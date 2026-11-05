@@ -68,6 +68,11 @@ pub(super) trait Entity: EntityRules {
     /// `Entity.resetFallDistance`: how far it has fallen is forgotten, so its next landing
     /// hurts it as a step does. Required, so a new kind states whether it keeps a fall distance.
     fn reset_fall_distance(&mut self);
+    /// `Entity.getYRot` and `getXRot`: yaw, pitch.
+    fn rotation(&self) -> [f32; 2];
+    /// The rotation part of `Entity.teleportSetPosition`: `setYRot`, `setXRot`
+    /// (clamped to -90..90), then `setOldRot`.
+    fn set_rotation(&mut self, rotation: [f32; 2]);
     fn bounds(&self) -> Aabb;
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
     /// name yet. Required, so a new kind states which.
@@ -319,6 +324,7 @@ pub(super) fn tick_item(
     no_physics: bool,
     entity_boxes: &[Aabb],
     border: Option<&horizon_core::geometry::border::BorderGeometry>,
+    blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
     splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
 ) -> bool {
     let step = tick_item_move(
@@ -332,6 +338,7 @@ pub(super) fn tick_item(
         no_physics,
         entity_boxes,
         border,
+        blocks,
         splash,
     );
     tick_item_settle(
@@ -353,6 +360,7 @@ pub(super) fn tick_item_move(
     no_physics: bool,
     entity_boxes: &[Aabb],
     border: Option<&horizon_core::geometry::border::BorderGeometry>,
+    blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
     splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
 ) -> horizon_client::entities::ItemStep {
     let (water, _lava) = item.push_by_fluid(world, fluids, context);
@@ -366,6 +374,8 @@ pub(super) fn tick_item_move(
         (water, _lava),
         entity_boxes,
         border,
+        blocks,
+        context,
     );
     item.push_by_bubble_column(world, registry, facts, collision);
     step
@@ -799,6 +809,20 @@ impl Entity for Mob {
     fn reset_fall_distance(&mut self) {
         self.fall_distance = 0.0;
     }
+    fn rotation(&self) -> [f32; 2] {
+        [self.yaw, self.head_pitch]
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.yaw = yaw;
+        self.body_yaw = yaw;
+        self.head_yaw = yaw;
+        self.head_pitch = pitch.clamp(-90.0, 90.0);
+        self.previous_yaw = self.yaw;
+        self.previous_head_pitch = self.head_pitch;
+    }
     fn native_type(&self) -> Cow<'static, str> {
         super::native_hooks::mob_kind(self).into()
     }
@@ -900,6 +924,15 @@ impl Entity for ItemEntity {
     fn reset_fall_distance(&mut self) {
         self.fall_distance = 0.0;
     }
+    fn rotation(&self) -> [f32; 2] {
+        self.rotation
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.rotation = [yaw, pitch.clamp(-90.0, 90.0)];
+    }
     fn fluid_eye_y(&self) -> f64 {
         ItemEntity::fluid_eye_y(self)
     }
@@ -964,6 +997,15 @@ impl Entity for ExperienceOrb {
     fn reset_fall_distance(&mut self) {
         // An orb keeps no fall distance here.
     }
+    fn rotation(&self) -> [f32; 2] {
+        self.rotation
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.rotation = [yaw, pitch.clamp(-90.0, 90.0)];
+    }
     fn ticks_after_projectiles(&self) -> bool {
         true
     }
@@ -1024,6 +1066,16 @@ impl Entity for ExperienceOrb {
 impl Entity for Boat {
     fn reset_fall_distance(&mut self) {
         // A boat keeps no fall distance here.
+    }
+    fn rotation(&self) -> [f32; 2] {
+        [self.yaw, self.pitch]
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.yaw = yaw;
+        self.pitch = pitch.clamp(-90.0, 90.0);
     }
     fn native_type(&self) -> Cow<'static, str> {
         self.entity_type().into()
@@ -1088,6 +1140,16 @@ impl Entity for Boat {
 impl Entity for Minecart {
     fn reset_fall_distance(&mut self) {
         self.fall_distance = 0.0;
+    }
+    fn rotation(&self) -> [f32; 2] {
+        [self.yaw, self.pitch]
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.yaw = yaw;
+        self.pitch = pitch.clamp(-90.0, 90.0);
     }
     fn native_type(&self) -> Cow<'static, str> {
         self.kind.id().into()
@@ -1160,6 +1222,17 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 impl Entity for ArmorStand {
     fn reset_fall_distance(&mut self) {
         self.enchantment_fall_distance = 0.0;
+    }
+    fn rotation(&self) -> [f32; 2] {
+        [self.yaw, self.pitch]
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.yaw = yaw;
+        self.previous_yaw = yaw;
+        self.pitch = pitch.clamp(-90.0, 90.0);
     }
     fn fluid_eye_y(&self) -> f64 {
         ArmorStand::fluid_eye_y(self)
@@ -1255,6 +1328,15 @@ impl Entity for PrimedTnt {
     fn reset_fall_distance(&mut self) {
         // Primed TNT keeps no fall distance here.
     }
+    fn rotation(&self) -> [f32; 2] {
+        self.rotation
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.rotation = [yaw, pitch.clamp(-90.0, 90.0)];
+    }
     fn ticks_after_projectiles(&self) -> bool {
         true
     }
@@ -1318,6 +1400,15 @@ impl Entity for FallingBlock {
     fn reset_fall_distance(&mut self) {
         self.fall_distance = 0.0;
     }
+    fn rotation(&self) -> [f32; 2] {
+        self.rotation
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.rotation = [yaw, pitch.clamp(-90.0, 90.0)];
+    }
     fn ticks_after_projectiles(&self) -> bool {
         true
     }
@@ -1358,6 +1449,18 @@ impl Entity for Projectile {
         if let Some(arrow) = self.arrow.as_deref_mut() {
             arrow.fall_distance = 0.0;
         }
+    }
+    fn rotation(&self) -> [f32; 2] {
+        [self.yaw, self.pitch]
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.yaw = yaw;
+        self.pitch = pitch.clamp(-90.0, 90.0);
+        self.previous_yaw = self.yaw;
+        self.previous_pitch = self.pitch;
     }
     fn native_type(&self) -> Cow<'static, str> {
         self.kind.id().into()
@@ -1450,6 +1553,15 @@ impl Entity for Rocket {
     fn reset_fall_distance(&mut self) {
         // A firework rocket keeps no fall distance here.
     }
+    fn rotation(&self) -> [f32; 2] {
+        self.rotation
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.rotation = [yaw, pitch.clamp(-90.0, 90.0)];
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:firework_rocket".into()
     }
@@ -1500,6 +1612,16 @@ impl Entity for Rocket {
 impl Entity for ThrownTrident {
     fn reset_fall_distance(&mut self) {
         // A thrown trident keeps no fall distance here.
+    }
+    fn rotation(&self) -> [f32; 2] {
+        [self.yaw, self.pitch]
+    }
+    fn set_rotation(&mut self, [yaw, pitch]: [f32; 2]) {
+        let previous = self.rotation();
+        let yaw = if yaw.is_finite() { yaw } else { previous[0] };
+        let pitch = if pitch.is_nan() { previous[1] } else { pitch };
+        self.yaw = yaw;
+        self.pitch = pitch.clamp(-90.0, 90.0);
     }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:trident".into()
@@ -1809,5 +1931,36 @@ mod join_order_tests {
             lists.walk(),
             Err(JoinOrderError::Unjoined(EntityHandle::ArmorStand(2)))
         );
+    }
+}
+
+#[cfg(test)]
+mod set_rotation_tests {
+    use super::Entity as _;
+    use horizon_client::entities::ExperienceOrb;
+
+    /// `Entity.teleportSetPosition`: yaw as given, pitch clamped to -90..90, on
+    /// every kind (the ones with no field of their own used to drop it).
+    #[test]
+    fn set_rotation_keeps_yaw_and_clamps_pitch_on_kinds_that_had_none() {
+        let mut orb = ExperienceOrb {
+            join: Default::default(),
+            no_gravity: false,
+            id: 0,
+            position: horizon_core::geometry::Vec3::ZERO,
+            previous: horizon_core::geometry::Vec3::ZERO,
+            velocity: horizon_core::geometry::Vec3::ZERO,
+            value: 1,
+            age: 0,
+            on_ground: false,
+            count: 1,
+            ticks: 0,
+            health: 5,
+            rotation: [0.0, 0.0],
+        };
+        orb.set_rotation([90.0, 10.0]);
+        assert_eq!(orb.rotation(), [90.0, 10.0]);
+        orb.set_rotation([0.0, 200.0]);
+        assert_eq!(orb.rotation(), [0.0, 90.0]);
     }
 }

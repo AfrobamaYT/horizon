@@ -128,6 +128,16 @@ impl ModList {
                 }
         })
     }
+    /// Turn the installed mod `id` on (nothing when it isn't installed).
+    pub fn turn_on(&mut self, id: &str) {
+        let Some(m) = self.installed.iter().find(|m| m.id == id && !m.dev) else {
+            return;
+        };
+        if m.native.is_some() {
+            self.disabled.remove(&m.id);
+        }
+        self.enabled.insert(m.id.clone());
+    }
     /// Turns installed mod `i` on or off (a dev mod stays on). A native mod's
     /// line says `false` when off, so that the launcher's next build leaves
     /// it out, and `true` when on again.

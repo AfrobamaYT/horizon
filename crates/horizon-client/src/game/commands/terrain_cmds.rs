@@ -653,6 +653,9 @@ impl Game<'_> {
                 let mut left = d.clone();
                 let mut placed = false;
                 for s in &slots {
+                    if !self.slot_accepts(s, Some(&left)) {
+                        continue;
+                    }
                     match self.slot_get(s) {
                         None => {
                             self.slot_set(s, Some(left.clone()));

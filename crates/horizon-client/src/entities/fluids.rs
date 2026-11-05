@@ -261,6 +261,53 @@ impl FluidFlowWorld for FlowLevel<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// `FluidState.getFlow`: water running out of a pool flows away from it,
+    /// while the pool itself, its edge on a solid floor and the air beside it
+    /// have no current.
+    #[test]
+    fn fluid_flow_runs_away_from_a_pool_and_is_zero_in_still_water() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = FluidResources::new(&assets, &facts).unwrap();
+        let mut world = World::test_scene(&assets, &render, 3).unwrap();
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        let mut state = assets.registry.state(water).unwrap().clone();
+        state.properties.insert("level".into(), "1".into());
+        let flowing = assets.registry.resolve(&state).unwrap();
+        for x in 16..=22 {
+            for z in 16..=20 {
+                world.set(x, 3, z, stone).unwrap();
+            }
+        }
+        for x in 17..=19 {
+            for z in 17..=19 {
+                world.set(x, 4, z, water).unwrap();
+            }
+        }
+        world.set(20, 4, 18, flowing).unwrap();
+        // A level-1 flow beside sources: the source is 1/9 higher to the west,
+        // the air to the east on stone gives nothing, so the current is +x.
+        let context = crate::test_resources::server_loop_context();
+        assert_eq!(
+            fluid_flow(&world, &fluids, context, BlockPos::new(20, 4, 18)),
+            Vec3::new(1.0, 0.0, 0.0)
+        );
+        for [x, y, z] in [[18, 4, 18], [17, 4, 17], [21, 4, 18]] {
+            assert_eq!(
+                fluid_flow(&world, &fluids, context, BlockPos::new(x, y, z)),
+                Vec3::ZERO,
+                "{x}, {y}, {z}"
+            );
+        }
+    }
     #[test]
     fn items_follow_flowing_water_but_still_water_has_no_horizontal_push() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -289,6 +336,7 @@ mod tests {
         let at = Vec3::new(20.5, 4.0, 20.5);
         let item = ItemEntity {
             fall_distance: 0.0,
+            rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
             id: 1,
@@ -325,6 +373,7 @@ mod tests {
             false,
             &fluids,
             &[],
+            None,
             None
         ));
         assert_eq!(still.position.x, at.x);
@@ -339,6 +388,7 @@ mod tests {
             false,
             &fluids,
             &[],
+            None,
             None
         ));
         // First push is damped by buoyancy before motion, second follows drag.
@@ -353,6 +403,7 @@ mod tests {
                 false,
                 &fluids,
                 &[],
+                None,
                 None,
             );
         }
@@ -389,6 +440,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let orb = ExperienceOrb {
+            rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
             id: 1,
