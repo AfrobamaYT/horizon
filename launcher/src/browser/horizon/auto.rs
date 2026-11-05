@@ -317,7 +317,7 @@ fn update(
         }
         let new_package = horizon_mods::Package::read(new)?;
         let old_wasm = old
-            .as_ref()
+            .as_deref()
             .map(horizon_mods::Package::read)
             .transpose()?
             .is_some_and(|package| package.manifest.wasm.is_some());
