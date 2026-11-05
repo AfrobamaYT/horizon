@@ -23,6 +23,16 @@ interface view {
   call: func(declared: u32, receiver: option<borrow<node>>, args: list<arg>) -> result<reached, refusal>;
 }
 
+interface raw-listeners {
+  enum host-kind { read, server, client, none }
+  /// Manifest internals and every named type walked by the generated view.
+  declared: func() -> list<tuple<string, string>>;
+  /// Point method name and the raw record's shape, in the guest's dispatch order.
+  subscribed: func() -> list<tuple<string, string>>;
+  fire: func(place: u32, host: host-kind);
+}
+
 world internals {
   import view;
+  export raw-listeners;
 }

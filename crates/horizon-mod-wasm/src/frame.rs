@@ -370,7 +370,7 @@ pub enum Call<'n> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mod_points::internals::{Thunk, Type};
+    use mod_points::internals::{Member, Thunk, Type};
 
     /// A tiny game: its players, each with health, and a flag.
     pub(crate) struct Game {
@@ -494,6 +494,21 @@ pub(crate) mod tests {
         types: &TYPES,
         thunks: &THUNKS,
         places: &[],
+        members: &[
+            Member {
+                path: "Game::flag",
+                hash: "flag-hash",
+                owner: GAME,
+                field: 1,
+            },
+            // A field and a method may share a Rust path; their hashes distinguish them.
+            Member {
+                path: "Game::kick",
+                hash: "field-kick-hash",
+                owner: GAME,
+                field: 0,
+            },
+        ],
     };
 
     pub(crate) fn world() -> Game {
