@@ -1127,6 +1127,9 @@ pub struct ParticleEngine {
     pub particle_level: u8,
     /// FireworkParticles.Starter instances.
     starters: Vec<Starter>,
+    pending_starters: Vec<Starter>,
+    elder_guardians: Vec<i32>,
+    pending_elder_guardians: usize,
     /// `ClientExplosionTracker` tracked explosions pending debris generation.
     tracked_explosions: Vec<TrackedExplosion>,
     /// Local sounds requested by particles (dripstone drips, firework bursts):
@@ -1138,7 +1141,10 @@ pub struct ParticleEngine {
     /// and cobweb models, resolved for the ground), one per model layer.
     pub item_sprites: HashMap<ParticleType, Vec<String>>,
 }
-/// `ParticleGroup.MAX_PARTICLES` (per render group; one group here).
+/// `ElderGuardianParticle.lifetime`.
+pub const ELDER_GUARDIAN_LIFETIME: i32 = 30;
+
+/// `ParticleGroup.MAX_PARTICLES` (per render group).
 const MAX_PARTICLES: usize = 16384;
 /// `ParticleLimit.SPORE_BLOSSOM`, the only limited particle.
 const SPORE_BLOSSOM_LIMIT: usize = 1000;
@@ -1313,6 +1319,9 @@ impl ParticleEngine {
             set_sprites: Vec::new(),
             emitters: Vec::new(),
             starters: Vec::new(),
+            pending_starters: Vec::new(),
+            elder_guardians: Vec::new(),
+            pending_elder_guardians: 0,
             tracked_explosions: Vec::new(),
             camera: [0.0; 3],
             particle_level: 0,
@@ -1464,17 +1473,20 @@ impl ParticleEngine {
         self.particles.is_empty()
     }
     /// The live particles of the groups this engine holds, as `ParticleEngine.countParticles`
-    /// counts them: the ordinary ones and the firework starters (`NO_RENDER`). Queued
-    /// particles and tracking emitters are not counted.
+    /// counts them: ordinary particles, firework starters (`NO_RENDER`) and elder guardian
+    /// apparitions (`ELDER_GUARDIANS`). Queued particles and tracking emitters are not counted.
     pub fn group_count(&self) -> usize {
-        self.particles.len() + self.starters.len()
+        self.particles.len() + self.starters.len() + self.elder_guardians.len()
     }
     /// `ParticleEngine.clearParticles`, for the groups this engine holds: the live
-    /// particles, the firework starters, the queued particles and the tracking emitters.
+    /// particles, firework starters, elder guardians, queued particles and tracking emitters.
     pub fn clear(&mut self) {
         self.emitters.clear();
         self.particles.clear();
         self.starters.clear();
+        self.pending_starters.clear();
+        self.elder_guardians.clear();
+        self.pending_elder_guardians = 0;
         self.pending.clear();
     }
     /// `VibrationSignalParticle`'s body: the signal leaves `from` aimed at the
@@ -3380,7 +3392,16 @@ impl ParticleEngine {
         self.sprite_from_age(&mut q);
         q
     }
-    /// ClientLevel.createFireworks: a Starter (or poofs without explosions).
+    /// Queue an elder guardian apparition, admitted with the other particles after ticking.
+    pub fn elder_guardian(&mut self) {
+        self.pending_elder_guardians += 1;
+    }
+    /// Ticks left for each admitted `ElderGuardianParticle`, for its model renderer.
+    pub fn elder_guardians(&self) -> &[i32] {
+        &self.elder_guardians
+    }
+    /// ClientLevel.createFireworks: queue a Starter (or poofs without explosions).
+    /// Like other particles it is admitted after the next tick, without being aged.
     pub fn fireworks(
         &mut self,
         at: [f64; 3],
@@ -3403,7 +3424,7 @@ impl ParticleEngine {
         let twinkle = explosions.iter().any(|e| e.twinkle);
         let lifetime = explosions.len() as i32 * 2 - 1 + if twinkle { 15 } else { 0 };
         let far = (0..3).map(|i| (at[i] - camera[i]).powi(2)).sum::<f64>() >= 256.0;
-        self.starters.push(Starter {
+        self.pending_starters.push(Starter {
             at,
             v,
             explosions,
@@ -3563,6 +3584,10 @@ impl ParticleEngine {
         }
     }
     pub fn tick(&mut self, level: &ParticleLevel) {
+        self.elder_guardians.retain_mut(|left| {
+            *left -= 1;
+            *left >= 0
+        });
         self.tick_starters();
         self.tick_explosions(level);
         for (options, feet, width, height, life) in std::mem::take(&mut self.emitters) {
@@ -3577,6 +3602,16 @@ impl ParticleEngine {
         }
         particles.retain(|p| !p.removed);
         self.particles = particles;
+        for starter in std::mem::take(&mut self.pending_starters) {
+            if self.group_has_space(self.starters.len()) {
+                self.starters.push(starter);
+            }
+        }
+        for _ in 0..std::mem::take(&mut self.pending_elder_guardians) {
+            if self.group_has_space(self.elder_guardians.len()) {
+                self.elder_guardians.push(ELDER_GUARDIAN_LIFETIME);
+            }
+        }
         let pending = std::mem::take(&mut self.pending);
         for mut p in pending {
             if p.pre_tick {
@@ -3584,19 +3619,22 @@ impl ParticleEngine {
                 self.tick_particle(&mut p, level);
                 p.after_constructor_tick();
             }
-            // ParticleGroup.add: the last quarter fills with decreasing probability.
-            let size = self.particles.len();
-            if size >= MAX_PARTICLES {
+            if !self.group_has_space(self.particles.len()) {
                 continue;
-            }
-            if size >= 12288 {
-                let free = (MAX_PARTICLES - size) as f32 / 4096.0;
-                if self.random.next_float() >= free * free {
-                    continue;
-                }
             }
             self.particles.push(p);
         }
+    }
+    /// `ParticleGroup.add`: each group's last quarter fills with decreasing probability.
+    fn group_has_space(&mut self, size: usize) -> bool {
+        if size >= MAX_PARTICLES {
+            return false;
+        }
+        if size >= 12288 {
+            let free = (MAX_PARTICLES - size) as f32 / 4096.0;
+            return self.random.next_float() < free * free;
+        }
+        true
     }
     /// `ClientExplosionTracker.tick`: throws up to 512 debris particles across all
     /// explosions tracked in this tick, weighted by each explosion's block count.
@@ -4802,6 +4840,138 @@ const CREEPER: [[f64; 2]; 12] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with_empty_particle_level(test: impl FnOnce(&ParticleLevel<'_>)) {
+        use horizon_world::{
+            DATA_VERSION,
+            collision::CachedCollisionRegistry,
+            nbt::Tag,
+            registry::{BlockRegistry, BlockStateId},
+        };
+        let states = || Tag::List(vec![Tag::String("minecraft:air".into())]);
+        let registry = BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(DATA_VERSION)),
+            ("states", states()),
+            ("defaults", Tag::compound([("minecraft:air", Tag::Int(0))])),
+        ]))
+        .unwrap();
+        let cached = CachedCollisionRegistry::from_nbt(
+            &Tag::compound([
+                ("DataVersion", Tag::Int(DATA_VERSION)),
+                ("states", states()),
+                ("shapes", Tag::List(vec![])),
+                ("cached_shapes", Tag::IntArray(vec![-1])),
+            ]),
+            &registry,
+        )
+        .unwrap();
+        let collision = BlockCollisionRegistry::new(std::sync::Arc::new(cached)).unwrap();
+        let facts = BlockFacts {
+            states: vec![],
+            air: BlockStateId(0),
+            woods: HashMap::new(),
+            sign_texts: HashMap::new(),
+        };
+        let world = World::new(BlockStateId(0), 0);
+        test(&ParticleLevel {
+            world: &world,
+            facts: &facts,
+            collision: &collision,
+            player: None,
+        });
+    }
+
+    #[test]
+    fn special_particles_wait_for_admission_without_ticking_or_counting() {
+        with_empty_particle_level(|level| {
+            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            engine.fireworks(
+                [0.0; 3],
+                [0.0; 3],
+                vec![FireworkExplosion::default(); 4],
+                [0.0; 3],
+            );
+            engine.elder_guardian();
+            assert_eq!(engine.group_count(), 0);
+            assert!(engine.elder_guardians().is_empty());
+            assert!(engine.sounds.is_empty());
+            engine.tick(level);
+            // No spark exists yet: these are exactly the starter and apparition, not
+            // a count inflated by the firework's first burst.
+            assert_eq!(engine.group_count(), 2);
+            assert_eq!(engine.elder_guardians(), [30]);
+            assert!(engine.sounds.is_empty());
+            engine.elder_guardian();
+            assert_eq!(engine.group_count(), 2);
+            engine.tick(level);
+            assert_eq!(engine.elder_guardians(), [29, 30]);
+            assert_eq!(
+                engine.sounds.len(),
+                1,
+                "starter first ticks after admission"
+            );
+        });
+    }
+
+    #[test]
+    fn clear_removes_live_and_pending_special_particles_without_resurrection() {
+        with_empty_particle_level(|level| {
+            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            for admitted in [false, true] {
+                engine.fireworks(
+                    [0.0; 3],
+                    [0.0; 3],
+                    vec![FireworkExplosion::default()],
+                    [0.0; 3],
+                );
+                engine.elder_guardian();
+                if admitted {
+                    engine.tick(level);
+                }
+                engine.clear();
+                assert_eq!(engine.group_count(), 0);
+                engine.tick(level);
+                assert_eq!(engine.group_count(), 0);
+                assert!(engine.sounds.is_empty());
+            }
+        });
+    }
+
+    #[test]
+    fn special_particles_admission_obeys_the_group_limit() {
+        with_empty_particle_level(|level| {
+            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            for _ in 0..20_000 {
+                engine.elder_guardian();
+            }
+            assert_eq!(engine.group_count(), 0);
+            engine.tick(level);
+            assert!((12_288..=16_384).contains(&engine.group_count()));
+            engine.clear();
+            engine.tick(level);
+            assert_eq!(engine.group_count(), 0);
+        });
+    }
+
+    #[test]
+    fn guardian_lifetime_starts_only_after_particle_admission() {
+        with_empty_particle_level(|level| {
+            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            engine.elder_guardian();
+            engine.tick(level);
+            for left in (0..30).rev() {
+                engine.tick(level);
+                assert_eq!(engine.elder_guardians(), [left]);
+                assert_eq!(engine.group_count(), 1);
+            }
+            engine.tick(level);
+            assert_eq!(
+                engine.group_count(),
+                0,
+                "Particle.tick removes at age++ >= lifetime"
+            );
+        });
+    }
 
     #[test]
     fn particle_light_cache_reuses_exact_blocks_and_fails_open_on_collisions() {
