@@ -216,7 +216,7 @@ pub(super) fn command_tree(
                 entry["executable"] = true.into();
                 let level = entry["execution_level"]
                     .as_u64()
-                    .unwrap_or(u8::MAX.into())
+                    .unwrap_or(4)
                     .min(command.level.into());
                 entry["execution_level"] = level.into();
             }
