@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "உங்கள் வீரருக்கு அணிய வேண்டியவை, Horizon இல் விளையாடும் அனைவருக்கும் தெரியும்.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "துவக்கியின் இந்தப் பதிப்பில் Microsoft உள்நுழைவு (HORIZON_MSA_CLIENT_ID) இல்லை, எனவே அது கேமைத் தொடங்க முடியாது.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "இது நிகழ்வை Horizon {version} க்கு நகர்த்துகிறது. இது புதிதாக விளையாட்டை தொகுக்கிறது, எனவே இது சாதாரண மறுகட்டமைப்பை விட அதிக நேரம் எடுக்கும்: 30 நிமிடங்கள் வரை.",
   "This server's Horizon": "இந்த சேவையகத்தின் Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "இந்த சேவையகத்தின் Horizon அதன் காப்புப்பிரதிகளை இங்கே பட்டியலிட மிகவும் பழையது: அவை அதன் காப்பு கோப்புறையில் உள்ளன. அதை கீழே புதுப்பிக்கவும்.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "இந்த சேவையகத்தின் Horizon அதன் அமைப்புகளை இங்கே காட்ட முடியாத அளவுக்கு பழையது. காப்புப்பிரதிகள் தாவலில் அதைப் புதுப்பிக்கவும், பின்னர் அவை தோன்றும்.",

@@ -2669,6 +2669,7 @@ name = "horizon-core"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "serde",
 ]
 
 [[package]]
@@ -2767,6 +2768,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
+ "proc-macro2",
  "quote",
  "serde",
  "serde_json",
@@ -2778,6 +2780,7 @@ dependencies = [
 name = "horizon-mods"
 version = "0.1.0"
 dependencies = [
+ "horizon-core",
  "horizon-shader-api",
  "log",
  "minisign-verify",

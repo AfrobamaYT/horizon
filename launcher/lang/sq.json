@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Gjëra për të veshur për lojtarin tënd, të dukshme për këdo që luan në Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Ky ndërtim i lëshuesit nuk ka hyrje në Microsoft (HORIZON_MSA_CLIENT_ID), kështu që nuk mund ta nisë lojën.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Kjo e zhvendos shembullin në Horizon {version}. Ai e përpilon lojën nga e para, kështu që kërkon më shumë se një rindërtim normal: deri në 30 minuta.",
   "This server's Horizon": "Ky server është Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon i këtij serveri është shumë i vjetër për të renditur kopjet rezervë të tij këtu: ato janë në dosjen e tij rezervë. Përditësojeni më poshtë.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon i këtij serveri është shumë i vjetër për të shfaqur cilësimet e tij këtu. Përditësojeni në skedën \"Bashkimet rezervë\", më pas ato shfaqen.",

@@ -131,6 +131,16 @@ mod entity_culling;
 mod event_loop;
 mod events;
 mod execution_role;
+/// The injection points' slots (`#[point]`, #589), generated from the game's source.
+#[doc(hidden)]
+pub mod points {
+    include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
+
+    /// A `side = "both"` point's host.
+    pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
+        super::execution_role::host_side(game)
+    }
+}
 mod explosion;
 mod extras;
 mod falling_damage;
@@ -3811,6 +3821,7 @@ impl Game<'_> {
         Some((self.eye_position()?, view_vector(self.yaw, self.pitch)))
     }
     /// `Player.blockInteractionRange`: the block pick's and mining's reach.
+    #[horizon_mod_api_macros::point(side = "both")]
     fn reach(&self) -> f64 {
         self.block_reach
     }
@@ -4116,6 +4127,7 @@ impl Game<'_> {
     /// (PowderSnowBlock.canEntityWalkOnPowderSnow), freeze-immune wear
     /// (LivingEntity.canFreeze), the dimension's FAST_LAVA, the sleeping
     /// pose and blindness (Player.isMobilityRestricted, which stops a sprint).
+    #[horizon_mod_api_macros::point(side = "both")]
     pub(crate) fn sync_player_body(&mut self) {
         let glider = self.glider_worn();
         let sleeping = self.sleeping.is_some();
@@ -8189,6 +8201,7 @@ impl Game<'_> {
         }
         None
     }
+    #[horizon_mod_api_macros::point(side = "both")]
     fn spawn_player(&mut self) -> Result<()> {
         if self.player.is_some() || self.remote.is_some() {
             return Ok(());
@@ -8336,6 +8349,7 @@ impl Game<'_> {
         };
         self.with_level(|b, level, ticks| b.notify_written(level, ticks, position, flags));
     }
+    #[horizon_mod_api_macros::point(side = "both")]
     fn tick(&mut self) -> Result<()> {
         if self.agent.hold_server {
             return Ok(());
@@ -8785,6 +8799,7 @@ impl Game<'_> {
     /// `MouseHandler.handleAccumulatedMovement` and `Entity.turn`, once per frame.
     /// An agent moving the mouse (`mouse-move`) counts as a grabbed pointer in
     /// an active window, as it cannot grab the real one.
+    #[horizon_mod_api_macros::point(side = "client", hot)]
     fn apply_mouse_look(&mut self) {
         let mut look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
@@ -9282,13 +9297,13 @@ impl Game<'_> {
             self.show_calibration(h);
         }
         if self.screen == Screen::Win {
-            let drawn = self.fire_screen_render_pre(&mut batch);
+            let drawn = self.draw_screen_with_pre_hook(&mut batch);
             if drawn {
                 self.draw_win_screen(&mut batch);
             }
             // The early return skips the match below: the hooks still see the
             // screen, after its own drawing.
-            self.fire_screen_render_post(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch, drawn);
             return batch;
         }
         if self.screen == Screen::Options {
@@ -9296,11 +9311,11 @@ impl Game<'_> {
                 self.flush_skin_slots();
                 self.update_remote_skins();
             }
-            let drawn = self.fire_screen_render_pre(&mut batch);
+            let drawn = self.draw_screen_with_pre_hook(&mut batch);
             if drawn {
                 self.draw_options(&mut batch);
             }
-            self.fire_screen_render_post(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch, drawn);
             self.draw_split_hud(&mut batch, true);
             return batch;
         }
@@ -9327,7 +9342,7 @@ impl Game<'_> {
             // TitleScreen.extractRenderState, then ToastManager over it: vanilla
             // draws the toast manager on every screen, so a pack download or a
             // resource-reload failure still shows on the title (#4428).
-            let drawn = self.fire_title_screen_render_pre(&mut batch);
+            let drawn = self.draw_title_screen_with_pre_hook(&mut batch);
             if drawn && let Some(title) = &self.title {
                 title.draw_with_items(
                     &self.gui.atlas,
@@ -9341,7 +9356,7 @@ impl Game<'_> {
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
             // over them here (a pack browser over Create New World, say), and the
             // toasts still come after, as over any screen.
-            self.fire_title_screen_render_post(&mut batch, drawn);
+            self.draw_title_screen_with_post_hook(&mut batch, drawn);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -9616,7 +9631,7 @@ impl Game<'_> {
         } else {
             self.screen
         };
-        let drawn = self.fire_screen_render_pre(&mut batch);
+        let drawn = self.draw_screen_with_pre_hook(&mut batch);
         match screen {
             _ if !drawn => {}
             Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),
@@ -9664,7 +9679,7 @@ impl Game<'_> {
         // tooltips, so a native mod draws over it here. Never `Playing`: the
         // prompts, books and sign editors drawn over gameplay keep it, draw
         // after this point and so over what a mod drew.
-        self.fire_screen_render_post(&mut batch, drawn);
+        self.draw_screen_with_post_hook(&mut batch, drawn);
         self.draw_saving_indicator(&mut batch);
         // ToastManager.extractRenderState: F1 hides the toasts too.
         self.draw_toasts(&mut batch, !show_hud);
@@ -9713,14 +9728,14 @@ impl Game<'_> {
     /// once a frame, before it draws itself: whether it is drawn (a cancelled
     /// `Render.Pre` skips it and its Background). The Win and Options screens
     /// call this on their own path. Client only: what a mod draws is its own.
-    fn fire_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
+    fn draw_screen_with_pre_hook(&self, batch: &mut HudBatch) -> bool {
         match self.screen_render_view(batch) {
             Some(view) => self.screen_render_begin(batch, &view),
             None => true,
         }
     }
-    /// `fire_screen_render_pre` for the title's own screens.
-    fn fire_title_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
+    /// `draw_screen_with_pre_hook` for the title's own screens.
+    fn draw_title_screen_with_pre_hook(&self, batch: &mut HudBatch) -> bool {
         match self.title_screen_render_view(batch) {
             Some(view) => self.screen_render_begin(batch, &view),
             None => true,
@@ -9731,14 +9746,14 @@ impl Game<'_> {
     /// itself and its tooltips, so a native mod draws over it here. Never
     /// `Playing`: the prompts, books and sign editors drawn over gameplay keep
     /// it, draw after this point and so over what a mod drew.
-    fn fire_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
+    fn draw_screen_with_post_hook(&self, batch: &mut HudBatch, drawn: bool) {
         if let Some(view) = self.screen_render_view(batch) {
             self.screen_render_end(batch, &view, drawn);
         }
     }
-    /// `fire_screen_render_post` for the title's own screen, once a frame,
+    /// `draw_screen_with_post_hook` for the title's own screen, once a frame,
     /// after it has drawn and before the toasts.
-    fn fire_title_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
+    fn draw_title_screen_with_post_hook(&self, batch: &mut HudBatch, drawn: bool) {
         if let Some(view) = self.title_screen_render_view(batch) {
             self.screen_render_end(batch, &view, drawn);
         }
@@ -12699,6 +12714,7 @@ impl Game<'_> {
         scale > 0.9 && falling && !restricted
     }
     /// Player.attack with the attack-strength charge, crits and knockback.
+    #[horizon_mod_api_macros::point(side = "both")]
     fn attack(&mut self) -> bool {
         if self.spectator() {
             return false;
@@ -16598,6 +16614,7 @@ impl Game<'_> {
             scaled: false,
         });
     }
+    #[horizon_mod_api_macros::point(side = "client", hot)]
     fn render(&mut self) -> Result<bool> {
         // The window's GPU holds the atlas: its copy in memory is kept
         // compressed (a no-op once it is).

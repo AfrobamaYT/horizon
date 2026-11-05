@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "给你的角色穿戴的物品，所有在 Horizon 上游玩的人都能看到。",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "此版本启动器未配置 Microsoft 登录（HORIZON_MSA_CLIENT_ID），因此无法启动游戏。",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "此游戏源码缺少原生清单条目模板。请更新 Horizon 并针对此游戏重新构建模组。",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "这会将此实例切换到 Horizon {version}。它会从头编译游戏，因此比普通重新构建更久：最多 30 分钟。",
   "This server's Horizon": "此服务器的 Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "此服务器的 Horizon 版本过旧，无法在此列出其备份：备份存放在其备份文件夹中。请在下方更新。",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "此服务器的 Horizon 版本过旧，无法在此显示其设置。请在“备份”选项卡中进行更新。",

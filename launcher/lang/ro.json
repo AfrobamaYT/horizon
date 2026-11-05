@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Lucruri de purtat pentru jucătorul tău, văzute de toți cei care joacă pe Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Această versiune a lansatorului nu are conectare Microsoft (HORIZON_MSA_CLIENT_ID), așa că nu poate porni jocul.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Acest cod sursă al jocului nu are un șablon de înregistrare în inventarul nativ. Actualizează Horizon și recompilează modurile pentru acest joc.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Aceasta mută instanța în Horizon {version}. Compilează jocul de la zero, așa că durează mai mult decât o reconstrucție normală: până la 30 de minute.",
   "This server's Horizon": "Acest server este Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizonul acestui server este prea vechi pentru a-și lista copiile de rezervă aici: acestea se află în folderul său de copii de rezervă. Actualizați-l mai jos.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizonul acestui server este prea vechi pentru a-și afișa setările aici. Actualizați-l în fila Backups, apoi apar.",

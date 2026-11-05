@@ -10,6 +10,7 @@
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
 use crate::manifest::Manifest;
+pub use horizon_core::arm_pose::ArmPose;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -438,6 +439,7 @@ struct ItemFile {
     components: BTreeMap<String, serde_json::Value>,
     crafting_remainder: Option<String>,
     block: Option<String>,
+    arm_pose: Option<ArmPose>,
 }
 
 /// An item the mod adds: a vanilla template item's components under a new
@@ -457,6 +459,8 @@ pub struct Item {
     pub crafting_remainder: Option<String>,
     /// The block placed by this item, if any.
     pub block: Option<String>,
+    /// The arm pose a humanoid takes holding it, in place of vanilla's (`ArmPose`).
+    pub arm_pose: Option<ArmPose>,
 }
 
 /// `MobEffectCategory`.
@@ -906,6 +910,7 @@ impl Content {
                 components: file.components,
                 crafting_remainder: file.crafting_remainder,
                 block: file.block,
+                arm_pose: file.arm_pose,
             };
             check_item(&item).map_err(|e| format!("{name}: {e}"))?;
             if !ids.insert(item.id.clone()) {
@@ -1627,6 +1632,27 @@ capabilities = ["registries"]
             .map(|i| i.crafting_remainder.as_deref())
             .collect();
         assert_eq!(rests, [Some("minecraft:bowl"), Some("ruby:c_flask"), None]);
+    }
+
+    #[test]
+    fn items_name_an_arm_pose() {
+        let item = |pose: &str| {
+            let text = format!(r#"{{"template": "minecraft:stick", "arm_pose": "{pose}"}}"#);
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/item/a.json", text.as_bytes())];
+            hmod("arm-pose", MANIFEST_TEXT, files)
+        };
+        assert_eq!(
+            item("toot_horn").unwrap().items[0].arm_pose,
+            Some(ArmPose::TootHorn)
+        );
+        let refused = item("bow").unwrap_err();
+        assert!(
+            refused.contains("a.json") && refused.contains("bow"),
+            "{refused}"
+        );
+        let files: &[(&str, &[u8])] = &[("data/ruby/horizon/item/a.json", ITEM)];
+        let plain = hmod("arm-pose", MANIFEST_TEXT, files).unwrap();
+        assert_eq!(plain.items[0].arm_pose, None);
     }
 
     #[test]

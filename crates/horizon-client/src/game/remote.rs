@@ -1845,6 +1845,7 @@ impl Game<'_> {
             if let Received::Event(Event::Packet(packet)) = &item
                 && let C::ForgetLevelChunk(p) = &**packet
             {
+                self.observe_client_packet(packet);
                 forgotten.insert((p.pos[0], p.pos[1]));
                 continue;
             }
@@ -1874,6 +1875,7 @@ impl Game<'_> {
                             continue;
                         }
                     };
+                    self.observe_client_packet(&packet);
                     if let C::LevelChunkWithLight(p) = *packet {
                         self.remote_chunk(&p, Some((&format, column)));
                     }
@@ -3136,6 +3138,7 @@ impl Game<'_> {
     }
 
     fn handle_packet(&mut self, packet: C) -> Result<()> {
+        self.observe_client_packet(&packet);
         match packet {
             // ClientCommonPacketListenerImpl.handlePing runs on the game
             // thread, after all preceding packets (especially teleports).
@@ -5909,6 +5912,7 @@ impl Game<'_> {
     }
 
     /// One client tick while connected (Minecraft.tick with a ClientLevel).
+    #[horizon_mod_api_macros::point(side = "client")]
     pub(super) fn tick_remote(&mut self) -> Result<()> {
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
@@ -6801,6 +6805,8 @@ impl Game<'_> {
                         Default::default,
                         horizon_client::first_person::item_use_animation,
                     );
+                m.extra.held_arm_pose = [m.extra.main_hand_id(), m.extra.off_hand_id()]
+                    .map(|held| held.and_then(|i| world_items!(self).get(i)?.arm_pose));
             }
             if m.extra.using_item > 0 {
                 if player {
@@ -7139,6 +7145,7 @@ impl Game<'_> {
         }
     }
     /// LocalPlayer.sendPosition plus input, sprint and held-slot updates.
+    #[horizon_mod_api_macros::point(side = "client")]
     fn remote_send_state(&mut self, input: u8) {
         let Some(p) = self.player.as_ref() else {
             return;
@@ -8973,6 +8980,7 @@ impl Game<'_> {
         }
     }
 
+    #[horizon_mod_api_macros::point(side = "client")]
     fn remote_start_attack(&mut self) -> bool {
         if self.clicks.miss_time > 0 || self.hands_busy() {
             return false;

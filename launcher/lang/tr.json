@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Oyuncunun giyebileceği şeyler; Horizon'da oynayan herkes görür.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Başlatıcının bu derlemesinde Microsoft oturum açma özelliği (HORIZON_MSA_CLIENT_ID) bulunmuyor, bu nedenle oyunu başlatamıyor.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Bu oyun kaynak kodunda yerel envanter giriş şablonu yok. Horizon'u güncelleyin ve modları bu oyuna karşı yeniden derleyin.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Bu, kurulumu Horizon {version} sürümüne taşır. Oyun sıfırdan derlenir, bu yüzden normal bir yeniden derlemeden uzun sürer: 30 dakikaya kadar.",
   "This server's Horizon": "Bu sunucunun Horizon sürümü",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Bu sunucunun Horizon sürümü yedekleri burada listelemek için çok eski: yedekler klasöründeler. Aşağıdan güncelleyin.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Bu sunucunun Horizon sürümü ayarları burada göstermek için çok eski. Yedekler sekmesinden güncelleyin.",

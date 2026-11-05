@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "چیزهایی برای پوشیدن بازیکن شما که همهٔ کسانی که در Horizon بازی می‌کنند می‌بینند.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "این ساختنی از راه‌انداز هیچ ورود به سیستم مایکروسافت (HORIZON_MSA_CLIENT_ID) ندارد، بنابراین نمی‌تواند بازی را شروع کند.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "این کد منبع بازی، الگوی ورودی فهرست بومی ندارد. Horizon را به‌روز کنید و مودها را برای این بازی دوباره بسازید.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "این نمونه را به Horizon {version} منتقل می کند. این بازی را از ابتدا کامپایل می کند، بنابراین بیشتر از یک بازسازی معمولی طول می کشد: تا 30 دقیقه.",
   "This server's Horizon": "Horizon این سرور",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon این سرور برای فهرست کردن نسخه‌های پشتیبان آن در اینجا بسیار قدیمی است: آنها در پوشه پشتیبان‌گیری آن هستند. آن را در زیر به روز کنید.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon این سرور برای نمایش تنظیماتش در اینجا خیلی قدیمی است. آن را در تب Backup ها به روز کنید، سپس ظاهر می شوند.",

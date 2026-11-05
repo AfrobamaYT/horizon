@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "ສິ່ງທີ່ໃສ່ສຳລັບຕົວລະຄອນຂອງທ່ານ, ທຸກຄົນທີ່ຫຼິ້ນ Horizon ເຫັນ.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "ຕົວເປີດຕົວນີ້ບໍ່ມີການເຂົ້າສູ່ລະບົບ Microsoft (HORIZON_MSA_CLIENT_ID), ສະນັ້ນມັນບໍ່ສາມາດເລີ່ມເກມໄດ້.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "ນີ້ຍ້າຍຕົວຢ່າງໄປ Horizon {version}. ມັນລວບລວມເກມຕັ້ງແຕ່ເລີ່ມຕົ້ນ, ສະນັ້ນມັນໃຊ້ເວລາດົນກວ່າການສ້າງໃຫມ່ແບບປົກກະຕິ: ເຖິງ 30 ນາທີ.",
   "This server's Horizon": "ເຊີບເວີນີ້ Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon ຂອງເຊີບເວີນີ້ເກົ່າເກີນໄປທີ່ຈະບອກລາຍຊື່ການສຳຮອງຂໍ້ມູນຂອງມັນຢູ່ບ່ອນນີ້: ພວກມັນຢູ່ໃນໂຟນເດີສຳຮອງຂອງມັນ. ປັບປຸງມັນຂ້າງລຸ່ມນີ້.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon ຂອງເຊີບເວີນີ້ເກົ່າເກີນໄປທີ່ຈະສະແດງການຕັ້ງຄ່າຂອງມັນຢູ່ທີ່ນີ້. ອັບເດດມັນຢູ່ໃນແຖບ Backups, ຫຼັງຈາກນັ້ນພວກມັນຈະປາກົດ.",

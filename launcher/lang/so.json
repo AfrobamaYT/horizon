@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Waxyaabo lagu xidho ciyaartoygaaga, ay arkaan qof kasta oo ku ciyaara Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Dhismahan soo-saarehu malaha soo gal Microsoft (HORIZON_MSA_CLIENT_ID), markaa ma bilaabi karo ciyaarta.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Tani waxay tusaalaha u wareejinaysaa Horizon {version}. Waxay ciyaarta ka soo ururisaa meel eber ah, markaa waxay qaadanaysaa wax ka badan dib u dhiska caadiga ah: ilaa 30 daqiiqo.",
   "This server's Horizon": "Horizon-ka seerfarkan",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Serfarkan Horizon aad buu u da'weyn yahay inuu halkan ku taxo kaydadkiisa: waxay ku jiraan galka kaydka. Hoos ka cusboonaysii",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Serfarkan Horizon aad buu u da'weyn yahay inuu halkan ku muujiyo dejintiisa. Ku cusboonaysii tab Backups, ka dib way soo muuqdaan.",

@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Barang yang dipakai pemainmu, terlihat oleh semua yang bermain di Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Build peluncur ini tidak memiliki fitur masuk Microsoft (HORIZON_MSA_CLIENT_ID), sehingga tidak dapat memulai game.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Sumber game ini tidak memiliki templat entri inventaris native. Perbarui Horizon dan bangun ulang mod terhadap game ini.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Ini memindahkan instans ke Horizon {version}. Ini mengkompilasi game dari awal, sehingga memakan waktu lebih lama daripada pembangunan ulang biasa: hingga 30 menit.",
   "This server's Horizon": "Versi Horizon server ini",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon server ini terlalu lama untuk mencantumkan cadangannya di sini: cadangan tersebut berada di folder cadangannya. Perbarui server di bawah ini.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Versi Horizon server ini terlalu lama untuk menampilkan pengaturannya di sini. Perbarui di tab Cadangan, lalu pengaturan tersebut akan muncul.",

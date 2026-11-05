@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "O‘yinchingiz uchun kiyimlar, Horizon’da o‘ynayotgan hamma ko‘radi.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Ushbu ishga tushirish qurilmasi Microsoft tizimiga kirish huquqiga ega emas (HORIZON_MSA_CLIENT_ID), shuning uchun u o'yinni boshlay olmaydi.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Bu misolni Horizon {version} ga o'tkazadi. U o'yinni noldan tuzadi, shuning uchun u oddiy qayta qurishdan ko'ra ko'proq vaqt oladi: 30 daqiqagacha.",
   "This server's Horizon": "Bu server Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Bu serverning Horizon serveri juda eski, uning zaxira nusxalarini bu yerda sanab o‘tish uchun: ular zaxiralar papkasida. Quyida uni yangilang.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Bu server Horizon sozlamalarini bu yerda ko‘rsatish uchun juda eski. Uni Zaxiralash yorlig'ida yangilang, keyin ular paydo bo'ladi.",

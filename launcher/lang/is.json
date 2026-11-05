@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Hlutir til að klæðast fyrir spilarann þinn, sýnilegir öllum sem spila á Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Þessi smíði ræsiforritsins hefur enga Microsoft innskráningu (HORIZON_MSA_CLIENT_ID), svo hún getur ekki ræst leikinn.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Þetta færir tilvikið í Horizon {version}. Það setur leikinn saman frá grunni, svo það tekur lengri tíma en venjuleg endurbygging: allt að 30 mínútur.",
   "This server's Horizon": "Horizon þessa netþjóns",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon netþjónsins er of gamalt til að skrá afrit hans hér: þau eru í afritamöppunni hans. Uppfærðu það hér að neðan.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon netþjónsins er of gamalt til að sýna stillingar hans hér. Uppfærðu það á flipanum Backups, þá birtast þær.",

@@ -271,6 +271,17 @@ A held item's third-person arm pose follows its use animation, as vanilla's `Ava
 item with `"minecraft:consumable": { "animation": "toot_horn", "consume_seconds": 7 }` raises its arm like a goat horn
 while it is used, for players and in other players' views.
 
+`arm_pose` names the pose a humanoid's arm takes holding the item, in place of what vanilla gives it, for as long as
+the item is in that hand (a used item's animation included): one of vanilla's `HumanoidModel.ArmPose` names, `empty`,
+`item`, `block`, `bow_and_arrow`, `crossbow_hold`, `crossbow_charge`, `throw_trident`, `toot_horn`, `spyglass`, `spear`
+or `brush`. A name that is no pose fails the mod's load, and an item without the key poses as before. It applies to
+player models, in the first person's own third-person view and in other players'; `spear` poses an arm only for an item
+with a kinetic weapon.
+
+```json
+{ "template": "minecraft:stick", "arm_pose": "toot_horn" }
+```
+
 An item can place a block by naming it with `block`, whether it is a vanilla block or a declared mod block:
 
 ```json

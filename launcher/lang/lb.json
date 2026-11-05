@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Saache fir Äre Spiller unzedoen, gesi vu jidderengem, deen op Horizon spillt.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Dëse Bau vum Starter huet keen Microsoft Umeldung (HORIZON_MSA_CLIENT_ID), sou datt et d'Spill net kann starten.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Dëst bewegt d'Instanz op Horizon {version}. Et kompiléiert d'Spill vun Null, sou datt et méi laang dauert wéi eng normal Rekonstruktioun: bis zu 30 Minutten.",
   "This server's Horizon": "Dëse Server ass Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Dem Server säin Horizon ass ze al fir seng Backups hei opzeweisen: si sinn a sengem Backup-Dossier. Update et hei ënnen.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Dem Server säin Horizon ass ze al fir seng Astellungen hei ze weisen. Update et op der Backups Tab, da schéngen se.",

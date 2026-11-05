@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Ihe ị ga-eyi maka onye egwuregwu gị, nke onye ọ bụla na-egwu Horizon na-ahụ.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Ihe nrụpụta ihe nrụpụta enweghị Microsoft nbanye (HORIZON_MSA_CLIENT_ID), yabụ enweghị ike ibido egwuregwu ahụ.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Nke a na-akpali ihe atụ na Horizon {version}. Ọ na-achịkọta egwuregwu ahụ site na ọkọ, yabụ ọ na-ewe ogologo oge karịa nrụgharị nkịtị: ihe ruru nkeji iri atọ.",
   "This server's Horizon": "Ihe nkesa a bụ Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Ihe nkesa Horizon nke a emeela agadi nke ukwuu idepụta ndabere ya ebe a: ha nọ na nchekwa ndabere ya. Melite ya n'okpuru.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Ihe nkesa Horizon emeela agadi nke ukwuu igosi ntọala ya ebe a. Melite ya na taabụ Backups, wee pụta.",

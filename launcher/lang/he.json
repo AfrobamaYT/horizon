@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "פריטים שהשחקן שלך לובש, גלויים לכל מי שמשחק ב־Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "למבנה הזה של המשגר אין כניסה של Microsoft (HORIZON_MSA_CLIENT_ID), כך שהוא לא יכול להפעיל את המשחק.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "לקוד המקור של המשחק אין תבנית לרשומה במצאי הנייטיבי. יש לעדכן את Horizon ולבנות מחדש את המודים עבור המשחק הזה.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "זה מעביר את המופע אל Horizon {version}. הוא מרכיב את המשחק מאפס, כך שזה לוקח יותר זמן מבניה מחדש רגילה: עד 30 דקות.",
   "This server's Horizon": "This server's Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon של שרת זה ישן מכדי לרשום את הגיבויים שלו כאן: הם נמצאים בתיקיית הגיבויים שלו. עדכן אותו למטה.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon של שרת זה ישן מכדי להציג את ההגדרות שלו כאן. עדכן אותו בכרטיסייה גיבויים, ואז הם יופיעו.",

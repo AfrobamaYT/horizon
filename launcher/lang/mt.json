@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Affarijiet x'tilbes għall-plejer tiegħek, li jarahom kull min jilgħab fuq Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Din il-bini tal-lanċjar m'għandux Microsoft sign-in (HORIZON_MSA_CLIENT_ID), għalhekk ma jistax jibda l-logħba.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Dan imexxi l-istanza għal Horizon {version}. Jiġbor il-logħba mill-bidu, għalhekk jieħu aktar żmien minn bini mill-ġdid normali: sa 30 minuta.",
   "This server's Horizon": "Dan is-server huwa Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon ta' dan is-server huwa antiki wisq biex jelenka l-backups tiegħu hawn: huma fil-folder tal-backups tiegħu. Aġġornaha hawn taħt.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon ta' dan is-server huwa antiki wisq biex juri s-settings tiegħu hawn. Aġġornaha fuq it-tab Backups, imbagħad jidhru.",

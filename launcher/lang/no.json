@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Ting spilleren din kan ha på seg, synlig for alle som spiller på Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Denne versjonen av startprogrammet har ingen Microsoft-pålogging (HORIZON_MSA_CLIENT_ID), så den kan ikke starte spillet.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Denne kildekoden til spillet mangler en mal for en oppføring i den native oversikten. Oppdater Horizon, og bygg modifikasjonene på nytt for dette spillet.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Dette flytter forekomsten til Horizon {version}. Den kompilerer spillet fra bunnen av, så det tar lengre tid enn en vanlig gjenoppbygging: opptil 30 minutter.",
   "This server's Horizon": "Denne serveren er Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Denne serverens Horizon er for gammel til å liste sikkerhetskopiene her: de er i backupmappen. Oppdater den nedenfor.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Denne serverens Horizon er for gammel til å vise innstillingene her. Oppdater den på Sikkerhetskopier-fanen, så vises de.",

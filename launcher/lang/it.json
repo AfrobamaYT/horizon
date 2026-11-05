@@ -900,7 +900,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Cose da indossare per il tuo giocatore, viste da tutti quelli che giocano su Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Questa build del launcher non ha accesso Microsoft (HORIZON_MSA_CLIENT_ID), quindi non può avviare il gioco.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Questo codice sorgente del gioco non ha un modello per le voci dell'inventario nativo. Aggiorna Horizon e ricompila le mod per questo gioco.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Questo sposta l'istanza su Horizon {version}. Compila il gioco da zero, quindi richiede più tempo di una normale ricostruzione: fino a 30 minuti.",
   "This server's Horizon": "Questo server è Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon di questo server è troppo vecchio per elencare i suoi backup qui: sono nella cartella dei backup. Aggiornalo qui sotto.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "L'Horizon di questo server è troppo vecchio per mostrare le sue impostazioni qui. Aggiornalo nella scheda Backup, quindi verranno visualizzati.",

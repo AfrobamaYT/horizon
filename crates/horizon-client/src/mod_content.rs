@@ -740,6 +740,7 @@ struct NewItem {
     components: Vec<(String, J)>,
     crafting_remainder: Option<String>,
     block: Option<String>,
+    arm_pose: Option<horizon_mods::content::ArmPose>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
 }
@@ -1312,6 +1313,7 @@ impl<'a> Plan<'a> {
                     components: component_patch(&b.decl.id, &b.decl.components)?,
                     crafting_remainder: None,
                     block: None,
+                    arm_pose: None,
                     wall_block: b.decl.wall_block.clone(),
                 });
             }
@@ -1331,6 +1333,7 @@ impl<'a> Plan<'a> {
                     components: component_patch(&i.id, &i.components)?,
                     crafting_remainder: i.crafting_remainder.clone(),
                     block: i.block.clone(),
+                    arm_pose: i.arm_pose,
                     wall_block: None,
                 });
             }
@@ -2966,6 +2969,17 @@ pub fn build(
         overlay.write(
             horizon_items::items::MOD_ITEM_BLOCKS,
             &serde_json::to_vec(&placed_blocks)?,
+        )?;
+    }
+    let arm_poses: BTreeMap<&str, horizon_mods::content::ArmPose> = plan
+        .items
+        .iter()
+        .filter_map(|i| Some((i.rename.to.as_str(), i.arm_pose?)))
+        .collect();
+    if !arm_poses.is_empty() {
+        overlay.write(
+            horizon_items::items::MOD_ITEM_ARM_POSES,
+            &serde_json::to_vec(&arm_poses)?,
         )?;
     }
     overlay.write(
