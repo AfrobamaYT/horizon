@@ -1,0 +1,84 @@
+// Keeps the "Horizon roadmap" board (user project 1) in step with arismoko/horizon.
+// Every open issue and PR is on the board; Status follows GitHub state:
+//   merged or closed            -> Done
+//   open PR (draft)             -> In progress
+//   open PR                     -> In review
+//   open issue with an open PR that closes it -> In review
+//   open issue with an assignee -> In progress
+//   other open issue            -> Todo
+// Owner is filled from the assignees (or the PR author) when empty. Pinned issues stay off the board.
+module.exports = async ({ github, context, core }) => {
+  const OWNER = 'arismoko', REPO = 'horizon', NUMBER = 1;
+  const q = (query, vars = {}) => github.graphql(query, vars);
+
+  const proj = (await q(`query($o:String!,$n:Int!){user(login:$o){projectV2(number:$n){id
+    fields(first:30){nodes{... on ProjectV2Field{id name} ... on ProjectV2SingleSelectField{id name options{id name}}}}}}}`,
+    { o: OWNER, n: NUMBER })).user.projectV2;
+  const field = name => proj.fields.nodes.find(f => f && f.name === name);
+  const status = field('Status'), owner = field('Owner');
+  const option = Object.fromEntries(status.options.map(o => [o.name, o.id]));
+
+  // Board items, keyed by content node id.
+  const items = new Map();
+  for (let after = null; ;) {
+    const page = (await q(`query($id:ID!,$a:String){node(id:$id){... on ProjectV2{items(first:100,after:$a){
+      pageInfo{hasNextPage endCursor}
+      nodes{id content{... on Issue{id} ... on PullRequest{id}}
+        s:fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}
+        o:fieldValueByName(name:"Owner"){... on ProjectV2ItemFieldTextValue{text}}}}}}}`, { id: proj.id, a: after })).node.items;
+    for (const n of page.nodes) if (n.content) items.set(n.content.id, { item: n.id, status: n.s?.name, owner: n.o?.text });
+    if (!page.pageInfo.hasNextPage) break;
+    after = page.pageInfo.endCursor;
+  }
+
+  // Repository issues and PRs: every open one, plus closed ones already on the board.
+  const want = new Map(); // content id -> {status, owner, number}
+  const linked = new Set(); // issue ids an open PR closes
+  const pinned = new Set();
+  for (const kind of ['issues', 'pullRequests']) {
+    for (const state of ['OPEN', 'CLOSED', 'MERGED']) {
+      if (kind === 'issues' && state === 'MERGED') continue;
+      for (let after = null; ;) {
+        const extra = kind === 'issues' ? 'isPinned assignees(first:5){nodes{login}}' :
+          'isDraft author{login} assignees(first:5){nodes{login}} closingIssuesReferences(first:10){nodes{id}}';
+        const page = (await q(`query($o:String!,$r:String!,$a:String){repository(owner:$o,name:$r){${kind}(first:100,after:$a,states:[${state}],orderBy:{field:UPDATED_AT,direction:DESC}){
+          pageInfo{hasNextPage endCursor} nodes{id number ${extra}}}}}`, { o: OWNER, r: REPO, a: after })).repository[kind];
+        for (const n of page.nodes) {
+          if (state !== 'OPEN' && !items.has(n.id)) continue;
+          if (n.isPinned) { pinned.add(n.id); continue; }
+          const who = n.assignees.nodes.map(a => a.login);
+          if (kind === 'pullRequests' && state === 'OPEN') n.closingIssuesReferences.nodes.forEach(i => linked.add(i.id));
+          let s;
+          if (state !== 'OPEN') s = 'Done';
+          else if (kind === 'pullRequests') s = n.isDraft ? 'In progress' : 'In review';
+          else s = who.length ? 'In progress' : 'Todo';
+          want.set(n.id, { status: s, owner: who.length ? who.join(', ') : (n.author?.login || ''), number: n.number, issue: kind === 'issues', open: state === 'OPEN' });
+        }
+        // Closed items only matter while they are on the board; stop paging closed lists early.
+        if (!page.pageInfo.hasNextPage || (state !== 'OPEN' && after !== null)) break;
+        after = page.pageInfo.endCursor;
+      }
+    }
+  }
+  for (const [id, w] of want) if (w.issue && w.open && linked.has(id)) w.status = 'In review';
+
+  // Add what is missing, then set what differs, in batches.
+  const missing = [...want.keys()].filter(id => !items.has(id));
+  for (let i = 0; i < missing.length; i += 25) {
+    const chunk = missing.slice(i, i + 25);
+    const r = await q(`mutation{${chunk.map((c, j) => `a${j}:addProjectV2ItemById(input:{projectId:"${proj.id}",contentId:"${c}"}){item{id}}`).join(' ')}}`);
+    chunk.forEach((c, j) => items.set(c, { item: r[`a${j}`].item.id }));
+  }
+  const edits = [];
+  for (const [id, w] of want) {
+    const it = items.get(id);
+    if (it.status !== w.status) edits.push(`updateProjectV2ItemFieldValue(input:{projectId:"${proj.id}",itemId:"${it.item}",fieldId:"${status.id}",value:{singleSelectOptionId:"${option[w.status]}"}}){clientMutationId}`);
+    if (owner && !it.owner && w.owner) edits.push(`updateProjectV2ItemFieldValue(input:{projectId:"${proj.id}",itemId:"${it.item}",fieldId:"${owner.id}",value:{text:${JSON.stringify(w.owner)}}}){clientMutationId}`);
+  }
+  for (let i = 0; i < edits.length; i += 40) {
+    await q(`mutation{${edits.slice(i, i + 40).map((e, j) => `e${j}:${e}`).join(' ')}}`);
+  }
+  const gone = [...pinned].filter(id => items.has(id));
+  if (gone.length) await q(`mutation{${gone.map((c, j) => `d${j}:deleteProjectV2Item(input:{projectId:"${proj.id}",itemId:"${items.get(c).item}"}){deletedItemId}`).join(' ')}}`);
+  core.summary.addRaw(`Board sync: ${missing.length} added, ${gone.length} pinned removed, ${edits.length} field updates, ${want.size} items checked.`).write();
+};
