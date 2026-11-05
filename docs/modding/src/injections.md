@@ -274,6 +274,7 @@ horizon = "<exact game commit>"
 mixins = "<exact mixins commit>"
 internals = [
     { path = "horizon_client::game::Game", hash = "<written by the tool>" },
+    { path = "horizon_client::game::native_ticks::TickRound::listening", kind = "method", hash = "<written by the tool>" },
 ]
 
 [[native.injection]]
@@ -284,8 +285,15 @@ raw = "count"
 ```
 
 `cargo horizon-mod internals add <path>` writes the path and hash from the pinned game's
-`internals.json`; don't invent hashes. `cargo horizon-mod update` shows the signature changes
-and refreshes the hashes. Each injection has exactly one of `trait_method`, `helper` or `raw`.
+`internals.json`; don't invent hashes. When several member kinds share a path (such as a field
+and a method named `listening`), pass `--kind <kind>` to select the catalog entry, for example
+`cargo horizon-mod internals add horizon_client::game::native_ticks::TickRound::listening --kind method`.
+The tool reports the available kinds if the choice is missing and writes the resolved `kind`
+into each added declaration, even for unambiguous paths. A declaration may omit `kind` only
+when its path has a single kind. Kind names match `internals.json`: inherent methods use `method`, free
+functions use `fn`, and fields use `field`. A `--kind` applies to all paths in that invocation.
+`cargo horizon-mod update` shows the signature changes and refreshes hashes while retaining
+member kinds. Each injection has exactly one of `trait_method`, `helper` or `raw`.
 `raw` names a function in the mod's crate root, not a helper source file, and accepts only
 `HEAD` or `RETURN` with no mixin bindings or selectors.
 
@@ -316,6 +324,8 @@ Both routes check the actual game's metadata before compiling mods:
   cannot be declared).
 - `E_INTERNAL_CHANGED`: the hash changed; the error names the new signature and asks for
   `cargo horizon-mod update`.
+- `E_INTERNAL_AMBIGUOUS`: several member kinds share the path; choose one of the listed kinds
+  with `internals add <path> --kind <kind>`.
 - `E_INTERNAL_GATED`: the entry exists only under a `cfg`; target-specific declarations are
   not supported.
 - `E_NOT_RAW`: the injection's target has no raw form, for example because it is generic or

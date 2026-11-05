@@ -100,6 +100,9 @@ pub struct Native {
 #[serde(deny_unknown_fields)]
 pub struct Internal {
     pub path: String,
+    /// The catalog's member kind, required when several kinds share the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub hash: String,
 }
 
@@ -379,10 +382,11 @@ impl Manifest {
             for internal in &native.internals {
                 if internal.path.is_empty()
                     || internal.hash.is_empty()
-                    || !paths.insert(&internal.path)
+                    || internal.kind.as_ref().is_some_and(|kind| kind.is_empty())
+                    || !paths.insert((&internal.path, &internal.kind))
                 {
                     return Err(format!(
-                        "{MANIFEST}: empty or duplicate internal path, or empty internal hash"
+                        "{MANIFEST}: empty internal path, kind or hash, or duplicate internal path and kind"
                     ));
                 }
             }
@@ -1100,6 +1104,41 @@ capabilities = ["registries"]
                 "{refused}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn internal_kinds_distinguish_members_and_round_trip() {
+        let base = format!(
+            "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let declaration = "internals=[{path='Round::listening',kind='field',hash='1234'}, {path='Round::listening',kind='method',hash='5678'}]\n";
+        let manifest = Manifest::parse(&format!("{base}{declaration}")).unwrap();
+        let native = manifest.native.unwrap();
+        assert_eq!(native.internals[1].kind.as_deref(), Some("method"));
+        let text = toml::to_string(&native).unwrap();
+        assert_eq!(toml::from_str::<Native>(&text).unwrap(), native);
+        assert!(
+            Manifest::parse(&format!(
+                "{base}{}",
+                declaration.replace("kind='method'", "kind='field'")
+            ))
+            .is_err()
+        );
+        assert!(
+            Manifest::parse(&format!(
+                "{base}{}",
+                declaration.replace("kind='method'", "kind=''")
+            ))
+            .is_err()
+        );
+        let untyped = Internal {
+            path: "Game".into(),
+            kind: None,
+            hash: "1234".into(),
+        };
+        assert!(!toml::to_string(&untyped).unwrap().contains("kind"));
     }
 
     #[test]
