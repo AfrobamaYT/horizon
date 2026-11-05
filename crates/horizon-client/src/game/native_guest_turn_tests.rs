@@ -613,7 +613,7 @@ fn tick_advancement_notice_precedes_recipe_reward() {
     std::fs::write(dir.join("tick.json"), r#"{"criteria":{"seen":{"trigger":"minecraft:tick"}},"rewards":{"recipes":["testmod:reward"]}}"#).unwrap();
     with_guests(|game| {
         let mut sync = horizon_client::lan::data::SyncData::empty();
-        sync.advancements = horizon_client::lan::advancements::ServerAdvancements::load(
+        sync.advancements = horizon_client::lan::ServerAdvancements::load(
             &scratch,
             &horizon_world::loot::PackOverlay::NONE,
             Default::default(),
