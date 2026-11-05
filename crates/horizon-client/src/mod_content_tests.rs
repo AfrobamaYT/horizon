@@ -3406,6 +3406,11 @@ fn declared_shapes_drive_lighting_and_occlusion() {
             Some(&J::Num((if no_occlusion { 1 } else { 15 }).into()))
         );
         assert_eq!(partial.get("solid_render"), Some(&J::Bool(false)));
+        assert_eq!(full.get("shape_occlusion"), Some(&J::Bool(false)));
+        assert_eq!(
+            partial.get("shape_occlusion"),
+            Some(&J::Bool(!no_occlusion))
+        );
         assert_eq!(partial.get("skylight_down"), Some(&J::Bool(true)));
         assert_eq!(partial.get("dampening"), Some(&J::Num(0.into())));
         let mut shapes = Tag::Compound(Compound::from([
@@ -3441,7 +3446,7 @@ fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
       "shapes":{"default":[[0,0,0,1,0.5,1]]}}"#;
     let facts = r#"{"states":[
       ["minecraft:test",false,false,"",{"id":"minecraft:test","properties":{"waterlogged":"false"}}],
-      ["minecraft:test",false,false,"",{"id":"minecraft:test","properties":{"waterlogged":"true"}}]],
+      ["minecraft:test",false,true,"",{"id":"minecraft:test","properties":{"waterlogged":"true"}}]],
       "defaults":{"minecraft:test":0}}"#;
     let (base, mods) = block_base_of("shape-light-water", &[declaration], facts);
     let plan = Plan::new(&base, &mods).unwrap();
@@ -3472,6 +3477,10 @@ fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
 #[test]
 #[ignore = "full content root: CI and pr_ready run it"]
 fn declared_shapes_reach_render_and_worldgen_occlusion() {
+    use crate::{
+        chunk::Chunk,
+        light::{LightTables, apply_lighting, light_chunk},
+    };
     use horizon_core::geometry::Direction;
     use horizon_world::{
         block_properties::{BlockPropertiesRegistry, BlockProperty},
@@ -3497,6 +3506,18 @@ fn declared_shapes_reach_render_and_worldgen_occlusion() {
             (
                 "data/testmod/horizon/block/open.json",
                 r#"{"template":"minecraft:stone","item":false,"properties":{"occludes":false},"shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/partial_open.json",
+                r#"{"template":"minecraft:stone","item":false,"properties":{"occludes":false},"shapes":{"default":[[0,0,0,1,0.5,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/bubble.json",
+                r#"{"template":"minecraft:bubble_column","item":false,"shapes":{"default":[]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/kelp.json",
+                r#"{"template":"minecraft:kelp","item":false,"shapes":{"default":[[0,0,0,1,0.5625,1]]}}"#,
             ),
         ],
     );
@@ -3540,6 +3561,44 @@ fn declared_shapes_reach_render_and_worldgen_occlusion() {
                 facts.get(vanilla).skylight_down
             ),
         );
+    }
+    // Intrinsic water is present without a waterlogged property. Identical
+    // declared outlines must retain the template's exported light facts.
+    for (content, template) in [
+        ("testmod:bubble", "minecraft:bubble_column"),
+        ("testmod:kelp", "minecraft:kelp"),
+    ] {
+        let vanilla = facts.get(registry.default_state(template).unwrap());
+        let declared = facts.get(registry.default_state(content).unwrap());
+        assert_eq!(declared.outline, vanilla.outline);
+        for state in [vanilla, declared] {
+            assert!(!state.waterlogged);
+            assert_eq!((state.skylight_down, state.dampening), (false, 1));
+        }
+    }
+    let tables = LightTables::load(&root, registry, &facts).unwrap();
+    let partial_open = registry.default_state("testmod:partial_open").unwrap();
+    for (roof, below) in [(partial, 0), (slab, 0), (partial_open, 15)] {
+        // A sealed room with a bottom-half roof: its open top admits sky,
+        // but only occluding shapes stop it at the covered bottom face.
+        let mut chunk = Chunk::empty(0, 0);
+        for x in 4..=12 {
+            for z in 4..=12 {
+                chunk.set(x, -1, z, stone.0);
+                chunk.set(x, 3, z, roof.0);
+                if x == 4 || x == 12 || z == 4 || z == 12 {
+                    for y in 0..3 {
+                        chunk.set(x, y, z, stone.0);
+                    }
+                }
+            }
+        }
+        let mut region = [[None; 3]; 3];
+        region[1][1] = Some(&chunk);
+        let lights = light_chunk(&region, &tables, true);
+        apply_lighting(&mut chunk, lights);
+        assert_eq!(chunk.light(8, 3, 8) >> 4, 15, "open roof top {roof:?}");
+        assert_eq!(chunk.light(8, 2, 8) >> 4, below, "roof bottom {roof:?}");
     }
     let mut visibility = crate::models::load_visibility(&root, registry).unwrap();
     for (content, vanilla) in [(full, stone), (partial, slab), (open, leaves)] {

@@ -700,8 +700,8 @@ struct NewBlock<'a> {
     item: Option<String>,
     shapes: Option<Vec<VoxelShape>>,
     collision_shapes: Option<Vec<VoxelShape>>,
-    /// Whether each template state contains water.
-    waterlogged: Vec<bool>,
+    /// Whether each shaped state contains fluid, including intrinsic template fluids.
+    has_fluid: Vec<bool>,
     /// The template overrides BlockBehaviour.propagatesSkylightDown.
     custom_skylight: bool,
     custom_dampening: bool,
@@ -1308,16 +1308,25 @@ impl<'a> Plan<'a> {
                     })
                 };
                 let collision_shapes = decl.collision_shapes.as_ref().map(resolve).transpose()?;
-                let waterlogged = order
-                    .iter()
-                    .map(|&(state, combo)| {
-                        combos[combo as usize]
-                            .iter()
-                            .any(|(name, value)| name == "waterlogged" && value == "true")
-                            || properties(states.start + state).and_then(|p| p.get("waterlogged"))
-                                == Some(&J::Str("true".into()))
-                    })
-                    .collect();
+                let mut has_fluid = Vec::new();
+                if shapes.is_some() {
+                    for &(state, combo) in &order {
+                        let J::Arr(row) = &rows[(states.start + state) as usize] else {
+                            unreachable!()
+                        };
+                        // facts.json exports !BlockState.getFluidState().isEmpty(),
+                        // including water in bubble columns and aquatic plants.
+                        let Some(J::Bool(fluid)) = row.get(2) else {
+                            return Err("facts.json: a state without a fluid flag".into());
+                        };
+                        has_fluid.push(
+                            *fluid
+                                || combos[combo as usize]
+                                    .iter()
+                                    .any(|(name, value)| name == "waterlogged" && value == "true"),
+                        );
+                    }
+                }
                 // The lookup from (template state, combination) to the state's row.
                 let mut rows = vec![0; order.len()];
                 for (position, &(state, combo)) in order.iter().enumerate() {
@@ -1344,7 +1353,7 @@ impl<'a> Plan<'a> {
                     item: None,
                     shapes,
                     collision_shapes,
-                    waterlogged,
+                    has_fluid,
                     custom_skylight: custom_skylight.contains(&decl.template),
                     custom_dampening: custom_dampening.contains(&decl.template),
                     default,
@@ -1539,8 +1548,14 @@ impl<'a> Plan<'a> {
                         let down = if b.custom_skylight {
                             matches!(row.get("skylight_down"), Some(J::Bool(true)))
                         } else {
-                            !full && !b.waterlogged[state_index]
+                            !full && !b.has_fluid[state_index]
                         };
+                        // A partial outline needs directional light occlusion even
+                        // when its full-cube template bypasses shape checks. Keep
+                        // the template's participation for special full shapes.
+                        let shape_occlusion = can_occlude
+                            && (!full || matches!(row.get("shape_occlusion"), Some(J::Bool(true))));
+                        row.set("shape_occlusion", J::Bool(shape_occlusion));
                         row.set("solid_render", J::Bool(solid));
                         row.set("skylight_down", J::Bool(down));
                         if !b.custom_dampening {
