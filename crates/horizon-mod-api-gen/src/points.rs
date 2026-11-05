@@ -345,7 +345,7 @@ mod tests {
         let item = shape.record_item("t").to_string();
         assert!(
             item.contains("pub yaw : f64")
-                && item.contains("pub text : & 'a str")
+                && item.contains("pub text : :: std :: borrow :: Cow < 'a , str >")
                 && item.contains("pub cancel : bool"),
             "{item}"
         );
