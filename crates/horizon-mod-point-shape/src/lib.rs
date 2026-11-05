@@ -653,6 +653,27 @@ impl Shape {
             .collect();
         let mut seen = std::collections::BTreeSet::new();
         lifetimes.retain(|lifetime| seen.insert(lifetime.ident.to_string()));
+        // An elided lifetime of the `impl`'s type (`impl Game<'_>`) is one lifetime for the receiver
+        // and every `Self` in the signature, so it gets a name the listener type binds once.
+        // Left elided, each `Self` would get its own, and a parameter such as `fn(&mut Self)`
+        // would not match the function's.
+        let self_ty = self_ty.map(|ty| {
+            struct Name<'a>(&'a mut Vec<syn::Lifetime>, usize);
+            impl syn::visit_mut::VisitMut for Name<'_> {
+                fn visit_lifetime_mut(&mut self, lifetime: &mut syn::Lifetime) {
+                    if lifetime.ident == "_" {
+                        *lifetime =
+                            syn::Lifetime::new(&format!("'__self{}", self.1), lifetime.apostrophe);
+                        self.1 += 1;
+                        self.0.push(lifetime.clone());
+                    }
+                }
+            }
+            let mut ty = ty.clone();
+            syn::visit_mut::VisitMut::visit_type_mut(&mut Name(&mut lifetimes, 0), &mut ty);
+            ty
+        });
+        let self_ty = self_ty.as_ref();
         let concrete = |ty: &Type| {
             let mut ty = ty.clone();
             if let Some(self_ty) = self_ty {
@@ -803,4 +824,36 @@ pub fn raw_fields(sig: &syn::Signature) -> Vec<RawField> {
             FnArg::Receiver(_) => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `impl Game<'_>`'s lifetime is one lifetime: the receiver and a `Self` in a parameter name
+    /// the same one, so a function such as `fn(&mut Self, u8)` matches the function's own.
+    #[test]
+    fn the_impl_lifetime_is_shared_by_the_receiver_and_self() {
+        let sig: syn::Signature =
+            syn::parse_quote!(fn guest(&mut self, fire: fn(&mut Self, u8), other: &Self));
+        let shape = shape(quote!(side = "both", raw), &sig).unwrap();
+        let self_ty: Type = syn::parse_quote!(Game<'_>);
+        let items = shape.raw_items(&sig, Some(&self_ty), None).to_string();
+        let listener = items
+            .split("pub type __GuestListener")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .unwrap();
+        assert!(listener.contains("for < 'r , '__self0 >"), "{listener}");
+        assert!(
+            listener.contains("& 'r mut Game < '__self0 >"),
+            "{listener}"
+        );
+        assert!(
+            listener.contains("fn (& mut Game < '__self0 > , u8)"),
+            "{listener}"
+        );
+        assert!(listener.contains("& Game < '__self0 >"), "{listener}");
+        assert!(!listener.contains("'_ "), "{listener}");
+    }
 }

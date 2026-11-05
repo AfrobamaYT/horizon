@@ -10,6 +10,9 @@
 //! crate that depends on it compiles a few seconds slower. Hooks, handles and parts are in
 //! `mod_api`.
 #![deny(missing_docs)]
+// Its tests are integration tests, so the unit-test build (`cargo test --lib`) is empty rather than
+// a second compile of the generated points.
+#![cfg(not(test))]
 
 // The guest glue names this crate by its path, here as in the mods it is expanded into.
 #[cfg(target_arch = "wasm32")]

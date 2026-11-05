@@ -8,8 +8,6 @@ description = "The game's injection points for mods that listen at them: each po
 
 [lib]
 name = "mod_points"
-# Its tests are integration tests: a unit-test build would compile the generated points again.
-test = false
 
 [dependencies]
 horizon-mod-api = { path = "../horizon-mod-api" }
