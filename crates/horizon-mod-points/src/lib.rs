@@ -1,6 +1,7 @@
-//! The game's injection points (#589), for mods that listen at them. Every `Game` method the
-//! prebuilt game's staging pass admits is a point: a mod listens at its head (before the body
-//! runs) and at its return (after) through [`Points`], with no game rebuild. Each listener gets the
+//! The game's injection points (#589), for mods that listen at them. Every function of the game
+//! module the prebuilt game's staging pass admits is a point, and so is each listed function of the
+//! crates below it: a mod listens at its head (before the body runs) and at its return (after)
+//! through [`Points`], with no game rebuild. Each listener gets the
 //! point's record: the arguments the API carries, and `cancel` or `result` where the function's
 //! return allows. A mod names each method in a `[[native.injection]]` whose `target` is the
 //! point's function.
@@ -19,17 +20,23 @@ pub use registry::{RegisterError, register, stop};
 // hidden: the game's side of the points, not part of the API a mod is written against
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::registry::{listened_at, seal};
+    pub use crate::registry::{POINTS, register_raw, seal};
     use crate::{PointId, Points};
 
-    /// Runs the listeners at `place` (the `Points` method `name`), each through `call`: one copy of
-    /// the loop for every point, out of the pointed functions' own code.
+    /// Runs the `impl Points` listeners at `place` (the `Points` method `name`), each through
+    /// `call`: one copy of the loop for every point, out of the pointed functions' own code.
     #[cold]
     #[inline(never)]
     pub fn fire(place: PointId, name: &'static str, call: &mut dyn FnMut(&'static dyn Points)) {
-        for points in crate::registry::listeners(place, name) {
-            call(points);
-        }
+        crate::registry::fire(place, name, call);
+    }
+
+    /// Runs the raw listeners at `place`, each through `call` with its erased function, which the
+    /// slot casts back to the place's listener type.
+    #[cold]
+    #[inline(never)]
+    pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(*const ())) {
+        crate::registry::fire_raw(place, name, call);
     }
 
     /// Whether `list` holds `name`, at compile time: the launcher's generated `main` checks each

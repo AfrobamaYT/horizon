@@ -501,9 +501,14 @@ impl Pass {
 
 /// Widen game internals and the declared lower-crate items in a staged source copy.
 /// Fails before writing anything if a declaration in `internals.txt` cannot be resolved.
+/// A listed lower-crate point is an internal too: its raw listener names the function's types.
 pub fn widen(root: &Path) -> Result<Widened, String> {
-    let list = root.join("crates/horizon-mod-api-gen/internals.txt");
-    let text = fs::read_to_string(&list).map_err(|e| format!("{}: {e}", list.display()))?;
+    let mut text = String::new();
+    for list in ["internals.txt", "points.txt"] {
+        let list = root.join("crates/horizon-mod-api-gen").join(list);
+        text += &fs::read_to_string(&list).map_err(|e| format!("{}: {e}", list.display()))?;
+        text.push('\n');
+    }
     widen_with(root, &text)
 }
 
