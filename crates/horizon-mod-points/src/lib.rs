@@ -47,6 +47,34 @@ pub mod __private {
     /// Runs the raw listeners at `place`, each through `call` with its kind and function. The
     /// slot casts a typed function back to the place's listener type, or calls an erased one
     /// with the place index and its receiver and raw record or return value pointers.
+    ///
+    /// Extracting an erased callback does not make it safe to call with arbitrary pointers:
+    ///
+    /// ```compile_fail,E0133
+    /// use mod_points::{PointId, __private::{fire_raw, RawKind}};
+    /// let place = PointId::Tick;
+    /// fire_raw(place, "tick", &mut |kind| {
+    ///     if let RawKind::Erased(function) = kind {
+    ///         function(place as usize, std::ptr::null_mut(), std::ptr::null_mut());
+    ///     }
+    /// });
+    /// ```
+    ///
+    /// A caller that provides the slot's pointer guarantees can invoke it explicitly:
+    ///
+    /// ```
+    /// use mod_points::{PointId, __private::{fire_raw, RawKind}};
+    /// // SAFETY: the caller must supply this place's exact receiver and record pointers,
+    /// // valid for the callback's duration, as required by RawKind::Erased.
+    /// unsafe fn forward(place: PointId, receiver: *mut (), raw: *mut ()) {
+    ///     fire_raw(place, "slot", &mut |kind| {
+    ///         if let RawKind::Erased(function) = kind {
+    ///             // SAFETY: the caller supplies the slot's pointer guarantees.
+    ///             unsafe { function(place as usize, receiver, raw) };
+    ///         }
+    ///     });
+    /// }
+    /// ```
     #[cold]
     #[inline(never)]
     pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
