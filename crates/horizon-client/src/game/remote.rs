@@ -10067,6 +10067,25 @@ impl Game<'_> {
         self.send(S::ContainerClose(play::ContainerClose { container: id }));
         self.remote_close_local();
     }
+    /// `MultiPlayerGameMode.handleInventoryButtonClick`: button `button` of
+    /// the menu the server opened goes to it (`ContainerButtonClick`), whose
+    /// menu decides what it does (`clickMenuButton`). No sound: that is the
+    /// screen's. False while no such menu is open.
+    pub(super) fn remote_button_click(&self, button: i32) -> bool {
+        let Some(container) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.menu.as_ref())
+            .map(|(w, _)| *w)
+        else {
+            return false;
+        };
+        self.send(S::ContainerButtonClick(play::ContainerButtonClick {
+            container,
+            button,
+        }));
+        true
+    }
     fn remote_reject_container(&mut self, container: i32) {
         self.remote_close_local();
         if self.screen == Screen::Inventory {
@@ -11980,6 +11999,84 @@ mod tests {
         assert_eq!(super::Game::menu_slot("minecraft:unknown", 0), None);
     }
 
+    /// A client connecting through a local pipe and through configuration, as
+    /// the client menu tests drive it: the server end's reader (what the
+    /// client sends) and writer.
+    fn connect_menu_test(
+        game: &mut super::Game<'_>,
+    ) -> (
+        horizon_protocol::connection::ConnReader,
+        horizon_protocol::connection::ConnWriter,
+    ) {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_protocol::{
+            connection::{Connection, Pipe},
+            packets::{Empty, configuration as cfg, login},
+        };
+        game.options.execution_role = ExecutionRole::Client;
+        let (client, server) = Pipe::pair();
+        game.connect_local(client, "MenuReadTest").unwrap();
+        let (mut reader, mut writer) = Connection::local(server).split();
+        reader
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        reader.recv().unwrap();
+        reader.recv().unwrap();
+        writer
+            .send(
+                &login::Clientbound::LoginFinished(login::LoginFinished {
+                    profile: login::GameProfile {
+                        uuid: 42,
+                        name: "MenuReadTest".into(),
+                        properties: vec![],
+                    },
+                    session: 1,
+                })
+                .encode(),
+            )
+            .unwrap();
+        let (id, body) = reader.recv().unwrap();
+        assert!(matches!(
+            login::Serverbound::decode(id, &body).unwrap(),
+            login::Serverbound::LoginAcknowledged(_)
+        ));
+        reader.recv().unwrap();
+        reader.recv().unwrap();
+        writer
+            .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+            .unwrap();
+        let (id, body) = reader.recv().unwrap();
+        assert!(matches!(
+            cfg::Serverbound::decode(id, &body).unwrap(),
+            cfg::Serverbound::FinishConfiguration(_)
+        ));
+        (reader, writer)
+    }
+
+    /// Spawns the connected client in the overworld as entity 7, profile 42.
+    fn spawn_menu_test(game: &mut super::Game<'_>) -> horizon_protocol::packets::play::SpawnInfo {
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::packets::play::SpawnInfo;
+        let spawn = SpawnInfo {
+            dimension_type: 0,
+            dimension: "minecraft:overworld".into(),
+            seed: 0,
+            game_type: 0,
+            previous_game_type: None,
+            debug: false,
+            flat: true,
+            last_death: None,
+            portal_cooldown: 0,
+            sea_level: 63,
+        };
+        game.enter_remote_dimension(&spawn, false, Reason::Other);
+        let remote = game.remote.as_mut().unwrap();
+        remote.logged_in = true;
+        remote.entity_id = 7;
+        remote.profile = 42;
+        spawn
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_menu_reads_follow_packets_and_lifetimes() {
@@ -11988,75 +12085,20 @@ mod tests {
         };
         use horizon_client::level_loading::Reason;
         use horizon_protocol::{
-            connection::{Connection, Pipe},
+            connection::Pipe,
             item::Stack,
-            packets::{
-                Empty, configuration as cfg, login,
-                play::{self, Clientbound as C, SpawnInfo},
-            },
+            packets::play::{self, Clientbound as C},
         };
         use horizon_world::nbt::Tag;
 
         with_game(|game| {
-            game.options.execution_role = ExecutionRole::Client;
-            let (client, server) = Pipe::pair();
-            game.connect_local(client, "MenuReadTest").unwrap();
-            let (mut reader, mut writer) = Connection::local(server).split();
-            reader
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .unwrap();
-            reader.recv().unwrap();
-            reader.recv().unwrap();
-            writer
-                .send(
-                    &login::Clientbound::LoginFinished(login::LoginFinished {
-                        profile: login::GameProfile {
-                            uuid: 42,
-                            name: "MenuReadTest".into(),
-                            properties: vec![],
-                        },
-                        session: 1,
-                    })
-                    .encode(),
-                )
-                .unwrap();
-            let (id, body) = reader.recv().unwrap();
-            assert!(matches!(
-                login::Serverbound::decode(id, &body).unwrap(),
-                login::Serverbound::LoginAcknowledged(_)
-            ));
-            reader.recv().unwrap();
-            reader.recv().unwrap();
-            writer
-                .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
-                .unwrap();
-            let (id, body) = reader.recv().unwrap();
-            assert!(matches!(
-                cfg::Serverbound::decode(id, &body).unwrap(),
-                cfg::Serverbound::FinishConfiguration(_)
-            ));
+            let (mut reader, _writer) = connect_menu_test(game);
             assert!(
                 game.native_local_player()
                     .and_then(|player| game.native_menu_ref(player))
                     .is_none()
             );
-            let spawn = SpawnInfo {
-                dimension_type: 0,
-                dimension: "minecraft:overworld".into(),
-                seed: 0,
-                game_type: 0,
-                previous_game_type: None,
-                debug: false,
-                flat: true,
-                last_death: None,
-                portal_cooldown: 0,
-                sea_level: 63,
-            };
-            game.enter_remote_dimension(&spawn, false, Reason::Other);
-            let remote = game.remote.as_mut().unwrap();
-            remote.logged_in = true;
-            remote.entity_id = 7;
-            remote.profile = 42;
+            let spawn = spawn_menu_test(game);
             let menu = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
@@ -12368,6 +12410,102 @@ mod tests {
             assert_eq!(game.native_menu_slot_count(before_logout), None);
             assert_eq!(game.native_menu_slot_count(reconnected), Some(46));
             assert_ne!(reconnected, before_logout);
+        });
+    }
+
+    /// `MenuRef::close` and `click_button` go through the screen's own close
+    /// and the button packet, and refuse a menu that is not open or stale.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_menu_close_and_button_click_reach_the_server() {
+        use super::super::{
+            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+        };
+        use horizon_protocol::packets::play::{self, Clientbound as C};
+        use horizon_world::nbt::Tag;
+
+        with_game(|game| {
+            let (mut reader, _writer) = connect_menu_test(game);
+            spawn_menu_test(game);
+            let sent = |reader: &mut horizon_protocol::connection::ConnReader| {
+                (0..32).find_map(|_| {
+                    let (id, body) = reader.recv().ok()?;
+                    match play::Serverbound::decode(id, &body).unwrap() {
+                        p @ (play::Serverbound::ContainerClose(_)
+                        | play::Serverbound::ContainerButtonClick(_)) => Some(p),
+                        _ => None,
+                    }
+                })
+            };
+            // The inventory menu while playing: no screen to close, no buttons.
+            let inventory = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.screen, Screen::Playing);
+            assert!(!inventory.close(game));
+            assert!(!inventory.click_button(game, 0));
+            let loom = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:menu")
+                .unwrap()
+                .id("minecraft:loom")
+                .unwrap();
+            let open = |game: &mut super::Game<'_>| {
+                game.handle_packet(C::OpenScreen(play::OpenScreen {
+                    container: 5,
+                    menu: loom,
+                    title: Tag::String("Loom".into()),
+                }))
+                .unwrap();
+                game.native_local_player()
+                    .and_then(|player| game.native_menu_ref(player))
+                    .unwrap()
+            };
+            let menu = open(game);
+            assert_eq!(game.screen, Screen::Inventory);
+            // The old inventory handle is stale now that the loom replaced it.
+            assert!(!inventory.close(game));
+            assert!(!inventory.click_button(game, 0));
+            game.options.execution_role = ExecutionRole::IntegratedServer;
+            assert!(!menu.click_button(game, 3));
+            assert!(!menu.close(game));
+            game.options.execution_role = ExecutionRole::Client;
+            assert_eq!(game.screen, Screen::Inventory);
+            assert!(menu.click_button(game, 3));
+            let Some(play::Serverbound::ContainerButtonClick(click)) = sent(&mut reader) else {
+                panic!("expected the button click, not a refused request");
+            };
+            assert_eq!((click.container, click.button), (5, 3));
+            assert!(menu.close(game));
+            assert_eq!(game.screen, Screen::Playing);
+            let Some(play::Serverbound::ContainerClose(close)) = sent(&mut reader) else {
+                panic!("expected the close");
+            };
+            assert_eq!(close.container, 5);
+            assert!(game.remote.as_ref().unwrap().menu.as_ref().is_none());
+            // Closed: the handle is stale and nothing more is sent.
+            assert!(!menu.close(game));
+            assert!(!menu.click_button(game, 3));
+            // A server-side close leaves a reopened menu's old handle stale too.
+            let first = open(game);
+            game.handle_packet(C::ContainerClose(play::ContainerClose { container: 5 }))
+                .unwrap();
+            let second = open(game);
+            assert!(!first.close(game));
+            assert!(!first.click_button(game, 3));
+            assert!(second.close(game));
+            reader
+                .set_read_timeout(Some(std::time::Duration::from_millis(20)))
+                .unwrap();
+            let Some(play::Serverbound::ContainerClose(close)) = sent(&mut reader) else {
+                panic!("expected the second close");
+            };
+            assert_eq!(close.container, 5);
+            assert!(sent(&mut reader).is_none());
         });
     }
 

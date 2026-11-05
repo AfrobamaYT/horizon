@@ -517,6 +517,12 @@ Inventory reads and direct server-side item transactions keep their existing con
 not expose direct client inventory writes or enforce a mod's locked-slot policy. Call from an explicit
 input action rather than submitting every render/tick. Diverges from upstream: new helper.
 
+`menu.close(host)` closes the menu's screen as Escape does and tells the server (`ContainerClose`);
+it returns `false` while that screen is not open, so the inventory menu closes only while the inventory
+screen shows. `menu.click_button(host, button)` presses one of the open menu's buttons
+(`ContainerButtonClick`, as a loom's pattern list does), for input the screen's own
+buttons don't take; the server's menu decides what it does, and the inventory menu has none.
+
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
