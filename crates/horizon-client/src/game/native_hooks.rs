@@ -14462,13 +14462,18 @@ mod player_heart_type_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Swap {
         fn player_heart_type(&self, _: &mut dyn ClientHost, event: &mut PlayerHeartTypeEvent) {
-            self.0.lock().unwrap().push(event.kind);
-            event.kind = match event.kind {
+            self.0.lock().unwrap().push(*event.kind);
+            *event.kind = match *event.kind {
                 HeartKind::Normal => HeartKind::Frozen,
                 HeartKind::Frozen => HeartKind::Withered,
                 other => other,
             };
         }
+    }
+
+    fn add_player(game: &mut super::Game<'_>) {
+        let at = horizon_core::geometry::Vec3::ZERO;
+        game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, at).unwrap());
     }
 
     /// `PlayerHeartTypeEvent`: the mod gets vanilla's pick and its answer is drawn; without a
@@ -14478,6 +14483,8 @@ mod player_heart_type_tests {
     fn a_client_mod_changes_the_health_bars_hearts() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.execution_role = super::ExecutionRole::Client;
+            assert_eq!(game.player_heart_kind(), None, "no player, no hearts");
+            add_player(game);
             assert_eq!(game.player_heart_kind(), Some(HeartKind::Normal));
             game.player.as_mut().unwrap().ticks_frozen = 1000;
             assert_eq!(game.player_heart_kind(), Some(HeartKind::Frozen));
@@ -14489,6 +14496,7 @@ mod player_heart_type_tests {
         with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.execution_role = super::ExecutionRole::Client;
+                add_player(game);
                 assert_eq!(game.player_heart_kind(), Some(HeartKind::Frozen));
                 game.player.as_mut().unwrap().ticks_frozen = 1000;
                 assert_eq!(game.player_heart_kind(), Some(HeartKind::Withered));
