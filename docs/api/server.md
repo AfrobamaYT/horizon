@@ -72,7 +72,8 @@ curl -s -H "Authorization: Bearer $token" -o world.zip "http://$address/api/v1/b
 ## Stability
 
 Stable ([stability.md](stability.md)): the commands, `server.toml`'s keys and `/api/v1`. A new key or endpoint is an
-addition; a change to one starts `/api/v2`, served beside `/api/v1`.
+addition; a change to one starts `/api/v2`, served beside `/api/v1`. The fork's clean-break runtime mod
+inventory contract below is an explicit exception: the old build-only reply is replaced, not kept as a second path.
 
 ## Runtime mod inventory
 
