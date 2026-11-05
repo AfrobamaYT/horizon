@@ -282,14 +282,22 @@ impl Shape {
             quote!()
         };
         let names: Vec<_> = self.args.iter().map(|arg| &arg.name).collect();
-        let types: Vec<_> = self
+        // Text crosses as a `Cow`, so a listener may replace it with an owned `String`.
+        let (types, fields): (Vec<_>, Vec<_>) = self
             .args
             .iter()
             .map(|arg| match &arg.ty {
-                Type::Reference(_) => quote!(&'a str),
-                ty => quote!(#ty),
+                Type::Reference(_) => (quote!(&'a str), quote!(::std::borrow::Cow<'a, str>)),
+                ty => (quote!(#ty), quote!(#ty)),
             })
-            .collect();
+            .unzip();
+        let inits = self.args.iter().map(|arg| {
+            let name = &arg.name;
+            match &arg.ty {
+                Type::Reference(_) => quote!(#name: ::std::borrow::Cow::Borrowed(#name)),
+                _ => quote!(#name),
+            }
+        });
         let field_docs = names.iter().map(|name| {
             format!(
                 "`{name}`: a head listener may change it, and the function runs with the change."
@@ -321,7 +329,7 @@ impl Shape {
             #[doc = #doc]
             #[non_exhaustive]
             pub struct #record #lifetime {
-                #( #[doc = #field_docs] pub #names: #types, )*
+                #( #[doc = #field_docs] pub #names: #fields, )*
                 #extra
             }
             impl #lifetime #record #lifetime {
@@ -329,7 +337,7 @@ impl Shape {
                 #[doc(hidden)]
                 #[inline]
                 pub fn __new(#(#names: #types),*) -> Self {
-                    Self { #(#names,)* #extra_init }
+                    Self { #(#inits,)* #extra_init }
                 }
             }
         }
