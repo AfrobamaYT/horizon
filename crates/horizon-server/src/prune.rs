@@ -33,7 +33,9 @@ const STAGING: &str = ".horizon-prune";
 const PREFIX: usize = 16 * 1024;
 const KINDS: [&str; 3] = ["region", "entities", "poi"];
 
-use horizon_server_launch::prune::{Mode, Settings};
+#[cfg(test)]
+use horizon_server_launch::prune::Mode;
+use horizon_server_launch::prune::Settings;
 
 type Chunk = (i32, i32);
 
