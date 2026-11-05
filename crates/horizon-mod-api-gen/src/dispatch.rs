@@ -24,11 +24,6 @@ const MAX_TARGET_PARAMETERS: usize = 7;
 /// shrinks and takes no new entries: convert a hook to a carrier and delete its line. A PR that
 /// adds a hook never edits it, so no two PRs collide on it.
 const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
-    "piston_pre",
-    "cauldron_level_changed",
-    "block_drops",
-    "bonemeal",
-    "note_block_play",
 ];
 
 /// Refuses a flat target of a new hook that takes more than [`MAX_TARGET_PARAMETERS`].

@@ -1487,15 +1487,15 @@ impl LevelAccess for GameLevel<'_> {
         } else {
             (None, None)
         };
-        self.native_note_block_play(
-            self.dimension,
+        self.native_note_block_play(mod_api::__private::NoteBlockPlayCall {
+            dimension: self.dimension,
             player,
             player_entity_id,
             pos,
-            &mut played_instrument,
-            &mut played,
-            &mut cancel,
-        );
+            instrument: &mut played_instrument,
+            note: &mut played,
+            cancel: &mut cancel,
+        });
         *instrument = played_instrument as u8;
         // A note out of 0 to 24 keeps the block's own.
         if (0..=24).contains(&played) {
@@ -1539,15 +1539,15 @@ impl LevelAccess for GameLevel<'_> {
     ) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
-            self.native_cauldron_level_changed(
-                self.dimension,
-                self.native_player,
+            self.native_cauldron_level_changed(mod_api::__private::CauldronLevelChangedCall {
+                dimension: self.dimension,
+                player: self.native_player,
                 pos,
-                from,
-                to,
+                from_level: from,
+                to_level: to,
                 reason,
-                &mut cancel,
-            );
+                cancel: &mut cancel,
+            });
         }
         !cancel
     }
@@ -1562,15 +1562,15 @@ impl LevelAccess for GameLevel<'_> {
         let mut canceled = false;
         if self.native_authoritative {
             let step = direction.normal();
-            self.native_piston_pre(
-                self.dimension,
+            self.native_piston_pre(mod_api::__private::PistonPreCall {
+                dimension: self.dimension,
                 piston,
-                step,
+                direction: step,
                 extending,
                 push,
                 destroy,
-                &mut canceled,
-            );
+                canceled: &mut canceled,
+            });
         }
         !canceled
     }
