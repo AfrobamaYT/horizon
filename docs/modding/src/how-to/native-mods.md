@@ -492,6 +492,11 @@ trusting native code is the player's decision, never an agent's.
    `/etc/os-release` (Debian, Ubuntu and Mint:
    `sudo apt install build-essential pkg-config libasound2-dev libudev-dev`). SteamOS has GCC without the C
    library's headers, and a read-only system: native builds don't work there yet.
+   On Windows, Smart App Control can block newly compiled build scripts or toolchain programs with
+   `os error 4551`. The launcher adds advice when it sees that error; it does not check the setting
+   before a build. To build after a block, Windows Security > App & browser control > Smart App Control
+   settings offers an off switch. On some Windows versions, turning it back on requires reinstalling
+   Windows. Content mods need no build and work with Smart App Control on.
    `horizon-launcher rust status|install|remove`.
 2. **horizon-mixins**, at the exact commit the mods name (`[native] mixins` in `horizon-mod.toml`),
    built once with that cargo (`cargo install --locked --git … --rev …`) into `native/tools/<commit>/`.
