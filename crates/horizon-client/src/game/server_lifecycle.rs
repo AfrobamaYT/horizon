@@ -27,23 +27,83 @@ impl Game<'_> {
         if !startup_began {
             return result;
         }
-        // Listeners still see the loaded worlds and players, even on failure.
-        self.native_server_stopping(dedicated);
-        if let Err(error) = &result {
-            self.native_lifecycle_world_failed(&error.to_string());
-            self.native_lifecycle_close_failed(&error.to_string());
+        let run_error = result.as_ref().err().map(ToString::to_string);
+        let shutdown = self.shutdown_started_server(dedicated, crashed, run_error.as_deref());
+        result.and(shutdown)
+    }
+
+    /// Vanilla's nested `stopServer` finally: a listener panic still reaches
+    /// cleanup, storage release and `server_stopped`, and the error is kept.
+    fn shutdown_started_server(
+        &mut self,
+        dedicated: bool,
+        crashed: bool,
+        run_error: Option<&str>,
+    ) -> Result<()> {
+        let mut failure: Option<String> = None;
+        if let Err(payload) =
+            catch_unwind(AssertUnwindSafe(|| self.native_server_stopping(dedicated)))
+        {
+            remember_shutdown(&mut failure, shutdown_panic(payload.as_ref()));
         }
-        let stopped = if dedicated {
-            self.stop_dedicated(crashed)
-        } else {
-            self.stop_integrated(crashed)
-        };
-        if let Err(error) = &stopped {
-            self.native_lifecycle_close_failed(&error.to_string());
-            log::error!("Exception stopping the server: {error}");
+        if let Some(error) = run_error {
+            let error = error.to_owned();
+            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+                self.native_lifecycle_world_failed(&error);
+                self.native_lifecycle_close_failed(&error);
+            })) {
+                remember_shutdown(&mut failure, shutdown_panic(payload.as_ref()));
+            }
         }
-        self.native_server_stopped(dedicated);
-        result.and(stopped)
+        match catch_unwind(AssertUnwindSafe(|| {
+            if dedicated {
+                self.stop_dedicated(crashed)
+            } else {
+                self.stop_integrated(crashed)
+            }
+        })) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                let text = error.to_string();
+                let _ = catch_unwind(AssertUnwindSafe(|| {
+                    self.native_lifecycle_close_failed(&text);
+                }));
+                log::error!("Exception stopping the server: {text}");
+                if failure.is_none() {
+                    failure = Some(text);
+                }
+            }
+            Err(payload) => {
+                let message = shutdown_panic(payload.as_ref());
+                self.release_server_storage();
+                let _ = catch_unwind(AssertUnwindSafe(|| {
+                    self.native_lifecycle_close_failed(&message);
+                }));
+                remember_shutdown(&mut failure, message);
+            }
+        }
+        if let Err(payload) =
+            catch_unwind(AssertUnwindSafe(|| self.native_server_stopped(dedicated)))
+        {
+            remember_shutdown(&mut failure, shutdown_panic(payload.as_ref()));
+        }
+        match failure {
+            Some(message) => Err(message.into()),
+            None => Ok(()),
+        }
+    }
+
+    /// Lock, flush and close when `stopServer` unwound before it released storage.
+    fn release_server_storage(&mut self) {
+        if self.session_lock.is_none() && !self.world_adopted {
+            return;
+        }
+        let _ = catch_unwind(AssertUnwindSafe(|| self.lan_close(false)));
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _ = self.save.flush();
+        }));
+        self.session_lock = None;
+        self.world_adopted = false;
     }
 
     /// A panic can interrupt `as_guest` with the player's current state swapped
@@ -69,25 +129,69 @@ impl Game<'_> {
 
     /// Complete teardown even if freeing beds or the final save fails. A failed
     /// open must never overwrite a world the server did not successfully adopt.
+    /// The session lock is not that marker: it is installed before the prepared
+    /// level, so tag reads work, and a save in that gap would write the placeholder.
     pub(super) fn finish_server_save(&mut self, crashed: bool) -> Result<()> {
-        let beds = if crashed {
-            Ok(())
-        } else {
-            self.free_player_beds()
+        let saved = catch_unwind(AssertUnwindSafe(|| {
+            let beds = if crashed {
+                Ok(())
+            } else {
+                self.free_player_beds()
+            };
+            let saved = if self.world_adopted && self.session_lock.is_some() {
+                self.save_game()
+            } else {
+                Ok(())
+            };
+            beds.and(saved)
+        }));
+        let mut result = match saved {
+            Ok(result) => result,
+            Err(payload) => Err(shutdown_panic(payload.as_ref()).into()),
         };
-        let saved = if self.session_lock.is_some() {
-            self.save_game()
-        } else {
-            Ok(())
-        };
-        self.lan_close(false);
-        let flushed = self.save.flush();
-        let result = beds.and(saved).and(flushed);
-        if result.is_ok() {
-            self.native_lifecycle_world_closed();
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.lan_close(false))) {
+            let message = shutdown_panic(payload.as_ref());
+            if result.is_ok() {
+                result = Err(message.into());
+            }
+        }
+        match catch_unwind(AssertUnwindSafe(|| self.save.flush())) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                if result.is_ok() {
+                    result = Err(error);
+                }
+            }
+            Err(payload) => {
+                let message = shutdown_panic(payload.as_ref());
+                if result.is_ok() {
+                    result = Err(message.into());
+                }
+            }
+        }
+        if result.is_ok()
+            && let Err(payload) =
+                catch_unwind(AssertUnwindSafe(|| self.native_lifecycle_world_closed()))
+        {
+            result = Err(shutdown_panic(payload.as_ref()).into());
         }
         self.session_lock = None;
+        self.world_adopted = false;
         result
+    }
+}
+
+fn shutdown_panic(payload: &(dyn std::any::Any + Send)) -> String {
+    format!(
+        "the server shutdown panicked: {}",
+        super::dedicated::panic_message(payload)
+    )
+}
+
+fn remember_shutdown(failure: &mut Option<String>, message: String) {
+    log::error!("{message}");
+    if failure.is_none() {
+        *failure = Some(message);
     }
 }
 
