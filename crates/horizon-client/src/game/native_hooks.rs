@@ -3350,7 +3350,7 @@ impl Game<'_> {
         stack: &ItemStack,
         pose: &mut Option<mod_api::ArmPose>,
     ) {
-        mod_api::dispatch_get_arm_pose(self, entity_id, hand, stack, pose);
+        self.fire_get_arm_pose(entity_id, hand, stack, pose);
     }
     /// Name tag visibility and optional replacement text. API 372.
     pub(super) fn native_render_name_tag(
@@ -7301,15 +7301,7 @@ impl Game<'_> {
         place: &mut TooltipPlace,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_render_tooltip_pre(
-            self,
-            stack,
-            screen_width,
-            screen_height,
-            elements,
-            place,
-            cancel,
-        );
+        self.fire_render_tooltip_pre(stack, screen_width, screen_height, elements, place, cancel);
     }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
