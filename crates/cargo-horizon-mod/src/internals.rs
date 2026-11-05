@@ -14,22 +14,39 @@ use std::{
 };
 use toml_edit::{DocumentMut, Item, Value};
 
-const USAGE: &str = "usage: cargo horizon-mod internals add <path>…";
+const USAGE: &str = "usage: cargo horizon-mod internals add <path>… [--kind <kind>]";
 const CATALOG: &str = "internals.json";
 const CATALOG_LIMIT: u64 = 64 << 20;
 const ARCHIVE_LIMIT: u64 = 4 << 30;
 
 pub fn run(args: &[String]) -> Result<(), String> {
-    let Some((command, paths)) = args.split_first() else {
+    let Some((command, args)) = args.split_first() else {
         return Err(USAGE.into());
     };
-    if command != "add" || paths.is_empty() || paths.iter().any(|p| p.starts_with('-')) {
+    let mut paths = Vec::new();
+    let mut kind = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--kind" && kind.is_none() {
+            kind = Some(
+                args.next()
+                    .filter(|k| !k.starts_with('-'))
+                    .ok_or(USAGE)?
+                    .as_str(),
+            );
+        } else if arg.starts_with('-') {
+            return Err(USAGE.into());
+        } else {
+            paths.push(arg.as_str());
+        }
+    }
+    if command != "add" || paths.is_empty() {
         return Err(USAGE.into());
     }
-    add(Path::new("."), paths)
+    add(Path::new("."), &paths, kind)
 }
 
-fn add(dir: &Path, paths: &[String]) -> Result<(), String> {
+fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
@@ -38,10 +55,12 @@ fn add(dir: &Path, paths: &[String]) -> Result<(), String> {
         .as_ref()
         .ok_or("internals add needs a [native] mod")?;
     let catalog = load(dir, &native.horizon)?;
-    // Resolve every request before editing: one missing or gated path leaves the file alone.
+    // Resolve every request before editing: any unavailable or ambiguous path leaves the file alone.
     let entries = paths
         .iter()
-        .map(|path| internals::resolve(&catalog, &manifest.id, path).map_err(|e| e.to_string()))
+        .map(|path| {
+            internals::resolve(&catalog, &manifest.id, path, kind).map_err(|e| e.to_string())
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let mut doc: DocumentMut = text
         .parse()
@@ -50,11 +69,20 @@ fn add(dir: &Path, paths: &[String]) -> Result<(), String> {
         .internals
         .iter()
         .enumerate()
-        .map(|(index, entry)| (entry.path.as_str(), index))
+        .map(|(index, entry)| ((entry.path.as_str(), entry.kind.as_deref()), index))
         .collect();
     for entry in entries {
-        if let Some(&index) = listed.get(entry.path.as_str()) {
-            set_hash(&mut doc, index, &entry.hash)?;
+        let key = (entry.path.as_str(), Some(entry.kind.as_str()));
+        let existing = listed
+            .get(&key)
+            .or_else(|| listed.get(&(entry.path.as_str(), None)))
+            .copied();
+        if let Some(index) = existing {
+            set_fingerprint(&mut doc, index, &entry.hash, Some(&entry.kind))?;
+            if listed.get(&(entry.path.as_str(), None)) == Some(&index) {
+                listed.remove(&(entry.path.as_str(), None));
+            }
+            listed.insert(key, index);
         } else {
             let item = &mut doc["native"]["internals"];
             if item.is_none() {
@@ -65,17 +93,19 @@ fn add(dir: &Path, paths: &[String]) -> Result<(), String> {
                 let mut internal = toml_edit::InlineTable::new();
                 internal.insert("path", entry.path.as_str().into());
                 internal.insert("hash", entry.hash.as_str().into());
+                internal.insert("kind", entry.kind.as_str().into());
                 internal.fmt();
                 array.push(internal);
             } else if let Some(array) = item.as_array_of_tables_mut() {
                 let mut internal = toml_edit::Table::new();
                 internal["path"] = toml_edit::value(&entry.path);
                 internal["hash"] = toml_edit::value(&entry.hash);
+                internal["kind"] = toml_edit::value(&entry.kind);
                 array.push(internal);
             } else {
                 return Err(format!("{MANIFEST}: native.internals must be an array"));
             }
-            listed.insert(&entry.path, listed.len());
+            listed.insert(key, listed.len());
         }
         println!("Added internal {}", entry.path);
     }
@@ -98,14 +128,14 @@ pub fn refresh(
     let mut report = String::new();
     for (index, declared) in native.internals.iter().enumerate() {
         let path = &declared.path;
-        let entry = match internals::resolve(new, &manifest.id, path) {
+        let entry = match internals::resolve(new, &manifest.id, path, declared.kind.as_deref()) {
             Ok(entry) => entry,
             Err(error) => {
                 report.push_str(&format!("missing: {path} ({error})\n"));
                 continue;
             }
         };
-        match internals::resolve(old, &manifest.id, path) {
+        match internals::resolve(old, &manifest.id, path, declared.kind.as_deref()) {
             Ok(previous) if previous.hash == entry.hash => {
                 report.push_str(&format!("unchanged: {path}\n"));
             }
@@ -118,22 +148,41 @@ pub fn refresh(
                 ));
             }
         }
-        set_hash(doc, index, &entry.hash)?;
+        set_fingerprint(doc, index, &entry.hash, declared.kind.as_deref())?;
     }
     Ok(report)
 }
 
-fn set_hash(doc: &mut DocumentMut, index: usize, hash: &str) -> Result<(), String> {
+fn set_fingerprint(
+    doc: &mut DocumentMut,
+    index: usize,
+    hash: &str,
+    kind: Option<&str>,
+) -> Result<(), String> {
     let item = &mut doc["native"]["internals"];
     let value = if let Some(array) = item.as_array_mut() {
         array
             .get_mut(index)
             .and_then(Value::as_inline_table_mut)
-            .and_then(|i| i.get_mut("hash"))
+            .and_then(|i| {
+                if let Some(kind) = kind {
+                    set_string(i.entry("kind").or_insert(kind.into()), kind);
+                }
+                i.get_mut("hash")
+            })
     } else {
         item.as_array_of_tables_mut()
             .and_then(|array| array.get_mut(index))
-            .and_then(|i| i.get_mut("hash"))
+            .and_then(|i| {
+                if let Some(kind) = kind {
+                    let value = i.entry("kind").or_insert(toml_edit::value(kind));
+                    set_string(
+                        value.as_value_mut().expect("manifest kind is a string"),
+                        kind,
+                    );
+                }
+                i.get_mut("hash")
+            })
             .and_then(Item::as_value_mut)
     }
     .ok_or_else(|| format!("{MANIFEST}: internal {index} has no hash"))?;
@@ -327,6 +376,7 @@ mod tests {
             serde_json::from_str(include_str!("../tests/fixtures/internals-new.json")).unwrap();
         let mut declared = horizon_mods::manifest::Internal {
             path: "horizon_client::game::Game<'_>::reach".into(),
+            kind: None,
             hash: "2222".into(),
         };
         assert_eq!(

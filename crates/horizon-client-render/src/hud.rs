@@ -3330,7 +3330,14 @@ mod tests {
                 image_width: 176,
             };
             let vanilla = crate::inventory_effects::EffectsLayout::vanilla(space.available());
-            crate::inventory_effects::panels(&space, &vanilla, &[effect], 20.0, &|_| None, &|_| 60)
+            crate::inventory_effects::panels(
+                &space,
+                &vanilla,
+                std::slice::from_ref(&effect),
+                20.0,
+                &|_| None,
+                &|_| 60,
+            )
         };
         batch.vertices.clear();
         crate::inventory_effects::paint(&mut batch, &atlas, &panels, [0, 0]);
@@ -4177,7 +4184,15 @@ texture=wide",
         };
         batch.vertices.clear();
         let tooltip = inventory_effects::paint(&mut batch, &atlas, &panels, [257, 44]);
-        assert_eq!(tooltip.unwrap()[0].0, "levitation");
+        let lines = inventory_effects::tooltip(tooltip.unwrap());
+        let plain: Vec<_> = lines.iter().map(|(t, c)| (t.plain(), *c)).collect();
+        assert_eq!(
+            plain,
+            [
+                ("levitation".to_owned(), u32::MAX),
+                ("∞".to_owned(), u32::MAX)
+            ]
+        );
         assert_eq!(batch.vertices.len(), 24);
         assert_eq!(batch.vertices[18].pos, [257.0, 44.0]);
         assert_eq!(batch.vertices[18].uv, [rect.u0, rect.v0]);
@@ -4191,7 +4206,14 @@ texture=wide",
                 image_width: 176,
             };
             let vanilla = crate::inventory_effects::EffectsLayout::vanilla(space.available());
-            crate::inventory_effects::panels(&space, &vanilla, &[effect], 20.0, &|_| None, &|_| 60)
+            crate::inventory_effects::panels(
+                &space,
+                &vanilla,
+                std::slice::from_ref(&effect),
+                20.0,
+                &|_| None,
+                &|_| 60,
+            )
         };
         batch.vertices.clear();
         assert!(inventory_effects::paint(&mut batch, &atlas, &panels, [0, 0]).is_none());

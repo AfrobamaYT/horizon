@@ -455,7 +455,7 @@ pub(super) fn compile(
             for krate in &facade.crates {
                 if krate != "horizon_client" {
                     cmd.arg("--extern")
-                        .arg(format!("{krate}={}", library(&deps, &krate)?.display()));
+                        .arg(format!("{krate}={}", library(&deps, krate)?.display()));
                 }
             }
             super::run(

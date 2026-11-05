@@ -473,11 +473,16 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                                 )
                             }
                         }
-                        mod_points::__private::RawKind::Erased(__function) => __function(
-                            mod_points::PointId::#variant as usize,
-                            #erased_receiver,
-                            &mut #raw_record as *mut _ as *mut (),
-                        ),
+                        mod_points::__private::RawKind::Erased(__function) => {
+                            // SAFETY: this slot supplies its exact receiver and raw record types.
+                            unsafe {
+                                __function(
+                                    mod_points::PointId::#variant as usize,
+                                    #erased_receiver,
+                                    &mut #raw_record as *mut _ as *mut (),
+                                )
+                            }
+                        }
                     },
                 );
                 #(#repack)*
@@ -569,11 +574,16 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                                 )
                             }
                         }
-                        mod_points::__private::RawKind::Erased(__function) => __function(
-                            mod_points::PointId::#variant as usize,
-                            #erased_receiver,
-                            &mut __result as *mut _ as *mut (),
-                        ),
+                        mod_points::__private::RawKind::Erased(__function) => {
+                            // SAFETY: this slot supplies its exact receiver and return types.
+                            unsafe {
+                                __function(
+                                    mod_points::PointId::#variant as usize,
+                                    #erased_receiver,
+                                    &mut __result as *mut _ as *mut (),
+                                )
+                            }
+                        }
                     },
                 );
             }

@@ -36,6 +36,11 @@ pub(super) enum Error {
         mod_id: String,
         path: String,
     },
+    Ambiguous {
+        mod_id: String,
+        path: String,
+        kinds: Vec<String>,
+    },
     NotRaw {
         mod_id: String,
         target: String,
@@ -59,6 +64,10 @@ impl std::fmt::Display for Error {
             Self::Gated { mod_id, path } => trf(
                 "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.",
                 &[("mod", mod_id), ("path", path)],
+            ),
+            Self::Ambiguous { mod_id, path, kinds } => trf(
+                "E_INTERNAL_AMBIGUOUS: {mod} uses {path}, which has multiple kinds; choose a kind from: {kinds}.",
+                &[("mod", mod_id), ("path", path), ("kinds", &kinds.join(", "))],
             ),
             Self::NotRaw { mod_id, target } => trf(
                 "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.",
@@ -88,6 +97,15 @@ impl From<internals::Error> for Error {
                 signature,
             },
             internals::Error::Gated { mod_id, path } => Self::Gated { mod_id, path },
+            internals::Error::Ambiguous {
+                mod_id,
+                path,
+                kinds,
+            } => Self::Ambiguous {
+                mod_id,
+                path,
+                kinds,
+            },
         }
     }
 }
@@ -160,16 +178,12 @@ impl Catalog {
         let mut crates = BTreeSet::from(["horizon_client".into()]);
         if let Some(native) = &manifest.native {
             for declared in &native.internals {
-                let entry = self
-                    .internals
-                    .iter()
-                    .find(|entry| {
-                        entry.path == declared.path
-                            && entry.hash == declared.hash
-                            && entry.cfg.is_empty()
-                            && !entry.shape_only
-                    })
-                    .expect("freshness checked");
+                let entry = internals::resolve(
+                    &self.internals,
+                    &manifest.id,
+                    &declared.path,
+                    declared.kind.as_deref(),
+                )?;
                 let path = self.export_path(entry)?;
                 let parts: Vec<_> = path.split("::").collect();
                 crates.insert(parts[0].to_owned());
@@ -514,6 +528,7 @@ pub mod raw {
         let native = bundle.manifest.native.as_mut().unwrap();
         native.internals[1] = horizon_mods::manifest::Internal {
             path: "horizon_client::game::maps::Game<'_>::dimension_id".into(),
+            kind: None,
             hash: "abcd".into(),
         };
         native.injection[0].kind = horizon_mods::manifest::InjectionKind::Return;
@@ -530,6 +545,38 @@ pub mod raw {
         assert!(text.contains("PointId::TickReturn"));
         let main = api::main_rs("/* MOD_RAW */", &[&bundle.manifest], &catalog.points);
         assert!(main.contains("mod_0_internals::raw::tick_return(\"example\", mod_0::count)"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn member_kind_reaches_the_facade_and_ambiguity_is_translated() {
+        let (dir, mut bundle, mut catalog) = fixture("member-kind");
+        let method = catalog.internals[2].clone();
+        let mut field = method.clone();
+        field.kind = "field".into();
+        field.hash = "field".into();
+        field.signature = "u8".into();
+        catalog.internals.insert(2, field);
+        bundle.manifest.native.as_mut().unwrap().internals[1] = horizon_mods::manifest::Internal {
+            path: method.path.clone(),
+            kind: Some("method".into()),
+            hash: method.hash,
+        };
+        let facade = catalog.facade(&bundle.manifest).unwrap();
+        assert!(facade
+            .source
+            .contains("pub use horizon_client::game::Game;"));
+        bundle.manifest.native.as_mut().unwrap().internals[1].hash = "field".into();
+        assert!(
+            matches!(catalog.check(&bundle.manifest), Err(Error::Changed { signature, .. }) if signature == method.signature)
+        );
+        bundle.manifest.native.as_mut().unwrap().internals[1].kind = None;
+        let error = catalog.check(&bundle.manifest).unwrap_err();
+        assert!(matches!(error, Error::Ambiguous { .. }));
+        let text = error.to_string();
+        assert!(text.contains("E_INTERNAL_AMBIGUOUS"), "{text}");
+        assert!(text.contains(&method.path), "{text}");
+        assert!(text.contains("field, method"), "{text}");
         fs::remove_dir_all(dir).unwrap();
     }
 

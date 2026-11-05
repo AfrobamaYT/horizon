@@ -100,6 +100,9 @@ pub struct Native {
 #[serde(deny_unknown_fields)]
 pub struct Internal {
     pub path: String,
+    /// The catalog's member kind, required when several kinds share the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub hash: String,
 }
 
@@ -369,20 +372,16 @@ impl Manifest {
                 m.id
             ));
         }
-        if m.native.is_none() && m.wasm.is_none() && !m.dependencies.is_empty() {
-            return Err(format!(
-                "{MANIFEST}: content mod dependencies are not supported yet"
-            ));
-        }
         if let Some(native) = &m.native {
             let mut paths = std::collections::HashSet::new();
             for internal in &native.internals {
                 if internal.path.is_empty()
                     || internal.hash.is_empty()
-                    || !paths.insert(&internal.path)
+                    || internal.kind.as_ref().is_some_and(|kind| kind.is_empty())
+                    || !paths.insert((&internal.path, &internal.kind))
                 {
                     return Err(format!(
-                        "{MANIFEST}: empty or duplicate internal path, or empty internal hash"
+                        "{MANIFEST}: empty internal path, kind or hash, or duplicate internal path and kind"
                     ));
                 }
             }
@@ -1103,6 +1102,41 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn internal_kinds_distinguish_members_and_round_trip() {
+        let base = format!(
+            "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let declaration = "internals=[{path='Round::listening',kind='field',hash='1234'}, {path='Round::listening',kind='method',hash='5678'}]\n";
+        let manifest = Manifest::parse(&format!("{base}{declaration}")).unwrap();
+        let native = manifest.native.unwrap();
+        assert_eq!(native.internals[1].kind.as_deref(), Some("method"));
+        let text = toml::to_string(&native).unwrap();
+        assert_eq!(toml::from_str::<Native>(&text).unwrap(), native);
+        assert!(
+            Manifest::parse(&format!(
+                "{base}{}",
+                declaration.replace("kind='method'", "kind='field'")
+            ))
+            .is_err()
+        );
+        assert!(
+            Manifest::parse(&format!(
+                "{base}{}",
+                declaration.replace("kind='method'", "kind=''")
+            ))
+            .is_err()
+        );
+        let untyped = Internal {
+            path: "Game".into(),
+            kind: None,
+            hash: "1234".into(),
+        };
+        assert!(!toml::to_string(&untyped).unwrap().contains("kind"));
+    }
+
+    #[test]
     fn declared_internals_and_raw_injections_have_one_explicit_form() {
         let base = format!(
             "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
@@ -1200,14 +1234,11 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn dependencies_are_typed_and_content_dependencies_are_refused() {
+    fn dependencies_are_typed_for_content_and_code_mods() {
         let deps =
             "[dependencies]\ncreate = '^6.0'\naddon = { version = '^1.2', optional = true }\n";
-        assert!(
-            Manifest::parse(&format!("{EXAMPLE}{deps}"))
-                .unwrap_err()
-                .contains("not supported")
-        );
+        let content = Manifest::parse(&format!("{EXAMPLE}{deps}")).unwrap();
+        assert_eq!(content.dependencies.len(), 2);
         let native = format!(
             "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
             "a".repeat(40),

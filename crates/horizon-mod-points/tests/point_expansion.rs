@@ -261,7 +261,7 @@ fn raw_double(raw: &mut __DoubleRaw<'_, i64, i64>) {
 
 /// Erased callbacks interpret the pointers with the exact types for their registered place,
 /// use them only during the call, and keep shared receivers read-only.
-fn erased_add(place: usize, receiver: *mut (), raw: *mut ()) {
+unsafe fn erased_add(place: usize, receiver: *mut (), raw: *mut ()) {
     assert_eq!(place, mod_points::PointId::Add as usize);
     // SAFETY: this callback is registered only at Add, whose receiver is mutable.
     let (counter, raw) = unsafe {
@@ -274,7 +274,7 @@ fn erased_add(place: usize, receiver: *mut (), raw: *mut ()) {
     *raw.step *= 2;
 }
 
-fn erased_add_return(place: usize, receiver: *mut (), value: *mut ()) {
+unsafe fn erased_add_return(place: usize, receiver: *mut (), value: *mut ()) {
     assert_eq!(place, mod_points::PointId::AddReturn as usize);
     // SAFETY: this callback is registered only at AddReturn with these mutable types.
     let (counter, value) = unsafe {
@@ -287,7 +287,7 @@ fn erased_add_return(place: usize, receiver: *mut (), value: *mut ()) {
     *value *= 2;
 }
 
-fn erased_slot_return(place: usize, receiver: *mut (), value: *mut ()) {
+unsafe fn erased_slot_return(place: usize, receiver: *mut (), value: *mut ()) {
     assert_eq!(place, mod_points::PointId::SlotReturn as usize);
     assert!(receiver.is_null(), "the value still borrows the receiver");
     // SAFETY: SlotReturn passes a mutable place holding its returned &mut usize.
@@ -295,7 +295,7 @@ fn erased_slot_return(place: usize, receiver: *mut (), value: *mut ()) {
     **value += 5;
 }
 
-fn erased_label(place: usize, receiver: *mut (), raw: *mut ()) {
+unsafe fn erased_label(place: usize, receiver: *mut (), raw: *mut ()) {
     assert_eq!(place, mod_points::PointId::PenLabel as usize);
     // SAFETY: PenLabel has a shared Pen receiver and this raw record; neither escapes the call.
     let (pen, raw) = unsafe {
@@ -308,7 +308,7 @@ fn erased_label(place: usize, receiver: *mut (), raw: *mut ()) {
     raw.tags.push(format!("{} erased tags", pen.tags.len()));
 }
 
-fn erased_double(place: usize, receiver: *mut (), raw: *mut ()) {
+unsafe fn erased_double(place: usize, receiver: *mut (), raw: *mut ()) {
     assert_eq!(place, mod_points::PointId::Double as usize);
     assert!(receiver.is_null(), "a free function has no receiver");
     // SAFETY: Double passes its mutable raw record.

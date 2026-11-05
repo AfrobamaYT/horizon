@@ -55,6 +55,7 @@ pub(super) fn check_game_graph(stage: &Path, text: &str) -> Result<(), String> {
             Some(manifest.get("package")?.get("name")?.as_str()?.to_owned())
         })
         .collect();
+    let mut staged = Vec::new();
     for (mod_id, manifest) in manifests(&stage.join(DIR))? {
         let text = fs::read_to_string(manifest).map_err(|e| e.to_string())?;
         let value: toml::Table = text.parse().map_err(|e| format!("Cargo.toml: {e}"))?;
@@ -62,7 +63,25 @@ pub(super) fn check_game_graph(stage: &Path, text: &str) -> Result<(), String> {
             .get("package")
             .and_then(|p| p.get("name"))
             .and_then(toml::Value::as_str)
-            .ok_or("Cargo.toml: missing package name")?;
+            .ok_or("Cargo.toml: missing package name")?
+            .to_owned();
+        staged.push((mod_id, name));
+    }
+    // Each staged mod's generated facade, by package, and the mod crate it belongs to. Only that
+    // crate passes through it: a facade with a registry or git source, or one reached from any
+    // other crate, is walked like any dependency, so its game dependency is refused.
+    let facades: BTreeMap<String, &str> = staged
+        .iter()
+        .filter(|(id, _)| {
+            let facade = super::internals::package(id);
+            packages.iter().all(|p| {
+                p.get("name").and_then(toml::Value::as_str) != Some(&facade)
+                    || p.get("source").is_none()
+            })
+        })
+        .map(|(id, name)| (super::internals::package(id), name.as_str()))
+        .collect();
+    for (mod_id, name) in &staged {
         let mut todo = vec![(name.to_owned(), name.to_owned())];
         let mut seen = BTreeSet::new();
         while let Some((current, via)) = todo.pop() {
@@ -81,13 +100,13 @@ pub(super) fn check_game_graph(stage: &Path, text: &str) -> Result<(), String> {
                     .filter_map(toml::Value::as_str)
                 {
                     let dep = dep.split_whitespace().next().unwrap_or(dep);
-                    if dep == super::internals::package(&mod_id)
-                        || dep == super::api::API_PACKAGE
+                    if dep == super::api::API_PACKAGE
                         || dep == super::api::POINTS_PACKAGE
+                        || facades.get(dep) == Some(&current.as_str())
                     {
                         continue;
                     }
-                    let first = if current == name {
+                    let first = if current == *name {
                         dep.to_owned()
                     } else {
                         via.clone()
@@ -510,6 +529,60 @@ version = "0.1.0"
             "dependencies = [\"horizon-internals-bake\"]",
         );
         assert!(check_game_graph(stage.root(), &safe).is_ok());
+    }
+
+    #[test]
+    fn game_graph_allows_a_sibling_mods_path_facade_only() {
+        let stage = StageFixture::new();
+        stage.add_crate("app", "engine", "app", "");
+        stage.add_crate("library", "engine", "library", "");
+        write_manifest(
+            &stage.root().join("crates/horizon-client"),
+            "horizon-client",
+            "",
+        );
+        let lock = r#"
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["library"]
+[[package]]
+name = "library"
+version = "0.1.0"
+dependencies = ["horizon-internals-library"]
+[[package]]
+name = "horizon-internals-library"
+version = "0.1.0"
+dependencies = ["horizon-client"]
+[[package]]
+name = "horizon-client"
+version = "0.1.0"
+"#;
+        assert!(check_game_graph(stage.root(), lock).is_ok());
+        for source in [
+            "registry+https://github.com/rust-lang/crates.io-index",
+            "git+https://example.invalid/facade#1234",
+        ] {
+            let external = lock.replace(
+                "name = \"horizon-internals-library\"",
+                &format!("name = \"horizon-internals-library\"\nsource = {source:?}"),
+            );
+            let error = check_game_graph(stage.root(), &external).unwrap_err();
+            assert!(error.contains("E_GAME_DEPENDENCY"), "{error}");
+            assert!(error.contains("library -> horizon-client"), "{error}");
+        }
+        let unstaged = lock.replace("horizon-internals-library", "horizon-internals-other");
+        assert!(check_game_graph(stage.root(), &unstaged).is_err());
+        // The app reaching the library's facade itself is the app using undeclared internals.
+        let borrowed = lock.replace(
+            "dependencies = [\"library\"]",
+            "dependencies = [\"library\", \"horizon-internals-library\"]",
+        );
+        let error = check_game_graph(stage.root(), &borrowed).unwrap_err();
+        assert!(
+            error.contains("horizon-internals-library -> horizon-client"),
+            "{error}"
+        );
     }
 
     fn wanted(stage: &Path) -> Result<Vec<Wanted>, String> {

@@ -31,6 +31,11 @@ pub enum Error {
         mod_id: String,
         path: String,
     },
+    Ambiguous {
+        mod_id: String,
+        path: String,
+        kinds: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for Error {
@@ -47,6 +52,15 @@ impl std::fmt::Display for Error {
             } => write!(
                 f,
                 "E_INTERNAL_CHANGED: {mod_id} uses {path}, whose signature is now {signature}; run cargo horizon-mod update to see what changed."
+            ),
+            Self::Ambiguous {
+                mod_id,
+                path,
+                kinds,
+            } => write!(
+                f,
+                "E_INTERNAL_AMBIGUOUS: {mod_id} uses {path}, which has multiple kinds; choose a kind from: {}.",
+                kinds.join(", ")
             ),
             Self::Gated { mod_id, path } => write!(
                 f,
@@ -68,9 +82,22 @@ pub fn resolve<'a>(
     entries: &'a [ListedInternal],
     mod_id: &str,
     path: &str,
+    kind: Option<&str>,
 ) -> Result<&'a ListedInternal, Error> {
+    let candidates = entries.iter().filter(|e| e.path == path && !e.shape_only);
+    if kind.is_none() {
+        let kinds: std::collections::BTreeSet<_> =
+            candidates.clone().map(|e| e.kind.clone()).collect();
+        if kinds.len() > 1 {
+            return Err(Error::Ambiguous {
+                mod_id: mod_id.to_owned(),
+                path: path.to_owned(),
+                kinds: kinds.into_iter().collect(),
+            });
+        }
+    }
     let mut gated = false;
-    for entry in entries.iter().filter(|e| e.path == path && !e.shape_only) {
+    for entry in candidates.filter(|e| kind.is_none_or(|kind| e.kind == kind)) {
         if entry.cfg.is_empty() {
             return Ok(entry);
         }
@@ -86,7 +113,7 @@ pub fn resolve<'a>(
 
 /// Check a declaration's fingerprint before a mod is compiled.
 pub fn check(entries: &[ListedInternal], mod_id: &str, declared: &Internal) -> Result<(), Error> {
-    let entry = resolve(entries, mod_id, &declared.path)?;
+    let entry = resolve(entries, mod_id, &declared.path, declared.kind.as_deref())?;
     if entry.hash != declared.hash {
         return Err(Error::Changed {
             mod_id: mod_id.to_owned(),
@@ -95,4 +122,67 @@ pub fn check(entries: &[ListedInternal], mod_id: &str, declared: &Internal) -> R
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_named_members_require_a_kind_and_check_its_hash() {
+        let path = "horizon_client::game::Round::listening";
+        // Test both the free-function and inherent-method kinds used by the catalog.
+        for kind in ["fn", "method"] {
+            let entries: Vec<ListedInternal> = serde_json::from_value(serde_json::json!([
+                { "path": path, "kind": "field", "signature": "bool", "hash": "field" },
+                { "path": path, "kind": kind, "signature": "fn listening(&self) -> bool", "hash": "function" }
+            ])).unwrap();
+            let mut declared = Internal {
+                path: path.into(),
+                kind: Some(kind.into()),
+                hash: "function".into(),
+            };
+            check(&entries, "example", &declared).unwrap();
+            declared.hash = "field".into();
+            assert!(
+                matches!(check(&entries, "example", &declared), Err(Error::Changed { signature, .. }) if signature == "fn listening(&self) -> bool")
+            );
+            declared.kind = None;
+            let error = check(&entries, "example", &declared).unwrap_err();
+            assert_eq!(
+                error,
+                Error::Ambiguous {
+                    mod_id: "example".into(),
+                    path: path.into(),
+                    kinds: vec!["field".into(), kind.into()],
+                }
+            );
+            assert!(error.to_string().contains("E_INTERNAL_AMBIGUOUS"));
+            assert!(error.to_string().contains(path));
+            declared.kind = Some("const".into());
+            assert!(matches!(
+                check(&entries, "example", &declared),
+                Err(Error::Missing { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn kind_resolution_keeps_gated_and_shape_only_refusals() {
+        let entries: Vec<ListedInternal> = serde_json::from_value(serde_json::json!([
+            { "path": "Round::listening", "kind": "field", "signature": "bool", "hash": "field" },
+            { "path": "Round::listening", "kind": "method", "cfg": "feature = tests", "signature": "fn listening(&self)", "hash": "gated" },
+            { "path": "Round::listening", "kind": "method", "signature": "fn listening(&self)", "hash": "shape", "shape_only": true }
+        ])).unwrap();
+        assert!(matches!(
+            resolve(&entries, "example", "Round::listening", Some("method")),
+            Err(Error::Gated { .. })
+        ));
+        assert_eq!(
+            resolve(&entries, "example", "Round::listening", Some("field"))
+                .unwrap()
+                .hash,
+            "field"
+        );
+    }
 }

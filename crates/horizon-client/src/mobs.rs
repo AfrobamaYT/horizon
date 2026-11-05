@@ -1604,10 +1604,11 @@ pub enum BreedExperience {
 }
 
 /// Makes the events pushed since `start` (the effects of a break a mod may stop)
-/// conditional on the game having broken one of `mob`'s blocks. Without a mod they
-/// stay plain events: nothing is allocated.
-pub fn after_break(events: &mut Vec<MobEvent>, mob: u32, start: usize) {
-    if crate::native_client_hooks::has_mods() {
+/// conditional on the game having broken one of `mob`'s blocks. Unless a listener
+/// can cancel the break (`MobWorld::asks_living_destroy_block`, passed as `asks`)
+/// they stay plain events: nothing is allocated.
+pub fn after_break(events: &mut Vec<MobEvent>, asks: bool, mob: u32, start: usize) {
+    if asks {
         let effects = events.split_off(start);
         events.push(MobEvent::IfBroke {
             mob,
@@ -2054,13 +2055,19 @@ pub enum MobEvent {
         table: &'static str,
         at: [f64; 3],
     },
+    /// A leave-block goal's sampled candidate, before neighbor-shape updates.
+    EndermanPlaceBlock {
+        mob: u32,
+        pos: [i32; 3],
+        carried: horizon_world::registry::BlockStateId,
+        occupants: Vec<horizon_core::geometry::Aabb>,
+    },
     SetBlock {
         pos: [i32; 3],
         state: horizon_world::registry::BlockStateId,
     },
-    /// A mob placing a block (an enderman putting its carried block down, a
-    /// snow golem's trail): `entity_place` may refuse it, and a refused
-    /// enderman keeps carrying `state`.
+    /// A mob placing a block (such as a snow golem's trail): `entity_place`
+    /// may refuse it. Enderman leave-block attempts use `EndermanPlaceBlock`.
     PlaceBlock {
         mob: u32,
         pos: [i32; 3],
@@ -2357,6 +2364,8 @@ pub enum MobEvent {
         from: [f64; 3],
         to: [f64; 3],
         ticks: i32,
+        /// `VibrationSystem.User.getPositionSource`: the listener itself.
+        source: horizon_protocol::entity_data::PositionSource,
     },
     /// The crumbs of the block under a digging or emerging warden.
     DigParticles {
