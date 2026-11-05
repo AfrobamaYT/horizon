@@ -2,6 +2,8 @@
 //! chunk-generation spawning (`NaturalSpawner`), mob events (attacks,
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
+mod pufferfish_player;
+
 use super::level_sounds::LevelSound;
 use super::{
     Dim, Game, Hand, InteractTarget, dispenser, native_mob_draw::NativePlayerRender,
@@ -396,6 +398,9 @@ impl Game<'_> {
             main_hand: self.held().map(|s| s.item.clone()),
             off_hand: self.offhand.as_ref().map(|s| s.item.clone()),
             head: self.armor[0].as_ref().map(|s| s.item.clone()),
+            chest: self.armor[1].as_ref().map(|s| s.item.clone()),
+            legs: self.armor[2].as_ref().map(|s| s.item.clone()),
+            feet: self.armor[3].as_ref().map(|s| s.item.clone()),
             armor_cover: self.armor.iter().filter(|a| a.is_some()).count() as f32 / 4.0,
             invisible: self.potions.effects.get("invisibility").is_some(),
             spectator: self.spectator(),
@@ -614,11 +619,10 @@ impl Game<'_> {
         let amount = ((damage / 4.0) as u32).max(1);
         let name = damage_type(kind, false);
         let fire = self
-            .motion
-            .health
+            .health_resources
             .damage
             .id(name)
-            .is_some_and(|d| self.motion.health.damage.in_tag(d, "minecraft:is_fire"));
+            .is_some_and(|d| self.health_resources.damage.in_tag(d, "minecraft:is_fire"));
         // A piece's maximum, or none when it may not lose durability at all.
         // `doHurtEquipment` starts from the item's `equippable` component
         // (`Equippable equippable = item.get(DataComponents.EQUIPPABLE)`), so a
@@ -1365,7 +1369,9 @@ impl Game<'_> {
                 };
                 w.controlling_player_movement = controlling_player_movement;
                 let credit_expiring = m.ai.last_hurt_by_player == 1;
-                let kept = m.tick(&w, &mut level, &mut events);
+                let kept =
+                    horizon_client::mobs::riders::tick(&mut mobs, i, &w, &mut level, &mut events);
+                let m = &mut mobs[i];
                 m.despawn = mod_api::NativeDespawn::default();
                 if credit_expiring && m.ai.last_hurt_by_player == 0 {
                     player_credit.remove(&m.id);
@@ -1713,15 +1719,10 @@ impl Game<'_> {
     pub(super) fn damage_view(&self, d: Damage) -> horizon_client::advancements::DamageView {
         let source = match d.attacker {
             // Its callers are KilledTrigger's: the source as their killing_blow sees it.
-            Some(Who::Player) => Some(
-                self.player_entity_looking(
-                    self.adv.tree.may_look("minecraft:player_killed_entity")
-                        || self
-                            .adv
-                            .tree
-                            .may_look("minecraft:kill_mob_near_sculk_catalyst"),
-                ),
-            ),
+            Some(Who::Player) => Some(self.player_entity_for_any(&[
+                "minecraft:player_killed_entity",
+                "minecraft:kill_mob_near_sculk_catalyst",
+            ])),
             Some(Who::Mob(id)) => self
                 .mobs
                 .iter()
@@ -2216,8 +2217,8 @@ impl Game<'_> {
     /// `LivingEntity.dropFromGiftLootTable`: the gift table from its random
     /// sequence with the mob as `this` (a chicken's egg depends on its
     /// variant); the loot data of the game's resources decides, and without it
-    /// the items' table engine (no entity) rolls it.
-    fn drop_gift_loot(&mut self, mob: u32, table: &'static str, at: [f64; 3]) {
+    /// the items' table engine (no entity) rolls it. Whether anything dropped.
+    fn drop_gift_loot(&mut self, mob: u32, table: &'static str, at: [f64; 3]) -> bool {
         use horizon_client::mobs::drops;
         use horizon_world::loot::EntityLootParams;
         let loot = self.server_loot.get();
@@ -2250,11 +2251,13 @@ impl Game<'_> {
                 .items()
                 .loot_table(table, false, None, &mut self.world.random),
         };
+        let dropped = !stacks.is_empty();
         for d in stacks {
             // The ItemEntity constructor's motion, from the entity's own
             // random (not the level's).
             self.spawn_item(d, at, dispenser::new_item_motion(), 10);
         }
+        dropped
     }
     /// Adds a projectile, giving it an id from the entity counter
     /// (`Entity.id`, the same counter as the rest) when it has none.
@@ -3392,7 +3395,10 @@ impl Game<'_> {
                     }
                 }
                 MobEvent::StartRiding { rider, vehicle } => {
-                    horizon_client::mobs::riders::start_riding(&mut self.mobs, rider, vehicle);
+                    if horizon_client::mobs::riders::start_riding(&mut self.mobs, rider, vehicle) {
+                        // sendEventAndTriggers: the server players already on it.
+                        self.note_started_riding(vehicle);
+                    }
                 }
                 // Applied after the fish's tick (`apply_brain_events`).
                 MobEvent::StartFollowing { .. } | MobEvent::SchoolSize { .. } => {}
@@ -3478,6 +3484,16 @@ impl Game<'_> {
                     );
                     let ctx = self.who_context(Some(Who::Mob(mob)), None);
                     self.post_game_event("minecraft:entity_place", at, ctx);
+                }
+                MobEvent::LayEgg { mob, at, pitch } => {
+                    // Chicken.aiStep: `dropFromGiftLootTable` says whether
+                    // anything dropped; only then the sound and the game event.
+                    if self.drop_gift_loot(mob, "minecraft:gameplay/chicken_lay", at) {
+                        self.audio
+                            .play("minecraft:entity.chicken.egg", Some(at), 1.0, pitch);
+                        let ctx = self.who_context(Some(Who::Mob(mob)), None);
+                        self.post_game_event("minecraft:entity_place", at, ctx);
+                    }
                 }
                 MobEvent::GiftLoot { mob, table, at } => {
                     // Turtle.ageBoundaryReached and Panda.afterSneeze: only
@@ -4093,9 +4109,7 @@ impl Game<'_> {
         // A projectile entity dealt it: `#is_projectile`, or a firework
         // rocket (its `fireworks` type is not in the tag).
         let projectile = rocket
-            || self
-                .res
-                .stations()
+            || world_stations!(self)
                 .enchantments
                 .damage_tags
                 .get("minecraft:is_projectile")
@@ -4152,7 +4166,7 @@ impl Game<'_> {
         let mut default_push: Option<([f64; 2], HurtSource<'_>)> = None;
         let rules = self.world.health_rules;
         if let Some(player) = self.player.as_mut()
-            && let Some(id) = self.motion.health.damage.id(damage_type)
+            && let Some(id) = self.health_resources.damage.id(damage_type)
             && let Ok(o) = player.hurt_caused_by(
                 crate::game::entity::damage_level_of!(self, &attack),
                 &self.motion.health,
@@ -4303,7 +4317,7 @@ impl Game<'_> {
         let rules = self.world.health_rules;
         if !self.creative
             && let Some(player) = self.player.as_mut()
-            && let Some(id) = self.motion.health.damage.id(damage_type)
+            && let Some(id) = self.health_resources.damage.id(damage_type)
             && let Ok(o) = player.hurt_blocking(
                 crate::game::entity::damage_level_of!(self),
                 &self.motion.health,
@@ -6176,6 +6190,12 @@ impl Game<'_> {
             self.swing_arm();
             return Ok(true);
         }
+        if !self.mobs[index].kind.food.contains(&item)
+            && self.interact_sheep_dye(index, self.hand, false)
+        {
+            self.swing_arm();
+            return Ok(true);
+        }
         if self.interact_allay(index, held.as_ref()) {
             self.swing_arm();
             return Ok(true);
@@ -6352,6 +6372,14 @@ impl Game<'_> {
                 }
             }
             Species::Sheep if item == "minecraft:shears" && !m.extra.sheared && !m.is_baby() => {
+                self.audio.play_bound(
+                    "minecraft:entity.sheep.shear",
+                    7,
+                    1.0,
+                    1.0,
+                    horizon_client::sound_engine::SoundEntity::new(m.id, feet, m.silent),
+                    None,
+                );
                 m.extra.sheared = true;
                 let color = horizon_client::mobs::render::DYE_NAMES[m.extra.color as usize & 15];
                 drops_table = format!("minecraft:shearing/sheep/{color}");
@@ -6363,25 +6391,7 @@ impl Game<'_> {
                 );
                 drops.extend(stacks.into_iter().map(|s| (s.item.to_string(), s.count)));
                 wool = true;
-                sound = Some("entity.sheep.shear");
                 self.damage_held_tool();
-            }
-            Species::Sheep if item.ends_with("_dye") => {
-                let name = item
-                    .trim_start_matches("minecraft:")
-                    .trim_end_matches("_dye");
-                if let Some(c) = horizon_client::mobs::render::DYE_NAMES
-                    .iter()
-                    .position(|d| *d == name)
-                    && m.extra.color as usize != c
-                    && !m.extra.sheared
-                {
-                    m.extra.color = c as u8;
-                    consume = true;
-                    sound = Some("item.dye.use");
-                } else {
-                    handled = false;
-                }
             }
             // Entity.interact: shears take a tamed wolf's armor off for its owner.
             Species::Wolf
@@ -7741,8 +7751,10 @@ impl Game<'_> {
             if let Some((start, rgb)) = glowing.take() {
                 self.mark_outline(&out[start..], rgb);
             }
-            if a.id != 0 && self.entity_glowing(a.id) {
-                glowing = Some((out.len(), super::glowing::team_color(self.mob_team(a.id))));
+            if a.id != 0
+                && let Some(rgb) = self.thing_outline(a.id, a.kind.id())
+            {
+                glowing = Some((out.len(), rgb));
             }
             let p = glam::DVec3::from_array(at) - camera;
             let c = p.as_vec3();
