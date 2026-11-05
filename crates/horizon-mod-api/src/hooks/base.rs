@@ -4585,8 +4585,6 @@ pub trait Helpers {
     )]
     fn refresh_biome_colors();
     #[helper(side = "both")]
-    fn weather();
-    #[helper(side = "both")]
     fn day_time();
     #[helper(side = "both")]
     fn world_height();
