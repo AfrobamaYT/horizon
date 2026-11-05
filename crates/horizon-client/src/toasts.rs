@@ -117,9 +117,7 @@ impl SystemToast {
     /// `addOrUpdate` on a toast that is still shown: `reset` to `other`'s text.
     pub fn reset_from(&mut self, other: SystemToast) {
         self.title_color = other.title_color;
-        self.title = other.title;
-        self.message = other.message;
-        self.changed = true;
+        self.reset(other.title, other.message);
     }
     pub fn force_hide(&mut self) {
         self.force_hide = true;
