@@ -12187,17 +12187,19 @@ mod tests {
             let (client, _server) = Pipe::pair();
             game.connect_local(client, "ClockReadTest").unwrap();
             let mut registries = (*game.remote.as_ref().unwrap().registries).clone();
-            for registry in ["minecraft:world_clock", "minecraft:dimension_type"] {
-                registries.registries.insert(
-                    registry.into(),
-                    vec![
-                        ("minecraft:overworld".into(), None),
-                        ("minecraft:the_end".into(), None),
-                        ("minecraft:the_nether".into(), None),
-                    ],
-                );
-            }
-            game.set_registries(Arc::new(registries));
+            let dimensions = vec![
+                ("minecraft:overworld".into(), None),
+                ("minecraft:the_end".into(), None),
+                ("minecraft:the_nether".into(), None),
+            ];
+            registries
+                .registries
+                .insert("minecraft:world_clock".into(), dimensions[..2].to_vec());
+            registries
+                .registries
+                .insert("minecraft:dimension_type".into(), dimensions);
+            let registries = Arc::new(registries);
+            game.set_registries(registries.clone());
             let mut spawn = play::SpawnInfo {
                 dimension_type: 1,
                 dimension: "minecraft:the_end".into(),
@@ -12371,6 +12373,7 @@ mod tests {
             let (client, _server) = Pipe::pair();
             game.connect_local(client, "ClockReadTest").unwrap();
             assert_eq!(fresh.day_time(game), None);
+            game.set_registries(registries);
             game.handle_packet(login(spawn)).unwrap();
             let reconnected = game.native_level("minecraft:the_nether").unwrap();
             assert_eq!(fresh.day_time(game), None);
