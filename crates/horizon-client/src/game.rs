@@ -2915,6 +2915,9 @@ struct Game<'a> {
     skin_frame: std::cell::RefCell<horizon_client::gfx::entity_skin::SkinFrame>,
     /// The glowing entities' silhouettes this frame (game/glowing.rs).
     glowing_vertices: std::cell::RefCell<Vec<Vertex>>,
+    /// Client mods' sounds (`native_play_local_sound`), with the ticks each waits, until the
+    /// next audio update plays them (`tick_sound_engine`).
+    mod_sounds: std::cell::RefCell<Vec<(mod_api::SoundPlay, u32)>>,
     /// The shader pack's entity and block entity ids, while one draws entities.
     pack_ids: Option<shader_packs::PackIds>,
     started: Instant,
@@ -20148,6 +20151,7 @@ impl<'a> Game<'a> {
             skin_models: Default::default(),
             skin_frame: Default::default(),
             glowing_vertices: Default::default(),
+            mod_sounds: Default::default(),
             pack_ids: None,
             health_hud: hud_layout::HealthHud::default(),
             started: now,
