@@ -143,6 +143,9 @@ fn buildable(shape: &Shape, rule: &Rule) -> bool {
             let Some(named) = rule.named(path) else {
                 return false;
             };
+            if named.foreign && named.sealed {
+                return false;
+            }
             rule.fields(path)
                 .iter()
                 .all(|f| buildable(&rule.shape(&named.module, Some(path), f.ty), rule))
@@ -283,7 +286,7 @@ impl<'r> Gen<'r> {
             syn::Item::Struct(item) => {
                 let binds: Vec<_> = (0..fields.len()).map(|i| format_ident!("f{i}")).collect();
                 let members: Vec<_> = fields.iter().map(|f| &f.member).collect();
-                let pattern = quote!(#path_ty { #(#members: #binds),* });
+                let pattern = quote!(#path_ty { #(#members: #binds,)* .. });
                 let encoded: Vec<_> = shapes
                     .iter()
                     .zip(&binds)
@@ -323,7 +326,7 @@ impl<'r> Gen<'r> {
                         .collect();
                     let binds: Vec<_> = at.iter().map(|i| format_ident!("f{i}")).collect();
                     let members: Vec<_> = at.iter().map(|i| &fields[*i].member).collect();
-                    let pattern = quote!(#path_ty::#ident { #(#members: #binds),* });
+                    let pattern = quote!(#path_ty::#ident { #(#members: #binds,)* .. });
                     let encoded: Vec<_> = at
                         .iter()
                         .zip(&binds)
@@ -345,14 +348,16 @@ impl<'r> Gen<'r> {
                     }
                 }
                 (
-                    quote!(match value { #(#encode_arms)* }),
+                    // Another crate's `#[non_exhaustive]` enum needs a wildcard; every case of this
+                    // build is listed, so it never matches.
+                    quote!(match value { #(#encode_arms)* _ => V::None }),
                     quote!(match value { #(#decode_arms)* _ => Err(I::changed("a case")) }),
                 )
             }
             _ => unreachable!("a struct or an enum"),
         };
         self.items.push(quote! {
-            #[allow(unused_variables, clippy::all)]
+            #[allow(unused_variables, unreachable_patterns, clippy::all)]
             fn #enc(value: &#ty) -> V { #encode }
         });
         if build {
@@ -514,7 +519,7 @@ impl<'r> Gen<'r> {
                             let i = i as u64;
                             quote!(#path_ty::#ident { .. } => #i,)
                         });
-                        quote!(I::Op::Case => Ok(I::Reply::Value(V::U(match &*(p as *const #rust) { #(#cases)* }))),)
+                        quote!(I::Op::Case => Ok(I::Reply::Value(V::U(match &*(p as *const #rust) { #(#cases)* _ => u64::MAX }))),)
                     }
                     _ => quote!(),
                 };
@@ -1121,6 +1126,41 @@ mod tests {
         assert_eq!(counts.skipped_types["conditional field or variant"], 2);
         assert_eq!(counts.skipped_types["lower-crate layout not widened"], 3);
         assert_eq!(counts.skipped_types["generic type"], 1);
+    }
+
+    #[test]
+    fn reachable_lower_shapes_are_walked_and_sealed_ones_never_built() {
+        let shape = |path: &str, kind: &'static str, signature: &str| {
+            let mut entry = internal(path, kind, signature);
+            entry.shape_only = true;
+            entry
+        };
+        let (code, counts) = table(&[
+            shape(
+                "horizon_items::Stack",
+                "struct",
+                "struct Stack { count : u8 , }",
+            ),
+            shape(
+                "horizon_items::Sealed",
+                "struct",
+                "# [non_exhaustive] struct Sealed { count : u8 , }",
+            ),
+            shape(
+                "horizon_items::Kind",
+                "enum",
+                "enum Kind { # [non_exhaustive] One { n : u8 } , Two , }",
+            ),
+            shape("mod_api::Api", "struct", "struct Api { private : u8 , }"),
+        ]);
+        syn::parse_file(&code).unwrap();
+        assert_eq!(counts.types, 3, "{code}");
+        assert_eq!(counts.skipped_types["lower-crate layout not widened"], 1);
+        assert!(code.contains("fn dec__horizon_items__Stack"));
+        assert!(!code.contains("fn dec__horizon_items__Sealed"));
+        assert!(!code.contains("fn dec__horizon_items__Kind"));
+        // Read from another crate: patterns that tolerate fields and cases they don't list.
+        assert!(code.contains("count : f0 , .."), "{code}");
     }
 
     #[test]

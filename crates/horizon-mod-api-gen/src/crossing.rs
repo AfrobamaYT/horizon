@@ -124,6 +124,9 @@ const COLLECTIONS: &[(&str, Collection)] = &[
 /// Crates whose types never cross: the GPU, the window, input devices, audio.
 const OPAQUE_CRATES: &[&str] = &["wgpu", "winit", "gilrs", "cpal", "rodio", "glyphon"];
 
+/// Crates whose types are the mod API's own: the staging pass never widens them.
+const API_CRATES: &[&str] = &["mod_api", "mod_points", "point_shape"];
+
 /// The game's crate: its paths are spelled from `crate`.
 const GAME: &str = "horizon_client";
 
@@ -137,6 +140,10 @@ pub struct Named {
     pub generic: bool,
     /// A layout the staging metadata does not prove can be accessed.
     pub opaque_reason: Option<&'static str>,
+    /// Declared in another crate than the game's, where the table reads it.
+    pub foreign: bool,
+    /// `#[non_exhaustive]` on it or a case of it: another crate can't build it.
+    pub sealed: bool,
 }
 
 /// A field of a listed type, in the numbering the table and the view share: declaration order,
@@ -184,6 +191,15 @@ impl Rule {
             let lifetimes = generics.lifetimes().count();
             let generic = generics.params.len() > lifetimes;
             let path = bare(&internal.path);
+            let foreign = !path.starts_with(&format!("{GAME}::"));
+            let open = |attrs: &[syn::Attribute]| {
+                attrs.iter().any(|a| a.path().is_ident("non_exhaustive"))
+            };
+            let sealed = match &item {
+                syn::Item::Struct(s) => open(&s.attrs),
+                syn::Item::Enum(e) => open(&e.attrs) || e.variants.iter().any(|v| open(&v.attrs)),
+                _ => false,
+            };
             let conditional = |attrs: &[syn::Attribute]| {
                 attrs
                     .iter()
@@ -200,8 +216,12 @@ impl Rule {
                 Some("generic type")
             } else if guarded {
                 Some("conditional field or variant")
-            } else if !path.starts_with(&format!("{GAME}::")) {
-                // The lower-crate pass widens selected items, not their fields and variants.
+            } else if foreign
+                && (!internal.shape_only
+                    || API_CRATES.contains(&path.split("::").next().unwrap_or_default()))
+            {
+                // Only a reachable shape's layout is widened in the staged copy, and never the
+                // mod API's own.
                 Some("lower-crate layout not widened")
             } else {
                 None
@@ -215,6 +235,8 @@ impl Rule {
                     lifetimes,
                     generic,
                     opaque_reason,
+                    foreign,
+                    sealed,
                 },
             );
         }
