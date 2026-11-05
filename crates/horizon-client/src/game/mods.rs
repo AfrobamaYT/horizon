@@ -370,19 +370,17 @@ fn announced_entry(
 }
 
 /// The mods' mob effects join vanilla's (`brewing::effect`), once the root
-/// holding their network ids is built. The startup root's effects, none
-/// included, stay until restart: a pack reload after a Mods switch builds a
-/// root with others.
+/// holding their network ids is built. The first root that declares effects
+/// sets them, until restart: a pack reload after a Mods switch builds a root
+/// with others. A root declaring none freezes nothing, and a game without
+/// mob effects reads the same empty list either way.
 fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
     use horizon_client::brewing::{self, Category};
     use horizon_mods::content::EffectCategory;
-    // No content mods: there is nothing to freeze the registry with. The
-    // first root that carries mods sets it, and a game without mods reads the
-    // same empty list either way.
-    if mods.is_empty() {
+    let effects = horizon_client::mod_content::mob_effects(mods);
+    if effects.is_empty() {
         return;
     }
-    let effects = horizon_client::mod_content::mob_effects(mods);
     let ids: Vec<String> = effects.iter().map(|e| e.id.clone()).collect();
     let set = brewing::register_mod_effects(effects.into_iter().map(|e| {
         let category = match e.category {
@@ -861,5 +859,22 @@ mod tests {
         let ids: Vec<_> = rows.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, ["veinminer", "zoom"]);
         assert!(not_built(&f.0.join("missing"), &[], &[]).is_empty());
+    }
+
+    /// A root that declares no mob effects leaves the registry open for the first one that does.
+    #[test]
+    fn a_root_without_mob_effects_does_not_freeze_the_registry() {
+        use horizon_client::brewing;
+        // Another test may have set the process-wide list already.
+        if !brewing::mod_effects().is_empty() {
+            return;
+        }
+        register_mob_effects(&[]);
+        // The list `potions::tests` registers, so it holds whichever test runs first.
+        assert!(brewing::register_mod_effects([(
+            "test:effect".to_owned(),
+            0,
+            brewing::Category::Neutral
+        )]));
     }
 }
