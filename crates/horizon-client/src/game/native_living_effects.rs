@@ -16,7 +16,7 @@ use horizon_client::mobs::Mob;
 use mod_api::{ItemStack, LivingRef, NativeActiveEffect};
 
 /// A player's effect as the API's: the id namespaced as the registry has it.
-fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
+pub(super) fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
     NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
         id: brewing::namespaced(e.id),
         duration: e.duration,
