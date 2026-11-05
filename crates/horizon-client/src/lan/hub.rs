@@ -2859,47 +2859,123 @@ impl Hub {
 
     // ---- entities ------------------------------------------------------
 
-    /// `LivingEntity.updateSynchronizedMobEffectParticles`: DATA_EFFECT_PARTICLES
-    /// (10) and DATA_EFFECT_AMBIENCE_ID (11) for the visible `effects`, as
-    /// (effect, ambient). The entries are left out when there is nothing to
-    /// show, which is their default.
-    pub fn effect_meta<'a>(
+    /// `ParticleTypes.STREAM_CODEC`'s value for `options`: the type's
+    /// network id and the data it carries (`state` for the block particles).
+    /// None for a particle whose data isn't sent from here (items, trails).
+    pub fn particle(
         &self,
-        effects: impl IntoIterator<Item = (&'a str, bool)>,
-    ) -> Vec<(u8, i32, Value)> {
-        let mut particles = Vec::new();
-        let mut all_ambient = true;
-        for (effect, ambient) in effects {
-            let effect = effect.trim_start_matches("minecraft:");
-            // MobEffect.particleFactory: the omens have their own particles,
-            // the others an entity effect in their colour (faint if ambient).
-            let (name, data) = match effect {
-                "trial_omen" | "raid_omen" => (effect, None),
-                _ => {
-                    let Some(def) = crate::brewing::effect(effect) else {
-                        continue;
-                    };
-                    let alpha = if ambient { 38 } else { 255 };
-                    let argb = (alpha << 24) | def.color as i32;
-                    ("entity_effect", Some(ParticleData::Color(argb)))
-                }
-            };
-            let Some(id) =
-                self.registry_id("minecraft:particle_type", &format!("minecraft:{name}"))
-            else {
-                continue;
-            };
-            particles.push(Particle { id, data });
-            all_ambient &= ambient;
+        options: &crate::particles::ParticleOptions,
+        state: Option<horizon_world::registry::BlockStateId>,
+    ) -> Option<Particle> {
+        use crate::particles::ParticleType as T;
+        // A native mod's own type: no registry id, so the sentinel and the name.
+        if let Some(name) = &options.mod_particle {
+            return Some(Particle {
+                id: horizon_protocol::entity_data::MOD_PARTICLE_ID,
+                data: Some(ParticleData::Mod(name.clone())),
+            });
         }
-        if particles.is_empty() {
+        let name = format!("minecraft:{}", options.ty.name());
+        let id = self.registry_id("minecraft:particle_type", &name)?;
+        // The options' RGB as an RGB colour (`ARGB.colorFromFloat` without alpha).
+        let rgb_int = |c: [f32; 3]| {
+            let b = |v: f32| ((v.clamp(0.0, 1.0) * 255.0).round() as i32) & 255;
+            (b(c[0]) << 16) | (b(c[1]) << 8) | b(c[2])
+        };
+        let c = options.color;
+        let rgb = rgb_int([c[0], c[1], c[2]]);
+        let data = match options.ty {
+            T::Block | T::BlockMarker | T::FallingDust | T::DustPillar | T::BlockCrumble => {
+                Some(ParticleData::State(state?.0 as i32))
+            }
+            T::Dust => Some(ParticleData::ColorScale(rgb, options.scale)),
+            T::DustColorTransition => Some(ParticleData::ColorScale2(
+                rgb,
+                rgb_int(options.to_color),
+                options.scale,
+            )),
+            T::Effect | T::InstantEffect => Some(ParticleData::ColorPower(rgb, options.scale)),
+            T::EntityEffect | T::TintedLeaves => Some(ParticleData::Color(
+                (((c[3].clamp(0.0, 1.0) * 255.0).round() as i32) << 24) | rgb,
+            )),
+            T::DragonBreath | T::SculkCharge => Some(ParticleData::Scalar(options.scale)),
+            T::Shriek => Some(ParticleData::Delay(options.scale as i32)),
+            T::Geyser | T::GeyserPlume => Some(ParticleData::Geyser(options.geyser?.0)),
+            T::GeyserBase | T::GeyserPoof => {
+                let (water_blocks, burst_impulse_base) = options.geyser?;
+                Some(ParticleData::GeyserBase(water_blocks, burst_impulse_base))
+            }
+            T::Vibration => {
+                use horizon_protocol::entity_data::PositionSource as NetworkPositionSource;
+                use mod_api::particles::PositionSource;
+                let (source, _, ticks) = options.vibration.as_ref()?;
+                let source = match source {
+                    PositionSource::Block(pos) => NetworkPositionSource::Block(*pos),
+                    PositionSource::Entity { id, y_offset } => NetworkPositionSource::Entity {
+                        id: *id,
+                        y_offset: *y_offset,
+                    },
+                    _ => return None,
+                };
+                Some(ParticleData::Vibration {
+                    source,
+                    ticks: *ticks,
+                })
+            }
+            T::Item | T::Trail => return None,
+            _ => None,
+        };
+        Some(Particle { id, data })
+    }
+
+    /// `LivingEntity.updateSynchronizedMobEffectParticles`: DATA_EFFECT_PARTICLES
+    /// (10) and DATA_EFFECT_AMBIENCE_ID (11) for an entity with `effects`.
+    /// Nothing for an entity without effects (`removeEffectParticles`).
+    pub fn effect_meta(
+        &self,
+        effects: impl IntoIterator<Item = crate::effects::ShownEffect>,
+    ) -> Vec<(u8, i32, Value)> {
+        let mut effects = effects.into_iter().peekable();
+        if effects.peek().is_none() {
             return Vec::new();
         }
-        let mut meta = vec![(10, serializer::PARTICLES, Value::Particles(particles))];
-        if all_ambient {
+        let (particles, ambient) = crate::effects::effect_particles(effects);
+        self.particle_meta(&particles, ambient)
+    }
+
+    /// DATA_EFFECT_PARTICLES and DATA_EFFECT_AMBIENCE_ID for `particles` and
+    /// `ambient`, each left out at its default.
+    pub fn particle_meta(
+        &self,
+        particles: &[crate::particles::ParticleOptions],
+        ambient: bool,
+    ) -> Vec<(u8, i32, Value)> {
+        let particles: Vec<_> = (particles.iter())
+            .filter_map(|p| self.particle(p, None))
+            .collect();
+        let mut meta = Vec::new();
+        if !particles.is_empty() {
+            meta.push((10, serializer::PARTICLES, Value::Particles(particles)));
+        }
+        if ambient {
             meta.push((11, serializer::BOOLEAN, Value::Bool(true)));
         }
         meta
+    }
+
+    /// A player's DATA_EFFECT_PARTICLES and DATA_EFFECT_AMBIENCE_ID: vanilla's,
+    /// or while a native mod listens to `effect_particle_modification`
+    /// (`modified`) what the mods made of them. The game asks the mods when
+    /// the effects change; until it has, the last answer goes out (nothing
+    /// before the first), as vanilla's synched data keeps its last value.
+    pub fn player_effect_meta(&self, g: &Guest, modified: bool) -> Vec<(u8, i32, Value)> {
+        if modified {
+            (g.modified_effect_particles.as_ref())
+                .map(|m| m.meta.clone())
+                .unwrap_or_default()
+        } else {
+            self.effect_meta(g.effects.list.iter().map(EffectInstance::shown))
+        }
     }
 
     fn player_state(
@@ -2917,7 +2993,7 @@ impl Hub {
         health: f32,
         equipment: Vec<(u8, Option<horizon_protocol::item::Stack>)>,
         attributes: Vec<play::AttributeSnapshot>,
-        effects: &[EffectInstance],
+        effect_meta: Vec<(u8, i32, Value)>,
     ) -> EntityState {
         let (sneaking, sprinting, sleeping) = flags;
         let shared = shared_flags(sneaking, sprinting, &body);
@@ -2957,14 +3033,7 @@ impl Hub {
         if skin != 0 {
             meta.push((16, serializer::BYTE, Value::Byte(skin as i8)));
         }
-        meta.extend(
-            self.effect_meta(
-                effects
-                    .iter()
-                    .filter(|e| e.visible)
-                    .map(|e| (e.id, e.ambient)),
-            ),
-        );
+        meta.extend(effect_meta);
         EntityState {
             id,
             uuid,
@@ -3084,6 +3153,8 @@ impl Hub {
     /// All entities as one client sees them: the world's and the other players.
     fn track_entities(&mut self, ctx: &mut TickCtx) {
         let mut all: Vec<EntityState> = Vec::with_capacity(ctx.entities.len() + self.guests.len());
+        let modified_particles =
+            mod_api::__private::listened(mod_api::HookId::EffectParticleModification);
         let placed: Vec<usize> = (0..self.guests.len())
             .filter(|&i| self.here(&self.guests[i]))
             .collect();
@@ -3123,7 +3194,7 @@ impl Hub {
                         .as_ref()
                         .map(|m| super::attributes::syncable(&m.attributes))
                         .unwrap_or_default(),
-                    &g.effects.list,
+                    self.player_effect_meta(g, modified_particles),
                 );
                 state.spectator = g.spectator();
                 state.watching = g.watching;

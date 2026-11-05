@@ -109,6 +109,7 @@ mod display_refs;
 mod dragon_refs;
 mod draw_animation;
 mod draw_measures;
+mod effect_particle_modification;
 mod enchantment_level_set;
 mod enchantments;
 mod ender_entity_teleport;

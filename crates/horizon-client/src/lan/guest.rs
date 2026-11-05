@@ -343,6 +343,9 @@ pub struct Guest {
     pub xp_seed: i32,
     /// Active status effects (`LivingEntity.activeEffects`).
     pub effects: crate::effects::PlayerEffects,
+    /// The swirls of `effects` as the native mods left them
+    /// (`effect_particle_modification`), while one listens.
+    pub modified_effect_particles: Option<crate::effects::ModifiedEffectParticles>,
     /// What the client was told of each effect: id, amplifier, flags, and
     /// the duration and `effects.tick_count` at the time, so a duration that
     /// only counted down is not sent again (`ServerPlayer.onEffectUpdated`).
@@ -653,6 +656,7 @@ impl Guest {
             xp_total: 0,
             xp_seed: 0,
             effects: Default::default(),
+            modified_effect_particles: None,
             sent_effects: Vec::new(),
             menu_sent: vec![None; 46],
             menu_state: 0,

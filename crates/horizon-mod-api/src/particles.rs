@@ -19,8 +19,8 @@ pub enum PositionSource {
 }
 
 /// `ParticleOptions` with the parameters of the option classes used here.
-#[derive(Clone, Debug)]
-// exhaustive: the game builds it with a literal; mods only read it
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods use the constructors
 pub struct ParticleOptions {
     pub ty: ParticleType,
     /// `BlockParticleOption`: the block's particle sprite and terrain tint.

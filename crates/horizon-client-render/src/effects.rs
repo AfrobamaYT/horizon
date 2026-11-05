@@ -2,7 +2,9 @@
 //! add/update with hidden effects, per-tick application of the periodic
 //! effects (regeneration, poison, wither, hunger, saturation, instant
 //! effects), and the derived flags the movement and damage code read.
+use crate::particles::{ParticleOptions, ParticleType};
 use horizon_client_core::potions;
+use horizon_protocol::entity_data::Value;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectInstance {
@@ -33,6 +35,15 @@ impl EffectInstance {
     }
     fn infinite(&self) -> bool {
         self.duration == -1
+    }
+    /// This effect as its entity's swirls are computed from.
+    pub fn shown(&self) -> ShownEffect {
+        ShownEffect {
+            effect: self.id,
+            amplifier: self.amplifier,
+            visible: self.visible,
+            ambient: self.ambient,
+        }
     }
     /// `MobEffectInstance.endsWithin`.
     pub fn ends_within(&self, ticks: i32) -> bool {
@@ -162,6 +173,75 @@ pub fn scaled_duration(duration: i32, scale: f32) -> i32 {
         duration
     } else {
         ((duration as f32 * scale).floor() as i32).max(1)
+    }
+}
+/// `MobEffect.particleFactory`: the omens have particles of their own, any
+/// other effect an entity effect in its colour, faint when ambient.
+pub fn effect_particle(effect: &str, ambient: bool) -> Option<ParticleOptions> {
+    Some(match effect.trim_start_matches("minecraft:") {
+        "trial_omen" => ParticleOptions::simple(ParticleType::TrialOmen),
+        "raid_omen" => ParticleOptions::simple(ParticleType::RaidOmen),
+        other => {
+            let color = potions::effect(other)?.color;
+            let channel = |shift: u32| ((color >> shift) & 255) as f32 / 255.0;
+            // MobEffect.AMBIENT_ALPHA is 38 of 255.
+            let alpha = if ambient { 38.0 / 255.0 } else { 1.0 };
+            ParticleOptions::colored(
+                ParticleType::EntityEffect,
+                [channel(16), channel(8), channel(0), alpha],
+            )
+        }
+    })
+}
+/// An active effect as `LivingEntity.updateSynchronizedMobEffectParticles`
+/// sees it; vanilla recomputes the particles when one of these changes
+/// (`onEffectAdded`, `onEffectUpdated`, `onEffectsRemoved`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShownEffect {
+    pub effect: &'static str,
+    pub amplifier: i32,
+    pub visible: bool,
+    pub ambient: bool,
+}
+/// `LivingEntity.updateSynchronizedMobEffectParticles` for an entity with
+/// `effects`: the particle of each visible one (`effect_particle`) and
+/// `areAllEffectsAmbient` (true when none is visible).
+pub fn effect_particles(
+    effects: impl IntoIterator<Item = ShownEffect>,
+) -> (Vec<ParticleOptions>, bool) {
+    let mut ambient = true;
+    let particles = (effects.into_iter())
+        .filter(|e| e.visible)
+        .filter_map(|e| {
+            ambient &= e.ambient;
+            effect_particle(e.effect, e.ambient)
+        })
+        .collect();
+    (particles, ambient)
+}
+/// A living entity's `DATA_EFFECT_PARTICLES` and `DATA_EFFECT_AMBIENCE_ID`
+/// as the native mods left them (`effect_particle_modification`), with the
+/// effects they were computed for: sent until those effects change and the
+/// mods are asked again, as vanilla recomputes them only then.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModifiedEffectParticles {
+    effects: Vec<ShownEffect>,
+    /// The entries sent, each left out at its default.
+    pub meta: Vec<(u8, i32, Value)>,
+}
+impl ModifiedEffectParticles {
+    pub fn new(
+        effects: impl IntoIterator<Item = ShownEffect>,
+        meta: Vec<(u8, i32, Value)>,
+    ) -> Self {
+        Self {
+            effects: effects.into_iter().collect(),
+            meta,
+        }
+    }
+    /// Whether these were computed for `effects`.
+    pub fn computed_for(&self, effects: impl IntoIterator<Item = ShownEffect>) -> bool {
+        self.effects.iter().copied().eq(effects)
     }
 }
 /// What an omen's `applyEffectTick` decided.

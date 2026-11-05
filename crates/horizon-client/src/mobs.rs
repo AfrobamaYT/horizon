@@ -1221,6 +1221,9 @@ pub struct Extra {
     /// server gave them: the swirls around it, and whether they are all faint.
     pub effect_particles: Vec<crate::particles::ParticleOptions>,
     pub effect_ambient: bool,
+    /// The swirls of `effects` as the native mods left them
+    /// (`effect_particle_modification`), sent while one listens.
+    pub modified_effect_particles: Option<crate::effects::ModifiedEffectParticles>,
     /// An invisible illusioner's mirror images.
     pub illusions: Option<illusioner::Illusions>,
     /// A villager's claimed bed head and meeting bell.

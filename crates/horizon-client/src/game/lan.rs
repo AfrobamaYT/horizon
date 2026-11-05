@@ -6,6 +6,7 @@ use super::{Game, shield::OFFHAND_SLOT};
 use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
     Result,
+    effects::{EffectInstance, ModifiedEffectParticles, ShownEffect},
     lan::{
         self, Lan, NetConfig,
         chunks::ChunkEncoder,
@@ -692,14 +693,13 @@ pub(super) fn mob_meta(
     }
     defaults.push((9, serializer::FLOAT, Value::Float(1.0)));
     // LivingEntity.DATA_EFFECT_PARTICLES and DATA_EFFECT_AMBIENCE_ID: the
-    // swirls of its effects (the ones a mob has are visible, not ambient).
-    meta.extend(
-        hub.effect_meta(
-            (m.extra.effects.iter())
-                .filter(|e| !m.extra.hidden_effects.contains(&e.0))
-                .map(|e| (e.0, m.extra.ambient_effects.contains(&e.0))),
-        ),
-    );
+    // swirls of its effects, or what the native mods made of them
+    // (`Game::lan_effect_particles`, kept only while one listens: mods are
+    // installed once per process).
+    match &m.extra.modified_effect_particles {
+        Some(modified) => meta.extend_from_slice(&modified.meta),
+        None => meta.extend(hub.effect_meta(mob_effects(m))),
+    }
     defaults.push((10, serializer::PARTICLES, Value::Particles(Vec::new())));
     defaults.push((11, serializer::BOOLEAN, Value::Bool(false)));
     // Mob.DATA_MOB_FLAGS_ID: no AI 1, left-handed 2, aggressive 4 (what
@@ -1296,6 +1296,16 @@ fn unhappy_counter(
         meta.push((18, serializer::INT, Value::Int(m.extra.ints[0])));
     }
     defaults.push((18, serializer::INT, Value::Int(0)));
+}
+
+/// A mob's effects as its swirls are computed from.
+fn mob_effects(m: &Mob) -> impl Iterator<Item = ShownEffect> + '_ {
+    (m.extra.effects.iter()).map(|&(effect, _, amplifier)| ShownEffect {
+        effect,
+        amplifier,
+        visible: !m.extra.hidden_effects.contains(&effect),
+        ambient: m.extra.ambient_effects.contains(&effect),
+    })
 }
 
 /// Raider.IS_CELEBRATING: also list false so tracking sends the end of a celebration.
@@ -2065,6 +2075,9 @@ impl Game<'_> {
     fn lan_entities(&mut self, out: &mut States, drain_minecart_steps: bool, after: u32) {
         out.clear();
         let mut speeds = super::lan_attributes::SpeedByType::default();
+        if mod_api::__private::listened(mod_api::HookId::EffectParticleModification) {
+            self.lan_effect_particles();
+        }
         for m in self.mobs.iter().filter(|m| !m.removed && m.id > after) {
             let Some(host) = self.lan.as_ref() else {
                 return;
@@ -2145,6 +2158,77 @@ impl Game<'_> {
                 .push((8, serializer::INT, Value::Int(o.value as i32)));
         }
         self.lan_object_states(out, drain_minecart_steps, after);
+    }
+
+    /// `LivingEntity.updateSynchronizedMobEffectParticles` while a native mod
+    /// listens to `effect_particle_modification`: the mobs and players whose
+    /// effects changed since the mods were last asked (vanilla's
+    /// `effectsDirty`) are asked again, and what they leave is kept and sent
+    /// until the next change. An entity whose effects are gone has none
+    /// (`removeEffectParticles`).
+    fn lan_effect_particles(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
+        for i in 0..self.mobs.len() {
+            let m = &self.mobs[i];
+            if m.removed {
+                continue;
+            }
+            if let Some(update) = self.modified_effect_particles(
+                &host.hub,
+                m.id,
+                m.extra.modified_effect_particles.as_ref(),
+                || mob_effects(m),
+            ) {
+                self.mobs[i].extra.modified_effect_particles = update;
+            }
+        }
+        for i in 0..host.hub.guests.len() {
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
+            let (hub, g) = (&host.hub, &host.hub.guests[i]);
+            if !hub.here(g) {
+                continue;
+            }
+            if let Some(update) = self.modified_effect_particles(
+                hub,
+                g.entity_id as u32,
+                g.modified_effect_particles.as_ref(),
+                || g.effects.list.iter().map(EffectInstance::shown),
+            ) && let Some(host) = self.lan.as_mut()
+            {
+                host.hub.guests[i].modified_effect_particles = update;
+            }
+        }
+    }
+
+    /// What the living entity `entity`, with `effects` and `kept` from the
+    /// last time, keeps now: None while its effects are unchanged, else the
+    /// mods' answer for them (`effect_particle_modification`), or none when
+    /// it has no effects.
+    fn modified_effect_particles<I: Iterator<Item = ShownEffect>>(
+        &self,
+        hub: &Hub,
+        entity: u32,
+        kept: Option<&ModifiedEffectParticles>,
+        effects: impl Fn() -> I,
+    ) -> Option<Option<ModifiedEffectParticles>> {
+        if effects().next().is_none() {
+            return kept.is_some().then_some(None);
+        }
+        if kept.is_some_and(|k| k.computed_for(effects())) {
+            return None;
+        }
+        let (mut particles, mut ambient) = horizon_client::effects::effect_particles(effects());
+        // Before the world has an epoch no handle can name the entity.
+        if let Some(epoch) = self.native_lifecycle.epoch() {
+            let living = mod_api::LivingRef::new(mod_api::EntityRef::new(epoch, entity));
+            self.native_effect_particle_modification(living, &mut particles, &mut ambient);
+        }
+        let meta = hub.particle_meta(&particles, ambient);
+        Some(Some(ModifiedEffectParticles::new(effects(), meta)))
     }
 
     /// Apply gameplay events produced while the hub handles guest packets.
@@ -4468,6 +4552,205 @@ mod tests {
                 say(game, "hello");
                 assert_eq!(received(&sender), ["system heard hello", "player"]);
                 assert_eq!(received(&other), ["player"]);
+            });
+        });
+    }
+
+    /// `effect_particle_modification` sees vanilla's swirls of a mob's and a
+    /// guest's effects, and what it leaves is what players are sent: a
+    /// replaced list and ambient flag, or nothing once cleared. With no
+    /// listener, vanilla's list goes out. As vanilla, the mods are asked when
+    /// an entity's effects change, not each tick, and their last answer goes
+    /// out until then (a guest whose effects just changed included).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_changes_the_effect_particles_players_are_sent() {
+        use super::super::lan::LanSettings;
+        use horizon_client::effects::EffectInstance;
+        use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
+        use horizon_client::particles::{ParticleOptions, ParticleType};
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::entity_data::{Particle, ParticleData};
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use mod_api::{EffectParticleModificationEvent, Hooks, Host, ModEntry, Mods};
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicI32, AtomicUsize},
+        };
+        const ZOMBIE: i32 = 40;
+        const PLAYER: i32 = 12;
+        // What the mod was asked: the entity, vanilla's particles and ambient flag.
+        static ASKED: Mutex<Vec<(u32, Vec<ParticleOptions>, bool)>> = Mutex::new(Vec::new());
+        // MobEffects.SPEED's colour, 3402751, as `entity_effect` takes it.
+        let speed = |alpha: u32| ParticleData::Color(((alpha << 24) | 0x33_EB_FF) as i32);
+        let speed_options = |alpha: f32| {
+            let rgb = [0x33, 0xEB, 0xFF].map(|c| c as f32 / 255.0);
+            ParticleOptions::colored(ParticleType::EntityEffect, [rgb[0], rgb[1], rgb[2], alpha])
+        };
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn effect_particle_modification(
+                &self,
+                _: &dyn Host,
+                event: &mut EffectParticleModificationEvent<'_>,
+            ) {
+                let id = event.entity.id();
+                (ASKED.lock().unwrap()).push((id, event.particles.clone(), event.ambient));
+                if id == ZOMBIE as u32 {
+                    *event.particles = vec![ParticleOptions::simple(ParticleType::Flame)];
+                    event.ambient = true;
+                } else {
+                    event.particles.clear();
+                }
+            }
+        }
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn: 12,
+                    uuid: 12,
+                    name: "guest12".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:1".parse().unwrap(),
+                    expected: false,
+                },
+                PLAYER,
+                [3.0, 64.0, 5.0],
+                10,
+            );
+            guest.placed = true;
+            guest.effects.list = vec![EffectInstance::new("speed", 600, 0)];
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut zombie = Mob::new(ZOMBIE as u32, kind, Vec3::ZERO, 0.0);
+            zombie.extra.effects.push(("speed", 600, 0));
+            game.mobs.push(zombie);
+
+            let builtin = super::sync_data(&game.res.core.item_data, &game.pack_files())
+                .unwrap()
+                .builtin
+                .clone();
+            let named = |p: &Particle| {
+                let types = builtin.get("minecraft:particle_type").unwrap();
+                (types.name(p.id).unwrap().to_owned(), p.data.clone())
+            };
+            let effect_entries = |meta: &[(u8, i32, Value)]| {
+                (meta.iter())
+                    .filter_map(|(index, _, value)| match value {
+                        Value::Particles(list) if *index == 10 => {
+                            Some((10, list.iter().map(named).collect::<Vec<_>>()))
+                        }
+                        Value::Bool(ambient) if *index == 11 => {
+                            assert!(*ambient);
+                            Some((11, Vec::new()))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            // One pass of the entities players are sent, then the guest's
+            // swirls as the hub sends them.
+            let sent = |game: &mut super::Game<'_>| {
+                let mut states = super::States::default();
+                game.lan_entities(&mut states, false, 0);
+                let zombie = states.as_slice().iter().find(|e| e.id == ZOMBIE).unwrap();
+                let hub = &game.lan.as_ref().unwrap().hub;
+                let listened =
+                    mod_api::__private::listened(mod_api::HookId::EffectParticleModification);
+                let player = hub.player_effect_meta(&hub.guests[0], listened);
+                (effect_entries(&zombie.meta), effect_entries(&player))
+            };
+            let asked = || std::mem::take(&mut *ASKED.lock().unwrap());
+            let vanilla = vec![(
+                10,
+                vec![("minecraft:entity_effect".to_owned(), Some(speed(255)))],
+            )];
+            assert_eq!(sent(game), (vanilla.clone(), vanilla.clone()));
+
+            let mods: Mods = vec![ModEntry::new("effect-swirls", Box::new(Mod))].into();
+            mod_api::testing::with_mods(mods, || {
+                let flame = vec![
+                    (10, vec![("minecraft:flame".to_owned(), None)]),
+                    (11, Vec::new()),
+                ];
+                assert_eq!(sent(game), (flame.clone(), Vec::new()));
+                let mut first = asked();
+                first.sort_by_key(|a| a.0);
+                assert_eq!(
+                    first,
+                    [
+                        (PLAYER as u32, vec![speed_options(1.0)], false),
+                        (ZOMBIE as u32, vec![speed_options(1.0)], false),
+                    ]
+                );
+
+                // Nothing changed: not asked again, and the answers still go out.
+                assert_eq!(sent(game), (flame.clone(), Vec::new()));
+                assert!(asked().is_empty());
+
+                // The zombie gains an omen: only it is asked, with both swirls.
+                let zombie = game
+                    .mobs
+                    .iter_mut()
+                    .find(|m| m.id == ZOMBIE as u32)
+                    .unwrap();
+                zombie.extra.effects.push(("trial_omen", 600, 0));
+                assert_eq!(sent(game), (flame.clone(), Vec::new()));
+                let omen = ParticleOptions::simple(ParticleType::TrialOmen);
+                assert_eq!(
+                    asked(),
+                    [(ZOMBIE as u32, vec![speed_options(1.0), omen], false)]
+                );
+
+                // The guest's effect turns ambient after the mods were asked:
+                // their answer (nothing) still goes out, not vanilla's, until
+                // the next pass asks them again with vanilla's faint swirl;
+                // the mod clears the particles and leaves the flag set.
+                let hub = &mut game.lan.as_mut().unwrap().hub;
+                hub.guests[0].effects.list[0].ambient = true;
+                assert!(hub.player_effect_meta(&hub.guests[0], true).is_empty());
+                assert_eq!(sent(game), (flame, vec![(11, Vec::new())]));
+                assert_eq!(
+                    asked(),
+                    [(PLAYER as u32, vec![speed_options(38.0 / 255.0)], true)]
+                );
             });
         });
     }

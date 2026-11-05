@@ -878,8 +878,7 @@ impl Game<'_> {
         // The dragon's breath and lingering potion clouds (AreaEffectCloud's DATA_RADIUS,
         // DATA_WAITING for its 20-tick wait, and DATA_PARTICLE): the
         // client draws them from these (`tick_remote_clouds`).
-        let breath = Self::hub_particle(
-            hub,
+        let breath = hub.particle(
             &mod_api::particles::ParticleOptions::simple(
                 horizon_client::particles::ParticleType::DragonBreath,
             ),
@@ -902,7 +901,7 @@ impl Game<'_> {
             // through `network_particle` would drop it and leave the client
             // on the default white particle.
             let particle = match &b.potion {
-                Some(p) => Self::hub_particle(hub, &p.particle(), None),
+                Some(p) => hub.particle(&p.particle(), None),
                 None => breath.clone(),
             };
             if let Some(p) = &particle {

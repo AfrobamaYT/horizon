@@ -5,6 +5,7 @@
 //! a server: nothing of them goes over the network.
 use super::Game;
 use horizon_client::blocks::RenderShape;
+use horizon_client::effects::effect_particle;
 use horizon_client::mobs::{MobEvent, ambient};
 use horizon_client::motion::{LAVA, WATER};
 use horizon_client::particles::{ParticleEngine, ParticleOptions, ParticleType};
@@ -319,25 +320,6 @@ impl Game<'_> {
             }
         }
     }
-}
-
-/// `MobEffect.particleFactory`: the omens have particles of their own, any
-/// other effect an entity effect in its colour, faint when ambient.
-pub(super) fn effect_particle(effect: &str, ambient: bool) -> Option<ParticleOptions> {
-    Some(match effect.trim_start_matches("minecraft:") {
-        "trial_omen" => ParticleOptions::simple(ParticleType::TrialOmen),
-        "raid_omen" => ParticleOptions::simple(ParticleType::RaidOmen),
-        other => {
-            let color = horizon_client::brewing::effect(other)?.color;
-            let channel = |shift: u32| ((color >> shift) & 255) as f32 / 255.0;
-            // MobEffect.AMBIENT_ALPHA is 38 of 255.
-            let alpha = if ambient { 38.0 / 255.0 } else { 1.0 };
-            ParticleOptions::colored(
-                ParticleType::EntityEffect,
-                [channel(16), channel(8), channel(0), alpha],
-            )
-        }
-    })
 }
 
 /// One tick of `LivingEntity.tickEffects`' client branch: a one in four

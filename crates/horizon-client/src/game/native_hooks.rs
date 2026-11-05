@@ -8795,6 +8795,21 @@ impl Game<'_> {
     ) {
         self.fire_mob_effect_remove(entity, effect, amplifier, cancel);
     }
+    /// NeoForge's `EffectParticleModificationEvent`, vanilla's
+    /// `LivingEntity.updateSynchronizedMobEffectParticles`: the swirl
+    /// `particles` of the living entity `entity`'s visible effects and
+    /// whether they are all `ambient`, as the server is about to send them.
+    /// Change, add, reorder or clear them; an empty list shows nothing.
+    /// Asked when the entity's effects change, only while a mod listens; the
+    /// answer is sent until the next change. Server-side.
+    pub(super) fn native_effect_particle_modification(
+        &self,
+        entity: LivingRef,
+        particles: &mut Vec<ParticleOptions>,
+        ambient: &mut bool,
+    ) {
+        self.fire_effect_particle_modification(entity, particles, ambient);
+    }
     /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
     /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
     /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and

@@ -84,6 +84,7 @@ mod tests {
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
         pub(super) struct NativeActiveEffect;
+        pub(super) struct ParticleOptions;
         #[derive(Debug, PartialEq)]
         pub(super) enum ScreenOpening {
             Cancel,
