@@ -480,7 +480,6 @@ impl Game<'_> {
     /// (in `text_layer` like the glyphs, a hair behind) when `background`.
     /// Returns the glyph pixels the atlas still needs.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn name_tag_quads(
         &self,
         o: glam::DVec3,
