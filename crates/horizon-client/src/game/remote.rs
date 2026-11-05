@@ -6910,7 +6910,6 @@ impl Game<'_> {
                 .flatten();
             let r = self.remote.as_mut().unwrap();
             let stepped = &mut r.stepped;
-            let head_lerps = &mut r.head_lerps;
             let players = &r.level_players;
             let tab_players = &r.tab_players;
             let m = &mut self.mobs[i];
