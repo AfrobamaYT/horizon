@@ -1,5 +1,6 @@
 name: claim
-# A comment of `/claim` on an open issue assigns the commenter; `/unclaim` releases it.
+# A comment of `/claim` on an open issue assigns the commenter and swaps `help wanted` for `claimed`;
+# `/unclaim` releases it and swaps them back.
 # The board's hourly sweep turns an assignee into Status Claimed with that Owner.
 on:
   issue_comment:
@@ -25,8 +26,14 @@ jobs:
                 return;
               }
               await github.rest.issues.addAssignees({ ...ref, assignees: [who] });
+              await github.rest.issues.addLabels({ ...ref, labels: ['claimed'] });
+              await github.rest.issues.removeLabel({ ...ref, name: 'help wanted' }).catch(() => {});
               await github.rest.reactions.createForIssueComment({ owner: ref.owner, repo: ref.repo, comment_id: context.payload.comment.id, content: '+1' });
             } else if (/^\/unclaim\b/i.test(body) && holders.includes(who)) {
               await github.rest.issues.removeAssignees({ ...ref, assignees: [who] });
+              if (holders.length === 1) {
+                await github.rest.issues.removeLabel({ ...ref, name: 'claimed' }).catch(() => {});
+                await github.rest.issues.addLabels({ ...ref, labels: ['help wanted'] });
+              }
               await github.rest.reactions.createForIssueComment({ owner: ref.owner, repo: ref.repo, comment_id: context.payload.comment.id, content: '+1' });
             }
