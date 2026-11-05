@@ -233,7 +233,7 @@ fn wasm_listeners(
                     panic!("the game fired a place this mod doesn't listen at")
                 }
             }
-            mod_points::export_listeners!(
+            mod_points::__private::wire::bindings::export_listeners!(
                 HorizonListeners with_types_in mod_points::__private::wire::bindings
             );
         };

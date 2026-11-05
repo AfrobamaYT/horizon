@@ -10,6 +10,10 @@
 //! `mod_api`.
 #![deny(missing_docs)]
 
+// The guest glue names this crate by its path, here as in the mods it is expanded into.
+#[cfg(target_arch = "wasm32")]
+extern crate self as mod_points;
+
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
 mod registry;
