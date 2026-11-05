@@ -5865,6 +5865,7 @@ mod tests {
         assert_eq!(engine.made().get("vibration"), Some(&2));
         assert_eq!(engine.pending.len(), 2);
         for q in &engine.pending {
+            let q = q.ordinary().expect("a vibration is an ordinary particle");
             assert_eq!(q.ty, ParticleType::Vibration);
             assert_eq!(q.lifetime, 7);
             assert!(matches!(
