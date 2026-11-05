@@ -318,6 +318,7 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
+    mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
     register_entity_types(&overlay.mods);
     register_menu_types(&overlay.mods);
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);

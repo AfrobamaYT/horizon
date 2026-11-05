@@ -329,6 +329,8 @@ struct Installed {
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
     requested_types: Vec<BlockEntityTypeRequest>,
+    registry_keys: super::registry_keys::Requests,
+    effects: OnceLock<super::registry_keys::Effects>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
@@ -338,6 +340,16 @@ struct Installed {
 /// The block entity types mods registered.
 pub fn block_entity_types() -> &'static [BlockEntityType] {
     installed().map_or(&[], |installed| &installed.block_entity_types)
+}
+
+pub(crate) fn requested_keys() -> &'static super::registry_keys::Requests {
+    static EMPTY: LazyLock<super::registry_keys::Requests> = LazyLock::new(Default::default);
+    installed().map_or(&EMPTY, |installed| &installed.registry_keys)
+}
+
+pub(crate) fn resolved_effects() -> &'static OnceLock<super::registry_keys::Effects> {
+    static EMPTY: OnceLock<super::registry_keys::Effects> = OnceLock::new();
+    installed().map_or(&EMPTY, |installed| &installed.effects)
 }
 
 pub(crate) fn requested_block_entity_types() -> &'static [BlockEntityTypeRequest] {
@@ -850,6 +862,10 @@ fn attached<'a, 'k, P: ?Sized>(
 pub trait Registrar {
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey;
+    /// Request a block by canonical registry id. All mods' declarations are checked at load.
+    fn block_key(&mut self, id: &str) -> super::BlockKey;
+    /// Request an effect by canonical registry id. All mods' declarations are checked at load.
+    fn effect_key(&mut self, id: &str) -> super::EffectKey;
     /// Declare block entity type `path` in this mod's namespace, held by `blocks`; mods usually
     /// reach it through `block_entity_type`.
     fn declare_block_entity_type(
@@ -867,7 +883,12 @@ pub trait Registrar {
     /// dropped when it loads.
     fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController;
     /// Attach `part`, of kind `kind` (its type's name), to block `block`.
-    fn attach_block_part(&mut self, block: &str, kind: &'static str, part: Arc<dyn BlockPart>);
+    fn attach_block_part(
+        &mut self,
+        block: super::BlockKey,
+        kind: &'static str,
+        part: Arc<dyn BlockPart>,
+    );
     /// Attach `part`, of kind `kind`, to the mod block entity type `key`.
     fn attach_block_entity_part(
         &mut self,
@@ -940,7 +961,7 @@ impl dyn Registrar + '_ {
         }
     }
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
-    pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
+    pub fn block_part<P: BlockPart>(&mut self, block: super::BlockKey, part: P) {
         self.attach_block_part(block, type_name::<P>(), Arc::new(part));
     }
     /// Attach a Part to a native type, including one another mod declares later.
@@ -1075,6 +1096,8 @@ pub struct PartRegistrar {
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
     requested_types: Vec<BlockEntityTypeRequest>,
+    registry_keys: super::registry_keys::Requests,
+    effects: OnceLock<super::registry_keys::Effects>,
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
     refused: Vec<String>,
@@ -1090,6 +1113,8 @@ impl PartRegistrar {
             tags: TagParts::default(),
             block_entity_types: Vec::new(),
             requested_types: Vec::new(),
+            registry_keys: Default::default(),
+            effects: OnceLock::new(),
             controllers: Vec::new(),
             structure_types: Vec::new(),
             refused: Vec::new(),
@@ -1306,6 +1331,26 @@ impl Registrar for PartRegistrar {
         kind
     }
 
+    fn block_key(&mut self, id: &str) -> super::BlockKey {
+        match self.registry_keys.blocks.request(self.mod_id, id) {
+            Ok(slot) => super::BlockKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::BlockKey(u32::MAX)
+            }
+        }
+    }
+
+    fn effect_key(&mut self, id: &str) -> super::EffectKey {
+        match self.registry_keys.effects.request(self.mod_id, id) {
+            Ok(slot) => super::EffectKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::EffectKey(u32::MAX)
+            }
+        }
+    }
+
     fn declare_block_entity_type(
         &mut self,
         path: &str,
@@ -1330,8 +1375,20 @@ impl Registrar for PartRegistrar {
         )
     }
 
-    fn attach_block_part(&mut self, block: &str, kind: &'static str, part: Arc<dyn BlockPart>) {
-        self.attach(|p| &mut p.blocks, kind, block, part);
+    fn attach_block_part(
+        &mut self,
+        block: super::BlockKey,
+        kind: &'static str,
+        part: Arc<dyn BlockPart>,
+    ) {
+        let Some(id) = self.registry_keys.blocks.id(block.0).map(str::to_owned) else {
+            self.refused.push(format!(
+                "mod {}: invalid block key slot {}",
+                self.mod_id, block.0
+            ));
+            return;
+        };
+        self.attach(|p| &mut p.blocks, kind, &id, part);
     }
 
     fn attach_block_entity_part(
@@ -1493,6 +1550,8 @@ pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
             tags: registrar.tags,
             block_entity_types: registrar.block_entity_types,
             requested_types: registrar.requested_types,
+            registry_keys: registrar.registry_keys,
+            effects: registrar.effects,
             controllers: registrar.controllers,
             structure_types: registrar.structure_types,
             hook_bits: Vec::new(),

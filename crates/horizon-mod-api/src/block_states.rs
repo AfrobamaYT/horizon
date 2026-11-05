@@ -45,7 +45,7 @@ impl BlockStates<'_> {
     }
     /// The states of `block` (`minecraft:oak_stairs`), `StateDefinition.getPossibleStates`.
     /// None for an unknown block, or a host without a game.
-    pub fn states_of(&self, block: &str) -> Option<BlockStateRange> {
+    pub fn states_of(&self, block: crate::BlockKey) -> Option<BlockStateRange> {
         self.backend?.block_states_of(block)
     }
 }

@@ -21450,6 +21450,28 @@ impl Game<'_> {
     pub(super) fn resolve_parts(&self) -> Result<()> {
         let items = self.items();
         let registry = self.pack.assets.registry;
+        mod_api::__private::resolve_blocks(|id| {
+            let default = registry.default_state(id)?;
+            let of_block = |state| {
+                registry
+                    .state(BlockStateId(state))
+                    .is_some_and(|s| s.name == id)
+            };
+            let mut first = default.0;
+            while first > 0 && of_block(first - 1) {
+                first -= 1;
+            }
+            let mut last = default.0;
+            while of_block(last + 1) {
+                last += 1;
+            }
+            Some(mod_api::__private::ResolvedBlock {
+                default,
+                states: mod_api::BlockStateRange::new(BlockStateId(first), last - first + 1),
+                block: self.res.behaviours().block(default),
+            })
+        })
+        .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
         mod_api::__private::resolve_parts(
             &items.block_tags,
             &items.item_tags,

@@ -131,7 +131,17 @@ fn api_types(source: &str, generated: &str) -> Result<ApiTypes, String> {
                 }
                 Item::Struct(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
                     if collect_handles
-                        && let Some(base) = item.ident.to_string().strip_suffix("Ref")
+                        && let Some(base) = item
+                            .ident
+                            .to_string()
+                            .strip_suffix("Ref")
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                item.ident
+                                    .to_string()
+                                    .strip_suffix("Key")
+                                    .map(|_| item.ident.to_string())
+                            })
                         && !base.is_empty()
                     {
                         let receiver = base.to_snake_case();
@@ -468,6 +478,8 @@ fn handle_method<'a>(
     let call = format!("{name}(self{args})");
     let body = if returns("Option") {
         format!("{backend}(host)?.{call}")
+    } else if handle.ends_with("Key") && returns("String") {
+        format!("{backend}(host).expect(\"registry key metadata requires a game host\").{call}")
     } else if returns("bool") {
         format!("{backend}(host).map(|backend| backend.{call}).unwrap_or(false)")
     } else if returns("Result") {

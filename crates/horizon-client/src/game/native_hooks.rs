@@ -1012,6 +1012,7 @@ use horizon_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 use mod_api::__private::game::IngredientTest;
+use mod_api::BlockKey;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
@@ -9662,14 +9663,14 @@ impl GameLevel<'_> {
         &self,
         ticks: &mut Ticks,
         pos: [i32; 3],
-        block: &str,
+        block: BlockKey,
         delay: i32,
     ) -> bool {
-        let Some(state) = self.registry.default_state(block) else {
+        let Some(resolved) = mod_api::__private::resolved_block(block) else {
             return false;
         };
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let block = self.behaviours.block(state);
+        let block = resolved.block;
         let time = self.game_time();
         ticks.schedule_block(time, at, block, delay, TickPriority::Normal)
             != ScheduleResult::MissingChunk

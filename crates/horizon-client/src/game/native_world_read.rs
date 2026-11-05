@@ -10,6 +10,7 @@ use horizon_world::{
     level::Behaviours,
     registry::{BlockRegistry, BlockStateId},
 };
+use mod_api::BlockKey;
 use mod_api::{LevelRef, NativeLifecycleContext, TagRegistry};
 
 /// Why a server block cannot be read.
@@ -76,8 +77,12 @@ impl Game<'_> {
 
     /// Whether the block registry name is in the world's merged block tag. Unknown names or tags
     /// return false; unavailable authoritative tags return None.
-    pub(super) fn native_block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
-        Some(block_in_tag(self.native_tag_items()?, block, tag))
+    pub(super) fn native_block_in_tag(&self, block: BlockKey, tag: &str) -> Option<bool> {
+        Some(block_in_tag(
+            self.native_tag_items()?,
+            mod_api::__private::block_key_id(block)?,
+            tag,
+        ))
     }
 
     /// The members of a tag in vanilla's order (`HolderSet.Named` iteration: file order, nested

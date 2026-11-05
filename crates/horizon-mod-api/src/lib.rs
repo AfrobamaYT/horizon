@@ -5,6 +5,18 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
 extern crate self as mod_api;
+mod registry_keys;
+
+/// A block requested once through [`Registrar::block_key`]. Its load-owned slot survives reload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so only registration creates a key
+pub struct BlockKey(u32);
+
+/// An effect requested once through [`Registrar::effect_key`]. The registry is fixed until restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so only registration creates a key
+pub struct EffectKey(u32);
+
 // Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
 #[cfg(any())]
 mod hooks;
@@ -4162,7 +4174,7 @@ pub trait LevelHost {
         unimplemented!("LevelHost::block_state_id")
     }
     /// The block's default state (`Block.defaultBlockState`), or None for an unknown block.
-    fn block_state_default(&self, _block: &str) -> Option<BlockStateId> {
+    fn block_state_default(&self, _block: BlockKey) -> Option<BlockStateId> {
         unimplemented!("LevelHost::block_state_default")
     }
     /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
@@ -4179,7 +4191,7 @@ pub trait LevelHost {
     }
     /// `BlockState.is(TagKey)`: whether the block registry name is in the merged block tag.
     /// Unknown names and tags return false; unavailable authoritative tags return None.
-    fn block_in_tag(&self, _block: &str, _tag: &str) -> Option<bool> {
+    fn block_in_tag(&self, _block: BlockKey, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::block_in_tag")
     }
     /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_in_tag` reads
@@ -4275,7 +4287,7 @@ level_random_draws!(LevelRandomHost, LevelWriteHost);
 /// A `LevelReader` with vanilla's `ScheduledTickAccess`. Shape updates cannot write blocks.
 pub trait LevelTicksHost: LevelHost {
     /// Schedule a block tick through `native_schedule_block_tick`.
-    fn schedule_block_tick(&mut self, _pos: [i32; 3], _block: &str, _delay: i32) -> bool {
+    fn schedule_block_tick(&mut self, _pos: [i32; 3], _block: BlockKey, _delay: i32) -> bool {
         unimplemented!("LevelTicksHost::schedule_block_tick")
     }
     /// Schedule a fluid tick through `native_schedule_fluid_tick`.
