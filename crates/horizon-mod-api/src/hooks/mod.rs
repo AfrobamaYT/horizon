@@ -126,6 +126,7 @@ mod entity_place;
 mod entity_remove;
 mod entity_riding;
 mod entity_sounds;
+mod entity_sprint_particles;
 mod entity_state;
 mod entity_struck_by_lightning;
 mod explosion_knockback;
