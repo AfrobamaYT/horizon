@@ -21,8 +21,23 @@ struct Sealed {
     places: Box<[Box<[u32]>]>,
 }
 
-static OPEN: Mutex<Vec<Listener>> = Mutex::new(Vec::new());
+/// The list while mods load: registrations, and stops that came before the seal.
+struct Open {
+    listeners: Vec<Listener>,
+    stopped: Vec<String>,
+}
+
+/// Registering, stopping and sealing all hold this lock, so a registration either lands in the
+/// sealed list or is refused, and a stop before the seal still holds after it.
+static OPEN: Mutex<Open> = Mutex::new(Open {
+    listeners: Vec::new(),
+    stopped: Vec::new(),
+});
 static SEALED: OnceLock<Sealed> = OnceLock::new();
+
+fn open() -> std::sync::MutexGuard<'static, Open> {
+    OPEN.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Why a listener wasn't registered.
 #[derive(Debug, PartialEq, Eq)]
@@ -48,14 +63,14 @@ impl std::error::Error for RegisterError {}
 /// Registers mod `id`'s listeners, `points`, at the places its [`Points::subscribed`] names. One
 /// route for both callers: a native mod's generated export and the wasm runtime's proxy.
 pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), RegisterError> {
+    let mut open = open();
     if SEALED.get().is_some() {
         return Err(RegisterError::Sealed);
     }
-    let mut open = OPEN.lock().unwrap_or_else(|e| e.into_inner());
-    if open.iter().any(|listener| listener.id == id) {
+    if open.listeners.iter().any(|listener| listener.id == id) {
         return Err(RegisterError::Twice);
     }
-    open.push(Listener {
+    open.listeners.push(Listener {
         id,
         points,
         stopped: AtomicBool::new(false),
@@ -63,33 +78,45 @@ pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), Reg
     Ok(())
 }
 
-/// Stops mod `id`'s listeners: none of them runs again. A trap that stops a wasm group and the
-/// game giving up on a native mod both end here.
+/// Stops mod `id`'s listeners: none of them runs again, whether the list is sealed yet or not. A
+/// trap that stops a wasm group and the game giving up on a native mod both end here.
 pub fn stop(id: &str) {
-    if let Some(sealed) = SEALED.get() {
-        for listener in sealed.listeners.iter().filter(|listener| listener.id == id) {
-            listener.stopped.store(true, Ordering::Release);
+    let mut open = open();
+    match SEALED.get() {
+        Some(sealed) => {
+            for listener in sealed.listeners.iter().filter(|listener| listener.id == id) {
+                listener.stopped.store(true, Ordering::Release);
+            }
         }
+        None => open.stopped.push(id.to_owned()),
     }
 }
 
 /// Seals the list: no listener registers after it. The game calls it once, after the mods load
 /// and before it reads [`listened_at`].
 pub fn seal() {
-    SEALED.get_or_init(|| {
-        let listeners: Box<[Listener]> =
-            std::mem::take(&mut *OPEN.lock().unwrap_or_else(|e| e.into_inner())).into();
-        let mut places = vec![Vec::new(); POINT_COUNT];
-        for (index, listener) in listeners.iter().enumerate() {
-            for place in listener.points.subscribed().iter().flatten() {
-                places[*place as usize].push(index as u32);
-            }
+    let mut open = open();
+    if SEALED.get().is_some() {
+        return;
+    }
+    let listeners: Box<[Listener]> = std::mem::take(&mut open.listeners).into();
+    for listener in listeners.iter() {
+        if open.stopped.iter().any(|id| id == listener.id) {
+            listener.stopped.store(true, Ordering::Release);
         }
-        Sealed {
-            listeners,
-            places: places.into_iter().map(Vec::into_boxed_slice).collect(),
+    }
+    let mut places = vec![Vec::new(); POINT_COUNT];
+    for (index, listener) in listeners.iter().enumerate() {
+        for place in listener.points.subscribed().iter().flatten() {
+            places[*place as usize].push(index as u32);
         }
-    });
+    }
+    let sealed = Sealed {
+        listeners,
+        places: places.into_iter().map(Vec::into_boxed_slice).collect(),
+    };
+    // Published while the lock is held: nothing registers or stops in between.
+    let _ = SEALED.set(sealed);
 }
 
 /// Whether a registered mod listens at the place with this `PointId` index.
@@ -144,6 +171,9 @@ mod tests {
         assert_eq!(register("tick_mod", &Tick), Ok(()));
         assert_eq!(register("tick_mod", &Quiet), Err(RegisterError::Twice));
         assert_eq!(register("quiet_mod", &Quiet), Ok(()));
+        // A stop before the seal holds after it.
+        assert_eq!(register("stopped_early", &Tick), Ok(()));
+        stop("stopped_early");
         assert!(
             !listened_at(PointId::Tick as usize),
             "nothing listens before the seal"
@@ -152,7 +182,11 @@ mod tests {
         assert_eq!(register("late", &Quiet), Err(RegisterError::Sealed));
         assert!(listened_at(PointId::Tick as usize) && listened_at(PointId::TickReturn as usize));
         assert!(!listened_at(PointId::Tick as usize + 2));
-        assert_eq!(listeners(PointId::Tick, "tick").count(), 1);
+        assert_eq!(
+            listeners(PointId::Tick, "tick").count(),
+            1,
+            "the mod stopped before the seal stays stopped"
+        );
         stop("tick_mod");
         assert_eq!(listeners(PointId::Tick, "tick").count(), 0);
     }

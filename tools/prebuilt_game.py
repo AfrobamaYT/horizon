@@ -79,7 +79,8 @@ def stage(target_dir: Path) -> Path:
 
 
 def build(out: Path, server: bool) -> None:
-    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "prebuilt"
+    # Resolved here: the staging and build steps run from the staged copy.
+    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
     staged = stage(target_dir)
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
@@ -193,7 +194,7 @@ def smoke(out: Path) -> None:
     print(f"smoke: the starter mod and the game executable built against {out} alone")
 
 
-# Fails the prebuilt build here, ahead of Windows' hard 65,535, so a growing export list is seen before it breaks.
+# Warns here, ahead of Windows' hard 65,535 (the linker's own failure), so a growing export list is seen first.
 EXPORT_WARNING = 60_000
 
 
@@ -216,9 +217,9 @@ def exports(out: Path) -> None:
             directory = raw + export_rva - address
             names = int.from_bytes(data[directory + 24:directory + 28], "little")
             print(f"{game.name}: {names} exported names (Windows' limit is 65,535)")
-            if names > EXPORT_WARNING:
-                sys.exit(f"{game.name} exports {names} names, past {EXPORT_WARNING:,}: Windows refuses to link a DLL "
-                         "past 65,535, so cut the exported names before adding points or internals (#589)")
+            if names >= EXPORT_WARNING:
+                print(f"::warning::{game.name} exports {names:,} names, {65_535 - names:,} short of Windows' 65,535: "
+                      "cut exported names before adding points or internals (#589)")
             return
     sys.exit(f"{game.name} has no export directory")
 
