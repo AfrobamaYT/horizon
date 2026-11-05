@@ -14,7 +14,7 @@ use crate::crossing::{Collection, Crossing, Rule, Scalar, Shape, Wrapper, bare};
 use crate::internals::Internal;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// The game's crate.
 const GAME: &str = "horizon_client";
@@ -27,6 +27,10 @@ pub struct Counts {
     /// Functions with a part that can't cross, or a form a thunk can't make (a generic, a `self`
     /// taken by value, a returned value that is no copy).
     pub skipped: usize,
+    /// Layouts whose accessibility or field set cannot be proven from the manifest.
+    pub skipped_types: BTreeMap<&'static str, usize>,
+    /// Functions refused at each stage of thunk generation.
+    pub skipped_functions: BTreeMap<&'static str, usize>,
 }
 
 struct Gen<'r> {
@@ -38,6 +42,7 @@ struct Gen<'r> {
     /// Each listed copy type's codec, by path: already generated.
     codecs: HashMap<String, bool>,
     items: Vec<TokenStream>,
+    skip_reason: &'static str,
 }
 
 /// A type's Rust spelling, from the game crate's root.
@@ -611,8 +616,8 @@ impl<'r> Gen<'r> {
     /// The thunk of the listed function `internal`, if every part of it can cross.
     fn thunk(&mut self, internal: &Internal) -> Option<TokenStream> {
         let rule = self.rule;
-        let sig: syn::ForeignItemFn = syn::parse_str(&format!("{};", internal.signature)).ok()?;
-        let sig = sig.sig;
+        self.skip_reason = "signature, generic impl, or unsafe/async function";
+        let sig = signature(&internal.signature)?;
         if sig.generics.params.len() != sig.generics.lifetimes().count()
             || sig.asyncness.is_some()
             || sig.unsafety.is_some()
@@ -620,6 +625,7 @@ impl<'r> Gen<'r> {
         {
             return None;
         }
+        self.skip_reason = "unresolved or opaque owner";
         let path = bare(&internal.path);
         let (owner, name) = path.rsplit_once("::")?;
         let name = format_ident!("{name}");
@@ -643,11 +649,28 @@ impl<'r> Gen<'r> {
             "fn" => (owner.to_owned(), None),
             _ => return None,
         };
+        self.skip_reason = "static or bounded input lifetime";
+        struct StaticInput(bool);
+        impl<'ast> syn::visit::Visit<'ast> for StaticInput {
+            fn visit_lifetime(&mut self, lifetime: &'ast syn::Lifetime) {
+                self.0 |= lifetime.ident == "static";
+            }
+        }
+        let mut static_input = StaticInput(false);
+        for input in &sig.inputs {
+            syn::visit::Visit::visit_fn_arg(&mut static_input, input);
+        }
+        if static_input.0
+            || sig.generics.where_clause.is_some()
+            || sig.generics.lifetimes().any(|l| !l.bounds.is_empty())
+        {
+            return None;
+        }
         let mut writes = 0u64;
         let mut receiver = quote!();
         let mut inputs = sig.inputs.iter();
         if let Some(this) = &this {
-            let syn::FnArg::Receiver(r) = inputs.next()? else {
+            let Some(syn::FnArg::Receiver(r)) = inputs.next() else {
                 // An associated function: called on the type, no receiver.
                 return self.thunk_tail(
                     internal,
@@ -660,6 +683,7 @@ impl<'r> Gen<'r> {
                     &name,
                 );
             };
+            self.skip_reason = "by-value receiver";
             r.reference.as_ref()?;
             let ty = spell(&Shape::Named(this.clone(), rule.named(this)?.lifetimes))?;
             if r.mutability.is_some() {
@@ -696,6 +720,7 @@ impl<'r> Gen<'r> {
         let rule = self.rule;
         let mut lets = Vec::new();
         let mut args = Vec::new();
+        self.skip_reason = "argument cannot cross or be built";
         for (i, input) in inputs.enumerate() {
             let syn::FnArg::Typed(input) = input else {
                 return None;
@@ -741,6 +766,7 @@ impl<'r> Gen<'r> {
         }
         let n = args.len();
         let names: Vec<_> = (0..n).map(|i| format_ident!("a{i}")).collect();
+        self.skip_reason = "result cannot cross";
         let result = match output {
             syn::ReturnType::Default => quote!({
                 result;
@@ -791,6 +817,29 @@ impl<'r> Gen<'r> {
     }
 }
 
+/// The manifest records impl bounds as well as the method signature. A bounded or type-generic
+/// impl is not callable on every receiver, even when the method itself has no generics.
+fn signature(written: &str) -> Option<syn::Signature> {
+    use syn::parse::Parser;
+    let parser = |input: syn::parse::ParseStream<'_>| {
+        if input.peek(syn::Token![impl]) {
+            input.parse::<syn::Token![impl]>()?;
+            let generics: syn::Generics = input.parse()?;
+            let _: syn::Type = input.parse()?;
+            let bounds: Option<syn::WhereClause> = input.parse()?;
+            if generics.params.len() != generics.lifetimes().count() || bounds.is_some() {
+                return Err(input.error("a generic or bounded impl"));
+            }
+            let content;
+            syn::braced!(content in input);
+            content.parse::<syn::Signature>()
+        } else {
+            input.parse::<syn::Signature>()
+        }
+    };
+    parser.parse_str(written).ok()
+}
+
 /// The `__internals` module for `internals`, and what it holds.
 pub fn table(internals: &[Internal]) -> (String, Counts) {
     let rule = Rule::new(internals);
@@ -800,6 +849,7 @@ pub fn table(internals: &[Internal]) -> (String, Counts) {
         nodes: Vec::new(),
         codecs: HashMap::new(),
         items: Vec::new(),
+        skip_reason: "unknown",
     };
     let mut paths: Vec<&str> = rule.paths().collect();
     paths.sort_unstable();
@@ -810,14 +860,31 @@ pub fn table(internals: &[Internal]) -> (String, Counts) {
         }
     }
     let mut thunks = Vec::new();
-    let mut counts = Counts::default();
+    let mut counts = Counts {
+        skipped_types: rule.skipped_types(),
+        ..Counts::default()
+    };
     for internal in internals {
-        if !internal.cfg.is_empty() || !matches!(internal.kind, "method" | "fn") {
+        if !matches!(internal.kind, "method" | "fn") {
+            continue;
+        }
+        if !internal.cfg.is_empty() {
+            counts.skipped += 1;
+            *counts
+                .skipped_functions
+                .entry("conditional function")
+                .or_default() += 1;
             continue;
         }
         match generator.thunk(internal) {
             Some(thunk) => thunks.push(thunk),
-            None => counts.skipped += 1,
+            None => {
+                counts.skipped += 1;
+                *counts
+                    .skipped_functions
+                    .entry(generator.skip_reason)
+                    .or_default() += 1;
+            }
         }
     }
     counts.types = generator.nodes.len();
@@ -830,7 +897,7 @@ pub fn table(internals: &[Internal]) -> (String, Counts) {
     let code = quote! {
         /// The game's internals for the wasm runtime (#589 W): generated by the staging pass.
         #[doc(hidden)]
-        #[allow(unsafe_code, non_snake_case, dead_code)]
+        #[allow(unsafe_code, unused_unsafe, unused_parens, non_snake_case, dead_code)]
         pub mod __internals {
             use ::mod_points::internals as I;
             use I::Value as V;
@@ -849,6 +916,101 @@ pub fn table(internals: &[Internal]) -> (String, Counts) {
 mod tests {
     use super::*;
     use crate::crossing::tests::internal;
+
+    #[test]
+    fn method_signatures_accept_bare_and_impl_forms_but_not_bounded_impls() {
+        for written in [
+            "fn count(&self) -> usize",
+            "impl Game<'_> { fn count(&self) -> usize }",
+        ] {
+            let (_, counts) = table(&[
+                internal(
+                    "horizon_client::Game",
+                    "struct",
+                    "struct Game<'a> { label: &'a str }",
+                ),
+                internal("horizon_client::Game<'_>::count", "method", written),
+            ]);
+            assert_eq!(counts.thunks, 1, "{written}");
+        }
+        assert!(signature("impl<T> Game<T> { fn count(&self) -> usize }").is_none());
+        assert!(signature("impl Game where Self: Sized { fn count(&self) -> usize }").is_none());
+    }
+
+    #[test]
+    fn a_call_cannot_keep_a_decoded_borrow_beyond_its_frame() {
+        let (_, counts) = table(&[
+            internal(
+                "horizon_client::take_static",
+                "fn",
+                "fn take_static(s: &'static str)",
+            ),
+            internal(
+                "horizon_client::take_bounded",
+                "fn",
+                "fn take_bounded<'a: 'static>(s: &'a str)",
+            ),
+            internal("horizon_client::take", "fn", "fn take(s: &str)"),
+        ]);
+        assert_eq!(counts.thunks, 1);
+        assert_eq!(
+            counts.skipped_functions["static or bounded input lifetime"],
+            2
+        );
+    }
+
+    #[test]
+    fn conditional_layouts_and_unwidened_lower_layouts_stay_opaque() {
+        let (code, counts) = table(&[
+            internal(
+                "horizon_client::Conditional",
+                "struct",
+                "struct Conditional { #[cfg(feature = \"audio\")] sound: u8 }",
+            ),
+            internal(
+                "horizon_client::Cases",
+                "enum",
+                "enum Cases { #[cfg(test)] Test, Normal }",
+            ),
+            internal(
+                "horizon_client_core::External",
+                "struct",
+                "struct External { private: u8 }",
+            ),
+            internal(
+                "horizon_client::Generic",
+                "struct",
+                "struct Generic<T> { value: T }",
+            ),
+        ]);
+        assert_eq!(counts.types, 0, "{code}");
+        assert_eq!(counts.skipped_types["conditional field or variant"], 2);
+        assert_eq!(counts.skipped_types["lower-crate layout not widened"], 1);
+        assert_eq!(counts.skipped_types["generic type"], 1);
+    }
+
+    #[test]
+    fn unresolved_imports_and_unexpected_generics_do_not_borrow_another_types_layout() {
+        let (_, counts) = table(&[
+            internal("horizon_client::a::Cell", "struct", "struct Cell { x: u8 }"),
+            internal("horizon_client::a::take", "fn", "fn take(c: Cell<u64>)"),
+            internal("horizon_client::b::take", "fn", "fn take(c: Cell)"),
+        ]);
+        assert_eq!(counts.types, 1);
+        assert_eq!(counts.thunks, 0);
+        assert_eq!(counts.skipped, 2);
+    }
+
+    #[test]
+    fn unsized_and_custom_hasher_fields_are_not_walked() {
+        let (code, counts) = table(&[internal(
+            "horizon_client::Fields",
+            "struct",
+            "struct Fields { slice: &'static [u8], map: HashMap<String, u8, UnknownHasher>, tuple: (u8, Unknown) }",
+        )]);
+        assert_eq!(counts.types, 1);
+        assert!(!code.contains("I :: Op :: Field"));
+    }
 
     #[test]
     fn the_table_covers_what_crosses_and_parses() {

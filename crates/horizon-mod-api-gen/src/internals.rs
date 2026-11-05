@@ -80,7 +80,9 @@ use crate::points::{conditions, test_only};
 fn clean_fields(fields: &Fields) -> Fields {
     let mut fields = fields.clone();
     for field in &mut fields {
-        field.attrs.clear();
+        field
+            .attrs
+            .retain(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
         field.vis = Visibility::Inherited;
     }
     fields
@@ -286,7 +288,9 @@ impl Pass {
                 signature.attrs.clear();
                 signature.vis = Visibility::Inherited;
                 for variant in &mut signature.variants {
-                    variant.attrs.clear();
+                    variant.attrs.retain(|attr| {
+                        attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr")
+                    });
                     variant.fields = clean_fields(&variant.fields);
                 }
                 let path = expose!(value, "enum", value.enum_token.span(), signature);
@@ -629,6 +633,17 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn conditional_layouts_remain_unwalkable_after_staging() {
+        let fixture = Fixture::new(
+            "struct Guarded { #[cfg(test)] only_in_tests: u8 }\nenum Cases { #[cfg(test)] Test, Normal }\n",
+        );
+        let widened = widen_with(&fixture.0, "").unwrap();
+        let (_, counts) = crate::internals_table::table(&widened.entries);
+        assert_eq!(counts.types, 0);
+        assert_eq!(counts.skipped_types["conditional field or variant"], 2);
     }
 
     #[test]

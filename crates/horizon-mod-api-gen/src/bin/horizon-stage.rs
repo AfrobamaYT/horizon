@@ -2,6 +2,12 @@
 //! source copy, then write both manifests (#589). Never run on a working tree.
 use std::path::PathBuf;
 
+/// Keep unsafe forbidden everywhere except the generated table, in the staged copy only.
+fn with_internals_table(source: &str, table: &str) -> String {
+    let source = source.replace("#![forbid(unsafe_code)]", "#![deny(unsafe_code)]");
+    format!("{source}\n{table}\n")
+}
+
 fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     let [root, list, internals] = &args[..] else {
@@ -20,12 +26,18 @@ fn main() {
         let (table, counts) = horizon_mod_api_gen::internals_table::table(&widened.entries);
         let lib = root.join("crates/horizon-client/src/lib.rs");
         let text = std::fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
-        std::fs::write(&lib, text + "\n" + &table + "\n")
+        std::fs::write(&lib, with_internals_table(&text, &table))
             .map_err(|e| format!("{}: {e}", lib.display()))?;
         println!(
             "internals table: {} types, {} thunks, {} functions that can't cross",
             counts.types, counts.thunks, counts.skipped
         );
+        for (reason, count) in &counts.skipped_types {
+            println!("internals table: skipped {count} types: {reason}");
+        }
+        for (reason, count) in &counts.skipped_functions {
+            println!("internals table: skipped {count} functions: {reason}");
+        }
         Ok((staged, widened))
     });
     match staged {
@@ -45,5 +57,20 @@ fn main() {
             eprintln!("horizon-stage: {error}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_staged_root_allows_only_the_table_to_override_unsafe() {
+        let source = "#![forbid(unsafe_code)]\npub mod game;";
+        let staged = with_internals_table(source, "#[allow(unsafe_code)] pub mod __internals {}");
+        assert!(staged.starts_with("#![deny(unsafe_code)]\npub mod game;"));
+        assert!(!staged.contains("forbid(unsafe_code)"));
+        assert!(staged.ends_with("#[allow(unsafe_code)] pub mod __internals {}\n"));
+        assert!(source.contains("forbid(unsafe_code)"));
     }
 }

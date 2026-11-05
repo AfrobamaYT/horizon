@@ -10,7 +10,7 @@
 //! Each written type resolves to a [`Shape`], whose types are spelled from the game crate's root,
 //! so the game's generated code names exactly the type the signature means.
 use crate::internals::Internal;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use syn::{GenericArgument, PathArguments, Type};
 
 /// The most scalars a copy holds; a bigger plain type crosses as a handle.
@@ -135,6 +135,8 @@ pub struct Named {
     pub lifetimes: usize,
     /// Generic over a type or a const: no one layout, so opaque.
     pub generic: bool,
+    /// A layout the staging metadata does not prove can be accessed.
+    pub opaque_reason: Option<&'static str>,
 }
 
 /// A field of a listed type, in the numbering the table and the view share: declaration order,
@@ -150,8 +152,6 @@ pub struct Field<'r> {
 /// The rule over one game's internals.
 pub struct Rule {
     named: HashMap<String, Named>,
-    /// Each type name's paths, for a name written without its module.
-    by_name: HashMap<String, Vec<String>>,
     memo: std::cell::RefCell<HashMap<String, Crossing>>,
 }
 
@@ -167,7 +167,6 @@ impl Rule {
     /// The rule over `internals`: every struct and enum they list, under no `cfg`.
     pub fn new(internals: &[Internal]) -> Self {
         let mut named = HashMap::new();
-        let mut by_name: HashMap<String, Vec<String>> = HashMap::new();
         for internal in internals {
             if !internal.cfg.is_empty() || !matches!(internal.kind, "struct" | "enum") {
                 continue;
@@ -183,11 +182,29 @@ impl Rule {
             let lifetimes = generics.lifetimes().count();
             let generic = generics.params.len() > lifetimes;
             let path = bare(&internal.path);
-            let (module, name) = path.rsplit_once("::").unwrap_or(("", &path));
-            by_name
-                .entry(name.to_owned())
-                .or_default()
-                .push(path.clone());
+            let conditional = |attrs: &[syn::Attribute]| {
+                attrs
+                    .iter()
+                    .any(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
+            };
+            let guarded = match &item {
+                syn::Item::Struct(s) => s.fields.iter().any(|f| conditional(&f.attrs)),
+                syn::Item::Enum(e) => e.variants.iter().any(|v| {
+                    conditional(&v.attrs) || v.fields.iter().any(|f| conditional(&f.attrs))
+                }),
+                _ => false,
+            };
+            let opaque_reason = if generic {
+                Some("generic type")
+            } else if guarded {
+                Some("conditional field or variant")
+            } else if path.starts_with("horizon_") && !path.starts_with(&format!("{GAME}::")) {
+                // The lower-crate pass widens selected items, not their fields and variants.
+                Some("lower-crate layout not widened")
+            } else {
+                None
+            };
+            let (module, _) = path.rsplit_once("::").unwrap_or(("", &path));
             named.insert(
                 path.clone(),
                 Named {
@@ -195,12 +212,12 @@ impl Rule {
                     item,
                     lifetimes,
                     generic,
+                    opaque_reason,
                 },
             );
         }
         Self {
             named,
-            by_name,
             memo: Default::default(),
         }
     }
@@ -234,8 +251,8 @@ impl Rule {
         }
     }
 
-    /// The listed type `written` names in module `module`: its path as written if listed, else the
-    /// one of its name in that module or above it, else the only one of its name.
+    /// Resolve only explicit paths and declarations in the current module. The manifest has no
+    /// `use` information: a name that happens to be unique elsewhere is not proof of an import.
     fn resolve(&self, module: &str, written: &syn::Path) -> Option<String> {
         let spelled = written
             .segments
@@ -243,27 +260,23 @@ impl Rule {
             .map(|s| s.ident.to_string())
             .collect::<Vec<_>>()
             .join("::");
-        let spelled = spelled
-            .strip_prefix("crate::")
-            .map_or(spelled.clone(), |rest| format!("{GAME}::{rest}"));
-        if self.named.contains_key(&spelled) {
-            return Some(spelled);
-        }
-        let candidates = self
-            .by_name
-            .get(&written.segments.last()?.ident.to_string())?;
+        let mut rest = spelled.as_str();
         let mut scope = module;
-        loop {
-            let here = format!("{scope}::{spelled}");
-            if self.named.contains_key(&here) {
-                return Some(here);
+        let resolved = if let Some(rest) = rest.strip_prefix("crate::") {
+            format!("{}::{rest}", module.split("::").next()?)
+        } else if self.named.contains_key(rest) {
+            rest.to_owned()
+        } else {
+            if let Some(tail) = rest.strip_prefix("self::") {
+                rest = tail;
             }
-            match scope.rsplit_once("::") {
-                Some((up, _)) => scope = up,
-                None => break,
+            while let Some(tail) = rest.strip_prefix("super::") {
+                scope = scope.rsplit_once("::")?.0;
+                rest = tail;
             }
-        }
-        (candidates.len() == 1).then(|| candidates[0].clone())
+            format!("{scope}::{rest}")
+        };
+        self.named.contains_key(&resolved).then_some(resolved)
     }
 
     /// What `ty`, written in module `module` (where `Self` is `this`), is.
@@ -350,6 +363,10 @@ impl Rule {
                 Shape::Collection(*collection, args)
             };
         }
+        // A listed non-generic `Cell` must not capture `std::cell::Cell<T>`, for example.
+        if !args.is_empty() {
+            return opaque;
+        }
         match self.resolve(module, path) {
             Some(found) => self.named_shape(&found),
             None => opaque,
@@ -358,7 +375,9 @@ impl Rule {
 
     fn named_shape(&self, path: &str) -> Shape {
         match self.named.get(path) {
-            Some(named) if !named.generic => Shape::Named(path.to_owned(), named.lifetimes),
+            Some(named) if named.opaque_reason.is_none() => {
+                Shape::Named(path.to_owned(), named.lifetimes)
+            }
             _ => Shape::Opaque(None),
         }
     }
@@ -377,7 +396,13 @@ impl Rule {
         match shape {
             Shape::Scalar(_) | Shape::Unit => Crossing::Copy(1),
             Shape::Ref { to, .. } | Shape::Wrapped(_, to) => self.of(to, open),
-            Shape::Tuple(parts) => self.all(parts.iter(), open),
+            Shape::Tuple(parts) => {
+                if parts.iter().any(|p| self.of(p, open) == Crossing::Opaque) {
+                    Crossing::Opaque
+                } else {
+                    self.all(parts.iter(), open)
+                }
+            }
             Shape::Array(elem, n) => match self.of(elem, open) {
                 Crossing::Copy(leaves) if leaves * n <= LEAVES => Crossing::Copy(leaves * n),
                 Crossing::Opaque => Crossing::Opaque,
@@ -388,16 +413,16 @@ impl Rule {
                 Crossing::Opaque => Crossing::Opaque,
                 _ => Crossing::Handle,
             },
-            Shape::Slice(elem) => match self.of(elem, open) {
-                Crossing::Opaque => Crossing::Opaque,
-                _ => Crossing::Handle,
-            },
+            // Nodes erase pointers to `*mut ()`; a slice's metadata cannot survive that.
+            Shape::Slice(_) => Crossing::Opaque,
             Shape::Collection(collection, args) => {
                 let walked = match collection {
                     Collection::HashMap | Collection::BTreeMap => &args[..2],
                     _ => &args[..1],
                 };
-                if walked.iter().any(|a| self.of(a, open) == Crossing::Opaque) {
+                if args.len() != walked.len()
+                    || walked.iter().any(|a| self.of(a, open) == Crossing::Opaque)
+                {
                     Crossing::Opaque
                 } else {
                     Crossing::Handle
@@ -418,6 +443,9 @@ impl Rule {
             return Crossing::Handle;
         }
         let named = &self.named[path];
+        if named.opaque_reason.is_some() {
+            return Crossing::Opaque;
+        }
         open.push(path.to_owned());
         let parts: Vec<Shape> = self
             .fields(path)
@@ -449,6 +477,17 @@ impl Rule {
             (true, true) if leaves <= LEAVES => Crossing::Copy(leaves),
             _ => Crossing::Handle,
         }
+    }
+
+    /// Layouts conservatively left opaque, counted once per listed type.
+    pub fn skipped_types(&self) -> BTreeMap<&'static str, usize> {
+        let mut counts = BTreeMap::new();
+        for named in self.named.values() {
+            if let Some(reason) = named.opaque_reason {
+                *counts.entry(reason).or_default() += 1;
+            }
+        }
+        counts
     }
 
     /// Every listed type's path.
@@ -526,7 +565,7 @@ pub(crate) mod tests {
         // A cell in it makes `Game` no copy, but a handle: its other fields are reached one by
         // one, and the cell can't be.
         assert_eq!(of(&rule, "g", "Game<'_>"), Crossing::Handle);
-        assert_eq!(of(&rule, "g", "(u8, RefCell<u8>)"), Crossing::Handle);
+        assert_eq!(of(&rule, "g", "(u8, RefCell<u8>)"), Crossing::Opaque);
         assert_eq!(of(&rule, "g", "Cache<u8>"), Crossing::Opaque);
         for opaque in [
             "Box<dyn Fn()>",
@@ -545,6 +584,9 @@ pub(crate) mod tests {
         let rule = rule();
         assert_eq!(of(&rule, "g::a", "Pos"), Crossing::Copy(1));
         assert_eq!(of(&rule, "g", "Pos"), Crossing::Copy(3));
-        assert_eq!(of(&rule, "g::b", "a::Pos"), Crossing::Copy(1));
+        assert_eq!(of(&rule, "g::b", "super::a::Pos"), Crossing::Copy(1));
+        assert_eq!(of(&rule, "g::b", "a::Pos"), Crossing::Opaque);
+        assert_eq!(of(&rule, "g::b", "Player"), Crossing::Opaque);
+        assert_eq!(of(&rule, "g", "Pos<u8>"), Crossing::Opaque);
     }
 }
