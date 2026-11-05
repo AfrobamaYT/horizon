@@ -357,7 +357,7 @@ mod facts_tests {
             );
             // Unknown: None.
             assert_eq!(
-                facts.states_of(mod_api::__private::part_tests::block_key("mymod:nothing")),
+                facts.states_of(mod_api::__private::part_tests::invalid_block_key()),
                 None
             );
             assert_eq!(facts.destroy_speed(BlockStateId(u32::MAX)), None);
