@@ -2727,6 +2727,22 @@ struct QueuedLevelEvent {
     source: Option<horizon_world::level::LevelEventPlayer>,
 }
 
+/// The inputs of the scaled GUI size, compared so `window_resize` fires once per change.
+#[derive(Clone, Copy, PartialEq)]
+struct ResizeState {
+    size: winit::dpi::PhysicalSize<u32>,
+    gui_scale: u32,
+    fullscreen: bool,
+    force_unicode: bool,
+}
+
+impl ResizeState {
+    /// Records `self` as the last report and says whether it differs from the previous one.
+    fn differs_from(self, last: &mut Option<Self>) -> bool {
+        last.replace(self) != Some(self)
+    }
+}
+
 struct Game<'a> {
     /// Shared with an integrated server; `collision` and `motion` borrow from it.
     res: Arc<Resources>,
@@ -2908,8 +2924,8 @@ struct Game<'a> {
     /// The layout the last frame drew the inventory's effect panels with.
     effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
-    last_window_size: Option<winit::dpi::PhysicalSize<u32>>,
-    resize_settings: Option<(u32, bool, bool)>,
+    /// What `window_resize` last reported: the physical size and the GUI settings behind the scaled size.
+    resize_state: Option<ResizeState>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
     last_device_recovery: Option<Instant>,
@@ -18361,7 +18377,7 @@ impl ApplicationHandler for Game<'_> {
                 return;
             }
         }
-        self.last_window_size = Some(window.inner_size());
+        self.resize_state = Some(self.resize_state_of(window.inner_size()));
         self.window = Some(window);
         self.ime_allowed = false;
         self.ime_area = None;
@@ -18520,18 +18536,10 @@ impl Game<'_> {
                 return;
             }
         }
-        let resized = if let WindowEvent::Resized(size) = &event {
-            if self.last_window_size.replace(*size) != Some(*size) {
-                Some(*size)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let resized = matches!(event, WindowEvent::Resized(_));
         self.handle_window_event_inner(event_loop, event);
-        if let Some(size) = resized {
-            self.native_window_resize(size.width, size.height);
+        if resized {
+            self.notify_window_resize();
         }
         // A title screen the event asked for opens before the next event.
         self.settle_title_mode();
@@ -20283,8 +20291,7 @@ impl<'a> Game<'a> {
             observed_screen: None,
             effects_layout: std::cell::Cell::new(None),
             window: None,
-            last_window_size: None,
-            resize_settings: None,
+            resize_state: None,
             renderer: None,
             last_device_recovery: None,
             entity_vertices: Vec::new(),
@@ -22877,7 +22884,7 @@ impl Loading {
         };
         drop(game_step);
         let game_ms = game_at.elapsed().as_millis();
-        game.last_window_size = Some(window.inner_size());
+        game.resize_state = Some(game.resize_state_of(window.inner_size()));
         game.window = Some(window);
         game.renderer = Some(renderer);
         game.world_renderer_ready = true;
