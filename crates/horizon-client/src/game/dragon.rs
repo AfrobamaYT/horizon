@@ -5009,6 +5009,9 @@ mod tests {
                     let refused = refused_finalization || answer == Answer::RefuseJoin;
                     assert_eq!(result, !refused);
                     assert_eq!(game.dragon.is_none(), refused);
+                    if !refused {
+                        assert_eq!(game.dragon_silent(), nbt == Some("{Silent:1b}"));
+                    }
                     // The finalized constructor draws yaw, then Mob.finalizeSpawn
                     // draws follow range and handedness unless skipped. The NBT
                     // loader instead draws the dragon seed from the level RNG.
