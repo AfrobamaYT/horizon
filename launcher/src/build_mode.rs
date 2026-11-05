@@ -370,7 +370,7 @@ impl Launcher {
 
     /// Each turned-on native mod's route under the chosen mode, read again when the files or the
     /// mode change.
-    fn native_routes(&self) -> Vec<(String, Route)> {
+    fn native_routes(&self) -> native_mods::Routes {
         let home = self.mods.home();
         let profile = Profile::chosen(&self.settings);
         let key = format!("{}{profile:?}", native_status::fingerprint(&home, None));

@@ -531,9 +531,12 @@ pub enum Route {
     Game { reason: String },
 }
 
+/// Each mod id with its route.
+pub type Routes = Vec<(String, Route)>;
+
 /// Each turned-on native mod's route under `profile`, by mod id. Read from the files in
 /// `home`; empty when they can't be read (the build says why).
-pub fn routes(home: &Path, profile: Profile) -> Vec<(String, Route)> {
+pub fn routes(home: &Path, profile: Profile) -> Routes {
     let Ok(folder) = stage_installed(home, root().join("installed.routes")) else {
         return Vec::new();
     };
@@ -2821,6 +2824,20 @@ mod tests {
             project_manifest(id, "0.3.0", horizon, mixins),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn native_mods_for_another_game_revision_are_rejected() {
+        let root = dir("revision-mismatch");
+        write_native(&root.join("matching"), "matching", A, B);
+        write_native(&root.join("other"), "other", B, B);
+        let mods = bundles(&root).unwrap();
+        assert_eq!(
+            mismatch(&mods, A).as_deref(),
+            Some("other → bbbbbbb; the build uses aaaaaaa")
+        );
+        assert!(mismatch(&mods[..1], A).is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
