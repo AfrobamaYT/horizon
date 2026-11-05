@@ -1,5 +1,32 @@
 # Hook notes
 
+## Foreground GUI and client lifecycle
+
+`Hooks::gui_render_post` runs after the frame's GUI, including menus and the
+F1-hidden HUD. Its `batch` is a `DrawContext`, not an engine `HudBatch`; use
+its drawing methods and `size()` to place overlays. `gui_hidden` and `focused`
+let a listener choose whether to draw. The GUI paint, nine-slice, and tooltip
+operations also use this drawing context and the window's existing atlas.
+`Hooks::menu_background` can adjust the requested blur radius or set it to
+`None` before the game validates it.
+
+`Hooks::entity_outline` receives the entity id, kind, and mutable optional RGB
+outline for the current client render. Leave the existing value unchanged to
+preserve vanilla glowing; `None` disables it. These read-only client hooks
+receive `&dyn ClientHost`. They do not grant server writes.
+
+`Hooks::client_disconnecting` runs before an actual connection is discarded,
+not for a dimension change. Initialization and final shutdown still use the
+existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
+
+## Sending a map image
+
+`PlayerRef::send_map` sends a complete 128-by-128 map image through a
+`&mut dyn ServerHost`. It validates the live player handle and refuses fake
+players; a connectionless actor never produces a protocol packet. The image
+uses map colour bytes and is not saved in the world's map storage. Send it
+again after a player reconnects if no saved map owns that id.
+
 ## Decoded client packets
 
 `Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
@@ -178,9 +205,11 @@ requires a farmer at work and `mob_griefing` enabled.
 - Menus for mod containers: the container names one of vanilla's slot-grid or furnace menus, which opens when the block is used,
   and `native_block_entity_tick` takes the whole block entity, with the data slots the menu shows.
 
-- What a machine's tick reaches: `native_with_mod_block_entity` (change a neighbouring mod block entity, which marks its chunk
-  and tells comparators when its items changed) and `native_set_block_property` (a property of the block's own state, through the level's
-  normal update path).
+- A machine reaches neighbouring storage through the block's Parts and capabilities, not a raw mutable
+  block-entity callback. `block_entity.data_slots(host)` reads a mod entity's menu data on the server or
+  the client's own copy; `set_data_slot(host, slot, value)` writes a declared slot on the server under
+  the current transaction, rolls back on abort, and uses the normal menu broadcast to viewers.
+  `level.set_block` uses the level's normal update path.
 
 - Screens a mod draws for its blocks' menus: `native_screen` lays one out (its height, where each container slot is,
   where the inventory starts; a slot it leaves out is not in the menu, so shift-clicks skip it) and `native_screen_draw` draws it with the mod's
@@ -563,7 +592,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - `Hooks::render_tooltip_pre` (NeoForge's `RenderTooltipEvent.Pre`) is asked for each tooltip about to be placed and drawn, after `render_tooltip_gather_components`: item tooltips and text tooltips (a button's, a book's, the creative tab names), not the selected-item name a bundle draws beside its grid. `place` is the point the tooltip hangs from (the cursor, or the point its screen gives), before the positioner adds its offset and keeps the box on screen; set its `x` and `y` to move it. `screen_width` and `screen_height` are the screen's size. `elements` are the tooltip's lines then its images, read-only (change them in `render_tooltip_gather_components`), and `stack` is the item it describes, `None` for a text tooltip. Set `cancel` and nothing is drawn and no `tooltip_color` is asked. It runs each frame a tooltip shows, only while a mod listens. Diverges from upstream: new hook.
 
-- [advancement triggers](#advancement-triggers) of a mod's own: `native_trigger_criterion(uuid, trigger, test)` fires a trigger
+- [advancement triggers](#advancement-triggers) of a mod's own: `player.trigger_criterion(host, trigger, test)` fires a trigger
   an advancement of a content mod or a data pack names (`mymod:pipe_connected`) for one player, as a NeoForge mod's
   `SimpleCriterionTrigger.trigger`.
 
@@ -676,6 +705,8 @@ or transactions. Declarations still go on each event or registrar.
 `native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen` (the answering mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins, and the dispatch records its id, so a mod can open only its own screen. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game where no mod listens to `screen_opening` or `screen_closing` assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs, and the command, link, code-of-conduct and server-pack prompts) open through `Game::open_screen_overlay`, which fires `screen_opening` before the overlay is set and honours `Cancel` and `ModScreen` in the same way (a canceled server-pack prompt leaves its packs unanswered, a canceled code of conduct leaves the server waiting, as in NeoForge), then `screen_closing` for an overlay it replaces. The title's own screens (`world_select`, `world_create`, `world_edit`, `multiplayer`, `onboarding`…) open in the same way: `Title::set_mode` asks for the screen while a mod listens to `screen_opening` or `screen_closing`, and the game fires `screen_opening` (from the title screen shown) and `screen_closing` for the one left before it applies it, after the window event or control command that asked; `Cancel` keeps the screen shown, and `ModScreen` opens the screen asked for, since a mod's own screen can't open over the title. The multiplayer list's own steps (`add_server`, `edit_server`, `direct_connect`, `server_delete`, `friends_join`, and back to `multiplayer`) are title screens too and go the same way. The title appearing as a whole (at startup, when a world closes, after a disconnect or a failed join) and going (when a world opens) goes through `Game::show_title` and `Game::hide_title`: `screen_opening` (from no screen to the title's screen, or back) and `screen_closing` for what it leaves fire before the change, and `screen_init_post` follows an appearance; a `Cancel` doesn't keep the title shut when there is no world to show instead, nor keep it open over a world that opens. Still announced by the per-frame observer, through the same function and in the same order but after the change, so a mod's answer can't keep it shut: an overlay's closing. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
 
 - `native_client_resources_reloaded()` fires on the render thread after successful client resource-pack application: the atlas, models, renderer and client caches already use the new resources. It covers selection/F3+T and server-pack reloads. Failed staging or application and initial startup do not fire it. This is a completion notification, not a reload-listener registration or staging API.
+
+- `client_stopped` fires after the client shutdown finishes. `game_shutting_down` fires after that on clients and after the dedicated server stops, with a side-typed host. Both fire once on orderly process exit; neither fires for a splitscreen guest. There is no separate `client_started`: `client_setup` covers that moment.
 
 - `native_client_stopping()` (Fabric's `ClientLifecycleEvents.CLIENT_STOPPING`; NeoForge has no event for it) fires once per game process, on the render thread, when the game shuts down: after the world the player was in is left and saved, with the settings and resources still held, so a listener can read them through the `ClientHost` and save its own client state. Closing the window, a quit shortcut and the stop signals reach it; a crash does not. A dedicated server and a splitscreen guest never fire it, as they never fire `client_setup`. Listeners are pure functions of the `ClientHost` reads and the mod's own state. Tick-time effect: none, it fires once at exit. Diverges from upstream: new hook.
 
@@ -2414,7 +2445,15 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `award_experience(host, x, y, z,
   amount)` splits experience into orbs (`ExperienceOrb.award`), all in the level in place.
 
-`level.set_block(host, pos, state, flags)`, `level.remove_block(host, pos, moved)` and `level.destroy_block(host, pos, drop)` change the level in place. They return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. Removal preserves the fluid's legacy block; `moved` marks a piston move. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. `CLIENTS` sends the update, while `INVISIBLE` suppresses notification only on the client, as in `Level.setBlock`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill.
+`level.set_block(host, pos, state, flags)` and `level.remove_block(host, pos, moved)` change the level in place. They return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. Removal preserves the fluid's legacy block; `moved` marks a piston move. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. `CLIENTS` sends the update, while `INVISIBLE` suppresses notification only on the client, as in `Level.setBlock`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill.
+
+`level.destroy_block(host, pos, drop, tool, collect)` uses that same level's destruction and loot path.
+`tool: None` means an empty hand. With `collect`, the returned stacks are not spawned as item entities;
+without it, a successful break returns an empty list after spawning them. The normal block-drop hook
+still runs once before either outcome; tool enchantments and vanilla random ordering are unchanged.
+`drop: false` suppresses resources. `None` means nothing broke, including an invalid write or air.
+`level.set_break_progress(host, breaker, pos, stage)` shows stages 0..9 or clears the crack otherwise;
+a machine uses a stable negative breaker id.
 
 A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
 
@@ -2502,18 +2541,31 @@ whatever conditions the mod reads:
 }
 ```
 
-- `native_trigger_criterion(uuid, trigger, test)` fires it for one player, on a server only. Each criterion with that
+- `player.trigger_criterion(host, &trigger, test)` fires it on a `PlayerRef`, with a mutable `ServerHost`,
+  a mod-owned `Identifier` such as `mymod:pipe_connected`, and an `Arc<dyn CriterionTest>`. Each criterion with that
   trigger the player hasn't been granted, of an advancement not done yet, goes to `test`, then to its `player`
   predicate, as vanilla tests one. Those that pass are granted; an advancement they complete is awarded as by the game's
   own triggers: the toast, the chat line, the rewards and the player's saved progress.
-- `test` gets a `NativeCriterion`: its `conditions` (`Null` when it has none), and `item(key, stack)`, which tests
-  `stack` against the item predicate under `key` as the game's own triggers read one: `items` (an id, a list or a
-  `#tag`), `count`, the `potion_contents` and `damage` components, and the `enchantments` and `damage` predicates.
-  Other components and predicates aren't checked. A missing key passes.
-- It reaches the acting player inside their hook, and another live player on the server in their own level, including
-  during a guest's turn. A displaced outer player is unavailable. True means the player was reached, not
-  that anything was granted. It returns false otherwise, when the player isn't on, and for a `minecraft:` trigger or a
-  name without a namespace: the game fires vanilla's triggers from its own events.
+- `CriterionTest::test(&self, criterion: &dyn CriterionContext)` returns `Result<bool, CriterionTestError>`.
+  The context is a scoped game resource, borrowed only for this test; neither it nor its private world can be retained.
+  `criterion.conditions_json()` gives owned JSON (`"null"` when conditions are absent).
+  `criterion.item(key, &stack)` tests the item predicate under `key` as the game's own triggers read one: `items`
+  (an id, a list or a `#tag`), `count`, the `potion_contents` and `damage` components, and the `enchantments` and
+  `damage` predicates. Other components and predicates aren't checked. A missing key passes. Tag membership is
+  evaluated in the target player's world, not from a detached conditions snapshot.
+- It reaches the acting player inside their hook, and another player on the server in their own level, including
+  during a guest's turn. A displaced outer player is unavailable. `Ok(())` means the player was reached, not that
+  anything was granted. `TriggerCriterionError` distinguishes an invalid trigger (`minecraft:` is reserved; empty
+  namespace/path is refused), a remote client, an unavailable player, a missing game backend, and a failed test.
+  A failed test stops further tests; earlier matching criteria may already be granted. The test itself is not retained.
+- Both resource interfaces and their glue are generated from the traits. **Runtime limitation:** the wasm runtime
+  refuses callbacks into a group already executing a hook. When a wasm mod triggers a criterion from its own hook,
+  the test currently returns `CriterionTestError::Unavailable`, propagated as `TriggerCriterionError::Test`, rather
+  than silently treating it as a nonmatch. Generated bindings alone do not make this synchronous same-group callback
+  executable; runtime support is still required. Native predicates execute synchronously through the same criterion context.
+
+Diverges from upstream: this replaces the unscoped `Host` closure helper with a player receiver and generated
+criterion resources; the private advancement world remains solely in the native implementation.
 
 ### Explosions
 

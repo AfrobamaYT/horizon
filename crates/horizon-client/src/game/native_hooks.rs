@@ -948,11 +948,7 @@
 //! `native_known_recipes`, `native_place_recipe`, `native_give`): what a
 //! recipe viewer needs.
 //!
-//! Names, parameters and call sites are kept from release to release, and
-//! hook points are only ever added: each addition raises [`NATIVE_HOOKS_API`].
-//! A bundle that hooks only these names the API it needs (`hooks`), and the
-//! launcher builds it on any Horizon whose API is at least that one. A change
-//! that would break such a bundle is not made.
+//! Native mods are built against an exact game revision, rather than a hook API revision.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 
@@ -1004,6 +1000,7 @@ use horizon_client::{
 use horizon_core::{
     geometry::Direction,
     position::BlockPos,
+    random::LegacyRandom,
     ticks::{ScheduleResult, TickPriority},
 };
 use horizon_world::level::{BonemealCheck, PlaceContext};
@@ -1025,10 +1022,10 @@ use mod_api::{
     ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
-    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
-    TooltipElement, TooltipPlace, UsePhase,
+    AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
+    LogicalSide, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
+    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, TooltipPlace,
+    UsePhase,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
@@ -1497,11 +1494,6 @@ impl Game<'_> {
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
 /// furnace sets its `lit`.
 pub(super) use horizon_world::level::flags;
-
-/// The hook points' API version. The launcher reads this line from the
-/// source it builds; keep its form.
-#[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 399;
 
 impl GameLevel<'_> {
     /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
@@ -2419,15 +2411,15 @@ impl OpenNativeScreen {
 /// The player as a native mod reads it.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NativePlayer {
-    pub(crate) x: f64,
-    pub(crate) y: f64,
-    pub(crate) z: f64,
+pub struct NativePlayer {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
     /// Degrees; 0 faces south, 90 west (`Direction.fromYRot`).
-    pub(crate) yaw: f32,
-    pub(crate) pitch: f32,
+    pub yaw: f32,
+    pub pitch: f32,
     /// `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`.
-    pub(crate) dimension: &'static str,
+    pub dimension: &'static str,
 }
 
 /// How the panel lays out a recipe of `native_panel_recipes`.
@@ -2625,6 +2617,23 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
+    /// Before an actual connection is discarded, not on a dimension change.
+    pub(super) fn native_client_disconnecting(&self) {
+        self.fire_client_disconnecting();
+    }
+    /// Override an entity's outline colour.
+    pub(super) fn native_entity_outline(
+        &self,
+        entity_id: u32,
+        kind: &str,
+        outline: &mut Option<u32>,
+    ) {
+        self.fire_entity_outline(entity_id, kind, outline);
+    }
+    /// The normal menu blur request, before finite/range validation. None disables it.
+    pub(super) fn native_menu_background(&self, radius: &mut Option<f32>) {
+        self.fire_menu_background(radius);
+    }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
     /// Invalid declarations are logged and skipped; the first valid category
@@ -2687,6 +2696,14 @@ impl Game<'_> {
     /// after its world is left, while settings and resources are still held.
     pub(super) fn native_client_stopping(&mut self) {
         self.fire_client_stopping();
+    }
+    /// The client shutdown has completed.
+    pub(super) fn native_client_stopped(&mut self) {
+        self.fire_client_stopped();
+    }
+    /// The process is about to exit after its game has stopped.
+    pub(super) fn native_game_shutting_down(&mut self) {
+        self.fire_game_shutting_down();
     }
     /// The client made a new level for `dimension` (NeoForge's
     /// `LevelEvent.Load` from the `ClientLevel` constructor): on joining a
@@ -3049,6 +3066,21 @@ impl Game<'_> {
     pub(super) fn native_render_gui_post(&self, draw: &mut HudBatch, corners: &mut Corners) {
         self.fire_render_gui_post(draw, corners);
     }
+    /// After the complete normal GUI batch, including screens, prompts, toasts,
+    /// debug overlays, the pad cursor and IME. Fires even with F1 or a menu open;
+    /// file/world loading and resource-reload overlays do not fire it. The batch
+    /// is in GUI pixels. `native_camera` is this frame's world camera (None on
+    /// the panorama). `gui_hidden` is the F1 setting; `focused` is window focus.
+    /// A mod decides whether its foreground indicator respects those flags.
+    /// Client only; the host is read-only. API @API:gui_render_post@.
+    pub(super) fn native_gui_render_post(
+        &self,
+        batch: &mut HudBatch,
+        gui_hidden: bool,
+        focused: bool,
+    ) {
+        self.fire_gui_render_post(batch, gui_hidden, focused);
+    }
     /// Before one of vanilla's HUD layers is drawn (`RenderGuiLayerEvent.Pre`):
     /// draw here to put something below the layer, or set `canceled` to hide
     /// it. `layer` is the layer's id, in the order Horizon draws them:
@@ -3364,7 +3396,7 @@ impl Game<'_> {
     /// draw the world from anywhere: a cinematic or replay camera. Only the picture, the sound's
     /// listener and the billboards facing the camera follow it; the player, where they aim, the
     /// first-person hand and which chunks load stay the player's. Values that aren't finite keep
-    /// vanilla's. Not called on the title screen's panorama. API @API:camera_pose@.
+    /// vanilla's. Not called on the title screen's panorama. API 402.
     pub(super) fn native_camera_pose(
         &self,
         partial: f32,
@@ -5707,7 +5739,7 @@ impl Game<'_> {
     /// client reads with `native_screen_extra_data` while the screen is open
     /// (NeoForge's `openMenu` with an extra-data writer). The first mod to
     /// set it wins, so answer only for your blocks. The player's state is not
-    /// swapped in. @API:menu_extra_data@.
+    /// swapped in. 401.
     pub(super) fn native_menu_extra_data(
         &mut self,
         player: u128,
@@ -8798,7 +8830,7 @@ impl Game<'_> {
                 self.native_level_set_block(level, at, state, flags);
             }
             LandingWrite::DestroyBlock { drop } => {
-                self.native_level_destroy_block(level, at, drop);
+                self.native_level_destroy_block(level, at, drop, None, false);
             }
             // A write a later API adds that this game does not know is not applied.
             _ => {}
@@ -10197,7 +10229,7 @@ impl Game<'_> {
     }
     /// The block of the mod screen that is open (`native_screen`), as the
     /// server named it when the block opened its menu type; None when no mod
-    /// screen is open. @API:menu_extra_data@.
+    /// screen is open. 401.
     pub(super) fn native_screen_pos(&self) -> Option<[i32; 3]> {
         self.shown_native_screen()?.pos()
     }
@@ -10225,6 +10257,7 @@ impl Game<'_> {
         self.res.facts().get(state).name.to_string()
     }
     /// The most recently extracted world frame's camera, if one exists.
+    /// During GUI rendering this is the current frame, including bob/spin and FOV.
     pub(super) fn native_camera(&self) -> Option<NativeCamera> {
         self.native_camera_frame.clone()
     }
@@ -10471,10 +10504,11 @@ impl Game<'_> {
     pub(super) fn native_chat(&mut self, text: &str) {
         let focused = self.screen == Screen::Chat;
         let line = Text::literal(text);
+        let ticks = self.visual_ticks();
         let atlas = &self.gui.atlas;
         self.ui
             .chat
-            .add(atlas, line, None, ChatSource::Client, self.ticks, focused);
+            .add(atlas, line, None, ChatSource::Client, ticks, focused);
     }
     /// The instance (game) folder, which its players share: `saves/`,
     /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the
@@ -13227,6 +13261,7 @@ mod tests {
                     kind,
                     attacker,
                     from: None,
+                    attacker_species: None,
                 },
                 &Attack {
                     attacker: 7,

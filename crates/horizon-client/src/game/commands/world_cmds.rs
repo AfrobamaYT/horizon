@@ -222,10 +222,15 @@ impl Game<'_> {
                     Target::Mob(i) => Some(Who::Mob(i)),
                     _ => None,
                 });
+                let attacker_species = match attacker {
+                    Some(Who::Mob(i)) => self.mobs.iter().find(|m| m.id == i).map(|m| m.species()),
+                    _ => None,
+                };
                 let damage = Damage {
                     kind: Self::damage_kind(&ty),
                     attacker,
                     from,
+                    attacker_species,
                 };
                 // DamageSource.getEntity is the causing player, even when
                 // another client issued the command or supplied the direct entity.
@@ -895,8 +900,24 @@ impl Game<'_> {
         let Some(Arg::Resource(attribute)) = ctx.get("attribute").cloned() else {
             return Ok(0);
         };
+        // An unbounded selector reaches every loaded level, so the target may
+        // be in another one than the command's (EntitySelector.findEntities,
+        // AttributeCommand acting on the entity itself).
+        self.in_target_level(target, |g| {
+            g.attribute_in_level(id, ctx, target, &attribute)
+        })
+        .unwrap_or(Ok(0))
+    }
+    /// `/attribute` on a target, with the target's own level in place.
+    fn attribute_in_level(
+        &mut self,
+        id: &str,
+        ctx: &Context,
+        target: Target,
+        attribute: &str,
+    ) -> R<i32> {
         let name = self.target_name(target);
-        let description = Self::attribute_description(&attribute);
+        let description = Self::attribute_description(attribute);
         let short = attribute.trim_start_matches("minecraft:").to_owned();
         let no_attribute = |name: &Text, d: &Text| {
             text_error(
@@ -921,7 +942,7 @@ impl Game<'_> {
                 let Some(player) = self.player.as_mut() else {
                     return Ok(0);
                 };
-                let Some(key) = player.attributes.key(&attribute) else {
+                let Some(key) = player.attributes.key(attribute) else {
                     return Err(no_attribute(&name, &description));
                 };
                 let unavailable = |_| no_attribute(&name, &description);
@@ -948,7 +969,7 @@ impl Game<'_> {
                         Ok((v * scale) as i32)
                     }
                     "attribute.base.set" => {
-                        self.write_attribute(target, &attribute, AttributeWrite::Base(value_arg))
+                        self.write_attribute(target, attribute, AttributeWrite::Base(value_arg))
                             .ok_or_else(|| no_attribute(&name, &description))?;
                         // onAttributeUpdated: a lowered max_health clamps health.
                         if attribute == "minecraft:max_health"
@@ -963,7 +984,7 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.base.reset" => {
-                        self.write_attribute(target, &attribute, AttributeWrite::ResetBase)
+                        self.write_attribute(target, attribute, AttributeWrite::ResetBase)
                             .ok_or_else(|| no_attribute(&name, &description))?;
                         let v = self
                             .player
@@ -990,7 +1011,7 @@ impl Game<'_> {
                             true,
                             false,
                         )
-                        .and_then(|write| self.write_attribute(target, &attribute, write))
+                        .and_then(|write| self.write_attribute(target, attribute, write))
                         .ok_or_else(|| no_attribute(&name, &description))?;
                         if !added {
                             return Err(text_error(
@@ -1011,7 +1032,7 @@ impl Game<'_> {
                     "attribute.modifier.remove" => {
                         let removed = self.write_attribute(
                             target,
-                            &attribute,
+                            attribute,
                             AttributeWrite::Remove(modifier_id.clone()),
                         );
                         if removed != Some(true) {
@@ -1081,7 +1102,7 @@ impl Game<'_> {
                 self.generic_attribute(
                     target,
                     id,
-                    &attribute,
+                    attribute,
                     (&name, &description),
                     (value_arg, scale, &modifier_id, &op),
                 )
@@ -1126,7 +1147,7 @@ impl Game<'_> {
                     "attribute.base.set" => {
                         // AttributeInstance keeps the raw base and clamps only the
                         // effective value.
-                        self.write_attribute(target, &attribute, AttributeWrite::Base(value_arg));
+                        self.write_attribute(target, attribute, AttributeWrite::Base(value_arg));
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
                             &[description, name, java_double_text(value_arg)],
@@ -1134,7 +1155,7 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.base.reset" => {
-                        self.write_attribute(target, &attribute, AttributeWrite::ResetBase);
+                        self.write_attribute(target, attribute, AttributeWrite::ResetBase);
                         let v = self
                             .mobs
                             .iter()
@@ -1154,7 +1175,7 @@ impl Game<'_> {
                             true,
                             false,
                         )
-                        .and_then(|write| self.write_attribute(target, &attribute, write));
+                        .and_then(|write| self.write_attribute(target, attribute, write));
                         if added != Some(true) {
                             return Err(text_error(
                                 "commands.attribute.failed.modifier_already_present",
@@ -1170,7 +1191,7 @@ impl Game<'_> {
                     "attribute.modifier.remove" => {
                         let removed = self.write_attribute(
                             target,
-                            &attribute,
+                            attribute,
                             AttributeWrite::Remove(modifier_id.clone()),
                         );
                         if removed != Some(true) {
@@ -1467,11 +1488,22 @@ impl Game<'_> {
             return;
         }
         self.mobs[i].extra.mount = None;
+        let remaining = self
+            .mobs
+            .iter()
+            .find(|m| m.extra.mount == Some(v))
+            .map(|m| m.id);
+        if let Some(vehicle) = self.mobs.iter_mut().find(|m| m.id == v) {
+            vehicle.extra.rider = remaining;
+        }
         let (width, yaw) = (f64::from(self.mobs[i].width()), self.mobs[i].yaw);
         let at = if let Some(b) = self.boats.iter().position(|b| b.id == v) {
             self.boat_dismount_target(b, width, yaw)
+        } else if let Some(at) = self.horse_dismount_point(v, i) {
+            at
+        } else if let Some(at) = self.cart_dismount_point(v, i) {
+            at
         } else if let Some(m) = self.mobs.iter_mut().find(|m| m.id == v) {
-            m.extra.rider = None;
             // Entity.getDismountLocationForPassenger: on top of the vehicle.
             let p = m.position;
             horizon_core::geometry::Vec3::new(p.x, p.y + f64::from(m.height()), p.z)
@@ -1682,7 +1714,7 @@ impl Game<'_> {
                 }
             }
             if !skip {
-                self.teleport_to(t, to, None);
+                self.teleport_to(t, to, None, false);
             }
             let closest = points
                 .iter()
