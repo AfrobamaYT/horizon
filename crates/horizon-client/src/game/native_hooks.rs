@@ -2820,6 +2820,11 @@ impl Game<'_> {
         title: &mut Text,
         description: &mut Option<Text>,
     ) -> bool {
+        // Shared advancement/recipe producers also run on logical servers;
+        // only their receiving client owns toast presentation and its hook.
+        if self.is_logical_server() {
+            return false;
+        }
         let mut cancel = false;
         self.native_toast_add(kind, title, description, &mut cancel);
         !cancel

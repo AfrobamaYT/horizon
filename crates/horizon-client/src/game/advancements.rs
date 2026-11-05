@@ -2426,6 +2426,17 @@ mod tests {
                 let system = game.add_system_toast(system).unwrap();
                 assert_eq!(system.title.plain(), "replacement");
                 assert_eq!(system.message.unwrap().plain(), "changed");
+                for role in [
+                    super::super::execution_role::ExecutionRole::IntegratedServer,
+                    super::super::execution_role::ExecutionRole::DedicatedServer,
+                ] {
+                    game.options.execution_role = role;
+                    let mut title = Text::literal("server");
+                    let mut description = Some(Text::literal("edit"));
+                    assert!(!game.add_toast(ToastKind::Advancement, &mut title, &mut description));
+                    assert_eq!(title.plain(), "server", "server must not invoke listener");
+                    assert_eq!(description.unwrap().plain(), "edit");
+                }
             });
         });
     }
