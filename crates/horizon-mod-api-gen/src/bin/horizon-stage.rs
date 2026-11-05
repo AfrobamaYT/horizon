@@ -106,6 +106,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn declaration_files_form_a_deterministic_union() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("wasm-declarations-{}", std::process::id()));
+        assert!(declarations(&root).unwrap().is_empty());
+        let directory = root.join("crates/horizon-mod-api-gen/wasm-internals");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("first.txt"),
+            "# whole comment\nz\na # inline\n\n",
+        )
+        .unwrap();
+        std::fs::write(directory.join("second.txt"), "a\nb\n").unwrap();
+        std::fs::write(directory.join("README.md"), "not a path").unwrap();
+        assert_eq!(declarations(&root).unwrap(), ["a", "b", "z"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn the_staged_root_allows_only_the_table_to_override_unsafe() {
         let source = "#![forbid(unsafe_code)]\npub mod game;";
         let staged = with_internals_table(source);

@@ -797,23 +797,45 @@ impl<'r> Gen<'r> {
             }
         });
         self.nodes[id as usize].2 = quote!(#node);
+        let writable = sig.receiver().is_some_and(|r| r.mutability.is_some());
         let variant = shape.variant();
         let target = &point.target;
         let hash = &point.wire_shape;
         let mut places = vec![
-            quote!(I::Place { place: ::mod_points::PointId::#variant as usize, target: #target, hash: #hash, receiver: #receiver, record: #id },),
+            quote!(I::Place { place: ::mod_points::PointId::#variant as usize, target: #target, hash: #hash, receiver: #receiver, receiver_writable: #writable, record: #id },),
         ];
         // A RETURN borrows the returned value directly, not the head's Option<R> slot.
         let returned = match &sig.output {
             syn::ReturnType::Default => Shape::Unit,
             syn::ReturnType::Type(_, ty) => rule.shape(module, owner.as_deref(), ty),
         };
-        if rule.crossing_of(&returned) != Crossing::Opaque && !matches!(returned, Shape::Ref { .. })
-        {
+        if rule.crossing_of(&returned) != Crossing::Opaque {
             self.selection.reach(&returned, rule);
-            let id = self.node(&returned);
+            let rust = spell(&returned)?;
+            let id = self.nodes.len() as u32;
+            let node = format_ident!("node_{id}");
+            let path = format!("{module}::{}ReturnPlace", shape.raw_record());
+            self.nodes.push((path, String::new(), quote!(#node)));
+            let arm = self.part(
+                0,
+                &returned,
+                quote!(&*(p as *const #rust)),
+                quote!(&mut *(p as *mut #rust)),
+                quote!(p),
+            );
+            self.items.push(quote! {
+                #[allow(unused_variables, unused_unsafe, clippy::all)]
+                unsafe fn #node(p: *mut (), w: bool, op: I::Op<'_>) -> ::std::result::Result<I::Reply, I::Refusal> {
+                    unsafe { match op { #arm _ => Err(I::not_here("not on this return place")) } }
+                }
+            });
+            let receiver = if shape.borrowed_return {
+                quote!(None)
+            } else {
+                receiver
+            };
             let variant = shape.return_variant();
-            places.push(quote!(I::Place { place: ::mod_points::PointId::#variant as usize, target: #target, hash: #hash, receiver: #receiver, record: #id },));
+            places.push(quote!(I::Place { place: ::mod_points::PointId::#variant as usize, target: #target, hash: #hash, receiver: #receiver, receiver_writable: #writable, record: #id },));
         }
         Some(places)
     }
@@ -1138,9 +1160,11 @@ pub fn table_with_points(
     };
     let mut selection = Selection::default();
     let mut functions = Vec::new();
+    let mut members = Vec::new();
+    let mut exposed = HashSet::new();
     for path in declared {
         let entries: Vec<_> = internals.iter().filter(|i| i.path == path).collect();
-        let Some(internal) = entries.iter().find(|i| i.cfg.is_empty()).copied() else {
+        if !entries.iter().any(|i| i.cfg.is_empty()) {
             counts.refused.insert(
                 path.into(),
                 if entries.is_empty() {
@@ -1150,67 +1174,77 @@ pub fn table_with_points(
                 },
             );
             continue;
-        };
-        let reason = match internal.kind {
-            "method" | "fn" => {
-                functions.push(internal);
-                continue;
-            }
-            "struct" | "enum" => {
-                let ty = bare(path);
-                let shape = Shape::Named(ty.clone(), rule.named(&ty).map_or(0, |n| n.lifetimes));
-                if rule.crossing_of(&shape) == Crossing::Opaque {
-                    let reason = rule
-                        .named(&ty)
-                        .and_then(|n| n.opaque_reason)
-                        .unwrap_or("opaque type");
-                    *counts.skipped_types.entry(reason).or_default() += 1;
-                    reason
-                } else {
-                    selection.reach(&shape, &rule);
+        }
+        // A field and a method can legitimately have the same manifest path.
+        for internal in entries.into_iter().filter(|i| i.cfg.is_empty()) {
+            let reason = match internal.kind {
+                "method" | "fn" => {
+                    functions.push(internal);
                     continue;
                 }
-            }
-            "field" => {
-                // An enum field's manifest path includes its case; numbering spans all cases.
-                let field = rule.paths().find_map(|owner| {
-                    rule.fields(owner)
-                        .into_iter()
-                        .enumerate()
-                        .find_map(|(index, field)| {
-                            use quote::ToTokens;
-                            let member = field.member.to_token_stream().to_string();
-                            let field_path = match field.case {
-                                Some((_, case)) => format!("{owner}::{case}::{member}"),
-                                None => format!("{owner}::{member}"),
-                            };
-                            (bare(path) == field_path).then_some((owner, index, field))
-                        })
-                });
-                if let Some((owner, index, field)) = field {
-                    let named = rule.named(owner).expect("listed");
-                    let shape = rule.shape(&named.module, Some(owner), field.ty);
-                    let owner_shape = Shape::Named(owner.into(), named.lifetimes);
-                    if rule.crossing_of(&owner_shape) == Crossing::Opaque {
-                        named.opaque_reason.unwrap_or("opaque owner")
-                    } else if rule.crossing_of(&shape) == Crossing::Opaque {
-                        "field type cannot cross"
+                "struct" | "enum" => {
+                    let ty = bare(path);
+                    let Some(named) = rule.named(&ty) else {
+                        counts.refused.insert(path.into(), "unresolved type layout");
+                        continue;
+                    };
+                    let shape = Shape::Named(ty.clone(), named.lifetimes);
+                    if rule.crossing_of(&shape) == Crossing::Opaque {
+                        let reason = rule
+                            .named(&ty)
+                            .and_then(|n| n.opaque_reason)
+                            .unwrap_or("opaque type");
+                        *counts.skipped_types.entry(reason).or_default() += 1;
+                        reason
                     } else {
-                        selection
-                            .owners
-                            .entry(owner.into())
-                            .or_default()
-                            .insert(index);
                         selection.reach(&shape, &rule);
+                        exposed.insert(path.to_owned());
                         continue;
                     }
-                } else {
-                    "unresolved field owner"
                 }
-            }
-            _ => "unsupported item kind",
-        };
-        counts.refused.insert(path.into(), reason);
+                "field" => {
+                    // An enum field's manifest path includes its case; numbering spans all cases.
+                    let field = rule.paths().find_map(|owner| {
+                        rule.fields(owner)
+                            .into_iter()
+                            .enumerate()
+                            .find_map(|(index, field)| {
+                                use quote::ToTokens;
+                                let member = field.member.to_token_stream().to_string();
+                                let field_path = match field.case {
+                                    Some((_, case)) => format!("{owner}::{case}::{member}"),
+                                    None => format!("{owner}::{member}"),
+                                };
+                                (bare(path) == field_path).then_some((owner, index, field))
+                            })
+                    });
+                    if let Some((owner, index, field)) = field {
+                        let named = rule.named(owner).expect("listed");
+                        let shape = rule.shape(&named.module, Some(owner), field.ty);
+                        let owner_shape = Shape::Named(owner.into(), named.lifetimes);
+                        if rule.crossing_of(&owner_shape) == Crossing::Opaque {
+                            named.opaque_reason.unwrap_or("opaque owner")
+                        } else if rule.crossing_of(&shape) == Crossing::Opaque {
+                            "field type cannot cross"
+                        } else {
+                            selection
+                                .owners
+                                .entry(owner.into())
+                                .or_default()
+                                .insert(index);
+                            members.push((internal, owner.to_owned(), index as u32));
+                            selection.reach(&shape, &rule);
+                            exposed.insert(path.to_owned());
+                            continue;
+                        }
+                    } else {
+                        "unresolved field owner"
+                    }
+                }
+                _ => "unsupported item kind",
+            };
+            counts.refused.insert(path.into(), reason);
+        }
     }
     // Validate functions before generating the final nodes: arguments/results may promote a
     // partial owner to a full layout. Discard each refused probe, including its nodes/codecs.
@@ -1224,12 +1258,14 @@ pub fn table_with_points(
                 selection = probe.selection;
                 raw.push((internal, point));
                 has_place = true;
+                exposed.insert(internal.path.clone());
             }
         }
         let mut probe = Gen::new(&rule, &hashes, selection.clone());
         if probe.thunk(internal).is_some() {
             selection = probe.selection;
             accepted.push(internal);
+            exposed.insert(internal.path.clone());
         } else if !has_place {
             *counts
                 .skipped_functions
@@ -1261,6 +1297,18 @@ pub fn table_with_points(
                 .expect("validated raw place")
         })
         .collect();
+    let members: Vec<_> = members
+        .into_iter()
+        .map(|(internal, owner, field)| {
+            let id = generator.node(&Shape::Named(
+                owner.clone(),
+                rule.named(&owner).expect("listed").lifetimes,
+            ));
+            let (path, hash) = (&internal.path, &internal.hash);
+            quote!(I::Member { path: #path, hash: #hash, owner: #id, field: #field },)
+        })
+        .collect();
+    counts.refused.retain(|path, _| !exposed.contains(path));
     counts.skipped = counts.refused.len();
     counts.types = generator.nodes.len();
     counts.thunks = thunks.len();
@@ -1279,13 +1327,14 @@ pub fn table_with_points(
             types: &[#(#types)*],
             thunks: &[#(#thunks)*],
             places: &[#(#places)*],
+            members: &[#(#members)*],
         };
     };
     (code.to_string(), counts)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::crossing::tests::internal;
 
@@ -1296,7 +1345,7 @@ mod tests {
         )
     }
 
-    fn run_fixture(code: &str, declarations: &str, body: &str) {
+    pub(crate) fn run_fixture(code: &str, declarations: &str, body: &str) {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let build = std::env::var_os("CARGO_TARGET_DIR")
             .map_or_else(|| root.join("target"), std::path::PathBuf::from)
@@ -1405,6 +1454,7 @@ mod tests {
                     r#"
                 let mut owner = Owner {{ first: 3, second: 7 }};
                 let walk = __internals::TABLE.types[0].node;
+                assert_eq!(owner.first, 3);
                 let ptr = &raw mut owner as *mut ();
                 unsafe {{
                     assert_eq!(walk(ptr, true, Op::Get(1)), Ok(Reply::Value(Value::U(7))));
