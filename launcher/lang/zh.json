@@ -931,6 +931,7 @@
   "Use the Microsoft account for {name}.": "请使用 {name} 的 Microsoft 账户。",
   "Use these jars": "使用这些 jar 文件",
   "Used from the next start.": "从下次启动开始生效。",
+  "Uses game internals ({count})": "Uses game internals ({count})",
   "Vanilla": "原版",
   "Verified": "已验证",
   "Version": "版本",

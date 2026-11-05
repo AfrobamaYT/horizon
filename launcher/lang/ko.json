@@ -931,6 +931,7 @@
   "Use the Microsoft account for {name}.": "{name}의 Microsoft 계정을 사용합니다.",
   "Use these jars": "이 jar 파일 사용",
   "Used from the next start.": "다음 시작부터 적용됩니다.",
+  "Uses game internals ({count})": "Uses game internals ({count})",
   "Vanilla": "바닐라",
   "Verified": "검증됨",
   "Version": "버전",
