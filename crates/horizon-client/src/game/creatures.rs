@@ -1004,16 +1004,16 @@ impl Game<'_> {
         if mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
             let mut heard = mod_api::NativeDifficulty::from(difficulty);
             let (mut spawn_cancelled, mut skip) = (false, false);
-            self.native_finalize_spawn(
-                self.dim.id(),
-                &mob.kind.id,
+            self.native_finalize_spawn(mod_api::__private::FinalizeSpawnCall {
+                dimension: self.dim.id(),
+                kind: &mob.kind.id,
                 reason,
-                at,
+                pos: at,
                 spawner,
-                &mut heard,
-                &mut spawn_cancelled,
-                &mut skip,
-            );
+                difficulty: &mut heard,
+                spawn_cancelled: &mut spawn_cancelled,
+                cancel: &mut skip,
+            });
             if spawn_cancelled {
                 return (Finalized::Cancelled, difficulty);
             }

@@ -33,7 +33,6 @@ const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
     "ender_pearl_teleport",
     "block_drops",
     "bonemeal",
-    "finalize_spawn",
     "item_tooltip",
     "note_block_play",
     "player_set_spawn",

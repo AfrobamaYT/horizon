@@ -6698,27 +6698,8 @@ impl Game<'_> {
     /// finalization (the mob still spawns, uninitialised); `spawn_cancelled`
     /// stops the spawn. `difficulty` is what finalization will read.
     /// Server-side.
-    pub(super) fn native_finalize_spawn(
-        &self,
-        dimension: &str,
-        kind: &str,
-        reason: NativeSpawnReason,
-        pos: [f64; 3],
-        spawner: Option<NativeSpawner>,
-        difficulty: &mut NativeDifficulty,
-        spawn_cancelled: &mut bool,
-        cancel: &mut bool,
-    ) {
-        self.fire_finalize_spawn(
-            dimension,
-            kind,
-            reason,
-            pos,
-            spawner,
-            difficulty,
-            spawn_cancelled,
-            cancel,
-        );
+    pub(super) fn native_finalize_spawn(&self, call: mod_api::__private::FinalizeSpawnCall<'_>) {
+        self.fire_finalize_spawn(call);
     }
     /// The world's spawn point changed to `pos` and `angle`.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {

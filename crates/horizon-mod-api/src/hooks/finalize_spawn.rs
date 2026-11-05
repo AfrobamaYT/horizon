@@ -10,5 +10,14 @@ pub trait Hooks {
         neoforge = "FinalizeSpawnEvent",
         cancellable = true
     )]
-    fn finalize_spawn();
+    fn finalize_spawn(
+        dimension: &str,
+        kind: &str,
+        reason: NativeSpawnReason,
+        pos: [f64; 3],
+        spawner: Option<NativeSpawner>,
+        difficulty: &mut NativeDifficulty,
+        spawn_cancelled: &mut bool,
+        cancel: &mut bool,
+    );
 }
