@@ -23,8 +23,7 @@ const MAX_TARGET_PARAMETERS: usize = 7;
 /// The hooks whose flat targets already take more than [`MAX_TARGET_PARAMETERS`]. This list only
 /// shrinks and takes no new entries: convert a hook to a carrier and delete its line. A PR that
 /// adds a hook never edits it, so no two PRs collide on it.
-const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
-];
+const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[];
 
 /// Refuses a flat target of a new hook that takes more than [`MAX_TARGET_PARAMETERS`].
 fn target_parameters(name: &str, native: &str, count: usize, carrier: &str) -> Result<(), String> {
