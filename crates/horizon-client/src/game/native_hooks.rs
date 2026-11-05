@@ -1037,6 +1037,7 @@ pub(crate) use mod_api::{
 };
 use mod_api::{
     MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe,
+    SoundPlay,
 };
 use std::{
     collections::HashMap,
@@ -9954,26 +9955,21 @@ impl Game<'_> {
     pub(super) fn native_window(&self) -> bool {
         self.options.execution_role == ExecutionRole::Client
     }
-    /// Plays sound event `sound` (`minecraft:entity.generic.explode`, or a
-    /// mod's own from its `assets/<id>/sounds.json`) at `at` for this
-    /// player only, `delay` ticks from now (0 to 1200, a minute): a client
-    /// mod's sound that waits, as thunder heard after the flash or a blast
-    /// heard when its shock wave arrives. `volume` past 1 carries farther,
-    /// as vanilla's attenuation does (16 blocks times the volume). False, with
-    /// nothing played, on a server or for a value out of range; an event the
-    /// resources don't have plays nothing, as vanilla's.
-    pub(super) fn native_play_local_sound(
-        &mut self,
-        sound: &str,
-        at: [f64; 3],
-        volume: f32,
-        pitch: f32,
-        delay: i32,
-    ) -> bool {
-        if !self.native_window() || !local_sound_ok(sound, at, volume, pitch, delay) {
+    /// Plays `sound` for this player only (`SoundPlay`'s event: `minecraft:ui.button.click`,
+    /// or a mod's own from its `assets/<id>/sounds.json`): nothing is sent to the server, and
+    /// other players don't hear it. It takes `&self`, so a screen, key or mouse hook can play
+    /// one: the sound is queued and starts at the next audio update (once a client tick),
+    /// `after` ticks counted from then (0 to 1200, a minute; `SoundEngine.playDelayed`). `SoundPlay::ui` plays it at the listener as an interface sound
+    /// (`SimpleSoundInstance.forUI`); `SoundPlay::at` at a position in the client's level,
+    /// fading with distance (`volume` past 1 carries farther, 16 blocks times the volume), as
+    /// thunder heard after the flash or a blast heard when its shock wave arrives. False,
+    /// with nothing played, on a server or for a value out of range; an event the resources
+    /// don't have plays nothing, as vanilla's.
+    pub(super) fn native_play_local_sound(&self, sound: &SoundPlay, after: u32) -> bool {
+        if !self.native_window() || !local_sound_ok(sound, after) {
             return false;
         }
-        self.audio.play_after(sound, at, volume, pitch, delay);
+        self.mod_sounds.borrow_mut().push((sound.clone(), after));
         true
     }
     /// Draws one vanilla HUD layer between the mods' hooks: `native_gui_layer_pre`
@@ -11957,17 +11953,21 @@ fn finite_params(params: [[f32; 4]; 8]) -> [[f32; 4]; 8] {
     params.map(|v| v.map(|x| if x.is_finite() { x } else { 0.0 }))
 }
 
-/// Whether `native_play_local_sound` takes these values: a sound event's id
-/// (`sound_id`, as `native_play_sound` takes), a finite position, a volume
-/// and pitch at or above 0, and a delay of a minute at most.
-fn local_sound_ok(sound: &str, at: [f64; 3], volume: f32, pitch: f32, delay: i32) -> bool {
-    sound_id(sound)
-        && at.iter().all(|v| v.is_finite() && v.abs() <= 30_000_000.0)
-        && volume.is_finite()
-        && volume >= 0.0
-        && pitch.is_finite()
-        && pitch >= 0.0
-        && (0..=1200).contains(&delay)
+/// Whether `native_play_local_sound` takes this sound: a sound event's id (`sound_id`, as
+/// `native_play_sound` takes), a finite position, a volume and pitch at or above 0, a repeat
+/// gap that isn't negative, and a start a minute away at most.
+fn local_sound_ok(sound: &SoundPlay, after: u32) -> bool {
+    sound_id(&sound.identifier)
+        && sound
+            .position
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= 30_000_000.0)
+        && sound.volume.is_finite()
+        && sound.volume >= 0.0
+        && sound.pitch.is_finite()
+        && sound.pitch >= 0.0
+        && sound.delay >= 0
+        && after <= 1200
 }
 
 /// `v` within `lo..=hi`; `lo` when it is not a number.
@@ -12955,32 +12955,33 @@ mod tests {
     }
 
     /// A client mod's sound needs a namespaced event, finite values and a
-    /// delay of a minute at most.
+    /// start a minute away at most.
     #[test]
     fn a_local_sound_is_checked() {
         use super::local_sound_ok;
-        let at = [0.5, 64.0, 0.5];
-        assert!(local_sound_ok("ironfall:boom_far", at, 8.0, 1.0, 140));
+        use mod_api::{SoundPlay, SoundSource};
+        let at = |id| SoundPlay::at(id, SoundSource::Hostile, [0.5, 64.0, 0.5]);
         assert!(local_sound_ok(
-            "minecraft:entity.generic.explode",
-            at,
-            1.0,
-            1.0,
-            0
+            &at("ironfall:boom_far").with_volume(8.0),
+            140
         ));
-        assert!(!local_sound_ok("boom", at, 1.0, 1.0, 0));
-        assert!(!local_sound_ok("ironfall:", at, 1.0, 1.0, 0));
-        assert!(!local_sound_ok("Ironfall:Boom", at, 1.0, 1.0, 0));
+        assert!(local_sound_ok(&at("minecraft:entity.generic.explode"), 0));
+        assert!(local_sound_ok(
+            &SoundPlay::ui("minecraft:ui.button.click"),
+            1200
+        ));
+        assert!(!local_sound_ok(&at("boom"), 0));
+        assert!(!local_sound_ok(&at("ironfall:"), 0));
+        assert!(!local_sound_ok(&at("Ironfall:Boom"), 0));
+        let nowhere = SoundPlay::at("ironfall:boom", SoundSource::Hostile, [f64::NAN, 0.0, 0.0]);
+        assert!(!local_sound_ok(&nowhere, 0));
+        assert!(!local_sound_ok(&at("ironfall:boom").with_volume(-1.0), 0));
         assert!(!local_sound_ok(
-            "ironfall:boom",
-            [f64::NAN, 0.0, 0.0],
-            1.0,
-            1.0,
+            &at("ironfall:boom").with_pitch(f32::NAN),
             0
         ));
-        assert!(!local_sound_ok("ironfall:boom", at, -1.0, 1.0, 0));
-        assert!(!local_sound_ok("ironfall:boom", at, 1.0, 1.0, 1201));
-        assert!(!local_sound_ok("ironfall:boom", at, 1.0, 1.0, -1));
+        assert!(!local_sound_ok(&at("ironfall:boom").looping(-1), 0));
+        assert!(!local_sound_ok(&at("ironfall:boom"), 1201));
     }
 
     /// `native_play_sound` takes vanilla's and mods' sound ids, nothing else.
@@ -14113,6 +14114,46 @@ mod text_tests {
             assert!(half.iter().all(|v| v.color >> 24 == 0x80));
             // RGB alone, as the API took before, is fully transparent now.
             assert!(drawn(0x00FF_FFFF).is_empty());
+        });
+    }
+}
+
+#[cfg(test)]
+mod local_sound_tests {
+    use mod_api::{
+        ClientHost, Flow, Hooks, ModEntry, RenderGuiPreEvent, SoundPlay, testing::with_mods,
+    };
+
+    struct Mod;
+    #[mod_api::__subscriptions]
+    impl Hooks for Mod {
+        fn render_gui_pre(&self, host: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
+            assert!(host.play_local_sound(&SoundPlay::ui("minecraft:ui.button.click"), 0));
+            Flow::Continue
+        }
+    }
+
+    /// A sound a screen hook plays through its read-only host is held, then played by the
+    /// next audio update, before its tick.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_screen_hooks_sound_reaches_audio_at_the_next_update() {
+        let mods: mod_api::Mods = vec![ModEntry::new("click", Box::new(Mod))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                game.audio.heard.clear();
+                game.native_render_gui_pre(&mut false);
+                assert_eq!(
+                    game.mod_sounds.borrow().len(),
+                    1,
+                    "held for the audio update"
+                );
+                assert!(!game.audio.heard.contains_key("minecraft:ui.button.click"));
+                game.tick_sound_engine();
+                assert!(game.mod_sounds.borrow().is_empty());
+                assert_eq!(game.audio.heard.get("minecraft:ui.button.click"), Some(&1));
+            });
         });
     }
 }
