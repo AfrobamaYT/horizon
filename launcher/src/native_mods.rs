@@ -24,9 +24,10 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use horizon_mods::dependencies;
+
 mod api;
 mod crates;
-mod dependencies;
 mod diagnostics;
 mod inject;
 mod inject_cache;
