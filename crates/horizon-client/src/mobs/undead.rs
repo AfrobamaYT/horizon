@@ -1607,10 +1607,11 @@ mod wither_arrow_tests {
             let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
             m.extra.anger = 300;
             m.extra.angry_at = Some(Who::Mob(99));
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             for _ in 0..40 {
                 let mut events = Vec::new();
-                m.tick(&w, &mut lr, &mut events);
+                m.tick(&w, level, &mut events);
                 assert_ne!(m.ai.target, Some(Who::Player));
             }
             // Fresh piglin, angry at the player: it does take the player.
@@ -1621,7 +1622,7 @@ mod wither_arrow_tests {
             let mut hit = false;
             for _ in 0..60 {
                 let mut events = Vec::new();
-                m.tick(&w, &mut lr, &mut events);
+                m.tick(&w, level, &mut events);
                 hit |= m.ai.target == Some(Who::Player);
             }
             assert!(hit, "angry at the player targets the player");
