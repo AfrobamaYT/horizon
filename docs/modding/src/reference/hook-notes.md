@@ -866,6 +866,37 @@ there is no per-particle code hook.
   asked once per state when the client joins a world and again when a mod calls `refresh_render_visibility()`, which
   remeshes the loaded terrain. Attach it to vanilla blocks with `block_part_tag`. With no part answering, meshing is unchanged.
 
+### Screenshots
+
+`Hooks::screenshot` is the client-thread counterpart of NeoForge 26.3's
+`ScreenshotEvent`. It runs with a `ClientHost` after F2's GPU readback and before
+any file is written. `event.image` is the in-memory frame (`getImage`): RGBA8,
+top to bottom, `width * height * 4` bytes. Change the pixels, or replace the
+image, and the normal PNG is that image. A buffer whose length is not
+`width * height * 4` writes neither file and shows the translated screenshot
+failure line. The HDR copy is not this image; it stays the read-back frame.
+
+Return `Flow::Cancel` to write neither the normal PNG nor its HDR companion.
+The chat then shows `event.message` when it is set, and otherwise the translated
+cancellation line (`screenshot.failure` with `horizon.screenshot.canceled`).
+
+Change `event.file_name` to a relative path under the player's `screenshots/`
+folder (for example `album/view.png`). Missing parent folders are created.
+Absolute paths, empty, `.` or `..` components, backslashes, drive prefixes, NUL
+and symbolic links, including the HDR destination, are refused with the normal
+translated screenshot failure line. The player may make the screenshots folder
+itself a symlink. As with other local file operations, this does not isolate a
+native mod or defend against a concurrent external filesystem replacement.
+
+`event.message` starts as `None`: after a successful save the game builds the
+normal translated, clickable success line using the final file name. Set it to
+`Some(Text)` to replace that success line. Save errors always show the failure,
+not a listener's success message. A no-op listener preserves ordinary saving.
+With HDR enabled the existing tagged 16-bit copy follows the chosen name as
+`<stem>-hdr.png`; its encoding and best-effort error handling are unchanged.
+The hook does not intercept control-socket captures or automatic world icons.
+It adds no tick work; dispatch runs only when an F2 image has been read back.
+
 ### Server data reload listeners
 
 Trait mods implement `Hooks::add_server_reload_listeners` (server only), the counterpart of
