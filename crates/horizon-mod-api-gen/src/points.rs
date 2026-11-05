@@ -1194,7 +1194,7 @@ mod tests {
         assert!(
             mesher.contains("point(name = \"client_render_mesher_mesher_mesh\", raw)] pub fn mesh")
                 && !mesher.contains("client_render_mesher_mesher_face")
-                && mesher.contains("& 'r mut Mesher < '_ >"),
+                && mesher.contains("& 'r mut Mesher < '__self0 >"),
             "{mesher}"
         );
         let manifest = std::fs::read_to_string(render.join("Cargo.toml")).unwrap();
