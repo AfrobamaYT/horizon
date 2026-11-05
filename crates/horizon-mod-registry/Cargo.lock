@@ -446,6 +446,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-core"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "serde",
+]
+
+[[package]]
 name = "horizon-mod-registry"
 version = "0.1.0"
 dependencies = [
@@ -470,6 +478,7 @@ dependencies = [
 name = "horizon-mods"
 version = "0.1.0"
 dependencies = [
+ "horizon-core",
  "horizon-shader-api",
  "log",
  "minisign-verify",
