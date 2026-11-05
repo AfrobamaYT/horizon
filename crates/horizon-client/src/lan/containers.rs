@@ -84,6 +84,19 @@ impl Hub {
         }
     }
 
+    /// `ServerChunkCache.sendToTrackingPlayersAndSelf`: send to every placed
+    /// guest that tracks the entity `id`, and to the guest whose entity it is.
+    pub fn send_to_tracking_and_self(&self, id: i32, packet: &C) {
+        let body = packet.encode();
+        for g in self
+            .guests
+            .iter()
+            .filter(|g| self.here(g) && (g.entity_id == id || g.tracker.is_tracking(id)))
+        {
+            g.sender.send(body.clone());
+        }
+    }
+
     /// Send to every placed guest within `range` blocks of `at`
     /// (`PlayerList.broadcast`, which leaves out a player exactly at `range`).
     pub fn broadcast_near(&self, at: [f64; 3], range: f64, packet: &C, except: Option<u32>) {
@@ -214,29 +227,23 @@ impl Hub {
         );
     }
 
-    pub fn entity_event(&self, id: i32, event: i8, at: [f64; 3]) {
-        self.broadcast_near(
-            at,
-            128.0,
-            &C::EntityEvent(play::EntityEvent { id, event }),
-            None,
-        );
+    /// `ServerLevel.broadcastEntityEvent`: send to the players tracking the
+    /// entity and the entity itself (`sendToTrackingPlayersAndSelf`).
+    pub fn entity_event(&self, id: i32, event: i8) {
+        self.send_to_tracking_and_self(id, &C::EntityEvent(play::EntityEvent { id, event }));
     }
 
     /// `ServerPlayer.crit` (`magicCrit` when `magic`): send the victim's
     /// animation to the players tracking the attacker and the attacker
     /// themselves (`sendToTrackingPlayersAndSelf`).
     pub fn critical_hit(&self, attacker: i32, target: i32, magic: bool) {
-        let body = C::Animate(play::Animate {
-            id: target,
-            action: if magic { 2 } else { 1 },
-        })
-        .encode();
-        for g in self.guests.iter().filter(|g| {
-            self.here(g) && (g.entity_id == attacker || g.tracker.is_tracking(attacker))
-        }) {
-            g.sender.send(body.clone());
-        }
+        self.send_to_tracking_and_self(
+            attacker,
+            &C::Animate(play::Animate {
+                id: target,
+                action: if magic { 2 } else { 1 },
+            }),
+        );
     }
 
     /// `ServerLevel.broadcastDamageEvent`: the clients around show the hurt
