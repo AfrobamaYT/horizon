@@ -6306,10 +6306,8 @@ impl Game<'_> {
         let mut orb = self.orbs[index].clone();
         let mut canceled = false;
         // Swapping the guest in costs: only when a mod hears the pickup.
-        let mut listened = false;
-        if self.serving.is_some() || self.options.dedicated.is_some() {
-            self.native_pickup_xp_listened(&mut listened);
-        }
+        let listened = (self.serving.is_some() || self.options.dedicated.is_some())
+            && mod_api::__private::listened(mod_api::HookId::PickupXp);
         if listened {
             let dimension = self.dim.id();
             let called = self.as_guest(conn, |game| {
@@ -7979,5 +7977,76 @@ mod respawn_position_tests {
                 assert_eq!(g.spawn, Some([5.5, 64.0, 5.5]));
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod pickup_xp_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use horizon_client::entities::ExperienceOrb;
+    use horizon_core::geometry::Vec3;
+
+    /// Listens to `pickup_xp`, canceling it when told to.
+    struct Listen(bool);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Listen {
+        fn pickup_xp(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::PickupXpEvent<'_>,
+        ) -> mod_api::Flow {
+            if self.0 {
+                mod_api::Flow::Cancel
+            } else {
+                mod_api::Flow::Continue
+            }
+        }
+    }
+
+    /// A guest takes the orb it stands in: the orb's id left in the level and the
+    /// guest's total experience after.
+    fn take_orb() -> (bool, i32) {
+        let mut out = (false, 0);
+        with_game(|game| {
+            open_to_lan(game);
+            let mut g = guest(1);
+            g.loaded = true;
+            g.position = [0.5, 70.0, 0.5];
+            game.lan.as_mut().unwrap().hub.guests.push(g);
+            let p = Vec3::new(0.5, 70.0, 0.5);
+            game.orbs.push(ExperienceOrb {
+                rotation: [0.0, 0.0],
+                join: Default::default(),
+                id: 40,
+                position: p,
+                previous: p,
+                velocity: Vec3::ZERO,
+                value: 7,
+                age: 0,
+                on_ground: true,
+                count: 1,
+                ticks: 0,
+                health: 5,
+                no_gravity: true,
+            });
+            game.guest_orbs(0);
+            let left = game.orbs.iter().any(|o| o.id == 40);
+            out = (left, game.lan.as_ref().unwrap().hub.guests[0].xp_total);
+        });
+        out
+    }
+
+    /// `PlayerXpEvent.PickupXp` through the shared `listened` probe: a pickup goes the
+    /// same with no listener and with one that changes nothing, and a cancel keeps the orb.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn pickup_xp_is_the_same_with_and_without_a_listener() {
+        let none = take_orb();
+        assert_eq!(none, (false, 7));
+        let mods = vec![mod_api::ModEntry::new("listen", Box::new(Listen(false)))].into();
+        mod_api::testing::with_mods(mods, || assert_eq!(take_orb(), none));
+        let mods = vec![mod_api::ModEntry::new("cancel", Box::new(Listen(true)))].into();
+        mod_api::testing::with_mods(mods, || assert_eq!(take_orb(), (true, 0)));
     }
 }

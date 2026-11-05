@@ -2891,12 +2891,6 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn exp_bottle();
-    /// Whether a mod hears `native_pickup_xp`: set `listened`
-    /// (a HEAD injection), or the server skips swapping the player in for it,
-    /// and with this empty the pickup costs nothing more without mods.
-    /// Server-side.
-    #[hook(side = "server", contract = "collect", out = "listened")]
-    fn pickup_xp_listened();
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
     /// and `count` take effect only when not canceled; value is clamped to
     /// 1..=i32::MAX and count to at least one.
