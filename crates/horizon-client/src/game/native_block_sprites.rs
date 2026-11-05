@@ -4,6 +4,7 @@ use super::Game;
 use horizon_client::block_sprites::{BlockSprites, Lookup, SpriteRef};
 use horizon_core::geometry::Direction;
 use horizon_world::registry::BlockStateId;
+use mod_api::BlockFaceTexture;
 
 #[allow(dead_code)]
 impl Game<'_> {
@@ -36,7 +37,7 @@ impl Game<'_> {
         &self,
         state: BlockStateId,
         side: Direction,
-    ) -> Option<(String, i32)> {
+    ) -> Option<BlockFaceTexture> {
         let wanted = horizon_assets::model::Direction::ALL[side as usize];
         let models = self
             .pack
@@ -49,7 +50,7 @@ impl Game<'_> {
             .find(|f| f.quad.cull == Some(wanted))
             .or_else(|| faces().find(|f| f.quad.facing == wanted))?;
         let name = self.pack.layer_names.get(&face.layer)?.clone();
-        Some((name, face.quad.tint_index))
+        Some(mod_api::BlockFaceTexture::new(name, face.quad.tint_index))
     }
     /// For a client mod: changes each time the resources load (a resource pack turned on or off can move every
     /// sprite): ask `native_block_sprites` again then. API 380.

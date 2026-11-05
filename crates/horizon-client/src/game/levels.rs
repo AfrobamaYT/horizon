@@ -656,7 +656,7 @@ impl Game<'_> {
             .into_iter()
             .filter(|d| {
                 // `/forceload`ed chunks, or a native mod's tickets.
-                let held = |s: &Streaming| !s.forced.is_empty() || !s.mod_forced.is_empty();
+                let held = |s: &Streaming| !s.forced.is_empty();
                 let forced = if *d == self.dim {
                     held(&self.streaming)
                 } else {

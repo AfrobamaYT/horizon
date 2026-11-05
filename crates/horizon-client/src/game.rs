@@ -259,7 +259,6 @@ mod native_guest_turn_tests;
 #[cfg(test)]
 mod native_held_out_tests;
 mod native_hooks;
-mod native_host_bridge;
 mod native_inventories;
 mod native_item_container;
 mod native_item_entity_refs;
@@ -501,7 +500,6 @@ pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
 pub use native_components::NativeComponentError;
 pub use native_configs::{NativeConfig, NativeConfigFile, NativeConfigKind};
-pub use native_criteria::NativeCriterion;
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
 pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
@@ -3361,9 +3359,6 @@ struct Game<'a> {
     mod_screen: Option<native_hooks::OpenNativeScreen>,
     /// The players with each mod container open, by level (`tick_mod_container_viewers`).
     mod_container_viewers: HashMap<(&'static str, (i32, i32, i32)), u32>,
-    /// The owners of each chunk a native mod's ticket holds, by level
-    /// (`native_force_chunk`); `streaming.mod_forced` is the level's chunks.
-    mod_chunk_tickets: HashMap<Dim, HashMap<(i32, i32), std::collections::BTreeSet<String>>>,
     /// Where item entities are, while the block entities tick (hoppers).
     item_columns: Option<machines::ItemColumns>,
     creative_screen: Creative,
@@ -5400,20 +5395,7 @@ impl Game<'_> {
                     .filter(|&(_, spectator)| game_mode::loads_chunks(rule, spectator))
                     .map(|(chunk, _)| chunk)
                     .collect(),
-                // A native mod's ticket holds its chunk as `/forceload` does
-                // (NeoForge's `TicketController` uses the same `FORCED` level).
-                forced: self
-                    .streaming
-                    .forced
-                    .iter()
-                    .chain(
-                        self.streaming
-                            .mod_forced
-                            .iter()
-                            .filter(|c| !self.streaming.forced.contains(c)),
-                    )
-                    .copied()
-                    .collect(),
+                forced: self.streaming.forced.iter().copied().collect(),
                 // Filled from the `PORTAL` tickets by `update`.
                 portal: Vec::new(),
                 // EnderDragonFight.tick: while a player watches the fight, the
@@ -20554,7 +20536,6 @@ impl<'a> Game<'a> {
             contents_changing: Vec::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),
-            mod_chunk_tickets: HashMap::new(),
             item_columns: None,
             creative_screen: prepared.creative_screen,
             control: None,

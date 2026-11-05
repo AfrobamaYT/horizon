@@ -213,44 +213,26 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `Block.canSupportRigidBlock(level, below)`.
     pub fn can_support_rigid_block(&self, pos: BlockPos) -> bool {
-        if let Some(rigid) = self.moving_block_supports(pos, Direction::Up, SupportType::Rigid) {
-            return rigid;
-        }
-        if let Some(rigid) = self.shulker_support(pos, Direction::Up, SupportType::Rigid) {
-            return rigid;
-        }
-        self.b
-            .is_face_sturdy_rigid(self.support_state(pos), Direction::Up)
+        self.signals().can_support_rigid_block(pos)
     }
     /// `Block.canSupportCenter(level, pos, direction)`.
     pub fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
-        let state = self.support_state(pos);
-        if direction == Direction::Down && self.b.in_set(state, &self.b.tags.unstable_bottom_center)
-        {
-            return false;
-        }
-        if let Some(center) = self.moving_block_supports(pos, direction, SupportType::Center) {
-            return center;
-        }
-        if let Some(center) = self.shulker_support(pos, direction, SupportType::Center) {
-            return center;
-        }
-        self.b.is_face_sturdy_center(state, direction)
+        self.signals().can_support_center(pos, direction)
     }
     pub fn is_empty_block(&self, pos: BlockPos) -> bool {
-        self.b.is_air(self.state(pos))
+        self.signals().is_empty_block(pos)
     }
     /// `LevelReader.isWaterAt`: the fluid at `pos` is in the water tag.
     pub fn is_water_at(&self, pos: BlockPos) -> bool {
-        self.b.is_water_fluid(self.fluid_at(pos).kind())
+        self.signals().is_water_at(pos)
     }
     /// `Level.getRawBrightness(pos, darken)`.
     pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
-        super::raw_brightness(self.level, pos, darken)
+        self.signals().raw_brightness(pos, darken)
     }
     /// `LevelReader.getMaxLocalRawBrightness(pos)`.
     pub fn max_local_raw_brightness(&self, pos: BlockPos) -> i32 {
-        self.raw_brightness(pos, self.level.sky_darken())
+        self.signals().max_local_raw_brightness(pos)
     }
     pub(crate) fn below_state(&self, pos: BlockPos) -> BlockStateId {
         self.state(below(pos))
@@ -367,6 +349,47 @@ impl<L: LevelAccess + ?Sized> Signals<'_, L> {
         }
         self.b.is_face_sturdy(self.support_state(pos), direction)
     }
+    /// `Block.canSupportRigidBlock(level, below)`.
+    pub fn can_support_rigid_block(&self, pos: BlockPos) -> bool {
+        if let Some(rigid) = self.moving_block_supports(pos, Direction::Up, SupportType::Rigid) {
+            return rigid;
+        }
+        if let Some(rigid) = self.shulker_support(pos, Direction::Up, SupportType::Rigid) {
+            return rigid;
+        }
+        self.b
+            .is_face_sturdy_rigid(self.support_state(pos), Direction::Up)
+    }
+    /// `Block.canSupportCenter(level, pos, direction)`.
+    pub fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
+        let state = self.support_state(pos);
+        if direction == Direction::Down && self.b.in_set(state, &self.b.tags.unstable_bottom_center)
+        {
+            return false;
+        }
+        if let Some(center) = self.moving_block_supports(pos, direction, SupportType::Center) {
+            return center;
+        }
+        if let Some(center) = self.shulker_support(pos, direction, SupportType::Center) {
+            return center;
+        }
+        self.b.is_face_sturdy_center(state, direction)
+    }
+    pub fn is_empty_block(&self, pos: BlockPos) -> bool {
+        self.b.is_air(self.state(pos))
+    }
+    /// `LevelReader.isWaterAt`: the fluid at `pos` is in the water tag.
+    pub fn is_water_at(&self, pos: BlockPos) -> bool {
+        self.b.is_water_fluid(self.b.fluid(self.state(pos)).kind())
+    }
+    /// `Level.getRawBrightness(pos, darken)`.
+    pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
+        super::raw_brightness(self.level, pos, darken)
+    }
+    /// `LevelReader.getMaxLocalRawBrightness(pos)`.
+    pub fn max_local_raw_brightness(&self, pos: BlockPos) -> i32 {
+        self.raw_brightness(pos, self.level.sky_darken())
+    }
     pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
         self.b.has_flag(state, state_flags::CONDUCTOR)
     }
@@ -377,18 +400,6 @@ impl<L: LevelAccess + ?Sized> Signals<'_, L> {
 
 /// `Sim` reads these through its [`Signals`], so there is one implementation of each.
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
-    pub(super) fn support_state(&self, pos: BlockPos) -> BlockStateId {
-        self.signals().support_state(pos)
-    }
-    fn moving_block_supports(
-        &self,
-        pos: BlockPos,
-        direction: Direction,
-        support: SupportType,
-    ) -> Option<bool> {
-        self.signals()
-            .moving_block_supports(pos, direction, support)
-    }
     pub fn sturdy(&self, pos: BlockPos, direction: Direction) -> bool {
         self.signals().sturdy(pos, direction)
     }

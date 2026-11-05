@@ -134,15 +134,14 @@ impl<'w, 'r> BlockSpace<'w, 'r> {
                 // A teleport candidate is queried before setPos changes the entity.
                 y: m.position.y,
                 descending: false,
-                main_hand: Some(CollisionItem {
-                    item: m.extra.main_hand.as_deref().unwrap_or("minecraft:air"),
-                    count: m
-                        .extra
+                main_hand: Some(
+                    m.extra
                         .main_hand_stack()
-                        .map_or(i32::from(m.extra.main_hand.is_some()), |s| {
-                            s.count.min(i32::MAX as u32) as i32
+                        .map_or(CollisionItem::EMPTY, |stack| CollisionItem {
+                            item: &stack.item,
+                            count: stack.count.min(i32::MAX as u32) as i32,
                         }),
-                }),
+                ),
             },
             false,
         )
@@ -153,8 +152,12 @@ impl<'w, 'r> BlockSpace<'w, 'r> {
             binding: self.binding,
             subject: Some(crate::collisions::PowderSnowSubject {
                 fall_distance: m.fall_distance,
-                leather_boots: m.extra.feet.as_deref() == Some("minecraft:leather_boots")
-                    && m.extra.armor[3].as_ref().is_none_or(|s| s.count > 0),
+                leather_boots: m
+                    .extra
+                    .slot_stack(horizon_items::equipment::FEET)
+                    .is_some_and(|stack| {
+                        stack.item.as_ref() == "minecraft:leather_boots" && stack.count > 0
+                    }),
                 walkable_type: self.powder_walkable,
                 ..Default::default()
             }),

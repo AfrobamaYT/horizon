@@ -338,6 +338,7 @@ pub(super) fn tick_item(
         no_physics,
         entity_boxes,
         border,
+        blocks,
         splash,
     );
     tick_item_settle(
@@ -359,6 +360,7 @@ pub(super) fn tick_item_move(
     no_physics: bool,
     entity_boxes: &[Aabb],
     border: Option<&horizon_core::geometry::border::BorderGeometry>,
+    blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
     splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
 ) -> horizon_client::entities::ItemStep {
     let (water, _lava) = item.push_by_fluid(world, fluids, context);
@@ -373,6 +375,7 @@ pub(super) fn tick_item_move(
         entity_boxes,
         border,
         blocks,
+        context,
     );
     item.push_by_bubble_column(world, registry, facts, collision);
     step

@@ -8829,7 +8829,7 @@ impl Game<'_> {
                 self.native_level_set_block(level, at, state, flags);
             }
             LandingWrite::DestroyBlock { drop } => {
-                self.native_level_destroy_block(level, at, drop);
+                self.native_level_destroy_block(level, at, drop, None, false);
             }
             // A write a later API adds that this game does not know is not applied.
             _ => {}

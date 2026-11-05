@@ -28,25 +28,6 @@ struct EntityFluidWorld<'a> {
     fluids: &'a FluidResources,
     context: &'a LoopContext,
 }
-/// `FluidState.getFlow(level, pos)`: the current of the fluid at `pos`, the
-/// one that pushes an item or a boat in it, normalised (zero where there is no
-/// fluid or it doesn't move: a source with only sources and walls around it).
-/// A falling fluid's current points down.
-pub fn fluid_flow(world: &World, fluids: &FluidResources, pos: [i32; 3]) -> [f64; 3] {
-    let mut velocity = Vec3::ZERO;
-    let mut scene = EntityFluidWorld {
-        bounds: Aabb::new(Vec3::ZERO, Vec3::ZERO),
-        position: Vec3::ZERO,
-        eye_y: 0.0,
-        velocity: &mut velocity,
-        world,
-        fluids,
-    };
-    let at = BlockPos::new(pos[0], pos[1], pos[2]);
-    let state = fluids.fluid(world.block(pos[0], pos[1], pos[2]));
-    let flow = flow_at(&mut scene, state, at).unwrap_or(Vec3::ZERO);
-    [flow.x, flow.y, flow.z]
-}
 /// `Entity.baseTick`'s fluid step for an entity that is pushed by fluid: its
 /// immersion heights, then the current of each fluid it sits in, added to
 /// `velocity` with vanilla's scales (water 0.014, lava 0.007 fast or

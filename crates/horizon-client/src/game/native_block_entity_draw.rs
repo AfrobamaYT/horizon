@@ -622,16 +622,27 @@ impl Game<'_> {
     pub(super) fn native_draw_scale(&self, draw: &mut BlockEntityDraw, by: [f32; 3]) {
         draw.scale(by);
     }
-    /// Keeps what this call drew: the block is drawn the same again, with
-    /// neither `native_block_entity_submit` nor
-    /// `native_block_entity_render_bounding_box` called, until its state,
-    /// its block entity (what the server sent), its light or the resource
-    /// packs change. Call it only when what you drew reads none of
-    /// `partial`, `game_time`, the blocks around it or anything else of
-    /// yours, and moves nothing by itself: an idle machine, not a turning
-    /// shaft. Kept geometry stands still: an enchanted item's glint, and an
-    /// item drawn with `native_draw_item` whose model reads the time (a clock,
-    /// a compass), stop where they were.
+    /// Begin time-based rotation using the surface's one implementation.
+    pub(super) fn native_draw_spin(
+        &self,
+        draw: &mut BlockEntityDraw,
+        axis: [f32; 3],
+        pivot: [f32; 3],
+        degrees_per_tick: f32,
+        phase: f32,
+    ) {
+        draw.spin(axis, pivot, degrees_per_tick, phase);
+    }
+    /// End time-based rotation for subsequent geometry.
+    pub(super) fn native_draw_still(&self, draw: &mut BlockEntityDraw) {
+        draw.still();
+    }
+    /// Keeps what this call drew, with neither `native_block_entity_submit` nor
+    /// `native_block_entity_render_bounding_box` called until its state, block entity,
+    /// light or resource packs change. Parts marked with `spin` keep turning from the
+    /// game time; other geometry stays as submitted. Do not bake frame-dependent
+    /// values into kept vertices: item glint and time-dependent item models stop
+    /// where they were, and neighboring blocks do not invalidate the cache.
     pub(super) fn native_draw_keep(&self, draw: &mut BlockEntityDraw) {
         draw.keep();
     }

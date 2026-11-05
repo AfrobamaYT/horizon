@@ -16,6 +16,13 @@ use horizon_world::level::data::state_flags;
 
 /// A quad in the scene's blocks, before it is seen: its corners, UVs in the
 /// atlas, ABGR colour, and its outward normal.
+struct ProjectedQuad {
+    depth: f32,
+    corners: [[f32; 3]; 4],
+    uv: [[f32; 2]; 4],
+    color: u32,
+}
+
 struct SceneQuad {
     corners: [Vec3; 4],
     uv: [[f32; 2]; 4],
@@ -76,7 +83,7 @@ impl Game<'_> {
         &self,
         batch: &mut HudBatch,
         rect: [f32; 4],
-        blocks: &[NativeSceneBlock<'_>],
+        blocks: &[NativeSceneBlock],
         view: NativeSceneView,
     ) {
         if !self.native_window() || !view.scale.is_finite() || view.scale <= 0.0 {
@@ -142,7 +149,9 @@ impl Game<'_> {
                     normal,
                 });
             }
-            if let Some(entity) = block.entity {
+            if let Some(entity) = &block.entity {
+                let entity =
+                    mod_api::ModBlockEntity::new(entity.id.to_string(), entity.fields.clone());
                 let name = &*self.res.facts().get(block.state).name;
                 let mut draw = BlockEntityDraw::posed(
                     self.clock.fraction() as f32,
@@ -153,7 +162,7 @@ impl Game<'_> {
                     diffuse_lights(false),
                     Vec::new(),
                 );
-                self.native_block_entity_submit(block.pos, name, block.state, entity, &mut draw);
+                self.native_block_entity_submit(block.pos, name, block.state, &entity, &mut draw);
                 let (drawn, spins) = draw.into_turning();
                 let mut placed: Vec<Vertex> = Vec::with_capacity(drawn.len());
                 place_turning(
@@ -179,20 +188,25 @@ impl Game<'_> {
             }
         }
         let m = scene_matrix(rect, view);
-        let mut seen: Vec<(f32, [[f32; 3]; 4], [[f32; 2]; 4], u32)> = quads
+        let mut seen: Vec<ProjectedQuad> = quads
             .into_iter()
             .filter(|q| m.transform_vector3(q.normal).z > 0.0)
             .map(|q| {
                 let p = q.corners.map(|c| m.transform_point3(c));
                 let depth = p.iter().map(|v| v.z).sum::<f32>() / 4.0;
-                (depth, p.map(|v| v.to_array()), q.uv, q.color)
+                ProjectedQuad {
+                    depth,
+                    corners: p.map(|v| v.to_array()),
+                    uv: q.uv,
+                    color: q.color,
+                }
             })
             .collect();
         // Far to near, for the faces that let others show through.
-        seen.sort_by(|a, b| a.0.total_cmp(&b.0));
+        seen.sort_by(|a, b| a.depth.total_cmp(&b.depth));
         let start = batch.vertices.len();
-        for (_, corners, uv, color) in seen {
-            batch.quad_3d(corners, uv, color);
+        for face in seen {
+            batch.quad_3d(face.corners, face.uv, face.color);
         }
         batch.depth_since(start, rect);
     }
@@ -203,12 +217,7 @@ mod tests {
     use super::*;
 
     fn view(yaw: f32, pitch: f32) -> NativeSceneView {
-        NativeSceneView {
-            center: [0.5, 0.5, 0.5],
-            yaw,
-            pitch,
-            scale: 20.0,
-        }
+        NativeSceneView::new([0.5, 0.5, 0.5], yaw, pitch, 20.0)
     }
 
     /// Unturned, the scene is seen from the north as a player at yaw 0 sees

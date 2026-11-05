@@ -157,6 +157,23 @@ mod drop_motion_tests {
         }
         assert_eq!(r.next_int(), 357425922);
     }
+
+    /// A scattered drop takes two floats and rises at 0.2; one along the view
+    /// (south, level) takes four and goes about 0.3 along +z.
+    #[test]
+    fn drops_scatter_or_follow_the_view_in_vanillas_draws() {
+        let (mut r, mut after) = (LegacyRandom::new(7), LegacyRandom::new(7));
+        let v = drop_motion(&mut r, 90.0, 30.0, true);
+        let pow = f64::from(after.next_float() * 0.5);
+        after.next_float();
+        assert_eq!(v[1], f64::from(0.2f32));
+        assert!((v[0].hypot(v[2]) - pow).abs() < 1.0e-3);
+        let v = drop_motion(&mut r, 0.0, 0.0, false);
+        (0..4).for_each(|_| _ = after.next_float());
+        assert!(v[0].abs() <= 0.02 && (v[2] - 0.3).abs() <= 0.02, "{v:?}");
+        assert!((v[1] - 0.1).abs() <= 0.1, "{v:?}");
+        assert_eq!(r.next_int(), after.next_int());
+    }
 }
 
 /// `LivingEntity.createItemStackToDrop`'s motion for a stack thrown by an
@@ -405,6 +422,7 @@ impl ItemEntity {
             entity_boxes,
             border,
             blocks,
+            crate::test_resources::server_loop_context(),
         );
         crate::motion::bubble_column_push(
             world,
@@ -574,6 +592,7 @@ impl ItemEntity {
         entity_boxes: &[Aabb],
         border: Option<&BorderGeometry>,
         blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
+        context: &horizon_world::native_load_context::LoopContext,
     ) -> ItemStep {
         self.ticks += 1;
         self.previous = self.position;
@@ -693,8 +712,13 @@ impl ItemEntity {
             // horizontal speed. A move through blocks (noPhysics) returns
             // before it. `blocks` is None only for the isolated unit tests.
             if !no_physics && let Some(blocks) = blocks {
-                let factor =
-                    crate::motion::block_speed_factor_at(world, blocks, self.position, None);
+                let factor = crate::motion::block_speed_factor_at(
+                    world,
+                    blocks,
+                    context,
+                    self.position,
+                    None,
+                );
                 self.velocity =
                     horizon_world::entity_move::scale_by_block_speed(self.velocity, factor);
             }
@@ -4025,26 +4049,3 @@ crate::impl_joined!(
     Cushion,
     ItemFrame
 );
-
-#[cfg(test)]
-mod drop_motion_tests {
-    use super::drop_motion;
-    use horizon_core::random::{LegacyRandom, RandomSource};
-
-    /// A scattered drop takes two floats and rises at 0.2; one along the view
-    /// (south, level) takes four and goes about 0.3 along +z.
-    #[test]
-    fn drops_scatter_or_follow_the_view_in_vanillas_draws() {
-        let (mut r, mut after) = (LegacyRandom::new(7), LegacyRandom::new(7));
-        let v = drop_motion(&mut r, 90.0, 30.0, true);
-        let pow = f64::from(after.next_float() * 0.5);
-        after.next_float();
-        assert_eq!(v[1], f64::from(0.2f32));
-        assert!((v[0].hypot(v[2]) - pow).abs() < 1.0e-3);
-        let v = drop_motion(&mut r, 0.0, 0.0, false);
-        (0..4).for_each(|_| _ = after.next_float());
-        assert!(v[0].abs() <= 0.02 && (v[2] - 0.3).abs() <= 0.02, "{v:?}");
-        assert!((v[1] - 0.1).abs() <= 0.1, "{v:?}");
-        assert_eq!(r.next_int(), after.next_int());
-    }
-}

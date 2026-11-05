@@ -205,18 +205,27 @@ impl Game<'_> {
     pub(super) fn native_send_packet(
         &mut self,
         packet: ServerboundPlayPacket,
-    ) -> Result<(), String> {
-        let Some(remote) = self.remote.as_ref() else {
-            return Err("not connected to a server".into());
-        };
-        // A server that reconfigures the player has them out of the play state.
+    ) -> Result<(), SendPacketError> {
+        let remote = self.remote.as_ref().ok_or(SendPacketError::NotConnected)?;
         if !remote.joined || remote.reconfiguring.is_some() {
-            return Err("the player has not joined yet".into());
+            return Err(SendPacketError::NotInPlay);
         }
+        let id = match packet.id.namespace() {
+            "minecraft" => horizon_protocol::ids::play::serverbound::NAMES
+                .iter()
+                .position(|name| *name == packet.id.path()),
+            _ => None,
+        }
+        .ok_or(SendPacketError::UnknownPacket { id: packet.id })?;
+        let packet =
+            S::decode(id as i32, &packet.body).map_err(|_| SendPacketError::InvalidBody)?;
         if let S::CustomPayload(payload) = &packet
             && payload.data.len() > quiet::MAX_PAYLOAD
         {
-            return Err(format!("the payload is past {} bytes", quiet::MAX_PAYLOAD));
+            return Err(SendPacketError::PayloadTooLarge {
+                size: payload.data.len() as u64,
+                limit: quiet::MAX_PAYLOAD as u64,
+            });
         }
         self.send(packet);
         Ok(())
@@ -228,8 +237,9 @@ mod tests {
     use super::super::{
         Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
     };
-    use super::{CustomPayload, S, quiet};
-    use horizon_protocol::{connection::Pipe, packets::configuration::Ping};
+    use super::{SendPacketError, ServerboundPlayPacket, quiet};
+    use horizon_protocol::{buf::Writer, connection::Pipe};
+    use mod_api::Identifier;
 
     /// A mod's packet goes out only from a joined player, and a custom
     /// payload only within vanilla's size limit.
@@ -267,10 +277,13 @@ mod tests {
         )
         .unwrap();
         let payload = |len| {
-            S::CustomPayload(CustomPayload {
-                channel: "voicechat:request_secret".into(),
-                data: vec![0; len],
-            })
+            let mut body = Writer::new();
+            body.string("voicechat:request_secret");
+            body.bytes(&vec![0; len]);
+            ServerboundPlayPacket::new(
+                Identifier::parse("minecraft:custom_payload").unwrap(),
+                body.data,
+            )
         };
 
         assert!(game.native_send_packet(payload(4)).is_err());
@@ -284,6 +297,27 @@ mod tests {
             game.native_send_packet(payload(quiet::MAX_PAYLOAD + 1))
                 .is_err()
         );
-        assert!(game.native_send_packet(S::Pong(Ping { id: 7 })).is_ok());
+        let mut pong = Writer::new();
+        pong.i32(7);
+        assert_eq!(
+            game.native_send_packet(ServerboundPlayPacket::new(
+                Identifier::parse("minecraft:pong").unwrap(),
+                pong.data.clone(),
+            )),
+            Ok(())
+        );
+        pong.bytes(&[0]);
+        assert_eq!(
+            game.native_send_packet(ServerboundPlayPacket::new(
+                Identifier::parse("minecraft:pong").unwrap(),
+                pong.data,
+            )),
+            Err(SendPacketError::InvalidBody)
+        );
+        let unknown = Identifier::parse("test:unknown_packet").unwrap();
+        assert_eq!(
+            game.native_send_packet(ServerboundPlayPacket::new(unknown.clone(), Vec::new())),
+            Err(SendPacketError::UnknownPacket { id: unknown })
+        );
     }
 }
