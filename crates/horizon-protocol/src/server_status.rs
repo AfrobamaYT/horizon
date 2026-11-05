@@ -2,17 +2,16 @@
 //! a server in its Multiplayer list (vanilla's `ServerStatusPinger`): a handshake asking for the
 //! status state, a status request, and the server's JSON answer. Nothing about the asker is sent.
 //!
-//! The launcher shows the official server's count beside "N playing now", and the telemetry
-//! server writes it down every minute for playhorizon.dev/stats (`history`, the `official`
-//! series). [`OFFICIAL_ADDRESS`] is the official server's built-in address for both; the launcher
+//! The launcher's server list asks for it when the list or a server's page is shown, never in
+//! the background. [`OFFICIAL_ADDRESS`] is the official server's built-in address; the launcher
 //! takes the current one from `launcher/links.json`.
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 /// Horizon's official survival server (SMP). The launcher's server list offers the same entry
-/// (`launcher/src/server_list.rs`) until links.json names another; the telemetry server's
-/// `HORIZON_TELEMETRY_OFFICIAL_SERVER` overrides it there. Its SRV record leads to the port.
+/// (`launcher/src/server_list.rs`) until links.json names another. Its SRV record leads to the
+/// port.
 pub const OFFICIAL_ADDRESS: &str = "play.playhorizon.dev";
 
 /// The official server's earlier addresses: the game and the launcher move a server list's
@@ -20,14 +19,10 @@ pub const OFFICIAL_ADDRESS: &str = "play.playhorizon.dev";
 /// `official_server_previous` in `launcher/links.json`).
 pub const OFFICIAL_PREVIOUS: &[&str] = &["horizon.bunchy7s.dev"];
 
-/// [`OFFICIAL_ADDRESS`] with the port its SRV record gives, for askers that don't look SRV up
-/// (the telemetry server).
-pub const OFFICIAL_STATUS_ADDRESS: &str = "play.playhorizon.dev:24454";
-
 /// The port a server address without one means.
 pub const DEFAULT_PORT: u16 = 25565;
 
-/// The protocol version the handshake names (`horizon_protocol`'s, 26.3). A server answers the
+/// The protocol version the handshake names (26.3). A server answers the
 /// status of any version.
 const PROTOCOL: i32 = 777;
 

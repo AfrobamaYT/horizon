@@ -20,11 +20,11 @@ SocialInteractionsScreen.extractRenderState	skip:service		social screen drawing
 SocialInteractionsScreen.keyPressed	skip:service		social keybind closes the screen
 SocialInteractionsScreen.checkSearchStringUpdate	skip:service		social search filter
 SocialInteractionsScreen.updateServerLabel	skip:service		social server label
-TelemetryEventWidget.buildContent	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
-TelemetryEventWidget.setScrollAmount	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
-TelemetryEventWidget.extractContents	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
-TelemetryEventWidget.addEventType	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
-TelemetryEventWidget.addEventTypeProperties	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
+TelemetryEventWidget.buildContent	skip:service		telemetry event list (opt-in data); Horizon sends no telemetry
+TelemetryEventWidget.setScrollAmount	skip:service		telemetry event list (opt-in data); Horizon sends no telemetry
+TelemetryEventWidget.extractContents	skip:service		telemetry event list (opt-in data); Horizon sends no telemetry
+TelemetryEventWidget.addEventType	skip:service		telemetry event list (opt-in data); Horizon sends no telemetry
+TelemetryEventWidget.addEventTypeProperties	skip:service		telemetry event list (opt-in data); Horizon sends no telemetry
 TelemetryEventWidget.ContentBuilder.addLine	skip:service		telemetry event list builder
 TelemetryEventWidget.ContentBuilder.addHeader	skip:service		telemetry event list builder
 TelemetryEventWidget.ContentBuilder.build	skip:service		telemetry event list builder

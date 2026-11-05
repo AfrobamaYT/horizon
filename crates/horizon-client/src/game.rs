@@ -3335,8 +3335,6 @@ struct Game<'a> {
     /// When an agent's last command came.
     agent_last: Option<Instant>,
     frame_stats: horizon_client::control::FrameStats,
-    /// This play session's frame and tick times, for opt-in performance statistics.
-    perf: horizon_client::telemetry::Session,
     /// Control replies waiting for a rendered frame or a benchmark deadline.
     pending_screenshot: Option<std::sync::mpsc::Sender<String>>,
     /// `render-capture DIR`: replied once the renderer wrote the scene.
@@ -13194,7 +13192,6 @@ impl Game<'_> {
     /// integrated-server selection. Server startup must use this entry point.
     fn load_world(&mut self, request: world_loading::WorldRequest) -> Result<()> {
         self.join_world_rest()?;
-        self.perf.world_opening();
         let prepared = request.prepare(
             &self.res,
             &self.pack,
@@ -13489,35 +13486,6 @@ impl Game<'_> {
     /// Leaving the game with a world open (window closed, Quit, `quit`):
     /// menu items go back (Player.closeContainer), then the world is saved,
     /// once.
-    /// Keeps this play session's performance summary for the launcher to send, if the player
-    /// allows performance statistics (`horizon_client::telemetry`), and starts the next one.
-    pub(super) fn finish_perf(&mut self) {
-        // One session per computer: P1's (a splitscreen player's would count it again).
-        if self.options.split_guest {
-            return;
-        }
-        let s = &self.settings;
-        let settings = horizon_telemetry::payload::Settings {
-            render_distance: s.render_distance.clamp(0, 255) as u8,
-            simulation_distance: s.simulation_distance.clamp(0, 255) as u8,
-            // 260 is the slider's "unlimited".
-            max_fps: if s.max_fps >= 260 {
-                0
-            } else {
-                s.max_fps.min(u32::from(u16::MAX)) as u16
-            },
-            vsync: s.vsync,
-            fullscreen: s.fullscreen,
-            graphics: s.graphics_preset.clone(),
-        };
-        // Again now: on Wayland the window is on a screen only once it has been shown.
-        if let Some(window) = &self.window {
-            horizon_client::telemetry::note_display(window);
-        }
-        self.perf
-            .finish(&horizon_client::logging::game_home(), settings);
-    }
-
     pub(super) fn save_for_exit(&mut self) -> Result<()> {
         // Native application termination can bypass CloseRequested. Finish any
         // save screen synchronously here, before the process can go away.
@@ -18241,7 +18209,6 @@ impl ApplicationHandler for Game<'_> {
             }
         };
         drop(window_step);
-        horizon_client::telemetry::note_display(&window);
         match self.new_renderer(window.clone()) {
             Ok(r) => {
                 self.renderer = Some(r);
@@ -18552,7 +18519,6 @@ impl Game<'_> {
                     && event.physical_key == PhysicalKey::Code(KeyCode::Escape))
         {
             self.pending_entry = None;
-            self.perf.cancel_world_opening();
             return;
         }
         if (self.pending_entry.is_some() || self.integrated_starting.is_some())
@@ -19625,8 +19591,6 @@ impl Game<'_> {
                     let updated = Instant::now();
                     self.track_toggle_screens();
                     self.heal_hold_latches();
-                    // For the "I'm playing" ping: an atomic, sent on when it changes.
-                    horizon_client::heartbeat::set_lan(self.is_published());
                     self.update_discord_presence();
                     let steps = self.clock.advance(elapsed);
                     for _ in 0..steps {
@@ -19668,7 +19632,7 @@ impl Game<'_> {
                     self.native_render_frame_post(elapsed);
                     self.apply_cursor_icon();
                     // The frame's spans, taken every frame they are recorded so they never
-                    // pile up: the slow-frame line's, and the session's (`perf.frame`).
+                    // pile up: the slow-frame line's.
                     let frame_spans = if horizon_client::spans::recording_here() {
                         horizon_client::spans::take_raw()
                     } else {
@@ -19794,11 +19758,10 @@ impl Game<'_> {
                                 self.started.elapsed().as_millis()
                             );
                         }
-                        if self.title.is_some() {
-                            self.perf.title_shown();
-                        } else if self.screen == Screen::Playing && self.player.is_some() {
-                            self.perf
-                                .frame(elapsed.as_secs_f32() * 1000.0, &frame_spans);
+                        if self.title.is_none()
+                            && self.screen == Screen::Playing
+                            && self.player.is_some()
+                        {
                             if startup::filling() {
                                 let mut fill: Vec<(&'static str, usize)> =
                                     self.streaming.stages().to_vec();
@@ -19856,7 +19819,7 @@ impl Game<'_> {
             self.exit_on_error(event_loop);
         }
     }
-    /// The loop ended: close the pads' output, save the world, write the perf report.
+    /// The loop ended: close the pads' output, save the world.
     pub(super) fn shut_down(&mut self) {
         self.pad_close_output();
         if let Err(e) = self.save_for_exit() {
@@ -19868,7 +19831,6 @@ impl Game<'_> {
         if self.options.is_client_start() {
             self.native_client_stopping();
         }
-        self.finish_perf();
     }
     /// winit's `about_to_wait`: what happens between frames (stop requests, the closing
     /// save, world entry, the control socket, pads), then the next frame.
@@ -20398,7 +20360,6 @@ impl<'a> Game<'a> {
             agent_control_on: false,
             agent_last: None,
             frame_stats: Default::default(),
-            perf: Default::default(),
             pending_screenshot: None,
             pending_render_capture: None,
             pending_bench: None,
@@ -20696,7 +20657,6 @@ impl Game<'_> {
         if self.rest_loader.is_none() {
             return Ok(false);
         }
-        self.perf.world_opening();
         if self.title.is_none() {
             let title = Title::new(
                 std::env::current_dir()?.join("saves"),
@@ -21611,7 +21571,6 @@ fn load_resources(
     };
     let resources = Arc::new(resources);
     if menu {
-        horizon_client::telemetry::mark_core_ready();
         log::info!(
             "Horizon: core-ready after {} ms",
             started.elapsed().as_millis()
@@ -21647,7 +21606,6 @@ fn load_resources(
                     .set(rest)
                     .map_err(|_| "world resources already loaded".to_owned())?;
                 progress.set(9);
-                horizon_client::telemetry::mark_rest_ready();
                 log::info!(
                     "Horizon: rest-ready after {} ms",
                     started.elapsed().as_millis()
@@ -22499,7 +22457,6 @@ impl Loading {
             }
         };
         drop(window_step);
-        horizon_client::telemetry::note_display(&window);
         // The renderer takes seconds to build and winit's window sits white
         // until the first frame presents, so paint the boot screen on it and
         // keep repainting it as the console's lines arrive; the wgpu frames
@@ -22647,7 +22604,6 @@ impl Loading {
             match renderer.render(&frame) {
                 Ok(true) if self.gui.is_some() && self.menu.pending.is_none() => {
                     self.title_drawn = true;
-                    self.menu.perf.title_shown()
                 }
                 Ok(_) => {}
                 Err(e) => log::warn!("Horizon: loading screen frame failed: {e}"),
@@ -22971,14 +22927,6 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         options.spikes = Some(dedicated::SLOW_TICK_MS);
     }
     horizon_client::spans::enable(options.spikes.is_some());
-    // A player who allows performance statistics also says what their slow frames spent their
-    // time in: this thread, which draws the frames, times its steps (wall time only).
-    if options.execution_role.is_client()
-        && horizon_telemetry::Consent::load(&horizon_client::logging::game_home())
-            .allows(horizon_telemetry::Kind::Perf)
-    {
-        horizon_client::spans::record_here(true);
-    }
     let vanilla_root = options.resources.clone();
     if let Some(error) = missing_resources(&vanilla_root) {
         // The game build started by hand (the release's zip), not by the
@@ -22991,17 +22939,15 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         }
         return Err(error.into());
     }
-    // Someone is playing: the anonymous ping behind the launcher's "N playing now", and the
-    // official server in their list (servers.dat in the game folder, the working directory). Not
-    // for a server, a benchmark, a run that quits by itself, a harness's fixture or a run that
+    // Someone is playing: the official server in their list (servers.dat in the game folder, the
+    // working directory). Not for a server, a benchmark, a run that quits by itself, a harness's fixture or a run that
     // horizon-ctl drives: those start in a source checkout and wrote the list there.
-    if !options.offscreen && !synchronous_startup(&options) {
-        horizon_client::heartbeat::start();
-        if let Err(e) =
+    if !options.offscreen
+        && !synchronous_startup(&options)
+        && let Err(e) =
             horizon_client::multiplayer::add_official_server(&horizon_client::logging::player_dir())
-        {
-            log::warn!("could not add the official server to servers.dat: {e}");
-        }
+    {
+        log::warn!("could not add the official server to servers.dat: {e}");
     }
     let mut early_settings = Settings::load(&Game::options_path());
     options

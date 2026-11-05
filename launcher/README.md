@@ -401,12 +401,7 @@ and don't set `%ERRORLEVEL%` / `$LASTEXITCODE`. Scripts that need the exit code 
     horizon-launcher servers run <server> -- <horizon-server command>   for example: servers run "My server" -- start
     horizon-launcher servers forget <server>        take it off the list (its folder stays)
     horizon-launcher benchmark [--repeats N]        measure the launcher (see Performance log)
-    horizon-launcher data [status]                  what data collection is allowed, the install ID, what waits
-    horizon-launcher data allow|deny <kinds|all>    performance, crashes, bugs, benchmarks
-    horizon-launcher data show                      exactly what would be sent
-    horizon-launcher data delete                    delete what was sent and what waits; new install ID
-    horizon-launcher data bug "<text>" [--log]      a bug report, printed for you to confirm first
-    horizon-launcher data benchmark <report.json>   upload a benchmark report, printed first
+    horizon-launcher bug-report "<text>" [--log]    write a bug report file to attach by hand (nothing is sent)
 
 `--json` prints JSON where there is something to report (`versions`, `install`, `notes`,
 `next`, `links`, `game-args`, `update --check`, `logs`, `account`, `benchmark`, `data`, `modpack`). Errors go to stderr with exit code 1. `server` runs in the terminal,
@@ -427,7 +422,7 @@ command that adds it; for Claude Code:
 (with the full path to the binary if it is not on your `PATH`). Every CLI command is a tool of the
 same name and arguments, generated from the CLI's definition (`src/cli_tools.rs`): `versions`,
 `install`, `remove`, `prepare`, `settings`, `mods_search`, `mods_install`, `modpack_import`,
-`servers_create`, `data_status`... A call runs that command with `--json` and returns its
+`servers_create`, `bug_report`... A call runs that command with `--json` and returns its
 output. Tools that delete something (`remove`, `mods_remove`, `modpack_remove`,
 `servers_forget`, `account_sign_out`, `data_delete`) need `confirm: true`. The session runs a few
 itself, under the CLI's names: `play`, `server` with `server_command`, `server_log` and
@@ -485,14 +480,9 @@ machine only if you turn on crash reports (below).
 
 ## Data collection
 
-The first time it opens, the launcher asks whether you want to send performance statistics,
-crash reports, bug reports and benchmark uploads, each on its own switch and all off until you
-turn one on ("Send nothing" is one click). Settings → Data collection changes them any time, shows
-exactly what would be sent (the JSON), and deletes everything sent from your install. It asks
-again only when what is collected changes. The game obeys the same answer, kept in
-`telemetry/consent.json` in the game folder. What waits is sent when the launcher starts and
-closes. Every field, the caps and the format: [docs/telemetry.md](../docs/telemetry.md).
-
+None. The launcher and the game send nothing about you or your machine (see
+[docs/telemetry.md](../docs/telemetry.md)). `horizon-launcher bug-report "text" [--log]` writes a bug report
+to a file you attach to your issue by hand.
 
 ## Performance log
 
@@ -504,9 +494,8 @@ and OS (read on a thread after the first frame: on Windows those queries take se
 to an issue about the launcher being slow. `horizon-launcher benchmark` measures on purpose: it starts the launcher `--repeats` times (5; the first start is the cold one, as far
 as the OS's file cache allows), switches pages for a few seconds in each, rests 3 seconds to
 measure idle CPU, fetches the release list 3 times, and writes one report there with means and
-95% confidence intervals. Its window has to be on a screen that is awake. Session logs stay on
-your machine; a `benchmark` report is uploaded, dated to the day, only if you allowed benchmark
-uploads ([data collection](../docs/telemetry.md)).
+95% confidence intervals. Its window has to be on a screen that is awake. Session logs and benchmark reports stay on
+your machine ([data collection](../docs/telemetry.md)).
 
 Long lists on Mods (results, installed entries, coverage reports and project versions), Versions
 and Patch notes build only nearby rows, including on their first frame. Variable row heights

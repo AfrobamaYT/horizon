@@ -1,13 +1,33 @@
-//! The machine as an item describes it ([`System`]): what the OS says, read the same way on
-//! every start. The game adds the GPU (its name, maker, kind, driver and backend, then
-//! [`vram_mb`] for it) and the screen.
-//!
-//! Only what explains performance: no serial number, host name, user name or path is read into
-//! an item. The slower probes (a command to run) are read once per process.
+//! The machine as local reports describe it ([`System`]): what the OS says, read the same way on
+//! every start. Only what explains performance: no serial number, host name, user name or path
+//! is read. The slower probes (a command to run) are read once per process.
 use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::payload::System;
+/// The machine the game runs on.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct System {
+    /// `linux`, `macos` or `windows`.
+    pub os: String,
+    /// The distribution or system version (`macOS 26.0`, `Fedora Linux 43`).
+    pub os_version: String,
+    pub arch: String,
+    pub cpu: String,
+    pub threads: u16,
+    /// Physical cores.
+    pub cores: u16,
+    /// The CPU's base and top boost clock, where the OS says.
+    pub cpu_base_mhz: u32,
+    pub cpu_boost_mhz: u32,
+    /// Installed memory, rounded to the GiB.
+    pub ram_gb: u16,
+    /// The drive under the game folder: `nvme`, `ssd` or `hdd`.
+    pub storage: String,
+    /// `ac` or `battery`, when the game started.
+    pub power: String,
+    /// `laptop` or `desktop`.
+    pub form: String,
+}
 
 /// What `program args` prints, trimmed, when it succeeds and prints something. On Windows the
 /// program opens no console window: a GUI launcher or a game started without one would flash a
@@ -171,9 +191,8 @@ fn cpu() -> Option<String> {
 /// The CPU's brand string on Windows (`AMD Ryzen 7 7700X 8-Core Processor`), from the registry's
 /// `ProcessorNameString`. `PROCESSOR_IDENTIFIER` is only the fallback: it always holds the family,
 /// model and stepping (`AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD`), which neither names the
-/// chip nor tells two chips of one family apart. The game, its crash report, the benchmark report
-/// and telemetry all read the CPU through this. Read once: every telemetry item and benchmark
-/// report would run `reg` again.
+/// chip nor tells two chips of one family apart. The game, its crash report and the benchmark report
+/// all read the CPU through this. Read once: every benchmark report would run `reg` again.
 pub fn windows_cpu() -> Option<String> {
     static CPU: OnceLock<Option<String>> = OnceLock::new();
     CPU.get_or_init(|| {
@@ -614,7 +633,7 @@ fn fixed() -> &'static Fixed {
 }
 
 impl System {
-    /// This machine, without the GPU and the screen. `home` is the game folder, for the kind of
+    /// This machine. `home` is the game folder, for the kind of
     /// drive it is on.
     pub fn detect_in(home: Option<&Path>) -> Self {
         const GIB: f64 = (1u64 << 30) as f64;
@@ -636,7 +655,6 @@ impl System {
                 .to_owned(),
             power: power().unwrap_or("").to_owned(),
             form: fixed.form.to_owned(),
-            ..Self::default()
         }
     }
 
@@ -900,22 +918,11 @@ mod tests {
         assert_eq!(gpu_vendor("llvmpipe (LLVM 19)", 0x10005), "software");
     }
 
-    /// `cargo test -p horizon-telemetry -- --ignored --nocapture what_this_machine_sends`
-    #[test]
-    #[ignore]
-    fn what_this_machine_sends() {
-        let home = std::env::current_dir().unwrap();
-        let mut system = System::detect_in(Some(&home));
-        system.vram_mb = vram_mb("nvidia").or_else(|| vram_mb("amd")).unwrap_or(0);
-        println!("{}", serde_json::to_string_pretty(&system).unwrap());
-    }
-
     #[test]
     fn this_machine_is_described() {
         let system = System::detect();
         assert_eq!(system.os, std::env::consts::OS);
         assert!(system.threads > 0);
-        assert!(system.gpu.is_empty(), "the game fills the GPU in");
         assert!(system.cores == 0 || system.cores <= system.threads);
         assert!(["", "ac", "battery"].contains(&system.power.as_str()));
         assert!(["", "laptop", "desktop"].contains(&system.form.as_str()));
