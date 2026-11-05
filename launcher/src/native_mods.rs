@@ -32,6 +32,7 @@ mod diagnostics;
 mod inject;
 mod inject_cache;
 mod internals;
+mod internals_sync;
 mod package;
 mod prebuilt;
 
@@ -537,6 +538,18 @@ fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
         _ => {}
     }
     result
+}
+
+/// Dispatch Cargo's discovery-only rustc wrapper before normal launcher startup.
+pub fn internals_rustc_wrapper() -> Option<i32> {
+    internals_sync::rustc_wrapper()
+}
+
+/// Discover used internals without installing a game or changing an instance.
+pub fn sync_internals(
+    folder: &Path,
+) -> Result<Vec<horizon_mods::internals::ListedInternal>, String> {
+    internals_sync::check(folder).map_err(|error| error.to_string())
 }
 
 pub const DEFAULT_CACHE_GIB: u64 = 30;
@@ -1534,7 +1547,12 @@ fn run_with_compiler(
             return Ok(());
         }
         let tail: Vec<String> = tail.into();
-        let error = messages.explain(failure(what, &status.to_string(), &errors, &tail));
+        let error = diagnostics::with_internals_hint(messages.explain(failure(
+            what,
+            &status.to_string(),
+            &errors,
+            &tail,
+        )));
         Err(match blocked {
             true => with_app_control(error),
             false => app_control(error),

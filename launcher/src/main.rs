@@ -5507,6 +5507,9 @@ fn menus() -> Vec<Menu> {
 }
 
 fn main() {
+    if let Some(code) = native_mods::internals_rustc_wrapper() {
+        std::process::exit(code);
+    }
     if let Err(error) = console::attach_for_cli() {
         eprintln!("Could not restore the launcher's terminal streams: {error}");
         std::process::exit(1);

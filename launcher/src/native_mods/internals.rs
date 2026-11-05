@@ -14,6 +14,7 @@ pub(super) const INTERNALS: &str = "internals.json";
 pub(super) struct Catalog {
     pub(super) internals: Vec<ListedInternal>,
     pub(super) points: Vec<inject::ListedPoint>,
+    pub(super) discovery: bool,
 }
 
 pub(super) struct Facade {
@@ -54,7 +55,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
             Self::Missing { mod_id, path } => trf(
-                "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have.",
+                "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
                 &[("mod", mod_id), ("path", path)],
             ),
             Self::Changed { mod_id, path, signature } => trf(
@@ -116,6 +117,7 @@ impl Catalog {
         Ok(Self {
             internals: internals::read(&path)?,
             points: inject::listed(&dir.join(inject::POINTS))?,
+            discovery: false,
         })
     }
 
@@ -149,8 +151,12 @@ impl Catalog {
         manifests
             .into_iter()
             .map(|manifest| {
-                self.facade(manifest)
-                    .map(|facade| (manifest.id.as_str(), facade))
+                (if self.discovery {
+                    self.discovery_facade(manifest)
+                } else {
+                    self.facade(manifest)
+                })
+                .map(|facade| (manifest.id.as_str(), facade))
             })
             .collect()
     }
@@ -169,6 +175,44 @@ impl Catalog {
             ))?;
         }
         Ok(())
+    }
+
+    /// Discovery opens the staged view, not the production declaration boundary. Keep the
+    /// exact raw constructors from the normal facade; they are not internal-use declarations.
+    fn discovery_facade(&self, manifest: &horizon_mods::Manifest) -> Result<Facade, Error> {
+        let mut manifest = manifest.clone();
+        manifest
+            .native
+            .as_mut()
+            .expect("native project")
+            .internals
+            .clear();
+        let mut facade = self.facade(&manifest)?;
+        facade.source.insert_str(0, "#![allow(deprecated)]\n");
+        facade.source.push_str("pub use horizon_client::*;\n");
+        facade
+            .crates
+            .extend(
+                self.internals
+                    .iter()
+                    .filter(|entry| !entry.shape_only)
+                    .map(|entry| {
+                        entry
+                            .path
+                            .split("::")
+                            .next()
+                            .expect("catalog crate")
+                            .to_owned()
+                    }),
+            );
+        for krate in facade
+            .crates
+            .iter()
+            .filter(|krate| *krate != "horizon_client")
+        {
+            facade.source.push_str(&format!("pub use {krate};\n"));
+        }
+        Ok(facade)
     }
 
     /// Re-exports are the compiler's boundary: no module wildcard can widen the declaration.
@@ -393,6 +437,7 @@ mod tests {
         fs::write(path, text).unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         let catalog = Catalog {
+            discovery: false,
             internals: serde_json::from_value(serde_json::json!([
                 { "path": "horizon_client::game::Game", "kind": "struct", "signature": "struct Game<'a> { world: World }", "hash": "1234" },
                 { "path": "horizon_client::game::maps::dimension_id", "kind": "fn", "signature": "fn dimension_id() -> u8", "hash": "5678" },
@@ -404,6 +449,21 @@ mod tests {
             ])).unwrap(),
         };
         (dir, bundle, catalog)
+    }
+
+    #[test]
+    fn discovery_opens_only_its_facade_and_retains_typed_raw_listeners() {
+        let (dir, bundle, mut catalog) = fixture("discovery-raw");
+        let normal = catalog.facade(&bundle.manifest).unwrap().source;
+        catalog.discovery = true;
+        let discovery = catalog.prepare([&bundle.manifest]).unwrap();
+        let source = &discovery[bundle.manifest.id.as_str()].source;
+        assert!(source.contains("pub use horizon_client::*;"));
+        assert!(source.contains("pub use horizon_client::game::__TickListener;"));
+        assert!(source.contains("mod_points::__private::RawListener::new"));
+        assert!(!normal.contains("pub use horizon_client::*;"));
+        assert_eq!(catalog.facade(&bundle.manifest).unwrap().source, normal);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

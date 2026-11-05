@@ -75,6 +75,19 @@ pub(super) fn capture(compiler: &Compiler<'_>, input: impl BufRead, mut log: imp
     output
 }
 
+/// Both rustc's prebuilt route and Cargo's source route preserve the rendered error.
+pub(super) fn with_internals_hint(error: String) -> String {
+    if error.contains("internals")
+        && ["E0432", "E0433", "E0603"]
+            .iter()
+            .any(|code| error.contains(code))
+    {
+        format!("{error}\n{}", crate::i18n::tr("Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again."))
+    } else {
+        error
+    }
+}
+
 #[derive(Default)]
 struct Functions(Vec<(Range<usize>, String)>);
 
@@ -187,6 +200,17 @@ mod tests {
             json!({"schema":6,"injections":entries}).to_string(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn undeclared_internals_on_both_compiler_routes_point_to_sync() {
+        for code in ["E0432", "E0433", "E0603"] {
+            let error = format!("error[{code}]: cannot import internals::game::Missing");
+            assert!(with_internals_hint(error.clone()).starts_with(&error));
+            assert!(with_internals_hint(error).contains("cargo horizon-mod internals sync"));
+        }
+        let unrelated = "error[E0432]: cannot import another::Missing";
+        assert_eq!(with_internals_hint(unrelated.into()), unrelated);
     }
 
     #[test]
