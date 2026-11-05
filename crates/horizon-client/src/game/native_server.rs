@@ -1143,8 +1143,8 @@ impl Game<'_> {
     /// ignored player who isn't in bed is left out of the players the night
     /// needs asleep, as a spectator is (an away-from-keyboard mod). Kept
     /// until a mod sets it back or the server stops, also if they leave and
-    /// come back. Only where no player's state is swapped in, as
-    /// `Commands::run_command`; false when the server list is unavailable or they aren't on.
+    /// come back. False when the server list is unavailable, the handle is
+    /// stale or the player isn't online.
     pub(super) fn native_player_set_sleep_ignored(
         &mut self,
         player: PlayerRef,
@@ -1195,8 +1195,8 @@ impl Game<'_> {
     /// log, commands, selectors and the server's events. Kept until a mod
     /// sets it again or the server stops (also if they leave and come back).
     /// Plain text: the mod checks it (`Messages::text_allowed`, its length,
-    /// other players' names). Only where no player's state is swapped in,
-    /// as `native_run_command`; false there and when they aren't on.
+    /// other players' names). False when the server list is unavailable,
+    /// the handle is stale or the player isn't online.
     pub(super) fn native_player_set_nickname(
         &mut self,
         player: PlayerRef,

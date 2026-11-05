@@ -386,7 +386,7 @@ pub trait Hooks {
     /// without its slash, for a command a mod registered and the player's
     /// level allows: set `ran` when it is yours. The player's state is
     /// swapped in for the call, so `native_player` and the other helpers
-    /// read that player; `native_feedback` answers them. A single player's
+    /// read that player; `host.commands().feedback()` answers them. A single player's
     /// owner console (`horizon-ctl command`) reaches it too, as the owner at
     /// level 4.
     #[hook(side = "server", contract = "cancel", out = "ran")]
@@ -1418,7 +1418,7 @@ pub trait Hooks {
     /// `canceled` to stop it: nothing runs and nothing is answered but the
     /// lines pushed to `replies`, which go to the player as system chat.
     /// No player's state is swapped in and the server's player list is busy
-    /// with this one, so `PlayerRef::tell` and the other helpers that take a UUID
+    /// with this one, so `PlayerRef::tell` and the other player helpers
     /// reach nobody here: answer through `replies`. Once for each command a
     /// player sends, on a server, and for each line of a quiet command batch
     /// (`horizon:quiet_commands`, whose replies are dropped). A command the
@@ -1437,7 +1437,7 @@ pub trait Hooks {
     /// (`DedicatedServer.handleConsoleInputs`), without its slash: set `ran`
     /// when it is yours. There is no player: the source is the console, at
     /// permission level 4, so `host.players().acting_player()` is None and the
-    /// player-only helpers give nothing; `native_feedback` answers on the
+    /// player-only helpers give nothing; `host.commands().feedback()` answers on the
     /// console. A name no mod registered goes to vanilla's dispatcher as
     /// before.
     #[hook(side = "server", contract = "cancel", out = "ran")]
