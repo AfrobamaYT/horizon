@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} l’è minga installà",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (o .mcp.json en un pruget)",
   "← All servers": "← Tüt i server",
-  "← Newer": "← Püsee nœuf"
+  "← Newer": "← Püsee nœuf",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

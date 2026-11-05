@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} tidak diinstal",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (atau .mcp.json di dalam proyek)",
   "← All servers": "← Semua server",
-  "← Newer": "← Lebih baru"
+  "← Newer": "← Lebih baru",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

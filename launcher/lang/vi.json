@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} chưa được cài đặt",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (hoặc .mcp.json trong một dự án)",
   "← All servers": "← Tất cả máy chủ",
-  "← Newer": "← Mới hơn"
+  "← Newer": "← Mới hơn",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

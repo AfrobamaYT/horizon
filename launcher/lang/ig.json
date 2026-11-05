@@ -1073,5 +1073,6 @@
   "{version} is not installed": "Awụnyeghị {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ma ọ bụ .mcp.json na oru ngo)",
   "← All servers": "← Sava niile",
-  "← Newer": "← Ọhụrụ"
+  "← Newer": "← Ọhụrụ",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

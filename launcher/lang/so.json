@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} lama rakibin",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ama .mcp.json mashruuc)",
   "← All servers": "← Dhammaan server-yada",
-  "← Newer": "← Ka cusub"
+  "← Newer": "← Ka cusub",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }
