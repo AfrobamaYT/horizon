@@ -223,7 +223,10 @@ solidity, face occlusion and default lighting: an occluding full cube is solid a
 shape uses its covered faces to stop light directionally. An empty or partial outline is not a solid
 render. Fluid-bearing states, including intrinsic water in bubble-column and kelp templates, retain their
 fluid attenuation and downward-skylight behavior when the declared geometry is unchanged. Special
-skylight and light-dampening rules, such as glass and leaves, remain inherited from the template, and
+skylight and light-dampening rules remain inherited from the template: fluid-dependent skylight rules
+(such as vegetation) use the resolved state's fluid, including declared waterlogging, while glass keeps
+its unconditional skylight rule and leaves keep their dampening. For example, a partial poppy-template
+outline passes skylight without attenuation when dry, but attenuates it by 1 when waterlogged.
 `occludes: false` still disables face occlusion.
 
 Movement collision is independently selectable with `collision_shapes`; it does not change the outline,

@@ -691,6 +691,14 @@ impl std::error::Error for ReservedBlockEntityNamespace {}
 /// A block ID resolved against the complete content and vanilla registry.
 struct KnownBlock<'a>(&'a str);
 
+/// The template class's rule for downward skylight through a declared outline.
+#[derive(Clone, Copy)]
+enum SkylightRule {
+    Shape,
+    Fluid,
+    Template,
+}
+
 /// A block being added: its declaration and where its states go.
 struct NewBlock<'a> {
     decl: &'a Block,
@@ -702,8 +710,7 @@ struct NewBlock<'a> {
     collision_shapes: Option<Vec<VoxelShape>>,
     /// Whether each shaped state contains fluid, including intrinsic template fluids.
     has_fluid: Vec<bool>,
-    /// The template overrides BlockBehaviour.propagatesSkylightDown.
-    custom_skylight: bool,
+    skylight: SkylightRule,
     custom_dampening: bool,
     default: u32,
     /// The declared state properties' combinations, every property at its
@@ -1033,46 +1040,50 @@ impl<'a> Plan<'a> {
             },
             false => BTreeSet::new(),
         };
-        // Preserve blocks whose vanilla class overrides the default shape-based
-        // skylight rule (for example glass, barriers, fences and chorus plants).
-        let (custom_skylight, custom_dampening): (BTreeSet<String>, BTreeSet<String>) = if base
-            .join("block-behaviours.json")
-            .exists()
-        {
+        // Class chains are most-derived first. Fluid-dependent overrides must
+        // use the resolved state's fluid, not the template's cached dry answer.
+        let mut skylight_rules = BTreeMap::new();
+        let mut custom_dampening = BTreeSet::new();
+        if base.join("block-behaviours.json").exists() {
             let behaviors = read_json(&base.join("block-behaviours.json"))?;
             let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
                 return Err("block-behaviours.json has no blocks".into());
             };
-            let names_with = |overrides: &[&str]| -> BTreeSet<String> {
-                blocks.iter().filter_map(|block| {
-                    let Some(J::Arr(classes)) = block.get("class") else { return None };
-                    if !classes.iter().any(|class| matches!(class, J::Str(name) if overrides.contains(&name.as_str()))) { return None }
-                    match block.get("name") { Some(J::Str(name)) => Some(name.clone()), _ => None }
-                }).collect()
-            };
-            (
-                names_with(&[
-                    "BambooStalkBlock",
-                    "BarrierBlock",
-                    "CrossCollisionBlock",
-                    "GlowLichenBlock",
-                    "HangingMossBlock",
-                    "LightBlock",
-                    "LiquidBlock",
-                    "MossyCarpetBlock",
-                    "PipeBlock",
-                    "ShulkerBoxBlock",
-                    "TintedGlassBlock",
-                    "TransparentBlock",
-                    "VegetationBlock",
-                    "VineBlock",
-                    "WallBlock",
-                ]),
-                names_with(&["LeavesBlock", "TintedGlassBlock"]),
-            )
-        } else {
-            (BTreeSet::new(), BTreeSet::new())
-        };
+            for block in blocks {
+                let (Some(J::Str(name)), Some(J::Arr(classes))) =
+                    (block.get("name"), block.get("class"))
+                else {
+                    continue;
+                };
+                let classes: Vec<&str> = classes
+                    .iter()
+                    .filter_map(|class| match class {
+                        J::Str(name) => Some(name.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(rule) = classes.iter().find_map(|class| match *class {
+                    "BarrierBlock"
+                    | "CrossCollisionBlock"
+                    | "GlowLichenBlock"
+                    | "LightBlock"
+                    | "VegetationBlock"
+                    | "WallBlock" => Some(SkylightRule::Fluid),
+                    "BambooStalkBlock" | "HangingMossBlock" | "LiquidBlock"
+                    | "MossyCarpetBlock" | "PipeBlock" | "ShulkerBoxBlock" | "TintedGlassBlock"
+                    | "TransparentBlock" | "VineBlock" => Some(SkylightRule::Template),
+                    _ => None,
+                }) {
+                    skylight_rules.insert(name.clone(), rule);
+                }
+                if classes
+                    .iter()
+                    .any(|class| matches!(*class, "LeavesBlock" | "TintedGlassBlock"))
+                {
+                    custom_dampening.insert(name.clone());
+                }
+            }
+        }
         let mut facts = read_json(&base.join("facts.json"))?;
         let names: Vec<String> = match facts.at("states") {
             Some(J::Arr(states)) => states
@@ -1354,7 +1365,10 @@ impl<'a> Plan<'a> {
                     shapes,
                     collision_shapes,
                     has_fluid,
-                    custom_skylight: custom_skylight.contains(&decl.template),
+                    skylight: skylight_rules
+                        .get(&decl.template)
+                        .copied()
+                        .unwrap_or(SkylightRule::Shape),
                     custom_dampening: custom_dampening.contains(&decl.template),
                     default,
                     combos,
@@ -1545,10 +1559,12 @@ impl<'a> Plan<'a> {
                         let full = !shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
                         let can_occlude = matches!(row.get("can_occlude"), Some(J::Bool(true)));
                         let solid = can_occlude && full;
-                        let down = if b.custom_skylight {
-                            matches!(row.get("skylight_down"), Some(J::Bool(true)))
-                        } else {
-                            !full && !b.has_fluid[state_index]
+                        let down = match b.skylight {
+                            SkylightRule::Shape => !full && !b.has_fluid[state_index],
+                            SkylightRule::Fluid => !b.has_fluid[state_index],
+                            SkylightRule::Template => {
+                                matches!(row.get("skylight_down"), Some(J::Bool(true)))
+                            }
                         };
                         // A partial outline needs directional light occlusion even
                         // when its full-cube template bypasses shape checks. Keep

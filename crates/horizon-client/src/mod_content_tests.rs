@@ -3473,6 +3473,85 @@ fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
+/// A declared waterlogged property changes a fluid-dependent class override,
+/// but not TransparentBlock's constant skylight rule.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn declared_waterlogged_vegetation_uses_resolved_fluid_for_skylight() {
+    use crate::{
+        blocks::Fluid,
+        chunk::Chunk,
+        light::{LightTables, apply_lighting, light_chunk},
+    };
+    let base = prepared().expect("prepared resources for the skylight regression");
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-vegetation-light-{}", std::process::id()));
+    let m = folder_mod(
+        &scratch.join("mod"),
+        &[
+            ("horizon-mod.toml", &manifest("testmod", "")),
+            (
+                "data/testmod/horizon/block/poppy.json",
+                r#"{
+                  "template": "minecraft:poppy",
+                  "item": false,
+                  "state_properties": {"waterlogged": {"type": "boolean"}},
+                  "shapes": {"default": [[0.3125,0,0.3125,0.6875,0.625,0.6875]]}
+                }"#,
+            ),
+            (
+                "data/testmod/horizon/block/glass.json",
+                r#"{"template":"minecraft:glass","item":false,
+                  "state_properties":{"waterlogged":{"type":"boolean"}},
+                  "shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+        ],
+    );
+    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let tables = LightTables::load(&root, registry, &facts).unwrap();
+    // VegetationBlock checks fluid emptiness independently of the outline;
+    // TransparentBlock always passes skylight. Values come from those rules,
+    // not from the generated facts or from another run of the derivation.
+    for (name, wet, down, dampening, sky) in [
+        ("testmod:poppy", false, true, 0, 15),
+        ("testmod:poppy", true, false, 1, 14),
+        ("testmod:glass", false, true, 0, 15),
+        ("testmod:glass", true, true, 0, 15),
+    ] {
+        let default = registry.default_state(name).unwrap();
+        let mut state = registry.state(default).unwrap().clone();
+        state
+            .properties
+            .insert("waterlogged".into(), wet.to_string());
+        let id = registry.id(&state).unwrap();
+        let declared = facts.get(id);
+        assert_eq!(declared.waterlogged, wet, "{state:?}");
+        assert_eq!(
+            declared.fluid,
+            if wet { Fluid::Water } else { Fluid::None },
+            "{state:?}"
+        );
+        assert!(!declared.can_occlude, "{state:?}");
+        assert_eq!(
+            (declared.skylight_down, declared.dampening),
+            (down, dampening),
+            "{state:?}"
+        );
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(8, 3, 8, id.0);
+        let mut region = [[None; 3]; 3];
+        region[1][1] = Some(&chunk);
+        let lights = light_chunk(&region, &tables, true);
+        apply_lighting(&mut chunk, lights);
+        assert_eq!(chunk.light(8, 4, 8) >> 4, 15, "exposed above {state:?}");
+        assert_eq!(chunk.light(8, 3, 8) >> 4, sky, "exposed cell {state:?}");
+    }
+    fs::remove_dir_all(scratch).unwrap();
+}
+
 /// Load the actual generated tables as the renderer and world generator do.
 #[test]
 #[ignore = "full content root: CI and pr_ready run it"]
