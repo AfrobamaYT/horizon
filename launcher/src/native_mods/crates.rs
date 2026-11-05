@@ -55,19 +55,33 @@ pub(super) fn check_game_graph(stage: &Path, text: &str) -> Result<(), String> {
             Some(manifest.get("package")?.get("name")?.as_str()?.to_owned())
         })
         .collect();
-    let staged_manifests = manifests(&stage.join(DIR))?;
-    let facades: BTreeSet<_> = staged_manifests
-        .iter()
-        .map(|(id, _)| super::internals::package(id))
-        .collect();
-    for (mod_id, manifest) in staged_manifests {
+    let mut staged = Vec::new();
+    for (mod_id, manifest) in manifests(&stage.join(DIR))? {
         let text = fs::read_to_string(manifest).map_err(|e| e.to_string())?;
         let value: toml::Table = text.parse().map_err(|e| format!("Cargo.toml: {e}"))?;
         let name = value
             .get("package")
             .and_then(|p| p.get("name"))
             .and_then(toml::Value::as_str)
-            .ok_or("Cargo.toml: missing package name")?;
+            .ok_or("Cargo.toml: missing package name")?
+            .to_owned();
+        staged.push((mod_id, name));
+    }
+    // Each staged mod's generated facade, by package, and the mod crate it belongs to. Only that
+    // crate passes through it: a facade with a registry or git source, or one reached from any
+    // other crate, is walked like any dependency, so its game dependency is refused.
+    let facades: BTreeMap<String, &str> = staged
+        .iter()
+        .filter(|(id, _)| {
+            let facade = super::internals::package(id);
+            packages.iter().all(|p| {
+                p.get("name").and_then(toml::Value::as_str) != Some(&facade)
+                    || p.get("source").is_none()
+            })
+        })
+        .map(|(id, name)| (super::internals::package(id), name.as_str()))
+        .collect();
+    for (mod_id, name) in &staged {
         let mut todo = vec![(name.to_owned(), name.to_owned())];
         let mut seen = BTreeSet::new();
         while let Some((current, via)) = todo.pop() {
@@ -78,11 +92,6 @@ pub(super) fn check_game_graph(stage: &Path, text: &str) -> Result<(), String> {
                 .iter()
                 .filter(|p| p.get("name").and_then(toml::Value::as_str) == Some(&current))
             {
-                // A staged mod's generated facade owns its game dependency. A registry or git
-                // package of the same name is not that facade, so still walk its dependencies.
-                if facades.contains(&current) && package.get("source").is_none() {
-                    continue;
-                }
                 for dep in package
                     .get("dependencies")
                     .and_then(toml::Value::as_array)
@@ -91,10 +100,13 @@ pub(super) fn check_game_graph(stage: &Path, text: &str) -> Result<(), String> {
                     .filter_map(toml::Value::as_str)
                 {
                     let dep = dep.split_whitespace().next().unwrap_or(dep);
-                    if dep == super::api::API_PACKAGE || dep == super::api::POINTS_PACKAGE {
+                    if dep == super::api::API_PACKAGE
+                        || dep == super::api::POINTS_PACKAGE
+                        || facades.get(dep) == Some(&current.as_str())
+                    {
                         continue;
                     }
-                    let first = if current == name {
+                    let first = if current == *name {
                         dep.to_owned()
                     } else {
                         via.clone()
@@ -561,6 +573,16 @@ version = "0.1.0"
         }
         let unstaged = lock.replace("horizon-internals-library", "horizon-internals-other");
         assert!(check_game_graph(stage.root(), &unstaged).is_err());
+        // The app reaching the library's facade itself is the app using undeclared internals.
+        let borrowed = lock.replace(
+            "dependencies = [\"library\"]",
+            "dependencies = [\"library\", \"horizon-internals-library\"]",
+        );
+        let error = check_game_graph(stage.root(), &borrowed).unwrap_err();
+        assert!(
+            error.contains("horizon-internals-library -> horizon-client"),
+            "{error}"
+        );
     }
 
     fn wanted(stage: &Path) -> Result<Vec<Wanted>, String> {
