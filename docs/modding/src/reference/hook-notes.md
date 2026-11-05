@@ -270,6 +270,12 @@ requires a farmer at work and `mob_griefing` enabled.
   draws replaces all the rows — armour, hearts, food, air and the heights above the hotbar — for that
   frame. Nothing answered draws Horizon's own.
 
+- Where the in-game chat is drawn through `native_customize_chat_overlay` (NeoForge's `CustomizeGuiOverlayEvent.Chat`):
+  each frame the chat layer draws, `x` and `y` come in as the chat's bottom-left corner (0 and the GUI height minus 40)
+  with the GUI size and whether the chat screen is open, and the chat is drawn shifted to where a mod moved them. Not
+  asked while the chat is hidden (F1 with the chat closed). Only the drawing moves; the input box and clicks on
+  messages stay in vanilla's place, as with NeoForge.
+
 - Right-clicking an entity, on the server for every player: `native_entity_interact` hears a right click on
   an entity (its id and type, and the stack in the hand) where `Player.interactOn` starts, once per hand. A mod that claims
   it swings the hand instead of the entity's and the item's own interaction.
