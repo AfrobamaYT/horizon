@@ -566,15 +566,8 @@ mod tests {
                 Some(0.0)
             );
 
-            // An unknown id, another entity and a stale handle read nothing.
-            assert_eq!(
-                me.effect_blend_factor(
-                    game,
-                    mod_api::__private::part_tests::invalid_effect_key(),
-                    0.5
-                ),
-                None
-            );
+            // Another entity and a stale handle read nothing.
+
             let epoch = me.entity().epoch();
             let other = LivingRef::new(EntityRef::new(epoch, 8));
             assert_eq!(
@@ -658,17 +651,8 @@ mod tests {
             assert!(!game.native_living_add_effect(zombie, &effect("minecraft:poison", 100, 0)));
             assert!(game.native_living_add_effect(cow, &effect("minecraft:poison", 100, 0)));
 
-            // An unknown id and a duration below -1 change nothing.
-            assert!(!game.native_living_add_effect(
-                zombie,
-                &NativeActiveEffect::new(
-                    mod_api::__private::part_tests::invalid_effect_key(),
-                    100,
-                    0,
-                    false,
-                    true
-                )
-            ));
+            // A duration below -1 changes nothing.
+
             assert!(!game.native_living_add_effect(zombie, &effect("minecraft:speed", -2, 0)));
 
             // remove_effect takes its absorption hearts with it; a second

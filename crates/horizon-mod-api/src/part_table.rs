@@ -1657,22 +1657,12 @@ pub mod tests {
         )
     }
 
-    /// An invalid transport slot, for the boundary-refusal cases in game tests.
-    pub fn invalid_block_key() -> BlockKey {
-        BlockKey(u32::MAX)
-    }
-
     /// A registered effect exposed by the real load-owned mapping, also for unrequested vanilla entries.
     pub fn effect_key(id: &str) -> EffectKey {
         let index = horizon_client_core::potions::effect(id)
             .expect("fixture registered this effect")
             .index;
         crate::registry_keys::effect_key(index).expect("fixture resolved effect keys")
-    }
-
-    /// An invalid transport slot, not a registry-name request.
-    pub fn invalid_effect_key() -> EffectKey {
-        EffectKey(u32::MAX)
     }
 
     #[cfg(test)]

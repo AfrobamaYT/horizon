@@ -213,10 +213,6 @@ mod tests {
                     .as_deref(),
                 Some("minecraft:air")
             );
-            assert_eq!(
-                host.block_item(mod_api::__private::part_tests::invalid_block_key()),
-                None
-            );
         });
     }
 
@@ -298,7 +294,15 @@ mod tests {
                 .default,
             BlockStateId(5)
         );
-        assert!(resolved_block(part_tests::invalid_block_key()).is_none());
+        // A valid key has no mapping on a different owning thread. Raw unknown slots are
+        // refused by the generated host boundary, not revalidated by typed operations.
+        let key = part_tests::block_key("minecraft:wheat");
+        assert!(
+            std::thread::spawn(move || resolved_block(key))
+                .join()
+                .unwrap()
+                .is_none()
+        );
     }
 }
 
@@ -355,11 +359,8 @@ mod facts_tests {
                     .map(|r| (r.first(), r.len())),
                 Some((stone, 1))
             );
-            // Unknown: None.
-            assert_eq!(
-                facts.states_of(mod_api::__private::part_tests::invalid_block_key()),
-                None
-            );
+            // Unknown state ids: None.
+
             assert_eq!(facts.destroy_speed(BlockStateId(u32::MAX)), None);
             assert_eq!(facts.sound(BlockStateId(u32::MAX)), None);
         });

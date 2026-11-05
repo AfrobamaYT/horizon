@@ -212,6 +212,15 @@ Block reload rebinds that mapping without changing the key's identity or canonic
 a refused rebind clears the old mapping. Effect registration is process-owned and fixed
 until restart, matching the engine's effect registry.
 
+Block tag membership is bound from the same merged item/block tag snapshot at world load and
+reload, including worlds without pack overrides. A read maps the slot to a numeric block id,
+looks up the tag name and tests a `BlockSet` bit; it never resolves the block's name. A fully
+namespaced tag needs no allocation (a bare tag adds `minecraft:`). Binding visits each merged
+block-tag member once, resolves its default state and inserts its numeric block id; it replaces
+the previous snapshot rather than accumulating membership. No membership work is added to ticks
+that do not call this read. Tags and block mappings belong to their resolving thread; missing
+authoritative context or an unavailable mapping returns `None`, not a stale membership result.
+
 `host.block_state_default(stone)`, `host.block_states().states_of(stone)`,
 `host.block_item(stone)`, `host.block_in_tag(stone, tag)` and restricted-level
 `schedule_block_tick(pos, stone, delay)` use `BlockKey`. Property expressions accepted by

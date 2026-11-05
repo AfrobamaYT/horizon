@@ -197,11 +197,7 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
         if !self.native_authoritative {
             return None;
         }
-        Some(super::native_world_read::block_in_tag(
-            self.items,
-            mod_api::__private::block_key_id(block)?,
-            tag,
-        ))
+        super::native_world_read::block_in_tag(block, tag)
     }
     fn item_stack_in_tag(&self, stack: &mod_api::ItemStack, tag: &str) -> Option<bool> {
         self.native_authoritative
@@ -296,11 +292,8 @@ impl mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
         Some(mod_api::__private::resolved_block(block)?.default)
     }
     fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
-        Some(super::native_world_read::block_in_tag(
-            self.0.tags()?,
-            mod_api::__private::block_key_id(block)?,
-            tag,
-        ))
+        self.0.tags()?;
+        super::native_world_read::block_in_tag(block, tag)
     }
     fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
         Some(super::native_world_read::fluid_in_tag(

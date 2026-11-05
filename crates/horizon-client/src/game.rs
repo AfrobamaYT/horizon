@@ -21472,6 +21472,11 @@ impl Game<'_> {
             })
         })
         .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
+        native_world_read::resolve_block_tags(items, |name| {
+            registry
+                .default_state(name)
+                .map(|state| self.res.behaviours().block(state))
+        });
         mod_api::__private::resolve_parts(
             &items.block_tags,
             &items.item_tags,
@@ -23935,6 +23940,18 @@ mod tests {
         mod_api::__private::install_parts(&mods).unwrap();
         mod_api::__private::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
+            let stone_key = mod_api::__private::part_tests::block_key("stone");
+            let name = stone_key.id(game);
+            let dir = std::env::temp_dir().join(format!("horizon-key-tags-{}", std::process::id()));
+            game.session_lock = Some(horizon_client::save::SessionLock::acquire(&dir).unwrap());
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "test:reload"),
+                Some(false)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "base_stone_overworld"),
+                Some(true)
+            );
             game.load_server_loot();
             let stack = super::functions::pack_stack(
                 &game.world_root,
@@ -23943,6 +23960,23 @@ mod tests {
                 &game.level.enabled_features,
             );
             game.reload_world_tables(&stack);
+            assert_eq!(stone_key.id(game), name);
+            assert_eq!(
+                stone_key,
+                mod_api::__private::part_tests::block_key("minecraft:stone")
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "test:reload"),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "minecraft:logs"),
+                Some(false)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "base_stone_overworld"),
+                Some(true)
+            );
             let stone = game
                 .pack
                 .assets
@@ -23956,6 +23990,8 @@ mod tests {
                     .block_state(stone)
                     .is_empty()
             );
+            game.session_lock = None;
+            let _ = std::fs::remove_dir_all(dir);
         });
     }
     #[test]
