@@ -456,16 +456,18 @@ impl Shape {
             (true, Side::Client) => "client",
             (true, Side::Both) => "side",
         };
+        // The record's own field types: a native-width integer as it crosses (`wide`).
+        let spelled = |ty: &Type| {
+            let ty = wide(ty).unwrap_or_else(|| ty.clone());
+            quote!(#ty).to_string().replace(' ', "")
+        };
         let types = self.args.iter().map(|arg| match &arg.ty {
             Type::Reference(_) => "str".to_owned(),
-            ty => quote!(#ty).to_string().replace(' ', ""),
+            ty => spelled(ty),
         });
         let extra = match &self.returns {
             Returns::Unit | Returns::UnitResult => Some("bool".to_owned()),
-            Returns::Value(ty) => Some(format!(
-                "Option<{}>",
-                quote!(#ty).to_string().replace(' ', "")
-            )),
+            Returns::Value(ty) => Some(format!("Option<{}>", spelled(ty))),
             Returns::Opaque => None,
         };
         let fields = self

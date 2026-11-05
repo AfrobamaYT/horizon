@@ -289,10 +289,11 @@ mod tests {
     use super::*;
     use crate::places::SHAPES;
 
-    /// The field types a record's shape may name: each one [`Wire`] carries.
+    /// The field types a record's shape may name: each one [`Wire`] carries with the same range in
+    /// the game and in a wasm32 mod. Native-width integers cross as `u64`/`i64`, and `i128` isn't
+    /// an API scalar, so neither may appear.
     const CARRIED: &[&str] = &[
-        "bool", "char", "str", "f32", "f64", "i8", "i16", "i32", "i64", "isize", "u8", "u16",
-        "u32", "u64", "usize",
+        "bool", "char", "str", "f32", "f64", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
     ];
 
     #[test]
@@ -353,5 +354,21 @@ mod tests {
             Err(Mismatch)
         );
         assert_eq!((turn.xo, turn.yo, turn.cancel), (1.0, 2.0, false));
+    }
+
+    #[test]
+    fn a_native_width_sentinel_survives_a_listener_that_leaves_it() {
+        // `slot_candidates` is called with `usize::MAX` for an unbounded slot source.
+        let shape = crate::places::NAMES
+            .iter()
+            .position(|name| *name == "slot_candidates")
+            .map(|place| crate::places::SHAPES[place])
+            .expect("slot_candidates is a point");
+        assert!(shape.contains("limit:u64"), "{shape}");
+        let record = crate::SlotCandidatesArgs::__new(usize::MAX);
+        let fields = record.lower();
+        assert!(matches!(&fields[0], Value::U(u64::MAX)));
+        // As the mod lifts it, on any target.
+        assert_eq!(u64::lift(&fields[0]), Ok(u64::MAX));
     }
 }
