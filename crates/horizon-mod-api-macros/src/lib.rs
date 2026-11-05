@@ -474,7 +474,8 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         #returned
         __result
     });
-    outer.attrs.retain(|attr| !attr.path().is_ident("inline"));
+    // The outer function keeps the function's own `#[inline]`: a small accessor in a lower crate
+    // (`Chunk::get`) stays inlinable into its callers, slot check and all.
     function.sig.ident = inner;
     function.vis = syn::Visibility::Inherited;
     function
