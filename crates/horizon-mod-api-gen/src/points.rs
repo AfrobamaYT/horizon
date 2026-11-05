@@ -4,8 +4,6 @@
 //! from any copy, staged or not, as `mod_points` (each point's record, the `Points` trait,
 //! `PointId`) and as `points.json`, the list the launcher routes injections by. All of them are
 //! build outputs, never committed.
-#[path = "../../horizon-mod-api-macros/src/point_shape.rs"]
-mod point_shape;
 
 use quote::{ToTokens, quote};
 use std::{
