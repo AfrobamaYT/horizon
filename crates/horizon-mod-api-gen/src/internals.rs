@@ -220,14 +220,12 @@ impl Pass {
                 self.entry(&format!("{module}::{}", value.sig.ident), "fn", &value.sig);
             }
             Item::Struct(value) => {
-                let (ident, generics, fields) =
-                    (&value.ident, &value.generics, clean_fields(&value.fields));
-                expose!(
-                    value,
-                    "struct",
-                    value.struct_token.span(),
-                    quote!(struct #ident #generics #fields)
-                );
+                let (ident, generics) = (&value.ident, &value.generics);
+                let mut signature = value.clone();
+                signature.attrs.clear();
+                signature.vis = Visibility::Inherited;
+                signature.fields = clean_fields(&value.fields);
+                expose!(value, "struct", value.struct_token.span(), signature);
                 if children {
                     self.fields(
                         file,
@@ -239,13 +237,14 @@ impl Pass {
             }
             Item::Union(value) => {
                 let (ident, generics) = (&value.ident, &value.generics);
-                let fields = clean_fields(&Fields::Named(value.fields.clone()));
-                expose!(
-                    value,
-                    "struct",
-                    value.union_token.span(),
-                    quote!(union #ident #generics #fields)
-                );
+                let mut signature = value.clone();
+                signature.attrs.clear();
+                signature.vis = Visibility::Inherited;
+                for field in &mut signature.fields.named {
+                    field.attrs.clear();
+                    field.vis = Visibility::Inherited;
+                }
+                expose!(value, "struct", value.union_token.span(), signature);
                 if children {
                     self.fields(
                         file,
@@ -256,18 +255,14 @@ impl Pass {
                 }
             }
             Item::Enum(value) => {
-                let (ident, generics) = (&value.ident, &value.generics);
-                let mut variants = value.variants.clone();
-                for variant in &mut variants {
+                let mut signature = value.clone();
+                signature.attrs.clear();
+                signature.vis = Visibility::Inherited;
+                for variant in &mut signature.variants {
                     variant.attrs.clear();
                     variant.fields = clean_fields(&variant.fields);
                 }
-                let path = expose!(
-                    value,
-                    "enum",
-                    value.enum_token.span(),
-                    quote!(enum #ident #generics { #variants })
-                );
+                let path = expose!(value, "enum", value.enum_token.span(), signature);
                 if children {
                     for variant in &value.variants {
                         if !test_only(&variant.attrs) {
@@ -300,13 +295,10 @@ impl Pass {
                 );
             }
             Item::Type(value) => {
-                let (ident, generics, ty) = (&value.ident, &value.generics, &value.ty);
-                expose!(
-                    value,
-                    "type",
-                    value.type_token.span(),
-                    quote!(type #ident #generics = #ty)
-                );
+                let mut signature = value.clone();
+                signature.attrs.clear();
+                signature.vis = Visibility::Inherited;
+                expose!(value, "type", value.type_token.span(), signature);
             }
             Item::Trait(value) => {
                 let mut signature = value.clone();
@@ -361,20 +353,50 @@ impl Pass {
         let segments: Vec<_> = segments.collect();
         for (index, segment) in segments.iter().enumerate() {
             let ident = &segment.ident;
-            if let Some(Item::Mod(child)) = items.iter().find(|item| matches!(item, Item::Mod(value) if value.ident == *ident && !test_only(&value.attrs))) {
+            let child = items.iter().find_map(|item| match item {
+                Item::Mod(value) if value.ident == *ident && !test_only(&value.attrs) => {
+                    Some(value)
+                }
+                _ => None,
+            });
+            if let Some(child) = child {
                 self.item(file, &module, &Item::Mod(child.clone()), false);
                 module = format!("{module}::{ident}");
-                if index + 1 == segments.len() { return Ok(()); }
-                if let Some((_, inner)) = &child.content { items = inner.clone(); dir = dir.join(ident.to_string()); }
-                else {
-                    let explicit = child.attrs.iter().find_map(|attr| {
-                        if attr.path().is_ident("path") && let syn::Meta::NameValue(value) = &attr.meta && let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(path), .. }) = &value.value { Some(path.value()) } else { None }
+                if index + 1 == segments.len() {
+                    return Ok(());
+                }
+                if let Some((_, inner)) = &child.content {
+                    items = inner.clone();
+                    dir = dir.join(ident.to_string());
+                } else {
+                    let explicit = child.attrs.iter().find_map(|attr| match &attr.meta {
+                        syn::Meta::NameValue(value) if attr.path().is_ident("path") => {
+                            match &value.value {
+                                syn::Expr::Lit(syn::ExprLit {
+                                    lit: syn::Lit::Str(path),
+                                    ..
+                                }) => Some(path.value()),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
                     });
                     let child_path = if let Some(relative) = explicit {
-                        self.sources[file].path.parent().expect("source parent").join(relative)
-                    } else if dir.join(format!("{ident}.rs")).is_file() { dir.join(format!("{ident}.rs")) }
-                    else { dir.join(ident.to_string()).join("mod.rs") };
-                    dir = if child_path.file_name().is_some_and(|name| name == "mod.rs") { child_path.parent().expect("source parent").to_owned() } else { child_path.with_extension("") };
+                        self.sources[file]
+                            .path
+                            .parent()
+                            .expect("source parent")
+                            .join(relative)
+                    } else if dir.join(format!("{ident}.rs")).is_file() {
+                        dir.join(format!("{ident}.rs"))
+                    } else {
+                        dir.join(ident.to_string()).join("mod.rs")
+                    };
+                    dir = if child_path.file_name().is_some_and(|name| name == "mod.rs") {
+                        child_path.parent().expect("source parent").to_owned()
+                    } else {
+                        child_path.with_extension("")
+                    };
                     file = self.load(&child_path)?;
                     items = self.sources[file].parsed.items.clone();
                 }
@@ -415,9 +437,15 @@ impl Pass {
                     {
                         for member in &block.items {
                             let matches = match member {
-                                ImplItem::Fn(value) => value.sig.ident == *member_name,
-                                ImplItem::Const(value) => value.ident == *member_name,
-                                ImplItem::Type(value) => value.ident == *member_name,
+                                ImplItem::Fn(value) => {
+                                    value.sig.ident == *member_name && !test_only(&value.attrs)
+                                }
+                                ImplItem::Const(value) => {
+                                    value.ident == *member_name && !test_only(&value.attrs)
+                                }
+                                ImplItem::Type(value) => {
+                                    value.ident == *member_name && !test_only(&value.attrs)
+                                }
                                 _ => false,
                             };
                             if matches {
@@ -680,6 +708,33 @@ const LABEL: &str = "é"; struct AfterUnicode;
             "{error}"
         );
         assert_eq!(fixture.game(), "struct Game;\n");
+    }
+
+    #[test]
+    fn signatures_track_bounds_and_types_but_not_bodies_or_docs() {
+        let one = Fixture::new(
+            "/// one\nstruct Game<T> where T: Copy { value: T }\nfn work() -> u32 { 1 }\n",
+        );
+        let two = Fixture::new(
+            "/// two\nstruct Game<T> where T: Clone { value: T }\nfn work() -> u32 { 2 }\n",
+        );
+        let first = widen_with(&one.0, "").unwrap();
+        let second = widen_with(&two.0, "").unwrap();
+        let lookup = |entries: Vec<Internal>| {
+            entries
+                .into_iter()
+                .map(|entry| (entry.path.clone(), entry))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let (first, second) = (lookup(first.entries), lookup(second.entries));
+        assert_ne!(
+            first["horizon_client::game::Game"].hash,
+            second["horizon_client::game::Game"].hash
+        );
+        assert_eq!(
+            first["horizon_client::game::work"],
+            second["horizon_client::game::work"]
+        );
     }
 
     #[test]

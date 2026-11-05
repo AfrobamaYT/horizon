@@ -35,6 +35,7 @@ horizon_world::worldgen::structure::legacy::make_bounding_box
 # Lower-crate parameter and internal types (aliases use their defining crate).
 # External and mod_api types need no widening. packet!/packet_enum! declarations
 # are already public and are not Rust items this source-level pass can select.
+horizon_client_core::text::Text
 horizon_client_lib::clock::FixedStep
 horizon_client_lib::extras_hud::MinimapLook
 horizon_client_lib::gizmos::Line
@@ -48,12 +49,14 @@ horizon_client_lib::net::Event
 horizon_client_lib::player_sync::PositionSender
 horizon_client_lib::sprint::Keys
 horizon_client_render::assets::Assets
+horizon_client_render::camera::NearPlane
 horizon_client_render::chat::ChatScreen
 horizon_client_render::chat::ChatSource
 horizon_client_render::chunk::Chunk
 horizon_client_render::font::Font
 horizon_client_render::gfx::Frame
 horizon_client_render::gfx::Renderer
+horizon_client_render::gfx::pack_timing::PassTiming
 horizon_client_render::hud::HudAtlas
 horizon_client_render::hud::Rect
 horizon_client_render::mesher::Info
@@ -70,10 +73,16 @@ horizon_client_render::sprite_cache::Decoded
 horizon_client_render::sprites::Sprites
 horizon_client_render::ui::Caret
 horizon_client_render::world::World
+horizon_core::geometry::Direction
+horizon_core::position::BlockPos
 horizon_items::blocks::BlockFacts
 horizon_protocol::packets::play::Explode
+horizon_world::registry::BlockRegistry
+horizon_world::worldgen::anchor::WorldGenerationContext
 horizon_world::worldgen::generator::GeneratorData
 horizon_world::worldgen::generator::ProtoChunk
 horizon_world::worldgen::generator::WorkerState
+horizon_world::worldgen::generator_structures::StructureState
 horizon_world::worldgen::overrides::WorldgenOverrides
 horizon_world::worldgen::structure::BoundingBox
+horizon_world::worldgen::structure::legacy::PieceRandom
