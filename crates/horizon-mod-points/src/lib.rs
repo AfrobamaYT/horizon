@@ -31,7 +31,7 @@ pub use registry::{RegisterError, register, stop};
 // hidden: the game's side of the points, not part of the API a mod is written against
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::registry::{POINTS, RawListener, register_raw, seal};
+    pub use crate::registry::{POINTS, RawKind, RawListener, register_raw, seal};
     #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
     pub use crate::wire;
     use crate::{PointId, Points};
@@ -44,11 +44,40 @@ pub mod __private {
         crate::registry::fire(place, name, call);
     }
 
-    /// Runs the raw listeners at `place`, each through `call` with its erased function, which the
-    /// slot casts back to the place's listener type.
+    /// Runs the raw listeners at `place`, each through `call` with its kind and function. The
+    /// slot casts a typed function back to the place's listener type, or calls an erased one
+    /// with the place index and its receiver and raw record or return value pointers.
+    ///
+    /// Extracting an erased callback does not make it safe to call with arbitrary pointers:
+    ///
+    /// ```compile_fail,E0133
+    /// use mod_points::{PointId, __private::{fire_raw, RawKind}};
+    /// let place = PointId::Tick;
+    /// fire_raw(place, "tick", &mut |kind| {
+    ///     if let RawKind::Erased(function) = kind {
+    ///         function(place as usize, std::ptr::null_mut(), std::ptr::null_mut());
+    ///     }
+    /// });
+    /// ```
+    ///
+    /// A caller that provides the slot's pointer guarantees can invoke it explicitly:
+    ///
+    /// ```
+    /// use mod_points::{PointId, __private::{fire_raw, RawKind}};
+    /// // SAFETY: the caller must supply this place's exact receiver and record pointers,
+    /// // valid for the callback's duration, as required by RawKind::Erased.
+    /// unsafe fn forward(place: PointId, receiver: *mut (), raw: *mut ()) {
+    ///     fire_raw(place, "slot", &mut |kind| {
+    ///         if let RawKind::Erased(function) = kind {
+    ///             // SAFETY: the caller supplies the slot's pointer guarantees.
+    ///             unsafe { function(place as usize, receiver, raw) };
+    ///         }
+    ///     });
+    /// }
+    /// ```
     #[cold]
     #[inline(never)]
-    pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(*const ())) {
+    pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
         crate::registry::fire_raw(place, name, call);
     }
 

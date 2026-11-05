@@ -1,6 +1,6 @@
 //! The one list of point listeners, and the slot table the points read. A native mod's
 //! `#[horizon_mod] impl Points` and the wasm runtime's proxies both [`register`] here while the game
-//! loads, and a native mod's raw listeners [`register_raw`]; the game then [`seal`]s the list, which
+//! loads, and raw listeners [`register_raw`]; the game then [`seal`]s the list, which
 //! sets [`POINTS`]. A firing slot walks the mods subscribed to that place, API listeners first and
 //! then raw ones, each in registration (dispatch) order, skipping any [`stop`]ped mod.
 use crate::{POINT_COUNT, PointId, Points};
@@ -21,17 +21,33 @@ struct Listener {
     stopped: AtomicBool,
 }
 
-/// A raw listener: a plain function of the mod's, whose type the generated `main` checked against
-/// the place's listener type before erasing it.
+/// How a slot calls a raw listener.
+#[derive(Clone, Copy)]
+pub enum RawKind {
+    /// A function of the place's listener type, cast back by the slot before calling it.
+    Typed(*const ()),
+    /// A runtime listener receiving the place index, receiver and raw record or return value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must pass the registered place's index and valid pointers of that place's exact
+    /// receiver and raw record or return types, respecting their mutability, aliasing, ownership
+    /// and lifetime requirements for the call's duration. The receiver is null for a free or
+    /// associated function, and at a borrowed-return place. A shared receiver must not be written
+    /// to; its mutable pointer only erases the type, not its mutability.
+    Erased(unsafe fn(usize, *mut (), *mut ())),
+}
+
+// Function pointers: no data behind them, so they move between threads.
+unsafe impl Send for RawKind {}
+unsafe impl Sync for RawKind {}
+
+/// A raw listener in its place's list.
 #[derive(Clone, Copy)]
 struct Raw {
     listener: u32,
-    function: *const (),
+    kind: RawKind,
 }
-
-// A function pointer: no data behind it, so it moves between threads.
-unsafe impl Send for Raw {}
-unsafe impl Sync for Raw {}
 
 /// The list while mods load: registrations, and stops that came before the seal.
 struct Open {
@@ -122,13 +138,12 @@ pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), Reg
     Ok(())
 }
 
-/// A native mod's raw listener at one place: a function of the place's listener type, erased.
-/// Only [`RawListener::new`], which is `unsafe`, makes one, so safe code can't hand a slot a
-/// pointer it would call as a listener.
+/// A raw listener at one place: a native mod's typed function, or a runtime's erased callback.
+/// Both constructors are `unsafe`: the caller guarantees the slot's pointers are used correctly.
 pub struct RawListener {
     id: &'static str,
     place: PointId,
-    function: *const (),
+    kind: RawKind,
 }
 
 impl RawListener {
@@ -143,7 +158,34 @@ impl RawListener {
         Self {
             id,
             place,
-            function,
+            kind: RawKind::Typed(function),
+        }
+    }
+
+    /// Mod `id`'s erased runtime listener `function` at `place`.
+    ///
+    /// The callback gets the place's index, the receiver and the raw record at a head or the
+    /// return value's place at a return (including `()` for a function with no explicit return
+    /// type). The receiver is null for a free or associated function. At a borrowed-return place
+    /// it is also null: only the value's place is passed, since the value may borrow the receiver.
+    /// A shared receiver is passed as a mutable pointer only to erase its type, not its mutability.
+    ///
+    /// # Safety
+    ///
+    /// Given the pointers guaranteed by [`RawKind::Erased`], `function` must interpret them using
+    /// `place`'s exact receiver and raw record or return types, respecting their mutability,
+    /// aliasing, ownership and lifetime requirements. The pointers and any references derived
+    /// from them must not escape the callback. In particular, a shared receiver must not be
+    /// written to.
+    pub const unsafe fn erased(
+        id: &'static str,
+        place: PointId,
+        function: unsafe fn(usize, *mut (), *mut ()),
+    ) -> Self {
+        Self {
+            id,
+            place,
+            kind: RawKind::Erased(function),
         }
     }
 
@@ -153,7 +195,7 @@ impl RawListener {
     }
 }
 
-/// Registers a native mod's raw listener.
+/// Registers a raw listener, in the same order for native functions and erased callbacks.
 pub fn register_raw(raw: &RawListener) -> Result<(), RegisterError> {
     let mut open = open()?;
     let listener = listener(&mut open, raw.id) as u32;
@@ -161,7 +203,7 @@ pub fn register_raw(raw: &RawListener) -> Result<(), RegisterError> {
         raw.place,
         Raw {
             listener,
-            function: raw.function,
+            kind: raw.kind,
         },
     ));
     Ok(())
@@ -252,10 +294,10 @@ pub(crate) fn fire(place: PointId, name: &'static str, call: &mut dyn FnMut(&'st
     }
 }
 
-/// Runs the raw listeners at `place`, each through `call` with its erased function.
-pub(crate) fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(*const ())) {
+/// Runs the raw listeners at `place`, each through `call` with its kind and function.
+pub(crate) fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
     let Some(sealed) = SEALED.get() else { return };
     for raw in &sealed.raw[place as usize] {
-        run(sealed, raw.listener, name, || call(raw.function));
+        run(sealed, raw.listener, name, || call(raw.kind));
     }
 }

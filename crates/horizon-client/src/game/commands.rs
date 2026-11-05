@@ -2497,7 +2497,7 @@ impl Game<'_> {
             return Ok(1);
         }
         let name;
-        if self.res.mob_types().contains_key(&kind) {
+        if kind == "minecraft:ender_dragon" || self.res.mob_types().contains_key(&kind) {
             self.spawn_mob_spawned(
                 &short,
                 pos,
