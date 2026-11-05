@@ -318,7 +318,7 @@ fn a_point_filled_by_a_wasm_mod() {
         wasm.toolchain()
     ))
     .unwrap();
-    let loaded = horizon_mod_wasm::load(
+    let mut loaded = horizon_mod_wasm::load(
         &horizon_mod_wasm::RuntimeConfig::default(),
         &std::fs::read(path("HORIZON_WASM_STD")).unwrap(),
         vec![horizon_mod_wasm::WasmPackage {
@@ -327,6 +327,9 @@ fn a_point_filled_by_a_wasm_mod() {
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
+    for listening in std::mem::take(&mut loaded.listening) {
+        listening.register().unwrap();
+    }
     mod_points::__private::seal();
     // The game's slot table: a place nobody listens at costs this check.
     let slots: Vec<AtomicBool> = (0..mod_points::POINT_COUNT)

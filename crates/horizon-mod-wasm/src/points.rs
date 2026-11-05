@@ -66,30 +66,51 @@ impl Forward for Listeners {
     }
 }
 
-/// The place a manifest's injection names: its `Points` method, `<method>` at the head and
-/// `<method>_return` at the return, which must be a place of this game at the same function.
+/// The place a manifest's injection names: the point at its `target`, at the head or return its
+/// `kind` says, whose `Points` method its `trait_method` must be (`<point>` at the head,
+/// `<point>_return` at the return).
 fn declared_place(target: &str, method: &str, kind: InjectionKind) -> Result<usize, Refusal> {
-    let name = match kind {
-        InjectionKind::Return => format!("{method}_return"),
-        _ => method.to_owned(),
+    let missing = || Refusal::NoSuchPoint {
+        point: format!("{target} ({method})"),
     };
-    NAMES
+    // A point's head comes first among its places, its return right after.
+    let head = TARGETS
         .iter()
-        .position(|place| *place == name)
-        .filter(|&place| TARGETS[place] == target)
-        .ok_or_else(|| Refusal::NoSuchPoint {
-            point: format!("{target} ({name})"),
-        })
+        .position(|t| *t == target)
+        .ok_or_else(missing)?;
+    let place = match kind {
+        InjectionKind::Return => Some(head + 1)
+            .filter(|&back| TARGETS.get(back) == Some(&target))
+            .ok_or_else(missing)?,
+        _ => head,
+    };
+    if NAMES[place] != method {
+        return Err(missing());
+    }
+    Ok(place)
 }
 
-/// Checks a loaded wasm mod's listeners against its manifest and this game's points, and
-/// registers them. A mod whose manifest lists no injections listens nowhere and is left alone.
-pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<(), Refusal> {
+/// A wasm mod's checked listeners, registered once every native mod's are, in the installed order.
+pub struct Listening {
+    id: &'static str,
+    points: &'static Forwarded,
+}
+
+impl Listening {
+    /// Registers the listeners in the points crate's one list.
+    pub fn register(self) -> Result<(), mod_points::RegisterError> {
+        mod_points::register(self.id, self.points)
+    }
+}
+
+/// Checks a loaded wasm mod's listeners against its manifest and this game's points: the listeners
+/// to register, none for a mod whose manifest lists no injections.
+pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Listening>, Refusal> {
     let Some(wasm) = &manifest.wasm else {
-        return Ok(());
+        return Ok(None);
     };
     if wasm.points().is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let mut declared = BTreeSet::new();
     for injection in wasm.points() {
@@ -143,6 +164,44 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<(), Refus
         fire,
         places: Box::leak(places.into_boxed_slice()),
     };
-    let points: &'static Forwarded = Box::leak(Box::new(Forwarded(Box::new(listeners))));
-    mod_points::register(exports.id(), points).map_err(|e| Refusal::Points(e.to_string()))
+    Ok(Some(Listening {
+        id: exports.id(),
+        points: Box::leak(Box::new(Forwarded(Box::new(listeners)))),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TICK: &str = "horizon_client::game::Game<'_>::tick";
+
+    #[test]
+    fn an_injection_names_the_place_its_kind_and_method_say() {
+        let head = declared_place(TICK, "tick", InjectionKind::Head).unwrap();
+        let back = declared_place(TICK, "tick_return", InjectionKind::Return).unwrap();
+        assert_eq!((NAMES[head], NAMES[back]), ("tick", "tick_return"));
+        // The method must be the one the kind places at the target.
+        for (method, kind) in [
+            ("tick_return", InjectionKind::Head),
+            ("tick", InjectionKind::Return),
+            ("tick_world", InjectionKind::Head),
+        ] {
+            assert!(
+                matches!(
+                    declared_place(TICK, method, kind),
+                    Err(Refusal::NoSuchPoint { .. })
+                ),
+                "{method} at {kind:?}"
+            );
+        }
+        assert!(
+            declared_place(
+                "horizon_client::game::Game<'_>::gone",
+                "gone",
+                InjectionKind::Head
+            )
+            .is_err()
+        );
+    }
 }

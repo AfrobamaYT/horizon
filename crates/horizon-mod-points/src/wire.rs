@@ -297,8 +297,13 @@ mod tests {
 
     #[test]
     fn every_point_of_the_game_crosses_to_a_wasm_mod() {
-        for shape in SHAPES.iter().filter(|shape| !shape.is_empty()) {
-            for field in shape.split(',') {
+        for shape in SHAPES.iter() {
+            let (host, fields) = shape.split_once('|').expect("a shape names its host");
+            assert!(
+                ["read", "side", "server", "client", "none"].contains(&host),
+                "a point's listener gets no known host in ({shape})"
+            );
+            for field in fields.split(',').filter(|field| !field.is_empty()) {
                 let (name, ty) = field.split_once(':').expect("a field is name:type");
                 let ty = ty
                     .strip_prefix("Option<")

@@ -422,9 +422,16 @@ impl Shape {
             .collect()
     }
 
-    /// Its record's shape, the field names and types a wasm mod's listener and the game check
-    /// against each other at load: `yaw:f64,text:str,cancel:bool`.
+    /// Its listener's contract, which a wasm mod's listener and the game check against each other
+    /// at load: the host it gets, then its record's field names and types,
+    /// `side|yaw:f64,text:str,cancel:bool`.
     pub fn wire_shape(&self) -> String {
+        let host = match (self.mutable, self.side) {
+            (false, _) => "read",
+            (true, Side::Server) => "server",
+            (true, Side::Client) => "client",
+            (true, Side::Both) => "side",
+        };
         let types = self.args.iter().map(|arg| match &arg.ty {
             Type::Reference(_) => "str".to_owned(),
             ty => quote!(#ty).to_string().replace(' ', ""),
@@ -437,12 +444,14 @@ impl Shape {
             )),
             Returns::Opaque => None,
         };
-        self.fields()
+        let fields = self
+            .fields()
             .iter()
             .zip(types.chain(extra))
             .map(|(name, ty)| format!("{name}:{ty}"))
             .collect::<Vec<_>>()
-            .join(",")
+            .join(",");
+        format!("{host}|{fields}")
     }
 
     /// How the record crosses to a wasm mod (`mod_points::wire`): its fields lowered in order and

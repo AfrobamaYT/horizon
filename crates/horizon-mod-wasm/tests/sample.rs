@@ -79,7 +79,7 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         undeclared.refused
     );
 
-    let loaded = load(manifest, module, &std_member);
+    let mut loaded = load(manifest, module, &std_member);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     let [entry] = loaded.mods.as_slice() else {
         panic!("one mod");
@@ -97,6 +97,9 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     assert!(mod_api::__private::has_part_hook(mod_api::HookId::UseItem));
 
     // Its mod.wasm fills the tick point: every 200 server ticks it says so in chat.
+    for listening in std::mem::take(&mut loaded.listening) {
+        listening.register().unwrap();
+    }
     mod_points::__private::seal();
     assert!(mod_points::__private::listened_at(
         mod_points::PointId::Tick as usize
