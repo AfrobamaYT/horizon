@@ -1169,6 +1169,10 @@ impl Game<'_> {
                 } else {
                     host.hub.teleport(i, Some(at));
                 }
+            } else if teleported {
+                // ServerPlayer.startRiding and an asPassenger transition also
+                // teleport the rider. Retain its mount and publish its body.
+                host.hub.teleport_rider(i, at);
             }
         }
         let g = &mut host.hub.guests[i];
