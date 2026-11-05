@@ -720,11 +720,43 @@ impl<'r> Gen<'r> {
         let rule = self.rule;
         let mut lets = Vec::new();
         let mut args = Vec::new();
+        // Named input lifetimes can be tied to a receiver's stored borrows. Spelling a listed
+        // lifetime-bearing input with `'static` would also invent an outlives guarantee.
+        struct InputLifetimes<'r> {
+            rule: &'r Rule,
+            module: &'r str,
+            this: Option<&'r str>,
+            forbidden: bool,
+        }
+        impl<'ast> syn::visit::Visit<'ast> for InputLifetimes<'_> {
+            fn visit_lifetime(&mut self, lifetime: &'ast syn::Lifetime) {
+                self.forbidden |= lifetime.ident != "_";
+            }
+
+            fn visit_type(&mut self, ty: &'ast syn::Type) {
+                if matches!(self.rule.shape(self.module, self.this, ty), Shape::Named(_, n) if n > 0)
+                {
+                    self.forbidden = true;
+                }
+                syn::visit::visit_type(self, ty);
+            }
+        }
         self.skip_reason = "argument cannot cross or be built";
         for (i, input) in inputs.enumerate() {
             let syn::FnArg::Typed(input) = input else {
                 return None;
             };
+            let mut lifetimes = InputLifetimes {
+                rule,
+                module,
+                this,
+                forbidden: false,
+            };
+            syn::visit::Visit::visit_type(&mut lifetimes, &input.ty);
+            if lifetimes.forbidden {
+                self.skip_reason = "named input lifetime or lifetime-bearing input type";
+                return None;
+            }
             let shape = rule.shape(module, this, &input.ty);
             let arg = format_ident!("a{i}");
             match (&shape, rule.crossing_of(&shape)) {
@@ -1019,6 +1051,39 @@ mod tests {
     }
 
     #[test]
+    fn an_argument_cannot_supply_a_borrow_stored_in_the_receiver() {
+        let (_, counts) = table(&[
+            internal(
+                "horizon_client::World",
+                "struct",
+                "struct World { rows: Vec<u8> }",
+            ),
+            internal(
+                "horizon_client::Holder",
+                "struct",
+                "struct Holder<'a> { world: &'a World }",
+            ),
+            internal(
+                "horizon_client::Foo",
+                "struct",
+                "struct Foo<'a> { world: &'a World }",
+            ),
+            internal(
+                "horizon_client::Holder<'_>::replace",
+                "method",
+                "impl<'a> Holder<'a> { fn replace(&mut self, world: &'a World) }",
+            ),
+            internal("horizon_client::take", "fn", "fn take(foo: &mut Foo<'_>)"),
+            internal("horizon_client::inspect", "fn", "fn inspect(world: &World)"),
+        ]);
+        assert_eq!(counts.thunks, 1);
+        assert_eq!(
+            counts.skipped_functions["named input lifetime or lifetime-bearing input type"],
+            2
+        );
+    }
+
+    #[test]
     fn conditional_layouts_and_unwidened_lower_layouts_stay_opaque() {
         let (code, counts) = table(&[
             internal(
@@ -1037,6 +1102,16 @@ mod tests {
                 "struct External { private: u8 }",
             ),
             internal(
+                "mod_api::External",
+                "struct",
+                "struct External { private: u8 }",
+            ),
+            internal(
+                "mod_points::External",
+                "struct",
+                "struct External { private: u8 }",
+            ),
+            internal(
                 "horizon_client::Generic",
                 "struct",
                 "struct Generic<T> { value: T }",
@@ -1044,7 +1119,7 @@ mod tests {
         ]);
         assert_eq!(counts.types, 0, "{code}");
         assert_eq!(counts.skipped_types["conditional field or variant"], 2);
-        assert_eq!(counts.skipped_types["lower-crate layout not widened"], 1);
+        assert_eq!(counts.skipped_types["lower-crate layout not widened"], 3);
         assert_eq!(counts.skipped_types["generic type"], 1);
     }
 

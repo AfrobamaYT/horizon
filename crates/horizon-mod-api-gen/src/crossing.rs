@@ -200,7 +200,7 @@ impl Rule {
                 Some("generic type")
             } else if guarded {
                 Some("conditional field or variant")
-            } else if path.starts_with("horizon_") && !path.starts_with(&format!("{GAME}::")) {
+            } else if !path.starts_with(&format!("{GAME}::")) {
                 // The lower-crate pass widens selected items, not their fields and variants.
                 Some("lower-crate layout not widened")
             } else {
@@ -553,34 +553,50 @@ pub(crate) mod tests {
     fn rule() -> Rule {
         Rule::new(&[
             internal(
-                "g::Pos",
+                "horizon_client::Pos",
                 "struct",
                 "struct Pos { x : i32 , y : i32 , z : i32 , }",
             ),
             internal(
-                "g::Mode",
+                "horizon_client::Mode",
                 "enum",
                 "enum Mode { Survival , Creative , Custom (u8) , }",
             ),
             internal(
-                "g::Player",
+                "horizon_client::Player",
                 "struct",
                 "struct Player { pos : Pos , mode : Mode , name : String , }",
             ),
             internal(
-                "g::World",
+                "horizon_client::World",
                 "struct",
                 "struct World { players : Vec < Player > , spawn : Pos , }",
             ),
             internal(
-                "g::Game",
+                "horizon_client::Game",
                 "struct",
                 "struct Game < 'a > { world : World , ui : RefCell < u8 > , }",
             ),
-            internal("g::Big", "struct", "struct Big { a : [u64 ; 17] , }"),
-            internal("g::Tree", "struct", "struct Tree { kids : Vec < Tree > , }"),
-            internal("g::Cache", "struct", "struct Cache < T > { item : T , }"),
-            internal("g::a::Pos", "struct", "struct Pos { only : bool , }"),
+            internal(
+                "horizon_client::Big",
+                "struct",
+                "struct Big { a : [u64 ; 17] , }",
+            ),
+            internal(
+                "horizon_client::Tree",
+                "struct",
+                "struct Tree { kids : Vec < Tree > , }",
+            ),
+            internal(
+                "horizon_client::Cache",
+                "struct",
+                "struct Cache < T > { item : T , }",
+            ),
+            internal(
+                "horizon_client::a::Pos",
+                "struct",
+                "struct Pos { only : bool , }",
+            ),
         ])
     }
 
@@ -591,22 +607,31 @@ pub(crate) mod tests {
     #[test]
     fn plain_data_copies_up_to_its_leaves_and_the_rest_is_walked_or_opaque() {
         let rule = rule();
-        assert_eq!(of(&rule, "g", "[i32; 3]"), Crossing::Copy(3));
-        assert_eq!(of(&rule, "g", "Pos"), Crossing::Copy(3));
-        assert_eq!(of(&rule, "g", "Option<Pos>"), Crossing::Copy(4));
-        assert_eq!(of(&rule, "g", "(u8, &str)"), Crossing::Copy(2));
-        assert_eq!(of(&rule, "g", "Mode"), Crossing::Copy(1));
+        assert_eq!(of(&rule, "horizon_client", "[i32; 3]"), Crossing::Copy(3));
+        assert_eq!(of(&rule, "horizon_client", "Pos"), Crossing::Copy(3));
+        assert_eq!(
+            of(&rule, "horizon_client", "Option<Pos>"),
+            Crossing::Copy(4)
+        );
+        assert_eq!(of(&rule, "horizon_client", "(u8, &str)"), Crossing::Copy(2));
+        assert_eq!(of(&rule, "horizon_client", "Mode"), Crossing::Copy(1));
         // A player is plain data: a copy, its name one leaf.
-        assert_eq!(of(&rule, "g", "Player"), Crossing::Copy(5));
-        assert_eq!(of(&rule, "g", "World"), Crossing::Handle);
-        assert_eq!(of(&rule, "g", "Big"), Crossing::Handle);
-        assert_eq!(of(&rule, "g", "Tree"), Crossing::Handle);
-        assert_eq!(of(&rule, "g", "&mut Vec<Pos>"), Crossing::Handle);
+        assert_eq!(of(&rule, "horizon_client", "Player"), Crossing::Copy(5));
+        assert_eq!(of(&rule, "horizon_client", "World"), Crossing::Handle);
+        assert_eq!(of(&rule, "horizon_client", "Big"), Crossing::Handle);
+        assert_eq!(of(&rule, "horizon_client", "Tree"), Crossing::Handle);
+        assert_eq!(
+            of(&rule, "horizon_client", "&mut Vec<Pos>"),
+            Crossing::Handle
+        );
         // A cell in it makes `Game` no copy, but a handle: its other fields are reached one by
         // one, and the cell can't be.
-        assert_eq!(of(&rule, "g", "Game<'_>"), Crossing::Handle);
-        assert_eq!(of(&rule, "g", "(u8, RefCell<u8>)"), Crossing::Opaque);
-        assert_eq!(of(&rule, "g", "Cache<u8>"), Crossing::Opaque);
+        assert_eq!(of(&rule, "horizon_client", "Game<'_>"), Crossing::Handle);
+        assert_eq!(
+            of(&rule, "horizon_client", "(u8, RefCell<u8>)"),
+            Crossing::Opaque
+        );
+        assert_eq!(of(&rule, "horizon_client", "Cache<u8>"), Crossing::Opaque);
         for opaque in [
             "Box<dyn Fn()>",
             "impl Iterator<Item = u8>",
@@ -615,18 +640,25 @@ pub(crate) mod tests {
             "Mutex<u8>",
             "Unlisted",
         ] {
-            assert_eq!(of(&rule, "g", opaque), Crossing::Opaque, "{opaque}");
+            assert_eq!(
+                of(&rule, "horizon_client", opaque),
+                Crossing::Opaque,
+                "{opaque}"
+            );
         }
     }
 
     #[test]
     fn a_name_resolves_in_its_own_module_first() {
         let rule = rule();
-        assert_eq!(of(&rule, "g::a", "Pos"), Crossing::Copy(1));
-        assert_eq!(of(&rule, "g", "Pos"), Crossing::Copy(3));
-        assert_eq!(of(&rule, "g::b", "super::a::Pos"), Crossing::Copy(1));
-        assert_eq!(of(&rule, "g::b", "a::Pos"), Crossing::Opaque);
-        assert_eq!(of(&rule, "g::b", "Player"), Crossing::Opaque);
-        assert_eq!(of(&rule, "g", "Pos<u8>"), Crossing::Opaque);
+        assert_eq!(of(&rule, "horizon_client::a", "Pos"), Crossing::Copy(1));
+        assert_eq!(of(&rule, "horizon_client", "Pos"), Crossing::Copy(3));
+        assert_eq!(
+            of(&rule, "horizon_client::b", "super::a::Pos"),
+            Crossing::Copy(1)
+        );
+        assert_eq!(of(&rule, "horizon_client::b", "a::Pos"), Crossing::Opaque);
+        assert_eq!(of(&rule, "horizon_client::b", "Player"), Crossing::Opaque);
+        assert_eq!(of(&rule, "horizon_client", "Pos<u8>"), Crossing::Opaque);
     }
 }
