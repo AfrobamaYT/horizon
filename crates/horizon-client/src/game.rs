@@ -3000,6 +3000,9 @@ struct Game<'a> {
     /// Client mods' sounds (`native_play_local_sound`), with the ticks each waits, until the
     /// next audio update plays them (`tick_sound_engine`).
     mod_sounds: std::cell::RefCell<Vec<(mod_api::SoundPlay, u32)>>,
+    /// A client mod asked to clear the particles (`native_clear_particles`), done before
+    /// the next frame or particle tick (`apply_mod_particle_clear`).
+    mod_clear_particles: std::cell::Cell<bool>,
     /// The shader pack's entity and block entity ids, while one draws entities.
     pack_ids: Option<shader_packs::PackIds>,
     started: Instant,
@@ -13882,8 +13885,7 @@ impl Game<'_> {
         self.tridents.clear();
         self.rockets.clear();
         self.bolts.clear();
-        self.particles.clear();
-        self.pickups.clear();
+        self.clear_client_particles();
         self.riding = None;
         self.persist = Default::default();
         self.entity_attachments.clear();
@@ -20508,6 +20510,7 @@ impl<'a> Game<'a> {
             skin_frame: Default::default(),
             glowing_vertices: Default::default(),
             mod_sounds: Default::default(),
+            mod_clear_particles: Default::default(),
             pack_ids: None,
             health_hud: hud_layout::HealthHud::default(),
             started: now,

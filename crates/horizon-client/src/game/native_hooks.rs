@@ -10063,6 +10063,50 @@ impl Game<'_> {
         self.mod_sounds.borrow_mut().push((sound.clone(), after));
         true
     }
+    /// The particles alive in the client's level (`ParticleEngine.countParticles`): 0 once
+    /// a clear is asked, and on a server.
+    pub(super) fn native_particle_count(&self) -> u32 {
+        if !self.native_window() || self.mod_clear_particles.get() {
+            return 0;
+        }
+        u32::try_from(self.client_particle_count()).unwrap_or(u32::MAX)
+    }
+    /// `ParticleEngine.countParticles`: every live group. Horizon keeps vanilla's groups
+    /// apart: the ordinary particles and firework starters in the engine, ITEM_PICKUP in
+    /// `pickups`, and ELDER_GUARDIANS as the apparition's ticks left (one particle while
+    /// it shows).
+    pub(super) fn client_particle_count(&self) -> usize {
+        self.particles.group_count()
+            + self.pickups.live.len()
+            + usize::from(self.creatures.elder_apparition > 0)
+    }
+    /// `ParticleEngine.clearParticles` over every group Horizon keeps apart: the engine's
+    /// particles, starters, queue and emitters, the item pickups and the elder guardian
+    /// apparition. Leaving a level and switching levels clear through it too.
+    pub(super) fn clear_client_particles(&mut self) {
+        self.particles.clear();
+        self.pickups.clear();
+        self.creatures.elder_apparition = 0;
+    }
+    /// Applies a client mod's `clear_particles` if one is waiting. Called at the start of
+    /// each particle tick, and once a frame right after `RenderFrameEvent.Pre`, before the
+    /// frame is drawn. So a clear also lands while the game is paused or ticks are frozen.
+    pub(super) fn apply_mod_particle_clear(&mut self) {
+        if self.mod_clear_particles.take() {
+            self.clear_client_particles();
+        }
+    }
+    /// `ParticleEngine.clearParticles`: every particle and emitter goes before the next
+    /// frame is drawn or the next particle tick runs, whichever comes first. It takes
+    /// `&self`, so a screen or render hook can ask, as with `native_play_local_sound`.
+    /// False on a server.
+    pub(super) fn native_clear_particles(&self) -> bool {
+        if !self.native_window() {
+            return false;
+        }
+        self.mod_clear_particles.set(true);
+        true
+    }
     /// Draws one vanilla HUD layer between the mods' hooks: `native_gui_layer_pre`
     /// (which may hide it), the layer, then `native_gui_layer_post`. `None` when
     /// a mod hid the layer.
@@ -14234,5 +14278,105 @@ mod local_sound_tests {
                 assert_eq!(game.audio.heard.get("minecraft:ui.button.click"), Some(&1));
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod particle_count_tests {
+    use super::super::pickups::{Collector, Taken};
+    use horizon_client::entities::ExperienceOrb;
+    use horizon_client::particles::{FireworkExplosion, ParticleOptions, ParticleType};
+    use horizon_core::geometry::Vec3;
+    use mod_api::ClientHost;
+    use std::time::Duration;
+
+    fn orb(at: Vec3) -> ExperienceOrb {
+        ExperienceOrb {
+            rotation: [0.0, 0.0],
+            join: Default::default(),
+            no_gravity: false,
+            id: 1,
+            position: at,
+            previous: at,
+            velocity: Vec3::ZERO,
+            value: 1,
+            age: 0,
+            on_ground: false,
+            count: 1,
+            ticks: 0,
+            health: 5,
+        }
+    }
+
+    /// Fills every particle group Horizon keeps apart: three flames, a multi-burst firework
+    /// starter (`NO_RENDER`), an item pickup (`ITEM_PICKUP`) and the elder guardian
+    /// apparition (`ELDER_GUARDIANS`), each live after one particle tick.
+    fn fill(game: &mut super::Game<'_>) {
+        let at = game.particles.camera;
+        for _ in 0..3 {
+            game.particles
+                .add(&ParticleOptions::simple(ParticleType::Flame), at, [0.0; 3]);
+        }
+        let bursts = vec![FireworkExplosion::default(); 4];
+        game.particles.fireworks(at, [0.0; 3], bursts, at);
+        let v = Vec3::new(at[0], at[1], at[2]);
+        game.add_pickup_toward(Taken::Orb(Box::new(orb(v))), Collector::Player, at);
+        game.tick_particles();
+        game.creatures.elder_apparition = 10;
+    }
+
+    /// `particle_count` and `clear_particles` through the client host. The count covers every
+    /// live group. A clear reads 0 at once and empties every group, its queue and emitters
+    /// before the next frame is drawn, with no tick in between (a paused or frozen game),
+    /// or at the next particle tick. A server answers 0 and refuses the clear.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_counts_and_clears_particles() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 0);
+            fill(game);
+            assert_eq!(game.pickups.live.len(), 1, "the pickup is live");
+            let engine = game.particles.group_count();
+            assert!(engine > 3, "the flames and the starter: {engine}");
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count() as usize, engine + 2);
+            // A clear asked between frames: it reads 0 at once, and the next frame clears
+            // every group without a particle tick.
+            game.particles.tracking_emitter(
+                ParticleOptions::simple(ParticleType::Crit),
+                [0.0; 3],
+                1.0,
+                1.0,
+            );
+            assert!(host_clear(game));
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 0);
+            game.extras_frame(Duration::ZERO);
+            assert_eq!(game.particles.group_count(), 0);
+            assert!(game.pickups.live.is_empty());
+            assert_eq!(game.creatures.elder_apparition, 0);
+            // The emitter and the queue went too: a tick brings nothing back.
+            game.tick_particles();
+            assert_eq!(game.client_particle_count(), 0);
+            // A clear asked before a particle tick lands at that tick.
+            fill(game);
+            assert!(host_clear(game));
+            game.tick_particles();
+            assert_eq!(game.particles.group_count(), 0);
+            assert!(game.pickups.live.is_empty());
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 0);
+            game.options.execution_role = super::ExecutionRole::IntegratedServer;
+            let host: &dyn ClientHost = game;
+            assert!(!host.clear_particles());
+            assert_eq!(host.particle_count(), 0);
+        });
+    }
+
+    fn host_clear(game: &super::Game<'_>) -> bool {
+        let host: &dyn ClientHost = game;
+        host.clear_particles()
     }
 }

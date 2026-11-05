@@ -4641,6 +4641,19 @@ pub trait Helpers {
     fn block_entity_sync();
     #[helper(side = "client")]
     fn play_local_sound();
+    /// How many particles the client's level has alive (`ParticleEngine.countParticles`): every
+    /// live group, item pickups, firework starters and the elder guardian apparition included.
+    /// Queued particles and emitters are not counted. 0 once `clear_particles` was asked, and on
+    /// a server.
+    #[helper(side = "client")]
+    fn particle_count();
+    /// Removes every particle, queued particle and emitter of the client's level
+    /// (`ParticleEngine.clearParticles`), item pickups, firework starters and the elder guardian
+    /// apparition included. It takes `&self`, so a screen or render hook can ask: the clear
+    /// lands before the next frame is drawn or the next particle tick, whichever comes first,
+    /// paused or not. False on a server.
+    #[helper(side = "client")]
+    fn clear_particles();
     #[helper(side = "client")]
     fn fill();
     #[helper(side = "client")]

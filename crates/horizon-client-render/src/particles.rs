@@ -1463,9 +1463,18 @@ impl ParticleEngine {
     pub fn is_empty(&self) -> bool {
         self.particles.is_empty()
     }
+    /// The live particles of the groups this engine holds, as `ParticleEngine.countParticles`
+    /// counts them: the ordinary ones and the firework starters (`NO_RENDER`). Queued
+    /// particles and tracking emitters are not counted.
+    pub fn group_count(&self) -> usize {
+        self.particles.len() + self.starters.len()
+    }
+    /// `ParticleEngine.clearParticles`, for the groups this engine holds: the live
+    /// particles, the firework starters, the queued particles and the tracking emitters.
     pub fn clear(&mut self) {
         self.emitters.clear();
         self.particles.clear();
+        self.starters.clear();
         self.pending.clear();
     }
     /// `VibrationSignalParticle`'s body: the signal leaves `from` aimed at the
