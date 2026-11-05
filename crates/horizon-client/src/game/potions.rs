@@ -1501,6 +1501,7 @@ impl Game<'_> {
             }
             if let Some((p, mob, block)) = hit {
                 landed.push((
+                    t.id,
                     t.stack.clone(),
                     p,
                     mob,
@@ -1520,7 +1521,7 @@ impl Game<'_> {
             t.age < 1200 && t.position.y > -128.0
         });
         self.potions.thrown = thrown;
-        for (stack, at, mob, block, age, owner, guest) in landed {
+        for (id, stack, at, mob, block, age, owner, guest) in landed {
             // Projectile.onHit (super.onHit of AbstractThrownPotion): a block
             // is heard at its centre, an entity at the hit.
             let heard = if mob.is_some() {
@@ -1529,7 +1530,7 @@ impl Game<'_> {
                 [at.x.floor() + 0.5, at.y.floor() + 0.5, at.z.floor() + 0.5]
             };
             let thrower = owner.is_some().then_some(Who::Player);
-            self.projectile_event("minecraft:projectile_land", thrower, heard);
+            self.projectile_landed_event(id, thrower, heard);
             let item = stack.item.to_string();
             // A potion a dispenser threw has nobody to name.
             let owner = PotionOwner {

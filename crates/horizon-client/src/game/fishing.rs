@@ -815,8 +815,8 @@ impl Game<'_> {
                         }
                         EntityCollision::Hooked => {
                             // Projectile.onHit on an entity: PROJECTILE_LAND.
-                            self.projectile_event(
-                                "minecraft:projectile_land",
+                            self.projectile_landed_event(
+                                h.id,
                                 Some(horizon_client::mobs::Who::Player),
                                 [h.position.x, h.position.y, h.position.z],
                             );
@@ -826,8 +826,8 @@ impl Game<'_> {
                     }
                 } else if let Some(hit) = block_hit {
                     // Projectile.onHit on a block: PROJECTILE_LAND.
-                    self.projectile_event(
-                        "minecraft:projectile_land",
+                    self.projectile_landed_event(
+                        h.id,
                         Some(horizon_client::mobs::Who::Player),
                         [hit.location.x, hit.location.y, hit.location.z],
                     );

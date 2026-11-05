@@ -1665,6 +1665,17 @@ impl Game<'_> {
         }
         self.post_game_event(event, at, ctx);
     }
+    /// `Projectile.onHit`: retain the projectile as the event source and the
+    /// shooter as its owner, even when the projectile is held out for ticking.
+    pub(super) fn projectile_landed_event(&mut self, id: u32, owner: Option<Who>, at: [f64; 3]) {
+        let ctx = Context {
+            source: (id != 0).then_some(EventSource::Entity(id)),
+            owner,
+            player: owner == Some(Who::Player) || self.rides_player(owner),
+            ..Context::default()
+        };
+        self.post_game_event("minecraft:projectile_land", at, ctx);
+    }
     /// The player shot or threw something.
     pub(super) fn player_projectile_shot(&mut self) {
         if let Some(p) = self.player.as_ref() {
@@ -2212,6 +2223,21 @@ mod tests {
                 .current
                 .unwrap();
             assert_eq!(info.source, Some(EventSource::Entity(id)));
+            game.sculk_entity((1, 64, 1))
+                .unwrap()
+                .vibration
+                .selector
+                .current = None;
+            game.projectile_landed_event(123, Some(Who::Player), [3.5, 64.0, 1.5]);
+            let (info, _) = game
+                .sculk_entity((1, 64, 1))
+                .unwrap()
+                .vibration
+                .selector
+                .current
+                .unwrap();
+            assert_eq!(info.source, Some(EventSource::Entity(123)));
+            assert_eq!(info.owner, Some(Who::Player));
         });
     }
 

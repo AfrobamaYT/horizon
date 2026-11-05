@@ -5185,7 +5185,7 @@ impl Game<'_> {
         }
         let atp = [at.x, at.y, at.z];
         // Projectile.onHit: the landing is heard.
-        self.projectile_event("minecraft:projectile_land", p.owner, atp);
+        self.projectile_landed_event(p.id, p.owner, atp);
         let source_kind = match p.kind {
             ProjectileKind::Arrow { .. } | ProjectileKind::Trident => DamageKind::Arrow,
             ProjectileKind::SmallFireball | ProjectileKind::LargeFireball { .. } => {
