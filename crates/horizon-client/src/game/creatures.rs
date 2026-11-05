@@ -5766,9 +5766,11 @@ impl Game<'_> {
                 // The blast's source names the owner, so a dragon it kills
                 // remembers the player who shot it.
                 self.set_blast_by_player(p.owner == Some(Who::Player));
-                // LargeFireball.onHit: both fire and MOB block destruction
-                // follow mob_griefing; other mob explosions keep their default.
-                let fire = self.ui.rules.bool("mob_griefing");
+                // LargeFireball.onHit: the fire follows
+                // `EventHooks.canEntityGrief(level, getOwner())`, so a mod's
+                // answer for whoever owns the fireball decides: the ghast that
+                // shot it, or the player who sent it back.
+                let fire = self.large_fireball_fire(p.owner, p.guest);
                 let result = self.explode_mob(atp, *power as f32, fire);
                 self.set_blast_by_player(false);
                 self.combat.explosion_owner = None;
@@ -8355,6 +8357,19 @@ impl Game<'_> {
         let rule = self.ui.rules.bool("mob_griefing");
         entity.map_or(rule, |entity| self.entity_grief(entity, rule))
     }
+    /// Whether a large fireball's blast lights fire (`LargeFireball.onHit`):
+    /// [`Self::can_entity_grief`] for its owner, as `getOwner()` gives it. That
+    /// is the mob that shot it, or the player who owns it (the guest on `guest`,
+    /// else the player in place). An owner that is gone, or none, reads the rule.
+    pub(super) fn large_fireball_fire(&self, owner: Option<Who>, guest: Option<u32>) -> bool {
+        self.can_entity_grief(match owner {
+            Some(Who::Mob(id)) => Some(id),
+            Some(Who::Player) => self
+                .player_entity_id_by_connection(guest)
+                .map(|id| id as u32),
+            None => None,
+        })
+    }
     /// Whether a mod may answer `can_entity_grief` differently from the rule:
     /// the sites that skip their whole work while griefing is off skip it only
     /// when no mod listens.
@@ -8379,10 +8394,11 @@ impl Game<'_> {
 #[cfg(test)]
 mod mob_griefing_tests {
     use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
     use std::sync::{Arc, Mutex};
 
-    /// Denies griefing to entity `self.0`, and logs who was asked.
-    struct Deny(u32, Arc<Mutex<Vec<(u32, bool)>>>);
+    /// Denies griefing to the entities in `self.0`, and logs who was asked.
+    struct Deny(Vec<u32>, Arc<Mutex<Vec<(u32, bool)>>>);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Deny {
         fn entity_mob_griefing(
@@ -8394,7 +8410,7 @@ mod mob_griefing_tests {
                 .lock()
                 .unwrap()
                 .push((event.entity.id(), event.can_grief));
-            if event.entity.id() == self.0 {
+            if self.0.contains(&event.entity.id()) {
                 event.can_grief = false;
             }
         }
@@ -8408,14 +8424,16 @@ mod mob_griefing_tests {
     fn a_mod_denies_one_entity_griefing() {
         let heard = Arc::default();
         let (denied, other) = (900, 901);
+        // Guest 5's entity id (`guest` gives `conn + 19`): a player the mod denies.
+        let denied_player = 24;
         let mods = vec![mod_api::ModEntry::new(
             "deny",
-            Box::new(Deny(denied, Arc::clone(&heard))),
+            Box::new(Deny(vec![denied, denied_player], Arc::clone(&heard))),
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
-                game.options.dedicated = Some(Vec::new());
+                open_to_lan(game);
                 assert!(game.ui.rules.bool("mob_griefing"));
                 assert!(!game.can_entity_grief(Some(denied)));
                 assert!(game.can_entity_grief(Some(other)));
@@ -8427,6 +8445,30 @@ mod mob_griefing_tests {
                 assert_eq!(
                     asked,
                     [(denied, true), (other, true), (denied, true), (other, true)]
+                );
+                // A large fireball asks for its owner: the ghast the mod denies
+                // lights no fire and another ghast's does; a fireball sent back
+                // by the guest the mod denies lights none and another guest's
+                // does. A gone owner, or none, reads the rule without asking.
+                use super::Who;
+                let hub = &mut game.lan.as_mut().unwrap().hub;
+                hub.guests.push(guest(5));
+                hub.guests.push(guest(6));
+                heard.lock().unwrap().clear();
+                assert!(!game.large_fireball_fire(Some(Who::Mob(denied)), None));
+                assert!(game.large_fireball_fire(Some(Who::Mob(other)), None));
+                assert!(!game.large_fireball_fire(Some(Who::Player), Some(5)));
+                assert!(game.large_fireball_fire(Some(Who::Player), Some(6)));
+                assert!(game.large_fireball_fire(Some(Who::Player), Some(7)));
+                assert!(game.large_fireball_fire(None, None));
+                assert_eq!(
+                    *heard.lock().unwrap(),
+                    [
+                        (denied, true),
+                        (other, true),
+                        (denied_player, true),
+                        (25, true)
+                    ]
                 );
             });
         });
