@@ -10,6 +10,7 @@ use horizon_client::motion::{LAVA, WATER};
 use horizon_client::particles::{ParticleEngine, ParticleOptions, ParticleType};
 use horizon_client::pose::Pose;
 use horizon_core::{geometry::Vec3, random::RandomSource};
+use mod_api::EntityRef;
 
 impl Game<'_> {
     pub(super) fn tick_client_ambient(&mut self) {
@@ -145,7 +146,7 @@ impl Game<'_> {
     /// `Entity.spawnSprintParticle`, called explicitly by a client mod. A
     /// valid entity returns true even if the block beneath it is invisible.
     /// Returns false for stale, untracked, server-side, or unsupported entities.
-    pub(super) fn native_entity_sprint_particles(&mut self, entity: mod_api::EntityRef) -> bool {
+    pub(super) fn native_entity_sprint_particles(&mut self, entity: EntityRef) -> bool {
         use super::commands::Target;
         if self.is_logical_server() {
             return false;
