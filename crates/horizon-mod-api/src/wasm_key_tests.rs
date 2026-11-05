@@ -8,8 +8,36 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     #[crate::__subscriptions]
     impl Hooks for Requests {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-            r.block_key("stone");
-            r.effect_key("speed");
+            let block = r.block_key("stone");
+            let effect = r.effect_key("speed");
+            assert_eq!(BlockKey::from_slot(block.0), Ok(block));
+            assert_eq!(EffectKey::from_slot(effect.0), Ok(effect));
+            assert!(BlockKey::from_slot(block.0 + 1).is_err());
+            assert!(EffectKey::from_slot(effect.0 + 1).is_err());
+            // Re-enter a real generated import before the registrar has been installed.
+            let table = Table(Cell::new(0));
+            let mut frame = Frame::default();
+            frame.host(&table);
+            let _restore = Restore(CURRENT.replace(&mut frame));
+            let mut state = State {
+                limits: wasmtime::StoreLimitsBuilder::new().build(),
+            };
+            use glue::horizon::mod_api::host::Host as Reads;
+            assert_eq!(
+                Reads::block_state_default(&mut state, block.0).unwrap(),
+                Some(19)
+            );
+            assert!(
+                Reads::block_state_default(&mut state, block.0 + 1)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("unknown BlockKey slot")
+            );
+            assert_eq!(
+                table.0.get(),
+                1,
+                "registration validates against pending requests, without executing refused imports"
+            );
         }
     }
     crate::install_parts(&[ModEntry::new("boundary", Box::new(Requests))]).unwrap();
@@ -26,6 +54,11 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         }
     }
     impl Host for Table {
+        fn block_state_default(&self, block: BlockKey) -> Option<crate::BlockStateId> {
+            assert_eq!(block.0, 0);
+            self.0.set(self.0.get() + 1);
+            Some(crate::BlockStateId(19))
+        }
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }

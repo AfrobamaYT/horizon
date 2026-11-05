@@ -80,24 +80,32 @@ impl Names {
 impl BlockKey {
     /// Validate an incoming slot against declarations, not a world's resolved mappings.
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::part_table::requested_keys()
-            .blocks
-            .id(slot)
-            .ok_or("unknown BlockKey slot")?;
-        Ok(Self(slot))
+        crate::part_table::with_registering_keys(|registering| {
+            registering
+                .unwrap_or_else(crate::part_table::requested_keys)
+                .blocks
+                .id(slot)
+                .ok_or("unknown BlockKey slot")?;
+            Ok(Self(slot))
+        })
     }
 }
 
 impl EffectKey {
     /// Resolved effects also expose registry entries no mod explicitly requested.
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        let names = crate::part_table::resolved_effects()
-            .get()
-            .map_or(&crate::part_table::requested_keys().effects, |effects| {
-                &effects.names
-            });
-        names.id(slot).ok_or("unknown EffectKey slot")?;
-        Ok(Self(slot))
+        crate::part_table::with_registering_keys(|registering| {
+            let names = match registering {
+                Some(requests) => &requests.effects,
+                None => crate::part_table::resolved_effects()
+                    .get()
+                    .map_or(&crate::part_table::requested_keys().effects, |effects| {
+                        &effects.names
+                    }),
+            };
+            names.id(slot).ok_or("unknown EffectKey slot")?;
+            Ok(Self(slot))
+        })
     }
 }
 

@@ -347,6 +347,21 @@ pub(crate) fn requested_keys() -> &'static super::registry_keys::Requests {
     installed().map_or(&EMPTY, |installed| &installed.registry_keys)
 }
 
+thread_local! {
+    // A reference to the registrar's canonical requests while Hooks::register is in flight.
+    // The table is moved, not copied, into Installed when registration finishes.
+    static REGISTERING_KEYS: RefCell<Option<Rc<RefCell<super::registry_keys::Requests>>>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn with_registering_keys<T>(
+    read: impl FnOnce(Option<&super::registry_keys::Requests>) -> T,
+) -> T {
+    REGISTERING_KEYS.with(|keys| match keys.borrow().as_ref() {
+        Some(keys) => read(Some(&keys.borrow())),
+        None => read(None),
+    })
+}
+
 pub(crate) fn resolved_effects() -> &'static OnceLock<super::registry_keys::Effects> {
     static EMPTY: OnceLock<super::registry_keys::Effects> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.effects)
@@ -1096,7 +1111,7 @@ pub struct PartRegistrar {
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
     requested_types: Vec<BlockEntityTypeRequest>,
-    registry_keys: super::registry_keys::Requests,
+    registry_keys: Rc<RefCell<super::registry_keys::Requests>>,
     effects: OnceLock<super::registry_keys::Effects>,
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
@@ -1332,7 +1347,12 @@ impl Registrar for PartRegistrar {
     }
 
     fn block_key(&mut self, id: &str) -> super::BlockKey {
-        match self.registry_keys.blocks.request(self.mod_id, id) {
+        match self
+            .registry_keys
+            .borrow_mut()
+            .blocks
+            .request(self.mod_id, id)
+        {
             Ok(slot) => super::BlockKey(slot),
             Err(error) => {
                 self.refused.push(error);
@@ -1342,7 +1362,12 @@ impl Registrar for PartRegistrar {
     }
 
     fn effect_key(&mut self, id: &str) -> super::EffectKey {
-        match self.registry_keys.effects.request(self.mod_id, id) {
+        match self
+            .registry_keys
+            .borrow_mut()
+            .effects
+            .request(self.mod_id, id)
+        {
             Ok(slot) => super::EffectKey(slot),
             Err(error) => {
                 self.refused.push(error);
@@ -1381,7 +1406,13 @@ impl Registrar for PartRegistrar {
         kind: &'static str,
         part: Arc<dyn BlockPart>,
     ) {
-        let Some(id) = self.registry_keys.blocks.id(block.0).map(str::to_owned) else {
+        let id = self
+            .registry_keys
+            .borrow()
+            .blocks
+            .id(block.0)
+            .map(str::to_owned);
+        let Some(id) = id else {
             self.refused.push(format!(
                 "mod {}: invalid block key slot {}",
                 self.mod_id, block.0
@@ -1516,6 +1547,13 @@ fn namespaced(id: &str) -> bool {
 /// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
 fn register_all(mods: &[ModEntry]) -> PartRegistrar {
     let mut registrar = PartRegistrar::new(mods.first().map_or("horizon", |entry| entry.id));
+    struct RestoreKeys(Option<Rc<RefCell<super::registry_keys::Requests>>>);
+    impl Drop for RestoreKeys {
+        fn drop(&mut self) {
+            REGISTERING_KEYS.set(self.0.take());
+        }
+    }
+    let _scope = RestoreKeys(REGISTERING_KEYS.replace(Some(registrar.registry_keys.clone())));
     let context = super::RegistrationContext::new();
     for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
@@ -1550,7 +1588,9 @@ fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
         tags: registrar.tags,
         block_entity_types: registrar.block_entity_types,
         requested_types: registrar.requested_types,
-        registry_keys: registrar.registry_keys,
+        registry_keys: Rc::try_unwrap(registrar.registry_keys)
+            .unwrap_or_else(|_| unreachable!("registration scope has ended"))
+            .into_inner(),
         effects: registrar.effects,
         controllers: registrar.controllers,
         structure_types: registrar.structure_types,
@@ -1678,6 +1718,9 @@ pub mod tests {
                 let same = r.block_key("minecraft:stone");
                 let later = r.block_key("later:machine");
                 assert_eq!(vanilla, same);
+                assert_eq!(BlockKey::from_slot(vanilla.0), Ok(vanilla));
+                assert_eq!(BlockKey::from_slot(later.0), Ok(later));
+                assert!(BlockKey::from_slot(later.0 + 1).is_err());
                 r.block_part(vanilla, Gauge);
                 r.block_part(same, Connector);
                 r.block_part(later, Gauge);
@@ -1764,6 +1807,9 @@ pub mod tests {
             fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
                 let speed = r.effect_key("speed");
                 let later = r.effect_key("key_test:later");
+                assert_eq!(EffectKey::from_slot(speed.0), Ok(speed));
+                assert_eq!(EffectKey::from_slot(later.0), Ok(later));
+                assert!(EffectKey::from_slot(later.0 + 1).is_err());
                 self.0.lock().unwrap().extend([speed, later]);
                 assert_eq!(speed, r.effect_key("minecraft:speed"));
             }

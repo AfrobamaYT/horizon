@@ -26,7 +26,9 @@ Lowering is still structural numeric transport. Guest lifts of host-owned values
 need a guest registry table.
 
 `BlockKey` and `EffectKey` use this rule to reject unknown incoming slots against their canonical load-owned
-name tables. A valid slot does not imply that a world's resolved mapping is available: startup, another owning
+name tables. While `Hooks::register` is in flight, validation reads the active registrar's pending requests;
+that same table moves into the installed load state afterward, without a second registry. A valid slot does not
+imply that a world's resolved mapping is available: startup, another owning
 thread or a refused block reload may have no mapping. Typed operations use trusted numeric indices once that
 context exists; `key.id(host) -> String` remains an explicit diagnostic read through the normal generated backend,
 not a per-operation name lookup. The effect registry remains fixed for the process.
