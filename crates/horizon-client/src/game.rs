@@ -1500,15 +1500,15 @@ impl LevelAccess for GameLevel<'_> {
         } else {
             (None, None)
         };
-        self.native_note_block_play(
-            self.dimension,
+        self.native_note_block_play(mod_api::__private::NoteBlockPlayCall {
+            dimension: self.dimension,
             player,
             player_entity_id,
             pos,
-            &mut played_instrument,
-            &mut played,
-            &mut cancel,
-        );
+            instrument: &mut played_instrument,
+            note: &mut played,
+            cancel: &mut cancel,
+        });
         *instrument = played_instrument as u8;
         // A note out of 0 to 24 keeps the block's own.
         if (0..=24).contains(&played) {
@@ -1552,15 +1552,15 @@ impl LevelAccess for GameLevel<'_> {
     ) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
-            self.native_cauldron_level_changed(
-                self.dimension,
-                self.native_player,
+            self.native_cauldron_level_changed(mod_api::__private::CauldronLevelChangedCall {
+                dimension: self.dimension,
+                player: self.native_player,
                 pos,
-                from,
-                to,
+                from_level: from,
+                to_level: to,
                 reason,
-                &mut cancel,
-            );
+                cancel: &mut cancel,
+            });
         }
         !cancel
     }
@@ -1575,15 +1575,15 @@ impl LevelAccess for GameLevel<'_> {
         let mut canceled = false;
         if self.native_authoritative {
             let step = direction.normal();
-            self.native_piston_pre(
-                self.dimension,
+            self.native_piston_pre(mod_api::__private::PistonPreCall {
+                dimension: self.dimension,
                 piston,
-                step,
+                direction: step,
                 extending,
                 push,
                 destroy,
-                &mut canceled,
-            );
+                canceled: &mut canceled,
+            });
         }
         !canceled
     }
@@ -2938,6 +2938,9 @@ struct Game<'a> {
     skin_frame: std::cell::RefCell<horizon_client::gfx::entity_skin::SkinFrame>,
     /// The glowing entities' silhouettes this frame (game/glowing.rs).
     glowing_vertices: std::cell::RefCell<Vec<Vertex>>,
+    /// Client mods' sounds (`native_play_local_sound`), with the ticks each waits, until the
+    /// next audio update plays them (`tick_sound_engine`).
+    mod_sounds: std::cell::RefCell<Vec<(mod_api::SoundPlay, u32)>>,
     /// The shader pack's entity and block entity ids, while one draws entities.
     pack_ids: Option<shader_packs::PackIds>,
     started: Instant,
@@ -7465,16 +7468,16 @@ impl Game<'_> {
             } else {
                 let (player, player_entity_id) = self.native_clicker();
                 let (hand, at) = (self.hand, hit.native());
-                self.native_use_on(
-                    &stack,
-                    hit.pos,
-                    hit.face,
+                self.native_use_on(mod_api::__private::UseOnCall {
+                    stack: &stack,
+                    pos: hit.pos,
+                    face: hit.face,
                     hand,
-                    at,
+                    hit: at,
                     player,
                     player_entity_id,
-                    &mut claimed,
-                );
+                    claimed: &mut claimed,
+                });
             }
         }
         if !claimed && !on_block {
@@ -20305,6 +20308,7 @@ impl<'a> Game<'a> {
             skin_models: Default::default(),
             skin_frame: Default::default(),
             glowing_vertices: Default::default(),
+            mod_sounds: Default::default(),
             pack_ids: None,
             health_hud: hud_layout::HealthHud::default(),
             started: now,
