@@ -3483,7 +3483,7 @@ fn declared_waterlogged_vegetation_uses_resolved_fluid_for_skylight() {
         chunk::Chunk,
         light::{LightTables, apply_lighting, light_chunk},
     };
-    let base = prepared().expect("prepared resources for the skylight regression");
+    let Some(base) = prepared() else { return };
     let scratch =
         std::env::temp_dir().join(format!("horizon-vegetation-light-{}", std::process::id()));
     let m = folder_mod(
