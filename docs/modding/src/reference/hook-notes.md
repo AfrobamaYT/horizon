@@ -2400,7 +2400,10 @@ handle, an entity the client doesn't track and a level it doesn't show:
   the way their running out does: the attribute modifiers they gave recompute and absorption's hearts go with theirs. The
   added-effect hooks hear a player's add without an entity id, so a guest's reaches them as the acting player (`None`) — a
   limitation of the hooks themselves, unchanged here. Armor stands and the dragon keep no effects, as `/effect` skips them:
-  `effects` and `effect` read `None` for them and their writes return false.
+  `effects` and `effect` read `None` for them and their writes return false. On a client,
+  `living.effect_blend_factor(host, id, partial)` (`getEffectBlendFactor`) reads how far the local player's effect has
+  faded in, from 0 to 1 at the partial tick: darkness fades over 22 ticks, nausea in over 150 and out over 20, any other
+  effect reads 1 while it lasts and a missing one 0. The client keeps no other entity's effects, so they read `None`.
 - `host.projectile(entity)` gives a `ProjectileRef` for a projectile in the level's projectile list (arrows, a mob's
   trident, thrown items, fireballs, wind charges, skulls, shulker bullets, mods' thrown types), a trident a player
   threw or a firework rocket; `projectile.entity()` goes back. A player's trident and a rocket have an owner and a
