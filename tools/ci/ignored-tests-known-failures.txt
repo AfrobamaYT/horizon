@@ -23,7 +23,9 @@ horizon-client-render packs::cache::tests::benchmark_real_resource_root HORIZON_
 horizon-client-render gfx::crumbling_tests::crack_samples_stay_aligned_between_stages adapter gpu
 horizon-client-render gfx::pack_uniforms::initial_history_tests::core_matrix_inputs_render_provider_values adapter gpu
 horizon-client-render gfx::weather::tests::weather_shader_uvs_match_legacy_bits adapter gpu
-horizon-client-render gfx::pack_post::material_tests::terrain_material_samplers_preserve_surface_and_encoded_bytes adapter flaky # needs a host (non-CPU) GPU: red on lavapipe, passes (skips) where there is no adapter
+# These require a non-CPU GPU, not merely a Vulkan driver; `flaky` admits host-dependent results.
+horizon-client-render gfx::pack_post::material_tests::terrain_material_samplers_preserve_surface_and_encoded_bytes adapter flaky
+horizon-client-render gfx::pack_post::weather_depth_tests::rain_depth_controls_writes_for_rain_snow_and_fallbacks adapter flaky
 
 # Known failures on main.
 horizon-client game::native_guest_turn_tests::another_guest_follows_a_vehicle_teleported_during_a_turn horizon-rust/horizon#8383
