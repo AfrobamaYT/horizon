@@ -556,7 +556,7 @@ mod tests {
                     .unwrap();
                     let m = &game.mobs[before];
                     assert!(m.persistent, "the join hook's write survives");
-                    assert!(m.no_ai && m.extra.age == -24000);
+                    assert!(m.no_ai && m.is_baby());
                 });
             },
         );
