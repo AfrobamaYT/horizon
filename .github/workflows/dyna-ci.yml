@@ -122,9 +122,12 @@ jobs:
       - name: Lint cache toolchain
         if: steps.rust.outputs.required != 'false'
         id: toolchain
-        run: echo "hash=$(rustc +stable -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "hash=$(rustc +stable -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          # One snapshot every 6 hours: the repository's 10 GB cache budget can't hold one per main head.
+          echo "slot=$(date -u +%Y%m%d)-$(( $(date -u +%H) / 6 ))" >> "$GITHUB_OUTPUT"
       # rust-cache's default removes workspace artifacts. Those are the expensive part here,
-      # in two feature graphs; keep both, and publish a fresh snapshot on each completed main head.
+      # in two feature graphs; keep both, and publish a fresh snapshot from main every 6 hours.
       - uses: actions/cache/restore@v4
         if: steps.rust.outputs.required != 'false'
         id: lint-cache
@@ -133,7 +136,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-${{ github.sha }}
+          key: lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-${{ steps.toolchain.outputs.slot }}
           restore-keys: |
             lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
             lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
