@@ -114,7 +114,16 @@ pub struct Place {
     pub target: &'static str,
     pub hash: &'static str,
     pub receiver: Option<u32>,
+    pub receiver_writable: bool,
     pub record: u32,
+}
+
+/// A declared field's identity and declaration-order position in its owner.
+pub struct Member {
+    pub path: &'static str,
+    pub hash: &'static str,
+    pub owner: u32,
+    pub field: u32,
 }
 
 /// The staged game's internals.
@@ -122,6 +131,7 @@ pub struct Table {
     pub types: &'static [Type],
     pub thunks: &'static [Thunk],
     pub places: &'static [Place],
+    pub members: &'static [Member],
 }
 
 impl Table {
@@ -130,6 +140,7 @@ impl Table {
         types: &[],
         thunks: &[],
         places: &[],
+        members: &[],
     };
 }
 
