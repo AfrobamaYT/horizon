@@ -352,8 +352,24 @@ impl Drop for Entered<'_> {
     }
 }
 
+/// How many linked groups are alive.
+static LIVE_GROUPS: AtomicUsize = AtomicUsize::new(0);
+
+/// How many linked groups are alive: a group refused at load is gone once its load returns, its
+/// store and memory with it.
+pub fn live_groups() -> usize {
+    LIVE_GROUPS.load(Ordering::Relaxed)
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        LIVE_GROUPS.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 impl Group {
     fn new(store: Store<State>, budgets: Budgets) -> Self {
+        LIVE_GROUPS.fetch_add(1, Ordering::Relaxed);
         Self {
             store: Mutex::new(store),
             running: AtomicU64::new(0),

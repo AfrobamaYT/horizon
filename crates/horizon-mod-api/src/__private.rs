@@ -39,7 +39,7 @@ pub use crate::phase::install_packages;
 pub mod wasm_host {
     pub use crate::wasm_host::{
         Budgets, CallHost, CallRefused, EPOCH, Exports, Fuel, Instantiated, LoadError, Member,
-        State, instantiate,
+        State, instantiate, live_groups,
     };
 }
 /// The registered structure types, for the executable to hand to the engine's

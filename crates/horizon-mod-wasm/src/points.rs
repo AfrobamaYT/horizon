@@ -91,15 +91,24 @@ fn declared_place(target: &str, method: &str, kind: InjectionKind) -> Result<usi
 }
 
 /// A wasm mod's checked listeners, registered once every native mod's are, in the installed order.
+/// It owns them until then: one dropped unregistered (its mod refused after the check) lets its
+/// group go.
 pub struct Listening {
-    id: &'static str,
-    points: &'static Forwarded,
+    exports: Exports,
+    fire: Fire,
+    places: Vec<Option<PointId>>,
 }
 
 impl Listening {
-    /// Registers the listeners in the points crate's one list.
+    /// Registers the listeners in the points crate's one list, which keeps them for good.
     pub fn register(self) -> Result<(), mod_points::RegisterError> {
-        mod_points::register(self.id, self.points)
+        let id = self.exports.id();
+        let listeners = Listeners {
+            exports: self.exports,
+            fire: self.fire,
+            places: Box::leak(self.places.into_boxed_slice()),
+        };
+        mod_points::register(id, Box::leak(Box::new(Forwarded(Box::new(listeners)))))
     }
 }
 
@@ -159,14 +168,10 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
             point: NAMES[place].to_owned(),
         });
     }
-    let listeners = Listeners {
+    Ok(Some(Listening {
         exports: exports.clone(),
         fire,
-        places: Box::leak(places.into_boxed_slice()),
-    };
-    Ok(Some(Listening {
-        id: exports.id(),
-        points: Box::leak(Box::new(Forwarded(Box::new(listeners)))),
+        places,
     }))
 }
 
