@@ -279,11 +279,17 @@ requires a farmer at work and `mob_griefing` enabled.
   creative. A mod that cancels it keeps the block: on the server it isn't attacked, dug or broken, and the player's client
   gets it back. The clicking player's own client still predicts the crack until then.
 
-- A player's server tick: `native_player_tick_pre` (NeoForge's `PlayerTickEvent.Pre`) runs once a tick for every
-  living player in the world before their digging, item use and cooldowns, and `native_player_tick_post`
-  (`PlayerTickEvent.Post`) at the end of their `ServerPlayer.tick`, both with the helpers reading that player. Players still tick while the game is frozen
-  (`/tick freeze`), as in vanilla. A dead player isn't called, and neither is one killed earlier in the same tick; it
-  runs again once they respawn.
+- A player's tick: `player_tick_pre` and `player_tick_post` match NeoForge 26.3's
+  non-cancellable `PlayerTickEvent.Pre`/`Post` on **both logical sides**, including
+  ordinary single player's client window and server-thread players. Match the typed
+  `HostSide`; the event's `player: PlayerRef` unambiguously names the ticked player
+  (including other client-side players). On the server the helpers read that acting
+  player. Pre precedes sleep/cooldown/body work; Post follows it, including item,
+  arrow and XP pickups. Dead players still receive the pair without enabling dead
+  actions. Players tick under `/tick freeze`, not while paused. With no listeners,
+  the added per-player cost is only the indexed subscriber probe for each endpoint;
+  listeners on the server pay an acting-guest enter/leave at each endpoint, reusing
+  the already resolved guest index (no second connection lookup).
 
 - Shape updates a mod can answer through `native_update_shape`: on an authoritative server, each time a
   block's state is worked out from a neighbour (`BlockBehaviour.updateShape`): neighbour shape updates after a

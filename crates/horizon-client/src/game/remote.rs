@@ -6112,6 +6112,27 @@ impl Game<'_> {
         // Window callbacks only queue clicks, so an interaction cannot leak
         // between CLIENT_TICK_END and a later pong.
         self.remote_handle_input();
+        // The local Player.tick includes its cooldown, sleep and motion work,
+        // even on the death screen. Keep its endpoints paired across load waits.
+        let player = (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
+            || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
+        .then(|| {
+            self.player
+                .as_ref()
+                .and_then(|_| self.native_local_player())
+        })
+        .flatten();
+        if let Some(player) = player {
+            self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
+        }
+        let result = self.tick_remote_player(running, hold);
+        if let Some(player) = player {
+            self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
+        }
+        result
+    }
+
+    fn tick_remote_player(&mut self, running: bool, hold: bool) -> Result<()> {
         // Player.tick's ItemCooldowns.tick, in ClientLevel.tickEntities after
         // handleKeybinds: this path replaces `tick_world`'s for a server's
         // client (multiplayer and the default single player), so the entries
@@ -6842,23 +6863,47 @@ impl Game<'_> {
         };
         let mut lerps = std::mem::take(&mut r.lerps);
         let mut cart_lerps = std::mem::take(&mut r.cart_lerps);
-        let stepped = &mut r.stepped;
-        let head_lerps = &mut r.head_lerps;
-        let players = &r.level_players;
-        let tab_players = &r.tab_players;
         let mut using = Vec::new();
         let mut mob_fx = water_fx;
-        for (m, rain) in self.mobs.iter_mut().zip(rain) {
-            let player = players.contains_key(&(m.id as i32));
+        let tick_listened = mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
+            || mod_api::__private::listened(mod_api::HookId::PlayerTickPost);
+        for (i, rain) in rain.into_iter().enumerate() {
+            let id = self.mobs[i].id;
+            let player = self
+                .remote
+                .as_ref()
+                .unwrap()
+                .level_players
+                .contains_key(&(id as i32));
+            if (!running && !player) || driven == Some(id) {
+                continue;
+            }
+            let player_ref = tick_listened
+                .then(|| {
+                    self.remote.as_ref().and_then(|r| {
+                        let uuid = *r.level_players.get(&(id as i32))?;
+                        Some(mod_api::__private::game::player_ref(
+                            mod_api::EntityRef::new(self.native_lifecycle.epoch()?, id),
+                            uuid,
+                        ))
+                    })
+                })
+                .flatten();
+            if let Some(player) = player_ref {
+                self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
+            }
+            let r = self.remote.as_mut().unwrap();
+            let stepped = &mut r.stepped;
+            let head_lerps = &mut r.head_lerps;
+            let players = &r.level_players;
+            let tab_players = &r.tab_players;
+            let m = &mut self.mobs[i];
             if player {
                 // AvatarRenderer.extractRenderState: isSpectator, from the player list.
                 m.extra.spectator = players
                     .get(&(m.id as i32))
                     .and_then(|uuid| tab_players.get(uuid))
                     .is_some_and(|t| t.game_mode == SPECTATOR);
-            }
-            if (!running && !player) || driven == Some(m.id) {
-                continue;
             }
             m.previous = m.position;
             // `Entity.deltaMovementOnPreviousTick`: the elytra's flight yaw
@@ -7062,6 +7107,9 @@ impl Game<'_> {
                 }
                 _ => {}
             }
+            if let Some(player) = player_ref {
+                self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
+            }
         }
         // ExperienceOrb.tick runs on a client too (all but the merges and the
         // push out of a block, which are the server's): gravity, buoyancy,
@@ -7156,7 +7204,11 @@ impl Game<'_> {
                 &mut |splash| entered.push(splash),
             );
         }
-        head_lerps.retain(|_, (_, steps)| *steps > 0);
+        self.remote
+            .as_mut()
+            .unwrap()
+            .head_lerps
+            .retain(|_, (_, steps)| *steps > 0);
         // Entity.doWaterSplashEffect on this window: Level.addParticle draws
         // the bubbles and splashes. ClientLevel.playSeededSound drops
         // Entity.playSound, so the sound stays the server's.

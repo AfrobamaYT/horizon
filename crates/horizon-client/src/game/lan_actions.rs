@@ -4441,12 +4441,25 @@ impl Game<'_> {
             // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
             play.suggestion_budget = true;
             self.guest_try_suggestions(conn);
+            self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPre, |game, player| {
+                game.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player })
+            });
             self.guest_sleep_tick(gi);
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
             if host.hub.guests[gi].dead {
                 self.guest_tick_death(gi);
+                self.guest_player_tick(
+                    gi,
+                    conn,
+                    mod_api::HookId::PlayerTickPost,
+                    |game, player| {
+                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                            player,
+                        })
+                    },
+                );
                 continue;
             }
             if self.on_server_trip(conn) {
@@ -4454,12 +4467,17 @@ impl Game<'_> {
                 // has loaded around the player or not: its respawn request
                 // is taken as soon as it comes.
                 self.guest_die(gi, conn);
+                self.guest_player_tick(
+                    gi,
+                    conn,
+                    mod_api::HookId::PlayerTickPost,
+                    |game, player| {
+                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                            player,
+                        })
+                    },
+                );
                 continue;
-            }
-            // Native mods, at the start of the living player's tick
-            // (PlayerTickEvent.Pre). The guest is swapped in only for a listener.
-            if mod_api::__private::listened(mod_api::HookId::PlayerTickPre) {
-                self.as_guest(conn, |g| g.native_player_tick_pre());
             }
             // ServerPlayerGameMode.tick stops an active destroy when its block is air.
             let Some(host) = self.lan.as_mut() else {
@@ -4572,8 +4590,6 @@ impl Game<'_> {
                 g.tick_advancements();
                 g.update_player_attributes();
                 g.record_player_scores(&mut recorded);
-                // Native mods, at the end of ServerPlayer.tick (PlayerTickEvent.Post).
-                g.native_player_tick_post();
             });
             if let Some(host) = self.lan.as_mut() {
                 host.play.entry(conn).or_default().score_recorded = recorded;
@@ -4587,7 +4603,32 @@ impl Game<'_> {
             self.guest_arrows(gi);
             self.guest_orbs(gi);
             self.guest_die(gi, conn);
+            self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPost, |game, player| {
+                game.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player })
+            });
         }
+    }
+
+    /// Only listeners pay for a guest swap; reuse the loop's resolved index.
+    fn guest_player_tick(
+        &mut self,
+        gi: usize,
+        conn: u32,
+        hook: mod_api::HookId,
+        fire: fn(&mut Self, mod_api::PlayerRef),
+    ) {
+        if !mod_api::__private::listened(hook) {
+            return;
+        }
+        let (Some(epoch), Some(host)) = (self.native_lifecycle.epoch(), self.lan.as_ref()) else {
+            return;
+        };
+        let guest = &host.hub.guests[gi];
+        let player = mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, guest.entity_id as u32),
+            guest.uuid,
+        );
+        let _ = self.as_guest_at(gi, conn, |game| fire(game, player));
     }
 
     /// `ServerPlayer.die` for a guest whose health has run out: the death
@@ -7991,34 +8032,83 @@ mod respawn_position_tests {
 mod player_tick_tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::super::native_item_places::tests::{guest, open_to_lan};
+    use horizon_client::items::ItemStack;
+    use mod_api::{Host, HostSide, PlayerRef};
     use std::sync::{Arc, Mutex};
 
-    /// Logs each player tick moment it hears.
-    struct Log(Arc<Mutex<Vec<&'static str>>>);
+    #[derive(Debug, PartialEq)]
+    struct Snapshot {
+        phase: &'static str,
+        side: &'static str,
+        uuid: u128,
+        diamonds: u32,
+        xp: i32,
+        cooldown: Option<i32>,
+    }
+
+    struct Log(Arc<Mutex<Vec<Snapshot>>>);
+    impl Log {
+        fn record(&self, side: HostSide<'_>, player: PlayerRef, phase: &'static str) {
+            let (host, side, cooldown): (&dyn Host, _, _) = match side {
+                HostSide::Server(host) => {
+                    assert_eq!(host.acting_player().unwrap().uuid, player.uuid());
+                    let cooldown = player
+                        .item_cooldowns(host)
+                        .unwrap()
+                        .first()
+                        .map(|c| c.ticks_left);
+                    (host, "server", cooldown)
+                }
+                HostSide::Client(host) => {
+                    if host.local_player() != Some(player) {
+                        assert_eq!(player.uuid(), 789);
+                        assert_eq!(player.entity().id(), 66);
+                        assert!(player.inventory(host).is_none());
+                    }
+                    (host, "client", None)
+                }
+            };
+            self.0.lock().unwrap().push(Snapshot {
+                phase,
+                side,
+                uuid: player.uuid(),
+                diamonds: player
+                    .inventory(host)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|s| &*s.item == "minecraft:diamond")
+                    .map(|s| s.count)
+                    .sum(),
+                xp: player.experience(host).map_or(0, |xp| xp.total),
+                cooldown,
+            });
+        }
+    }
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Log {
-        fn player_tick_pre(
-            &self,
-            _: &mut dyn mod_api::ServerHost,
-            _: &mut mod_api::PlayerTickPreEvent,
-        ) {
-            self.0.lock().unwrap().push("pre");
+        fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
+            self.record(host, event.player, "pre");
         }
-        fn player_tick_post(
+        fn player_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPostEvent) {
+            self.record(host, event.player, "post");
+        }
+        fn can_continue_sleeping(
             &self,
             _: &mut dyn mod_api::ServerHost,
-            _: &mut mod_api::PlayerTickPostEvent,
-        ) {
-            self.0.lock().unwrap().push("post");
+            event: &mut mod_api::CanContinueSleepingEvent<'_>,
+        ) -> Option<bool> {
+            // The sleep rule runs inside the tick, never ahead of Pre.
+            let heard = self.0.lock().unwrap();
+            assert_eq!(heard.last().unwrap().phase, "pre");
+            assert_eq!(heard.last().unwrap().uuid, event.entity);
+            Some(false)
         }
     }
 
-    /// `PlayerTickEvent.Pre` and `.Post`: once each a tick for a living
-    /// player, Pre first; a dead player hears neither.
     #[test]
     #[ignore = "needs prepared resources"]
-    fn a_living_guest_ticks_pre_then_post() {
-        let heard: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+    fn guest_tick_brackets_sleep_cooldowns_pickups_and_death() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
         let mods = vec![mod_api::ModEntry::new(
             "log",
             Box::new(Log(Arc::clone(&heard))),
@@ -8029,16 +8119,164 @@ mod player_tick_tests {
                 open_to_lan(game);
                 let mut g = guest(1);
                 g.loaded = true;
-                game.lan.as_mut().unwrap().hub.guests.push(g);
+                g.bed = Some([0, 0, 0]);
+                g.sleeping = true;
+                g.sleep_timer = 4;
+                let mut other = guest(2);
+                other.loaded = true;
+                other.position = [50.0, 0.0, 50.0];
+                let host = game.lan.as_mut().unwrap();
+                host.hub.guests.extend([g, other]);
+                host.play
+                    .entry(1)
+                    .or_default()
+                    .cooldowns
+                    .add("minecraft:ender_pearl".into(), 3);
+                let diamond = ItemStack::new("minecraft:diamond", 2);
+                game.spawn_item(diamond.clone(), [0.0; 3], [0.0; 3], 0);
+                let level = game.native_level("minecraft:overworld").unwrap();
+                assert!(game.native_level_award_experience(level, 0.0, 0.0, 0.0, 7));
                 game.tick_guests();
-                assert_eq!(*heard.lock().unwrap(), ["pre", "post"]);
-                game.tick_guests();
-                assert_eq!(*heard.lock().unwrap(), ["pre", "post", "pre", "post"]);
+                let observations = heard.lock().unwrap();
+                assert_eq!(
+                    observations
+                        .iter()
+                        .map(|s| (s.phase, s.uuid))
+                        .collect::<Vec<_>>(),
+                    [("pre", 123), ("post", 123), ("pre", 124), ("post", 124)]
+                );
+                assert_eq!(
+                    observations[0],
+                    Snapshot {
+                        phase: "pre",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 0,
+                        xp: 0,
+                        cooldown: Some(3)
+                    }
+                );
+                assert_eq!(
+                    observations[1],
+                    Snapshot {
+                        phase: "post",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(observations[2].diamonds, 0);
+                drop(observations);
+                assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].sleep_timer, 100);
+                assert!(game.lan.as_ref().unwrap().hub.guests[0].bed.is_none());
+                assert!(game.inventory.iter().all(Option::is_none));
                 heard.lock().unwrap().clear();
-                game.lan.as_mut().unwrap().hub.guests[0].dead = true;
+                // A real zero-health death-screen tick still gets both endpoints,
+                // without use/cooldown/pickup work re-enabled.
+                let g = &mut game.lan.as_mut().unwrap().hub.guests[0];
+                g.dead = true;
+                g.health = 0.0;
+                game.spawn_item(diamond, [0.0; 3], [0.0; 3], 0);
+                assert!(game.native_level_award_experience(level, 0.0, 0.0, 0.0, 7));
                 game.tick_guests();
-                assert!(heard.lock().unwrap().is_empty());
-            });
+                let observations = heard.lock().unwrap();
+                assert_eq!(
+                    observations[0],
+                    Snapshot {
+                        phase: "pre",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(
+                    observations[1],
+                    Snapshot {
+                        phase: "post",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(observations.len(), 4);
+                assert_eq!(game.dropped.len(), 1);
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn client_player_ticks_on_the_death_screen_too() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "log",
+            Box::new(Log(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+                let (client, server) = horizon_protocol::connection::Pipe::pair();
+                game.connect_local(client, "tick-client").unwrap();
+                let remote = game.remote.as_mut().unwrap();
+                remote.logged_in = true;
+                remote.profile = 456;
+                remote.entity_id = 42;
+                game.player = horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .ok();
+                game.remote.as_mut().unwrap().level_players.insert(66, 789);
+                let kind = game
+                    .res
+                    .mob_types()
+                    .get("minecraft:player")
+                    .unwrap()
+                    .clone();
+                game.mobs.push(horizon_client::mobs::Mob::new(
+                    66,
+                    kind,
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                ));
+                game.cooldowns.add("minecraft:ender_pearl".into(), 3);
+                game.sleep_timer = 4;
+                game.tick_remote().unwrap();
+                assert_eq!(game.cooldowns.remaining().next().unwrap().1, 2);
+                assert_eq!(game.sleep_timer, 5);
+                game.screen = super::super::Screen::Dead;
+                game.player
+                    .as_mut()
+                    .unwrap()
+                    .set_health(0.0, false)
+                    .unwrap();
+                game.tick_remote().unwrap();
+                let observations = heard.lock().unwrap();
+                assert_eq!(
+                    observations
+                        .iter()
+                        .map(|s| (s.phase, s.side, s.uuid))
+                        .collect::<Vec<_>>(),
+                    [
+                        ("pre", "client", 456),
+                        ("pre", "client", 789),
+                        ("post", "client", 789),
+                        ("post", "client", 456),
+                        ("pre", "client", 456),
+                        ("pre", "client", 789),
+                        ("post", "client", 789),
+                        ("post", "client", 456)
+                    ]
+                );
+                server.shutdown();
+            })
         });
     }
 }

@@ -670,21 +670,21 @@ pub trait Hooks {
     /// every player of the world (the helpers read the acting one).
     #[hook(side = "server", contract = "cancel", out = "canceled")]
     fn left_click_block();
-    /// A living player's server tick starts (NeoForge's `PlayerTickEvent.Pre`):
-    /// once a tick for every player in the world, before their digging, item
-    /// use, cooldowns, statistics and advancements. The helpers read that
-    /// player. Players still tick under `/tick freeze`; a dead player doesn't,
-    /// nor does one killed earlier in the same tick.
-    #[hook(side = "server", contract = "listen", neoforge = "PlayerTickEvent.Pre")]
-    fn player_tick_pre();
-    /// A living player's server tick ends (NeoForge's `PlayerTickEvent.Post`,
-    /// the end of `ServerPlayer.tick`): once a tick for every player in the
-    /// world, after their digging, item use, cooldowns, statistics and
-    /// advancements, and after `player_tick_pre` for the same player. The
-    /// helpers read that player. Players still tick under `/tick freeze`; a
-    /// dead player doesn't, nor does one killed earlier in the same tick.
-    #[hook(side = "server", contract = "listen", neoforge = "PlayerTickEvent.Post")]
-    fn player_tick_post();
+    /// Before a player's tick on both logical sides (NeoForge 26.3
+    /// `PlayerTickEvent.Pre`). Non-cancellable, including death-screen ticks.
+    /// `player` identifies the ticked player; on the server their state is
+    /// acting. Fires before sleep, cooldowns and body work. Players still tick
+    /// under `/tick freeze`, but not while the level is paused.
+    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Pre")]
+    fn player_tick_pre(player: PlayerRef);
+    /// After a player's tick on both logical sides (NeoForge 26.3
+    /// `PlayerTickEvent.Post`). Non-cancellable, including death-screen ticks.
+    /// `player` is the same identity as in `player_tick_pre`; on the server
+    /// their state is acting. Runs after body work and server-side item,
+    /// arrow and XP pickups, so reads see the completed tick. Client reads
+    /// see only the state available to that client, not future server updates.
+    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Post")]
+    fn player_tick_post(player: PlayerRef);
     /// An entity joins the server level `dimension` (NeoForge's
     /// `EntityJoinLevelEvent`): vanilla's `PersistentEntitySectionManager.addEntity`.
     /// `loaded_from_disk` is true for an entity coming back with its chunk,
