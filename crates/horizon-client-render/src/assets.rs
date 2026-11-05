@@ -325,7 +325,9 @@ impl RenderAssets {
             Some(parsed) => parsed,
             None if draws => {
                 let _step = crate::spans::startup::step("core.models_parse");
-                crate::model_library::ParsedModels::load(root)
+                crate::model_library::ParsedModels::load(
+                    &crate::resource_source::ResourceSource::directory(root.to_owned()),
+                )
             }
             None => crate::model_library::ParsedModels::default(),
         };

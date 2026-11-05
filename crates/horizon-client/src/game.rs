@@ -21863,7 +21863,9 @@ fn load_core(
         let models = (parallel && !headless).then(|| {
             scope.spawn(|| {
                 let _step = startup::step("core.models_parse");
-                horizon_client::model_library::ParsedModels::load(root)
+                horizon_client::model_library::ParsedModels::load(
+                    &horizon_client::resource_source::ResourceSource::directory(root.to_owned()),
+                )
             })
         });
         let assets = startup::time("core.assets", || Assets::load(root));

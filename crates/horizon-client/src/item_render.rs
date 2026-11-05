@@ -727,7 +727,10 @@ impl ItemRenderer {
     ) -> crate::Result<Self> {
         Self::load_with_library(
             root,
-            crate::model_library::ParsedModels::load(root).into_item_library(),
+            crate::model_library::ParsedModels::load(
+                &crate::resource_source::ResourceSource::directory(root.to_owned()),
+            )
+            .into_item_library(),
             item_data,
         )
     }
@@ -1253,7 +1256,10 @@ mod tests {
         let model = root.join("assets/horizon/models/INVALID.json");
         fs::create_dir_all(model.parent().unwrap())?;
         fs::write(model, "{}")?;
-        let library = crate::model_library::ParsedModels::load(&root).into_item_library();
+        let library = crate::model_library::ParsedModels::load(
+            &crate::resource_source::ResourceSource::directory(root.clone()),
+        )
+        .into_item_library();
         assert!(library.is_err());
         fs::write(root.join("items.json"), "{")?;
         let load = || {
@@ -1317,7 +1323,10 @@ mod tests {
         let cit = root.join("assets/minecraft/optifine");
         fs::create_dir_all(&cit)?;
         fs::write(cit.join("cit.properties"), "useGlint=false\n")?;
-        let library = crate::model_library::ParsedModels::load(&root).into_item_library();
+        let library = crate::model_library::ParsedModels::load(
+            &crate::resource_source::ResourceSource::directory(root.clone()),
+        )
+        .into_item_library();
         let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload)?;
         let client = ItemRenderer::load_with_library(&root, library.clone(), &data)?;
         let server = ItemRenderer::load_for_server(&root, library, &data)?;

@@ -353,7 +353,11 @@ fn main() {
             runs,
             || {},
             || {
-                std::hint::black_box(ParsedModels::load(&root));
+                std::hint::black_box(ParsedModels::load(
+                    &horizon_client_render::resource_source::ResourceSource::directory(
+                        root.clone(),
+                    ),
+                ));
             },
         ),
     );

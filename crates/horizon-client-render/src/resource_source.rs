@@ -50,6 +50,11 @@ impl Resource {
 /// Clones share the open archive; construct a new source for a resource reload.
 #[derive(Clone)]
 pub struct ResourceSource(Arc<Storage>);
+impl Default for ResourceSource {
+    fn default() -> Self {
+        Self::indexed(BTreeMap::new())
+    }
+}
 
 /// A resource name cannot escape its layer. ZIP names already have separators
 /// normalized by `Zip`; reject drive/stream names and NULs on every platform.
@@ -132,6 +137,10 @@ impl ResourceSource {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
                 .read(),
         }
+    }
+    pub fn read_to_string(&self, name: &str) -> io::Result<String> {
+        String::from_utf8(self.read(name)?)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
     /// File names from the layer root, in name order. A directory prefix ends
     /// with `/`; partial file-name prefixes are supported for archives too.

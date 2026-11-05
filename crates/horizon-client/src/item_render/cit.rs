@@ -513,7 +513,10 @@ mod tests {
     }
 
     fn renderer(root: &Path) -> ItemRenderer {
-        let library = crate::model_library::ParsedModels::load(root).into_item_library();
+        let library = crate::model_library::ParsedModels::load(
+            &crate::resource_source::ResourceSource::directory(root.to_owned()),
+        )
+        .into_item_library();
         let data = crate::test_resources::item_data(
             root,
             horizon_world::native_load_context::DataLoadOrigin::ClientPreload,

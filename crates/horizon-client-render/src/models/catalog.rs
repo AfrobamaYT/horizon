@@ -320,11 +320,17 @@ impl StateModels {
             }
         }
         let names: Vec<String> = variants.iter().map(|(name, _, _)| name.clone()).collect();
-        let library = match models.block_library(root, names.clone()) {
+        let library = match models.block_library(
+            &crate::resource_source::ResourceSource::directory(root.to_owned()),
+            names.clone(),
+        ) {
             Ok(library) => library,
             Err(e) => {
                 log::warn!("Horizon: block models incomplete ({e}); using the missing model");
-                models.block_library_or_missing(root, names)?
+                models.block_library_or_missing(
+                    &crate::resource_source::ResourceSource::directory(root.to_owned()),
+                    names,
+                )?
             }
         };
         let resolved: Vec<_> = variants
@@ -388,7 +394,10 @@ impl StateModels {
                 continue;
             }
             let model = models
-                .block_library(root, vec![name.clone()])
+                .block_library(
+                    &crate::resource_source::ResourceSource::directory(root.to_owned()),
+                    vec![name.clone()],
+                )
                 .and_then(|library| bake_variant(root, sprites, &library, name, [0; 3], false));
             match model {
                 Ok(model) => {
@@ -568,7 +577,9 @@ mod tests {
         ]
         .map(str::to_owned)
         .into();
-        let parsed = ParsedModels::load(&fixture.0);
+        let parsed = ParsedModels::load(&crate::resource_source::ResourceSource::directory(
+            fixture.0.clone(),
+        ));
         models.bake_standalone(&fixture.0, &mut sprites, &parsed, &names)?;
         let shaft = models.standalone("lanef:block/shaft_half").expect("baked");
         assert_eq!(shaft.faces.len(), 2);
