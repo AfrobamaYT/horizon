@@ -688,14 +688,14 @@ fn canonical_permissions_preserve_owner_and_fake_player_reads() {
         let mut body = PlayerMotion::new(game.motion, Vec3::new(0.0, 64.0, 0.0)).unwrap();
         body.entity_id = 99;
         game.player = Some(body);
-        game.creative = true;
+        game.set_mode(horizon_client::command::args::GameMode::Creative);
         let owner = game.native_player_ref(99).unwrap();
         for (allow, permission) in [(false, 0), (true, 4)] {
             game.set_allow_commands(allow);
             assert_eq!(owner.permission_level(game), Some(permission));
             assert_eq!(owner.can_use_game_master_blocks(game), Some(allow));
         }
-        game.creative = false;
+        game.set_mode(horizon_client::command::args::GameMode::Survival);
         assert_eq!(owner.permission_level(game), Some(4));
         assert_eq!(owner.can_use_game_master_blocks(game), Some(false));
 
