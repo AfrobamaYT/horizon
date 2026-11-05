@@ -12,7 +12,13 @@
 // Pinned issues stay off the board.
 module.exports = async ({ github, context, core }) => {
   const OWNER = 'arismoko', REPO = 'horizon', NUMBER = 1;
-  const q = (query, vars = {}) => github.graphql(query, vars);
+  // GitHub answers 502 on heavy pages now and then; retry those a few times.
+  const q = async (query, vars = {}) => {
+    for (let i = 0; ; i++) {
+      try { return await github.graphql(query, vars); }
+      catch (e) { if (i >= 4 || !/50[234]|timeout/i.test(String(e.status || e.message))) throw e; await new Promise(r => setTimeout(r, 5000 * (i + 1))); }
+    }
+  };
 
   const proj = (await q(`query($o:String!,$n:Int!){user(login:$o){projectV2(number:$n){id
     fields(first:30){nodes{... on ProjectV2Field{id name} ... on ProjectV2SingleSelectField{id name options{id name}}}}}}}`,
@@ -46,7 +52,7 @@ module.exports = async ({ github, context, core }) => {
       for (let after = null; ;) {
         const extra = kind === 'issues' ? 'isPinned body labels(first:10){nodes{name}} assignees(first:5){nodes{login}}' :
           'isDraft body author{login} assignees(first:5){nodes{login}} closingIssuesReferences(first:10){nodes{id}}';
-        const page = (await q(`query($o:String!,$r:String!,$a:String){repository(owner:$o,name:$r){${kind}(first:100,after:$a,states:[${state}],orderBy:{field:UPDATED_AT,direction:DESC}){
+        const page = (await q(`query($o:String!,$r:String!,$a:String){repository(owner:$o,name:$r){${kind}(first:40,after:$a,states:[${state}],orderBy:{field:UPDATED_AT,direction:DESC}){
           pageInfo{hasNextPage endCursor} nodes{id number ${extra}}}}}`, { o: OWNER, r: REPO, a: after })).repository[kind];
         for (const n of page.nodes) {
           if (state !== 'OPEN' && !items.has(n.id)) continue;
