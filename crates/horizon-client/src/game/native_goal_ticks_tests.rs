@@ -384,6 +384,109 @@ fn mobs_without_mod_goals_tick_as_before() {
     });
 }
 
+#[test]
+#[ignore = "needs prepared resources"]
+fn the_host_answers_without_panicking() {
+    /// Reads a block, a tag, the neighbour as a living and the day time
+    /// through `cx.host()`, reporting what came back.
+    static READS: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
+    struct Reader;
+    impl Goal for Reader {
+        fn flags(&self) -> GoalFlags {
+            GoalFlags::MOVE
+        }
+        fn name(&self) -> &'static str {
+            "Reader"
+        }
+        fn can_use(&mut self, _cx: &mut GoalContext<'_>) -> bool {
+            true
+        }
+        fn start(&mut self, cx: &mut GoalContext<'_>) {
+            let host = cx.host();
+            // The level's own reads forward to the game host behind the tick.
+            let stone = host.block_state_id("minecraft:stone");
+            let tagged = host.entity_type_in_tag("minecraft:zombie", "minecraft:undead");
+            let day_time = host.day_time();
+            // The entity lookups answer the tick's own rules: the neighbour
+            // comes back as a handle, and it reads from the snapshot.
+            let other = OTHER.lock().unwrap().as_ref().copied();
+            let (found, health) = match other {
+                Some(other) => match host.living(other) {
+                    Some(living) => (true, living.health(host)),
+                    None => (false, None),
+                },
+                None => (false, None),
+            };
+            let line = format!(
+                "stone={:?} tagged={} day_time={} neighbour={:?} health={:?}",
+                stone.is_some(),
+                tagged,
+                day_time,
+                found,
+                health
+            );
+            READS.lock().unwrap().push(("host", line.clone()));
+            // The entity lookup builds a handle the same way: from an id.
+            let by_id = other.and_then(|other| host.entity(other.id()));
+            READS
+                .lock()
+                .unwrap()
+                .push(("host", format!("by_id={:?}", by_id.is_some())));
+        }
+    }
+    struct Readers;
+    #[mod_api::horizon_part]
+    impl EntityPart for Readers {
+        fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+            goals.add_goal(4, Reader);
+        }
+    }
+    struct ReaderMod;
+    #[mod_api::__subscriptions]
+    impl Hooks for ReaderMod {
+        fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
+            r.entity_part("minecraft:zombie", Readers);
+        }
+    }
+    EVENTS.lock().unwrap().clear();
+    with_game(|game| {
+        mod_api::__private::install(vec![ModEntry::new("reader", Box::new(ReaderMod))].into());
+        mod_api::__private::install_parts(&[ModEntry::new("reader", Box::new(ReaderMod))]).unwrap();
+        game.resolve_parts().unwrap();
+        zombie(game, 70, [3.5, 65.0, 3.5]);
+        zombie(game, 71, [13.5, 65.0, 13.5]);
+        game.mobs[1].health = 12.5;
+        let other = game.native_entity(71).unwrap();
+        set_other(other);
+        // Only the reader goal, so nothing else races it.
+        game.mobs[0].ai.goals.clear();
+        mobs::part_goals::attach(&mut game.mobs[0]);
+        game.options.dedicated = Some(Vec::new());
+        assert!(
+            game.mob_world_base(&[]).goal_host.is_some(),
+            "the goal host is in place"
+        );
+        tick_goals(game, 0);
+        let reads = READS.lock().unwrap();
+        let line = reads
+            .iter()
+            .find(|(case, _)| *case == "host")
+            .map(|(_, value)| value.clone())
+            .expect("the reader ran");
+        assert!(line.contains("stone=true"), "{line}");
+        assert!(line.contains("tagged=true"), "{line}");
+        assert!(line.contains("day_time="), "{line}");
+        assert!(line.contains("neighbour=true"), "{line}");
+        assert!(line.contains("health=Some(12.5)"), "{line}");
+        assert!(
+            reads
+                .iter()
+                .any(|(case, value)| *case == "host" && value == "by_id=true"),
+            "the id lookup answers too"
+        );
+    });
+}
+
 /// What one mod-goal tick costs against a plain engine goal, in nanoseconds:
 /// printed once for the PR body (#1077). Run with `--ignored --nocapture`.
 #[test]

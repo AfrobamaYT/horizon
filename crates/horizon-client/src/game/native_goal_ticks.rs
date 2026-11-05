@@ -1,24 +1,28 @@
 //! The mod goal context of a mob's tick (arismoko/horizon#1077): the reads a
 //! goal makes through `GoalContext::host` answer the ticking mob itself, the
-//! player the tick sees and the tick's snapshot of the other entities — every
-//! other backend read is refused its typed refusal by the generated view
-//! below, as a host without a backend refuses it. The writes a goal makes
-//! apply to the mob in hand through the engine's own paths (`nav_move_to`,
-//! `ai.target`), and the write handles a `ServerHost` takes do not exist here.
+//! player the tick sees and the tick's snapshot of the other entities — the
+//! entity lookups and snapshot-backed reads are the view's own (generated
+//! below), every other backend read is refused its typed refusal, and the
+//! level's own reads (blocks, tags, recipes, settings) forward to the game
+//! host the view carries. The writes a goal makes apply to the mob in hand
+//! through the engine's own paths (`nav_move_to`, `ai.target`), and the write
+//! handles a `ServerHost` takes do not exist here.
 use super::Game;
 use crate::mobs::{self, Mob, MobWorld, Seen, Species, TargetInfo, Who, part_goals::GoalOp};
 use horizon_core::geometry::Axis;
 use mod_api::{
-    BackendRef, EntityRef, GoalCxBackend, Host, LegacyRandom, LivingRef, MobRef,
+    EntityRef, GoalCxBackend, Host, LegacyRandom, LivingRef, MobRef, PlayerRef,
     crash::{NativeModCall, enter_native_mod},
 };
 
-/// What a mod goal runs with: the mob in hand and the tick's `MobWorld` (the
+/// What a mod goal runs with: the mob in hand, the tick's `MobWorld` (the
 /// [`mobs::part_goals::GoalHost`], the snapshot and the player view ride on
-/// it), with the writes applied to the mob itself.
+/// it) and the game host behind the tick, for the reads that are the level's
+/// own. The writes apply to the mob itself.
 pub(super) struct GoalCx<'a, 'w> {
     m: &'a mut Mob,
     w: &'a MobWorld<'w>,
+    host: &'a dyn Host,
 }
 
 /// What a handle names in the goal view: the ticking mob itself, the player
@@ -64,6 +68,55 @@ impl GoalCx<'_, '_> {
             None => others.iter().find(|s| s.id == id),
         }?;
         Some(Resolved::Seen(seen))
+    }
+
+    // --- the entity lookups the generated Host impl forwards to ----------
+
+    /// `Host::entity`: the id resolves in the tick's view — the ticking mob,
+    /// the player it sees, a mob of the snapshot, the dragon — or none.
+    pub(crate) fn lookup_entity(&self, id: u32) -> Option<EntityRef> {
+        let host = self.w.goal_host?;
+        let epoch = host.epoch()?;
+        match self.resolve(EntityRef::new(epoch, id))? {
+            Resolved::Own | Resolved::Player | Resolved::Seen(_) | Resolved::Dragon(_) => {
+                Some(EntityRef::new(epoch, id))
+            }
+        }
+    }
+
+    /// `Host::living`: the handle resolves in the tick's view.
+    pub(crate) fn lookup_living(&self, entity: EntityRef) -> Option<LivingRef> {
+        self.resolve(entity).map(|_| LivingRef::new(entity))
+    }
+
+    /// `Host::mob`: the handle resolves in the tick's view.
+    pub(crate) fn lookup_mob(&self, entity: EntityRef) -> Option<MobRef> {
+        self.resolve(entity).map(|_| MobRef::new(entity))
+    }
+
+    /// `Host::player`: the player the tick sees, by uuid.
+    pub(crate) fn lookup_player(&self, uuid: u128) -> Option<PlayerRef> {
+        let host = self.w.goal_host?;
+        let (uuid_seen, id) = host.player()?;
+        let epoch = host.epoch()?;
+        (uuid == horizon_client::lan::playerdata::ints_uuid(uuid_seen))
+            .then(|| mod_api::__private::game::player_ref(EntityRef::new(epoch, id), uuid))
+    }
+
+    /// `Host::item_entity`: no item entity is in the tick's view.
+    pub(crate) fn lookup_item_entity(&self, entity: EntityRef) -> Option<mod_api::ItemEntityRef> {
+        let _ = entity;
+        None
+    }
+
+    /// `Host::block_entity`: block entities live in the world's chunks, which
+    /// the tick does not take out — the game host answers for them.
+    pub(crate) fn lookup_block_entity(
+        &self,
+        level: mod_api::LevelRef,
+        pos: [i32; 3],
+    ) -> Option<mod_api::BlockEntityRef> {
+        self.host.block_entity(level, pos)
     }
 
     /// The entity's position, or None where unresolvable.
@@ -265,15 +318,6 @@ impl GoalCxBackend for GoalCx<'_, '_> {
     }
 }
 
-/// The goal view is a host of reads only: its backend is the context itself,
-/// so every handle read answers from the tick (or its typed refusal), and the
-/// write handles a `ServerHost` takes do not exist there.
-impl Host for GoalCx<'_, '_> {
-    fn backend(&self) -> Option<BackendRef<'_>> {
-        Some(mod_api::__private::backend_ref(self))
-    }
-}
-
 impl mobs::part_goals::GoalHost for Game<'_> {
     fn epoch(&self) -> Option<mod_api::NativeWorldEpoch> {
         self.native_lifecycle.epoch()
@@ -306,7 +350,7 @@ impl mobs::part_goals::GoalHost for Game<'_> {
             GoalOp::Stop => "goal_stop",
             GoalOp::Tick => "goal_tick",
         };
-        let mut gcx = GoalCx { m, w };
+        let mut gcx = GoalCx { m, w, host: self };
         let mut context = mod_api::GoalContext::new(&mut gcx);
         let _guard = enter_native_mod(NativeModCall {
             id: mod_id,

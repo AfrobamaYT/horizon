@@ -4430,7 +4430,7 @@ mod wasm_refused;
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
 }
-pub use generated::Hooks;
+pub use generated::{EntityPart, Hooks};
 impl FallOnEvent<'_> {
     /// Ask for a write at the block the entity landed on. It is applied once the entity's
     /// batch has ticked, in the order asked, if the block is still the state it landed on.
