@@ -2904,9 +2904,9 @@ mod tests {
             fn screen_render_inventory_mob_effects(
                 &self,
                 _: &dyn ClientHost,
-                event: &mut mod_api::ScreenRenderInventoryMobEffectsEvent<'_>,
-            ) {
-                *event.canceled = true;
+                _: &mut mod_api::ScreenRenderInventoryMobEffectsEvent<'_>,
+            ) -> mod_api::Flow {
+                mod_api::Flow::Cancel
             }
         }
         super::super::native_entity_refs::tests::with_game(|game| {
