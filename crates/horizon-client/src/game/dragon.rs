@@ -931,18 +931,26 @@ impl Dragon {
 /// The source `reallyHurt` takes from a hit `by` the player of that entity
 /// id: `DamageSources.explosion(crystal, player)` is `player_explosion` with
 /// a player behind it, who is the causing entity, and the direct one of a
-/// melee hit; a projectile hit names the projectile separately from its owner.
+/// melee hit. A projectile is the direct entity only when the damage type
+/// names one; `magic()` (an ownerless wither skull) does not.
 fn hurt_source(
     kind: DamageKind,
     by: Option<i32>,
     direct: Option<&Projectile>,
 ) -> HurtSource<'static> {
     let causing = by.unwrap_or(0);
-    let melee = direct.is_none() && super::creatures::melee(kind);
+    let damage_type = super::creatures::damage_type(kind, by.is_some());
+    let projectile = direct
+        .filter(|_| horizon_client::health::names_its_projectile(damage_type))
+        .map(|p| p.id as i32);
     HurtSource {
-        damage_type: super::creatures::damage_type(kind, by.is_some()),
+        damage_type,
         causing,
-        direct: direct.map_or(if melee { causing } else { 0 }, |p| p.id as i32),
+        direct: projectile.unwrap_or(if super::creatures::melee(kind) {
+            causing
+        } else {
+            0
+        }),
         position: None,
     }
 }
@@ -5320,6 +5328,11 @@ mod tests {
         arrow.id = 37;
         let shot = source(DamageKind::Arrow, Some(12), Some(&arrow));
         assert_eq!(shot, ("minecraft:arrow", 12, 37));
+        let skull = source(DamageKind::WitherSkull, Some(12), Some(&arrow));
+        assert_eq!(skull, ("minecraft:wither_skull", 12, 37));
+        // DamageSources.magic(): an ownerless skull names no direct entity.
+        let magic = source(DamageKind::Magic, None, Some(&arrow));
+        assert_eq!(magic, ("minecraft:magic", 0, 0));
         let blast = source(DamageKind::Explosion, Some(12), None);
         assert_eq!(blast, ("minecraft:player_explosion", 12, 0));
         let blast = source(DamageKind::Explosion, None, None);

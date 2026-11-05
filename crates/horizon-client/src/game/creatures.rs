@@ -4147,7 +4147,7 @@ impl Game<'_> {
                 let source = HurtSource {
                     damage_type,
                     causing,
-                    direct: attack.projectile.unwrap_or(0),
+                    direct: attack.projectile_direct(damage_type),
                     position: None,
                 };
                 default_push = Some(([xd, zd], source));
@@ -4195,7 +4195,7 @@ impl Game<'_> {
             let source = HurtSource {
                 damage_type,
                 causing,
-                direct: attack.projectile.unwrap_or(0),
+                direct: attack.projectile_direct(damage_type),
                 position: None,
             };
             self.after_block(outcome, (attacker, projectile), source, &attack);

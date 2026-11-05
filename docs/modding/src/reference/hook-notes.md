@@ -442,8 +442,9 @@ requires a farmer at work and `mob_griefing` enabled.
   route, with the hit's level host (its blocks, random and own attachments), the hurt entity's id and type
   (`minecraft:player` for a player), the hit's source (`HurtSource`: the damage type, `minecraft:fall`; the causing
   entity, `causing`, vanilla's `DamageSource.getEntity`: a skeleton for its arrow; the direct entity, `direct`,
-  `getDirectEntity`: the projectile's entity id for hits on players, mobs and the ender dragon, including
-  ownerless projectiles, or the attacker itself in melee; and `position`, `getSourcePosition`), the `victim`'s
+  `getDirectEntity`: the projectile's entity id when the damage type names one, for hits on players, mobs and
+  the ender dragon, including an ownerless projectile, or the attacker itself in melee; `magic()` and any other
+  source with no direct entity stay 0 even during that projectile's impact; and `position`, `getSourcePosition`), the `victim`'s
   position and view vector, the direct entity's `weapon` (`getWeaponItem`) when Horizon knows it (a player's or mob's
   melee hit inside its attack), and the hit's `DamageContainer` before any reduction. The entity ids are 0 for none,
   and for the sources listed below that Horizon doesn't track yet. A mod may change the container's new damage or the
@@ -474,7 +475,8 @@ the hit, which doesn't tell every vanilla type apart yet:
 
 The causing and direct entities are 0 for now in these cases:
 
-- A player's direct entity outside a projectile hit
+- A player's direct entity outside a projectile hit, and `magic()` dealt during one (an ownerless wither
+  skull, instant harm from a tipped arrow): vanilla's source names no entity
 - A player's causing entity, except for a mob that shot the projectile, the mob `/damage` names, an evoker that summoned
   the fangs, a slime or magma cube that touched the player, and a mob that exploded (a sulfur cube's is guessed until
   its blast names its source)
