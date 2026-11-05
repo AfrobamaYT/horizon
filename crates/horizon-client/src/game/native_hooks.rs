@@ -3424,6 +3424,17 @@ impl Game<'_> {
     pub(super) fn native_camera_shake(&self, partial: f32, shake: &mut NativeShake) {
         mod_api::dispatch_camera_shake(self, partial, shake);
     }
+    /// The pose of the arm holding `stack` in `hand` (`IClientItemExtensions.getArmPose`); set
+    /// `pose` to replace what the item would give. Client-side.
+    pub(super) fn native_get_arm_pose(
+        &self,
+        entity_id: u32,
+        hand: Hand,
+        stack: &ItemStack,
+        pose: &mut Option<mod_api::ArmPose>,
+    ) {
+        mod_api::dispatch_get_arm_pose(self, entity_id, hand, stack, pose);
+    }
     /// Name tag visibility and optional replacement text. API 372.
     pub(super) fn native_render_name_tag(
         &self,

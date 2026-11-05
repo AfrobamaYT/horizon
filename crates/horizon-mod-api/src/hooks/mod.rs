@@ -131,6 +131,7 @@ mod fluid_draw;
 mod fluid_flow;
 mod fluid_place_block;
 mod game_rule_changed;
+mod get_arm_pose;
 mod get_enchantment_level;
 mod grindstone_place;
 mod grindstone_take;

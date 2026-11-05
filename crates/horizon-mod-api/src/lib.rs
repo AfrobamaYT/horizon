@@ -177,7 +177,9 @@ pub use horizon_client_core::suggestion::Suggestion;
 pub use horizon_client_core::text::Text;
 #[horizon_mod_api_macros::wasm(via = (u64, Option<f64>))]
 pub use horizon_core::random::LegacyRandom;
-pub use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
+pub use horizon_core::{
+    arm_pose::ArmPose, geometry::Direction, position::BlockPos, random::RandomSource,
+};
 /// The registry facts a recipe viewer needs for an enchantment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]

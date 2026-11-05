@@ -276,7 +276,8 @@ the item is in that hand (a used item's animation included): one of vanilla's `H
 `item`, `block`, `bow_and_arrow`, `crossbow_hold`, `crossbow_charge`, `throw_trident`, `toot_horn`, `spyglass`, `spear`
 or `brush`. A name that is no pose fails the mod's load, and an item without the key poses as before. It applies to
 player models, in the first person's own third-person view and in other players'; `spear` poses an arm only for an item
-with a kinetic weapon.
+with a kinetic weapon. A code mod that must decide by stack, hand or entity answers the `get_arm_pose` hook instead,
+which wins over the declared key.
 
 ```json
 { "template": "minecraft:stick", "arm_pose": "toot_horn" }
