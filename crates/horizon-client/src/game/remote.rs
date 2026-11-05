@@ -6116,14 +6116,6 @@ impl Game<'_> {
     }
 
     fn tick_remote_player(&mut self, running: bool, hold: bool) -> Result<()> {
-        // Player.tick's ItemCooldowns.tick, in ClientLevel.tickEntities after
-        // handleKeybinds: this path replaces `tick_world`'s for a server's
-        // client (multiplayer and the default single player), so the entries
-        // advance here or the slot stays shaded until the server says the
-        // entry ended. `onCooldownEnded` is the plain ItemCooldowns' no-op on
-        // a client. Ticking it after the keybinds keeps a held use from
-        // trying again a tick before the server's entry ends.
-        self.cooldowns.tick();
         // Inventory.tick's ItemStack.inventoryTick: the pop time runs down.
         if !hold {
             for pop in &mut self.hotbar_pop {
@@ -6170,8 +6162,6 @@ impl Game<'_> {
             self.tick_client_ambient();
             self.tick_client_effects();
         }
-        // Player.tick's sleep counter (the darkening and the wake-up fade).
-        self.sleep_timer = super::tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
         // Gui.tick: the titles, the action bar and the held item's name.
         if !hold {
             self.tick_hud();
@@ -6235,6 +6225,16 @@ impl Game<'_> {
         pushed: Vec3,
         sprint_window: i32,
     ) -> Result<()> {
+        // Player.tick's ItemCooldowns.tick, after Pre and after
+        // handleKeybinds: this path replaces `tick_world`'s for a server's
+        // client (multiplayer and the default single player), so the entries
+        // advance here or the slot stays shaded until the server says the
+        // entry ended. `onCooldownEnded` is the plain ItemCooldowns' no-op on
+        // a client. Ticking it after the keybinds keeps a held use from
+        // trying again a tick before the server's entry ends.
+        self.cooldowns.tick();
+        // Player.tick's sleep counter (the darkening and the wake-up fade).
+        self.sleep_timer = super::tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
         let stick = self.pad_move();
         if self.player.is_none() {
             return Ok(());
@@ -6904,9 +6904,6 @@ impl Game<'_> {
                     })
                 })
                 .flatten();
-            if let Some(player) = player_ref {
-                self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
-            }
             let r = self.remote.as_mut().unwrap();
             let stepped = &mut r.stepped;
             let head_lerps = &mut r.head_lerps;
@@ -6997,6 +6994,13 @@ impl Game<'_> {
             {
                 place_interpolated(m, at);
             }
+            // `ClientLevel.tickNonPassenger`'s `commonTick` interpolated the
+            // entity before `Player.tick`, which `Pre` precedes.
+            if let Some(player) = player_ref {
+                self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
+            }
+            let head_lerps = &mut self.remote.as_mut().unwrap().head_lerps;
+            let m = &mut self.mobs[i];
             // LivingEntity.aiStep: the head's own interpolation.
             if let Some((yaw, steps)) = head_lerps.get_mut(&(m.id as i32))
                 && *steps > 0
