@@ -4136,8 +4136,11 @@ impl Mob {
     pub fn add_effect_instance(
         &mut self,
         effect: &'static str,
-        incoming: crate::effects::EffectInstance,
+        mut incoming: crate::effects::EffectInstance,
     ) -> bool {
+        // Player instances use short vanilla names; every mob chain uses its canonical name,
+        // including a weaker incoming instance saved behind the active effect.
+        incoming.id = effect;
         let index = self.extra.effects.iter().position(|e| e.id == effect);
         let old_amp = index.map(|i| self.extra.effects[i].amplifier);
         let mut active = if let Some(i) = index {
@@ -5489,6 +5492,31 @@ mod magic_absorb_tests {
             m.extra.effects,
             vec![crate::mobs::StoredEffect::new("minecraft:speed", 110, 0)]
         );
+    }
+
+    #[test]
+    fn resolved_instances_preserve_mob_identity_through_hidden_promotion() {
+        let mut m = witch();
+        let def = horizon_client_core::potions::effect("speed").unwrap();
+        let effect = "minecraft:speed";
+        assert!(m.add_effect_instance(effect, crate::effects::EffectInstance::from_def(def, 2, 1)));
+        assert!(
+            !m.add_effect_instance(effect, crate::effects::EffectInstance::from_def(def, 5, 0))
+        );
+        assert_eq!(m.extra.effect_chains[0].id, effect);
+        for _ in 0..2 {
+            ai::tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                None,
+            );
+        }
+        let restored = &m.extra.effects[0];
+        assert_eq!(restored.id, "minecraft:speed");
+        assert_eq!((restored.duration, restored.amplifier), (3, 0));
+        assert_eq!(restored.registry_index, Some(0));
+        assert!(m.extra.effect_chains.is_empty());
     }
 
     #[test]

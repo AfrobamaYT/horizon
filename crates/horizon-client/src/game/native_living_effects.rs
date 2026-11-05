@@ -391,6 +391,24 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn resolved_keys_keep_the_mobs_hidden_effect_identity() {
+        with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            game.mobs.push(Mob::new(22, kind, Vec3::ZERO, 0.0));
+            let cow = game.native_living(game.native_entity(22).unwrap()).unwrap();
+            let key = mod_api::__private::part_tests::effect_key("speed");
+            assert!(game.native_living_add_effect(cow, &effect("speed", 2, 1)));
+            assert!(!game.native_living_add_effect(cow, &effect("speed", 5, 0)));
+            let mob = &game.mobs[0];
+            assert_eq!(mob.extra.effect_chains[0].id, "minecraft:speed");
+            assert_eq!(mob.extra.effect_chains[0].registry_index, Some(0));
+            assert_eq!(game.native_living_effect(cow, key).unwrap().id, key);
+            assert_eq!(game.native_living_effect(cow, key).unwrap().amplifier, 1);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn indexed_consumable_effects_apply_to_a_mob() {
         use horizon_core::random::RandomSource;
         use mod_api::ItemStack;
