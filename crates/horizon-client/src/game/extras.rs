@@ -61,6 +61,9 @@ impl Game<'_> {
         let now = self.extras_now();
         self.extras.fps.record(now, elapsed.as_secs_f32() * 1000.0);
         self.native_render_frame_pre(elapsed);
+        // A clear a mod asked for (in this frame's `RenderFrameEvent.Pre`, or after the last
+        // frame was drawn) lands before this frame's particles are drawn, paused or not.
+        self.apply_mod_particle_clear();
         self.pvp_frame();
         self.recipes_received_now();
     }
@@ -226,7 +229,6 @@ impl Game<'_> {
         }
     }
     /// The field of view in degrees, divided by an instant zoom.
-    #[horizon_mod_api_macros::point(side = "client")]
     pub(super) fn zoomed_fov_degrees(&self, fov: f32) -> f32 {
         match self.zoom_now() {
             (factor, false, _) => fov / factor,

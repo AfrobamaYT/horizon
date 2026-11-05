@@ -695,7 +695,11 @@ impl Mob {
             return false;
         };
         let eye = Vec3::new(self.position.x, self.eye_y(), self.position.z);
-        let v = w.line_of_sight(eye, Vec3::new(t.position.x, t.eye_y, t.position.z));
+        let v = w.line_of_sight_for(
+            Some(self.position.y),
+            eye,
+            Vec3::new(t.position.x, t.eye_y, t.position.z),
+        );
         self.ai.seen_cache.push((who, v));
         v
     }
@@ -1082,7 +1086,11 @@ impl Goal for Stroll {
     fn flags(&self) -> u8 {
         MOVE
     }
+    /// RandomStrollGoal.canUse.
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        if super::riders::mob_controlled(m, cx.w) {
+            return false;
+        }
         if self.gate.is_some_and(|gate| !gate(m, cx.w)) {
             return false;
         }
@@ -1137,8 +1145,9 @@ impl Goal for Stroll {
         self.force = false;
         true
     }
-    fn can_continue(&mut self, m: &mut Mob, _: &mut Cx) -> bool {
-        !m.ai.nav.is_done()
+    /// RandomStrollGoal.canContinueToUse.
+    fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        !m.ai.nav.is_done() && !super::riders::mob_controlled(m, cx.w)
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         m.nav_move_to(cx.w, self.wanted, self.speed);
@@ -2303,11 +2312,10 @@ impl Goal for Breed {
         );
         self.love_time += 1;
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
-            let llama = super::llama::is_llama(m.species())
-                .then(|| Box::new(super::llama::breed_offspring(m, &p)));
+            let equine = super::equine::breed_offspring(m, &p).map(Box::new);
             let parent_variant =
                 super::draws_parent_variant(m.species()).then(|| m.random.next_boolean());
-            let experience = if (llama.is_some() || parent_variant.is_some())
+            let experience = if (equine.is_some() || parent_variant.is_some())
                 && !cx.w.asks_baby_spawn
                 && !super::orb_after_child(m.species())
             {
@@ -2328,7 +2336,7 @@ impl Goal for Breed {
             cx.events.push(MobEvent::Breed {
                 parent: m.id,
                 partner: p.id,
-                llama,
+                equine,
                 parent_variant,
                 experience,
             });
@@ -3054,6 +3062,7 @@ mod breeding_variant_tests {
                 "minecraft:chicken",
                 "minecraft:fox",
                 "minecraft:cat",
+                "minecraft:wolf",
             ] {
                 let kind = Arc::new(types.types[id].clone());
                 let partner =

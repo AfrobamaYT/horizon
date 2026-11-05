@@ -216,9 +216,9 @@ impl Launcher {
         let picker = segments(
             "settings-native-profile",
             &[
-                (native_mods::Profile::Performance, "Performance build"),
-                (native_mods::Profile::Dev, "Dev build"),
-                (native_mods::Profile::Release, "Release build"),
+                (native_mods::Profile::Optimized, "Optimized"),
+                (native_mods::Profile::Balanced, "Balanced"),
+                (native_mods::Profile::Developer, "Developer"),
             ],
             profile,
             &t,
@@ -234,21 +234,13 @@ impl Launcher {
                 }
             },
         );
-        let said = match profile {
-            native_mods::Profile::Performance => tr("The everyday build for playing with mods"),
-            native_mods::Profile::Dev => tr(
-                "For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow",
-            ),
-            native_mods::Profile::Release => {
-                tr("Release build: slower to build, slightly faster game")
-            }
-        };
+        let said = crate::build_mode::mode_note(profile);
         ui::setting_row(
             tr("Native mods"),
             Some(
                 div()
                     .child(format!(
-                        "{} {said}.",
+                        "{} {said}",
                         tr("Experimental. Builds the native mods you trust into a game of their own.")
                     ))
                     .into_any_element(),
@@ -397,7 +389,8 @@ impl Launcher {
             .child(self.reset_look_row(cx));
         let network = card().child(self.proxy_row(n, cx));
         let game = card()
-            .child(self.game_args_row(n, cx))
+            .child(self.game_architecture_row(n, cx))
+            .child(self.game_args_row(n + 1, cx))
             .child(self.native_mods_row(cx));
         let ai = card()
             .child(self.no_ai_row(n, cx))

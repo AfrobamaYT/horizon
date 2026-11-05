@@ -437,7 +437,11 @@ pub trait Hooks {
     /// (the held item can break blocks, the debug stick didn't take the
     /// click): where `ServerPlayerGameMode.destroyBlock` starts. Set
     /// `canceled` to keep the block: nothing is destroyed or dropped, and a
-    /// guest sees it back. Server-side, for every player of the world (the
+    /// guest sees it back. Set `exp_to_drop` to `Some(amount)` to replace
+    /// the vanilla experience sample later, after item drops are prepared;
+    /// `None` keeps vanilla sampling. `block_drops` sees and may change that
+    /// amount afterwards; cancellation or disabled block drops suppresses it.
+    /// Server-side, for every player of the world (the
     /// helpers read the acting one). Diverges from upstream: renamed from
     /// `destroy_block`, to NeoForge's `BlockEvent.BreakEvent`.
     #[hook(
@@ -4581,11 +4585,7 @@ pub trait Helpers {
     )]
     fn refresh_biome_colors();
     #[helper(side = "both")]
-    fn weather();
-    #[helper(side = "both")]
     fn day_time();
-    #[helper(side = "both")]
-    fn world_height();
     #[helper(side = "both")]
     fn max_stack_size();
     #[helper(side = "client")]
@@ -4644,13 +4644,17 @@ pub trait Helpers {
     fn block_entity_sync();
     #[helper(side = "client")]
     fn play_local_sound();
-    /// How many particles the client's level has alive (`ParticleEngine.countParticles`); 0 once
-    /// `clear_particles` was asked, and on a server.
+    /// How many particles the client's level has alive (`ParticleEngine.countParticles`): every
+    /// live group, item pickups, firework starters and the elder guardian apparition included.
+    /// Queued particles and emitters are not counted. 0 once `clear_particles` was asked, and on
+    /// a server.
     #[helper(side = "client")]
     fn particle_count();
-    /// Removes every particle and emitter of the client's level (`ParticleEngine.clearParticles`),
-    /// at the next particle tick: it takes `&self`, so a screen or render hook can ask. False on
-    /// a server.
+    /// Removes every particle, queued particle and emitter of the client's level
+    /// (`ParticleEngine.clearParticles`), item pickups, firework starters and the elder guardian
+    /// apparition included. It takes `&self`, so a screen or render hook can ask: the clear
+    /// lands before the next frame is drawn or the next particle tick, whichever comes first,
+    /// paused or not. False on a server.
     #[helper(side = "client")]
     fn clear_particles();
     #[helper(side = "client")]
@@ -4661,10 +4665,6 @@ pub trait Helpers {
     fn item();
     #[helper(side = "client")]
     fn screen_title();
-    #[helper(side = "both")]
-    fn block();
-    #[helper(side = "both")]
-    fn block_property();
     #[helper(side = "client")]
     fn cursor();
     #[helper(side = "client")]

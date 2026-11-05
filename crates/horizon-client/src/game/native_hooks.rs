@@ -645,7 +645,7 @@
 //!
 //! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`).
 //!
-//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (`native_light`, `native_weather`, `native_day_time`, `native_world_height`, `native_max_stack_size`).
+//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather and height now through `LevelRef`, with `native_day_time`, `native_max_stack_size`).
 //!
 //! API 96 adds reading redstone from a server mod's block (`native_neighbor_signal`).
 //!
@@ -890,8 +890,8 @@
 //!
 //! API 20 adds buttons, tooltips and item icons on mod screens
 //! (`native_screen_click`, `native_screen_tooltip`, `native_menu_button`,
-//! and `native_item`, `native_screen_title`, `native_data`, `native_block`,
-//! `native_block_property`, `native_insert_item`, `native_cursor`).
+//! and `native_item`, `native_screen_title`, `native_data`, `LevelRef::block`,
+//! `LevelRef::block_property`, `native_insert_item`, `native_cursor`).
 //!
 //! API 19 adds mod-drawn screens for mod blocks (`native_screen`,
 //! `native_screen_draw`, and the `native_sprite` helpers), with the mod's own
@@ -2411,15 +2411,15 @@ impl OpenNativeScreen {
 /// The player as a native mod reads it.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NativePlayer {
-    pub(crate) x: f64,
-    pub(crate) y: f64,
-    pub(crate) z: f64,
+pub struct NativePlayer {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
     /// Degrees; 0 faces south, 90 west (`Direction.fromYRot`).
-    pub(crate) yaw: f32,
-    pub(crate) pitch: f32,
+    pub yaw: f32,
+    pub pitch: f32,
     /// `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`.
-    pub(crate) dimension: &'static str,
+    pub dimension: &'static str,
 }
 
 /// How the panel lays out a recipe of `native_panel_recipes`.
@@ -2617,6 +2617,23 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
+    /// Before an actual connection is discarded, not on a dimension change.
+    pub(super) fn native_client_disconnecting(&self) {
+        self.fire_client_disconnecting();
+    }
+    /// Override an entity's outline colour.
+    pub(super) fn native_entity_outline(
+        &self,
+        entity_id: u32,
+        kind: &str,
+        outline: &mut Option<u32>,
+    ) {
+        self.fire_entity_outline(entity_id, kind, outline);
+    }
+    /// The normal menu blur request, before finite/range validation. None disables it.
+    pub(super) fn native_menu_background(&self, radius: &mut Option<f32>) {
+        self.fire_menu_background(radius);
+    }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
     /// Invalid declarations are logged and skipped; the first valid category
@@ -2679,6 +2696,14 @@ impl Game<'_> {
     /// after its world is left, while settings and resources are still held.
     pub(super) fn native_client_stopping(&mut self) {
         self.fire_client_stopping();
+    }
+    /// The client shutdown has completed.
+    pub(super) fn native_client_stopped(&mut self) {
+        self.fire_client_stopped();
+    }
+    /// The process is about to exit after its game has stopped.
+    pub(super) fn native_game_shutting_down(&mut self) {
+        self.fire_game_shutting_down();
     }
     /// The client made a new level for `dimension` (NeoForge's
     /// `LevelEvent.Load` from the `ClientLevel` constructor): on joining a
@@ -3041,6 +3066,21 @@ impl Game<'_> {
     pub(super) fn native_render_gui_post(&self, draw: &mut HudBatch, corners: &mut Corners) {
         self.fire_render_gui_post(draw, corners);
     }
+    /// After the complete normal GUI batch, including screens, prompts, toasts,
+    /// debug overlays, the pad cursor and IME. Fires even with F1 or a menu open;
+    /// file/world loading and resource-reload overlays do not fire it. The batch
+    /// is in GUI pixels. `native_camera` is this frame's world camera (None on
+    /// the panorama). `gui_hidden` is the F1 setting; `focused` is window focus.
+    /// A mod decides whether its foreground indicator respects those flags.
+    /// Client only; the host is read-only. API @API:gui_render_post@.
+    pub(super) fn native_gui_render_post(
+        &self,
+        batch: &mut HudBatch,
+        gui_hidden: bool,
+        focused: bool,
+    ) {
+        self.fire_gui_render_post(batch, gui_hidden, focused);
+    }
     /// Before one of vanilla's HUD layers is drawn (`RenderGuiLayerEvent.Pre`):
     /// draw here to put something below the layer, or set `canceled` to hide
     /// it. `layer` is the layer's id, in the order Horizon draws them:
@@ -3170,6 +3210,10 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         self.fire_mouse_button_pre(button, pressed, modifiers, canceled);
+    }
+    /// The physical window size changed.
+    pub(super) fn native_window_resize(&mut self, width: u32, height: u32) {
+        self.fire_window_resize(width, height);
     }
     /// An accepted raw button event finished dispatch, including a screen handler's early return.
     pub(super) fn native_mouse_button_post(&mut self, button: i32, pressed: bool, modifiers: u32) {
@@ -7551,8 +7595,9 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
         canceled: &mut bool,
+        exp_to_drop: &mut Option<u32>,
     ) {
-        self.fire_break_block(pos, state, canceled);
+        self.fire_break_block(pos, state, canceled, exp_to_drop);
     }
     /// `BlockEvent.EntityPlaceEvent` (and `EntityMultiPlaceEvent`, which
     /// extends it): `placer` is about to set the block `state` at `pos`
@@ -9064,13 +9109,33 @@ impl Game<'_> {
         } else {
             [None, None]
         };
-        Attack { attacker, held }
+        let player_uuid = if self
+            .player
+            .as_ref()
+            .is_some_and(|p| p.entity_id == attacker)
+        {
+            self.owner_damage_uuid()
+        } else {
+            self.lan
+                .as_ref()
+                .and_then(|host| host.hub.guests.iter().find(|g| g.entity_id == attacker))
+                .map(|g| horizon_client::lan::playerdata::uuid_ints(g.uuid))
+        };
+        Attack {
+            attacker,
+            held,
+            player_uuid,
+        }
     }
     /// [`Self::attack_of`] for the attacker a damage source names: the player, a mob, or (none)
     /// the attack the enclosing [`Self::with_attack`] lends.
     pub(super) fn attack_of_who(&self, attacker: Option<Who>) -> Attack {
         match attacker {
-            Some(Who::Player) => self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id)),
+            Some(Who::Player) => {
+                let mut attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
+                attack.player_uuid = self.owner_damage_uuid();
+                attack
+            }
             Some(Who::Mob(id)) => self.attack_of(id as i32),
             None => self.current_attack(),
         }
@@ -9732,24 +9797,11 @@ impl Game<'_> {
         let _ = self.process_level_events();
         changed
     }
-    /// The rain and thunder levels of the world in place, each 0.0 to 1.0
-    /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel
-    /// or a wind turbine reads. Both 0 in the Nether and the End, which have
-    /// no weather (`Level.canHaveWeather`).
-    pub(super) fn native_weather(&self) -> (f32, f32) {
-        self.weather_levels(1.0)
-    }
     /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
     /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
     /// take it modulo 24000 for the hour.
     pub(super) fn native_day_time(&self) -> i64 {
         self.world.day_time
-    }
-    /// The lowest block y and the height of the world in place
-    /// (`LevelHeightAccessor.getMinY` and `getHeight`): how deep a quarry or a
-    /// miner may dig.
-    pub(super) fn native_world_height(&self) -> (i32, i32) {
-        (self.world.shape.min_y, self.world.shape.height)
     }
     /// The most of the item `item` one slot holds (`Item.getDefaultMaxStackSize`),
     /// or `None` for an unknown item: for a mod's container that fills or
@@ -9970,11 +10022,37 @@ impl Game<'_> {
         if !self.native_window() || self.mod_clear_particles.get() {
             return 0;
         }
-        u32::try_from(self.particles.len()).unwrap_or(u32::MAX)
+        u32::try_from(self.client_particle_count()).unwrap_or(u32::MAX)
     }
-    /// `ParticleEngine.clearParticles`: every particle and emitter goes, before the next
-    /// particle tick. It takes `&self`, so a screen or render hook can ask, as with
-    /// `native_play_local_sound`. False on a server.
+    /// `ParticleEngine.countParticles`: every live group. Horizon keeps vanilla's groups
+    /// apart: the ordinary particles and firework starters in the engine, ITEM_PICKUP in
+    /// `pickups`, and ELDER_GUARDIANS as the apparition's ticks left (one particle while
+    /// it shows).
+    pub(super) fn client_particle_count(&self) -> usize {
+        self.particles.group_count()
+            + self.pickups.live.len()
+            + usize::from(self.creatures.elder_apparition > 0)
+    }
+    /// `ParticleEngine.clearParticles` over every group Horizon keeps apart: the engine's
+    /// particles, starters, queue and emitters, the item pickups and the elder guardian
+    /// apparition. Leaving a level and switching levels clear through it too.
+    pub(super) fn clear_client_particles(&mut self) {
+        self.particles.clear();
+        self.pickups.clear();
+        self.creatures.elder_apparition = 0;
+    }
+    /// Applies a client mod's `clear_particles` if one is waiting. Called at the start of
+    /// each particle tick, and once a frame right after `RenderFrameEvent.Pre`, before the
+    /// frame is drawn. So a clear also lands while the game is paused or ticks are frozen.
+    pub(super) fn apply_mod_particle_clear(&mut self) {
+        if self.mod_clear_particles.take() {
+            self.clear_client_particles();
+        }
+    }
+    /// `ParticleEngine.clearParticles`: every particle and emitter goes before the next
+    /// frame is drawn or the next particle tick runs, whichever comes first. It takes
+    /// `&self`, so a screen or render hook can ask, as with `native_play_local_sound`.
+    /// False on a server.
     pub(super) fn native_clear_particles(&self) -> bool {
         if !self.native_window() {
             return false;
@@ -10229,12 +10307,8 @@ impl Game<'_> {
         }
         fs::read(self.options.resources.join(path)).ok()
     }
-    /// The block at `pos` (`mymod:cable`; air where nothing is loaded).
-    pub(super) fn native_block(&self, pos: [i32; 3]) -> String {
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        self.res.facts().get(state).name.to_string()
-    }
     /// The most recently extracted world frame's camera, if one exists.
+    /// During GUI rendering this is the current frame, including bob/spin and FOV.
     pub(super) fn native_camera(&self) -> Option<NativeCamera> {
         self.native_camera_frame.clone()
     }
@@ -10256,18 +10330,6 @@ impl Game<'_> {
                 [min.x, min.y, min.z, max.x, max.y, max.z]
             })
             .collect()
-    }
-    /// Property `key` of the block at `pos` (a machine's `facing`), if it
-    /// has one.
-    pub(super) fn native_block_property(&self, pos: [i32; 3], key: &str) -> Option<String> {
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        self.pack
-            .assets
-            .registry
-            .state(state)?
-            .properties
-            .get(key)
-            .cloned()
     }
     /// The window's width and height in physical pixels, independent of GUI
     /// scale; none on a server or when no window exists.
@@ -10481,10 +10543,11 @@ impl Game<'_> {
     pub(super) fn native_chat(&mut self, text: &str) {
         let focused = self.screen == Screen::Chat;
         let line = Text::literal(text);
+        let ticks = self.visual_ticks();
         let atlas = &self.gui.atlas;
         self.ui
             .chat
-            .add(atlas, line, None, ChatSource::Client, self.ticks, focused);
+            .add(atlas, line, None, ChatSource::Client, ticks, focused);
     }
     /// The instance (game) folder, which its players share: `saves/`,
     /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the
@@ -10825,9 +10888,10 @@ impl Game<'_> {
         else {
             return false;
         };
+        let against_pos = ctx.placed_against_pos(preview.pos);
         let against = self
             .world
-            .block(ctx.clicked_pos.x, ctx.clicked_pos.y, ctx.clicked_pos.z);
+            .block(against_pos.x, against_pos.y, against_pos.z);
         let (_, entity) = self.native_clicker();
         self.place_canceled(
             entity.cast_unsigned(),
@@ -13241,6 +13305,7 @@ mod tests {
                 },
                 &Attack {
                     attacker: 7,
+                    player_uuid: None,
                     held: Default::default(),
                 },
             );
@@ -14171,12 +14236,52 @@ mod local_sound_tests {
 
 #[cfg(test)]
 mod particle_count_tests {
-    use horizon_client::particles::{ParticleOptions, ParticleType};
+    use super::super::pickups::{Collector, Taken};
+    use horizon_client::entities::ExperienceOrb;
+    use horizon_client::particles::{FireworkExplosion, ParticleOptions, ParticleType};
+    use horizon_core::geometry::Vec3;
     use mod_api::ClientHost;
+    use std::time::Duration;
 
-    /// `particle_count` and `clear_particles` through the client host: the count rises once
-    /// spawned particles tick in, reads 0 as soon as a clear is asked, and the next particle
-    /// tick removes them. A server answers 0 and refuses the clear.
+    fn orb(at: Vec3) -> ExperienceOrb {
+        ExperienceOrb {
+            rotation: [0.0, 0.0],
+            join: Default::default(),
+            no_gravity: false,
+            id: 1,
+            position: at,
+            previous: at,
+            velocity: Vec3::ZERO,
+            value: 1,
+            age: 0,
+            on_ground: false,
+            count: 1,
+            ticks: 0,
+            health: 5,
+        }
+    }
+
+    /// Fills every particle group Horizon keeps apart: three flames, a multi-burst firework
+    /// starter (`NO_RENDER`), an item pickup (`ITEM_PICKUP`) and the elder guardian
+    /// apparition (`ELDER_GUARDIANS`), each live after one particle tick.
+    fn fill(game: &mut super::Game<'_>) {
+        let at = game.particles.camera;
+        for _ in 0..3 {
+            game.particles
+                .add(&ParticleOptions::simple(ParticleType::Flame), at, [0.0; 3]);
+        }
+        let bursts = vec![FireworkExplosion::default(); 4];
+        game.particles.fireworks(at, [0.0; 3], bursts, at);
+        let v = Vec3::new(at[0], at[1], at[2]);
+        game.add_pickup_toward(Taken::Orb(Box::new(orb(v))), Collector::Player, at);
+        game.tick_particles();
+        game.creatures.elder_apparition = 10;
+    }
+
+    /// `particle_count` and `clear_particles` through the client host. The count covers every
+    /// live group. A clear reads 0 at once and empties every group, its queue and emitters
+    /// before the next frame is drawn, with no tick in between (a paused or frozen game),
+    /// or at the next particle tick. A server answers 0 and refuses the clear.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_client_mod_counts_and_clears_particles() {
@@ -14184,23 +14289,47 @@ mod particle_count_tests {
             game.options.execution_role = super::ExecutionRole::Client;
             let host: &dyn ClientHost = game;
             assert_eq!(host.particle_count(), 0);
-            let at = game.particles.camera;
-            for _ in 0..3 {
-                game.particles
-                    .add(&ParticleOptions::simple(ParticleType::Flame), at, [0.0; 3]);
-            }
-            game.tick_particles();
+            fill(game);
+            assert_eq!(game.pickups.live.len(), 1, "the pickup is live");
+            let engine = game.particles.group_count();
+            assert!(engine > 3, "the flames and the starter: {engine}");
             let host: &dyn ClientHost = game;
-            assert_eq!(host.particle_count(), 3);
-            assert!(host.clear_particles());
+            assert_eq!(host.particle_count() as usize, engine + 2);
+            // A clear asked between frames: it reads 0 at once, and the next frame clears
+            // every group without a particle tick.
+            game.particles.tracking_emitter(
+                ParticleOptions::simple(ParticleType::Crit),
+                [0.0; 3],
+                1.0,
+                1.0,
+            );
+            assert!(host_clear(game));
+            let host: &dyn ClientHost = game;
             assert_eq!(host.particle_count(), 0);
+            game.extras_frame(Duration::ZERO);
+            assert_eq!(game.particles.group_count(), 0);
+            assert!(game.pickups.live.is_empty());
+            assert_eq!(game.creatures.elder_apparition, 0);
+            // The emitter and the queue went too: a tick brings nothing back.
             game.tick_particles();
-            assert!(game.particles.is_empty());
+            assert_eq!(game.client_particle_count(), 0);
+            // A clear asked before a particle tick lands at that tick.
+            fill(game);
+            assert!(host_clear(game));
+            game.tick_particles();
+            assert_eq!(game.particles.group_count(), 0);
+            assert!(game.pickups.live.is_empty());
             let host: &dyn ClientHost = game;
             assert_eq!(host.particle_count(), 0);
             game.options.execution_role = super::ExecutionRole::IntegratedServer;
             let host: &dyn ClientHost = game;
             assert!(!host.clear_particles());
+            assert_eq!(host.particle_count(), 0);
         });
+    }
+
+    fn host_clear(game: &super::Game<'_>) -> bool {
+        let host: &dyn ClientHost = game;
+        host.clear_particles()
     }
 }

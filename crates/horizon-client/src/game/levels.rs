@@ -363,8 +363,7 @@ impl Game<'_> {
         self.creaking.swap_level(&mut p.creaking);
         swap(&mut self.spawn_scratch, &mut p.spawn_scratch);
         // What only the client draws starts over.
-        self.particles.clear();
-        self.pickups.clear();
+        self.clear_client_particles();
     }
 
     /// Put `target`'s level in place, opening it first if it is not loaded.
@@ -516,9 +515,8 @@ impl Game<'_> {
                         self.tick()
                     } else {
                         let running = running.unwrap_or_else(|| self.clock.world_runs());
-                        if running {
-                            self.tick_weather_effects();
-                        }
+                        // ClientLevel.tick: the sky flash fades in a frozen level too.
+                        self.tick_weather_effects();
                         self.tick_world(running)
                     }
                 },

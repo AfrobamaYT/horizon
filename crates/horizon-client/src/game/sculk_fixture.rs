@@ -626,6 +626,7 @@ impl Game<'_> {
                 .replace(Vec::new())
                 .unwrap_or_default()
                 .into_iter()
+                .map(|s| (s.event, s.position, s.volume, s.pitch))
                 .chain(bound)
             {
                 if CLIENT_SOUNDS.contains(&sound.as_str()) {

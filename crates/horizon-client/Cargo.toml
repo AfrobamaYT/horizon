@@ -15,6 +15,7 @@ horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [dependencies]
 horizon-mod-api = { path = "../horizon-mod-api" }
+horizon-mod-points = { path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-mod-wasm = { path = "../horizon-mod-wasm" }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
@@ -135,6 +136,10 @@ windows-segment-heap = []
 [[bin]]
 name = "horizon-client"
 path = "src/main.rs"
+
+[[example]]
+name = "native_gui_overlay_probe"
+path = "examples/native_gui_overlay_probe.rs"
 
 [[test]]
 name = "datapack_biome_sync"
