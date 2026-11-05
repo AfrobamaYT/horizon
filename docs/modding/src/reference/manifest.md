@@ -87,6 +87,20 @@ Missing internals name the prebuilt game's opt-in file to update; changed hashes
 without an internals table refuse the mod. A raw listener receives no Host: its access is through
 the call-scoped internals view ([Injections](../injections.md#raw-listeners-and-declared-internals)).
 
+`cargo horizon-mod internals add <path>… [--kind <kind>]` also works beside `[wasm]`.
+Without a native pin it uses the newest daily prebuilt's `internals.json`. For a staged-game
+build, set `HORIZON_MOD_INTERNALS_CATALOG` to an absolute path to that game's catalog; both
+`internals add` and the wasm view build use the same selection.
+
+Hot, GPU and worker-thread paths in `crates/horizon-mod-api-gen/native-only.txt` never receive
+wasm entries, even when declared. Loading them refuses with `native only: <path>` rather than
+suggesting an opt-in file. The daily prebuilt always generates a table from the checkout's
+per-mod declarations. A launcher build from source generates one only when an enabled wasm
+package in the instance declares internals, and uses only those installed mods' paths, not
+the checkout's seed files. With no such mod it retains the empty table. Standalone server
+exports currently have no instance declarations and keep the empty table; use an instance
+build with the mod installed or the daily prebuilt when the mod needs internals.
+
 Top-level `[dependencies]` declares other mods by id: a semver requirement string, or
 `{ version = "^1", optional = true }`. These versions refer to `horizon-mod.toml`, not Cargo metadata.
 Content layers load in dependency order. A missing required dependency, incompatible installed version or dependency cycle refuses startup; an absent optional dependency is ignored. Native code dependencies additionally require API packages

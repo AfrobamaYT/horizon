@@ -34,6 +34,7 @@ mod inject_cache;
 mod internals;
 mod package;
 mod prebuilt;
+mod wasm_internals;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
@@ -1889,6 +1890,7 @@ fn pipeline(
     target: Target,
     allow_jar_downloads: bool,
     progress: &impl Fn(Step),
+    home: Option<&Path>,
 ) -> Result<Built, String> {
     let started = std::time::Instant::now();
     let built_on = about(base);
@@ -2013,14 +2015,18 @@ fn pipeline(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
-    let version = version_for(
-        &revision,
-        &mixins,
-        profile,
-        target,
-        platform.cache_key(),
-        &mods,
-    )?;
+    let wasm_internals = wasm_internals::installed(home)?;
+    let version = wasm_internals::version(
+        version_for(
+            &revision,
+            &mixins,
+            profile,
+            target,
+            platform.cache_key(),
+            &mods,
+        )?,
+        &wasm_internals,
+    );
     let now = Record {
         horizon: revision.clone(),
         mixins: mixins.clone(),
@@ -2182,6 +2188,7 @@ fn pipeline(
         .arg(&listed)
         .arg(real.join("internals.json"))
         .env("CARGO_TARGET_DIR", real.join("target"));
+        wasm_internals::stage(&fresh, &wasm_internals, &mut pass)?;
         run(pass, "Marking the game's injection points", |_| {})?;
         inject::check(&point_injections, &inject::listed(&listed)?).map_err(|e| e.to_string())?;
         if !mods.is_empty() {
@@ -2331,7 +2338,15 @@ pub fn build(
         return Err(error);
     }
     logged(|| {
-        let built = pipeline(base, folder, profile, Target::Client, false, &progress)?;
+        let built = pipeline(
+            base,
+            folder,
+            profile,
+            Target::Client,
+            false,
+            &progress,
+            Some(&instance.home),
+        )?;
         check_cancelled()?;
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
@@ -2398,6 +2413,7 @@ pub fn build_server(
             Target::Server,
             allow_jar_downloads,
             &progress,
+            None,
         )?;
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
@@ -3646,6 +3662,7 @@ mod tests {
             Target::Client,
             false,
             &|_| panic!("invalid records must not start a build"),
+            None,
         ) else {
             panic!("invalid build must be refused");
         };

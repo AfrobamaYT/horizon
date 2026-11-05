@@ -201,8 +201,6 @@ pub fn set_string(value: &mut Value, text: &str) {
     *value.decor_mut() = decor;
 }
 
-/// The same release tags and archive layout the launcher reads. Keep each pin's catalog in
-/// the mod's build folder, so updating can still show the old signature after a release expires.
 /// The catalog a pinless wasm build uses, shared by `internals add` and the guest view build.
 /// An explicit catalog is useful for a build against a staged game instead of a daily release.
 pub(crate) fn wasm_catalog(dir: &Path) -> Result<PathBuf, String> {
@@ -221,6 +219,8 @@ pub(crate) fn wasm_catalog(dir: &Path) -> Result<PathBuf, String> {
         .join(CATALOG))
 }
 
+/// The same release tags and archive layout the launcher reads. Keep each pin's catalog in
+/// the mod's build folder, so updating can still show the old signature after a release expires.
 pub fn load(dir: &Path, revision: &str) -> Result<Vec<ListedInternal>, String> {
     let cache = dir.join("target/horizon-mod/prebuilt").join(revision);
     let path = cache.join(CATALOG);
