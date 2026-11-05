@@ -1680,7 +1680,9 @@ impl Game<'_> {
         &mut self,
         mut pending: horizon_client::gfx::PendingScreenshot,
     ) -> Option<std::result::Result<[u32; 2], String>> {
-        if self.ui.screenshot_message.is_none() {
+        if self.ui.screenshot_message.as_ref() != Some(&pending.path) {
+            // Another request replaced F2 before its frame was drawn.
+            self.ui.screenshot_message = None;
             return Some(pending.save().map_err(|e| e.to_string()));
         }
         let mut file_name = pending
