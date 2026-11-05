@@ -1,11 +1,10 @@
 # Native hook points, modelled on NeoForge 26.3 (proposal)
 
 Status: proposal, for the authors of hook PRs to comment on. Nothing here is built yet. Checked against `native-hooks.json` on main
-(386 hooks, `NATIVE_HOOKS_API` 359) on 3 November 2026.
+(386 hooks) on 3 November 2026.
 
 Native mods hook empty functions in `crates/horizon-client/src/game/native_hooks.rs`, listed by name in
-`native-hooks.json` ([native-mods.md](native-mods.md)). So far each hook was designed on its own, and open PRs
-number their API versions over each other. This proposes one
+`native-hooks.json` ([native-mods.md](native-mods.md)). So far each hook was designed on its own. This proposes one
 reference for every new hook point: the NeoForge 26.3 event that does the same thing.
 
 Why NeoForge:
@@ -46,11 +45,8 @@ from vanilla 26.3's own methods, and the hooks stay Horizon's own Rust.
 5. **Payload.** The event's getters become parameters, by value or `&`. A hook gets `&mut self` only when the
    NeoForge listener may change the world at that point (server-side events); otherwise `&self`, and the
    doc does not call a `&mut` hook read-only.
-6. **Frozen once merged.** Name, parameters and call site never change after a merge (as today). A changed
-   contract is a new hook (`..._v2`) or a new catalog `version`. A stack of PRs that refines one hook lands
-   in one release batch, under one `NATIVE_HOOKS_API` bump.
-7. **API numbers are given at merge**, not when a PR is opened: a PR says "API next" and takes `main + 1`
-   when it merges, so open PRs stop colliding.
+6. **One hook per moment.** A changed contract replaces the old hook. Native mods target an exact game
+   revision and rebuild against that revision.
 
 ## Catalog fields
 
@@ -132,7 +128,3 @@ and any change to them gets its own proposal with its own citations.
 
 - Snake-case NeoForge names without a `neoforge_` prefix (agreed in the comments). Both-side hooks pass the
   role as a parameter (agreed).
-- Rule 7 renumbers every open PR on each merge. Every catalog entry already has a name and `version`, so a
-  bundle could list the hooks it uses (`random_tick` v1...) and the launcher check each against the catalog,
-  with `"hooks": N` kept for old bundles. That is a separate change to `native-mods.md`; if agreed, rule 7
-  goes away.
