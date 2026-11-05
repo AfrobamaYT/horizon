@@ -38,8 +38,8 @@ horizon_client::game::lan_actions::Game<'_>::guest_command
 horizon_client::game::Resources::facts
 horizon_client::game::Resources::items
 horizon_client::game::remote::Remote::profile
-# horizon_client::game::Dim::min_y — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_client::game::Dim::max_y — no internals.json method entry (lower-crate shapes expose layout only).
+# horizon_client::game::Dim::min_y — removed since the adapter's pinned game; bounds now live on World.shape.
+# horizon_client::game::Dim::max_y — removed since the adapter's pinned game; bounds now live on World.shape.
 # horizon_client_render::world::World::loaded — no internals.json method entry (lower-crate shapes expose layout only).
 # horizon_client_render::world::World::block — no internals.json method entry (lower-crate shapes expose layout only).
 # horizon_client_render::world::World::is_air — no internals.json method entry (lower-crate shapes expose layout only).
@@ -50,7 +50,7 @@ horizon_client::game::remote::Remote::profile
 # horizon_world::registry::BlockRegistry::state — no internals.json method entry (lower-crate shapes expose layout only).
 # horizon_world::registry::BlockRegistry::default_state — no internals.json method entry (lower-crate shapes expose layout only).
 # horizon_core::position::BlockPos::new — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_client_core::text::Text::literal — no internals.json method entry (lower-crate shapes expose layout only).
+# horizon_client_core::text::Text::literal — no internals.json method entry; its impl Into<String> argument also cannot cross.
 # horizon_client_lib::lan::hub::Hub::guest — no internals.json method entry (lower-crate shapes expose layout only).
 
 # Named lower-crate data read or constructed by the adapter (also reached below fields).
