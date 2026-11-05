@@ -189,29 +189,18 @@ impl Catalog {
             .clear();
         let mut facade = self.facade(&manifest)?;
         facade.source.insert_str(0, "#![allow(deprecated)]\n");
-        facade.source.push_str("pub use horizon_client::*;\n");
-        facade
-            .crates
-            .extend(
-                self.internals
-                    .iter()
-                    .filter(|entry| !entry.shape_only)
-                    .map(|entry| {
-                        entry
-                            .path
-                            .split("::")
-                            .next()
-                            .expect("catalog crate")
-                            .to_owned()
-                    }),
-            );
-        for krate in facade
-            .crates
-            .iter()
-            .filter(|krate| *krate != "horizon_client")
-        {
-            facade.source.push_str(&format!("pub use {krate};\n"));
+        let mut tree = Module::default();
+        // A member is reached through its catalogued owner. Never open a whole engine
+        // crate: unlisted public APIs have no diagnostic marker and would be missed.
+        for entry in self.internals.iter().filter(|entry| {
+            !entry.shape_only
+                && entry.cfg.is_empty()
+                && !matches!(entry.kind.as_str(), "mod" | "field" | "method")
+                && !entry.signature.starts_with("impl ")
+        }) {
+            tree.export(&self.export_path(entry)?, &mut facade.crates);
         }
+        tree.write(&mut facade.source, 0);
         Ok(facade)
     }
 
@@ -229,19 +218,7 @@ impl Catalog {
                     declared.kind.as_deref(),
                 )?;
                 let path = self.export_path(entry)?;
-                let parts: Vec<_> = path.split("::").collect();
-                crates.insert(parts[0].to_owned());
-                // `horizon_client` is the facade's root, other exposed crates retain their name.
-                let parts = if parts[0] == "horizon_client" {
-                    &parts[1..]
-                } else {
-                    &parts[..]
-                };
-                let mut module = &mut tree;
-                for part in &parts[..parts.len() - 1] {
-                    module = module.children.entry((*part).to_owned()).or_default();
-                }
-                module.items.insert(format!("pub use {path};"));
+                tree.export(&path, &mut crates);
             }
         }
         let mut text = String::from(
@@ -372,6 +349,22 @@ struct Module {
     children: BTreeMap<String, Module>,
 }
 impl Module {
+    fn export(&mut self, path: &str, crates: &mut BTreeSet<String>) {
+        let parts: Vec<_> = path.split("::").collect();
+        crates.insert(parts[0].to_owned());
+        // The game is the facade's root; lower crates retain their own namespace.
+        let parts = if parts[0] == "horizon_client" {
+            &parts[1..]
+        } else {
+            &parts[..]
+        };
+        let mut module = self;
+        for part in &parts[..parts.len() - 1] {
+            module = module.children.entry((*part).to_owned()).or_default();
+        }
+        module.items.insert(format!("pub use {path};"));
+    }
+
     fn write(&self, text: &mut String, depth: usize) {
         let indent = "    ".repeat(depth);
         for item in &self.items {
@@ -455,10 +448,18 @@ mod tests {
     fn discovery_opens_only_its_facade_and_retains_typed_raw_listeners() {
         let (dir, bundle, mut catalog) = fixture("discovery-raw");
         let normal = catalog.facade(&bundle.manifest).unwrap().source;
+        catalog.internals.extend(serde_json::from_value::<Vec<ListedInternal>>(serde_json::json!([
+            { "path": "lower::selected", "kind": "fn", "signature": "fn selected()", "hash": "selected" },
+            { "path": "lower::Shape", "kind": "struct", "signature": "struct Shape", "hash": "shape", "shape_only": true }
+        ])).unwrap());
         catalog.discovery = true;
         let discovery = catalog.prepare([&bundle.manifest]).unwrap();
         let source = &discovery[bundle.manifest.id.as_str()].source;
-        assert!(source.contains("pub use horizon_client::*;"));
+        assert!(source.contains("pub use horizon_client::game::Game;"));
+        assert!(!source.contains("pub use horizon_client::*;"));
+        assert!(source.contains("pub use lower::selected;"));
+        assert!(!source.contains("pub use lower;"));
+        assert!(!source.contains("pub use lower::Shape;"));
         assert!(source.contains("pub use horizon_client::game::__TickListener;"));
         assert!(source.contains("mod_points::__private::RawListener::new"));
         assert!(!normal.contains("pub use horizon_client::*;"));
