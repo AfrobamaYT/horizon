@@ -1064,8 +1064,5 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
-  "Claim for free": "Ħudu b'xejn",
-  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Il-fornitur tal-ħlas tal-ħanut ma jaqdix lil pajjiżek, għalhekk tista' tieħu s-Sett tal-fundatur hawn b'xejn.",
-  "The Founder Set is yours.": "Is-Sett tal-fundatur huwa tiegħek.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

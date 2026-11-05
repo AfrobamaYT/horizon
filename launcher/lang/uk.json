@@ -1064,8 +1064,5 @@
   "Move…": "Перенести…",
   "Move and restart": "Перенести й перезапустити",
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
-  "Claim for free": "Отримати безкоштовно",
-  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Платіжний сервіс крамниці не працює у вашій країні, тож Набір засновника можна отримати тут безкоштовно.",
-  "The Founder Set is yours.": "Набір засновника тепер ваш.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

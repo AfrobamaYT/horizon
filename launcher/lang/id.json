@@ -1064,8 +1064,5 @@
   "Move…": "Pindahkan…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "Peluncur ditutup selama data Anda disalin dan diverifikasi, lalu dibuka kembali. Folder lama tetap disimpan dan menggunakan ruang disk hingga Anda memastikan pemindahan berhasil dan menghapusnya sendiri.",
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
-  "Claim for free": "Klaim gratis",
-  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Penyedia pembayaran toko tidak melayani negaramu, jadi kamu bisa mengklaim Set pendiri di sini secara gratis.",
-  "The Founder Set is yours.": "Set pendiri kini milikmu.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

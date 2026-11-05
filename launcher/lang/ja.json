@@ -1064,8 +1064,5 @@
   "Move…": "移動…",
   "Move and restart": "移動して再起動",
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
-  "Claim for free": "無料で受け取る",
-  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "ショップの決済サービスはお住まいの国に対応していないため、ファウンダーセットをここで無料で受け取れます。",
-  "The Founder Set is yours.": "ファウンダーセットはあなたのものです。",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

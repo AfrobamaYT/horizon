@@ -1064,8 +1064,5 @@
   "Move…": "Verschieben…",
   "Move and restart": "Verschieben und neu starten",
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
-  "Claim for free": "Kostenlos holen",
-  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Der Zahlungsanbieter des Shops ist in deinem Land nicht verfügbar, daher kannst du das Gründer-Set hier kostenlos holen.",
-  "The Founder Set is yours.": "Das Gründer-Set gehört dir.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }
