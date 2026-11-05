@@ -130,7 +130,7 @@ pub(super) struct GuestPlay {
     pub(super) won_game: bool,
     pub(super) respawn_requested: bool,
     /// `Player.takeXpDelay`: ticks until the next orb can be taken.
-    xp_delay: u32,
+    pub(super) xp_delay: u32,
     /// This player entity's age and level-up sound cooldown.
     level_up_sound: horizon_client::entities::LevelUpSound,
     /// What last killed the guest outright (`/kill`): the death message's key.
@@ -215,6 +215,8 @@ pub(super) struct GuestSwap {
     pub(super) shield_cooldown: u32,
     /// The guest's item cooldowns (`Game::cooldowns` for its turn).
     cooldowns: horizon_client::cooldowns::Cooldowns,
+    /// The guest's `takeXpDelay` (`Game::xp_delay` for its turn).
+    xp_delay: u32,
     attack_ticks: u32,
     attack_item: Option<std::sync::Arc<str>>,
     swing: horizon_client::first_person::SwingState,
@@ -651,6 +653,7 @@ impl Game<'_> {
         let use_delay = std::mem::replace(&mut self.use_delay, play.use_delay);
         let shield_cooldown = std::mem::replace(&mut self.shield_cooldown, play.shield_cooldown);
         let cooldowns = std::mem::replace(&mut self.cooldowns, std::mem::take(&mut play.cooldowns));
+        let xp_delay = std::mem::replace(&mut self.xp_delay, play.xp_delay);
         let attack_ticks = std::mem::replace(&mut self.attack_ticks, play.attack_ticks);
         let attack_item = std::mem::replace(&mut self.attack_item, play.attack_item.take());
         let swing = std::mem::replace(&mut self.swing, play.swing);
@@ -794,6 +797,7 @@ impl Game<'_> {
             use_delay,
             shield_cooldown,
             cooldowns,
+            xp_delay,
             attack_ticks,
             attack_item,
             swing,
@@ -910,6 +914,7 @@ impl Game<'_> {
             use_delay,
             shield_cooldown,
             cooldowns,
+            xp_delay,
             attack_ticks,
             attack_item,
             swing,
@@ -1080,6 +1085,7 @@ impl Game<'_> {
         play.use_delay = std::mem::replace(&mut self.use_delay, use_delay);
         play.shield_cooldown = std::mem::replace(&mut self.shield_cooldown, shield_cooldown);
         play.cooldowns = std::mem::replace(&mut self.cooldowns, cooldowns);
+        play.xp_delay = std::mem::replace(&mut self.xp_delay, xp_delay);
         play.attack_ticks = std::mem::replace(&mut self.attack_ticks, attack_ticks);
         play.attack_item = std::mem::replace(&mut self.attack_item, attack_item);
         play.swing = std::mem::replace(&mut self.swing, swing);
