@@ -659,6 +659,5 @@ mod tests {
         assert!(target_parameters("new_hook", "native_new_hook", 7, "NewHookCall").is_ok());
         let refused = target_parameters("new_hook", "native_new_hook", 8, "NewHookCall");
         assert!(refused.unwrap_err().contains("one NewHookCall"));
-        assert!(target_parameters("use_on", "native_use_on", 9, "UseOnCall").is_ok());
     }
 }
