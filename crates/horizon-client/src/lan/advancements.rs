@@ -39,6 +39,7 @@ pub struct FirstTick {
 }
 
 /// A criterion `CriteriaTriggers.TICK` newly granted, for the game to tell the mods.
+#[derive(Clone)]
 pub struct CriterionGrant {
     pub advancement: String,
     pub criterion: String,
@@ -62,11 +63,6 @@ impl ServerAdvancements {
             displays: RecipeIndex::load(resources, overlay),
             groups,
         }
-    }
-
-    /// Whether the current tree has any advancements.
-    pub fn is_empty(&self) -> bool {
-        self.tree.list.is_empty()
     }
 
     /// The unconditional tick criteria in tree order. A caller grants these one
@@ -354,6 +350,44 @@ impl ServerAdvancements {
         self.tree
             .get(id)
             .map(|a| a.parent.is_none() && a.display.is_some())
+    }
+
+    /// Initial reset after staged first-tick grants. Fresh criteria keep the
+    /// millisecond timestamp from the tick; older progress keeps its saved date.
+    pub fn first_snapshot(
+        &self,
+        sync: &SyncData,
+        progress: &Progress,
+        fresh: &[CriterionGrant],
+        now_millis: i64,
+    ) -> (Vec<u8>, Vec<bool>) {
+        let visible = self.visibility(progress);
+        let shown: Vec<_> = (0..self.tree.list.len()).filter(|&i| visible[i]).collect();
+        let mut w = Writer::new();
+        w.bool(true);
+        w.varint(shown.len() as i32);
+        for &i in &shown {
+            self.write_advancement(&mut w, i, sync);
+        }
+        w.varint(0);
+        w.varint(shown.len() as i32);
+        for &i in &shown {
+            let id = &self.tree.list[i].id;
+            self.write_progress(&mut w, i, |criterion| {
+                let date = progress.criteria.get(id)?.get(criterion)?;
+                if fresh
+                    .iter()
+                    .any(|g| &g.advancement == id && g.criterion == criterion)
+                    && *date == crate::advancements::date_text(now_millis.div_euclid(1000))
+                {
+                    Some(now_millis)
+                } else {
+                    Some(crate::advancements::date_millis(date).unwrap_or(0))
+                }
+            });
+        }
+        w.bool(true);
+        (w.data, visible)
     }
 
     /// Which advancements a player with `progress` may see.
@@ -785,12 +819,21 @@ mod tests {
 
     #[test]
     fn tick_grants_wait_for_listener_before_reward_and_recheck_progress() {
-        use crate::advancements::{Advancement, Criterion, Rewards};
+        use crate::advancements::{Advancement, Criterion, Display, Frame, Rewards};
         let mut tree = Tree::default();
         tree.list.push(Advancement {
             id: "test:tick".into(),
             parent: None,
-            display: None,
+            display: Some(Display {
+                icon: "minecraft:air".into(),
+                title: serde_json::json!("Title"),
+                description: serde_json::json!("Description"),
+                frame: Frame::Task,
+                background: None,
+                show_toast: true,
+                announce: false,
+                hidden: false,
+            }),
             criteria: ["first", "second"]
                 .into_iter()
                 .map(|name| Criterion {
@@ -806,6 +849,8 @@ mod tests {
             },
         });
         let mut sync = SyncData::empty();
+        sync.advancements.kids = tree.children();
+        sync.advancements.layout = tree.layout();
         sync.advancements.tree = std::sync::Arc::new(tree);
         let advancement = &sync.advancements;
         let mut progress = Progress::default();
@@ -813,14 +858,14 @@ mod tests {
         let candidates = advancement.tick_candidates(&progress);
         assert_eq!(candidates.len(), 2);
         let was_done = advancement
-            .grant_tick(&mut progress, &candidates[0], 0)
+            .grant_tick(&mut progress, &candidates[0], 12_345)
             .unwrap();
         assert!(progress.has("test:tick", "first"));
         assert!(!book.knows("test:reward"));
         advancement.reward_tick(&sync, &progress, &mut book, &candidates[0], was_done);
         assert!(!book.knows("test:reward"));
         let was_done = advancement
-            .grant_tick(&mut progress, &candidates[1], 0)
+            .grant_tick(&mut progress, &candidates[1], 12_345)
             .unwrap();
         assert!(progress.has("test:tick", "second"));
         // This is where the Game invokes the mod listener: the criterion is
@@ -830,10 +875,21 @@ mod tests {
         assert!(book.knows("test:reward"));
         assert!(
             advancement
-                .grant_tick(&mut progress, &candidates[1], 0)
+                .grant_tick(&mut progress, &candidates[1], 12_345)
                 .is_none()
         );
         assert!(advancement.tick_candidates(&progress).is_empty());
+        let (staged, _) = advancement.first_snapshot(&sync, &progress, &candidates, 12_345);
+        let original = advancement.first_tick(
+            &sync,
+            12_345,
+            &mut Progress::default(),
+            &mut Settings::default(),
+        );
+        assert_eq!(
+            staged, original.update_advancements,
+            "the staged first packet keeps the vanilla timestamp"
+        );
     }
 
     #[test]

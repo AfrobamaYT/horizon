@@ -764,6 +764,7 @@ impl Game<'_> {
         };
         let tasks = std::mem::take(&mut host.hub.native_advancement_grants);
         for task in tasks {
+            let mut fresh = Vec::new();
             for grant in &task.grants {
                 let Some(was_done) = self
                     .lan
@@ -772,6 +773,7 @@ impl Game<'_> {
                 else {
                     continue;
                 };
+                fresh.push(grant.clone());
                 self.native_player_advancement_progress(
                     task.player,
                     task.entity_id,
@@ -785,7 +787,7 @@ impl Game<'_> {
                 }
             }
             if let Some(host) = self.lan.as_mut() {
-                host.hub.finish_native_first_tick(&task);
+                host.hub.finish_native_first_tick(&task, &fresh);
             }
         }
         if let Some(host) = self

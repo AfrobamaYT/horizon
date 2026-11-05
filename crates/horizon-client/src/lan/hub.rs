@@ -3517,26 +3517,33 @@ impl Hub {
     }
 
     /// Send the first advancement snapshot after all its grants and hooks.
-    pub fn finish_native_first_tick(&mut self, task: &TickGrants) {
+    pub fn finish_native_first_tick(
+        &mut self,
+        task: &TickGrants,
+        fresh: &[super::advancements::CriterionGrant],
+    ) {
         if !task.first_tick || !Arc::ptr_eq(&self.sync, &task.sync) {
             return;
         }
-        if let Some(i) = self.guests.iter().position(|g| {
+        let Some(guest) = self.guests.iter_mut().find(|g| {
             g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
-        }) {
-            if task.sync.advancements.is_empty() {
-                // Even an empty tree sends the initial reset packet.
-                let mut writer = horizon_protocol::buf::Writer::new();
-                writer.bool(true);
-                writer.varint(0);
-                writer.varint(0);
-                writer.varint(0);
-                writer.bool(true);
-                self.guests[i].send(&raw(ids::UPDATE_ADVANCEMENTS, writer.data));
-            } else {
-                self.flush_advancements(i, true);
-            }
+        }) else {
+            return;
+        };
+        let mut unlocked = std::mem::take(&mut guest.recipes_unlocked);
+        unlocked.retain(|id| guest.recipe_book.knows(id));
+        if let Some(add) = task.sync.advancements.recipes_added(&unlocked, &task.sync) {
+            guest.send(&raw(ids::RECIPE_BOOK_ADD, add));
         }
+        let (update, visible) = task.sync.advancements.first_snapshot(
+            &task.sync,
+            &guest.advancements,
+            fresh,
+            task.now_millis,
+        );
+        guest.send(&raw(ids::UPDATE_ADVANCEMENTS, update));
+        guest.advancements_visible = visible;
+        guest.advancements_changed.clear();
     }
 
     /// `PlayerAdvancements.flushDirty` and the recipes the player unlocked
@@ -4965,7 +4972,7 @@ mod tests {
                     == Some(ids::UPDATE_ADVANCEMENTS),
             _ => false,
         }));
-        hub.finish_native_first_tick(&task);
+        hub.finish_native_first_tick(&task, &[]);
         let found = rx.try_iter().any(|out| match out {
             crate::lan::Out::Packet(body) => {
                 let mut reader = horizon_protocol::buf::Reader::new(&body);
