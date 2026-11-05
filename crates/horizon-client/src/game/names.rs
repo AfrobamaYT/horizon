@@ -128,9 +128,11 @@ impl Game<'_> {
             let at = glam::DVec3::new(m.position.x, m.position.y, m.position.z);
             (at.distance_squared(camera) < 64.0 * 64.0).then_some((m, name, false))
         });
+        let own = self.own_name_tag();
+        let own_id = own.as_ref().map(|(m, _)| m.id);
         let players = players
             .into_iter()
-            .chain(self.own_name_tag())
+            .chain(own)
             .map(|(m, name)| (m, name, true));
         // Who is riding whom: asked once per tag below, and rescanning every entity
         // for each tag made this quadratic in the number of loaded entities.
@@ -188,7 +190,7 @@ impl Game<'_> {
                 .then(|| m.extra.description.component())
                 .flatten()
                 .map(|tag| horizon_client::entity_nbt::name_text(&tag).resolve_legacy());
-            let is_own = Some(m.id) == own;
+            let is_own = Some(m.id) == own_id;
             let name_shown = sb::name_shown(team, viewer, view)
                 && (!is_own || !view.is_vehicle)
                 && (player || m.name_visible || Some(m.id) == target)
