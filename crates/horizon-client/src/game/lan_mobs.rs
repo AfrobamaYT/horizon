@@ -254,7 +254,7 @@ impl Game<'_> {
         out.extend(
             host.hub
                 .guests
-                .iter()
+                .simulation_iter()
                 .filter(|g| host.hub.here(g) && g.loaded && !g.dead && !g.spectator())
                 .filter_map(|g| host.play.get(&g.conn)?.hook.as_ref())
                 .map(|hook| (hook.bounds(), hook.applies_block_effects())),

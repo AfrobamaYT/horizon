@@ -7044,10 +7044,14 @@ mod tests {
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
             assert!(!game.lan_open_container(12, (2, 64, 0)));
-            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Fake;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = GuestKind::Fake;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(game.lan_open_container(12, (0, 64, 0)));
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
-            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Network;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = GuestKind::Network;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(game.lan_open_container(12, (0, 64, 0)));
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
         });

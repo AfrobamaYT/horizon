@@ -5230,7 +5230,7 @@ impl Game<'_> {
             .chain(self.lan.iter().flat_map(|h| {
                 h.hub
                     .guests
-                    .iter()
+                    .simulation_iter()
                     .filter(|g| h.hub.here(g) && !g.spectator())
                     .map(|g| g.position)
             }))
@@ -5258,7 +5258,7 @@ impl Game<'_> {
                 .flat_map(|h| {
                     h.hub
                         .guests
-                        .iter()
+                        .simulation_iter()
                         .filter(|g| h.hub.here(g) && !g.spectator())
                 })
                 .filter_map(|g| g.menu.as_ref().and_then(|m| m.pos)),
