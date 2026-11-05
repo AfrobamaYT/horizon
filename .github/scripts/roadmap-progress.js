@@ -2,7 +2,9 @@
 // board's issues are Done, drawn as a bar. Counts issues only (a PR and the issue it closes are one
 // piece of work). Rewrites only the text between the progress markers; the rest of the body is
 // edited by hand.
-module.exports = async ({ github, context, core }) => {
+// `github` carries PROJECT_TOKEN (board reads); `issues` carries the workflow's own token, which
+// may edit issues (PROJECT_TOKEN may not).
+module.exports = async ({ github, issues, core }) => {
   const OWNER = 'arismoko', REPO = 'horizon', NUMBER = 1, ISSUE = 771;
   const START = '<!-- progress:start -->', END = '<!-- progress:end -->';
 
@@ -42,12 +44,12 @@ module.exports = async ({ github, context, core }) => {
     `<sub>Counted from the [board](https://github.com/users/${OWNER}/projects/${NUMBER}) automatically every hour (last ${stamp} UTC). New issues add to the total, so a bar can move back as work is found.</sub>`,
     END].join('\n');
 
-  const issue = (await github.rest.issues.get({ owner: OWNER, repo: REPO, issue_number: ISSUE })).data;
+  const issue = (await issues.rest.issues.get({ owner: OWNER, repo: REPO, issue_number: ISSUE })).data;
   const body = issue.body || '';
   const from = body.indexOf(START), to = body.indexOf(END);
   if (from < 0 || to < from) { core.setFailed(`#${ISSUE} has no progress markers`); return; }
   const next = body.slice(0, from) + block + body.slice(to + END.length);
   if (next.replace(/\(last [^)]*\)/, '') === body.replace(/\(last [^)]*\)/, '')) { core.summary.addRaw('No change.').write(); return; }
-  await github.rest.issues.update({ owner: OWNER, repo: REPO, issue_number: ISSUE, body: next });
+  await issues.rest.issues.update({ owner: OWNER, repo: REPO, issue_number: ISSUE, body: next });
   core.summary.addRaw(`#${ISSUE} progress: ${done} of ${total} issues done.`).write();
 };

@@ -1,7 +1,7 @@
 name: roadmap-progress
 # Redraws the progress bars in the pinned roadmap issue #771 from the board
-# (.github/scripts/roadmap-progress.js). Needs PROJECT_TOKEN (Projects read, issues write on the
-# arismoko account); skipped without it. Checks out no PR code.
+# (.github/scripts/roadmap-progress.js). Needs PROJECT_TOKEN (Projects read on the arismoko account); the
+# issue edit uses the workflow's own token; skipped without it. Checks out no PR code.
 on:
   issues:
     types: [opened, closed, reopened]
@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  issues: write
 concurrency:
   group: roadmap-progress
   cancel-in-progress: false
@@ -31,6 +32,8 @@ jobs:
           sparse-checkout: .github/scripts
       - if: steps.token.outputs.set
         uses: actions/github-script@v7
+        env:
+          ISSUES_TOKEN: ${{ github.token }}
         with:
           github-token: ${{ secrets.PROJECT_TOKEN }}
-          script: await require('./.github/scripts/roadmap-progress.js')({ github, context, core })
+          script: await require('./.github/scripts/roadmap-progress.js')({ github, issues: getOctokit(process.env.ISSUES_TOKEN), core })
