@@ -243,6 +243,7 @@ pub fn hurt_mobs_with_kind(
         kind,
         attacker: None,
         from: Some([position.x, position.y, position.z]),
+        attacker_species: None,
     };
     for mob in mobs
         .iter_mut()

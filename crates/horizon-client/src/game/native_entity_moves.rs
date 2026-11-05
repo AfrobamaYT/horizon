@@ -52,7 +52,7 @@ impl Game<'_> {
         {
             return false;
         }
-        self.teleport_to(t, pos, rotation);
+        self.teleport_to(t, pos, rotation, true);
         true
     }
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
