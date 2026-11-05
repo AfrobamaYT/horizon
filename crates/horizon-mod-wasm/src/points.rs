@@ -39,6 +39,7 @@ impl Forward for Listeners {
             PointHost::Client(h) | PointHost::Side(mod_api::HostSide::Client(h)) => {
                 (CallHost::Client(h), HostKind::Client)
             }
+            PointHost::None => (CallHost::None, HostKind::None),
         };
         let fields = record.lower();
         let answer = self.exports.call(host, |store| {

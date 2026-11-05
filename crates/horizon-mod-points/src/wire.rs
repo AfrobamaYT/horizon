@@ -216,7 +216,9 @@ mod guest {
             match host {
                 HostKind::Server => mod_api::HostSide::Server(wasm_guest::server_host()),
                 HostKind::Client => mod_api::HostSide::Client(wasm_guest::client_host()),
-                HostKind::Read => panic!("the game gave a writing point the reading host"),
+                HostKind::Read | HostKind::None => {
+                    panic!("the game gave a writing point no writing host")
+                }
             }
         }
     }
@@ -231,6 +233,11 @@ mod guest {
         fn from_host(_: HostKind) -> Self {
             wasm_guest::client_host()
         }
+    }
+
+    /// A point with no host: its listener takes only its record.
+    impl FromHost for () {
+        fn from_host(_: HostKind) -> Self {}
     }
 
     /// Runs one place's listener on the record the game sent, answering its fields after.
@@ -261,6 +268,8 @@ mod host {
         Side(mod_api::HostSide<'a>),
         Server(&'a mut dyn mod_api::ServerHost),
         Client(&'a mut dyn mod_api::ClientHost),
+        /// A point below the game: no `Game`, so no host.
+        None,
     }
 
     /// One mod's listeners, every place forwarded to it with its record.

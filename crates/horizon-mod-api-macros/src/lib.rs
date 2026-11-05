@@ -125,12 +125,15 @@ fn expand_points(mut implementation: ItemImpl) -> TokenStream {
     let mut methods = Vec::new();
     let mut cfgs = Vec::new();
     let mut records = Vec::new();
+    let mut hostless = Vec::new();
     for item in &implementation.items {
         if let ImplItem::Fn(method) = item {
             methods.push(method.sig.ident.clone());
             cfgs.push(cfg_attributes(method));
             // The record a listener takes, `args: &mut XArgs`: what crosses to it in a wasm mod.
-            let record = match method.sig.inputs.iter().nth(2) {
+            // The last parameter: a point below the game takes no host before it.
+            hostless.push(method.sig.inputs.len() == 2);
+            let record = match method.sig.inputs.last() {
                 Some(syn::FnArg::Typed(typed)) => match &*typed.ty {
                     syn::Type::Reference(reference) => Some((*reference.elem).clone()),
                     _ => None,
@@ -140,7 +143,7 @@ fn expand_points(mut implementation: ItemImpl) -> TokenStream {
             let Some(record) = record else {
                 return syn::Error::new_spanned(
                     &method.sig,
-                    "a point listener takes `&self`, its host and `args: &mut <Point>Args`",
+                    "a point listener takes `&self`, its host if it has one, and `args: &mut <Point>Args`",
                 )
                 .into_compile_error()
                 .into();
@@ -148,7 +151,13 @@ fn expand_points(mut implementation: ItemImpl) -> TokenStream {
             records.push(record);
         }
     }
-    let guest = wasm_listeners(&implementation.self_ty, &methods, &cfgs, &records);
+    let guest = wasm_listeners(
+        &implementation.self_ty,
+        &methods,
+        &cfgs,
+        &records,
+        &hostless,
+    );
     implementation.items.push(syn::parse_quote! {
         fn subscribed(&self) -> &'static [Option<mod_points::PointId>] {
             &[#(#(#cfgs)* mod_points::ids::#methods),*]
@@ -184,7 +193,19 @@ fn wasm_listeners(
     methods: &[syn::Ident],
     cfgs: &[Vec<syn::Attribute>],
     records: &[syn::Type],
+    hostless: &[bool],
 ) -> proc_macro2::TokenStream {
+    let ty_path = ty;
+    let calls: Vec<_> = methods
+        .iter()
+        .zip(hostless)
+        .map(|(method, &hostless)| match hostless {
+            true => quote!(|_: (), args| <#ty_path as mod_points::Points>::#method(this, args)),
+            false => {
+                quote!(|host, args| <#ty_path as mod_points::Points>::#method(this, host, args))
+            }
+        })
+        .collect();
     let names = methods.iter().map(|method| method.to_string());
     let records = records.iter().map(|record| {
         // The record's own lifetime, if any, elided: `<XArgs<'_> as Lift<'_>>`.
@@ -224,9 +245,7 @@ fn wasm_listeners(
                     let mut index = 0u32;
                     #(#(#cfgs)* {
                         if place == index {
-                            return mod_points::__private::wire::fire(host, &fields, |host, args| {
-                                <#ty as mod_points::Points>::#methods(this, host, args)
-                            });
+                            return mod_points::__private::wire::fire(host, &fields, #calls);
                         }
                         index += 1;
                     })*

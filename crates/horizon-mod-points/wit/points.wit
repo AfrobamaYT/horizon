@@ -7,8 +7,9 @@ interface listeners {
   /// One field of a point's record: an argument, `cancel`, or `result` (`none` when unset).
   variant value { none, b(bool), c(char), s(s64), u(u64), f(f64), str(string) }
 
-  /// The host a listener gets: the reading one, or the side's writing one.
-  enum host-kind { read, server, client }
+  /// The host a listener gets: the reading one, the side's writing one, or none (a point below the
+  /// game, with no `Game` behind it).
+  enum host-kind { read, server, client, none }
 
   /// The places the mod listens at, each its `Points` method's name and its record's shape.
   subscribed: func() -> list<tuple<string, string>>;

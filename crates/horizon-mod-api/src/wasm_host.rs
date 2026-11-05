@@ -843,6 +843,8 @@ pub enum CallHost<'a> {
     Server(&'a mut dyn crate::ServerHost),
     /// A client call's writing host.
     Client(&'a mut dyn crate::ClientHost),
+    /// A call with no host: the mod's imports that need one trap.
+    None,
 }
 
 impl Exports {
@@ -888,6 +890,7 @@ impl Exports {
             CallHost::Read(h) => frame.host(h),
             CallHost::Server(h) => frame.server_host_mut(h),
             CallHost::Client(h) => frame.client_host_mut(h),
+            CallHost::None => {}
         }
         self.0
             .call_or(frame, Call::Hook, || None, |_, store| f(store).map(Some))
