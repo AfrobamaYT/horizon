@@ -119,6 +119,8 @@ pub struct Extras {
     /// painted texel of a player's outer layer drawn as a slab
     /// (`horizon_client::mobs::skin_layers`).
     pub three_d_skin_layers: bool,
+    /// The PvP & HUD page's options (`pvp`).
+    pub pvp: crate::pvp::Pvp,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -167,6 +169,7 @@ impl Default for Extras {
             music_off: Vec::new(),
             music_page: false,
             three_d_skin_layers: false,
+            pvp: Default::default(),
         }
     }
 }
@@ -264,13 +267,15 @@ impl Extras {
                 }
                 "musicPage" => e.music_page = flag(e.music_page),
                 SKIN_LAYERS_KEY => e.three_d_skin_layers = flag(e.three_d_skin_layers),
-                _ => {}
+                key => {
+                    e.pvp.parse_line(key, value);
+                }
             }
         }
         e
     }
     pub fn serialize(&self) -> String {
-        format!(
+        let mut text = format!(
             "packBrowser:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\n{}:{}\n",
             bool_text(self.pack_browser),
             bool_text(self.fullbright),
@@ -322,7 +327,9 @@ impl Extras {
             bool_text(self.music_page),
             SKIN_LAYERS_KEY,
             bool_text(self.three_d_skin_layers),
-        )
+        );
+        self.pvp.serialize(&mut text);
+        text
     }
     /// Adopts the settings `options.txt` held before they moved here, while
     /// this file (`own`) has no line of its own: 3D skin layers was an
@@ -489,6 +496,8 @@ pub enum Item {
     WheelCyclesSettings,
     /// The Select Resource Packs screen's Add button (Modrinth).
     PackBrowser,
+    /// On the PvP & HUD page (`pvp::rows`).
+    Pvp(crate::pvp::Opt),
 }
 /// The Extras page: headers (language keys) and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
@@ -543,6 +552,7 @@ impl Item {
             Item::ChatIndicator => "horizon.extras.chat_indicator",
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings",
             Item::PackBrowser => "horizon.extras.pack_browser",
+            Item::Pvp(o) => o.caption_key(),
         }
     }
     /// The language key of the description shown as the row's tooltip.
@@ -568,6 +578,7 @@ impl Item {
             Item::ChatIndicator => "horizon.extras.chat_indicator.tooltip",
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings.tooltip",
             Item::PackBrowser => "horizon.extras.pack_browser.tooltip",
+            Item::Pvp(o) => o.description_key(),
         }
     }
     /// The caption in the current language (English when the key is missing).
@@ -602,6 +613,7 @@ impl Item {
             Item::Splitscreen => "Splitscreen",
             Item::WheelCyclesSettings => "Scroll wheel changes settings",
             Item::PackBrowser => "Resource pack browser",
+            Item::Pvp(o) => o.caption(),
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -612,6 +624,7 @@ impl Item {
             MouseTweaksWheel => MouseTweaks,
             SortKey => Sort,
             ChatIndicator => ChatAnimation,
+            Pvp(o) => return o.parent().map(Pvp),
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
             | AutoReconnect | NoAi | AgentControl | ReproKeys | DiscordPresence | Splitscreen
             | ChatAnimation | WheelCyclesSettings | MusicPage | PackBrowser => {
@@ -672,6 +685,7 @@ impl Item {
             Item::ReproKeys => {
                 "F3+R starts or stops a repro recording and F3+E writes its bundle. Off by default: a recording copies the world."
             }
+            Item::Pvp(o) => o.description(),
             Item::WheelCyclesSettings => {
                 "The scroll wheel over a button in the settings changes its value, as in vanilla. Off, the wheel only scrolls the list."
             }
@@ -722,6 +736,7 @@ impl Item {
             Item::Splitscreen => e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings,
             Item::PackBrowser => e.pack_browser,
+            Item::Pvp(o) => return o.switch(&e.pvp),
             _ => return None,
         })
     }
@@ -729,6 +744,7 @@ impl Item {
     pub fn value(self, e: &Extras) -> String {
         match self {
             Item::SortKey => crate::keybinds::display_name(&e.sort_key).plain(),
+            Item::Pvp(o) if o.switch(&e.pvp).is_none() => o.value(&e.pvp).unwrap_or_default(),
             other => match other.switch(e) {
                 Some(true) => crate::lang::get_or("On", "On"),
                 _ => crate::lang::get_or("Off", "Off"),
@@ -736,7 +752,7 @@ impl Item {
         }
     }
     /// A click: every item is a switch, so it flips. The sort key binds instead.
-    pub fn cycle(self, e: &mut Extras) {
+    pub fn cycle(self, e: &mut Extras, back: bool) {
         match self {
             Item::Fullbright => e.fullbright = !e.fullbright,
             Item::DynamicLights => e.dynamic_lights = !e.dynamic_lights,
@@ -757,6 +773,7 @@ impl Item {
             Item::Splitscreen => e.splitscreen = !e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings = !e.wheel_cycles_settings,
             Item::PackBrowser => e.pack_browser = !e.pack_browser,
+            Item::Pvp(o) => o.cycle(&mut e.pvp, back),
             Item::SortKey => {}
         }
     }
@@ -785,9 +802,9 @@ mod tests {
         assert_eq!(Extras::parse(""), d);
         assert_eq!(Extras::parse(&d.serialize()), d);
         let mut e = d.clone();
-        Item::Fullbright.cycle(&mut e);
+        Item::Fullbright.cycle(&mut e, false);
         assert_eq!(Item::Fullbright.switch(&e), Some(true));
-        Item::DynamicLights.cycle(&mut e);
+        Item::DynamicLights.cycle(&mut e, false);
         assert_eq!(Item::DynamicLights.switch(&e), Some(true));
         assert_eq!(Extras::parse(&e.serialize()), e);
         e.zoom = true;
@@ -804,10 +821,10 @@ mod tests {
         e.minimap_rotate = true;
         e.minimap_corner = Corner::BottomLeft;
         e.auto_reconnect = true;
-        Item::OwnNameTag.cycle(&mut e);
+        Item::OwnNameTag.cycle(&mut e, false);
         assert_eq!(Item::OwnNameTag.switch(&e), Some(true));
         assert_eq!(Item::HideBlockParticles.switch(&e), Some(false));
-        Item::HideBlockParticles.cycle(&mut e);
+        Item::HideBlockParticles.cycle(&mut e, false);
         assert!(e.hide_block_particles);
         assert_eq!(Item::HideBlockParticles.switch(&e), Some(true));
         let only = Extras::parse("hideBlockParticles:true\n");
@@ -820,16 +837,16 @@ mod tests {
         e.chat_indicator = false;
         e.discord_presence = false;
         assert!(!e.splitscreen);
-        Item::Splitscreen.cycle(&mut e);
+        Item::Splitscreen.cycle(&mut e, false);
         assert_eq!(Item::Splitscreen.switch(&e), Some(true));
-        Item::WheelCyclesSettings.cycle(&mut e);
+        Item::WheelCyclesSettings.cycle(&mut e, false);
         assert_eq!(Item::WheelCyclesSettings.switch(&e), Some(false));
         e.music_off = vec![
             "minecraft:music/game/calm1".into(),
             "minecraft:music.menu".into(),
         ];
         assert!(!e.music_page);
-        Item::MusicPage.cycle(&mut e);
+        Item::MusicPage.cycle(&mut e, false);
         assert_eq!(Item::MusicPage.switch(&e), Some(true));
         assert_eq!(Extras::parse(&e.serialize()), e);
     }
@@ -921,7 +938,7 @@ mod tests {
     #[test]
     fn items_cycle_through_their_values() {
         let mut e = Extras::default();
-        Item::Sort.cycle(&mut e);
+        Item::Sort.cycle(&mut e, false);
         assert_eq!(Item::Sort.value(&e), "On");
         // The minimap's old keys still parse, for the move to its mod.
         assert_eq!(

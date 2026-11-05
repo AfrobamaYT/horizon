@@ -1004,6 +1004,7 @@ use horizon_client::{
 use horizon_core::{
     geometry::Direction,
     position::BlockPos,
+    random::LegacyRandom,
     ticks::{ScheduleResult, TickPriority},
 };
 use horizon_world::level::{BonemealCheck, PlaceContext};
@@ -1025,10 +1026,10 @@ use mod_api::{
     ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
-    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
-    TooltipElement, TooltipPlace, UsePhase,
+    AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
+    LogicalSide, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
+    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, TooltipPlace,
+    UsePhase,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
@@ -1501,7 +1502,7 @@ pub(super) use horizon_world::level::flags;
 /// The hook points' API version. The launcher reads this line from the
 /// source it builds; keep its form.
 #[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 399;
+pub(crate) const NATIVE_HOOKS_API: u32 = 409;
 
 impl GameLevel<'_> {
     /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
@@ -3364,7 +3365,7 @@ impl Game<'_> {
     /// draw the world from anywhere: a cinematic or replay camera. Only the picture, the sound's
     /// listener and the billboards facing the camera follow it; the player, where they aim, the
     /// first-person hand and which chunks load stay the player's. Values that aren't finite keep
-    /// vanilla's. Not called on the title screen's panorama. API @API:camera_pose@.
+    /// vanilla's. Not called on the title screen's panorama. API 402.
     pub(super) fn native_camera_pose(
         &self,
         partial: f32,
@@ -5707,7 +5708,7 @@ impl Game<'_> {
     /// client reads with `native_screen_extra_data` while the screen is open
     /// (NeoForge's `openMenu` with an extra-data writer). The first mod to
     /// set it wins, so answer only for your blocks. The player's state is not
-    /// swapped in. @API:menu_extra_data@.
+    /// swapped in. 401.
     pub(super) fn native_menu_extra_data(
         &mut self,
         player: u128,
@@ -8798,7 +8799,7 @@ impl Game<'_> {
                 self.native_level_set_block(level, at, state, flags);
             }
             LandingWrite::DestroyBlock { drop } => {
-                self.native_level_destroy_block(level, at, drop);
+                self.native_level_destroy_block(level, at, drop, None, false);
             }
             // A write a later API adds that this game does not know is not applied.
             _ => {}
@@ -10197,7 +10198,7 @@ impl Game<'_> {
     }
     /// The block of the mod screen that is open (`native_screen`), as the
     /// server named it when the block opened its menu type; None when no mod
-    /// screen is open. @API:menu_extra_data@.
+    /// screen is open. 401.
     pub(super) fn native_screen_pos(&self) -> Option<[i32; 3]> {
         self.shown_native_screen()?.pos()
     }
@@ -13227,6 +13228,7 @@ mod tests {
                     kind,
                     attacker,
                     from: None,
+                    attacker_species: None,
                 },
                 &Attack {
                     attacker: 7,
