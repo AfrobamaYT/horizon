@@ -10856,9 +10856,10 @@ impl Game<'_> {
         else {
             return false;
         };
+        let against_pos = ctx.placed_against_pos(preview.pos);
         let against = self
             .world
-            .block(ctx.clicked_pos.x, ctx.clicked_pos.y, ctx.clicked_pos.z);
+            .block(against_pos.x, against_pos.y, against_pos.z);
         let (_, entity) = self.native_clicker();
         self.place_canceled(
             entity.cast_unsigned(),
