@@ -1,0 +1,1 @@
+{"status":"pr_opened","pr":1057,"branch":"bulk-batch2-2j42fp-c932756ddda2","head":"10f626a1655a41d575b2099e5a31e6e257a11926","notes":"Equine parent RNG and vanilla draw ordering implemented. Goat and dye mixing retain world RNG per vanilla. Focused test and all-target check blocked by nine pre-existing test compilation errors; wasm check result not captured. No in-game proof."}
