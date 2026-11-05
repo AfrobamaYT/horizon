@@ -3844,7 +3844,7 @@ mod tests {
             "--version",
             "v2026.10.13",
             "--profile",
-            "release",
+            "optimized",
         ])
         .unwrap()
         .command
@@ -3857,7 +3857,7 @@ mod tests {
             }) => {
                 assert_eq!(version.as_deref(), Some("v2026.10.13"));
                 assert!(!update);
-                assert_eq!(profile.as_deref(), Some("release"));
+                assert_eq!(profile.as_deref(), Some("optimized"));
             }
             _ => panic!("expected native-build"),
         }
