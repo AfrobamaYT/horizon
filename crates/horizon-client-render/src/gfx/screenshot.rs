@@ -58,9 +58,40 @@ impl PendingScreenshot {
 fn screenshot_destination(root: &Path, file_name: &str) -> Result<PathBuf> {
     if file_name.is_empty()
         || file_name.contains(['\\', ':', '\0'])
-        || file_name
-            .split('/')
-            .any(|part| matches!(part, "" | "." | ".."))
+        || file_name.split('/').any(|part| {
+            let stem = part
+                .split('.')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_uppercase();
+            part.is_empty()
+                || part.ends_with(['.', ' '])
+                || matches!(
+                    stem.as_str(),
+                    "CON"
+                        | "PRN"
+                        | "AUX"
+                        | "NUL"
+                        | "COM1"
+                        | "COM2"
+                        | "COM3"
+                        | "COM4"
+                        | "COM5"
+                        | "COM6"
+                        | "COM7"
+                        | "COM8"
+                        | "COM9"
+                        | "LPT1"
+                        | "LPT2"
+                        | "LPT3"
+                        | "LPT4"
+                        | "LPT5"
+                        | "LPT6"
+                        | "LPT7"
+                        | "LPT8"
+                        | "LPT9"
+                )
+        })
     {
         return Err("screenshot file name must be a relative path inside screenshots".into());
     }
@@ -170,6 +201,11 @@ mod tests {
             "C:drive.png",
             "a\\escape.png",
             "nul\0.png",
+            ".. /escape.png",
+            "album./image.png",
+            "NUL.png",
+            "com1.png",
+            "LPT9/log.png",
         ] {
             assert!(pending.save_in(root.path(), name).is_err(), "{name:?}");
         }
