@@ -143,7 +143,7 @@ impl Game<'_> {
         }
     }
 
-    /// `Entity.spawnSprintParticle`, called explicitly by a client mod. A
+    /// Spawn sprint particles when called explicitly by a client mod. A
     /// valid entity returns true even if the block beneath it is invisible.
     /// Returns false for stale, untracked, server-side, or unsupported entities.
     pub(super) fn native_entity_sprint_particles(&mut self, entity: EntityRef) -> bool {
@@ -381,6 +381,21 @@ mod sprint_handle_tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
             game.options.dedicated = None;
+            let root =
+                std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+            let client_resources = super::super::load_resources(
+                root.clone(),
+                None,
+                &root,
+                &super::super::Settings::default(),
+                std::time::Instant::now(),
+                false,
+                super::super::execution_role::ExecutionRole::Client,
+                &super::super::Progress::new(),
+                &mut |_, _| unreachable!(),
+            )
+            .unwrap();
+            game.pack = client_resources.pack;
             let (client, _server) = Pipe::pair();
             game.connect_local(client, "SprintParticleTest").unwrap();
             let remote = game.remote.as_mut().unwrap();
@@ -398,6 +413,11 @@ mod sprint_handle_tests {
                 .default_state("minecraft:stone")
                 .unwrap();
             game.world.set(0, 63, 0, stone).unwrap();
+            assert_eq!(game.world.block(0, 63, 0), stone);
+            assert!(
+                game.particle_sprite(stone, [0, 63, 0]).is_some(),
+                "stone sprite missing"
+            );
             game.particles.requested = Some(Vec::new());
             let entity = game.entity(7).unwrap();
             let host: &mut dyn ClientHost = game;
