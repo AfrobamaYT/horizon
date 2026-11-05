@@ -1201,7 +1201,9 @@ fn widen_mode(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<
                 .map_or(0, |s| s.len() + 1);
             pass.sources[file]
                 .annotations
-                .insert(start, (start, "#![allow(deprecated)]\n".into()));
+                .entry(start)
+                .and_modify(|(_, text)| text.insert_str(0, "#![allow(deprecated)]\n"))
+                .or_insert_with(|| (start, "#![allow(deprecated)]\n".into()));
         }
     }
     pass.finish()
@@ -1297,10 +1299,16 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
                 "crates/horizon-client/src/lib.rs",
                 "pub mod game; mod entry;\n",
             );
+            fixture.put(
+                "crates/lower/Cargo.toml",
+                "[package]\nname='lower'\nversion='0.1.0'\n",
+            );
+            fixture.put("crates/lower/src/lib.rs", "pub fn direct() {}\n");
         }
-        let expected = widen_with(&normal.0, &[]).unwrap();
-        let ordinary = widen_mode(&repeat.0, &[], false).unwrap();
-        let marked = widen_mode(&discovery.0, &[], true).unwrap();
+        let lists = [("internals.txt", "lower::direct".into())];
+        let expected = widen_with(&normal.0, &lists).unwrap();
+        let ordinary = widen_mode(&repeat.0, &lists, false).unwrap();
+        let marked = widen_mode(&discovery.0, &lists, true).unwrap();
         assert_eq!(expected.entries, marked.entries);
         assert_eq!(
             serde_json::to_vec(&expected.entries).unwrap(),
@@ -1342,8 +1350,21 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
                 .any(|message| message["code"]["code"] == "deprecated"),
             "game must suppress its own deprecations"
         );
+        let lower = out.join("liblower.rlib");
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2024", "--crate-type=lib", "--crate-name=lower"])
+            .arg(discovery.0.join("crates/lower/src/lib.rs"))
+            .arg("-o")
+            .arg(&lower)
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
         let mod_source = out.join("mod.rs");
-        fs::write(&mod_source, "use horizon_client::game::*; macro_rules! run { ($t:expr) => { $t.method() } } pub fn uses(t: &Thing) -> u32 { free(); run!(t) + t.field }").unwrap();
+        fs::write(&mod_source, "use horizon_client::game::*; macro_rules! run { ($t:expr) => { $t.method() } } pub fn uses(t: &Thing) -> u32 { free(); lower::direct(); run!(t) + t.field }").unwrap();
         let checked = std::process::Command::new("rustc")
             .args([
                 "--edition=2024",
@@ -1354,6 +1375,8 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
                 "--extern",
             ])
             .arg(format!("horizon_client={}", library.display()))
+            .arg("--extern")
+            .arg(format!("lower={}", lower.display()))
             .arg(&mod_source)
             .arg("-o")
             .arg(out.join("mod.rmeta"))
@@ -1370,6 +1393,7 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
             "field:horizon_client::game::Thing::field",
             "method:horizon_client::game::Thing::method",
             "fn:horizon_client::game::free",
+            "fn:lower::direct",
         ] {
             assert!(
                 messages.contains(&format!("horizon-internal:{note}")),

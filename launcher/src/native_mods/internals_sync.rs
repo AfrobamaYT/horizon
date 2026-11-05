@@ -168,7 +168,7 @@ pub(crate) fn rustc_wrapper() -> Option<i32> {
     if Some(&compiler) != std::env::var_os("RUSTC").as_ref() {
         return None;
     }
-    let mut cmd = std::process::Command::new(compiler);
+    let mut cmd = crate::process::command(compiler);
     cmd.args(args);
     if std::env::var_os("CARGO_MANIFEST_DIR").as_ref() == Some(&selected) {
         cmd.arg("--force-warn=deprecated");
