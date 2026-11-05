@@ -587,8 +587,7 @@ impl Game<'_> {
             .iter()
             .find(|item| item.id == id)
             .is_some_and(|item| {
-                self.res
-                    .items()
+                world_items!(self)
                     .item_tags
                     .get("minecraft:dampens_vibrations")
                     .is_some_and(|tag| tag.contains(item.stack.item.as_ref()))
