@@ -131,8 +131,19 @@ fn children(
             .cloned()
             .chain(conditions(&declared.attrs))
             .collect();
+        let explicit = declared.attrs.iter().find_map(|attr| match &attr.meta {
+            syn::Meta::NameValue(value) if attr.path().is_ident("path") => match &value.value {
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(path),
+                    ..
+                }) => Some(path.value()),
+                _ => None,
+            },
+            _ => None,
+        });
         if let Some((_, inner)) = &declared.content {
-            let inner_dir = dir.join(&name);
+            // An inline module's children live in its folder, named by its own `#[path]` if any.
+            let inner_dir = dir.join(explicit.as_deref().unwrap_or(&name));
             children(
                 &child,
                 inner,
@@ -144,16 +155,6 @@ fn children(
             );
             continue;
         }
-        let explicit = declared.attrs.iter().find_map(|attr| match &attr.meta {
-            syn::Meta::NameValue(value) if attr.path().is_ident("path") => match &value.value {
-                syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(path),
-                    ..
-                }) => Some(path.value()),
-                _ => None,
-            },
-            _ => None,
-        });
         let (file, child_dir) = match explicit {
             Some(relative) => {
                 let file = here.join(relative);
@@ -486,7 +487,7 @@ mod tests {
         std::fs::create_dir_all(src.join("game/remote")).unwrap();
         std::fs::write(
             src.join("game.rs"),
-            "mod remote;\nmod nested { mod leaf; }\n#[cfg(test)]\nmod probes;\nimpl Game<'_> {\n    fn tick(&mut self) {}\n    pub(super) fn slot(&mut self) -> &mut u8 { todo!() }\n    fn native_tick(&mut self) {}\n}\n",
+            "mod remote;\nmod nested { mod leaf; }\n#[path = \"elsewhere\"]\nmod moved { mod deep; }\n#[cfg(test)]\nmod probes;\nimpl Game<'_> {\n    fn tick(&mut self) {}\n    pub(super) fn slot(&mut self) -> &mut u8 { todo!() }\n    fn native_tick(&mut self) {}\n}\n",
         )
         .unwrap();
         std::fs::write(
@@ -497,6 +498,12 @@ mod tests {
         std::fs::write(
             src.join("game/remote/lan.rs"),
             "impl Game<'_> { fn join(&mut self) {} }",
+        )
+        .unwrap();
+        std::fs::create_dir_all(src.join("game/elsewhere")).unwrap();
+        std::fs::write(
+            src.join("game/elsewhere/deep.rs"),
+            "impl Game<'_> { fn dive(&mut self) {} }",
         )
         .unwrap();
         std::fs::create_dir_all(src.join("game/nested")).unwrap();
@@ -515,6 +522,7 @@ mod tests {
         assert_eq!(
             targets,
             [
+                "horizon_client::game::moved::deep::Game<'_>::dive",
                 "horizon_client::game::nested::leaf::Game<'_>::fall",
                 "horizon_client::game::remote::lan::Game<'_>::join",
                 "horizon_client::game::remote::Game<'_>::send",
@@ -530,9 +538,9 @@ mod tests {
         assert_eq!(
             stage(&root).unwrap(),
             Staged {
-                points: 5,
+                points: 6,
                 head_only: 1,
-                files: 4
+                files: 5
             }
         );
         let game = std::fs::read_to_string(src.join("game.rs")).unwrap();
