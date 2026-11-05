@@ -321,6 +321,7 @@ jobs:
     env:
       VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
       VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
+      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -371,7 +372,8 @@ jobs:
             export PATH="$CARGO_HOME/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      # Dependencies and the workspace's own build, saved from main's runs (pull requests read main's cache).
+      # Dependency-only cache: a full workspace/test snapshot would compete with lint for the 10 GB budget.
+      # Profile overrides in Cargo.toml are part of rust-cache's key; unchanged dependencies still restore.
       - uses: Swatinem/rust-cache@v2
         if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
         with:
@@ -387,15 +389,18 @@ jobs:
       # these 4-core runners it was no faster (#4978).
       - name: Test Rust core and voxel kernel correctness
         if: steps.rust.outputs.required != 'false'
-        env:
-          JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
+        run: cargo +stable test $JOBS --workspace --lib --bins --tests
+      # Separate timings make rebuilds between Cargo invocations visible without changing the test selection.
+      # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
+      # prepared vanilla data, so without it they pass at once. Keep the target selection identical to avoid
+      # recompiling the workspace with a different dependency graph.
+      - name: Test ignored mod content roots
+        if: steps.rust.outputs.required != 'false'
         run: |
-          cargo +stable test $JOBS --workspace --lib --bins --tests
-          # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
-          # prepared vanilla data, so without it they pass at once. Keep the target selection identical to avoid
-          # recompiling the workspace with a different dependency graph.
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
-          cargo +stable test $JOBS --workspace --doc
+      - name: Test Rust documentation examples
+        if: steps.rust.outputs.required != 'false'
+        run: cargo +stable test $JOBS --workspace --doc
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
