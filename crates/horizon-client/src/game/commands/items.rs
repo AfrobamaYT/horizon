@@ -706,7 +706,7 @@ impl Game<'_> {
         // max_stack_size component, else the item's) is refused.
         let max_stack = self.stack_max_size(&stack);
         if count > max_stack {
-            return Err(err("arguments.item.overstacked", &[&id, &max_stack]));
+            return Err(err("arguments.item.overstacked", &[id, &max_stack]));
         }
         Ok(stack)
     }

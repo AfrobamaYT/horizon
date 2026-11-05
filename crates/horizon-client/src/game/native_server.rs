@@ -1604,8 +1604,8 @@ impl Game<'_> {
                 Arg::Int(value) => Value::Integer(*value),
                 Arg::Double(value) => Value::Number(*value),
                 Arg::Bool(value) => Value::Boolean(*value),
-                Arg::Entity(_) => {
-                    let targets = self.entities(&context, &argument.name, true)?;
+                Arg::Entity(selector) => {
+                    let targets = self.resolve_entity_argument(selector, true)?;
                     let [target] = targets.as_slice() else {
                         return Err(err("argument.entity.toomany", &[]));
                     };
@@ -2239,6 +2239,7 @@ mod tests {
                     NativeCommand::new("typed give <who:player> <amount:integer> [message:text]"),
                     NativeCommand::new("typed data <word:word> <number:number> <enabled:boolean> <item:item> <pos:block_pos>"),
                     NativeCommand::new("typed opt [value:integer]"),
+                    NativeCommand::new("typed repeat <value:player> <value:integer>"),
                     NativeCommand::op("protected <who:player>", 4),
                 ]);
             }
@@ -2320,9 +2321,10 @@ mod tests {
                             "typed data console 3 true dirt ^0 ^0 ^1"
                         )
                     );
+                    assert!(game.perform_native_console_command("typed repeat guest13 3"));
                     assert!(game.command_source.is_none(), "console source restored");
                     let heard = heard.lock().unwrap();
-                    assert_eq!(heard.len(), 9);
+                    assert_eq!(heard.len(), 10);
                     let first = &heard[0].1;
                     assert_eq!(first.literals, ["typed", "give"]);
                     assert_eq!(first.argument("who"), Some(&Value::Player(other)));
@@ -2364,6 +2366,8 @@ mod tests {
                         heard[8].1.argument("pos"),
                         Some(&Value::BlockPos([10, 70, -2]))
                     );
+                    assert_eq!(heard[9].1.arguments[0].value, Value::Player(other));
+                    assert_eq!(heard[9].1.argument("value"), Some(&Value::Integer(3)));
                 });
             },
         );
