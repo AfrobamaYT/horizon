@@ -4021,10 +4021,19 @@ impl Game<'_> {
         pos: [i32; 3],
         player_context: bool,
     ) -> Vec<[f64; 6]> {
+        self.outline_boxes_iter(world, anims, pos, player_context)
+            .collect()
+    }
+    /// The same outline traversal without allocating a box list.
+    fn outline_boxes_iter(
+        &self,
+        world: &World,
+        anims: &horizon_client::block_entity_anim::BlockEntityAnims,
+        pos: [i32; 3],
+        player_context: bool,
+    ) -> impl Iterator<Item = [f64; 6]> + '_ {
         let state = world.block(pos[0], pos[1], pos[2]);
-        if let Some(b) = self.context_outline(pos, state, player_context, anims) {
-            return vec![std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i])];
-        }
+        let context = self.context_outline(pos, state, player_context, anims);
         let f = self.res.facts().get(state);
         let o = perspective::outline_offset(
             &self.pack.context.tables,
@@ -4038,10 +4047,19 @@ impl Game<'_> {
             f64::from(pos[1]) + o[1],
             f64::from(pos[2]) + o[2],
         ];
-        f.outline
-            .iter()
-            .map(|b| std::array::from_fn(|i| base[i % 3] + b[i]))
-            .collect()
+        let boxes = if context.is_some() {
+            &[][..]
+        } else {
+            f.outline.as_slice()
+        };
+        context
+            .map(|b| std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i]))
+            .into_iter()
+            .chain(
+                boxes
+                    .iter()
+                    .map(move |b| std::array::from_fn(|i| base[i % 3] + b[i])),
+            )
     }
     /// Voxel traversal against non-air, non-fluid blocks, clipped against
     /// each block's outline shape (`BlockGetter.clip` with `ClipContext.Block.OUTLINE`).
