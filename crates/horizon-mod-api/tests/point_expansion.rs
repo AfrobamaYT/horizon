@@ -1,8 +1,8 @@
-//! `#[point]` at run time: a method with the attribute, and the slots and records the generator
-//! would write for it, declared here where the expansion looks for them (`crate::game::points`).
+//! `#[point]` at run time: methods with the attribute, and the slot table, records and listener
+//! list the expansion finds in `crate::game::points`, declared here in place of the game's.
 use horizon_mod_api_macros::point;
-use mod_api::__private::point::Attach;
 use mod_api::ServerHost;
+use std::sync::atomic::Ordering;
 
 struct Counter {
     total: u32,
@@ -13,8 +13,9 @@ impl ServerHost for Counter {}
 
 mod game {
     pub mod points {
-        use mod_api::__private::point::{Place, Point};
         use mod_api::ServerHost;
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
 
         pub struct AddArgs {
             pub step: u32,
@@ -37,14 +38,44 @@ mod game {
             }
         }
 
-        type Listener<A> = fn(&mut dyn ServerHost, &mut A);
-        pub(crate) static ADD: Point<Listener<AddArgs>> = Point::new("Counter::add", Place::Head);
-        pub(crate) static ADD_RETURN: Point<Listener<AddArgs>> =
-            Point::new("Counter::add", Place::Return);
-        pub(crate) static RESET: Point<Listener<ResetArgs>> =
-            Point::new("Counter::reset", Place::Head);
-        pub(crate) static RESET_RETURN: Point<Listener<ResetArgs>> =
-            Point::new("Counter::reset", Place::Return);
+        pub struct SlotArgs {}
+
+        impl SlotArgs {
+            pub fn __new() -> Self {
+                Self {}
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        pub enum PointId {
+            Add,
+            AddReturn,
+            Reset,
+            ResetReturn,
+            Slot,
+        }
+
+        pub static POINTS: [AtomicBool; 5] = [const { AtomicBool::new(false) }; 5];
+
+        /// The listener the test installs: its own `Points`.
+        pub trait Points: Sync {
+            fn add(&self, _: &mut dyn ServerHost, _: &mut AddArgs) {}
+            fn add_return(&self, _: &mut dyn ServerHost, _: &mut AddArgs) {}
+            fn reset(&self, _: &mut dyn ServerHost, _: &mut ResetArgs) {}
+            fn reset_return(&self, _: &mut dyn ServerHost, _: &mut ResetArgs) {}
+            fn slot(&self, _: &mut dyn ServerHost, _: &mut SlotArgs) {}
+        }
+
+        pub static LISTENER: Mutex<Option<&'static dyn Points>> = Mutex::new(None);
+        pub static HEARD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+        pub fn listeners(
+            _: PointId,
+            name: &'static str,
+        ) -> impl Iterator<Item = &'static dyn Points> {
+            HEARD.lock().unwrap().push(name);
+            (*LISTENER.lock().unwrap()).into_iter()
+        }
     }
 }
 
@@ -59,41 +90,64 @@ impl Counter {
     fn reset(&mut self) {
         self.total = 0;
     }
+
+    /// Its value borrows the counter: a head and no return.
+    #[point(side = "server")]
+    fn slot(&mut self) -> &mut u32 {
+        &mut self.total
+    }
 }
 
-type Add = fn(&mut dyn ServerHost, &mut game::points::AddArgs);
-type Reset = fn(&mut dyn ServerHost, &mut game::points::ResetArgs);
+struct Listener;
+
+impl game::points::Points for Listener {
+    // Doubles the step, or answers 7 for a step of 100.
+    fn add(&self, _: &mut dyn ServerHost, args: &mut game::points::AddArgs) {
+        match args.step {
+            100 => args.result = Some(7),
+            _ => args.step *= 2,
+        }
+    }
+    fn add_return(&self, _: &mut dyn ServerHost, args: &mut game::points::AddArgs) {
+        args.result = args.result.map(|value| value + 1000);
+    }
+    fn reset(&self, _: &mut dyn ServerHost, args: &mut game::points::ResetArgs) {
+        args.cancel = true;
+    }
+}
 
 #[test]
 fn slots_change_arguments_stop_the_function_and_change_its_value() {
+    use game::points::{HEARD, LISTENER, POINTS, PointId};
     let mut counter = Counter { total: 0 };
-    // Empty slots: the function runs as written.
+    // Empty slots: the function runs as written, and no listener list is asked for.
     assert_eq!(counter.add(1), 1);
     counter.reset();
-    assert_eq!(counter.total, 0);
+    *counter.slot() = 0;
+    assert!(HEARD.lock().unwrap().is_empty());
 
-    // A head listener doubles the step, or answers 7 for a step of 100; a return listener adds
-    // 1000 to what the function returns.
-    let head: Add = |_, args| match args.step {
-        100 => args.result = Some(7),
-        _ => args.step *= 2,
-    };
-    let returned: Add = |_, args| args.result = args.result.map(|value| value + 1000);
-    game::points::ADD.attach(Box::new(vec![head])).unwrap();
-    game::points::ADD_RETURN
-        .attach(Box::new(vec![returned]))
-        .unwrap();
+    *LISTENER.lock().unwrap() = Some(&Listener);
+    for id in [
+        PointId::Add,
+        PointId::AddReturn,
+        PointId::Reset,
+        PointId::Slot,
+    ] {
+        POINTS[id as usize].store(true, Ordering::Release);
+    }
     // The doubled step reaches the body, and the return listener changes the value.
     assert_eq!(counter.add(3), 1006);
     assert_eq!(counter.total, 6);
-    // A head result returns at once: no body, no return slot.
+    // A head result returns at once: no body, no return place.
     assert_eq!(counter.add(100), 7);
     assert_eq!(counter.total, 6);
-
-    // A head cancel skips the body.
-    let cancel: Reset = |_, args| args.cancel = true;
-    game::points::RESET.attach(Box::new(vec![cancel])).unwrap();
+    // A head cancel skips the body; its unset return slot isn't asked.
     counter.reset();
     assert_eq!(counter.total, 6);
-    assert!(game::points::RESET_RETURN.get().is_none());
+    *counter.slot() += 1;
+    assert_eq!(counter.total, 7);
+    assert_eq!(
+        *HEARD.lock().unwrap(),
+        ["add", "add_return", "add", "reset", "slot"]
+    );
 }

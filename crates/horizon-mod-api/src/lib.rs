@@ -3350,17 +3350,14 @@ pub(crate) fn listened(hook: generated::HookId) -> bool {
     installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
-/// Whether an installed mod listens at `point`; `None` (a point this API lacks) never is.
-pub(crate) fn point_listened(point: Option<points::PointId>) -> bool {
-    point.is_some_and(|point| {
-        installed()
-            .is_some_and(|installed| installed.point_subscribers.contains_any(point as usize))
-    })
+/// Whether an installed mod listens at the point with this `PointId` index.
+pub(crate) fn point_listened_at(index: usize) -> bool {
+    installed().is_some_and(|installed| installed.point_subscribers.contains_any(index))
 }
 
 /// The mods listening at `point`, in dispatch order, each marked as running `name` so a panic in
 /// it names the mod, as [`entered`] marks a hook's.
-fn entered_points(
+pub(crate) fn entered_points(
     point: points::PointId,
     name: &'static str,
 ) -> impl Iterator<Item = &'static dyn points::Points> {

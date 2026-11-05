@@ -1,11 +1,18 @@
-//! Injection points (#589): the game's `#[point]` methods, read from its source like the hooks'
-//! functions, as the slot statics the launcher fills (`points_generated.rs`) and the list it
-//! routes injections by (`points.json`). Both are build outputs, never committed.
+//! Injection points (#589): every `Game` method [`point_shape::eligible`] admits is a point. The
+//! staging pass ([`stage`]) puts `#[point]` on each in a staged copy of the game's source, the copy
+//! the prebuilt game and the launcher's source builds compile; the generator lists the same points
+//! from any copy, staged or not, as `mod_api::points` (each point's record, the `Points` trait,
+//! `PointId`) and as `points.json`, the list the launcher routes injections by. All of them are
+//! build outputs, never committed.
 #[path = "../../horizon-mod-api-macros/src/point_shape.rs"]
 mod point_shape;
 
 use quote::{ToTokens, quote};
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+use syn::{ImplItem, Item, Type};
 
 /// One point, as `points.json` lists it.
 #[derive(Debug, serde::Serialize)]
@@ -24,133 +31,248 @@ pub struct GamePoint {
     /// What its listeners may do with the return: `cancel`, `result` (an API-typed value they
     /// may set at the head or change at the return) or `none`.
     pub returns: &'static str,
-    #[serde(skip)]
-    listener: String,
+    /// Whether it has a return place: not when the value returned borrows the game.
+    pub at_return: bool,
     #[serde(skip)]
     record_item: String,
-    /// Its `Points` methods, `PointId` variants and dispatchers ([`point_shape::Shape::api_items`]).
+    /// Its `Points` methods, `PointId` variants and subscription consts
+    /// ([`point_shape::Shape::api_items`]).
     #[serde(skip)]
     api: [String; 3],
 }
 
-/// The `#[point]` methods of `Game`, in `game.rs` and under `game/`, by name. Two with one name
-/// are refused, naming both: the second takes `#[point(name = "…")]`.
-pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
-    let src = root.join("crates/horizon-client/src");
-    let mut methods = Vec::new();
-    super::file_game_methods(&src.join("game.rs"), "horizon_client::game", &mut methods)?;
-    super::game_methods(&src.join("game"), "horizon_client::game", &mut methods)?;
-    let mut points = BTreeMap::<String, GamePoint>::new();
-    for (module, method) in methods {
-        let Some(attribute) = method.attrs.iter().find(|attr| {
-            attr.path()
-                .segments
-                .last()
-                .is_some_and(|segment| segment.ident == "point")
-        }) else {
-            continue;
-        };
-        let tokens = match &attribute.meta {
-            syn::Meta::List(list) => list.tokens.clone(),
-            _ => Default::default(),
-        };
-        let target = format!("{module}::Game<'_>::{}", method.sig.ident);
-        let shape =
-            point_shape::shape(tokens, &method.sig).map_err(|e| format!("{target}: {e}"))?;
-        let record_item = shape.record_item(&target).to_string();
-        let api = shape.api_items(&target);
-        let point = GamePoint {
-            record_item,
-            api: [api.0.to_string(), api.1.to_string(), api.2.to_string()],
-            target,
-            side: shape.side.name(),
-            host: match (shape.mutable, shape.side) {
-                (false, _) => "host",
-                (true, side) => side.name(),
-            },
-            hot: shape.hot,
-            args: shape
-                .args
-                .iter()
-                .map(|arg| {
-                    (
-                        arg.name.to_string(),
-                        arg.ty.to_token_stream().to_string().replace("& ", "&"),
-                    )
-                })
-                .collect(),
-            listener: shape.listener().to_string(),
-            record: shape.record().to_string(),
-            returns: match shape.returns {
-                point_shape::Returns::Unit | point_shape::Returns::UnitResult => "cancel",
-                point_shape::Returns::Value(_) => "result",
-                point_shape::Returns::Opaque => "none",
-            },
-            name: shape.name,
-        };
-        if let Some(other) = points.get(&point.name) {
-            return Err(format!(
-                "{} and {} are both the point {:?}: give one #[point(name = \"…\")]",
-                other.target, point.target, point.name
-            ));
-        }
-        points.insert(point.name.clone(), point);
-    }
-    Ok(points.into_values().collect())
+/// The attribute the staging pass writes: every point fires on both sides, its listeners
+/// matching on `HostSide` where it takes `&mut self`.
+const ATTRIBUTE: &str = "side = \"both\"";
+
+/// A source file of the game module, with its module path.
+struct GameFile {
+    module: String,
+    path: PathBuf,
 }
 
-/// The game's `points` module: a private head and return slot per point, and `attach_installed`,
-/// which fills each slot an installed mod subscribes to with `mod_api`'s dispatcher for it.
-pub(crate) fn slots(points: &[GamePoint]) -> String {
-    let ident = |name: String| syn::Ident::new(&name, proc_macro2::Span::call_site());
-    let slots: Vec<_> = points
-        .iter()
-        .flat_map(|point| {
-            let upper = point.name.to_uppercase();
-            [
-                (ident(upper.clone()), point, ident("Head".into())),
-                (ident(upper + "_RETURN"), point, ident("Return".into())),
-            ]
-        })
-        .collect();
-    let statics = slots.iter().map(|(slot, point, at)| {
-        let listener: proc_macro2::TokenStream =
-            point.listener.parse().expect("generated listener type");
-        let target = &point.target;
-        quote!(pub(crate) static #slot: Point<#listener> = Point::new(#target, Place::#at);)
-    });
-    let attach = slots.iter().map(|(slot, point, at)| {
-        let listener: proc_macro2::TokenStream =
-            point.listener.parse().expect("generated listener type");
-        let method = match at.to_string().as_str() {
-            "Head" => point.name.clone(),
-            _ => format!("{}_return", point.name),
-        };
-        let dispatcher = ident(format!("dispatch_{method}"));
-        let method = ident(method);
-        quote! {
-            if mod_api::__private::point_listened(mod_api::points::#method) {
-                let listener: #listener = mod_api::points::#dispatcher;
-                #slot.attach(Box::new(vec![listener])).expect("a slot is filled once, with its own type");
+/// The files of `horizon_client::game` that every build compiles, following its `mod`
+/// declarations (and `#[path]`s) from `game.rs`: a module behind a `cfg` is left out with
+/// everything under it.
+fn game_files(src: &Path) -> Result<Vec<GameFile>, String> {
+    let mut files = Vec::new();
+    let mut pending = vec![(
+        "horizon_client::game".to_owned(),
+        src.join("game.rs"),
+        src.join("game"),
+    )];
+    while let Some((module, path, dir)) = pending.pop() {
+        let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+        let here = path
+            .parent()
+            .expect("a source file has a folder")
+            .to_owned();
+        for item in &file.items {
+            let Item::Mod(declared) = item else { continue };
+            if declared.content.is_some() || gated(&declared.attrs) {
+                continue;
             }
+            let name = declared.ident.to_string();
+            let child = format!("{module}::{name}");
+            let explicit = declared.attrs.iter().find_map(|attr| match &attr.meta {
+                syn::Meta::NameValue(value) if attr.path().is_ident("path") => match &value.value {
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(path),
+                        ..
+                    }) => Some(path.value()),
+                    _ => None,
+                },
+                _ => None,
+            });
+            let (file, child_dir) = match explicit {
+                Some(relative) => {
+                    let file = here.join(relative);
+                    let dir = file.with_extension("");
+                    (file, dir)
+                }
+                None if dir.join(format!("{name}.rs")).is_file() => {
+                    (dir.join(format!("{name}.rs")), dir.join(&name))
+                }
+                None => (dir.join(&name).join("mod.rs"), dir.join(&name)),
+            };
+            pending.push((child, file, child_dir));
         }
-        .to_string()
-    });
-    // One `if` per line: the slots attach independently, and tokens on one line read to clippy as
-    // a missing `else`.
-    let attach = attach.collect::<Vec<_>>().join("\n");
-    let items = quote! {
-        use mod_api::__private::point::{Attach, Place, Point};
-        pub(crate) use mod_api::points::*;
-        #(#statics)*
-    };
-    format!(
-        "{items}\n/// Fills each slot an installed mod subscribes to, once, after the mods are installed.\npub(crate) fn attach_installed() {{\n{attach}\n}}\n"
-    )
+        files.push(GameFile { module, path });
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
+}
+
+/// Whether `attrs` hold a `cfg` (or `cfg_attr`): the item is compiled only in some builds.
+fn gated(attrs: &[syn::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"))
+}
+
+/// The point methods of one parsed file: each with its module path, from the file's inherent
+/// `impl Game` blocks and the inline modules every build compiles.
+fn file_points<'a>(module: &str, items: &'a [Item], out: &mut Vec<(String, &'a syn::ImplItemFn)>) {
+    for item in items {
+        match item {
+            Item::Mod(inline) if !gated(&inline.attrs) => {
+                if let Some((_, inner)) = &inline.content {
+                    file_points(&format!("{module}::{}", inline.ident), inner, out);
+                }
+            }
+            Item::Impl(block) if block.trait_.is_none() && !gated(&block.attrs) => {
+                let Type::Path(ty) = &*block.self_ty else {
+                    continue;
+                };
+                if ty.qself.is_some()
+                    || ty.path.segments.len() != 1
+                    || ty.path.segments[0].ident != "Game"
+                {
+                    continue;
+                }
+                for member in &block.items {
+                    if let ImplItem::Fn(method) = member
+                        && point_shape::eligible(&method.attrs, &method.sig)
+                    {
+                        out.push((module.to_owned(), method));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The game's points, by name: every eligible inherent `Game` method of the game module, whose
+/// names Rust already keeps unique.
+pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
+    let mut points = Vec::new();
+    for file in game_files(&root.join("crates/horizon-client/src"))? {
+        let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
+        let parsed =
+            syn::parse_file(&source).map_err(|e| format!("{}: {e}", file.path.display()))?;
+        let mut methods = Vec::new();
+        file_points(&file.module, &parsed.items, &mut methods);
+        for (module, method) in methods {
+            let target = format!("{module}::Game<'_>::{}", method.sig.ident);
+            let shape = point_shape::shape(ATTRIBUTE.parse().expect("the attribute"), &method.sig)
+                .map_err(|e| format!("{target}: {e}"))?;
+            let api = shape.api_items(&target);
+            points.push(GamePoint {
+                record_item: shape.record_item(&target).to_string(),
+                api: [api.0.to_string(), api.1.to_string(), api.2.to_string()],
+                at_return: shape.has_return(),
+                target,
+                side: shape.side.name(),
+                host: match (shape.mutable, shape.side) {
+                    (false, _) => "host",
+                    (true, side) => side.name(),
+                },
+                hot: shape.hot,
+                args: shape
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        (
+                            arg.name.to_string(),
+                            arg.ty.to_token_stream().to_string().replace("& ", "&"),
+                        )
+                    })
+                    .collect(),
+                record: shape.record().to_string(),
+                returns: match shape.returns {
+                    point_shape::Returns::Unit | point_shape::Returns::UnitResult => "cancel",
+                    point_shape::Returns::Value(_) => "result",
+                    point_shape::Returns::Opaque => "none",
+                },
+                name: shape.name,
+            });
+        }
+    }
+    points.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(points)
+}
+
+/// What [`stage`] did.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Staged {
+    /// Points given a slot.
+    pub points: usize,
+    /// Of those, the ones with a head only (their return value borrows the game).
+    pub head_only: usize,
+    /// Files rewritten.
+    pub files: usize,
+}
+
+/// The staging pass: puts `#[point]` on every point method of the staged copy at `root`, in
+/// place. Run on a copy, never on a working tree: the source tree carries no `#[point]`.
+pub fn stage(root: &Path) -> Result<Staged, String> {
+    let mut staged = Staged::default();
+    for file in game_files(&root.join("crates/horizon-client/src"))? {
+        let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
+        let parsed =
+            syn::parse_file(&source).map_err(|e| format!("{}: {e}", file.path.display()))?;
+        let mut methods = Vec::new();
+        file_points(&file.module, &parsed.items, &mut methods);
+        if methods.is_empty() {
+            continue;
+        }
+        let lines: Vec<usize> = std::iter::once(0)
+            .chain(source.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+        let mut at: Vec<usize> = methods
+            .iter()
+            .map(|(_, method)| {
+                if let Some(attr) = method.attrs.iter().find(|attr| {
+                    attr.path()
+                        .segments
+                        .last()
+                        .is_some_and(|segment| segment.ident == "point")
+                }) {
+                    return Err(format!(
+                        "{}: {} already has {}: the source carries no #[point]",
+                        file.path.display(),
+                        method.sig.ident,
+                        attr.to_token_stream()
+                    ));
+                }
+                let start = match &method.vis {
+                    syn::Visibility::Inherited => method.sig.fn_token.span.start(),
+                    vis => syn::spanned::Spanned::span(vis).start(),
+                };
+                let line = lines[start.line - 1];
+                Ok(source[line..]
+                    .char_indices()
+                    .nth(start.column)
+                    .map_or(source.len(), |(i, _)| line + i))
+            })
+            .collect::<Result<_, String>>()?;
+        staged.points += methods.len();
+        staged.head_only += methods
+            .iter()
+            .filter(|(_, method)| {
+                point_shape::shape(ATTRIBUTE.parse().expect("the attribute"), &method.sig)
+                    .is_ok_and(|shape| !shape.has_return())
+            })
+            .count();
+        at.sort_unstable();
+        let mut out = String::with_capacity(source.len() + at.len() * 48);
+        let mut from = 0;
+        for offset in at {
+            out.push_str(&source[from..offset]);
+            out.push_str(&format!("#[horizon_mod_api_macros::point({ATTRIBUTE})] "));
+            from = offset;
+        }
+        out.push_str(&source[from..]);
+        fs::write(&file.path, out).map_err(|e| format!("{}: {e}", file.path.display()))?;
+        staged.files += 1;
+    }
+    Ok(staged)
 }
 
 /// `mod_api::points`: each point's record, the type its listeners take, and the `Points` trait a
-/// mod implements to listen, with its `PointId`s and the dispatchers the game's slots hold.
+/// mod implements to listen, with its `PointId`s and subscription consts.
 pub(crate) fn records(points: &[GamePoint]) -> String {
     let parse = |code: &str| {
         code.parse::<proc_macro2::TokenStream>()
@@ -159,8 +281,7 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
     let records = points.iter().map(|point| parse(&point.record_item));
     let methods = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
-    let dispatch = points.iter().map(|point| parse(&point.api[2]));
-    let count = points.len() * 2;
+    let consts = points.iter().map(|point| parse(&point.api[2]));
     quote! {
         #(#records)*
         /// A point's place: each point's head and return, in the order of [`Points`]' methods.
@@ -168,8 +289,10 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
         #[repr(usize)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         #[non_exhaustive]
-        pub enum PointId { #(#variants)* }
-        pub(crate) const POINT_COUNT: usize = #count;
+        pub enum PointId { #(#variants)* __Count }
+        /// The number of places, the length of the game's slot table.
+        #[doc(hidden)]
+        pub const POINT_COUNT: usize = PointId::__Count as usize;
         /// The game's injection points a mod listens to (#589): one method per point's head and
         /// return, each a no-op until the mod overrides it. Implement it with
         /// `#[mod_api::horizon_mod]`, return it from [`Hooks::points`](crate::Hooks::points), and
@@ -179,7 +302,13 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
             fn subscribed(&self) -> &'static [Option<PointId>];
             #(#methods)*
         }
-        #(#dispatch)*
+        /// Each place's `PointId`, by its `Points` method's name: the subscriptions
+        /// `#[horizon_mod]` derives.
+        #[doc(hidden)]
+        pub mod ids {
+            use super::PointId;
+            #(#consts)*
+        }
     }
     .to_string()
 }
@@ -193,6 +322,11 @@ mod tests {
         point_shape::shape(attribute.parse().unwrap(), &method.sig).map_err(|e| e.to_string())
     }
 
+    fn eligible(method: &str) -> bool {
+        let method: syn::ImplItemFn = syn::parse_str(method).unwrap();
+        point_shape::eligible(&method.attrs, &method.sig)
+    }
+
     #[test]
     fn a_point_passes_only_api_typed_parameters() {
         let shape = point(
@@ -202,11 +336,6 @@ mod tests {
         .unwrap();
         let args: Vec<_> = shape.args.iter().map(|arg| arg.name.to_string()).collect();
         assert_eq!(args, ["yaw", "text"]);
-        assert_eq!(
-            shape.listener().to_string(),
-            quote!(fn(&mut dyn ::mod_api::ClientHost, &mut ::mod_api::points::TurnArgs<'_>))
-                .to_string()
-        );
         assert!(matches!(shape.returns, point_shape::Returns::Unit));
         let item = shape.record_item("t").to_string();
         assert!(
@@ -221,12 +350,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            (read.name.as_str(), read.slot().to_string()),
-            ("reach_of", "REACH_OF".into())
-        );
-        assert_eq!(
-            read.listener().to_string(),
-            quote!(fn(&dyn ::mod_api::Host, &mut ::mod_api::points::ReachOfArgs)).to_string()
+            (read.name.as_str(), read.variant().to_string()),
+            ("reach_of", "ReachOf".into())
         );
         assert!(
             read.record_item("t")
@@ -250,77 +375,96 @@ mod tests {
             returns("fn hit(&self) -> Option<(usize, f64)> {}"),
             Ok(point_shape::Returns::Opaque)
         ));
-        assert!(
-            point(r#"side = "both""#, "fn f(&mut self, cancel: bool) {}")
-                .err()
-                .expect("refused")
-                .contains("rename")
-        );
+        let at_return = |sig: &str| point(r#"side = "both""#, sig).unwrap().has_return();
+        assert!(at_return("fn hit(&self) -> Option<(usize, f64)> {}"));
+        assert!(!at_return(
+            "fn slot(&mut self, i: u32) -> Option<&mut ItemStack> {}"
+        ));
+        assert!(!at_return("fn view(&self) -> View<'_> {}"));
     }
 
     #[test]
-    fn a_point_needs_a_side_and_a_game_receiver() {
-        let refused = |attribute, method| point(attribute, method).err().expect("refused");
-        assert!(refused("", "fn tick(&mut self) {}").contains("side"));
-        assert!(refused(r#"side = "both""#, "fn free(x: u8) {}").contains("method"));
-        assert!(
-            refused(r#"side = "up""#, "fn tick(&mut self) {}").contains("server, client or both")
-        );
+    fn every_plain_game_method_is_a_point() {
+        assert!(eligible("fn tick(&mut self) -> Result<()> {}"));
+        assert!(eligible("pub(super) fn reach(&self) -> f64 { 0.0 }"));
+        assert!(eligible("fn get<T: Copy>(&self) -> T { todo!() }"));
+        for left_out in [
+            "fn native_server_tick(&mut self) {}",
+            "fn new() -> Self {}",
+            "fn take(self) {}",
+            "const fn size(&self) -> usize { 0 }",
+            "async fn wait(&self) {}",
+            "#[cfg(test)] fn probe(&self) {}",
+            "#[inline(always)] fn hot(&self) {}",
+            "fn each(&self, f: impl Fn()) {}",
+            "fn iter(&self) -> impl Iterator<Item = u8> { todo!() }",
+            "fn stop(&self) -> ! { loop {} }",
+            "fn f(&mut self, cancel: bool) {}",
+        ] {
+            assert!(!eligible(left_out), "{left_out}");
+        }
     }
 
     #[test]
-    fn two_points_with_one_name_are_refused_naming_both() {
+    fn the_pass_marks_the_methods_the_generator_lists() {
         let root = std::env::temp_dir().join(format!("horizon-points-{}", std::process::id()));
         let src = root.join("crates/horizon-client/src");
-        std::fs::create_dir_all(src.join("game")).unwrap();
+        std::fs::create_dir_all(src.join("game/remote")).unwrap();
         std::fs::write(
             src.join("game.rs"),
-            "impl Game<'_> { #[mod_api::point(side = \"both\")] fn tick(&mut self) {} }",
+            "mod remote;\n#[cfg(test)]\nmod probes;\nimpl Game<'_> {\n    fn tick(&mut self) {}\n    pub(super) fn slot(&mut self) -> &mut u8 { todo!() }\n    fn native_tick(&mut self) {}\n}\n",
         )
         .unwrap();
         std::fs::write(
             src.join("game/remote.rs"),
-            "impl Game<'_> { #[point(side = \"client\")] fn tick(&mut self, input: u8) {} fn plain(&self) {} }",
+            "mod lan;\nimpl Game<'_> { fn send(&self, id: u32) {} }\nimpl Other { fn send(&self) {} }\n",
         )
         .unwrap();
-        let error = game_points(&root).unwrap_err();
-        assert!(
-            error.contains("horizon_client::game::Game<'_>::tick"),
-            "{error}"
-        );
-        assert!(
-            error.contains("horizon_client::game::remote::Game<'_>::tick"),
-            "{error}"
-        );
         std::fs::write(
-            src.join("game/remote.rs"),
-            "impl Game<'_> { #[point(side = \"client\", name = \"remote_tick\")] fn tick(&mut self, input: u8) {} }",
+            src.join("game/remote/lan.rs"),
+            "impl Game<'_> { fn join(&mut self) {} }",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("game/probes.rs"),
+            "impl Game<'_> { fn probe(&self) {} }",
         )
         .unwrap();
         let points = game_points(&root).unwrap();
-        let targets: Vec<_> = points
-            .iter()
-            .map(|p| (p.name.as_str(), p.target.as_str()))
-            .collect();
+        let targets: Vec<_> = points.iter().map(|p| p.target.as_str()).collect();
         assert_eq!(
             targets,
             [
-                (
-                    "remote_tick",
-                    "horizon_client::game::remote::Game<'_>::tick"
-                ),
-                ("tick", "horizon_client::game::Game<'_>::tick"),
+                "horizon_client::game::remote::lan::Game<'_>::join",
+                "horizon_client::game::remote::Game<'_>::send",
+                "horizon_client::game::Game<'_>::slot",
+                "horizon_client::game::Game<'_>::tick",
             ]
         );
-        let slots = slots(&points);
-        assert!(slots.contains("attach_installed"));
-        // Each slot attaches in its own statement: clippy reads `} if` on one line as a missing `else`.
-        assert!(!slots.contains("} if"), "{slots}");
         let api = records(&points);
         assert!(
-            api.contains("fn remote_tick_return") && api.contains("dispatch_tick"),
+            api.contains("fn tick_return") && !api.contains("fn slot_return"),
             "{api}"
         );
+        assert_eq!(
+            stage(&root).unwrap(),
+            Staged {
+                points: 4,
+                head_only: 1,
+                files: 3
+            }
+        );
+        let game = std::fs::read_to_string(src.join("game.rs")).unwrap();
+        assert!(
+            game.contains("    #[horizon_mod_api_macros::point(side = \"both\")] fn tick(")
+                && game.contains(
+                    "#[horizon_mod_api_macros::point(side = \"both\")] pub(super) fn slot("
+                )
+                && !game.contains("point(side = \"both\")] fn native_tick"),
+            "{game}"
+        );
+        // A second pass finds the attribute and refuses: the source tree never carries one.
+        assert!(stage(&root).unwrap_err().contains("already has"));
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

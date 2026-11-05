@@ -16,7 +16,6 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             vec![
                 ("mod_api_host_generated.rs", generated.implementation),
                 ("mod_api_fire_generated.rs", generated.fire),
-                ("points_generated.rs", super::points::slots(&points)),
             ]
         }
         Target::Api => {
