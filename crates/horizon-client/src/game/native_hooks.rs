@@ -9964,6 +9964,24 @@ impl Game<'_> {
         self.mod_sounds.borrow_mut().push((sound.clone(), after));
         true
     }
+    /// The particles alive in the client's level (`ParticleEngine.countParticles`): 0 once
+    /// a clear is asked, and on a server.
+    pub(super) fn native_particle_count(&self) -> u32 {
+        if !self.native_window() || self.mod_clear_particles.get() {
+            return 0;
+        }
+        u32::try_from(self.particles.len()).unwrap_or(u32::MAX)
+    }
+    /// `ParticleEngine.clearParticles`: every particle and emitter goes, before the next
+    /// particle tick. It takes `&self`, so a screen or render hook can ask, as with
+    /// `native_play_local_sound`. False on a server.
+    pub(super) fn native_clear_particles(&self) -> bool {
+        if !self.native_window() {
+            return false;
+        }
+        self.mod_clear_particles.set(true);
+        true
+    }
     /// Draws one vanilla HUD layer between the mods' hooks: `native_gui_layer_pre`
     /// (which may hide it), the layer, then `native_gui_layer_post`. `None` when
     /// a mod hid the layer.
@@ -14147,6 +14165,42 @@ mod local_sound_tests {
                 assert!(game.mod_sounds.borrow().is_empty());
                 assert_eq!(game.audio.heard.get("minecraft:ui.button.click"), Some(&1));
             });
+        });
+    }
+}
+
+#[cfg(test)]
+mod particle_count_tests {
+    use horizon_client::particles::{ParticleOptions, ParticleType};
+    use mod_api::ClientHost;
+
+    /// `particle_count` and `clear_particles` through the client host: the count rises once
+    /// spawned particles tick in, reads 0 as soon as a clear is asked, and the next particle
+    /// tick removes them. A server answers 0 and refuses the clear.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_counts_and_clears_particles() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 0);
+            let at = game.particles.camera;
+            for _ in 0..3 {
+                game.particles
+                    .add(&ParticleOptions::simple(ParticleType::Flame), at, [0.0; 3]);
+            }
+            game.tick_particles();
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 3);
+            assert!(host.clear_particles());
+            assert_eq!(host.particle_count(), 0);
+            game.tick_particles();
+            assert!(game.particles.is_empty());
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 0);
+            game.options.execution_role = super::ExecutionRole::IntegratedServer;
+            let host: &dyn ClientHost = game;
+            assert!(!host.clear_particles());
         });
     }
 }

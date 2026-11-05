@@ -380,6 +380,10 @@ impl Game<'_> {
         lightmap_brightness(if self.dim == Dim::Nether { 0.1 } else { 0.0 }, raw)
     }
     pub(super) fn tick_particles(&mut self) {
+        // A client mod's `clear_particles`, before this tick adds any.
+        if self.mod_clear_particles.take() {
+            self.particles.clear();
+        }
         self.fog.tick_flicker();
         let eye = self.eye_position();
         if let Some(e) = eye {

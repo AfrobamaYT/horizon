@@ -4644,6 +4644,15 @@ pub trait Helpers {
     fn block_entity_sync();
     #[helper(side = "client")]
     fn play_local_sound();
+    /// How many particles the client's level has alive (`ParticleEngine.countParticles`); 0 once
+    /// `clear_particles` was asked, and on a server.
+    #[helper(side = "client")]
+    fn particle_count();
+    /// Removes every particle and emitter of the client's level (`ParticleEngine.clearParticles`),
+    /// at the next particle tick: it takes `&self`, so a screen or render hook can ask. False on
+    /// a server.
+    #[helper(side = "client")]
+    fn clear_particles();
     #[helper(side = "client")]
     fn fill();
     #[helper(side = "client")]
