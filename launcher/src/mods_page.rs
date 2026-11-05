@@ -52,6 +52,8 @@ pub(super) enum Event {
     About(HashMap<String, Vec<String>>),
     /// Registry files taken down that the launcher turned off.
     TakenDown(Vec<String>),
+    /// What the automatic updates did (`horizon::auto`).
+    AutoUpdated(Vec<String>),
     /// A project page's part, an image or a filter's values (`mods_project`).
     Loaded(super::mods_project::Loaded),
     /// The palette's registry mods for its search of that number.
@@ -395,6 +397,13 @@ impl Launcher {
                     m.about.extend(about);
                     m.results_list.reset();
                 }
+                Event::AutoUpdated(lines) => {
+                    if !lines.is_empty() {
+                        m.message = Some(Ok(lines.join("\n")));
+                        m.installed = installed::Installed::load(&m.home()).entries;
+                        m.installed_list.reset();
+                    }
+                }
                 Event::TakenDown(lines) => {
                     m.message = Some(Ok(lines.join("\n")));
                     m.installed = installed::Installed::load(&m.home()).entries;
@@ -505,6 +514,27 @@ impl Launcher {
             let lines = horizon::turn_off_revoked(&index, &home);
             if !lines.is_empty() {
                 let _ = tx.send(Event::TakenDown(lines));
+            }
+        });
+    }
+
+    /// At start: recover interrupted updates, then update every Horizon instance's registry
+    /// content when enabled ([`auto_update`]), reading the selected instance's list again after.
+    pub(super) fn mods_auto_update(&mut self) {
+        let enabled = self.settings.auto_updates_mods();
+        let list: Vec<AutoTarget> = self
+            .instances
+            .list
+            .iter()
+            .map(|i| AutoTarget {
+                instance: i.clone(),
+            })
+            .collect();
+        let tx = self.mods.tx.clone();
+        std::thread::spawn(move || {
+            let lines = auto_update(&list, enabled);
+            if !lines.is_empty() {
+                let _ = tx.send(Event::AutoUpdated(lines));
             }
         });
     }
@@ -1666,6 +1696,31 @@ impl Launcher {
         }
         out
     }
+}
+
+/// An instance whose registry projects may update.
+pub(super) struct AutoTarget {
+    pub(super) instance: instances::Instance,
+}
+
+/// Updates the registry projects of `targets`: Horizon's own instances only, never a modpack's
+/// profile, whose pack pins its mods. Returns what happened for the page's notice.
+pub(super) fn auto_update(targets: &[AutoTarget], enabled: bool) -> Vec<String> {
+    let mut lines = Vec::new();
+    for t in targets {
+        let i = &t.instance;
+        let pack = i.id.starts_with("pack:") || i.id.starts_with("port:");
+        let (false, None) = (pack, &i.java) else {
+            continue;
+        };
+        let ctx = horizon::auto::Context {
+            in_pack: horizon::auto::in_pack(&i.home),
+        };
+        if let Some(report) = horizon::auto::run(&i.home, &ctx, enabled, &|_, _| {}) {
+            lines.extend(report.lines());
+        }
+    }
+    lines
 }
 
 /// Where a kind's tab searches first: Horizon's registry for mods and shader packs, Modrinth for
