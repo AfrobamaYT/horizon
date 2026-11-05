@@ -176,8 +176,9 @@ villager (`is_sleeping`, `sleeping_pos`, `start_sleeping`, `stop_sleeping`, `set
 the jump of the player in place (`is_jumping`, `set_is_jumping`), climbing (`is_climbing`, the same `onClimbable`
 movement uses, including the gliding exclusion for vines) and the baby read (`baby`). Server player sleep writes
 work for the integrated owner, LAN guests and dedicated-server guests in the level in place, both inside and
-outside their own turn; guests in another dimension and fake players refuse all four sleep writes without mutation. A suspended outer actor is unavailable during a nested turn. Glide counters and
-stops follow the same authoritative body across turns. These reads do not add client tracked-entity coverage.
+outside their own turn; guests in another dimension and fake players refuse all four sleep writes without
+mutation. A suspended outer actor is unavailable during a nested turn. Glide counters and stops follow the
+same authoritative body across turns. These reads do not add client tracked-entity coverage.
 
 `start_sleeping` requires a bed with an available sleep shape before changing any state (a villager also refuses an
 occupied bed). It moves the sleeper onto that shape and occupies the bed. `stop_sleeping` stands the sleeper up
