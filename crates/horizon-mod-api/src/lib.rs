@@ -97,6 +97,8 @@ pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, OwningLoad, OwningLoop,
     PackageInfo, PackageKind, RegistrationContext,
 };
+mod advancement_progress;
+pub use advancement_progress::{AdvancementProgress, CriterionProgress};
 mod criteria;
 pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
 mod packets;

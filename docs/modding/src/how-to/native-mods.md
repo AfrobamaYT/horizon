@@ -76,6 +76,19 @@ are generated imports, and acquiring a service just reborrows the current call's
 frame resource. Block and fluid scheduling stays on `LevelTicksHost`, and
 `tick_stats()` stays on `ServerHost`.
 
+## Observing advancement progress
+
+Subscribe to `player_advancement_progress` to inspect the whole advancement immediately after
+one criterion is granted or revoked, before its completion rewards. `event.progress.criteria`
+includes obtained and unobtained criteria; `obtained_at` is the original saved grant date or
+`None`. `requirements` lists the OR groups, `completed_requirements` counts satisfied groups,
+and `done` is the game's completion result. This also describes first-tick and reload grants
+for the event's player, even when another player's state is in place.
+
+Keep `event.progress.clone()` if it is needed later: the owned `AdvancementProgress` snapshot
+cannot change the player's progress and is not updated by subsequent events. No-op grants and
+revokes do not fire. The snapshot uses the same plain-data bindings in native and wasm mods.
+
 ## Filtering toast notifications
 
 Implement `Hooks::toast_add` to filter a client notification before it enters its

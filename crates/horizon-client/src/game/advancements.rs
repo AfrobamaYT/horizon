@@ -20,6 +20,30 @@ use std::{
     time::Instant,
 };
 
+#[cfg(test)]
+mod progress_tests;
+
+/// Capture the owning progress without changing its dates or requirement semantics.
+fn progress_snapshot(a: &adv::Advancement, progress: &Progress) -> mod_api::AdvancementProgress {
+    let obtained = progress.criteria.get(&a.id);
+    mod_api::AdvancementProgress::new(
+        a.criteria
+            .iter()
+            .map(|criterion| {
+                mod_api::CriterionProgress::new(
+                    criterion.name.clone(),
+                    obtained
+                        .and_then(|criteria| criteria.get(&criterion.name))
+                        .cloned(),
+                )
+            })
+            .collect(),
+        a.requirements.clone(),
+        progress.counts(a).0 as u32,
+        progress.done(a),
+    )
+}
+
 pub(super) struct Toast {
     icon: String,
     frame: Frame,
@@ -782,13 +806,18 @@ impl Game<'_> {
             self.lan_acting_entity,
             self.lan_acting_name.clone(),
         ) {
+            let definition = self.adv.tree.get(advancement).expect("changed advancement");
+            let progress = progress_snapshot(definition, &self.adv.progress);
             self.native_player_advancement_progress(
-                uuid,
-                entity_id as i32,
-                &name,
-                advancement,
-                criterion,
-                progress_type,
+                mod_api::__private::PlayerAdvancementProgressCall {
+                    player: uuid,
+                    player_entity_id: entity_id as i32,
+                    name: &name,
+                    advancement,
+                    criterion,
+                    progress_type,
+                    progress: &progress,
+                },
             );
         }
     }
@@ -810,14 +839,32 @@ impl Game<'_> {
                     continue;
                 };
                 fresh.push(grant.clone());
-                self.native_player_advancement_progress(
-                    task.player,
-                    task.entity_id,
-                    &task.name,
-                    &grant.advancement,
-                    &grant.criterion,
-                    NativeProgressType::Grant,
-                );
+                if mod_api::__private::listened(mod_api::HookId::PlayerAdvancementProgress) {
+                    let guest = self
+                        .lan
+                        .as_ref()
+                        .expect("granted guest's host")
+                        .hub
+                        .guest(task.conn)
+                        .expect("granted guest");
+                    let definition = task
+                        .sync
+                        .advancements
+                        .definition(&grant.advancement)
+                        .expect("granted advancement");
+                    let progress = progress_snapshot(definition, &guest.advancements);
+                    self.native_player_advancement_progress(
+                        mod_api::__private::PlayerAdvancementProgressCall {
+                            player: task.player,
+                            player_entity_id: task.entity_id,
+                            name: &task.name,
+                            advancement: &grant.advancement,
+                            criterion: &grant.criterion,
+                            progress_type: NativeProgressType::Grant,
+                            progress: &progress,
+                        },
+                    );
+                }
                 if let Some(host) = self.lan.as_mut() {
                     host.hub.reward_native_tick(&task, grant, was_done);
                 }

@@ -1017,9 +1017,9 @@ use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
     GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
     NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
-    NativeProgressType, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
-    RecipeBookCategory, ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase,
-    TicketController, ToolUse, WorldPhase,
+    NativeServerPlayer, PathComputationType, Placement, PlayerRef, RecipeBookCategory,
+    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
@@ -5437,25 +5437,13 @@ impl Game<'_> {
     }
     /// A criterion of a server player's advancement was granted or revoked, after its progress changed
     /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
-    /// The full advancement progress is
-    /// not yet exposed (tracked on #29).
+    /// The call carries a snapshot of all criterion dates and requirement results at this mutation;
+    /// no player-progress storage is borrowed while listeners run.
     pub(super) fn native_player_advancement_progress(
         &mut self,
-        player: u128,
-        player_entity_id: i32,
-        name: &str,
-        advancement: &str,
-        criterion: &str,
-        progress_type: NativeProgressType,
+        call: mod_api::__private::PlayerAdvancementProgressCall<'_>,
     ) {
-        self.fire_player_advancement_progress(
-            player,
-            player_entity_id,
-            name,
-            advancement,
-            criterion,
-            progress_type,
-        );
+        self.fire_player_advancement_progress(call);
     }
     /// A statistic is about to be awarded to a server player, before its count and scoreboard criteria
     /// change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, and
