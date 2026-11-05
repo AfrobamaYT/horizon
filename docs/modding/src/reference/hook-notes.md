@@ -164,7 +164,9 @@ requires a farmer at work and `mob_griefing` enabled.
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
   drops; `native_entity_place` (`EntityPlaceEvent`, `EntityMultiPlaceEvent`) hears a block placed from an item
   (`BlockItem.place`), an enderman putting its block down or a snow golem's trail, before it is written, and may cancel it:
-  nothing is placed and the stack is kept. A bed, door or tall plant arrives as one `Placement::Multi`. Silverfish
+  nothing is placed and the stack is kept. For a player, `placed_against` is the state next to the primary placed
+  block opposite the clicked face, even when the clicked block is replaceable; for mobs it is the state below.
+  A bed, door or tall plant arrives as one `Placement::Multi`. Silverfish
   infesting, turtle eggs and falling blocks are not placements yet.
 
 - Block entities for a mod's blocks (`native_block_entity`, `native_block_entity_ticks`,
