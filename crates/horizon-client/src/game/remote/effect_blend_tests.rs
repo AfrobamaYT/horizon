@@ -55,14 +55,12 @@ fn assert_blend(game: &Game<'_>, living: LivingRef, expected: [f32; 6]) {
             "partial tick {partial}"
         );
     }
-    for partial in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        assert!(
-            living
-                .effect_blend_factor(game, "speed", partial)
-                .unwrap()
-                .is_nan()
-        );
-    }
+    assert!(
+        living
+            .effect_blend_factor(game, "speed", f32::NAN)
+            .unwrap()
+            .is_nan()
+    );
 }
 
 #[test]
@@ -128,6 +126,59 @@ fn ordinary_effect_first_read_does_not_restart_the_blend() {
             });
         }
     }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn ordinary_effect_infinite_partial_ticks_follow_the_blend_direction() {
+    with_client(|game, living, speed| {
+        update(game, speed, 100, 10);
+        // Mth.lerp: infinite partial ticks produce NaN for a flat blend,
+        // but signed infinities when the two factors differ.
+        for partial in [f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(
+                living
+                    .effect_blend_factor(game, "speed", partial)
+                    .unwrap()
+                    .is_nan()
+            );
+        }
+        game.tick_client_effects();
+        assert_eq!(
+            living.effect_blend_factor(game, "speed", f32::INFINITY),
+            Some(f32::INFINITY)
+        );
+        assert_eq!(
+            living.effect_blend_factor(game, "speed", f32::NEG_INFINITY),
+            Some(f32::NEG_INFINITY)
+        );
+        game.tick_client_effects();
+        for partial in [f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(
+                living
+                    .effect_blend_factor(game, "speed", partial)
+                    .unwrap()
+                    .is_nan()
+            );
+        }
+        update(game, speed, 1, 10);
+        game.tick_client_effects();
+        assert_eq!(
+            living.effect_blend_factor(game, "speed", f32::INFINITY),
+            Some(f32::NEG_INFINITY)
+        );
+        assert_eq!(
+            living.effect_blend_factor(game, "speed", f32::NEG_INFINITY),
+            Some(f32::INFINITY)
+        );
+        remove(game, speed);
+        for partial in [f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(
+                living.effect_blend_factor(game, "speed", partial),
+                Some(0.0)
+            );
+        }
+    });
 }
 
 #[test]
