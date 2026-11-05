@@ -6116,14 +6116,10 @@ impl Game<'_> {
         // Window callbacks only queue clicks, so an interaction cannot leak
         // between CLIENT_TICK_END and a later pong.
         self.remote_handle_input();
-        // Player.tick's ItemCooldowns.tick, in ClientLevel.tickEntities after
-        // handleKeybinds: this path replaces `tick_world`'s for a server's
-        // client (multiplayer and the default single player), so the entries
-        // advance here or the slot stays shaded until the server says the
-        // entry ended. `onCooldownEnded` is the plain ItemCooldowns' no-op on
-        // a client. Ticking it after the keybinds keeps a held use from
-        // trying again a tick before the server's entry ends.
-        self.cooldowns.tick();
+        self.tick_remote_player(running, hold)
+    }
+
+    fn tick_remote_player(&mut self, running: bool, hold: bool) -> Result<()> {
         // Inventory.tick's ItemStack.inventoryTick: the pop time runs down.
         if !hold {
             for pop in &mut self.hotbar_pop {
@@ -6170,8 +6166,6 @@ impl Game<'_> {
             self.tick_client_ambient();
             self.tick_client_effects();
         }
-        // Player.tick's sleep counter (the darkening and the wake-up fade).
-        self.sleep_timer = super::tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
         // Gui.tick: the titles, the action bar and the held item's name.
         if !hold {
             self.tick_hud();
@@ -6203,6 +6197,48 @@ impl Game<'_> {
             }
             return Ok(());
         }
+        // LocalPlayer.tick reaches Player.tick only once the client has loaded
+        // and the player's chunk is there; its endpoints bracket that work
+        // alone, also on the death screen, not the level pass before it.
+        let player = self
+            .remote
+            .as_ref()
+            .is_some_and(|r| r.loaded_sent)
+            .then(|| {
+                (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
+                    || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
+                .then(|| self.native_local_player())
+                .flatten()
+            })
+            .flatten();
+        if let Some(player) = player {
+            self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
+        }
+        let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
+        if let Some(player) = player {
+            self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
+        }
+        result
+    }
+
+    /// `LocalPlayer.tick`'s `Player.tick` work: input, riding, motion, sleep
+    /// and the state the server hears.
+    fn tick_local_player(
+        &mut self,
+        entity_collisions: Vec<horizon_core::geometry::Aabb>,
+        pushed: Vec3,
+        sprint_window: i32,
+    ) -> Result<()> {
+        // Player.tick's ItemCooldowns.tick, after Pre and after
+        // handleKeybinds: this path replaces `tick_world`'s for a server's
+        // client (multiplayer and the default single player), so the entries
+        // advance here or the slot stays shaded until the server says the
+        // entry ended. `onCooldownEnded` is the plain ItemCooldowns' no-op on
+        // a client. Ticking it after the keybinds keeps a held use from
+        // trying again a tick before the server's entry ends.
+        self.cooldowns.tick();
+        // Player.tick's sleep counter (the darkening and the wake-up fade).
+        self.sleep_timer = super::tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
         let stick = self.pad_move();
         if self.player.is_none() {
             return Ok(());
@@ -6846,23 +6882,44 @@ impl Game<'_> {
         };
         let mut lerps = std::mem::take(&mut r.lerps);
         let mut cart_lerps = std::mem::take(&mut r.cart_lerps);
-        let stepped = &mut r.stepped;
-        let head_lerps = &mut r.head_lerps;
-        let players = &r.level_players;
-        let tab_players = &r.tab_players;
         let mut using = Vec::new();
         let mut mob_fx = water_fx;
-        for (m, rain) in self.mobs.iter_mut().zip(rain) {
-            let player = players.contains_key(&(m.id as i32));
+        let tick_listened = mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
+            || mod_api::__private::listened(mod_api::HookId::PlayerTickPost);
+        for (i, rain) in rain.into_iter().enumerate() {
+            let id = self.mobs[i].id;
+            let player = self
+                .remote
+                .as_ref()
+                .unwrap()
+                .level_players
+                .contains_key(&(id as i32));
+            if (!running && !player) || driven == Some(id) {
+                continue;
+            }
+            let player_ref = tick_listened
+                .then(|| {
+                    self.remote.as_ref().and_then(|r| {
+                        let uuid = *r.level_players.get(&(id as i32))?;
+                        Some(mod_api::__private::game::player_ref(
+                            mod_api::EntityRef::new(self.native_lifecycle.epoch()?, id),
+                            uuid,
+                        ))
+                    })
+                })
+                .flatten();
+            let r = self.remote.as_mut().unwrap();
+            let stepped = &mut r.stepped;
+            let head_lerps = &mut r.head_lerps;
+            let players = &r.level_players;
+            let tab_players = &r.tab_players;
+            let m = &mut self.mobs[i];
             if player {
                 // AvatarRenderer.extractRenderState: isSpectator, from the player list.
                 m.extra.spectator = players
                     .get(&(m.id as i32))
                     .and_then(|uuid| tab_players.get(uuid))
                     .is_some_and(|t| t.game_mode == SPECTATOR);
-            }
-            if (!running && !player) || driven == Some(m.id) {
-                continue;
             }
             m.previous = m.position;
             // `Entity.deltaMovementOnPreviousTick`: the elytra's flight yaw
@@ -6941,6 +6998,13 @@ impl Game<'_> {
             {
                 place_interpolated(m, at);
             }
+            // `ClientLevel.tickNonPassenger`'s `commonTick` interpolated the
+            // entity before `Player.tick`, which `Pre` precedes.
+            if let Some(player) = player_ref {
+                self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
+            }
+            let head_lerps = &mut self.remote.as_mut().unwrap().head_lerps;
+            let m = &mut self.mobs[i];
             // LivingEntity.aiStep: the head's own interpolation.
             if let Some((yaw, steps)) = head_lerps.get_mut(&(m.id as i32))
                 && *steps > 0
@@ -7066,6 +7130,9 @@ impl Game<'_> {
                 }
                 _ => {}
             }
+            if let Some(player) = player_ref {
+                self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
+            }
         }
         // ExperienceOrb.tick runs on a client too (all but the merges and the
         // push out of a block, which are the server's): gravity, buoyancy,
@@ -7160,7 +7227,11 @@ impl Game<'_> {
                 &mut |splash| entered.push(splash),
             );
         }
-        head_lerps.retain(|_, (_, steps)| *steps > 0);
+        self.remote
+            .as_mut()
+            .unwrap()
+            .head_lerps
+            .retain(|_, (_, steps)| *steps > 0);
         // Entity.doWaterSplashEffect on this window: Level.addParticle draws
         // the bubbles and splashes. ClientLevel.playSeededSound drops
         // Entity.playSound, so the sound stays the server's.
@@ -13355,5 +13426,273 @@ mod tests {
         assert_eq!(respawn.event, 11);
         assert_eq!(crafting.event, 12);
         assert!(crafting.param == 1.0);
+    }
+}
+
+#[cfg(test)]
+mod player_tick_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use horizon_client::items::ItemStack;
+    use mod_api::{Host, HostSide, PlayerRef};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, PartialEq)]
+    struct Snapshot {
+        phase: &'static str,
+        side: &'static str,
+        uuid: u128,
+        diamonds: u32,
+        xp: i32,
+        cooldown: Option<i32>,
+    }
+
+    struct Log(Arc<Mutex<Vec<Snapshot>>>);
+    impl Log {
+        fn record(&self, side: HostSide<'_>, player: PlayerRef, phase: &'static str) {
+            let (host, side, cooldown): (&dyn Host, _, _) = match side {
+                HostSide::Server(host) => {
+                    assert_eq!(host.acting_player().unwrap().uuid, player.uuid());
+                    let cooldown = player
+                        .item_cooldowns(host)
+                        .unwrap()
+                        .first()
+                        .map(|c| c.ticks_left);
+                    (host, "server", cooldown)
+                }
+                HostSide::Client(host) => {
+                    if host.local_player() != Some(player) {
+                        assert_eq!(player.uuid(), 789);
+                        assert_eq!(player.entity().id(), 66);
+                        assert!(player.inventory(host).is_none());
+                    }
+                    (host, "client", None)
+                }
+            };
+            self.0.lock().unwrap().push(Snapshot {
+                phase,
+                side,
+                uuid: player.uuid(),
+                diamonds: player
+                    .inventory(host)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|s| &*s.item == "minecraft:diamond")
+                    .map(|s| s.count)
+                    .sum(),
+                xp: player.experience(host).map_or(0, |xp| xp.total),
+                cooldown,
+            });
+        }
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Log {
+        fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
+            self.record(host, event.player, "pre");
+        }
+        fn player_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPostEvent) {
+            self.record(host, event.player, "post");
+        }
+        fn can_continue_sleeping(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::CanContinueSleepingEvent<'_>,
+        ) -> Option<bool> {
+            // The sleep rule runs inside the tick, never ahead of Pre.
+            let heard = self.0.lock().unwrap();
+            assert_eq!(heard.last().unwrap().phase, "pre");
+            assert_eq!(heard.last().unwrap().uuid, event.entity);
+            Some(false)
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn guest_tick_brackets_sleep_cooldowns_pickups_and_death() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "log",
+            Box::new(Log(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                open_to_lan(game);
+                let mut g = guest(1);
+                g.loaded = true;
+                g.bed = Some([0, 0, 0]);
+                g.sleeping = true;
+                g.sleep_timer = 4;
+                let mut other = guest(2);
+                other.loaded = true;
+                other.position = [50.0, 0.0, 50.0];
+                let host = game.lan.as_mut().unwrap();
+                host.hub.guests.extend([g, other]);
+                host.play
+                    .entry(1)
+                    .or_default()
+                    .cooldowns
+                    .add("minecraft:ender_pearl".into(), 3);
+                let diamond = ItemStack::new("minecraft:diamond", 2);
+                game.spawn_item(diamond.clone(), [0.0; 3], [0.0; 3], 0);
+                let level = game.native_level("minecraft:overworld").unwrap();
+                assert!(game.native_level_award_experience(level, 0.0, 0.0, 0.0, 7));
+                game.tick_guests();
+                let observations = heard.lock().unwrap();
+                assert_eq!(
+                    observations
+                        .iter()
+                        .map(|s| (s.phase, s.uuid))
+                        .collect::<Vec<_>>(),
+                    [("pre", 123), ("post", 123), ("pre", 124), ("post", 124)]
+                );
+                assert_eq!(
+                    observations[0],
+                    Snapshot {
+                        phase: "pre",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 0,
+                        xp: 0,
+                        cooldown: Some(3)
+                    }
+                );
+                assert_eq!(
+                    observations[1],
+                    Snapshot {
+                        phase: "post",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(observations[2].diamonds, 0);
+                drop(observations);
+                assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].sleep_timer, 100);
+                assert!(game.lan.as_ref().unwrap().hub.guests[0].bed.is_none());
+                assert!(game.inventory.iter().all(Option::is_none));
+                heard.lock().unwrap().clear();
+                // A real zero-health death-screen tick still gets both endpoints,
+                // without use/cooldown/pickup work re-enabled.
+                let g = &mut game.lan.as_mut().unwrap().hub.guests[0];
+                g.dead = true;
+                g.health = 0.0;
+                game.spawn_item(diamond, [0.0; 3], [0.0; 3], 0);
+                assert!(game.native_level_award_experience(level, 0.0, 0.0, 0.0, 7));
+                game.tick_guests();
+                let observations = heard.lock().unwrap();
+                assert_eq!(
+                    observations[0],
+                    Snapshot {
+                        phase: "pre",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(
+                    observations[1],
+                    Snapshot {
+                        phase: "post",
+                        side: "server",
+                        uuid: 123,
+                        diamonds: 2,
+                        xp: 7,
+                        cooldown: Some(2)
+                    }
+                );
+                assert_eq!(observations.len(), 4);
+                assert_eq!(game.dropped.len(), 1);
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn client_player_ticks_on_the_death_screen_too() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "log",
+            Box::new(Log(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+                let (client, server) = horizon_protocol::connection::Pipe::pair();
+                game.connect_local(client, "tick-client").unwrap();
+                let remote = game.remote.as_mut().unwrap();
+                remote.logged_in = true;
+                remote.profile = 456;
+                remote.entity_id = 42;
+                game.player = horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .ok();
+                game.remote.as_mut().unwrap().level_players.insert(66, 789);
+                let kind = game
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .player_type
+                    .as_ref()
+                    .unwrap()
+                    .clone();
+                game.mobs.push(horizon_client::mobs::Mob::new(
+                    66,
+                    kind,
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                ));
+                game.cooldowns.add("minecraft:ender_pearl".into(), 3);
+                game.sleep_timer = 4;
+                // LocalPlayer.tick waits for the client load and its chunk: only
+                // the other player's pair runs, and the level pass still ticks.
+                game.tick_remote().unwrap();
+                // Player.tick owns both counters, so they wait with it.
+                assert_eq!(game.cooldowns.remaining().next().unwrap().1, 3);
+                assert_eq!(game.sleep_timer, 4);
+                let phases = || {
+                    std::mem::take(&mut *heard.lock().unwrap())
+                        .iter()
+                        .map(|s| (s.phase, s.side, s.uuid))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(phases(), [("pre", "client", 789), ("post", "client", 789)]);
+                game.remote.as_mut().unwrap().loaded_sent = true;
+                game.streaming
+                    .insert_remote(&mut game.world, horizon_client::chunk::Chunk::empty(0, 0));
+                // The other player's tick ends before the local player's starts.
+                game.tick_remote().unwrap();
+                assert_eq!(game.cooldowns.remaining().next().unwrap().1, 2);
+                assert_eq!(game.sleep_timer, 5);
+                game.screen = super::super::Screen::Dead;
+                game.player
+                    .as_mut()
+                    .unwrap()
+                    .set_health(0.0, false)
+                    .unwrap();
+                game.tick_remote().unwrap();
+                assert_eq!(
+                    phases(),
+                    [
+                        ("pre", "client", 789),
+                        ("post", "client", 789),
+                        ("pre", "client", 456),
+                        ("post", "client", 456),
+                        ("pre", "client", 789),
+                        ("post", "client", 789),
+                        ("pre", "client", 456),
+                        ("post", "client", 456)
+                    ]
+                );
+                server.shutdown();
+            })
+        });
     }
 }
