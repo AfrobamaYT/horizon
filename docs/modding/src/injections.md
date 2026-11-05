@@ -260,6 +260,67 @@ The source tree carries no `#[point]`: the build of the prebuilt game, and the l
 put one on each method in the copy they compile. A plain `cargo build` of the game in a checkout has no
 points; a mod listening there builds, and its listeners never fire.
 
+## Raw listeners and declared internals
+
+When an API-typed point cannot carry the state a mod needs, a native mod can declare game
+internals and a raw listener. Each internal is an API request: propose the missing hook, handle
+or Part on the [roadmap](https://github.com/arismoko/horizon/issues/771) so the mod can move back
+to the typed API.
+
+```toml
+[native]
+game = "26.3"
+horizon = "<exact game commit>"
+mixins = "<exact mixins commit>"
+internals = [
+    { path = "horizon_client::game::Game", hash = "<written by the tool>" },
+]
+
+[[native.injection]]
+id = "count"
+target = "horizon_client::game::Game<'_>::tick"
+kind = "HEAD"
+raw = "count"
+```
+
+`cargo horizon-mod internals add <path>` writes the path and hash from the pinned game's
+`internals.json`; don't invent hashes. `cargo horizon-mod update` shows the signature changes
+and refreshes the hashes. Each injection has exactly one of `trait_method`, `helper` or `raw`.
+`raw` names a function in the mod's crate root, not a helper source file, and accepts only
+`HEAD` or `RETURN` with no mixin bindings or selectors.
+
+Depend on `horizon-internals` (library `internals`) at the same pin as `horizon-mod-api`, never
+on `horizon-client` directly. The build generates a facade for this mod alone. Its nested
+modules re-export declared types and free functions: the declaration above makes
+`internals::game::Game` available. Declaring a field or inherent method exports its owner type;
+a type necessarily brings all its public fields and inherent methods. Undeclared types have no
+name in the facade and do not compile.
+
+A raw injection also exposes the point's listener and raw record in `internals::raw`, for
+example `__TickListener` and `__TickRaw`. Implement `pub fn count` with the exact listener type
+from `points.json` (including the receiver and argument-record lifetime). The facade's safe,
+typed `raw::tick` constructor registers it in the generated executable; a mismatched function
+fails at that registration line, naming the injection. `RETURN` uses the point's return
+listener and `raw::tick_return` constructor. Raw listeners work against the prebuilt game as
+well as source builds; only source-spliced helpers and modules require a game rebuild.
+
+Both routes check the actual game's metadata before compiling mods:
+
+- `E_INTERNAL_MISSING`: the declared path is absent (type shapes not exposed as internals
+  cannot be declared).
+- `E_INTERNAL_CHANGED`: the hash changed; the error names the new signature and asks for
+  `cargo horizon-mod update`.
+- `E_INTERNAL_GATED`: the entry exists only under a `cfg`; target-specific declarations are
+  not supported.
+- `E_NOT_RAW`: the injection's target has no raw form, for example because it is generic or
+  takes `impl Trait`.
+- `E_GAME_DEPENDENCY`: the mod depends directly on `horizon-client`; use the facade instead.
+- `E_INTERNAL_PATH`: the entry cannot be re-exported as an item, for example an entire module;
+  declare its types or free functions instead.
+
+The build log lists each mod's internals and raw places. The same information is recorded in
+`native-mods.json` beside the built game.
+
 ## Reference
 
 - A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after
