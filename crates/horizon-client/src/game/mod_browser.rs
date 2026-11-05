@@ -73,8 +73,11 @@ impl Jobs {
 
     /// What finished since the last frame, into `ui`. An installed mod is
     /// turned on in `mods`; the caller saves the settings and lists the mods
-    /// again when this returns true.
-    pub(super) fn poll(&mut self, ui: &mut ModBrowser, mods: &mut ModList) -> bool {
+    /// again when this returns true. Completion waits while a world owns its frozen registry set.
+    pub(super) fn poll(&mut self, ui: &mut ModBrowser, mods: &mut ModList, in_world: bool) -> bool {
+        if in_world {
+            return false;
+        }
         let Some(running) = &self.running else {
             return false;
         };
@@ -146,13 +149,48 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
 impl Game<'_> {
     /// Each frame: what the browser's worker finished.
     pub(super) fn drive_mod_browser(&mut self) {
-        let installed = self
-            .mods
-            .jobs
-            .poll(&mut self.ui.options.mod_browser, &mut self.settings.mods);
+        let installed = self.mod_jobs.poll(
+            &mut self.ui.options.mod_browser,
+            &mut self.settings.mods,
+            self.player.is_some(),
+        );
         if installed {
             self.settings.save(&Self::options_path());
             self.start_mods();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_install_finishing_after_world_open_waits_to_enable_its_content() {
+        let (send, receive) = channel();
+        let mut jobs = Jobs {
+            running: Some(receive),
+            index: None,
+        };
+        let mut ui = ModBrowser::default();
+        let mut mods = ModList::default();
+        mods.disabled.insert("ruby".into());
+        send.send(Finished::Installed(
+            Ok(Done {
+                id: "ruby".into(),
+                version: "1.0".into(),
+                verified: false,
+            }),
+            Vec::new(),
+        ))
+        .unwrap();
+        assert!(!jobs.poll(&mut ui, &mut mods, true));
+        assert!(mods.enabled.is_empty());
+        assert!(mods.disabled.contains("ruby"));
+        assert!(jobs.running.is_some());
+        assert!(jobs.poll(&mut ui, &mut mods, false));
+        assert!(mods.enabled.contains("ruby"));
+        assert!(!mods.disabled.contains("ruby"));
+        assert!(jobs.running.is_none());
     }
 }
