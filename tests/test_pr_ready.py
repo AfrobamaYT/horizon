@@ -63,7 +63,7 @@ class PrReadyTests(unittest.TestCase):
         self.assertTrue(pr_ready.launcher_rust("tools/ci/rust_changes.py"))
         self.assertTrue(pr_ready.launcher_rust("crates/horizon-prepare/src/lib.rs"))
         self.assertTrue(pr_ready.launcher_rust("crates/horizon-theme/src/lib.rs"))
-        self.assertTrue(pr_ready.launcher_rust("crates/horizon-telemetry/src/lib.rs"))
+        self.assertTrue(pr_ready.launcher_rust("crates/horizon-system/src/lib.rs"))
         self.assertTrue(pr_ready.launcher_rust("crates/horizon-mod-api-gen/src/injection.rs"))
         self.assertFalse(pr_ready.launcher_rust("launcher/links.json"))
         self.assertFalse(pr_ready.launcher_rust("launcher/README.md"))

@@ -11,7 +11,16 @@ pub trait Hooks {
         host = "level",
         target = "horizon_client::game::native_hooks::HitLevel<'_>::native_fall_on"
     )]
-    fn fall_on();
+    fn fall_on(
+        dimension: &str,
+        entity: i32,
+        kind: &str,
+        state: BlockStateId,
+        pos: BlockPos,
+        distance: f64,
+        damage: &mut f32,
+        writes: &mut Vec<LandingWrite>,
+    );
     /// An entity bounced off a block state this part is attached to (`Block.bounceOn`), after falling `event.fall_distance` blocks. It fires only when the entity bounced, just before vanilla sets its movement. `event.movement` is the movement the bounce leaves it (`x`, `y`, `z`): change it to change what the entity keeps. It runs inside the entity's move, on the level random host: it reads blocks and draws the level's random in vanilla's order, but writes nothing. Players and mobs bounce here; dropped items and the other entities do not yet.
     #[hook(
         side = "server",
@@ -22,5 +31,13 @@ pub trait Hooks {
         host = "level",
         target = "horizon_client::game::native_hooks::HitLevel<'_>::native_bounce_on"
     )]
-    fn bounce_on();
+    fn bounce_on(
+        dimension: &str,
+        entity: i32,
+        kind: &str,
+        state: BlockStateId,
+        pos: BlockPos,
+        fall_distance: f64,
+        movement: &mut [f64; 3],
+    );
 }

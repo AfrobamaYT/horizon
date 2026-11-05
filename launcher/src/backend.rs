@@ -3146,11 +3146,6 @@ pub enum Msg {
     PackLine(String),
     /// A modpack step ended: the pack as it now is.
     PackDone(Result<Box<crate::modpacks::Imported>, String>),
-    /// How many play Horizon now, or none when the server can't be reached (`telemetry`).
-    Playing(Option<u64>),
-    /// How many play on the official server now, or none when it doesn't answer its status ping
-    /// (`telemetry::watch_official`).
-    OfficialPlayers(Option<u64>),
     /// Where the native-mods build is (`native_mods::Step::label`).
     NativeProgress(String),
     /// The native-mods build ended: the version built, or why not.
@@ -3326,10 +3321,6 @@ pub struct Settings {
     /// Dark, Light, or the system's: the launcher's look. Dark by default.
     #[serde(default)]
     pub appearance: Appearance,
-    /// The player has read what the "I'm playing" ping holds (`telemetry::PING`): on the
-    /// first-run question, or on the Play page once if they answered that before it existed.
-    #[serde(default)]
-    pub ping_notice_seen: bool,
     /// The player without an account that owns the game has read, once, why the launcher needs
     /// one now (the owner gate's screen).
     #[serde(default)]

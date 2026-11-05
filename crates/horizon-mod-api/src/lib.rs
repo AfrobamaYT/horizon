@@ -111,7 +111,7 @@ pub use config_files::{
     ConfigPath, ConfigStat,
 };
 mod tooltip_element;
-pub use tooltip_element::{TooltipElement, TooltipImage};
+pub use tooltip_element::{TooltipElement, TooltipImage, TooltipPlace};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
@@ -179,7 +179,9 @@ pub use horizon_client_core::suggestion::Suggestion;
 pub use horizon_client_core::text::Text;
 #[horizon_mod_api_macros::wasm(via = (u64, Option<f64>))]
 pub use horizon_core::random::LegacyRandom;
-pub use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
+pub use horizon_core::{
+    arm_pose::ArmPose, geometry::Direction, position::BlockPos, random::RandomSource,
+};
 /// The registry facts a recipe viewer needs for an enchantment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -316,6 +318,44 @@ pub struct NativeKeyMapping {
     pub down: bool,
     /// The name of the key it is bound to, as Controls shows it (`KeyMapping.getTranslatedKeyMessage`).
     pub label: Text,
+}
+
+/// The metadata of a server play packet observed by `Hooks::client_packet`.
+///
+/// Fields beyond the type id are exposed only for custom payloads. This is
+/// plain mod API data, not the game's decoded protocol enum.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ClientPacket {
+    /// The protocol type, such as `minecraft:ping` or `minecraft:custom_payload`.
+    /// An id outside the protocol's packet table is reported as `horizon:unknown`.
+    pub id: Identifier,
+    /// The channel and bytes of a custom payload; `None` for other packet types.
+    pub custom_payload: Option<ClientPayload>,
+}
+
+impl ClientPacket {
+    /// Construct packet metadata with an optional custom payload.
+    pub fn new(id: Identifier, custom_payload: Option<ClientPayload>) -> Self {
+        Self { id, custom_payload }
+    }
+}
+
+/// The channel and uninterpreted bytes of a server custom payload.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ClientPayload {
+    /// The namespaced plugin channel, exactly as received.
+    pub channel: String,
+    /// The payload bytes, without the packet id or channel prefix.
+    pub data: Vec<u8>,
+}
+
+impl ClientPayload {
+    /// Construct a custom payload without interpreting its bytes.
+    pub fn new(channel: String, data: Vec<u8>) -> Self {
+        Self { channel, data }
+    }
 }
 
 /// Camera values from the most recently extracted world frame.
@@ -654,6 +694,10 @@ pub enum SoundSource {
 }
 
 impl SoundSource {
+    /// Its position in vanilla's `SoundSource` order, as the network sends it.
+    pub fn index(self) -> usize {
+        self as usize
+    }
     /// Every source, in vanilla's order (`SoundSource.values()`).
     pub const ALL: [SoundSource; 11] = [
         Self::Master,
@@ -854,6 +898,12 @@ pub struct NativeBlockRim {
     /// The line width in pixels.
     pub width: f32,
 }
+impl NativeBlockRim {
+    /// An outline of the block at `pos` in `argb`, `width` pixels wide.
+    pub const fn new(pos: [i32; 3], argb: u32, width: f32) -> Self {
+        Self { pos, argb, width }
+    }
+}
 
 /// A camera-local visual light, with no gameplay light or shadow writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -867,6 +917,17 @@ pub struct NativeColoredLight {
     pub radius: f32,
     /// The light's strength.
     pub intensity: f32,
+}
+impl NativeColoredLight {
+    /// A light at `at` in `rgb`, reaching `radius` blocks at strength `intensity`.
+    pub const fn new(at: [f64; 3], rgb: u32, radius: f32, intensity: f32) -> Self {
+        Self {
+            at,
+            rgb,
+            radius,
+            intensity,
+        }
+    }
 }
 
 /// The minimap a native mod shows (`native_minimap`), drawn by Horizon's
@@ -2346,43 +2407,6 @@ pub enum NativeExplosionInteraction {
     Block,
     /// Blocks break and drop by the `tnt_explosion_drop_decay` rule (`TNT`).
     Tnt,
-}
-
-/// Which volume slider a sound is played under (`SoundSource`). A sound source
-/// is the group a client's sound options control: an entity's is
-/// `Entity.getSoundSource`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NativeSoundSource {
-    /// The master volume category.
-    Master,
-    /// Music.
-    Music,
-    /// Jukeboxes and note blocks (`RECORDS`).
-    Records,
-    /// Rain and thunder.
-    Weather,
-    /// Blocks (`BLOCKS`).
-    Blocks,
-    /// Hostile mobs.
-    Hostile,
-    /// Friendly and neutral mobs.
-    Neutral,
-    /// Players (`PLAYERS`).
-    Players,
-    /// Ambient and block sounds.
-    Ambient,
-    /// Voice.
-    Voice,
-    /// Interface sounds.
-    Ui,
-}
-
-impl NativeSoundSource {
-    /// Its position in vanilla's `SoundSource` order, as the network sends it.
-    pub fn index(self) -> usize {
-        self as usize
-    }
 }
 
 /// The empty-context block shape requested from a level.

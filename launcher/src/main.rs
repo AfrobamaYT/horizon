@@ -8,7 +8,6 @@ mod art;
 mod blocks;
 mod cli;
 mod cli_tools;
-mod collection;
 mod console;
 mod console_page;
 mod cull;
@@ -95,7 +94,6 @@ use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::native_mods;
 use horizon_launcher::native_status;
-use horizon_launcher::telemetry;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -294,14 +292,12 @@ struct Launcher {
     wardrobe: Option<wardrobe_page::Wardrobe>,
     /// Ask the service again on the next draw of the Wardrobe (set by each visit).
     wardrobe_reload: bool,
-    /// The cosmetics service's last word on the founder set's claim (`GET /v1/shop`): whether
+    /// The cosmetics service's last word on the founder set's window (`GET /v1/shop`): whether
     /// the top bar has the Wardrobe page with cosmetics off (`wardrobe_shown`).
     shop_status: Option<horizon_launcher::wardrobe::Claim>,
     /// The selected account's own answer on it from its last Wardrobe visit, kept on disk (a
     /// preview the service grants it, its claim).
     shop_kept: Option<horizon_launcher::wardrobe::Claim>,
-    /// The Wardrobe page's Shop tab (`wardrobe_page/shop.rs`).
-    shop: wardrobe_page::Shop,
     /// Work the look out again on the next frame (a launcher theme put on or taken off).
     restyle: bool,
     /// Why the last picture for Home's background was refused.
@@ -381,14 +377,8 @@ struct Launcher {
     proxy_input: line_edit::LineEdit,
     proxy_focused: bool,
     proxy_focus: FocusHandle,
-    /// Opt-in data collection: the player's answer and Settings' section (`collection`).
-    collection: collection::Collection,
     /// Settings' "Connect an AI agent" (`agents_page`).
     agents: agents_page::AgentsUi,
-    /// How many play Horizon now, while the server answers ("N playing now" on the Play page).
-    playing: Option<u64>,
-    /// How many play on the official server now, while it answers ("M on the official SMP").
-    official_players: Option<u64>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     _appearance: Subscription,
@@ -608,7 +598,6 @@ impl Launcher {
             wardrobe_reload: false,
             shop_status: None,
             shop_kept: None,
-            shop: Default::default(),
             // The first draw takes the launcher theme from Settings.
             restyle: true,
             background_error: None,
@@ -663,10 +652,7 @@ impl Launcher {
             quick_play: None,
             client_run: None,
             client_vars: Vec::new(),
-            collection: collection::Collection::load(),
             agents: agents_page::AgentsUi::default(),
-            playing: None,
-            official_players: None,
             tx,
             rx,
             _appearance: appearance,
@@ -766,10 +752,6 @@ impl Launcher {
         {
             this.wardrobe_preview();
         }
-        // What the game and the launcher kept, if the player allows it and there is a server.
-        telemetry::send_in_background();
-        telemetry::watch_playing(this.tx.clone());
-        telemetry::watch_official(this.tx.clone());
         this
     }
 
@@ -1025,9 +1007,8 @@ impl Launcher {
                     self.releases = r.map_or_else(Load::Failed, Load::Ready)
                 }
                 Msg::Links(links) => {
-                    // The official server may have moved: its list entry and its count follow.
+                    // The official server may have moved: its list entry follows.
                     self.multiplayer.stale();
-                    telemetry::set_official_server(&links.official_server);
                     self.links = links;
                 }
                 // The page reads is_prepared when drawn; `changed` redraws it.
@@ -1076,8 +1057,6 @@ impl Launcher {
                         Err(e) => self.sign_in_state = Some(SignInState::Done(Err(e))),
                     }
                 }
-                Msg::Playing(playing) => self.playing = playing,
-                Msg::OfficialPlayers(players) => self.official_players = players,
                 Msg::JavaGame(id, home, cmd) => {
                     self.starting_client = None;
                     let spawned = cmd.and_then(|(cmd, vars)| {
@@ -3848,7 +3827,6 @@ impl Launcher {
                         ))
                     }),
             )
-            .child(self.collection_section(cx))
             .children(self.agents_section(cx))
             .children(self.dev_options_section(cx))
     }
@@ -5191,9 +5169,6 @@ impl Render for Launcher {
         if let Some(palette) = self.palette_overlay(window, cx) {
             root = root.child(palette);
         }
-        if self.asking_consent() {
-            root = root.child(self.consent_screen(cx));
-        }
         if self.asking_owner() {
             root = root.child(self.owner_screen(cx));
         }
@@ -5326,11 +5301,9 @@ impl Launcher {
 
 actions!(horizon_launcher, [Quit, CloseWindow]);
 
-/// What closing the last window does: stop the servers this launcher started, send the telemetry,
-/// exit. A game that is running keeps running. Cmd+Q goes through here too.
+/// What closing the last window does: stop the servers this launcher started, exit. A game that is running keeps running. Cmd+Q goes through here too.
 fn shut_down(cx: &mut App) {
     servers_page::stop_on_quit();
-    telemetry::send_before_exit();
     cx.quit()
 }
 

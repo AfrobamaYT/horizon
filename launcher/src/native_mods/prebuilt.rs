@@ -250,6 +250,8 @@ pub(super) fn fetch(
         ));
     }
     let unpacked = partial.join("game");
+    // `unpack_in` writes inside a folder that exists.
+    fs::create_dir_all(&unpacked).map_err(|e| e.to_string())?;
     let reader = flate2::read::GzDecoder::new(fs::File::open(&file).map_err(|e| e.to_string())?)
         .take(UNPACKED_LIMIT);
     let mut tar = tar::Archive::new(reader);

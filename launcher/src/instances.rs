@@ -455,7 +455,6 @@ const NOT_COPIED: &[&str] = &[
     "logs",
     "crash-reports",
     "sessions",
-    "telemetry",
     "mod-browser",
     ".horizon-cache",
     // Far terrain's copies of what servers sent, rebuilt as the instance plays.
@@ -684,12 +683,6 @@ fn follow_player(game_home: &Path, home: &Path) {
         if !home.join(f).exists() && game_home.join(f).is_file() {
             let _ = fs::copy(game_home.join(f), home.join(f));
         }
-    }
-    let consent = horizon_telemetry::consent::Consent::path(game_home);
-    if consent.is_file() {
-        let to = horizon_telemetry::consent::Consent::path(home);
-        let _ = fs::create_dir_all(to.parent().unwrap());
-        let _ = fs::copy(consent, to);
     }
     let no_ai = horizon_core::no_ai::is_on(game_home);
     if horizon_core::no_ai::is_on(home) != no_ai {

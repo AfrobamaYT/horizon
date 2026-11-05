@@ -30,7 +30,15 @@ pub trait Hooks {
         neoforge = "LivingDropsEvent",
         cancellable = true
     )]
-    fn living_drops();
+    fn living_drops(
+        entity: u32,
+        kind: &str,
+        player: Option<u128>,
+        source: &HurtSource<'_>,
+        recently_hit: bool,
+        drops: &mut Vec<NativeItemDrop>,
+        cancel: &mut bool,
+    );
     /// A dying mob `entity` of `kind` is about to roll its drop chance for
     /// the item `stack` in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's
     /// `GetEquipmentDropChanceEvent`). `original_chance` is
@@ -51,5 +59,15 @@ pub trait Hooks {
         neoforge = "GetEquipmentDropChanceEvent",
         cancellable = false
     )]
-    fn get_equipment_drop_chance();
+    fn get_equipment_drop_chance(
+        entity: u32,
+        kind: &str,
+        slot: EquipmentSlot,
+        source: &HurtSource<'_>,
+        recently_hit: bool,
+        stack: &ItemStack,
+        original_chance: f32,
+        preserved: bool,
+        chance: &mut f32,
+    );
 }

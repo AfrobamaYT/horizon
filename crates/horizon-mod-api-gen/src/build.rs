@@ -15,6 +15,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             fs::write(out_dir.join("points.json"), list + "\n").map_err(|e| e.to_string())?;
             vec![
                 ("mod_api_host_generated.rs", generated.implementation),
+                ("mod_api_fire_generated.rs", generated.fire),
                 ("points_generated.rs", super::points::slots(&points)),
             ]
         }

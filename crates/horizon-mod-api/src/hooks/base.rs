@@ -698,7 +698,15 @@ pub trait Hooks {
         neoforge = "LivingIncomingDamageEvent",
         target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_incoming_damage"
     )]
-    fn living_incoming_damage();
+    fn living_incoming_damage(
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        victim: &Victim,
+        weapon: Option<&ItemStack>,
+        container: &mut DamageContainer,
+        canceled: &mut bool,
+    );
     /// An entity leaves the server level `dimension` (NeoForge's
     /// `EntityLeaveLevelEvent`): vanilla's `onTrackingEnd`, when it is removed
     /// for any reason (picked up, merged, despawned, burnt, blown up, killed,
@@ -740,7 +748,18 @@ pub trait Hooks {
     /// changes apply after the hook; clearing `keep` ends the effect.
     /// Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
-    fn apply_effect_tick();
+    fn apply_effect_tick(
+        effect: &str,
+        dimension: &str,
+        entity: Option<i32>,
+        amplifier: i32,
+        holder: LivingRef,
+        health: f32,
+        max_health: f32,
+        food: Option<NativePlayerFood>,
+        changes: &mut Vec<EffectTickChange>,
+        keep: &mut bool,
+    );
     /// `MobEffect.onEffectAdded`: `LivingEntity.addEffect` gave `entity`
     /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
     /// which it didn't have. Server-side.
@@ -1705,7 +1724,18 @@ pub trait Hooks {
         neoforge = "LivingKnockBackEvent",
         target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_knockback"
     )]
-    fn living_knockback();
+    fn living_knockback(
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    );
     /// Whether the experience orb `into` takes the orb `from` in (vanilla's
     /// `ExperienceOrb.canMerge`): the same value, and ids a multiple of 40 apart. Asked
     /// for each pair whose boxes meet, when an orb spawns (`tryMergeToExisting`: `from` is

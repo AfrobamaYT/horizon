@@ -69,6 +69,7 @@ mod block_entity_anims;
 mod block_entity_ticks;
 mod block_items;
 mod blockctl;
+mod boarding;
 mod boat_authority_fixture;
 mod boat_leads;
 mod boat_passengers;
@@ -418,6 +419,7 @@ mod tutorial;
 mod tweaks;
 mod ui_control;
 mod vault;
+mod vehicle_teleport;
 mod villagers;
 mod wandering_trader;
 mod win;
@@ -3281,6 +3283,13 @@ struct Game<'a> {
     cart_models: minecarts::CartModels,
     /// The boat the player rides.
     riding: Option<u32>,
+    /// `Entity.boardingCooldown` of the acting player, and its vehicle at the
+    /// last tick (`game/boarding.rs`).
+    boarding_cooldown: i32,
+    riding_at_tick: Option<u32>,
+    /// A rotation-only write (`/rotate`, `Entity.forceSetRotation`) to the player of this
+    /// turn: `leave_guest` sends it as `ClientboundPlayerRotationPacket`, not a teleport.
+    rotation_forced: bool,
     /// The mount the last `position_rider` put the player on, to tell the tick
     /// a seat is taken (`Entity.moveTo`, no camera sweep) from the ones that
     /// follow it (`positionRider`, interpolated as usual).
@@ -3335,8 +3344,6 @@ struct Game<'a> {
     /// When an agent's last command came.
     agent_last: Option<Instant>,
     frame_stats: horizon_client::control::FrameStats,
-    /// This play session's frame and tick times, for opt-in performance statistics.
-    perf: horizon_client::telemetry::Session,
     /// Control replies waiting for a rendered frame or a benchmark deadline.
     pending_screenshot: Option<std::sync::mpsc::Sender<String>>,
     /// `render-capture DIR`: replied once the renderer wrote the scene.
@@ -3458,6 +3465,9 @@ struct Game<'a> {
     gamemode_switcher: Option<horizon_client::game_mode_switcher::GameModeSwitcher>,
     /// The system clipboard (`KeyboardHandler.clipboardManager`).
     clipboard: horizon_client::clipboard::SystemClipboard,
+    /// The game is handling a key, mouse or typed-text event, from the window or the
+    /// control socket: the only time a mod reaches the clipboard (`with_user_input`).
+    user_input: std::cell::Cell<bool>,
     /// Select All in the append-only text fields.
     text_selection: horizon_client::clipboard::AppendSelection,
     /// The world was saved for the application ending (`save_for_exit`).
@@ -7853,7 +7863,7 @@ impl Game<'_> {
                 let level = self.native_level(self.dim.id())?;
                 let source = match mob {
                     Some(living) => self.native_entity_sound_source(living.entity())?,
-                    None => mod_api::NativeSoundSource::Players,
+                    None => mod_api::SoundSource::Players,
                 };
                 self.native_queue_sound(level, sound, at, source, 1.0, 1.0, None)?;
                 true
@@ -9299,13 +9309,13 @@ impl Game<'_> {
             self.show_calibration(h);
         }
         if self.screen == Screen::Win {
-            let drawn = self.fire_screen_render_pre(&mut batch);
+            let drawn = self.draw_screen_with_pre_hook(&mut batch);
             if drawn {
                 self.draw_win_screen(&mut batch);
             }
             // The early return skips the match below: the hooks still see the
             // screen, after its own drawing.
-            self.fire_screen_render_post(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch, drawn);
             return batch;
         }
         if self.screen == Screen::Options {
@@ -9313,11 +9323,11 @@ impl Game<'_> {
                 self.flush_skin_slots();
                 self.update_remote_skins();
             }
-            let drawn = self.fire_screen_render_pre(&mut batch);
+            let drawn = self.draw_screen_with_pre_hook(&mut batch);
             if drawn {
                 self.draw_options(&mut batch);
             }
-            self.fire_screen_render_post(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch, drawn);
             self.draw_split_hud(&mut batch, true);
             return batch;
         }
@@ -9344,7 +9354,7 @@ impl Game<'_> {
             // TitleScreen.extractRenderState, then ToastManager over it: vanilla
             // draws the toast manager on every screen, so a pack download or a
             // resource-reload failure still shows on the title (#4428).
-            let drawn = self.fire_title_screen_render_pre(&mut batch);
+            let drawn = self.draw_title_screen_with_pre_hook(&mut batch);
             if drawn && let Some(title) = &self.title {
                 title.draw_with_items(
                     &self.gui.atlas,
@@ -9358,7 +9368,7 @@ impl Game<'_> {
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
             // over them here (a pack browser over Create New World, say), and the
             // toasts still come after, as over any screen.
-            self.fire_title_screen_render_post(&mut batch, drawn);
+            self.draw_title_screen_with_post_hook(&mut batch, drawn);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -9633,7 +9643,7 @@ impl Game<'_> {
         } else {
             self.screen
         };
-        let drawn = self.fire_screen_render_pre(&mut batch);
+        let drawn = self.draw_screen_with_pre_hook(&mut batch);
         match screen {
             _ if !drawn => {}
             Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),
@@ -9681,7 +9691,7 @@ impl Game<'_> {
         // tooltips, so a native mod draws over it here. Never `Playing`: the
         // prompts, books and sign editors drawn over gameplay keep it, draw
         // after this point and so over what a mod drew.
-        self.fire_screen_render_post(&mut batch, drawn);
+        self.draw_screen_with_post_hook(&mut batch, drawn);
         self.draw_saving_indicator(&mut batch);
         // ToastManager.extractRenderState: F1 hides the toasts too.
         self.draw_toasts(&mut batch, !show_hud);
@@ -9730,14 +9740,14 @@ impl Game<'_> {
     /// once a frame, before it draws itself: whether it is drawn (a cancelled
     /// `Render.Pre` skips it and its Background). The Win and Options screens
     /// call this on their own path. Client only: what a mod draws is its own.
-    fn fire_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
+    fn draw_screen_with_pre_hook(&self, batch: &mut HudBatch) -> bool {
         match self.screen_render_view(batch) {
             Some(view) => self.screen_render_begin(batch, &view),
             None => true,
         }
     }
-    /// `fire_screen_render_pre` for the title's own screens.
-    fn fire_title_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
+    /// `draw_screen_with_pre_hook` for the title's own screens.
+    fn draw_title_screen_with_pre_hook(&self, batch: &mut HudBatch) -> bool {
         match self.title_screen_render_view(batch) {
             Some(view) => self.screen_render_begin(batch, &view),
             None => true,
@@ -9748,14 +9758,14 @@ impl Game<'_> {
     /// itself and its tooltips, so a native mod draws over it here. Never
     /// `Playing`: the prompts, books and sign editors drawn over gameplay keep
     /// it, draw after this point and so over what a mod drew.
-    fn fire_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
+    fn draw_screen_with_post_hook(&self, batch: &mut HudBatch, drawn: bool) {
         if let Some(view) = self.screen_render_view(batch) {
             self.screen_render_end(batch, &view, drawn);
         }
     }
-    /// `fire_screen_render_post` for the title's own screen, once a frame,
+    /// `draw_screen_with_post_hook` for the title's own screen, once a frame,
     /// after it has drawn and before the toasts.
-    fn fire_title_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
+    fn draw_title_screen_with_post_hook(&self, batch: &mut HudBatch, drawn: bool) {
         if let Some(view) = self.title_screen_render_view(batch) {
             self.screen_render_end(batch, &view, drawn);
         }
@@ -13194,7 +13204,6 @@ impl Game<'_> {
     /// integrated-server selection. Server startup must use this entry point.
     fn load_world(&mut self, request: world_loading::WorldRequest) -> Result<()> {
         self.join_world_rest()?;
-        self.perf.world_opening();
         let prepared = request.prepare(
             &self.res,
             &self.pack,
@@ -13489,35 +13498,6 @@ impl Game<'_> {
     /// Leaving the game with a world open (window closed, Quit, `quit`):
     /// menu items go back (Player.closeContainer), then the world is saved,
     /// once.
-    /// Keeps this play session's performance summary for the launcher to send, if the player
-    /// allows performance statistics (`horizon_client::telemetry`), and starts the next one.
-    pub(super) fn finish_perf(&mut self) {
-        // One session per computer: P1's (a splitscreen player's would count it again).
-        if self.options.split_guest {
-            return;
-        }
-        let s = &self.settings;
-        let settings = horizon_telemetry::payload::Settings {
-            render_distance: s.render_distance.clamp(0, 255) as u8,
-            simulation_distance: s.simulation_distance.clamp(0, 255) as u8,
-            // 260 is the slider's "unlimited".
-            max_fps: if s.max_fps >= 260 {
-                0
-            } else {
-                s.max_fps.min(u32::from(u16::MAX)) as u16
-            },
-            vsync: s.vsync,
-            fullscreen: s.fullscreen,
-            graphics: s.graphics_preset.clone(),
-        };
-        // Again now: on Wayland the window is on a screen only once it has been shown.
-        if let Some(window) = &self.window {
-            horizon_client::telemetry::note_display(window);
-        }
-        self.perf
-            .finish(&horizon_client::logging::game_home(), settings);
-    }
-
     pub(super) fn save_for_exit(&mut self) -> Result<()> {
         // Native application termination can bypass CloseRequested. Finish any
         // save screen synchronously here, before the process can go away.
@@ -15740,6 +15720,8 @@ impl Game<'_> {
         let Some(at) = self.sleeping_position(head) else {
             return;
         };
+        // LivingEntity.startSleeping: stopRiding once the bed is valid.
+        self.stop_riding();
         self.stop_mining();
         self.left = false;
         self.right = false;
@@ -15885,8 +15867,11 @@ impl Game<'_> {
     fn tooltip(&self, batch: &mut HudBatch, text: &str, x: f32, y: f32) {
         let atlas = &self.gui.atlas;
         let lines = vec![(horizon_client::text::Text::literal(text), u32::MAX)];
-        let (x, y, w, h) =
-            Self::tooltip_geometry(atlas, &lines, (x, y), (batch.width, batch.height), [0.0; 2]);
+        let screen = (batch.width, batch.height);
+        let Some(at) = self.tooltip_pre(None, &lines, &[], (x, y), screen) else {
+            return;
+        };
+        let (x, y, w, h) = Self::tooltip_geometry(atlas, &lines, at, screen, [0.0; 2]);
         self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
     }
@@ -16652,6 +16637,7 @@ impl Game<'_> {
         // compressed (a no-op once it is).
         if self.renderer.is_some() {
             self.gui.atlas.pack_pixels();
+            self.pack.render.pixels.pack();
         }
         // Before any text of this frame: a full glyph region starts over.
         self.gui.atlas.font.begin_frame();
@@ -18238,7 +18224,6 @@ impl ApplicationHandler for Game<'_> {
             }
         };
         drop(window_step);
-        horizon_client::telemetry::note_display(&window);
         match self.new_renderer(window.clone()) {
             Ok(r) => {
                 self.renderer = Some(r);
@@ -18279,7 +18264,10 @@ impl ApplicationHandler for Game<'_> {
                 (_, false) => mod_api::KeyAction::Press,
                 (_, true) => mod_api::KeyAction::Repeat,
             };
-            self.native_input_key(name.unwrap_or("key.keyboard.unknown"), action, modifiers);
+            // Still the key's handling: a mod's key hook may reach the clipboard.
+            self.with_user_input(true, |game| {
+                game.native_input_key(name.unwrap_or("key.keyboard.unknown"), action, modifiers);
+            });
         }
     }
     fn device_event(&mut self, event_loop: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
@@ -18322,6 +18310,24 @@ impl Game<'_> {
     /// winit's `window_event`. The control socket and the pad menu call it too, with the
     /// input they make up.
     pub(super) fn handle_window_event(
+        &mut self,
+        event_loop: &dyn EventLoopCtl,
+        id: WindowId,
+        event: WindowEvent,
+        origin: input_trace::InputOrigin,
+    ) {
+        let input = matches!(
+            event,
+            WindowEvent::KeyboardInput { .. }
+                | WindowEvent::MouseInput { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::Ime(_)
+        );
+        self.with_user_input(input, |game| {
+            game.handle_window_event_as(event_loop, id, event, origin);
+        });
+    }
+    fn handle_window_event_as(
         &mut self,
         event_loop: &dyn EventLoopCtl,
         id: WindowId,
@@ -18549,7 +18555,6 @@ impl Game<'_> {
                     && event.physical_key == PhysicalKey::Code(KeyCode::Escape))
         {
             self.pending_entry = None;
-            self.perf.cancel_world_opening();
             return;
         }
         if (self.pending_entry.is_some() || self.integrated_starting.is_some())
@@ -19622,8 +19627,6 @@ impl Game<'_> {
                     let updated = Instant::now();
                     self.track_toggle_screens();
                     self.heal_hold_latches();
-                    // For the "I'm playing" ping: an atomic, sent on when it changes.
-                    horizon_client::heartbeat::set_lan(self.is_published());
                     self.update_discord_presence();
                     let steps = self.clock.advance(elapsed);
                     for _ in 0..steps {
@@ -19665,7 +19668,7 @@ impl Game<'_> {
                     self.native_render_frame_post(elapsed);
                     self.apply_cursor_icon();
                     // The frame's spans, taken every frame they are recorded so they never
-                    // pile up: the slow-frame line's, and the session's (`perf.frame`).
+                    // pile up: the slow-frame line's.
                     let frame_spans = if horizon_client::spans::recording_here() {
                         horizon_client::spans::take_raw()
                     } else {
@@ -19791,11 +19794,10 @@ impl Game<'_> {
                                 self.started.elapsed().as_millis()
                             );
                         }
-                        if self.title.is_some() {
-                            self.perf.title_shown();
-                        } else if self.screen == Screen::Playing && self.player.is_some() {
-                            self.perf
-                                .frame(elapsed.as_secs_f32() * 1000.0, &frame_spans);
+                        if self.title.is_none()
+                            && self.screen == Screen::Playing
+                            && self.player.is_some()
+                        {
                             if startup::filling() {
                                 let mut fill: Vec<(&'static str, usize)> =
                                     self.streaming.stages().to_vec();
@@ -19853,7 +19855,7 @@ impl Game<'_> {
             self.exit_on_error(event_loop);
         }
     }
-    /// The loop ended: close the pads' output, save the world, write the perf report.
+    /// The loop ended: close the pads' output, save the world.
     pub(super) fn shut_down(&mut self) {
         self.pad_close_output();
         if let Err(e) = self.save_for_exit() {
@@ -19865,7 +19867,6 @@ impl Game<'_> {
         if self.options.is_client_start() {
             self.native_client_stopping();
         }
-        self.finish_perf();
     }
     /// winit's `about_to_wait`: what happens between frames (stop requests, the closing
     /// save, world entry, the control socket, pads), then the next frame.
@@ -20364,6 +20365,9 @@ impl<'a> Game<'a> {
             trim_slots: Vec::new(),
             cart_models: prepared.cart_models,
             riding: None,
+            boarding_cooldown: 0,
+            riding_at_tick: None,
+            rotation_forced: false,
             posed_rider: None,
             pending_vehicle: None,
             ender_items: vec![None; 27],
@@ -20395,7 +20399,6 @@ impl<'a> Game<'a> {
             agent_control_on: false,
             agent_last: None,
             frame_stats: Default::default(),
-            perf: Default::default(),
             pending_screenshot: None,
             pending_render_capture: None,
             pending_bench: None,
@@ -20462,6 +20465,7 @@ impl<'a> Game<'a> {
             previous_mode: None,
             gamemode_switcher: None,
             clipboard: Default::default(),
+            user_input: Default::default(),
             text_selection: Default::default(),
             saved_for_exit: false,
             pending_save: None,
@@ -20693,7 +20697,6 @@ impl Game<'_> {
         if self.rest_loader.is_none() {
             return Ok(false);
         }
-        self.perf.world_opening();
         if self.title.is_none() {
             let title = Title::new(
                 std::env::current_dir()?.join("saves"),
@@ -21608,7 +21611,6 @@ fn load_resources(
     };
     let resources = Arc::new(resources);
     if menu {
-        horizon_client::telemetry::mark_core_ready();
         log::info!(
             "Horizon: core-ready after {} ms",
             started.elapsed().as_millis()
@@ -21644,7 +21646,6 @@ fn load_resources(
                     .set(rest)
                     .map_err(|_| "world resources already loaded".to_owned())?;
                 progress.set(9);
-                horizon_client::telemetry::mark_rest_ready();
                 log::info!(
                     "Horizon: rest-ready after {} ms",
                     started.elapsed().as_millis()
@@ -21955,7 +21956,7 @@ fn load_world_rest(
 fn prepare_renderer_textures(pack: &PackResources) -> horizon_client::gfx::PreparedTextures {
     let assets = &pack.render;
     horizon_client::gfx::PreparedTextures::new(
-        &assets.pixels,
+        &assets.pixels.get(),
         assets.sprite_size,
         assets.texture_layers,
         &assets.sprite_mips,
@@ -22001,7 +22002,7 @@ fn build_renderer(
     let mut renderer = pollster::block_on(Renderer::new(
         window,
         offscreen,
-        &assets.pixels,
+        &assets.pixels.get(),
         assets.sprite_size,
         assets.sprite_minimum_size,
         assets.texture_layers,
@@ -22496,7 +22497,6 @@ impl Loading {
             }
         };
         drop(window_step);
-        horizon_client::telemetry::note_display(&window);
         // The renderer takes seconds to build and winit's window sits white
         // until the first frame presents, so paint the boot screen on it and
         // keep repainting it as the console's lines arrive; the wgpu frames
@@ -22644,7 +22644,6 @@ impl Loading {
             match renderer.render(&frame) {
                 Ok(true) if self.gui.is_some() && self.menu.pending.is_none() => {
                     self.title_drawn = true;
-                    self.menu.perf.title_shown()
                 }
                 Ok(_) => {}
                 Err(e) => log::warn!("Horizon: loading screen frame failed: {e}"),
@@ -22968,14 +22967,6 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         options.spikes = Some(dedicated::SLOW_TICK_MS);
     }
     horizon_client::spans::enable(options.spikes.is_some());
-    // A player who allows performance statistics also says what their slow frames spent their
-    // time in: this thread, which draws the frames, times its steps (wall time only).
-    if options.execution_role.is_client()
-        && horizon_telemetry::Consent::load(&horizon_client::logging::game_home())
-            .allows(horizon_telemetry::Kind::Perf)
-    {
-        horizon_client::spans::record_here(true);
-    }
     let vanilla_root = options.resources.clone();
     if let Some(error) = missing_resources(&vanilla_root) {
         // The game build started by hand (the release's zip), not by the
@@ -22988,17 +22979,15 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         }
         return Err(error.into());
     }
-    // Someone is playing: the anonymous ping behind the launcher's "N playing now", and the
-    // official server in their list (servers.dat in the game folder, the working directory). Not
-    // for a server, a benchmark, a run that quits by itself, a harness's fixture or a run that
+    // Someone is playing: the official server in their list (servers.dat in the game folder, the
+    // working directory). Not for a server, a benchmark, a run that quits by itself, a harness's fixture or a run that
     // horizon-ctl drives: those start in a source checkout and wrote the list there.
-    if !options.offscreen && !synchronous_startup(&options) {
-        horizon_client::heartbeat::start();
-        if let Err(e) =
+    if !options.offscreen
+        && !synchronous_startup(&options)
+        && let Err(e) =
             horizon_client::multiplayer::add_official_server(&horizon_client::logging::player_dir())
-        {
-            log::warn!("could not add the official server to servers.dat: {e}");
-        }
+    {
+        log::warn!("could not add the official server to servers.dat: {e}");
     }
     let mut early_settings = Settings::load(&Game::options_path());
     options

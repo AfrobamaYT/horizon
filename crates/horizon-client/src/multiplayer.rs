@@ -347,10 +347,10 @@ pub fn save_server_icon(saves: &Path, address: &str, png: &[u8]) {
 }
 
 /// Horizon's official survival server: a name and an address like any entry. The address is
-/// `horizon_telemetry::server_status::OFFICIAL_ADDRESS`, the one place it is kept.
+/// `horizon_protocol::server_status::OFFICIAL_ADDRESS`, the one place it is kept.
 pub const OFFICIAL_SERVER: (&str, &str) = (
     "Horizon Official",
-    horizon_telemetry::server_status::OFFICIAL_ADDRESS,
+    horizon_protocol::server_status::OFFICIAL_ADDRESS,
 );
 /// Beside servers.dat once the official server was offered, so a player who
 /// deletes it never gets it back: the address offered, so a new one moves the
@@ -384,7 +384,7 @@ pub fn add_official_server(game_dir: &Path) -> std::io::Result<()> {
     let file = game_dir.join("servers.dat");
     let _guard = SAVING.lock();
     let mut list = servers::load(&file);
-    let previous = horizon_telemetry::server_status::OFFICIAL_PREVIOUS;
+    let previous = horizon_protocol::server_status::OFFICIAL_PREVIOUS;
     if move_official(&mut list, address, previous) {
         servers::save(&file, &list)?;
     }

@@ -5,6 +5,32 @@ use horizon_client::clipboard::{self, EditShortcut};
 use winit::event::KeyEvent;
 
 impl Game<'_> {
+    /// Runs `f` with `user_input` saying whether it handles input, then restores it, so a
+    /// frame drawn while a key is handled reads false.
+    pub(super) fn with_user_input<R>(&mut self, input: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        let was = self.user_input.replace(input);
+        let result = f(self);
+        self.user_input.set(was);
+        result
+    }
+    /// The clipboard's text (`KeyboardHandler.getClipboard`), empty when it holds none,
+    /// while the game handles a key, mouse or typed-text event: a mod's key or screen hook
+    /// pasting into its own field. None at any other moment (a tick, a frame, a packet),
+    /// so no mod reads the clipboard without the player doing something, and None on a
+    /// server.
+    pub(super) fn native_clipboard_text(&self) -> Option<String> {
+        (self.native_window() && self.user_input.get()).then(|| self.clipboard.text())
+    }
+    /// Puts `text` on the clipboard (`KeyboardHandler.setClipboard`) on the same terms as
+    /// `native_clipboard_text` reads it. False, with nothing copied, at any other moment or
+    /// on a server; empty text copies nothing, as vanilla's.
+    pub(super) fn native_set_clipboard_text(&self, text: &str) -> bool {
+        if !self.native_window() || !self.user_input.get() {
+            return false;
+        }
+        self.clipboard.set_text(text);
+        true
+    }
     /// `InputWithModifiers.isSelectAll`/`isCopy`/`isPaste`/`isCut` of a key
     /// press (or repeat): the keyboard's modifier state, or a modifier key an
     /// agent holds.
@@ -135,3 +161,86 @@ impl Game<'_> {
 
 /// `CreativeModeInventoryScreen`'s search box: `setMaxLength(50)`.
 pub(super) const CREATIVE_SEARCH_CHARS: usize = 50;
+
+#[cfg(test)]
+mod tests {
+    use mod_api::{
+        ClientHost, ClientTickPreEvent, Flow, Hooks, ModEntry, MouseButtonPreEvent,
+        RenderGuiPreEvent, testing::with_mods,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// What each hook read from the clipboard, and whether its copy was taken.
+    #[derive(Clone, Default)]
+    struct Reads(Arc<Mutex<Vec<(&'static str, Option<String>, bool)>>>);
+    impl Reads {
+        fn read(&self, at: &'static str, host: &dyn ClientHost) {
+            let text = host.clipboard_text();
+            let copied = host.set_clipboard_text(at);
+            self.0.lock().unwrap().push((at, text, copied));
+        }
+    }
+    struct Mod(Reads);
+    /// A step of an event loop that is never asked to stop.
+    struct NoEventLoop;
+    impl crate::game::event_loop::EventLoopCtl for NoEventLoop {
+        fn exit(&self) {}
+        fn set_control_flow(&self, _: winit::event_loop::ControlFlow) {}
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Mod {
+        fn client_tick_pre(&self, host: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {
+            self.0.read("tick", host);
+        }
+        fn render_gui_pre(&self, host: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
+            self.0.read("frame", host);
+            Flow::Continue
+        }
+        fn mouse_button_pre(&self, host: &mut dyn ClientHost, _: &mut MouseButtonPreEvent) -> Flow {
+            self.0.read("click", host);
+            // The click stops here: the game has no world to click in.
+            Flow::Cancel
+        }
+    }
+
+    /// A tick and a frame reach no clipboard, read or write; a click from the window does,
+    /// and its copy is what the clipboard holds after.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_reaches_the_clipboard_only_while_input_is_handled() {
+        let reads = Reads::default();
+        let mods: mod_api::Mods = vec![ModEntry::new("paste", Box::new(Mod(reads.clone())))].into();
+        with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
+                game.options.headless = true;
+                game.clipboard.set_text("pasted");
+
+                game.native_client_tick_pre();
+                game.native_render_gui_pre(&mut false);
+                game.handle_window_event(
+                    &NoEventLoop,
+                    winit::window::WindowId::dummy(),
+                    winit::event::WindowEvent::MouseInput {
+                        device_id: winit::event::DeviceId::dummy(),
+                        state: winit::event::ElementState::Pressed,
+                        button: winit::event::MouseButton::Left,
+                    },
+                    crate::game::input_trace::InputOrigin::User,
+                );
+                game.native_client_tick_pre();
+                let got = reads.0.lock().unwrap().clone();
+                assert_eq!(
+                    got,
+                    [
+                        ("tick", None, false),
+                        ("frame", None, false),
+                        ("click", Some("pasted".to_owned()), true),
+                        ("tick", None, false),
+                    ]
+                );
+                assert_eq!(game.clipboard.text(), "click");
+            });
+        });
+    }
+}

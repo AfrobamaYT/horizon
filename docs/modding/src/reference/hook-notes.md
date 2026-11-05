@@ -1,5 +1,20 @@
 # Hook notes
 
+## Decoded client packets
+
+`Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
+`ClientPacketEvent` before the window handles a decoded server play packet.
+The read-only `event.packet` is a `mod_api::ClientPacket`: `id` identifies the
+packet type (for example, `minecraft:custom_payload`); `custom_payload` contains
+the channel and raw bytes for a custom payload, or `None` otherwise. An id
+outside the protocol's packet table is reported as `horizon:unknown`.
+Other decoded fields are not exposed. This one plain-data contract works
+for native and wasm mods, with a generated codec.
+
+The hook cannot cancel or replace a packet. It also observes chunk packets
+handled by the batching path, once each. Configuration packets and the network
+thread's own handling (including keep-alives and resource pack messages) do not fire it.
+
 ## Conditional item model properties
 
 A client mod supplies its own namespaced `minecraft:condition` property by implementing
@@ -26,6 +41,12 @@ including for nested bundle items: `item`, `count`, explicit component `patch` (
 defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
 `minecraft:condition` node. Custom special model renderers are not supplied by this hook.
+
+A `minecraft:special` item model whose `model.type` is another namespace's has no renderer in Horizon: the
+item draws as its `base` model, and the log says so once per type. A mod gets the same result from model
+JSON: a `minecraft:model` leaf naming a model file with `elements` and `display` draws cuboids with a
+transformation per display context, `tints` colours them, and `minecraft:select`, `condition` and
+`range_dispatch` on a property the mod answers through `item_model_property` pick between variants.
 
 ## Item frame rendering
 
@@ -340,7 +361,8 @@ requires a farmer at work and `mob_griefing` enabled.
   that call, so its part isn't asked: its attachments go with it, and only its container slots come back out.
 
 - `native_visuals`: a world-frame hook that appends block-rim and
-  colored-light requests. Rims trace the client's existing block outline edges,
+  colored-light requests (`NativeBlockRim::new(pos, argb, width)`,
+  `NativeColoredLight::new(at, rgb, radius, intensity)`). Rims trace the client's existing block outline edges,
   depth-tested against terrain. Lights add camera-local RGB illumination to the
   normal terrain/entity shaders, not gameplay light. Only the first eight rims
   and eight lights are examined; positions must be within 32 blocks of the player,
@@ -539,6 +561,8 @@ or transactions. Declarations still go on each event or registrar.
 
 - `Hooks::render_tooltip_gather_components` (NeoForge's `RenderTooltipEvent.GatherComponents`, client-side, cancellable): an item's tooltip as one list of `TooltipElement`s, a `Text` line with its colour or an `Image` (a `TooltipImage`: the stack whose item's `tooltip_component_draw` part draws it, and its size in GUI pixels), after `item_tooltip` and before anything is wrapped or measured. Add, change, reorder or remove elements. `max_width` starts at -1, no limit, which leaves the lines as vanilla draws them; a mod that sets it wraps every line wider than that. Cancel and nothing is drawn. An image with a non-finite or non-positive size is dropped.
 
+- `Hooks::render_tooltip_pre` (NeoForge's `RenderTooltipEvent.Pre`) is asked for each tooltip about to be placed and drawn, after `render_tooltip_gather_components`: item tooltips and text tooltips (a button's, a book's, the creative tab names), not the selected-item name a bundle draws beside its grid. `place` is the point the tooltip hangs from (the cursor, or the point its screen gives), before the positioner adds its offset and keeps the box on screen; set its `x` and `y` to move it. `screen_width` and `screen_height` are the screen's size. `elements` are the tooltip's lines then its images, read-only (change them in `render_tooltip_gather_components`), and `stack` is the item it describes, `None` for a text tooltip. Set `cancel` and nothing is drawn and no `tooltip_color` is asked. It runs each frame a tooltip shows, only while a mod listens. Diverges from upstream: new hook.
+
 - [advancement triggers](#advancement-triggers) of a mod's own: `native_trigger_criterion(uuid, trigger, test)` fires a trigger
   an advancement of a content mod or a data pack names (`mymod:pipe_connected`) for one player, as a NeoForge mod's
   `SimpleCriterionTrigger.trigger`.
@@ -559,7 +583,7 @@ or transactions. Declarations still go on each event or registrar.
   its chunk faded in), with the copy the server sent (`native_block_entity_update_tag`). It draws into the entity batch
   under `draw`'s pose stack (`push`, `pop`, `translate`, `rotate_about`, `scale`, in blocks from the block's corner, as
   vanilla's `PoseStack`): `native_draw_quad` (four corners and a sprite's UVs), `native_draw_cube` (a model element's box,
-  its faces baked as a model's are; `CubeFace` is in `super::native_block_entity_draw`), `native_draw_block` (a block
+  its faces baked as a model's are, each a `CubeFace::new(sprite)`, `.with_uv(uv)` for UVs of its own), `native_draw_block` (a block
   state's model, as `submitBlockModel`: a moving part is often a block of the mod's own) and `native_draw_text`
   (`BlockEntityDrawContext::text(text, at, rgb)`: a line of the game's font, as a sign's, in font pixels with y down as
   `Font.drawInBatch` lays it out under the pose, opaque `0xRRGGBB`, in the frame's light; `set_light` to full bright for
@@ -657,6 +681,8 @@ or transactions. Declarations still go on each event or registrar.
 - `native_client_setup()` (NeoForge's `FMLClientSetupEvent`) fires once per game process on the render thread, after the first client load has applied and before the title screen's first frame, with the `ClientHost`. It is the moment `client_resources_reloaded` skips: that one never runs at initial startup and runs after every later reload, while this one runs once and never again. Returning to the title screen and opening another world, or adding a splitscreen player, is not a new start. NeoForge's `DeferredWorkQueue` has no counterpart (the listener already runs on the thread that would drain it; work a mod wants in parallel is its own). A dedicated server has no client and never fires it; `FMLDedicatedServerSetupEvent` is `server_about_to_start`. A failing listener is handled like any other listener of a hook. Listeners are pure functions of the `ClientHost` reads and the mod's own state.
 
 - `native_vanilla_game_event(dimension, event, pos, cause, affected_state, cancel)` (NeoForge's `VanillaGameEvent`) fires on the server for every vanilla game event before the sculk sensors, wardens and allays hear it; canceling keeps them from hearing it. `cause` is the network id of the entity that caused it (`GameEvent.Context.sourceEntity`, None for none) and `affected_state` is the block state the event touched (`GameEvent.Context.affectedState`): the block a player broke or placed, the block a mob stepped on, and None where vanilla passes none (`Context.of(entity)`). Contract version `2`: version `1` had no `affected_state`. With no listener the cost is one `listened` branch per event. Diverges from upstream.
+
+- `native_get_arm_pose(entity_id, hand, stack, pose)` (NeoForge's `IClientItemExtensions.getArmPose`) sets the pose of the arm that holds `stack` in `hand`, as a humanoid player model draws it (`AvatarRenderer.getArmPose`): the window's own player model and other players'. It replaces what the item would give, whatever the use animation, a loaded crossbow or an `arm_pose` declared on the item say (a content mod's data key, see the content-mods how-to, is the answer when no mod listens or none sets one). Return one of vanilla's `ArmPose` values (`empty`, `item`, `block`, `bow_and_arrow`, `crossbow_hold`, `crossbow_charge`, `throw_trident`, `toot_horn`, `spyglass`, `spear`, `brush`); the first mod to answer wins. It is asked once a tick for each player model and non-empty hand, only while a mod listens, and a two-handed pose still moves the other hand as vanilla's does. NeoForge's custom poses made by extending the `ArmPose` enum have no counterpart; mobs' own poses (`getArmPose` on a mob renderer) are not asked. Client-side, with the `ClientHost`. Diverges from upstream: new hook.
 
 - `native_item_decorations(stack, x, y, batch)` appends custom GUI drawing after the default bar, cooldown shade and count have been painted for an item icon. The stack is the displayed stack, x/y are its icon's top-left in GUI units, the units the batch takes (no item-local translation remains active). Existing GUI helpers can draw badges, text and overlays. The shared path covers the hotbar, carried stacks, menu slots, recipe book and item tooltip icons, and the item icons of the advancement, beacon, stats and trading screens. `native_item_bar` still controls the bar separately; this hook does not suppress vanilla decorations.
 
@@ -2213,7 +2239,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
-  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
+  slot as `LivingEntity.setItemSlot` does (None or air empties it), and `set_hand_item(host, hand, stack)` puts one in
+  a hand as `LivingEntity.setItemInHand` does (the main hand's or the off hand's slot, written as `set_equipment` writes it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
   `body` and `saddle` are kept and saved in the `equipment` compound as vanilla does, and dropped on death, but nothing
   renders or sends them. Armor stands and the dragon hold all eight slots in the same `Equipment`, saved in `equipment`
   (omitted when empty). A stand keeps a body or saddle a mod writes (`setItemSlot` stores it; `ArmorStand.canUseSlot`
@@ -2282,7 +2309,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   players in range; a silent mob plays nothing and a player doesn't hear their own), `game_event(host, event)`
   (`Entity.gameEvent`: the entity is the source of a vibration for sculk sensors, wardens and allays),
   `broadcast_event(host, id)` (`Level.broadcastEntityEvent`: entity event `id` to the players near it, for
-  `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `NativeSoundSource`) and
+  `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `SoundSource`) and
   `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
   place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
   client only.

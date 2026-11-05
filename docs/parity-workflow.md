@@ -132,7 +132,7 @@ the same path as normal single player. `python3 tools/test_friends.py --client
 target/fast/horizon-client --relay target/fast/horizon-relay --baseline` covers
 plain LAN, direct invitations, a local relay and ended invitations in that mode.
 Run Linux games under `xvfb-run -a` when no display is available. Each
-process gets scratch game, launcher, XDG data and config homes; telemetry, audio
+process gets scratch game, launcher, XDG data and config homes; audio
 and launcher self-update are disabled.
 
 `lan_integration` and `friends_integration` register these suites with `parity.py`.

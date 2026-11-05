@@ -1004,16 +1004,16 @@ impl Game<'_> {
         if mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
             let mut heard = mod_api::NativeDifficulty::from(difficulty);
             let (mut spawn_cancelled, mut skip) = (false, false);
-            self.native_finalize_spawn(
-                self.dim.id(),
-                &mob.kind.id,
+            self.native_finalize_spawn(mod_api::__private::FinalizeSpawnCall {
+                dimension: self.dim.id(),
+                kind: &mob.kind.id,
                 reason,
-                at,
+                pos: at,
                 spawner,
-                &mut heard,
-                &mut spawn_cancelled,
-                &mut skip,
-            );
+                difficulty: &mut heard,
+                spawn_cancelled: &mut spawn_cancelled,
+                cancel: &mut skip,
+            });
             if spawn_cancelled {
                 return (Finalized::Cancelled, difficulty);
             }
@@ -1381,6 +1381,7 @@ impl Game<'_> {
             self.lan_entity_event(id as i32, 60, at);
             self.death_poof(at, width, height);
         }
+        self.tick_boarding();
         self.sync_riders();
         self.tick_skeleton_traps();
         self.tick_apparition();
@@ -1852,15 +1853,17 @@ impl Game<'_> {
                 };
                 let mut chance = choice.chance;
                 self.native_get_equipment_drop_chance(
-                    id,
-                    &kind,
-                    EquipmentSlot::ALL[choice.slot],
-                    hurt,
-                    by_player,
-                    &stack,
-                    choice.original,
-                    choice.preserved,
-                    &mut chance,
+                    mod_api::__private::GetEquipmentDropChanceCall {
+                        entity: id,
+                        kind: &kind,
+                        slot: EquipmentSlot::ALL[choice.slot],
+                        source: hurt,
+                        recently_hit: by_player,
+                        stack: &stack,
+                        original_chance: choice.original,
+                        preserved: choice.preserved,
+                        chance: &mut chance,
+                    },
                 );
                 chance
             };
@@ -1973,15 +1976,15 @@ impl Game<'_> {
             })
             .collect();
         let mut cancel = false;
-        self.native_living_drops(
-            dying.entity,
-            dying.kind,
-            dying.player,
+        self.native_living_drops(mod_api::__private::LivingDropsCall {
+            entity: dying.entity,
+            kind: dying.kind,
+            player: dying.player,
             source,
-            dying.recently_hit,
-            &mut drops,
-            &mut cancel,
-        );
+            recently_hit: dying.recently_hit,
+            drops: &mut drops,
+            cancel: &mut cancel,
+        });
         if cancel {
             return;
         }
@@ -5532,6 +5535,8 @@ impl Game<'_> {
                             SpawnSite::Plain,
                         );
                     }
+                    // ServerPlayer.teleport: removeVehicle before the placement.
+                    self.stop_riding();
                     if let Some(pl) = self.player.as_mut() {
                         pl.position = to;
                         pl.velocity = Vec3::ZERO;

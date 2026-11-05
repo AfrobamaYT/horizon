@@ -298,80 +298,16 @@ Linux: put Horizon in the applications menu (an entry and the icon, under $XDG_D
 
 MCP: `desktop_entry`.
 
-## `horizon-launcher data status`
+## `horizon-launcher bug-report`
 
-What is allowed, the install ID and how many items wait (the default).
+Write a bug report to a file you attach to the issue by hand; nothing is sent (docs/telemetry.md).
 
-    horizon-launcher data status
-
-MCP: `data_status`.
-
-## `horizon-launcher data allow`
-
-Turn kinds on: performance, crashes, bugs, benchmarks, or all.
-
-    horizon-launcher data allow <KINDS>...
-
-- `KINDS`
-
-MCP: `data_allow`, only when the player asks.
-
-## `horizon-launcher data deny`
-
-Turn kinds off: performance, crashes, bugs, benchmarks, or all.
-
-    horizon-launcher data deny <KINDS>...
-
-- `KINDS`
-
-MCP: `data_deny`.
-
-## `horizon-launcher data show`
-
-Print exactly what would be sent.
-
-    horizon-launcher data show
-
-MCP: `data_show`.
-
-## `horizon-launcher data delete`
-
-Delete everything sent from here, and what waits, and take a new install ID.
-
-    horizon-launcher data delete
-
-MCP: `data_delete`, needs `confirm: true`.
-
-## `horizon-launcher data send`
-
-Send what is waiting now.
-
-    horizon-launcher data send
-
-MCP: `data_send`, only when the player asks.
-
-## `horizon-launcher data bug`
-
-Send a bug report you write; it is printed first, as it would leave.
-
-    horizon-launcher data bug <TEXT>
+    horizon-launcher bug-report <TEXT>
 
 - `TEXT`
-- `--log`: Add the end of the game's log (scrubbed, without chat)
-- `--yes`: Send without asking
+- `--log`: Add the end of the game's log (names and worlds hidden, without chat)
 
-MCP: `data_bug`, only when the player asks.
-
-## `horizon-launcher data benchmark`
-
-Upload a benchmark report (docs/benchmark-report.md); it is printed first.
-
-    horizon-launcher data benchmark <FILE>
-
-- `FILE`
-- `--yes`
-
-MCP: `data_benchmark`, only when the player asks.
+MCP: `bug_report`.
 
 ## `horizon-launcher instance list`
 

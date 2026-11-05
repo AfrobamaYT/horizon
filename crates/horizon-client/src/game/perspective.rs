@@ -458,11 +458,10 @@ impl Game<'_> {
                 Default::default,
                 horizon_client::first_person::item_use_animation,
             );
-        let held_arm_pose = [self.selected, super::shield::OFFHAND_SLOT].map(|slot| {
-            self.stack_in(slot)
-                .and_then(|stack| self.items().get(&stack.item))
-                .and_then(|info| info.arm_pose)
-        });
+        let held_arm_pose = self.held_arm_poses(
+            self.own_entity_id() as u32,
+            [self.selected, super::shield::OFFHAND_SLOT].map(|slot| self.stack_in(slot)),
+        );
         let charged = self.inventory[self.selected]
             .as_ref()
             .is_some_and(|s| s.data().is_some_and(|d| !d.charged.is_empty()));
@@ -1099,6 +1098,30 @@ impl Game<'_> {
             self.res.mob_data(),
             out,
         );
+    }
+    /// `IClientItemExtensions.getArmPose` for each hand's stack, else the item's declared
+    /// `arm_pose`: the pose that replaces the one `AvatarRenderer.getArmPose` derives. An
+    /// empty hand keeps vanilla's.
+    pub(super) fn held_arm_poses(
+        &self,
+        entity_id: u32,
+        stacks: [Option<&horizon_client::items::ItemStack>; 2],
+    ) -> [Option<horizon_core::arm_pose::ArmPose>; 2] {
+        let mut poses = [None; 2];
+        for ((pose, stack), hand) in poses
+            .iter_mut()
+            .zip(stacks)
+            .zip(mod_api::first_person::Hand::BOTH)
+        {
+            let Some(stack) = stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air") else {
+                continue;
+            };
+            self.native_get_arm_pose(entity_id, hand, stack, pose);
+            if pose.is_none() {
+                *pose = self.items().get(&stack.item).and_then(|info| info.arm_pose);
+            }
+        }
+        poses
     }
     /// The entity id the local player has on its server: the one it was
     /// given at login on a client, else the acting player's own.

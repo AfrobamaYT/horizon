@@ -300,7 +300,14 @@ impl Game<'_> {
         // editor or a screen consumes the key, there is no world, or a
         // command handler returns an error: a lost release keeps Shift down.
         let released = released_modifier(line);
-        let result = self.control_command_inner(line, reply, event_loop);
+        // The socket's own key, mouse and typing commands are input, as the window's events are.
+        let input = matches!(
+            line.split_whitespace().next(),
+            Some("key" | "mouse" | "type")
+        );
+        let result = self.with_user_input(input, |game| {
+            game.control_command_inner(line, reply, event_loop)
+        });
         self.settle_title_mode();
         if let Some(key) = released {
             self.press_modifier_key(key, false);
@@ -1398,7 +1405,7 @@ impl Game<'_> {
             "streaming": self.streaming.stages().into_iter().map(|(k, v)| (k.to_string(), v.into())).collect::<serde_json::Map<_, _>>(),
             "dirty_light": self.world.dirty_light.len(),
             "renderer": renderer,
-            "display": self.window.as_deref().and_then(horizon_client::telemetry::monitor).map(|m| json!({
+            "display": self.window.as_deref().and_then(horizon_client::monitor::of).map(|m| json!({
                 "width": m.size().width,
                 "height": m.size().height,
                 "scale": m.scale_factor(),

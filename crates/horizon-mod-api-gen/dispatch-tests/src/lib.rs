@@ -96,10 +96,13 @@ mod tests {
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }
+        pub(super) struct ClientPacket;
         pub(super) struct Corners;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
         pub(super) struct TooltipElement;
+        #[derive(Clone, Copy)]
+        pub(super) struct TooltipPlace;
         pub(super) struct BiomeColors;
         pub(super) struct SpawnEntry;
         pub(super) struct UseAnimation;
@@ -339,6 +342,8 @@ mod tests {
             #[derive(Clone, Copy)]
             pub enum KeyAction {}
             pub struct NativeArmorHurt;
+            #[derive(Clone, Copy)]
+            pub struct ArmPose;
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum EffectApplicable {
                 Allow,
@@ -1108,13 +1113,15 @@ mod tests {
             let (mut container, mut canceled) = (DamageContainer(4.0), false);
             dispatch_living_incoming_damage(
                 &mut TestLevel,
-                1,
-                "minecraft:zombie",
-                &source,
-                &victim,
-                weapon,
-                &mut container,
-                &mut canceled,
+                calls::LivingIncomingDamageCall {
+                    entity: 1,
+                    kind: "minecraft:zombie",
+                    source: &source,
+                    victim: &victim,
+                    weapon,
+                    container: &mut container,
+                    canceled: &mut canceled,
+                },
             );
             assert_eq!((container.0, canceled), (expected, false));
         }
@@ -1194,16 +1201,18 @@ mod tests {
         };
         dispatch_living_knockback(
             &mut TestLevel,
-            12,
-            "minecraft:armor_stand",
-            &source,
-            7,
-            None,
-            None,
-            &mut strength,
-            &mut x,
-            &mut z,
-            &mut canceled,
+            calls::LivingKnockbackCall {
+                entity: 12,
+                kind: "minecraft:armor_stand",
+                source: &source,
+                attacker: 7,
+                attacker_main: None,
+                attacker_off: None,
+                strength: &mut strength,
+                x: &mut x,
+                z: &mut z,
+                canceled: &mut canceled,
+            },
         );
         assert_eq!((strength, x, z), (0.8, -1.0, 0.0));
         assert!(canceled);
@@ -1262,13 +1271,15 @@ mod tests {
         let mut canceled = false;
         dispatch_living_incoming_damage(
             &mut TestLevel,
-            0,
-            "kind",
-            &source,
-            &victim,
-            None,
-            &mut container,
-            &mut canceled,
+            calls::LivingIncomingDamageCall {
+                entity: 0,
+                kind: "kind",
+                source: &source,
+                victim: &victim,
+                weapon: None,
+                container: &mut container,
+                canceled: &mut canceled,
+            },
         );
         // Each mod sees the one before: (1 × 2 + 1) × 2 + 2, kept though mod 2 cancels.
         assert_eq!(container.0, 8.0);
@@ -1290,13 +1301,15 @@ mod tests {
         let mut canceled = false;
         dispatch_living_incoming_damage(
             &mut TestLevel,
-            0,
-            "kind",
-            &source,
-            &victim,
-            None,
-            &mut container,
-            &mut canceled,
+            calls::LivingIncomingDamageCall {
+                entity: 0,
+                kind: "kind",
+                source: &source,
+                victim: &victim,
+                weapon: None,
+                container: &mut container,
+                canceled: &mut canceled,
+            },
         );
         assert_eq!(container.0, 9.0);
         assert!(!canceled);

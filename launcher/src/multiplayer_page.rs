@@ -38,6 +38,19 @@ impl Multiplayer {
     }
 }
 
+/// A server's players by its server-list status ping, as the game's Multiplayer list sends it
+/// (through the address's SRV record), with a 3-second timeout. None when it doesn't answer.
+fn server_players(address: &str) -> Option<horizon_protocol::server_status::Players> {
+    let (host, port) = horizon_protocol::server_status::split_address(address)?;
+    let (host, port) = horizon_protocol::server_redirect(&host, port);
+    horizon_protocol::server_status::players_at(
+        address,
+        (&host, port),
+        std::time::Duration::from_secs(3),
+    )
+    .ok()
+}
+
 impl Launcher {
     /// Asks each listed server for its players once, as the game's Multiplayer list does when it
     /// opens; the rows show the answer (the mockup's dot and "3 of 10" or "Offline").
@@ -54,7 +67,7 @@ impl Launcher {
             let address = ip.clone();
             let task = cx
                 .background_executor()
-                .spawn(async move { horizon_launcher::telemetry::server_players(&address) });
+                .spawn(async move { server_players(&address) });
             cx.spawn(async move |this, cx| {
                 let answer = task.await;
                 let _ = this.update(cx, |this, cx| {

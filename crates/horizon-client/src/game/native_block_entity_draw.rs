@@ -816,6 +816,51 @@ mod tests {
         });
     }
 
+    /// A face a mod builds with `CubeFace::new` and `with_uv` draws in its sprite through
+    /// `BlockEntityDrawContext::cube`, its UVs cut from the sprite; an unknown sprite's face
+    /// is left out and the call says so.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_built_cube_face_draws_in_its_sprite() {
+        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
+        use mod_api::BlockEntityDrawContext;
+
+        super::super::native_entity_refs::tests::with_game(|game| {
+            // A server-side game holds only the font, so the sprite is given its place.
+            game.gui
+                .atlas
+                .sprites
+                .insert("mymod:block/casing".into(), sprite());
+            let casing = sprite();
+            let mut surface = draw();
+            let mut drawn = GameBlockEntityDrawContext {
+                game,
+                surface: &mut surface,
+            };
+            let mut faces = [None; 6];
+            // Up, the casing's top-left quarter.
+            faces[1] =
+                Some(mod_api::CubeFace::new("mymod:block/casing").with_uv([0.0, 0.0, 8.0, 8.0]));
+            assert!(drawn.cube([0.0; 3], [16.0; 3], faces, 0xFFFFFF));
+            assert_eq!(surface.vertices.len(), 4, "one face");
+            let (mid_u, mid_v) = ((casing.u0 + casing.u1) / 2.0, (casing.v0 + casing.v1) / 2.0);
+            for v in &surface.vertices {
+                assert_eq!(v.pos[1], 1.0, "a 16-texel box's top, in blocks");
+                assert!((casing.u0..=mid_u).contains(&v.uv[0]), "{:?}", v.uv);
+                assert!((casing.v0..=mid_v).contains(&v.uv[1]), "{:?}", v.uv);
+            }
+
+            let mut surface = draw();
+            let mut drawn = GameBlockEntityDrawContext {
+                game,
+                surface: &mut surface,
+            };
+            faces[0] = Some(mod_api::CubeFace::new("mymod:block/missing"));
+            assert!(!drawn.cube([0.0; 3], [16.0; 3], faces, 0xFFFFFF));
+            assert_eq!(surface.vertices.len(), 4, "the casing face alone");
+        });
+    }
+
     #[test]
     fn the_pose_stack_turns_about_its_pivot_and_pops_back() {
         let mut d = draw();
