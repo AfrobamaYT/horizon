@@ -3048,18 +3048,26 @@ impl Game<'_> {
     pub(super) fn native_server_about_to_start(&mut self, dedicated: bool) {
         self.fire_server_about_to_start(dedicated);
     }
+    /// Server startup has begun, before play can be accepted.
+    pub(super) fn native_server_starting(&mut self, dedicated: bool) {
+        self.fire_server_starting(dedicated);
+    }
+    /// Server teardown has finished, including the final save if possible.
+    pub(super) fn native_server_stopped(&mut self, dedicated: bool) {
+        self.fire_server_stopped(dedicated);
+    }
     /// The server opened its worlds and is about to tick (NeoForge's
     /// `ServerStartedEvent`): every level loaded, no player joined. Where
     /// `WorldOpenReady` fired: the end of the open, before the tick loop.
     pub(super) fn native_server_started(&mut self, dedicated: bool) {
         self.fire_server_started(dedicated);
     }
-    /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
+    /// The server begins teardown (NeoForge's `ServerStoppingEvent`):
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
     /// mod can save its own data or tell them. `native_world_lifecycle`'s
     /// `WorldCloseFinal` follows once the worlds are saved. A server whose loop
-    /// fails stops without this (`WorldCloseFailed` reports it).
+    /// fails still fires this before the final save attempt and `native_server_stopped`.
     pub(super) fn native_server_stopping(&mut self, dedicated: bool) {
         self.fire_server_stopping(dedicated);
     }
