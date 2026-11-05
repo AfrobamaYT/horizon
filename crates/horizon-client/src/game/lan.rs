@@ -632,7 +632,7 @@ fn mob_variant_meta(
 /// from the defaults the client constructs), with vanilla's entry indices:
 /// Entity 0..=7, LivingEntity 8..=14, Mob 15, then the subclasses.
 /// `defaults` gets the defaults of the entries that can go back to theirs.
-fn mob_meta(
+pub(super) fn mob_meta(
     m: &Mob,
     hub: &Hub,
     player_entity: Option<i32>,
@@ -2354,7 +2354,7 @@ impl Game<'_> {
                             let host = self.lan.as_mut()?;
                             let at = host.hub.guests.len();
                             host.hub.guests.push(*guest);
-                            self.guest_close_all(conn);
+                            self.guest_disconnected(conn);
                             let Some(host) = self.lan.as_mut() else {
                                 unreachable!("LanHost dropped inside a tick; closes are deferred")
                             };
@@ -4179,6 +4179,7 @@ mod tests {
         for (template, id) in [
             ("minecraft:zombie", "ruby:ghoul"),
             ("minecraft:villager", "ruby:settler"),
+            ("minecraft:wandering_trader", "ruby:merchant"),
         ] {
             assert_eq!(
                 meta_of(id),
