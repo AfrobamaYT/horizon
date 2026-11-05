@@ -861,15 +861,28 @@ mod tests {
         assert!(not_built(&f.0.join("missing"), &[], &[]).is_empty());
     }
 
-    /// A root that declares no mob effects leaves the registry open for the first one that does.
+    /// A root with mods that declare no mob effects leaves the registry open for the first one
+    /// that does.
     #[test]
     fn a_root_without_mob_effects_does_not_freeze_the_registry() {
-        use horizon_client::brewing;
+        use horizon_client::{brewing, mod_content::ContentMod};
         // Another test may have set the process-wide list already.
         if !brewing::mod_effects().is_empty() {
             return;
         }
-        register_mob_effects(&[]);
+        let f = Fixture::new("no-effects");
+        std::fs::write(
+            f.0.join("horizon-mod.toml"),
+            "id = 'plain'\nname = 'plain'\nversion = '1.0'\napi = '0.2'\ncapabilities = ['registries']\n",
+        )
+        .unwrap();
+        let package = horizon_mods::Package::read(&f.0).unwrap();
+        let plain = ContentMod {
+            id: "plain".into(),
+            content: horizon_mods::content::Content::read(&f.0, &package.manifest).unwrap(),
+            jars: Vec::new(),
+        };
+        register_mob_effects(&[plain]);
         // The list `potions::tests` registers, so it holds whichever test runs first.
         assert!(brewing::register_mod_effects([(
             "test:effect".to_owned(),
