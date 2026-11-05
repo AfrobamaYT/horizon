@@ -991,7 +991,6 @@ use horizon_client::{
         Victim,
     },
     hud::{HudBatch, rgba},
-    item_tooltip::TooltipDisplay,
     items::ItemStack,
     keybinds,
     lan::menu::Slots,
@@ -1026,7 +1025,7 @@ use mod_api::{
     ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentStore, BlockHit, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
+    AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
     LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, TooltipPlace, UsePhase,
@@ -4785,17 +4784,8 @@ impl Game<'_> {
     /// (the editor writes into their world directly), and the sign changes
     /// that are no edit of the text (dyeing, glow ink, waxing, `/data`,
     /// `/setblock`, mods' `native_with_mod_block_entity`).
-    pub(super) fn native_sign_changed(
-        &mut self,
-        player: u128,
-        name: &str,
-        dimension: &str,
-        pos: [i32; 3],
-        front: bool,
-        lines: &mut Vec<String>,
-        cancel: &mut bool,
-    ) {
-        self.fire_sign_changed(player, name, dimension, pos, front, lines, cancel);
+    pub(super) fn native_sign_changed(&mut self, call: mod_api::__private::SignChangedCall<'_>) {
+        self.fire_sign_changed(call);
     }
     /// A command a player typed (NeoForge's `CommandEvent`, before
     /// `Commands.performCommand` runs it), without its slash: any command,
@@ -4843,15 +4833,9 @@ impl Game<'_> {
     /// heard by `native_projectile_impact`.
     pub(super) fn native_ender_pearl_teleport(
         &mut self,
-        player: u128,
-        name: &str,
-        pearl: u32,
-        from: [f64; 3],
-        target: &mut [f64; 3],
-        damage: &mut f32,
-        cancel: &mut bool,
+        call: mod_api::__private::EnderPearlTeleportCall<'_>,
     ) {
-        self.fire_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel);
+        self.fire_ender_pearl_teleport(call);
     }
     /// A server player who ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
@@ -5456,23 +5440,9 @@ impl Game<'_> {
     /// the player. Server-side.
     pub(super) fn native_player_set_spawn(
         &mut self,
-        player: u128,
-        player_entity_id: i32,
-        name: &str,
-        dimension: &str,
-        pos: Option<[i32; 3]>,
-        forced: bool,
-        cancel: &mut bool,
+        call: mod_api::__private::PlayerSetSpawnCall<'_>,
     ) {
-        self.fire_player_set_spawn(
-            player,
-            player_entity_id,
-            name,
-            dimension,
-            pos,
-            forced,
-            cancel,
-        );
+        self.fire_player_set_spawn(call);
     }
     /// NeoForge's `PermissionsChangedEvent`: the operator list is about to give player
     /// `player` (`name`) the permission level `new` in place of `old`, through `PlayerList.op`
@@ -7145,25 +7115,8 @@ impl Game<'_> {
     /// `advanced` (F3+H) and `creative` (a creative tab's own slot) its
     /// `TooltipFlag`. Asked each frame the tooltip shows, never for one the
     /// stack hides or a crossbow's loaded projectile. Client-side.
-    pub(super) fn native_item_tooltip(
-        &self,
-        player: u128,
-        player_entity_id: i32,
-        stack: &ItemStack,
-        display: &TooltipDisplay<'_>,
-        advanced: bool,
-        creative: bool,
-        lines: &mut Vec<(Text, u32)>,
-    ) {
-        self.fire_item_tooltip(
-            player,
-            player_entity_id,
-            stack,
-            display,
-            advanced,
-            creative,
-            lines,
-        );
+    pub(super) fn native_item_tooltip(&self, call: mod_api::__private::ItemTooltipCall<'_>) {
+        self.fire_item_tooltip(call);
     }
     /// `RenderTooltipEvent.GatherComponents`: the elements of `stack`'s
     /// tooltip (`ItemStack.getTooltipLines` as text lines, then the image
@@ -7287,27 +7240,8 @@ impl Game<'_> {
     /// (`UseOnContext.getClickLocation`, `getClickedFace`, `isInside`) and
     /// `player` (the acting player's UUID) and `player_entity_id` (the server's
     /// entity id),.
-    pub(super) fn native_use_on(
-        &mut self,
-        stack: &ItemStack,
-        pos: [i32; 3],
-        face: [i32; 3],
-        hand: Hand,
-        hit: BlockHit,
-        player: u128,
-        player_entity_id: i32,
-        claimed: &mut bool,
-    ) {
-        self.fire_use_on(
-            stack,
-            pos,
-            face,
-            hand,
-            hit,
-            player,
-            player_entity_id,
-            claimed,
-        );
+    pub(super) fn native_use_on(&mut self, call: mod_api::__private::UseOnCall<'_>) {
+        self.fire_use_on(call);
     }
     /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
     /// including vanilla items, on the authoritative server (not droppers).
@@ -8252,25 +8186,8 @@ impl Game<'_> {
     /// (`/ride`, a stab). It is not told for a rider whose vehicle was removed from the
     /// level (a boat or minecart destroyed, a broken cushion), nor for riders loaded with a
     /// save. The acting player is the one whose action runs, a guest on a server. Server-side.
-    pub(super) fn native_entity_mount(
-        &mut self,
-        dimension: &str,
-        entity: u32,
-        kind: &str,
-        vehicle: u32,
-        vehicle_kind: &str,
-        mounting: bool,
-        canceled: &mut bool,
-    ) {
-        self.fire_entity_mount(
-            dimension,
-            entity,
-            kind,
-            vehicle,
-            vehicle_kind,
-            mounting,
-            canceled,
-        );
+    pub(super) fn native_entity_mount(&mut self, call: mod_api::__private::EntityMountCall<'_>) {
+        self.fire_entity_mount(call);
     }
     /// Whether a mod listens to `native_entity_tick_pre` and `native_entity_tick_post`: a mod
     /// that hooks them hooks this one too and sets `listened` (HEAD, `*listened = true`).
@@ -8784,29 +8701,9 @@ impl Game<'_> {
     /// `native_hears_projectile_impacts`. Server-side.
     pub(super) fn native_projectile_impact(
         &mut self,
-        dimension: &str,
-        projectile: u32,
-        kind: &str,
-        owner: u32,
-        entity: Option<u32>,
-        entity_kind: &str,
-        block: [i32; 3],
-        face: [i32; 3],
-        at: [f64; 3],
-        canceled: &mut bool,
+        call: mod_api::__private::ProjectileImpactCall<'_>,
     ) {
-        self.fire_projectile_impact(
-            dimension,
-            projectile,
-            kind,
-            owner,
-            entity,
-            entity_kind,
-            block,
-            face,
-            at,
-            canceled,
-        );
+        self.fire_projectile_impact(call);
     }
 
     /// `Block.stepOn` for a mod block, on its authoritative server level.

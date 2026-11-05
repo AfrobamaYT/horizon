@@ -7399,16 +7399,16 @@ impl Game<'_> {
             } else {
                 let (player, player_entity_id) = self.native_clicker();
                 let (hand, at) = (self.hand, hit.native());
-                self.native_use_on(
-                    &stack,
-                    hit.pos,
-                    hit.face,
+                self.native_use_on(mod_api::__private::UseOnCall {
+                    stack: &stack,
+                    pos: hit.pos,
+                    face: hit.face,
                     hand,
-                    at,
+                    hit: at,
                     player,
                     player_entity_id,
-                    &mut claimed,
-                );
+                    claimed: &mut claimed,
+                });
             }
         }
         if !claimed && !on_block {
