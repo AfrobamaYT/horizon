@@ -2334,8 +2334,8 @@ impl LevelRef {
 /// raids file saves. `level.raid_at(host, pos)`, `level.raids(host)`,
 /// `level.raid(host, id)` and `mob.raid(host)` make one. A handle resolves
 /// again on each call: it reads as `None` or `false` once the raid is gone,
-/// for a handle of an earlier open, for a level that is not in place, and on a
-/// client.
+/// for a handle of an earlier open, for a closed level, and on a client.
+/// Reads and writes reach parked server levels without moving them into place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RaidRef {
