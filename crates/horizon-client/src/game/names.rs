@@ -573,7 +573,7 @@ impl Game<'_> {
 fn named_by_player_list(players: &[(&Mob, String)]) -> std::collections::HashSet<u32> {
     players.iter().map(|(player, _)| player.id).collect()
 }
-fn name_tag_at(m: &Mob, alpha: f64) -> glam::DVec3 {
+pub(super) fn name_tag_at(m: &Mob, alpha: f64) -> glam::DVec3 {
     glam::DVec3::new(
         m.previous.x + (m.position.x - m.previous.x) * alpha,
         m.previous.y + (m.position.y - m.previous.y) * alpha + f64::from(m.height()) + 0.5,
