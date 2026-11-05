@@ -1795,7 +1795,7 @@ fn source(revision: &str) -> Result<PathBuf, String> {
     }
     let archive = format!(
         "https://codeload.github.com/{}/tar.gz/{revision}",
-        backend::REPO
+        horizon_mods::index::native::PREBUILT_REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
     let top = unpack_archive(&archive, &partial, u64::MAX)?;

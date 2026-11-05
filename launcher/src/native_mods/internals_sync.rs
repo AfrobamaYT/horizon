@@ -71,13 +71,13 @@ fn discover(folder: &Path) -> Result<Vec<ListedInternal>, Error> {
         .as_ref()
         .expect("native bundle")
         .horizon;
-    let source = super::source(revision).map_err(|reason| Error::SourceUnavailable {
-        revision: revision.clone(),
-        reason,
-    })?;
     let cache = super::root().join("internals-sync").join(revision);
     let game = cache.join("game");
     if !game.join(".discovery-ready").is_file() {
+        let source = super::source(revision).map_err(|reason| Error::SourceUnavailable {
+            revision: revision.clone(),
+            reason,
+        })?;
         let fresh = cache.join("game.new");
         if fresh.exists() {
             fs::remove_dir_all(&fresh).map_err(|e| e.to_string())?;
@@ -93,7 +93,7 @@ fn discover(folder: &Path) -> Result<Vec<ListedInternal>, Error> {
         fs::rename(&fresh, &game).map_err(|e| e.to_string())?;
     }
     let stage = cache.join("stage");
-    super::sync(&game, &stage)?;
+    prepare_stage(&game, &stage)?;
     let mut listed = internals::Catalog::read(&stage)?;
     listed.discovery = true;
     api::stage(&stage, &projects, &declared, &resolution, &listed)?;
@@ -138,6 +138,24 @@ fn discover(folder: &Path) -> Result<Vec<ListedInternal>, Error> {
                 .map_err(|error| Error::Check(error.to_string()))
         })
         .collect()
+}
+
+// The pinned game never changes in this cache. Keep Cargo.lock after the first check:
+// horizon-world watches it, so restoring the pristine lock would rebuild the entire game
+// every time. Reset only the workspace membership and the generated mod source copies.
+fn prepare_stage(game: &Path, stage: &Path) -> Result<(), String> {
+    if !stage.join("Cargo.toml").is_file() {
+        super::sync(game, stage)?;
+    } else {
+        fs::copy(game.join("Cargo.toml"), stage.join("Cargo.toml")).map_err(|e| e.to_string())?;
+    }
+    for relative in ["native-api", "native-internals", "crates/native-game"] {
+        let path = stage.join(relative);
+        if path.exists() {
+            fs::remove_dir_all(path).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 /// Entry point used only when Cargo launches this executable as the discovery rustc wrapper.
@@ -248,6 +266,44 @@ fn parse(line: &str, mod_dir: &Path, stage: &Path) -> Option<Message> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn discovery_cache_keeps_the_resolved_lock_and_game_sources_but_replaces_mods() {
+        let root = super::super::tests::dir("discovery-cache");
+        let game = root.join("game");
+        let stage = root.join("stage");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
+        fs::write(game.join("Cargo.lock"), "original").unwrap();
+        fs::write(game.join("game.rs"), "struct Game;").unwrap();
+        prepare_stage(&game, &stage).unwrap();
+        let modified = fs::metadata(stage.join("game.rs"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        fs::write(stage.join("Cargo.lock"), "resolved with mod dependencies").unwrap();
+        fs::write(stage.join("Cargo.toml"), "with a generated mod").unwrap();
+        fs::create_dir_all(stage.join("native-api/old/src")).unwrap();
+        fs::write(stage.join("native-api/old/src/lib.rs"), "old mod").unwrap();
+        prepare_stage(&game, &stage).unwrap();
+        assert_eq!(
+            fs::read(stage.join("Cargo.lock")).unwrap(),
+            b"resolved with mod dependencies"
+        );
+        assert_eq!(
+            fs::metadata(stage.join("game.rs"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            modified
+        );
+        assert_eq!(
+            fs::read(stage.join("Cargo.toml")).unwrap(),
+            fs::read(game.join("Cargo.toml")).unwrap()
+        );
+        assert!(!stage.join("native-api").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn discovery_filters_diagnostics_by_crate_span_and_lint_and_keeps_macro_calls() {
