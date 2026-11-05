@@ -82,7 +82,7 @@ pub trait Hooks {
     )]
     fn server_stopping();
     /// Fired once at the end of server teardown, after `server_stopping` and
-    /// final save attempt and storage release. Also fired when startup or
+    /// the final save attempt and storage release. Also fired when startup or
     /// teardown fails after startup began, on integrated and dedicated servers.
     /// Failed opens save only worlds already adopted by the server; a failed
     /// save still reaches this hook, but does not emit `WorldCloseFinal`.

@@ -18,12 +18,10 @@ impl Game<'_> {
         let result = match run {
             Ok(result) => result,
             Err(payload) => {
+                let message = super::dedicated::panic_message(payload.as_ref());
+                log::error!("The server thread panicked: {message}");
                 self.prepare_server_crash();
-                Err(format!(
-                    "the server thread panicked: {}",
-                    super::dedicated::panic_message(payload.as_ref())
-                )
-                .into())
+                Err(format!("the server thread panicked: {message}").into())
             }
         };
         if !startup_began {
