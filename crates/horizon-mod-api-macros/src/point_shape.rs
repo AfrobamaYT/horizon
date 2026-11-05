@@ -261,7 +261,7 @@ impl Shape {
         syn::Ident::new(&camel(&format!("{}_return", self.name)), Span::call_site())
     }
 
-    /// The record its listeners get, in `mod_api::points`: `TickArgs` for `tick`.
+    /// The record its listeners get, in `mod_points`: `TickArgs` for `tick`.
     pub fn record(&self) -> syn::Ident {
         syn::Ident::new(&format!("{}Args", camel(&self.name)), Span::call_site())
     }
@@ -273,7 +273,7 @@ impl Shape {
             .any(|arg| matches!(arg.ty, Type::Reference(_)))
     }
 
-    /// The record's declaration in `mod_api::points`, documented from the function's `target`.
+    /// The record's declaration in `mod_points`, documented from the function's `target`.
     pub fn record_item(&self, target: &str) -> TokenStream {
         let record = self.record();
         let lifetime = if self.borrows() {
@@ -337,7 +337,7 @@ impl Shape {
 
     /// The `Points` methods for this point (its head, then its return when it has one), their
     /// `PointId` variants, and the `Option<PointId>` consts `#[horizon_mod]` subscribes a mod by:
-    /// generated into `mod_api::points`.
+    /// generated into `mod_points`.
     pub fn api_items(&self, target: &str) -> (TokenStream, TokenStream, TokenStream) {
         let record = self.record();
         let record = if self.borrows() {
