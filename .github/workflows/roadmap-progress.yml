@@ -1,0 +1,36 @@
+name: roadmap-progress
+# Redraws the progress bars in the pinned roadmap issue #771 from the board
+# (.github/scripts/roadmap-progress.js). Needs PROJECT_TOKEN (Projects read, issues write on the
+# arismoko account); skipped without it. Checks out no PR code.
+on:
+  issues:
+    types: [opened, closed, reopened]
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: roadmap-progress
+  cancel-in-progress: false
+jobs:
+  progress:
+    runs-on: ubuntu-latest
+    steps:
+      - id: token
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: '[ -n "$PROJECT_TOKEN" ] && echo set=1 >> "$GITHUB_OUTPUT" || echo "::notice::PROJECT_TOKEN is not set; progress skipped."'
+      # Let the board sync for the same event place the issue first.
+      - if: steps.token.outputs.set && github.event_name == 'issues'
+        run: sleep 90
+      - if: steps.token.outputs.set
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+      - if: steps.token.outputs.set
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: await require('./.github/scripts/roadmap-progress.js')({ github, context, core })
