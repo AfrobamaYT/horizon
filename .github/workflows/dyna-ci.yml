@@ -74,7 +74,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [ "$EVENT" = push ] || git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qE '^(crates/(horizon-mod-api|horizon-mod-api-gen|horizon-mod-wasm|horizon-mods)/|Cargo\.lock$)'; then
+          if [ "$EVENT" = push ] || git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qE '^(crates/(horizon-mod-api|horizon-mod-api-gen|horizon-mod-api-macros|horizon-mod-points|horizon-mod-wasm|horizon-mods)/|Cargo\.lock$)'; then
             echo wasm=true >> "$GITHUB_OUTPUT"
           else
             echo wasm=false >> "$GITHUB_OUTPUT"
@@ -239,7 +239,7 @@ jobs:
         env:
           HORIZON_WASM_BENCH: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/bench/target/horizon-mod/bench_mod.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture
+        run: cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1
 
   verify:
     needs: changes
