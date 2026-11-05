@@ -2604,6 +2604,33 @@ pub(super) mod tests {
                 level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
                 Some(false),
             );
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.moving_pistons.push((
+                [0, 64, 0],
+                horizon_world::piston_shape::MovingPistonState {
+                    moved_state: stone,
+                    direction: horizon_core::geometry::Direction::East,
+                    extending: true,
+                    source: false,
+                    progress: 1.0,
+                    previous_progress: 1.0,
+                },
+            ));
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
+                Some(true),
+            );
+            game.world.moving_pistons[0].1.progress = 0.5;
+            game.world.moving_pistons[0].1.previous_progress = 0.5;
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
+                Some(false),
+            );
             let stale = LevelRef::new(
                 NativeWorldEpoch::new(level.epoch().get() + 1),
                 level.dimension(),
