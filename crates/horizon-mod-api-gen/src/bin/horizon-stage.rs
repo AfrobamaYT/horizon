@@ -34,9 +34,8 @@ fn declarations(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// Keep unsafe forbidden everywhere except the generated table, in the staged copy only.
-fn with_internals_table(source: &str, table: &str) -> String {
-    let source = source.replace("#![forbid(unsafe_code)]", "#![deny(unsafe_code)]");
-    format!("{source}\n{table}\n")
+fn with_internals_table(source: &str) -> String {
+    source.replace("#![forbid(unsafe_code)]", "#![deny(unsafe_code)]")
 }
 
 fn main() {
@@ -60,8 +59,10 @@ fn main() {
         );
         let lib = root.join("crates/horizon-client/src/lib.rs");
         let text = std::fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
-        std::fs::write(&lib, with_internals_table(&text, &table))
+        std::fs::write(&lib, with_internals_table(&text))
             .map_err(|e| format!("{}: {e}", lib.display()))?;
+        let module = root.join("crates/horizon-client/src/__internals.rs");
+        std::fs::write(&module, table).map_err(|e| format!("{}: {e}", module.display()))?;
         println!(
             "internals table: {} types, {} thunks from {} declared paths ({} skipped)",
             counts.types, counts.thunks, counts.declared, counts.skipped
@@ -107,10 +108,10 @@ mod tests {
     #[test]
     fn the_staged_root_allows_only_the_table_to_override_unsafe() {
         let source = "#![forbid(unsafe_code)]\npub mod game;";
-        let staged = with_internals_table(source, "#[allow(unsafe_code)] pub mod __internals {}");
+        let staged = with_internals_table(source);
         assert!(staged.starts_with("#![deny(unsafe_code)]\npub mod game;"));
         assert!(!staged.contains("forbid(unsafe_code)"));
-        assert!(staged.ends_with("#[allow(unsafe_code)] pub mod __internals {}\n"));
+        assert!(!staged.contains("pub mod __internals"));
         assert!(source.contains("forbid(unsafe_code)"));
     }
 }

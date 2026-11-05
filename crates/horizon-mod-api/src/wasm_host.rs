@@ -790,10 +790,12 @@ pub fn instantiate(
     component: &Component,
     members: &[Member],
     budgets: Budgets,
+    imports: impl FnOnce(&mut Linker<State>),
 ) -> Result<Vec<Instantiated>, LoadError> {
     let mut linker = Linker::<State>::new(engine);
     glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(&mut linker, |s| s)
         .expect("the game's own imports are defined once");
+    imports(&mut linker);
     let limits = wasmtime::StoreLimitsBuilder::new()
         .memory_size(budgets.memory)
         .build();

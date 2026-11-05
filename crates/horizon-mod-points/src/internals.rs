@@ -88,6 +88,8 @@ pub type ThunkFn = unsafe fn(Option<*mut ()>, Vec<Arg>) -> Result<Reply, Refusal
 pub struct Thunk {
     /// Its `internals.json` path.
     pub path: &'static str,
+    /// Its `internals.json` hash.
+    pub hash: &'static str,
     /// Its receiver's node type, for a method; `None` for a free or associated function.
     pub receiver: Option<u32>,
     /// Each argument's node type, or `None` for one given as a copy.
@@ -98,12 +100,37 @@ pub struct Thunk {
     pub call: ThunkFn,
 }
 
+/// A walked type's identity and operations.
+pub struct Type {
+    pub path: &'static str,
+    /// Empty for a wrapper or collection, reached only through a checked named type.
+    pub hash: &'static str,
+    pub node: NodeFn,
+}
+
+/// A raw point's receiver and record, as roots of a call.
+pub struct Place {
+    pub place: usize,
+    pub target: &'static str,
+    pub hash: &'static str,
+    pub receiver: Option<u32>,
+    pub record: u32,
+}
+
 /// The staged game's internals.
 pub struct Table {
-    /// Each walked type's operations, by its path as `internals.json` spells it, or for a type
-    /// that isn't listed (a list, a map, an option), as the game's crate root spells it.
-    pub types: &'static [(&'static str, NodeFn)],
+    pub types: &'static [Type],
     pub thunks: &'static [Thunk],
+    pub places: &'static [Place],
+}
+
+impl Table {
+    /// A game built without wasm internals support.
+    pub const EMPTY: Self = Self {
+        types: &[],
+        thunks: &[],
+        places: &[],
+    };
 }
 
 /// The wrong shape for `what`.
@@ -161,5 +188,102 @@ pub fn node(arg: Arg) -> Result<*mut (), Refusal> {
     match arg {
         Arg::Node(node) => Ok(node),
         Arg::Value(_) => Err(changed("a node, not a value")),
+    }
+}
+
+/// The generic internals interface, generated from the same WIT on host and guest.
+#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+pub mod bindings {
+    wasmtime::component::bindgen!({ path: "wit/internals.wit", world: "internals" });
+}
+#[cfg(target_arch = "wasm32")]
+pub mod bindings {
+    wit_bindgen::generate!({ path: "wit/internals.wit", world: "internals" });
+}
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+pub use bindings::horizon::mod_internals::view::Cell;
+
+/// A plain value as pre-order cells. Compound counts count children, not all descendants.
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+pub fn flatten(value: Value) -> Vec<Cell> {
+    let mut pending = vec![value];
+    let mut cells = Vec::new();
+    while let Some(value) = pending.pop() {
+        cells.push(match value {
+            Value::None => Cell::None,
+            Value::B(v) => Cell::B(v),
+            Value::C(v) => Cell::C(v),
+            Value::S(v) => Cell::S(v),
+            Value::U(v) => Cell::U(v),
+            Value::F(v) => Cell::F(v),
+            Value::Str(v) => Cell::Str(v),
+            Value::Seq(children) => {
+                let cell = Cell::Seq(children.len() as u32);
+                pending.extend(children.into_iter().rev());
+                cell
+            }
+            Value::Rec(children) => {
+                let cell = Cell::Rec(children.len() as u32);
+                pending.extend(children.into_iter().rev());
+                cell
+            }
+            Value::Var(case, children) => {
+                let cell = Cell::Var((case, children.len() as u32));
+                pending.extend(children.into_iter().rev());
+                cell
+            }
+        });
+    }
+    cells
+}
+
+/// One value from pre-order cells. Refuses missing children, trailing cells and excessive nesting.
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+pub fn unflatten(cells: Vec<Cell>) -> Result<Value, Refusal> {
+    fn next(cells: &mut std::vec::IntoIter<Cell>, depth: usize) -> Result<Value, Refusal> {
+        if depth > 128 {
+            return Err(changed("a value nested too deeply"));
+        }
+        let cell = cells.next().ok_or_else(|| changed("missing value cells"))?;
+        let (count, case) = match cell {
+            Cell::None => return Ok(Value::None),
+            Cell::B(v) => return Ok(Value::B(v)),
+            Cell::C(v) => return Ok(Value::C(v)),
+            Cell::S(v) => return Ok(Value::S(v)),
+            Cell::U(v) => return Ok(Value::U(v)),
+            Cell::F(v) => return Ok(Value::F(v)),
+            Cell::Str(v) => return Ok(Value::Str(v)),
+            Cell::Seq(n) => (n, None),
+            Cell::Rec(n) => (n, Some(None)),
+            Cell::Var((case, n)) => (n, Some(Some(case))),
+        };
+        if count as usize > cells.len() {
+            return Err(changed("missing value children"));
+        }
+        let children = (0..count)
+            .map(|_| next(cells, depth + 1))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(match case {
+            None => Value::Seq(children),
+            Some(None) => Value::Rec(children),
+            Some(Some(case)) => Value::Var(case, children),
+        })
+    }
+    let mut cells = cells.into_iter();
+    let value = next(&mut cells, 0)?;
+    if cells.len() != 0 {
+        return Err(changed("trailing value cells"));
+    }
+    Ok(value)
+}
+
+#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+impl From<Refusal> for bindings::horizon::mod_internals::view::Refusal {
+    fn from(why: Refusal) -> Self {
+        match why {
+            Refusal::Gone(why) => Self::Gone(why),
+            Refusal::Changed(why) => Self::Changed(why),
+            Refusal::NotHere(why) => Self::NotHere(why),
+        }
     }
 }
