@@ -137,8 +137,19 @@ fn children(
             .cloned()
             .chain(conditions(&declared.attrs))
             .collect();
+        let explicit = declared.attrs.iter().find_map(|attr| match &attr.meta {
+            syn::Meta::NameValue(value) if attr.path().is_ident("path") => match &value.value {
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(path),
+                    ..
+                }) => Some(path.value()),
+                _ => None,
+            },
+            _ => None,
+        });
         if let Some((_, inner)) = &declared.content {
-            let inner_dir = dir.join(&name);
+            // An inline module's children live in its folder, named by its own `#[path]` if any.
+            let inner_dir = dir.join(explicit.as_deref().unwrap_or(&name));
             children(
                 &child,
                 inner,
@@ -150,16 +161,6 @@ fn children(
             );
             continue;
         }
-        let explicit = declared.attrs.iter().find_map(|attr| match &attr.meta {
-            syn::Meta::NameValue(value) if attr.path().is_ident("path") => match &value.value {
-                syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(path),
-                    ..
-                }) => Some(path.value()),
-                _ => None,
-            },
-            _ => None,
-        });
         let (file, child_dir) = match explicit {
             Some(relative) => {
                 let file = here.join(relative);
@@ -911,7 +912,7 @@ mod tests {
         };
         put(
             "crates/horizon-client/src/game.rs",
-            "mod remote;\nmod nested { mod leaf; }\n#[cfg(test)]\nmod probes;\nimpl Game<'_> {\n    fn tick(&mut self) {}\n    pub(super) fn slot(&mut self) -> &mut u8 { todo!() }\n    fn native_tick(&mut self) {}\n    fn new() -> Self { todo!() }\n}\n",
+            "mod remote;\nmod nested { mod leaf; }\n#[path = \"elsewhere\"]\nmod moved { mod deep; }\n#[cfg(test)]\nmod probes;\nimpl Game<'_> {\n    fn tick(&mut self) {}\n    pub(super) fn slot(&mut self) -> &mut u8 { todo!() }\n    fn native_tick(&mut self) {}\n    fn new() -> Self { todo!() }\n}\n",
         );
         put(
             "crates/horizon-client/src/game/remote.rs",
@@ -920,6 +921,10 @@ mod tests {
         put(
             "crates/horizon-client/src/game/remote/lan.rs",
             "impl Game<'_> { fn join(&mut self) {} }",
+        );
+        put(
+            "crates/horizon-client/src/game/elsewhere/deep.rs",
+            "impl Game<'_> { fn dive(&mut self) {} }",
         );
         put(
             "crates/horizon-client/src/game/nested/leaf.rs",
@@ -968,6 +973,12 @@ mod tests {
                     true
                 ),
                 (
+                    "dive",
+                    "horizon_client::game::moved::deep::Game<'_>::dive",
+                    "both",
+                    true
+                ),
+                (
                     "fall",
                     "horizon_client::game::nested::leaf::Game<'_>::fall",
                     "both",
@@ -1012,10 +1023,10 @@ mod tests {
         assert_eq!(
             stage(&root).unwrap(),
             Staged {
-                points: 8,
+                points: 9,
                 head_only: 1,
-                raw: 7,
-                files: 5
+                raw: 8,
+                files: 6
             }
         );
         let game = std::fs::read_to_string(root.join("crates/horizon-client/src/game.rs")).unwrap();

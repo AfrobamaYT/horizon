@@ -34,11 +34,12 @@ unsafe impl Send for Raw {}
 unsafe impl Sync for Raw {}
 
 /// The list while mods load: registrations, and stops that came before the seal.
-#[derive(Default)]
 struct Open {
     listeners: Vec<Listener>,
     raw: Vec<(PointId, Raw)>,
     stopped: Vec<String>,
+    /// Set once [`seal`] has taken the list: registering is refused from then on.
+    sealing: bool,
 }
 
 struct Sealed {
@@ -55,6 +56,7 @@ static OPEN: Mutex<Open> = Mutex::new(Open {
     listeners: Vec::new(),
     raw: Vec::new(),
     stopped: Vec::new(),
+    sealing: false,
 });
 static SEALED: OnceLock<Sealed> = OnceLock::new();
 
@@ -86,7 +88,7 @@ fn lock() -> std::sync::MutexGuard<'static, Open> {
 /// The open list, while listeners may still register.
 fn open() -> Result<std::sync::MutexGuard<'static, Open>, RegisterError> {
     let open = lock();
-    if SEALED.get().is_some() {
+    if open.sealing {
         return Err(RegisterError::Sealed);
     }
     Ok(open)
@@ -151,35 +153,46 @@ pub fn stop(id: &str) {
 /// Seals the list, so no listener registers after it, and sets each slot a mod listens at. The game
 /// calls it once, after the mods load.
 pub fn seal() {
-    let mut guard = lock();
-    // Published while the lock is held: nothing registers or stops in between.
-    let sealed = SEALED.get_or_init(|| {
-        let open = std::mem::take(&mut *guard);
-        for listener in &open.listeners {
-            if open.stopped.iter().any(|id| id == listener.id) {
-                listener.stopped.store(true, Ordering::Release);
-            }
+    // Takes the list under the lock, then asks each mod where it listens without it: a mod's
+    // `subscribed` may call `stop` (or `register`, refused) without deadlocking.
+    let (listeners, raw_list) = {
+        let mut open = lock();
+        if open.sealing {
+            return;
         }
-        let mut places = vec![Vec::new(); POINT_COUNT];
-        for (index, listener) in open.listeners.iter().enumerate() {
-            for place in listener
-                .points
-                .iter()
-                .flat_map(|points| points.subscribed())
-                .flatten()
-            {
-                places[*place as usize].push(index as u32);
-            }
+        open.sealing = true;
+        (
+            std::mem::take(&mut open.listeners),
+            std::mem::take(&mut open.raw),
+        )
+    };
+    let mut places = vec![Vec::new(); POINT_COUNT];
+    for (index, listener) in listeners.iter().enumerate() {
+        for place in listener
+            .points
+            .iter()
+            .flat_map(|points| points.subscribed())
+            .flatten()
+        {
+            places[*place as usize].push(index as u32);
         }
-        let mut raw = vec![Vec::new(); POINT_COUNT];
-        for (place, function) in open.raw {
-            raw[place as usize].push(function);
+    }
+    let mut raw = vec![Vec::new(); POINT_COUNT];
+    for (place, function) in raw_list {
+        raw[place as usize].push(function);
+    }
+    let open = lock();
+    // Every stop so far, before the seal or while it ran, is in `stopped`; the next ones see
+    // `SEALED`, set while the lock is held.
+    for listener in &listeners {
+        if open.stopped.iter().any(|id| id == listener.id) {
+            listener.stopped.store(true, Ordering::Release);
         }
-        Sealed {
-            listeners: open.listeners.into(),
-            places: places.into_iter().map(Vec::into_boxed_slice).collect(),
-            raw: raw.into_iter().map(Vec::into_boxed_slice).collect(),
-        }
+    }
+    let sealed = SEALED.get_or_init(|| Sealed {
+        listeners: listeners.into(),
+        places: places.into_iter().map(Vec::into_boxed_slice).collect(),
+        raw: raw.into_iter().map(Vec::into_boxed_slice).collect(),
     });
     for (index, slot) in POINTS.iter().enumerate() {
         let listened = !sealed.places[index].is_empty() || !sealed.raw[index].is_empty();
@@ -238,6 +251,17 @@ mod tests {
 
     fn raw_listener() {}
 
+    /// Stops its own mod, and tries to register another, from inside the seal.
+    struct SelfStop;
+
+    impl Points for SelfStop {
+        fn subscribed(&self) -> &'static [Option<PointId>] {
+            stop("self_stopping");
+            assert_eq!(register("during", &Quiet), Err(RegisterError::Sealed));
+            &[crate::ids::tick]
+        }
+    }
+
     #[test]
     fn one_list_registered_sealed_and_stopped() {
         assert_eq!(register("tick_mod", &Tick), Ok(()));
@@ -246,6 +270,7 @@ mod tests {
         // A stop before the seal holds after it.
         assert_eq!(register("stopped_early", &Tick), Ok(()));
         stop("stopped_early");
+        assert_eq!(register("self_stopping", &SelfStop), Ok(()));
         let raw = PointId::Tick as usize + 2;
         let place = PointId::Tick;
         assert_eq!(
