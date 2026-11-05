@@ -1114,5 +1114,11 @@
   "Claim for free": "Preuzmi besplatno",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Pružatelj plaćanja trgovine ne posluje u vašoj zemlji, pa Osnivački set možete preuzeti ovdje besplatno.",
   "The Founder Set is yours.": "Osnivački set je vaš.",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }

@@ -1114,5 +1114,11 @@
   "Claim for free": "مفت حاصل کریں",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "دکان کا ادائیگی فراہم کنندہ آپ کے ملک میں خدمات نہیں دیتا، اس لیے آپ بانی سیٹ یہاں مفت حاصل کر سکتے ہیں۔",
   "The Founder Set is yours.": "بانی سیٹ اب آپ کا ہے۔",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }

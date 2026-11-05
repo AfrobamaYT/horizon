@@ -1114,5 +1114,11 @@
   "Claim for free": "รับฟรี",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "ผู้ให้บริการชำระเงินของร้านค้าไม่ให้บริการในประเทศของคุณ คุณจึงรับชุดผู้ก่อตั้งได้ที่นี่ฟรี",
   "The Founder Set is yours.": "ชุดผู้ก่อตั้งเป็นของคุณแล้ว",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }

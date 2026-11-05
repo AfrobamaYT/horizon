@@ -1114,5 +1114,11 @@
   "Claim for free": "Вземи безплатно",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Платежният доставчик на магазина не обслужва вашата държава, затова можете да вземете Основателския комплект тук безплатно.",
   "The Founder Set is yours.": "Основателският комплект е ваш.",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }

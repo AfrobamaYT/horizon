@@ -1114,5 +1114,11 @@
   "Claim for free": "Faigh saor in aisce",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Ní fhreastalaíonn soláthraí íocaíochta an tsiopa ar do thír, mar sin is féidir leat an tSraith bunaitheoir a fháil anseo saor in aisce.",
   "The Founder Set is yours.": "Is leatsa an tSraith bunaitheoir.",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }

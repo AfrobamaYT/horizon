@@ -1114,5 +1114,11 @@
   "Claim for free": "Акысыз алуу",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Дүкөндүн төлөм провайдери сиздин өлкөдө иштебейт, ошондуктан Негиздөөчү топтомун бул жерден акысыз ала аласыз.",
   "The Founder Set is yours.": "Негиздөөчү топтому эми сиздики.",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }

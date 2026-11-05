@@ -1114,5 +1114,11 @@
   "Claim for free": "Ricevi senpage",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "La pagoservo de la vendejo ne servas vian landon, do vi povas ricevi la Fondinto-aron ĉi tie senpage.",
   "The Founder Set is yours.": "La Fondinto-aro estas via.",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }

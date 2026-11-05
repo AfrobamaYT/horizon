@@ -1114,5 +1114,11 @@
   "Claim for free": "Obténer a gratis",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Lo provesidor de pagament de la botiga opèra pas dins vòstre país, doncas podètz obténer l'Ensemble de fondators aicí a gratis.",
   "The Founder Set is yours.": "L'Ensemble de fondators es vòstre.",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }

@@ -1114,5 +1114,11 @@
   "Claim for free": "Fergees krije",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "De betellingsprovider fan de winkel betsjinnet dyn lân net, dus kinst de Oprjochter set hjir fergees krije.",
   "The Founder Set is yours.": "De Oprjochter set is fan dy.",
-  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
+  "Documentation": "Documentation",
+  "Help build the mod API": "Help build the mod API",
+  "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
+  "Roadmap": "Roadmap",
+  "So is the game.": "So is the game.",
+  "This launcher is open.": "This launcher is open."
 }
