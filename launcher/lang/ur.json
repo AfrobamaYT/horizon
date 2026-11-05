@@ -1076,5 +1076,6 @@
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (یا ایک پروجیکٹ میں .mcp.json)",
   "← All servers": "← تمام سرورز",
   "← Newer": "← جدید تر",
-  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported.",
+  "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.": "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back."
 }
