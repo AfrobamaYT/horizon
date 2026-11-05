@@ -15507,7 +15507,6 @@ impl Game<'_> {
             .ok_or("no renderer for graphics recovery")?;
         let screenshot = old.screenshot.take();
         let screenshot_result = old.screenshot_result.take();
-        let pending_screenshot = old.pending_screenshot.take();
         drop(old);
         let mut renderer = build_renderer(
             window,
@@ -15527,7 +15526,6 @@ impl Game<'_> {
         )?;
         renderer.screenshot = screenshot;
         renderer.screenshot_result = screenshot_result;
-        renderer.pending_screenshot = pending_screenshot;
         self.renderer = Some(renderer);
         self.skin_slots.forget();
         self.maps.slots.forget();
@@ -19978,16 +19976,13 @@ impl Game<'_> {
                     }
                     self.clock.end_frame(self.pause);
                     let mut consumed = self.ui.screenshot_message.is_some();
-                    let pending = self
+                    let finished = self
                         .renderer
                         .as_mut()
-                        .and_then(|r| r.pending_screenshot.take());
-                    let finished = pending
-                        .and_then(|pending| self.save_screenshot(pending))
-                        .or_else(|| {
-                            self.renderer
-                                .as_mut()
-                                .and_then(|r| r.screenshot_result.take())
+                        .and_then(|r| r.screenshot_result.take())
+                        .and_then(|result| match result {
+                            Ok(pending) => self.save_screenshot(pending),
+                            Err(error) => Some(Err(error)),
                         });
                     if let Some(result) = &finished
                         && self.ui.screenshot_message.is_some()

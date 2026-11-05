@@ -207,9 +207,9 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     });
     renderer.render(&frame)?;
     renderer
-        .pending_screenshot
+        .screenshot_result
         .take()
-        .expect("CPU readback")
+        .expect("CPU readback")?
         .save()?;
     let expected = read(&out.join("cpu.png"));
     let matches = expected
@@ -256,9 +256,9 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     });
     renderer.render(&frame)?;
     renderer
-        .pending_screenshot
+        .screenshot_result
         .take()
-        .expect("GPU readback")
+        .expect("GPU readback")?
         .save()?;
     assert_eq!(
         read(&out.join("gpu.png")),

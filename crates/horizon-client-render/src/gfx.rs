@@ -1433,10 +1433,8 @@ pub struct Renderer {
     started: Instant,
     /// The next frame to write to a PNG path (control socket, F2, world icon).
     pub screenshot: Option<ScreenshotRequest>,
-    /// CPU pixels ready for the game to approve before writing any file.
-    pub pending_screenshot: Option<PendingScreenshot>,
-    /// Outcome of a failed readback: frame size, or the error.
-    pub screenshot_result: Option<std::result::Result<[u32; 2], String>>,
+    /// Readback outcome: CPU pixels for the game to approve before writing, or an error.
+    pub screenshot_result: Option<std::result::Result<PendingScreenshot, String>>,
     /// Screenshot Quality (Horizon setting): a `scaled` screenshot's frame is this many
     /// times the game's resolution (1, 2, 4 or 8).
     pub screenshot_quality: u32,
@@ -4721,7 +4719,6 @@ impl Renderer {
             started: Instant::now(),
             screenshot: None,
             screenshot_result: None,
-            pending_screenshot: None,
             screenshot_quality: 1,
             screenshot_halvings: 0,
             gamma: 0.5,
@@ -10558,10 +10555,10 @@ impl Renderer {
                 self.screenshot = Some(request);
             } else {
                 self.screenshot_halvings = 0;
-                match self.read_screenshot(&request, &buffer, hdr_readback.as_ref()) {
-                    Ok(pending) => self.pending_screenshot = Some(pending),
-                    Err(e) => self.screenshot_result = Some(Err(e.to_string())),
-                }
+                self.screenshot_result = Some(
+                    self.read_screenshot(&request, &buffer, hdr_readback.as_ref())
+                        .map_err(|e| e.to_string()),
+                );
             }
         }
         // The frame's own waits for the submit thread (its queue writes and passes).

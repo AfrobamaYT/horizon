@@ -385,15 +385,14 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
             });
             for _ in 0..32 {
                 draw(&mut renderer)?;
-                if renderer.pending_screenshot.is_some() || renderer.screenshot_result.is_some() {
+                if renderer.screenshot_result.is_some() {
                     break;
                 }
             }
             let result = renderer
-                .pending_screenshot
+                .screenshot_result
                 .take()
-                .map(|pending| pending.save().map_err(|e| e.to_string()))
-                .or_else(|| renderer.screenshot_result.take());
+                .map(|result| result.and_then(|pending| pending.save().map_err(|e| e.to_string())));
             match result {
                 Some(Ok(_)) => {}
                 Some(Err(e)) => notes.push(format!("screenshot: {e}")),
