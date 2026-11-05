@@ -3983,7 +3983,7 @@ impl OptionsUi {
                 Click::Nothing => Vec::new(),
                 Click::Pressed => vec![Event::ButtonClick],
                 Click::Switch => {
-                    crate::extras::Item::Splitscreen.cycle(&mut s.extras, false);
+                    crate::extras::Item::Splitscreen.cycle(&mut s.extras);
                     vec![Event::ButtonClick, Event::Changed]
                 }
                 Click::Done => {
@@ -4238,7 +4238,7 @@ impl OptionsUi {
                             if let Some(name) = item.key_name() {
                                 self.selected_key = Some(name);
                             } else {
-                                item.cycle(&mut s.extras, self.shift);
+                                item.cycle(&mut s.extras);
                                 events.push(Event::Changed);
                             }
                         }
@@ -4571,7 +4571,7 @@ impl OptionsUi {
                 self.cycle_option(s, opt, amount > 0.0, framebuffer)
             }
             Some(HoveredControl::Extra(item)) if amount != 0.0 => {
-                item.cycle(&mut s.extras, amount > 0.0);
+                item.cycle(&mut s.extras);
                 vec![Event::Changed]
             }
             Some(_) => Vec::new(),
@@ -5177,7 +5177,7 @@ impl OptionsUi {
                             if let Some(name) = item.key_name() {
                                 self.selected_key = Some(name);
                             } else {
-                                item.cycle(&mut s.extras, shift);
+                                item.cycle(&mut s.extras);
                                 events.push(Event::Changed);
                             }
                         }
@@ -8293,53 +8293,5 @@ mod tests {
         ui.click(&mut s, &atlas, px, py, size, [854, 480], false, false);
         assert_eq!(s.particles, 0);
         ui.shift = false;
-
-        // Also verify Act::Extra on Page::Extras
-        ui.show(Page::Extras);
-        let (widgets, top, _, _) = ui.layout(&s, size.0, size.1);
-        if let Some(extra_btn) = widgets.iter().find(|wd| {
-            matches!(
-                wd.kind,
-                WKind::Button {
-                    active: true,
-                    act: Act::Extra(crate::extras::Item::CosmeticsOthers),
-                    ..
-                }
-            )
-        }) {
-            // Extras has enough rows to scroll: click the cycle button inside
-            // the list's viewport, as a player would after scrolling to it.
-            ui.scroll = (extra_btn.y - top).max(0.0);
-            let (widgets, _, _, _) = ui.layout(&s, size.0, size.1);
-            let extra_btn = widgets
-                .iter()
-                .find(|wd| {
-                    matches!(
-                        wd.kind,
-                        WKind::Button {
-                            act: Act::Extra(crate::extras::Item::CosmeticsOthers),
-                            ..
-                        }
-                    )
-                })
-                .unwrap();
-            let (ex, ey) = (extra_btn.x + 1.0, extra_btn.y + 1.0);
-            use horizon_cosmetics::prefs::Others;
-            assert_eq!(s.extras.cosmetics_others, Others::Shown);
-
-            // Forward
-            ui.click(&mut s, &atlas, ex, ey, size, [854, 480], false, false);
-            assert_eq!(s.extras.cosmetics_others, Others::NameTags);
-
-            // Backward with shift
-            ui.shift = true;
-            ui.click(&mut s, &atlas, ex, ey, size, [854, 480], false, false);
-            assert_eq!(s.extras.cosmetics_others, Others::Shown);
-
-            // Wrap-around backward with shift
-            ui.click(&mut s, &atlas, ex, ey, size, [854, 480], false, false);
-            assert_eq!(s.extras.cosmetics_others, Others::Hidden);
-            ui.shift = false;
-        }
     }
 }
