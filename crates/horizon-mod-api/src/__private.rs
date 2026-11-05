@@ -37,11 +37,17 @@ pub use crate::phase::install_packages;
 /// The game's side of wasm mods, for `horizon-mod-wasm`.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub mod wasm_host {
-    pub use crate::wasm_host::{Budgets, CallRefused, EPOCH, Fuel, LoadError, Member, instantiate};
+    pub use crate::wasm_host::{
+        Budgets, CallHost, CallRefused, EPOCH, Exports, Fuel, Instantiated, LoadError, Member,
+        State, instantiate, live_groups,
+    };
 }
 /// The registered structure types, for the executable to hand to the engine's
 /// `StructureRegistry` before any world opens.
 pub use crate::structure_type::installed_structure_types;
+/// The mod's side of the exports other crates add to its world (the points crate's listeners).
+#[cfg(target_arch = "wasm32")]
+pub use crate::wasm::exported as wasm_guest;
 #[cfg(any(test, feature = "testing"))]
 pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 

@@ -645,7 +645,7 @@
 //!
 //! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`).
 //!
-//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (`native_light`, `native_weather`, `native_day_time`, `LevelRef::height`, `native_max_stack_size`).
+//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather and height now through `LevelRef`, with `native_day_time`, `native_max_stack_size`).
 //!
 //! API 96 adds reading redstone from a server mod's block (`native_neighbor_signal`).
 //!
@@ -7595,8 +7595,9 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
         canceled: &mut bool,
+        exp_to_drop: &mut Option<u32>,
     ) {
-        self.fire_break_block(pos, state, canceled);
+        self.fire_break_block(pos, state, canceled, exp_to_drop);
     }
     /// `BlockEvent.EntityPlaceEvent` (and `EntityMultiPlaceEvent`, which
     /// extends it): `placer` is about to set the block `state` at `pos`
@@ -9795,13 +9796,6 @@ impl Game<'_> {
             self.with_level(|_, level, ticks| level.native_set_block(ticks, pos, state, flags));
         let _ = self.process_level_events();
         changed
-    }
-    /// The rain and thunder levels of the world in place, each 0.0 to 1.0
-    /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel
-    /// or a wind turbine reads. Both 0 in the Nether and the End, which have
-    /// no weather (`Level.canHaveWeather`).
-    pub(super) fn native_weather(&self) -> (f32, f32) {
-        self.weather_levels(1.0)
     }
     /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
     /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
