@@ -494,6 +494,22 @@ one, where vanilla gives the `by` one.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
+
+  One tick's streaming step (`update_world`) runs in this order:
+
+  1. The chunks that come and go are worked out. A chunk saved while that is planned is copied for its save there.
+  2. The arriving chunks join the level and the departing ones leave it.
+  3. Each departing chunk that changed since its last save is copied, with its block entities and save data, and the
+     copy is queued to save.
+  4. `native_chunk_load` runs for each arriving chunk (`native_chunks_loaded`).
+  5. `native_chunk_unload` runs for each departing chunk.
+  6. The departing chunks' entities, block entities and block names are dropped.
+
+  So an edit a `native_chunk_load` listener makes to a chunk departing in the same tick (a neighbour's block entity,
+  say) comes after that chunk's save copy (step 3): it is not saved, and step 6 drops it. That is the difference from an
+  ordinary load, where the edit lands in a chunk that stays and is saved with its next save, and it is the same rule as
+  `native_chunk_unload`, whose edits also come after the copy. Change a chunk you may lose from a later tick instead,
+  after checking it is still loaded.
 - Sounds the server plays to its players: `native_play_level_sound_at_position` and `native_play_level_sound_at_entity`
   (NeoForge's `PlayLevelSoundEvent.AtPosition` and `.AtEntity`, in `ServerLevel.playSeededSound`). As in vanilla, a mob's own
   sounds (`Entity.playSound`) are at its position; only `playSound(except, sourceEntity, ...)` sounds are at an entity: vanilla's

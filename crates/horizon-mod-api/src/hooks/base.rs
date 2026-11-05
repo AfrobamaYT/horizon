@@ -798,6 +798,9 @@ pub trait Hooks {
     /// but its saved entities join afterwards and its light may not be ready:
     /// change the world from a later tick. The chunks around the spawn come
     /// before `server_started`. Not told of a chunk a client receives.
+    /// The chunks leaving in the same tick were already copied for their last
+    /// save: an edit made here to one of them (a neighbour's block entity, say)
+    /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
     #[hook(side = "server", contract = "listen")]
     fn chunk_load();
