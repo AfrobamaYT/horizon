@@ -101,6 +101,8 @@ mod tests {
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
         pub(super) struct TooltipElement;
+        #[derive(Clone, Copy)]
+        pub(super) struct TooltipPlace;
         pub(super) struct BiomeColors;
         pub(super) struct SpawnEntry;
         pub(super) struct UseAnimation;
