@@ -7595,8 +7595,9 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
         canceled: &mut bool,
+        exp_to_drop: &mut Option<u32>,
     ) {
-        self.fire_break_block(pos, state, canceled);
+        self.fire_break_block(pos, state, canceled, exp_to_drop);
     }
     /// `BlockEvent.EntityPlaceEvent` (and `EntityMultiPlaceEvent`, which
     /// extends it): `placer` is about to set the block `state` at `pos`
