@@ -86,7 +86,7 @@ type Pending = (String, PathBuf, PathBuf, Vec<String>);
 /// module behind a `cfg` is left out with everything under it (the points: functions every build
 /// compiles); without, it is kept with its conditions (the internals, listed with the builds they
 /// exist in). Test-only modules are always left out.
-fn module_files(
+pub(crate) fn module_files(
     module: String,
     path: PathBuf,
     dir: PathBuf,
@@ -189,7 +189,7 @@ pub(crate) fn game_files(src: &Path, every_build: bool) -> Result<Vec<GameFile>,
 }
 
 /// The crate `krate`'s package folder and library root, from its manifest.
-fn crate_root(root: &Path, krate: &str) -> Result<(PathBuf, PathBuf), String> {
+pub(crate) fn crate_root(root: &Path, krate: &str) -> Result<(PathBuf, PathBuf), String> {
     let package = root.join("crates").join(krate.replace('_', "-"));
     let manifest = package.join("Cargo.toml");
     let text = fs::read_to_string(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;

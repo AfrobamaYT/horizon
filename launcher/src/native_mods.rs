@@ -24,12 +24,14 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use horizon_mods::dependencies;
+
 mod api;
 mod crates;
-mod dependencies;
 mod diagnostics;
 mod inject;
 mod inject_cache;
+mod internals;
 mod package;
 mod prebuilt;
 
@@ -695,14 +697,14 @@ impl Bundle {
     }
 
     /// Whether horizon-mixins changes the game's source for it: a helper injection or a module.
-    /// A `trait_method` injection listens at a point instead ([`inject`]).
+    /// A `trait_method` or `raw` injection listens at a point instead ([`inject`]).
     fn needs_mixins(&self) -> bool {
         !self.native().module.is_empty()
             || self
                 .native()
                 .injection
                 .iter()
-                .any(|injection| injection.trait_method.is_none())
+                .any(|injection| injection.helper.is_some())
     }
 }
 
@@ -1748,7 +1750,9 @@ fn lock_crates(
         fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
     };
     let horizon = crates::downloaded(&read(source)?)?;
-    let staged = crates::downloaded(&read(stage)?)?;
+    let staged_lock = read(stage)?;
+    crates::check_game_graph(stage, &staged_lock)?;
+    let staged = crates::downloaded(&staged_lock)?;
     let api_ids: Vec<&str> = mods.iter().map(|m| m.manifest.id.as_str()).collect();
     if let Some(why) = crates::refused(&horizon, Some(&staged), wanted, &api_ids) {
         return Err(why);
@@ -1948,6 +1952,25 @@ fn pipeline(
         .map(api::Project::read)
         .collect::<Result<_, _>>()
         .map_err(|error| error.to_string())?;
+    for bundle in &ordered {
+        let native = bundle.native();
+        if !native.internals.is_empty() {
+            let paths = native
+                .internals
+                .iter()
+                .map(|internal| internal.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            append_log(&trf(
+                "{mod} uses {count} game internals: {paths}",
+                &[
+                    ("mod", &bundle.manifest.id),
+                    ("count", &native.internals.len().to_string()),
+                    ("paths", &paths),
+                ],
+            ))?;
+        }
+    }
     let point_injections: Vec<_> = ordered
         .iter()
         .flat_map(|bundle| inject::of(&bundle.manifest))
@@ -2056,6 +2079,10 @@ fn pipeline(
                 "id": m.manifest.id,
                 "version": m.manifest.version,
                 "sha256": digests.get(&m.manifest.id).cloned().flatten(),
+                "internals": m.native().internals,
+                "raw": m.native().injection.iter().filter(|injection| injection.raw.is_some()).map(|injection| serde_json::json!({
+                    "id": injection.id, "target": injection.target, "kind": injection.kind,
+                })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
     };
@@ -2163,7 +2190,11 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
-        let has_api = api::stage(&fresh, &projects, &declared, &resolution)?;
+        let catalog = internals::Catalog::read(&real)?;
+        let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
+        for project in &projects {
+            catalog.log_raw(&project.bundle.manifest)?;
+        }
         let paths = mods
             .iter()
             .map(|bundle| {
