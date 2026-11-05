@@ -687,7 +687,7 @@ fn canonical_permissions_preserve_owner_and_fake_player_reads() {
         game.level.player_uuid = Some([0, 0, 0, 99]);
         let mut body = PlayerMotion::new(game.motion, Vec3::new(0.0, 64.0, 0.0)).unwrap();
         body.entity_id = 99;
-        game.player = Some(Box::new(body));
+        game.player = Some(body);
         game.creative = true;
         let owner = game.native_player_ref(99).unwrap();
         for (allow, permission) in [(false, 0), (true, 4)] {
