@@ -1647,10 +1647,13 @@ impl Game<'_> {
             }
             return true;
         }
-        if let Some(i) = boat {
-            let pending = self.boat_loot_pending(self.boats[i].id);
+        if let Some(i) = boat
+            && self.boat_loot_pending(self.boats[i].id)
+        {
+            // The placeholder is the authoritative container while any menu is open.
+            self.store_cart_items(pos);
             self.unpack_boat_loot(i);
-            if pending
+            if !self.boat_loot_pending(self.boats[i].id)
                 && let Some(horizon_client::containers::BlockEntity::Chest(items)) =
                     self.world.block_entities.get_mut(&pos)
             {
