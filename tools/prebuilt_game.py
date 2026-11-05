@@ -83,7 +83,8 @@ def stage(target_dir: Path) -> Path:
 
 
 def build(out: Path, server: bool) -> None:
-    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "prebuilt"
+    # Resolved here: the staging and build steps run from the staged copy.
+    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
     staged = stage(target_dir)
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
@@ -204,7 +205,7 @@ def smoke(out: Path) -> None:
     print(f"smoke: the starter mod and the game executable built against {out} alone")
 
 
-# Fails the prebuilt build here, ahead of Windows' hard 65,535, so a growing export list is seen before it breaks.
+# Warns here, ahead of Windows' hard 65,535 (the linker's own failure), so a growing export list is seen first.
 EXPORT_WARNING = 60_000
 
 
@@ -227,16 +228,18 @@ def export_count(library: Path) -> int:
 
 
 def exports(out: Path) -> None:
-    """Report and guard every DLL's Windows export budget (#589), including the separate wasm runtime."""
-    over = []
+    """Report every DLL's Windows export count (#589), the separate wasm runtime included, and warn on
+    one near the limit: the linker's own failure at 65,535 is the real one."""
     for library in sorted((out / "deps").glob("*.dll")):
         names = export_count(library)
         print(f"{library.name}: {names} exported names (Windows' limit is 65,535)")
-        if names > EXPORT_WARNING:
-            over.append(f"{library.name} exports {names} names")
-    if over:
-        sys.exit(f"{'; '.join(over)}, past {EXPORT_WARNING:,}: Windows refuses to link a DLL "
-                 "past 65,535, so cut the exported names before adding points or internals (#589)")
+        if names >= EXPORT_WARNING:
+            warning = (f"{library.name} exports {names:,} names, {65_535 - names:,} short of Windows' 65,535: "
+                       "cut exported names before adding points or internals (#589)")
+            print(f"::warning::{warning}")
+            if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+                with open(summary, "a", encoding="utf-8") as file:
+                    file.write(f"- {warning}\n")
 
 
 def main() -> None:

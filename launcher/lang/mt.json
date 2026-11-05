@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} mhux installat",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (jew .mcp.json fi proġett)",
   "← All servers": "← Is-servers kollha",
-  "← Newer": "← Aktar ġodda"
+  "← Newer": "← Aktar ġodda",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

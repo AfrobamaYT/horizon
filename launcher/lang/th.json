@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} ไม่ได้ติดตั้ง",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (หรือ .mcp.json ในโปรเจ็กต์)",
   "← All servers": "← เซิร์ฟเวอร์ทั้งหมด",
-  "← Newer": "← ใหม่กว่า"
+  "← Newer": "← ใหม่กว่า",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

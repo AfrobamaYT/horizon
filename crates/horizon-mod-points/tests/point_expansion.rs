@@ -5,7 +5,7 @@ use mod_api::ServerHost;
 use std::sync::atomic::Ordering;
 
 struct Counter {
-    total: u32,
+    total: usize,
 }
 
 impl mod_api::Host for Counter {}
@@ -17,14 +17,18 @@ mod game {
         use std::sync::Mutex;
         use std::sync::atomic::AtomicBool;
 
+        /// A native width crosses as 64 bits, as a wasm guest sees it.
         pub struct AddArgs {
-            pub step: u32,
-            pub result: Option<u32>,
+            pub step: u64,
+            pub result: Option<u64>,
         }
 
         impl AddArgs {
-            pub fn __new(step: u32) -> Self {
-                Self { step, result: None }
+            pub fn __new(step: usize) -> Self {
+                Self {
+                    step: step as u64,
+                    result: None,
+                }
             }
         }
 
@@ -79,7 +83,7 @@ mod game {
 
 impl Counter {
     #[point(side = "server")]
-    fn add(&mut self, step: u32) -> u32 {
+    fn add(&mut self, step: usize) -> usize {
         self.total += step;
         self.total
     }
@@ -91,7 +95,7 @@ impl Counter {
 
     /// Its value borrows the counter: a head and no return.
     #[point(side = "server")]
-    fn slot(&mut self) -> &mut u32 {
+    fn slot(&mut self) -> &mut usize {
         &mut self.total
     }
 }

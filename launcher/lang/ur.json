@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} انسٹال نہیں ہے۔",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (یا ایک پروجیکٹ میں .mcp.json)",
   "← All servers": "← تمام سرورز",
-  "← Newer": "← جدید تر"
+  "← Newer": "← جدید تر",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

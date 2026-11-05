@@ -1073,5 +1073,6 @@
   "{version} is not installed": "الإصدار {version} غير مثبت",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (أو .mcp.json في المشروع)",
   "← All servers": "← جميع الخوادم",
-  "← Newer": "← الأحدث"
+  "← Newer": "← الأحدث",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

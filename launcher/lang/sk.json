@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} nie je nainštalovaný",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (alebo .mcp.json v projekte)",
   "← All servers": "← Všetky servery",
-  "← Newer": "← Novšie"
+  "← Newer": "← Novšie",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} nu este instalat",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (sau .mcp.json într-un proiect)",
   "← All servers": "← Toate serverele",
-  "← Newer": "← Mai nou"
+  "← Newer": "← Mai nou",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

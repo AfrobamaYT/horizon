@@ -60,15 +60,18 @@ class PrebuiltContentsTests(unittest.TestCase):
         for name, count in (("horizon_client", 45000), ("horizon_mod_wasm", 12000), ("serde_derive", 1)):
             self.assertIn(f"{name}.dll: {count} exported names", output.getvalue())
 
-    def test_exports_refuses_any_oversized_dll_but_reports_all(self):
+    def test_exports_warns_about_any_dll_near_the_limit_without_failing(self):
         for large in ("horizon_client", "horizon_mod_wasm"):
             root = self.folder("deps/libhorizon_client.so")
             for name in ("horizon_client", "horizon_mod_wasm"):
                 self.dll(root, f"{name}.dll", 60001 if name == large else 45000)
             output = io.StringIO()
-            with self.subTest(large), contextlib.redirect_stdout(output), self.assertRaisesRegex(SystemExit, large):
+            with self.subTest(large), contextlib.redirect_stdout(output):
                 prebuilt_game.exports(root)
-            self.assertEqual(output.getvalue().count("exported names"), 2)
+            warnings = [line for line in output.getvalue().splitlines() if line.startswith("::warning::")]
+            self.assertEqual(len(warnings), 1)
+            self.assertIn(f"{large}.dll exports 60,001 names", warnings[0])
+            self.assertEqual(output.getvalue().count("exported names (Windows' limit"), 2)
 
     def test_exports_is_silent_without_dlls(self):
         output = io.StringIO()

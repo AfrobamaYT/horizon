@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} ayifakiwe",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (noma .mcp.json kuphrojekthi)",
   "← All servers": "← Wonke amaseva",
-  "← Newer": "← Okusha"
+  "← Newer": "← Okusha",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

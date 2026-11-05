@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} n'est pas installée",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ou .mcp.json dans un projet)",
   "← All servers": "← Tous les serveurs",
-  "← Newer": "← Plus récentes"
+  "← Newer": "← Plus récentes",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

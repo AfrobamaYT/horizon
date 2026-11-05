@@ -231,9 +231,11 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
             Some(arg) => {
                 let name = &arg.name;
                 passed.push(plain);
-                call.push(match arg.ty {
-                    syn::Type::Reference(_) => quote!(&*__args.#name),
-                    _ => quote!(__args.#name),
+                call.push(match (&arg.ty, point_shape::wide(&arg.ty)) {
+                    (syn::Type::Reference(_), _) => quote!(&*__args.#name),
+                    // A native width crosses as 64 bits: back to the parameter's own type.
+                    (ty, Some(_)) => quote!(__args.#name as #ty),
+                    (_, None) => quote!(__args.#name),
                 });
             }
             None => call.push(quote!(#plain)),
@@ -281,6 +283,14 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     );
     let head_listened = listened(&head_variant);
     let head_fire = fire(&head_variant, &head_method);
+    // A native-width value crosses the record as 64 bits.
+    let (widen, narrow) = match &shape.returns {
+        point_shape::Returns::Value(ty) => match point_shape::wide(ty) {
+            Some(wide) => (quote!(as #wide), quote!(as #ty)),
+            None => (quote!(), quote!()),
+        },
+        _ => (quote!(), quote!()),
+    };
     let stop = match &shape.returns {
         point_shape::Returns::Unit => quote!(if __args.cancel {
             return;
@@ -289,7 +299,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
             return Ok(());
         }),
         point_shape::Returns::Value(_) => quote!(if let Some(__result) = __args.result.take() {
-            return __result;
+            return __result #narrow;
         }),
         point_shape::Returns::Opaque => quote!(),
     };
@@ -302,9 +312,9 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         let return_fire = fire(&variant, &method);
         let body = match &shape.returns {
             point_shape::Returns::Value(_) => quote! {
-                __args.result = Some(__result);
+                __args.result = Some(__result #widen);
                 #return_fire;
-                return __args.result.unwrap_or(__result);
+                return __args.result.map_or(__result, |__value| __value #narrow);
             },
             _ => quote!(#return_fire;),
         };

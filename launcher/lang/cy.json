@@ -1073,5 +1073,6 @@
   "{version} is not installed": "Nid yw {version} wedi'i osod",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (neu .mcp.json mewn prosiect)",
   "← All servers": "← Pob gweinydd",
-  "← Newer": "← Newyddach"
+  "← Newer": "← Newyddach",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

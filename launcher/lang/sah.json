@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} туруоруллубат",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (эбэтэр бырайыакка .mcp.json)",
   "← All servers": "← Бары сервердар",
-  "← Newer": "← Саҥа"
+  "← Newer": "← Саҥа",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }
