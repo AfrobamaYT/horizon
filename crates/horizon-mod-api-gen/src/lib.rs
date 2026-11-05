@@ -1599,7 +1599,7 @@ mod tests {
         std::fs::write(&first, original).unwrap();
         let hooks = root.join("crates/horizon-client/src/game/native_hooks.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
-        let call = "mod_api::dispatch_item_damaged(self, player, name, item, amount, cancel);";
+        let call = "self.fire_item_damaged(player, name, item, amount, cancel);";
         assert_eq!(shipped.matches(call).count(), 1);
         let unfinished = shipped.replace(call, "let _ = (player, name, item, amount);");
         std::fs::write(&hooks, &unfinished).unwrap();
@@ -1641,11 +1641,7 @@ mod tests {
         super::fill_hooks(&root).unwrap();
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");
-        let filled = shipped.replace(
-            call,
-            "self.fire_item_damaged(player, name, item, amount, cancel);",
-        );
-        assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&filled));
+        assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&shipped));
         assert_eq!(
             super::sources(&root, super::FillMode::Require)
                 .unwrap()
