@@ -43,6 +43,16 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_about_to_start();
+    /// Fired once immediately after `server_about_to_start`, before the server
+    /// accepts play, on both integrated and dedicated servers. A failed startup
+    /// still reaches `server_stopped`.
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ServerStartingEvent",
+        cancellable = false
+    )]
+    fn server_starting();
     /// The server has opened its worlds and is about to run its tick loop
     /// (NeoForge's `ServerStartedEvent`): every level is loaded, no player has
     /// joined, and the first tick has not run. Fired where `WorldOpenReady` was,
@@ -56,12 +66,13 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_started();
-    /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
+    /// The server begins teardown (NeoForge's `ServerStoppingEvent`), including
+    /// after startup or the tick loop failed:
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
     /// mod can save its own data or tell them. `native_world_lifecycle`'s
     /// `WorldCloseFinal` follows once the worlds are saved. A server whose loop
-    /// fails stops without this (`WorldCloseFailed` reports it).
+    /// fails still fires this before the final save attempt and `server_stopped`.
     #[hook(
         side = "server",
         contract = "listen",
@@ -70,6 +81,20 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_stopping();
+    /// Fired once at the end of server teardown, after `server_stopping` and
+    /// the final save attempt and storage release. Also fired when startup or
+    /// teardown fails after startup began, including when a shutdown listener
+    /// panics, on integrated and dedicated servers.
+    /// Failed opens save only worlds already adopted by the server (the prepared
+    /// level is installed; the session lock alone is not adoption). A failed
+    /// save still reaches this hook, but does not emit `WorldCloseFinal`.
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ServerStoppedEvent",
+        cancellable = false
+    )]
+    fn server_stopped();
     /// The authoritative server tick's phases: `ServerTickStart` before any
     /// level is ticked (NeoForge's `ServerTickEvent.Pre`), `ServerTickEnd`
     /// after the last (`.Post`). Read blocks with `native_server_block`, by

@@ -369,12 +369,20 @@ requires a farmer at work and `mob_griefing` enabled.
   the Nether and the End open when someone first goes there and close after 300 ticks with nobody in them. Inside a
   restricted level hook, `with_random` on the `LevelRandomHost` draws from the same stream.
 
-- The server starting and stopping, on the single player server thread and on a dedicated server:
-  `native_server_about_to_start(dedicated)` before the worlds load (NeoForge's `ServerAboutToStartEvent`), and
-  `native_server_stopping(dedicated)` when an orderly stop begins, with the players still connected and not yet saved
-  (`ServerStoppingEvent`). Each start is followed by `native_server_started` (NeoForge's `ServerStartedEvent`: every
-  level loaded, no player joined, the first tick not yet run, fired where `WorldOpenReady` used to be; diverges from upstream: new hook) or by
-  `native_world_lifecycle`'s `WorldOpenFailed`, and each stop by `WorldCloseFinal`; a server whose loop fails reports `WorldCloseFailed` instead of stopping.
+- Server lifecycle hooks run once per start, on both the single-player server thread and a dedicated server.
+  `server_about_to_start(dedicated)` runs before worlds load (`ServerAboutToStartEvent`), immediately followed by
+  `server_starting(dedicated)` (`ServerStartingEvent`), before the server accepts play. `server_started(dedicated)`
+  keeps its existing firing point: every level loaded and the first tick not yet run (`ServerStartedEvent`).
+  On every exit after startup began, including a failed open, failed tick, or caught panic,
+  `server_stopping(dedicated)` (`ServerStoppingEvent`) runs before player cleanup and the final world save attempt.
+  `server_stopped(dedicated)` (`ServerStoppedEvent`) runs last, after network teardown, flushing saves and releasing
+  storage, even when the save failed or a shutdown listener panicked. An early callback panic (including
+  `config_unloading`) still reaches the final adopted-world save attempt and full server/network teardown,
+  not just unpublishing or flushing queued writes. The first failure is retained if cleanup also fails.
+  These are server-side, mutable `ServerHost` notifications, not cancellable.
+  A failed open never overwrites a world the server did not successfully adopt: the session lock is taken before the prepared level is installed, and only that installation allows the final save. `WorldOpenFailed` or `WorldCloseFailed`
+  still reports the failure; `WorldCloseFinal` is only emitted after a successful orderly close. No tick-time cost:
+  these hooks dispatch only at server startup and shutdown.
 
 - Mod block entities are sent to clients. Only declared types receive wire IDs after vanilla's, and several valid
   blocks can share a type. Server and client use its declared identity; `native_block_entity` supplies only initial data.
