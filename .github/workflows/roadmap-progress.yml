@@ -36,4 +36,5 @@ jobs:
           ISSUES_TOKEN: ${{ github.token }}
         with:
           github-token: ${{ secrets.PROJECT_TOKEN }}
-          script: await require('./.github/scripts/roadmap-progress.js')({ github, issues: getOctokit(process.env.ISSUES_TOKEN), core })
+          script: |
+            await require('./.github/scripts/roadmap-progress.js')({ github, issues: getOctokit(process.env.ISSUES_TOKEN), core })
