@@ -3490,8 +3490,8 @@ pub trait Hooks {
     /// `name` the name. Heard for
     /// the `/gamemode` command, the F3+F4 switcher's packet and a hardcore
     /// world's respawn into spectator, once for each change to a different
-    /// mode; not for the world's default mode a player joins with. Set
-    /// `cancel` and the player keeps their mode (nothing is sent, the
+    /// mode; not for the world's default mode a player joins with. Return
+    /// `Flow::Cancel` and the player keeps their mode (nothing is sent, the
     /// command counts it as no change). For a change the game makes inside
     /// a player's turn their state is swapped in; for the hardcore respawn
     /// it is not.
