@@ -116,6 +116,8 @@ pub use screenshot::ScreenshotImage;
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
+mod client_session;
+pub use client_session::{BlockBreakingState, ClientFrameStats, ClientServer};
 pub(crate) mod reload;
 mod reload_order;
 pub(crate) mod server_reload;
