@@ -104,6 +104,11 @@ fn game_files(src: &Path) -> Result<Vec<GameFile>, String> {
     Ok(files)
 }
 
+/// The game module's files, for a build script to track.
+pub fn tracked(src: &Path) -> Result<Vec<PathBuf>, String> {
+    Ok(game_files(src)?.into_iter().map(|file| file.path).collect())
+}
+
 /// Whether `attrs` hold a `cfg` (or `cfg_attr`): the item is compiled only in some builds.
 fn gated(attrs: &[syn::Attribute]) -> bool {
     attrs
@@ -295,8 +300,8 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
         pub const POINT_COUNT: usize = PointId::__Count as usize;
         /// The game's injection points a mod listens to (#589): one method per point's head and
         /// return, each a no-op until the mod overrides it. Implement it with
-        /// `#[mod_api::horizon_mod]`, return it from [`Hooks::points`](crate::Hooks::points), and
-        /// name each method in a `[[native.injection]]` with the point's function as `target`.
+        /// `#[mod_api::horizon_mod]` on the same type as the mod's `Hooks`, and name each method
+        /// in a `[[native.injection]]` with the point's function as `target`.
         pub trait Points: Send + Sync {
             #[doc(hidden)]
             fn subscribed(&self) -> &'static [Option<PointId>];

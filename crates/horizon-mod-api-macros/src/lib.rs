@@ -118,8 +118,9 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     quote!(#implementation #export).into()
 }
 
-/// `#[horizon_mod]` on `impl Points`: its subscriptions, and `__HORIZON_POINTS`, the methods it
-/// overrides, which the launcher's generated `main` checks each slot injection against.
+/// `#[horizon_mod]` on `impl mod_points::Points`: its subscriptions, `__HORIZON_POINTS`, the methods
+/// it overrides, which the launcher's generated `main` checks each point injection against, and
+/// `__horizon_points`, which the generated `main` registers the mod's listeners with.
 fn expand_points(mut implementation: ItemImpl) -> TokenStream {
     let mut methods = Vec::new();
     let mut cfgs = Vec::new();
@@ -130,16 +131,26 @@ fn expand_points(mut implementation: ItemImpl) -> TokenStream {
         }
     }
     implementation.items.push(syn::parse_quote! {
-        fn subscribed(&self) -> &'static [Option<mod_api::points::PointId>] {
-            &[#(#(#cfgs)* mod_api::points::ids::#methods),*]
+        fn subscribed(&self) -> &'static [Option<mod_points::PointId>] {
+            &[#(#(#cfgs)* mod_points::ids::#methods),*]
         }
     });
     let names = methods.iter().map(|method| method.to_string());
+    let ty = &implementation.self_ty;
     quote! {
         #implementation
         /// The injection-point methods this mod overrides (its `impl Points`).
         #[doc(hidden)]
         pub const __HORIZON_POINTS: &[&str] = &[#(#(#cfgs)* #names),*];
+        /// The mod's `impl Points`: its installed `Hooks`, the same value, seen as its listeners.
+        /// The launcher's generated `main` registers it.
+        #[doc(hidden)]
+        pub fn __horizon_points(hooks: &'static dyn mod_api::Hooks) -> &'static dyn mod_points::Points {
+            let hooks: &'static dyn ::std::any::Any = hooks;
+            hooks
+                .downcast_ref::<#ty>()
+                .expect("a mod's Points and Hooks are one type")
+        }
     }
     .into()
 }
@@ -252,7 +263,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let fire = |variant: &syn::Ident, method: &syn::Ident| {
         let name = method.to_string();
         quote! {
-            ::mod_api::__private::point::fire(|| {
+            ::mod_points::__private::fire(|| {
                 for __points in crate::game::points::listeners(crate::game::points::PointId::#variant, #name) {
                     __points.#method(#host, &mut __args);
                 }

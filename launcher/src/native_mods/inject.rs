@@ -1,5 +1,5 @@
 //! Point injections (#589): a `trait_method` injection listens at a game function's injection
-//! point through the mod's `impl mod_api::points::Points`, at its head or its return, with no
+//! point through the mod's `impl mod_points::Points`, at its head or its return, with no
 //! source of its own spliced into the game. Every `Game` method the staging pass admits is a
 //! point, on both routes: the prebuilt game was staged before it was built, and the source route
 //! runs the revision's own pass on its copy; `points.json` lists them.
@@ -126,10 +126,10 @@ pub(super) fn main_checks(index: usize, injections: &[PointInjection]) -> String
         .iter()
         .map(|injection| {
             format!(
-                "const _: () = assert!(mod_api::__private::point::lists(mod_{index}::__HORIZON_POINTS, {:?}), {:?});\n",
+                "const _: () = assert!(horizon_client::entry::point_listed(mod_{index}::__HORIZON_POINTS, {:?}), {:?});\n",
                 injection.method,
                 format!(
-                    "{}: injection {} names Points::{}, which the mod's #[mod_api::horizon_mod] impl Points doesn't override",
+                    "{}: injection {} names Points::{}, which the mod's #[mod_api::horizon_mod] impl mod_points::Points doesn't override",
                     injection.mod_id, injection.id, injection.method
                 )
             )

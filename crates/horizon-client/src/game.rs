@@ -136,20 +136,19 @@ mod execution_role;
 /// `mod_api::points::PointId`, set once after the mods are installed where one listens.
 #[doc(hidden)]
 pub mod points {
-    pub(crate) use mod_api::__private::point::listeners;
-    pub(crate) use mod_api::points::*;
+    pub(crate) use mod_points::__private::listeners;
+    pub(crate) use mod_points::*;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     pub(crate) static POINTS: [AtomicBool; POINT_COUNT] =
         [const { AtomicBool::new(false) }; POINT_COUNT];
 
-    /// Sets each slot an installed mod listens at, once, after the mods are installed.
+    /// Seals the listener list and sets each slot a mod listens at, once, after the mods are
+    /// installed and their listeners registered.
     pub(crate) fn attach_installed() {
+        mod_points::__private::seal();
         for (index, slot) in POINTS.iter().enumerate() {
-            slot.store(
-                mod_api::__private::point::listened_at(index),
-                Ordering::Release,
-            );
+            slot.store(mod_points::__private::listened_at(index), Ordering::Release);
         }
     }
 

@@ -346,10 +346,10 @@ impl Shape {
             quote!(#record)
         };
         let host = match (self.mutable, self.side) {
-            (false, _) => quote!(&dyn crate::Host),
-            (true, Side::Server) => quote!(&mut dyn crate::ServerHost),
-            (true, Side::Client) => quote!(&mut dyn crate::ClientHost),
-            (true, Side::Both) => quote!(crate::HostSide<'_>),
+            (false, _) => quote!(&dyn ::mod_api::Host),
+            (true, Side::Server) => quote!(&mut dyn ::mod_api::ServerHost),
+            (true, Side::Client) => quote!(&mut dyn ::mod_api::ClientHost),
+            (true, Side::Both) => quote!(::mod_api::HostSide<'_>),
         };
         let mut places = vec![(
             self.name.clone(),

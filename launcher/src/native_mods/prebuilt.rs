@@ -121,7 +121,7 @@ pub(super) fn refusal(projects: &[api::Project<'_>], profile: Profile) -> Option
                     .get("package")
                     .and_then(toml::Value::as_str)
                     .unwrap_or(key);
-                if krate != api::API_PACKAGE {
+                if !api::PACKAGES.iter().any(|(package, _)| *package == krate) {
                     return Some(SourceReason::Crate {
                         mod_id: mod_id(),
                         krate: krate.to_owned(),
@@ -382,6 +382,10 @@ pub(super) fn compile(
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
     let deps = game.join("deps");
     let api_library = library(&deps, "mod_api")?;
+    let mut libraries = std::collections::HashMap::new();
+    for (_, name) in api::PACKAGES {
+        libraries.insert(name, library(&deps, name)?);
+    }
     let mut rlibs: std::collections::HashMap<&str, PathBuf> = std::collections::HashMap::new();
     for &index in &resolution.order {
         let project = &projects[index];
@@ -406,9 +410,9 @@ pub(super) fn compile(
         cmd.args(["--crate-type", "rlib", "--crate-name", &krate])
             .arg("-C")
             .arg(format!("metadata={id}"));
-        for api in project.api_dependencies() {
+        for (name, package) in project.api_dependencies() {
             cmd.arg("--extern")
-                .arg(format!("{api}={}", api_library.display()));
+                .arg(format!("{name}={}", libraries[package].display()));
         }
         for dependency in &declared[index] {
             let Some(rlib) = rlibs.get(dependency.id.as_str()) else {
