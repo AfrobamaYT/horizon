@@ -9347,7 +9347,7 @@ impl Game<'_> {
                     self.mobs[i].kind.id.trim_start_matches("minecraft:")
                 );
                 self.remote_sweep_event(&kind, true);
-                self.pvp_attacked(self.mobs[i].id as i32);
+                self.pvp_attacked(self.mobs[i].id as i32, distance);
                 self.remote_player_attack(i);
                 self.reset_attack_strength();
             }

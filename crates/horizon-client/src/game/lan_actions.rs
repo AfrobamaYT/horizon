@@ -1449,10 +1449,24 @@ impl Game<'_> {
         if pos.1 == super::minecarts::CART_KEY_Y {
             return self.lan_open_vehicle_container(conn, pos);
         }
-        !matches!(self.open_block_menu(conn, pos), MenuOpen::Refused)
+        !matches!(
+            self.open_block_menu_with_opener(conn, pos, true),
+            MenuOpen::Refused
+        )
     }
 
     pub(super) fn open_block_menu(&mut self, conn: u32, pos: (i32, i32, i32)) -> MenuOpen {
+        self.open_block_menu_with_opener(conn, pos, false)
+    }
+
+    /// A use handed over from `open_menu` already started its opener; a direct
+    /// `BlockEntityRef::open_menu` must start it after its checks succeed.
+    fn open_block_menu_with_opener(
+        &mut self,
+        conn: u32,
+        pos: (i32, i32, i32),
+        opener_started: bool,
+    ) -> MenuOpen {
         let name = &self
             .res
             .facts()
@@ -1611,9 +1625,10 @@ impl Game<'_> {
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(conn);
-        // A block's or a double chest's menu counts among the openers of its
-        // lid (a vehicle keeps its own `Container`, an ender chest has none).
-        let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
+        // A hand-off from `open_menu` must not count one player twice. A direct
+        // handle open has no earlier `startOpen`; only it starts the block's lid.
+        let counts_openers =
+            !opener_started && matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
         // A mod menu type's block tells the client where it is, with what its
         // mod writes (`openMenu` with an extra-data writer); a stock menu
@@ -1643,16 +1658,9 @@ impl Game<'_> {
         if !hidden.is_empty() {
             host.hub.hide_menu_slots(conn, hidden);
         }
-        // `ContainerOpenersCounter.incrementOpeners` (`ChestBlockEntity.startOpen`,
-        // `ShulkerBoxBlockEntity.startOpen`): the lid opens for the guest, and
-        // when this is the first opener the open sound plays for everyone
-        // around, the opener included (`playSound(null, …)`, which the capture
-        // relay sends on to the guests). Without it the host's copy never
-        // learned of the open, so a guest's box opened silently.
-        // A spectator never joins the openers (`startOpen` returns on
-        // `player.isSpectator()`): its menu opens but the lid stays shut, no
-        // sound plays, and `stopOpen` has nothing to decrement, which is why
-        // the count must not be raised here either (#8517).
+        // `ContainerOpenersCounter.incrementOpeners`: a direct handle open
+        // starts the lid once, sounding on its first opener. A spectator's
+        // `startOpen` does nothing, so its close must have nothing to decrement.
         if counts_openers && !spectator && self.container_openers_changed(pos, true) {
             self.container_edge_sound(pos, true);
         }
@@ -6919,6 +6927,54 @@ fn copied_respawn_point(has_config: bool, spawn: Option<[f64; 3]>) -> Option<Opt
 mod tests {
     use super::{copied_respawn_point, eye_columns};
     use horizon_client::pose::Pose;
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn block_menu_handle_and_use_each_count_the_guest_once() {
+        use horizon_client::chunk::Chunk;
+        use mod_api::NativeBlockUpdateFlags;
+        use std::sync::Arc;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            let pos = (0, 64, 0);
+            assert!(game.native_level_set_block(
+                level,
+                [pos.0, pos.1, pos.2],
+                chest,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            // A handle starts here, without an earlier use's `open_menu`.
+            assert_eq!(game.open_block_menu(12, pos), super::MenuOpen::Opened);
+            assert_eq!(game.lid_openers.get(&pos), Some(&1));
+            game.guest_close_all(12);
+            assert!(!game.lid_openers.contains_key(&pos));
+            // A block use starts before leaving the guest turn; its hand-off
+            // must not start the same opener a second time.
+            assert!(
+                game.as_guest(12, |game| game.open_menu([pos.0, pos.1, pos.2]))
+                    .is_some()
+            );
+            assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
+            assert_eq!(game.lid_openers.get(&pos), Some(&1));
+            game.guest_close_all(12);
+            assert!(!game.lid_openers.contains_key(&pos));
+            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 3;
+            assert_eq!(game.open_block_menu(12, pos), super::MenuOpen::Opened);
+            assert!(!game.lid_openers.contains_key(&pos));
+            game.guest_close_all(12);
+            assert!(!game.lid_openers.contains_key(&pos));
+        });
+    }
 
     #[test]
     #[ignore = "requires prepared game resources"]

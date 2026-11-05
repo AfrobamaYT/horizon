@@ -4759,7 +4759,9 @@ mod query_feedback_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_silent_source_drops_query_results_but_still_stores_them() {
-        use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+        use crate::game::{
+            Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
+        };
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
@@ -4769,7 +4771,7 @@ mod query_feedback_tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
