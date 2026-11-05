@@ -1365,20 +1365,10 @@ impl Game<'_> {
         let (home_x, home_y) = (0, height - 40);
         let (mut x, mut y) = (home_x, home_y);
         self.native_customize_chat_overlay(width, height, focused, &mut x, &mut y);
-        let shift = (x, y) != (home_x, home_y);
-        if shift {
-            let to = horizon_client::hud_layout::PoseOp::Translate(
-                (x - home_x) as f32,
-                (y - home_y) as f32,
-            );
-            let push = [horizon_client::hud_layout::GuiDraw::Push(vec![to])];
-            horizon_client::hud_layout::paint(batch, &self.gui.atlas, &push);
-        }
-        self.ui.chat.draw(batch, &self.gui.atlas, now, focused);
-        if shift {
-            let pop = [horizon_client::hud_layout::GuiDraw::Pop];
-            horizon_client::hud_layout::paint(batch, &self.gui.atlas, &pop);
-        }
+        let offset = [(x - home_x) as f32, (y - home_y) as f32];
+        self.ui
+            .chat
+            .draw_at(batch, &self.gui.atlas, now, focused, offset);
     }
     /// `HoverEvent.EntityTooltipInfo.getTooltipLines`: the name when the
     /// event has one, the entity type and the UUID.

@@ -14466,7 +14466,7 @@ mod customize_chat_overlay_tests {
         }
     }
 
-    /// The top of what the chat draws, in window pixels, and the batch's GUI scale.
+    /// The top of what the chat draws, in GUI pixels, and the batch's GUI scale.
     fn chat_top(game: &mut super::Game<'_>) -> (Option<f32>, f32) {
         let mut batch = HudBatch::new([1280, 720]);
         game.draw_chat(&mut batch);
@@ -14498,7 +14498,7 @@ mod customize_chat_overlay_tests {
                 let (moved, scale) = chat_top(game);
                 let moved = moved.expect("the message is drawn");
                 assert!(
-                    (plain - moved - 100.0 * scale).abs() < 0.5,
+                    (plain - moved - 100.0).abs() < 0.5,
                     "lifted by 100 GUI pixels: {plain} -> {moved} at scale {scale}"
                 );
                 let (w, h) = {
