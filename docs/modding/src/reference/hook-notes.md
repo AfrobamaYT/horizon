@@ -455,6 +455,15 @@ requires a farmer at work and `mob_griefing` enabled.
   `native_kill_mob` don't reach it yet: they set the health to 0 instead of hurting with `minecraft:generic_kill` as
   vanilla does. NeoForge's reduction modifiers (`addReductionModifier`) aren't there yet.
 
+- `living_damage_post` (NeoForge's `LivingDamageEvent.Post`) observes the hit after it takes health.
+  Its `container.should_cause_side_effects()` is `hurtServer`'s fresh-hit decision
+  (`shouldCauseSideEffects`), recorded before damage is applied: true for a fresh hit, false for a
+  stronger hit inside the invulnerability window, and true for a source that bypasses the cooldown.
+  A weaker or equal hit refused by the cooldown does not fire Post. The flag is not inferred from
+  final damage or invulnerability ticks, so changing those in a damage listener does not change it.
+  It accompanies the container's reductions, inflicted damage and health damage in native and wasm
+  listeners; it describes the decision to cause fresh-hit effects, not whether every effect occurred.
+
 A player's damage type is the source's own. A mob's and the dragon's come from the kind of damage Horizon keeps for
 the hit, which doesn't tell every vanilla type apart yet:
 
