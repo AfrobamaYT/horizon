@@ -951,6 +951,7 @@ enum FillMode {
 }
 
 mod build;
+pub mod crossing;
 mod dispatch;
 mod host_param;
 pub mod internals;
