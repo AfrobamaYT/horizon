@@ -6044,7 +6044,6 @@ impl Game<'_> {
     }
 
     /// One client tick while connected (Minecraft.tick with a ClientLevel).
-    #[horizon_mod_api_macros::point(side = "client")]
     pub(super) fn tick_remote(&mut self) -> Result<()> {
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
@@ -6159,6 +6158,7 @@ impl Game<'_> {
         if running {
             self.tick_particles();
         }
+        self.tick_frame_visuals(running);
         // Under `HORIZON_STILL` they wait for the world too: endermen's and blazes' particles
         // draw on the particles' random, and effects count down, on every tick a frozen
         // client runs, as many as the run took to get there.
@@ -7112,6 +7112,7 @@ impl Game<'_> {
                     border,
                     &self.res.motion().fluids,
                     &self.loop_context,
+                    &mut |_, _| {},
                 );
                 // `tick` set `previous` to the stepped position: keep the
                 // pre-step one, as `xo` is in vanilla.
@@ -7323,7 +7324,6 @@ impl Game<'_> {
         }
     }
     /// LocalPlayer.sendPosition plus input, sprint and held-slot updates.
-    #[horizon_mod_api_macros::point(side = "client")]
     fn remote_send_state(&mut self, input: u8) {
         let Some(p) = self.player.as_ref() else {
             return;
@@ -9188,7 +9188,6 @@ impl Game<'_> {
         }
     }
 
-    #[horizon_mod_api_macros::point(side = "client")]
     fn remote_start_attack(&mut self) -> bool {
         if self.clicks.miss_time > 0 || self.hands_busy() {
             return false;
@@ -9600,6 +9599,9 @@ impl Game<'_> {
             return;
         }
         if let Some(command) = message.strip_prefix('/') {
+            if self.studio_command(command) {
+                return;
+            }
             self.send_command(command);
         } else {
             self.send_signed_chat(message);

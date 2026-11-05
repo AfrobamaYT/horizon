@@ -376,6 +376,8 @@ pub type Held = [Option<crate::items::ItemStack>; 2];
 pub struct Attack {
     /// The attacking entity's id, 0 for none.
     pub attacker: i32,
+    /// The verified causing player's UUID, when the attacker is a player.
+    pub player_uuid: Option<[i32; 4]>,
     /// What it holds, or none when it is not known (no native mod listens: the game only
     /// records it then).
     pub held: Held,
@@ -383,6 +385,7 @@ pub struct Attack {
 /// The attack of a hit nobody started: environment damage, falls, a level built outside a hit.
 pub static NO_ATTACK: Attack = Attack {
     attacker: 0,
+    player_uuid: None,
     held: [None, None],
 };
 impl Attack {
@@ -1441,6 +1444,7 @@ mod tests {
         let sword = crate::items::ItemStack::new("minecraft:iron_sword", 1);
         let attack = Attack {
             attacker: 7,
+            player_uuid: None,
             held: [Some(sword.clone()), None],
         };
         assert_eq!(attack.weapon_of(7), Some(&sword));
@@ -1520,6 +1524,71 @@ mod tests {
         // A weaker one doesn't hurt at all.
         let third = hit(1.5);
         assert!(!third.hurt && !third.knockback);
+    }
+
+    #[test]
+    fn player_post_records_fresh_hit_decision() {
+        use horizon_world::living_damage::DamageValues;
+        static SEEN: std::sync::Mutex<Vec<super::DamageContainer>> =
+            std::sync::Mutex::new(Vec::new());
+        fn post(
+            _: super::DamageLevel<'_>,
+            _: super::Hurting<'_>,
+            container: &super::DamageContainer,
+        ) {
+            // The plain values used by wasm must preserve the decision in both directions.
+            let values = DamageValues::from(container);
+            assert_eq!(
+                values.should_cause_side_effects,
+                container.should_cause_side_effects()
+            );
+            assert_eq!(super::DamageContainer::from(values), *container);
+            SEEN.lock().unwrap().push(*container);
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let resources = crate::motion::MotionResources::load(&root, &assets).unwrap();
+        let mut player = crate::motion::PlayerMotion::new(&resources, Default::default()).unwrap();
+        let hooks = super::DamageHooks {
+            post: Some(post),
+            ..super::DamageHooks::NONE
+        };
+        let mut level = super::TestLevel::with_hooks(0, hooks);
+        let health = &resources.health;
+        let rules = super::HealthRules::default();
+        let attack = health.damage.id("minecraft:mob_attack").unwrap();
+        assert!(
+            player
+                .hurt(&mut level.level(), health, rules, attack, 2.0)
+                .unwrap()
+        );
+        assert!(
+            player
+                .hurt(&mut level.level(), health, rules, attack, 4.0)
+                .unwrap()
+        );
+        assert!(
+            !player
+                .hurt(&mut level.level(), health, rules, attack, 3.0)
+                .unwrap()
+        );
+        let seen = SEEN.lock().unwrap();
+        assert_eq!(seen.len(), 2, "the refused hit must not fire Post");
+        let flags: Vec<_> = seen
+            .iter()
+            .map(|hit| hit.should_cause_side_effects())
+            .collect();
+        assert_eq!(flags, [true, false]);
+        // Both first hits deal 2 and leave 20 ticks: neither value determines freshness.
+        for hit in &seen[..2] {
+            assert_eq!(hit.health_damage(), 2.0);
+            assert_eq!(hit.post_attack_invulnerability_ticks(), 20);
+        }
     }
 
     /// #2800: on Easy a mob's 4 is scaled to 3 before `applyItemBlocking`,

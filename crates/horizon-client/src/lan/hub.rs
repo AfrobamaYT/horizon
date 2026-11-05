@@ -810,13 +810,13 @@ impl Hub {
     /// `PlayerList.broadcastAll`: send a packet to every placed player.
     pub fn broadcast(&self, packet: &C) {
         let mut body = None;
-        for g in self
-            .guests
-            .iter()
-            .filter(|g| g.placed && g.participates_online())
-        {
-            g.sender
-                .send(body.get_or_insert_with(|| packet.encode()).clone());
+        for g in self.online_players() {
+            if let C::RemoveEntities(p) = packet {
+                self.send_ordered_removal(g, &p.ids);
+            } else {
+                g.sender
+                    .send(body.get_or_insert_with(|| packet.encode()).clone());
+            }
         }
     }
     /// MinecraftServer.onGameRuleChanged: every player is told when
@@ -4802,7 +4802,7 @@ mod tests {
     fn hub_with_sync(sync: SyncData) -> (Hub, std::sync::mpsc::Receiver<crate::lan::Out>) {
         let config = crate::lan::NetConfig {
             announce: false,
-            ..crate::lan::NetConfig::lan(0, "EffectSyncTest".into(), 2)
+            ..crate::lan::NetConfig::loopback(0, "EffectSyncTest".into(), 2)
         };
         let sync = std::sync::Arc::new(sync);
         let lan = Lan::start_with(sync.clone(), config).unwrap();

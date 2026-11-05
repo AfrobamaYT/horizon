@@ -157,23 +157,22 @@ enum WorldToast {
     AccessFailure(String),
 }
 impl WorldToast {
-    fn text(&self) -> (String, String) {
+    fn text(&self) -> (Text, Text) {
         match self {
             Self::Created { folder, bytes } => (
-                translate("selectWorld.edit.backupCreated", "Backed up: %s", &[folder]),
-                translate(
+                Text::tr("selectWorld.edit.backupCreated", &[folder]),
+                Text::tr(
                     "selectWorld.edit.backupSize",
-                    "Size: %s MB",
                     &[&((*bytes as f64 / 1_048_576.0).ceil() as u64)],
                 ),
             ),
             Self::Failed(error) => (
-                lang::get_or("selectWorld.edit.backupFailed", "Backup failed"),
-                error.clone(),
+                Text::translate("selectWorld.edit.backupFailed", &[]),
+                Text::literal(error),
             ),
             Self::AccessFailure(folder) => (
-                lang::get_or("selectWorld.access_failure", "Failed to access world"),
-                folder.clone(),
+                Text::translate("selectWorld.access_failure", &[]),
+                Text::literal(folder),
             ),
         }
     }
@@ -451,7 +450,8 @@ pub struct Title {
     /// A Realm's checked address, once the Realms screen's join came back.
     connect_request: Option<String>,
     /// EditWorldScreen's and WorldOpenFlows' `SystemToast` and its slide.
-    toast: Option<(crate::toasts::Slide, WorldToast)>,
+    toast: Option<crate::toasts::SystemToast>,
+    pending_toast: Option<WorldToast>,
     icons: RefCell<std::collections::HashMap<PathBuf, (std::time::SystemTime, Option<Vec<u8>>)>>,
     splash: Option<String>,
     /// `SplashManager.getSplash` rolled the player's own name instead of a list entry.
@@ -822,6 +822,7 @@ impl Title {
             open_request: None,
             connect_request: None,
             toast: None,
+            pending_toast: None,
             icons: RefCell::new(std::collections::HashMap::new()),
             splash: choose_splash(&splashes, seed, (today.month(), today.day())),
             splash_you,
@@ -1207,9 +1208,11 @@ impl Title {
             buffet::wheel(buffet, delta, cursor, size);
             return false;
         }
+        // CycleButton.mouseScrolled reads only the vertical wheel.
         if let Mode::Create {
             creative, options, ..
         } = &mut self.mode
+            && delta != 0.0
         {
             let (w, h) = size;
             let buttons = create_world::buttons(w, h, *creative, options);
@@ -1236,6 +1239,20 @@ impl Title {
         scroll.wheel(delta, ROW_HEIGHT / 2.0, top, bottom, content);
         self.scroll.set(scroll);
         false
+    }
+    /// The right stick's scroll: the open list moves wherever the hidden pointer
+    /// is, and Create World's buttons don't take the step.
+    pub fn stick_scroll(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) {
+        self.step_scroll(delta, crate::widgets::over_scroll_area(cursor), size);
+    }
+    /// A focus step past a list's edge: what the pointer is over scrolls, and
+    /// Create World's buttons don't take the step.
+    pub fn step_scroll(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) {
+        let open_rules = self.rules.get_mut().is_some();
+        if matches!(self.mode, Mode::Create { .. }) && !open_rules {
+            return;
+        }
+        self.scroll_worlds(delta, cursor, size);
     }
     pub fn failed(&mut self, error: impl std::fmt::Display) {
         let return_to = Box::new(self.mode.clone());
@@ -1288,17 +1305,23 @@ impl Title {
                 Ok(bytes) => WorldToast::Created { folder, bytes },
                 Err(error) => WorldToast::Failed(error),
             };
-            self.toast = Some((crate::toasts::Slide::default(), toast));
+            self.pending_toast = Some(toast);
         }
+    }
+    /// A client-lib decision for the game to admit before applying it.
+    pub fn take_pending_toast(&mut self) -> Option<crate::toasts::SystemToast> {
+        let (title, message) = self.pending_toast.take()?.text();
+        Some(crate::toasts::SystemToast::new(title, Some(message)))
+    }
+    /// Apply a toast accepted by the game's toast admission hook.
+    pub fn apply_toast(&mut self, toast: crate::toasts::SystemToast) {
+        self.toast = Some(toast);
     }
     /// `ToastManager.update` for the system toast: slides it in, keeps it
     /// for 5 s times the notification display time, slides it out. The
     /// sound of a new visibility (`Toast.Visibility`), if any.
     pub fn update_toast(&mut self, multiplier: f32) -> Option<&'static str> {
-        let (slide, _) = self.toast.as_mut()?;
-        // SystemToast.update: shown until displayTime (5000 ms) has passed.
-        let time = 5000.0 * f64::from(multiplier);
-        let (sound, finished) = slide.update_now(|fully| (fully as f64) < time);
+        let (sound, finished) = self.toast.as_mut()?.update(f64::from(multiplier));
         if finished {
             self.toast = None;
         }
@@ -1389,10 +1412,7 @@ impl Title {
             return Action::None;
         }
         if crate::save::SessionLock::acquire(&self.saves.join(&world.folder)).is_err() {
-            self.toast = Some((
-                crate::toasts::Slide::default(),
-                WorldToast::AccessFailure(world.folder),
-            ));
+            self.pending_toast = Some(WorldToast::AccessFailure(world.folder));
             return Action::None;
         }
         // openWorldLoadLevelData: a level.dat that does not read opens
@@ -3305,18 +3325,8 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         if let Mode::Multiplayer(screen) = &self.mode {
             screen.draw_tooltip(atlas, batch, cursor);
         }
-        if let Some((slide, toast)) = &self.toast {
-            let (title, message) = toast.text();
-            let width = HudBatch::text_width(atlas, &title)
-                .max(HudBatch::text_width(atlas, &message))
-                .ceil()
-                .max(160.0)
-                + 30.0;
-            // Toast.xPos: in from the right edge by the visible portion.
-            let x = w - width * slide.portion;
-            crate::toasts::background(atlas, batch, x, 0.0, width);
-            batch.text(atlas, &title, x + 18.0, 7.0, rgba(255, 255, 0, 255), false);
-            batch.text(atlas, &message, x + 18.0, 19.0, u32::MAX, false);
+        if let Some(toast) = &self.toast {
+            toast.draw(atlas, batch, 0.0);
         }
     }
     /// The tooltip of a world's icon (drawn with the row, as vanilla does) or, for a
@@ -4376,12 +4386,26 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             self.focused_button = Some(next_id);
         }
     }
-    /// The keyboard's focus landed on the world row at `point`
+    /// The focus moves the selection on this list, the controller's as well as the keyboard's:
+    /// the superflat and single-biome ones, where a selected row only sits there. On the world
+    /// list the controller leaves it to A.
+    pub fn focus_selects_row(&self) -> bool {
+        matches!(
+            self.mode,
+            Mode::CreateFlat { .. } | Mode::CreateBuffet { .. }
+        )
+    }
+    /// The focus landed on the list row at `point`
     /// (`AbstractSelectionList.setFocused`): it is selected, never joined,
     /// and the search box no longer has the keys. Whether a row was there.
     pub fn focus_world_row(&mut self, point: (f32, f32), size: (f32, f32)) -> bool {
         if self.rules.get_mut().is_some() {
             return false;
+        }
+        match &mut self.mode {
+            Mode::CreateFlat { flat, .. } => return flat::focus_row(flat, point, size),
+            Mode::CreateBuffet { buffet, .. } => return buffet::focus_row(buffet, point, size),
+            _ => {}
         }
         let Mode::Select { worlds, .. } = &self.mode else {
             return false;

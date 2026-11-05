@@ -5,6 +5,7 @@
 //! request with the entry. Reviewers decide; merging publishes. Signed-in
 //! players also rate published projects (`ratings`, its only data: sessions
 //! are signed cookies, and GitHub holds everything else).
+mod archive;
 pub mod github;
 pub mod ratings;
 
@@ -464,7 +465,7 @@ async fn rate(
             format!("{id} isn't published in the registry"),
         ));
     };
-    if entry.owners.iter().any(|o| o.eq_ignore_ascii_case(&login)) {
+    if ownership(&entry, &login, account) != Ownership::None {
         return Err(Refusal::new(
             StatusCode::FORBIDDEN,
             "you publish this project: its players rate it",
@@ -773,10 +774,41 @@ fn submission_tag_valid(config: &Config, branch: &str, login: &str, tag: &str) -
     mac.verify_slice(&tag).is_ok()
 }
 
+/// How a signed-in account relates to a project's owners.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ownership {
+    /// Its numeric ID is one of `owner_ids`: the account that listed it (or was added), whatever
+    /// its login is now.
+    ById,
+    /// The entry records no IDs (from before they were recorded) and its login is listed: an owner
+    /// as far as anyone can tell, but its updates always wait for a reviewer.
+    ByLoginOnly,
+    None,
+}
+
+/// Who `login` (GitHub account `user_id`) is to `entry`. When the entry has IDs, only they count: a
+/// login listed in `owners` but held by another account is someone who claimed it after a rename.
+pub fn ownership(entry: &Entry, login: &str, user_id: u64) -> Ownership {
+    if !entry.owner_ids.is_empty() {
+        return if entry.owner_ids.contains(&user_id) {
+            Ownership::ById
+        } else {
+            Ownership::None
+        };
+    }
+    if entry.owners.iter().any(|o| o.eq_ignore_ascii_case(login)) {
+        Ownership::ByLoginOnly
+    } else {
+        Ownership::None
+    }
+}
+
 /// The trailer of an owner update's pull request: a comment holding what the
 /// update is and an HMAC-SHA256 (hex, with `key`) over it, which the registry
 /// repository's `owner-update` workflow verifies with the same secret
-/// (`scripts/owner_update.py` there builds the same message).
+/// (`scripts/owner_update.py` there builds the same message). v2 adds the
+/// submitter's numeric GitHub ID, which the workflow checks against the
+/// entry's `owner_ids` on main.
 pub fn update_trailer(
     key: &[u8],
     id: &str,
@@ -784,8 +816,10 @@ pub fn update_trailer(
     sha256: &str,
     file: &str,
     submitter: &str,
+    submitter_id: u64,
 ) -> String {
-    let message = format!("owner-update-v1\n{id}\n{version}\n{sha256}\n{file}\n{submitter}");
+    let message =
+        format!("owner-update-v2\n{id}\n{version}\n{sha256}\n{file}\n{submitter}\n{submitter_id}");
     let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC takes any key length");
     mac.update(message.as_bytes());
     let hmac: String = mac
@@ -795,7 +829,7 @@ pub fn update_trailer(
         .map(|b| format!("{b:02x}"))
         .collect();
     format!(
-        "<!-- owner-update\nid: {id}\nversion: {version}\nsha256: {sha256}\nfile: {file}\nsubmitter: {submitter}\nhmac: {hmac}\n-->"
+        "<!-- owner-update\nformat: v2\nid: {id}\nversion: {version}\nsha256: {sha256}\nfile: {file}\nsubmitter: {submitter}\nsubmitter_id: {submitter_id}\nhmac: {hmac}\n-->"
     )
 }
 
@@ -828,6 +862,7 @@ pub fn publish(
         return Err(bad("a project needs a name and a licence"));
     }
     // The file's own checks first: a wrong file never reaches GitHub.
+    archive::check(file).map_err(bad)?;
     let facts = index::inspect(&kind, file).map_err(bad)?;
     if let Some(id) = facts.id.as_ref().filter(|id| **id != form.id) {
         return Err(bad(format!("the file's id is {id:?}, not {:?}", form.id)));
@@ -858,6 +893,7 @@ pub fn publish(
     // An owner update: an owner's new version and nothing else of the entry
     // changes (key and owners included).
     let mut owner_update = false;
+    let mut matched = Ownership::ById;
     let (entry, blob) = match existing {
         None => (
             Entry {
@@ -869,16 +905,21 @@ pub fn publish(
                 description: form.description.clone(),
                 authors: form.authors.clone(),
                 owners: vec![login.to_owned()],
+                owner_ids: vec![user_id],
                 license: form.license.trim().to_owned(),
                 source: form.source.trim().to_owned(),
                 icon: form.icon.clone(),
+                categories: Vec::new(),
+                tags: Vec::new(),
+                screenshots: Vec::new(),
                 key: form.key.clone().filter(|k| !k.trim().is_empty()),
                 versions: vec![version.clone()],
             },
             None,
         ),
         Some((mut entry, blob)) => {
-            if !entry.owners.iter().any(|o| o.eq_ignore_ascii_case(login)) {
+            matched = ownership(&entry, login, user_id);
+            if matched == Ownership::None {
                 return Err(Refusal::new(
                     StatusCode::FORBIDDEN,
                     format!(
@@ -927,7 +968,10 @@ pub fn publish(
             let (mut a, mut b) = (entry.clone(), before);
             a.versions.clear();
             b.versions.clear();
-            owner_update = a == b
+            // Only an owner known by ID publishes on their own: a login match alone
+            // could be someone who claimed the login after a rename.
+            owner_update = matched == Ownership::ById
+                && a == b
                 && (entry.key.is_none() || version.signature.is_some())
                 && version
                     .version
@@ -1051,6 +1095,15 @@ pub fn publish(
         source = entry.source,
         lists = [capabilities, requires].concat().join("\n"),
     );
+    let body = if matched == Ownership::ByLoginOnly {
+        format!(
+            "{body}\n\n⚠️ This entry records no owner IDs, so @{login} (GitHub ID {user_id}) was matched by login only. \
+             Check it is the same account that listed the project (a renamed owner's login can be claimed by anyone), \
+             then add `owner_ids = [{user_id}]` to the entry."
+        )
+    } else {
+        body
+    };
     let trailer = config
         .update_key
         .as_deref()
@@ -1063,6 +1116,7 @@ pub fn publish(
                 &sha256,
                 &v.file.name,
                 login,
+                user_id,
             )
         });
     let body = match &trailer {
@@ -1108,9 +1162,13 @@ pub fn list(config: &Config, login: &str, user_id: u64, form: &Form) -> Result<S
         description: form.description.clone(),
         authors: form.authors.clone(),
         owners: vec![login.to_owned()],
+        owner_ids: vec![user_id],
         license: form.license.trim().to_owned(),
         source: String::new(),
         icon: form.icon.clone(),
+        categories: Vec::new(),
+        tags: Vec::new(),
+        screenshots: Vec::new(),
         key: form.key.clone().filter(|k| !k.trim().is_empty()),
         versions: Vec::new(),
     };

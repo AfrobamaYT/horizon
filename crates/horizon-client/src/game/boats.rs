@@ -1368,9 +1368,13 @@ impl Game<'_> {
         let key = (i32::MAX - 15, super::minecarts::CART_KEY_Y, b.id as i32);
         let at = [b.position.x, b.position.y, b.position.z];
         let items = b.items.clone();
-        self.world
-            .block_entities
-            .insert(key, horizon_client::containers::BlockEntity::Chest(items));
+        // `startOpen` shares one container, it does not reset it: a stand-in
+        // another player's menu is still editing over stays as it is.
+        if !self.world.block_entities.contains_key(&key) {
+            self.world
+                .block_entities
+                .insert(key, horizon_client::containers::BlockEntity::Chest(items));
+        }
         self.container = Some(key);
         self.set_screen(super::Screen::Inventory);
         self.capture(false);
@@ -1482,7 +1486,6 @@ impl Game<'_> {
             self.view_scale(),
         );
         for b in &self.boats {
-            let entity_start = out.len();
             // EntityRenderer.shouldRender.
             let (previous, position) = (at(b.previous), at(b.position));
             if !self.standing_entity_in_view(
@@ -1490,6 +1493,11 @@ impl Game<'_> {
             ) {
                 continue;
             }
+            let culling = self.entity_cull_decision(b, alpha);
+            if culling.hides_entity() {
+                continue;
+            }
+            let entity_start = out.len();
             let models = if b.chest {
                 &self.boat_models.chest_models
             } else {
@@ -1584,7 +1592,7 @@ impl Game<'_> {
                     out,
                 );
             }
-            self.cull_entity_vertices(out, entity_start);
+            self.finish_entity_occlusion(culling, b, out, entity_start);
         }
     }
 }
