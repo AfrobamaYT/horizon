@@ -136,6 +136,8 @@ mod execution_role;
 /// `mod_points::PointId`, set once after the mods are installed where one listens.
 #[doc(hidden)]
 pub mod points {
+    // `fire` and `host_side` are called only by the `#[point]`s the stage adds to its copy.
+    #[allow(unused_imports, reason = "used by the staged copy's points")]
     pub(crate) use mod_points::__private::fire;
     pub(crate) use mod_points::*;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -154,6 +156,7 @@ pub mod points {
 
     /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
     #[inline(never)]
+    #[allow(dead_code, reason = "used by the staged copy's points")]
     pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
         super::execution_role::host_side(game)
     }
