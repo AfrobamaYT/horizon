@@ -1094,5 +1094,6 @@
   "{version} is not installed": "{version} tidak dipasang",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (atau .mcp.json dalam projek)",
   "← All servers": "← Semua pelayan",
-  "← Newer": "← Lebih baharu"
+  "← Newer": "← Lebih baharu",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

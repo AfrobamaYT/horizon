@@ -1094,5 +1094,6 @@
   "{version} is not installed": "{version} نصب نشده است",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (یا mcp.json. در پروژه)",
   "← All servers": "← همه سرورها",
-  "← Newer": "← جدیدتر"
+  "← Newer": "← جدیدتر",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

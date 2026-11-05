@@ -1094,5 +1094,6 @@
   "{version} is not installed": "الإصدار {version} غير مثبت",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (أو .mcp.json في المشروع)",
   "← All servers": "← جميع الخوادم",
-  "← Newer": "← الأحدث"
+  "← Newer": "← الأحدث",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

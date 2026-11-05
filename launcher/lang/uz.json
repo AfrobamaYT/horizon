@@ -1094,5 +1094,6 @@
   "{version} is not installed": "{version} oʻrnatilmagan",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (yoki loyihada .mcp.json)",
   "← All servers": "← Barcha serverlar",
-  "← Newer": "← Yangiroq"
+  "← Newer": "← Yangiroq",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

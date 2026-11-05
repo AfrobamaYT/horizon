@@ -1094,5 +1094,6 @@
   "{version} is not installed": "{version} ni nameščen",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ali .mcp.json v projektu)",
   "← All servers": "← Vsi strežniki",
-  "← Newer": "← Novejše"
+  "← Newer": "← Novejše",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

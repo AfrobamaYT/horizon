@@ -1094,5 +1094,6 @@
   "{version} is not installed": "Níl {version} suiteáilte",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (nó .mcp.json i dtionscadal)",
   "← All servers": "← Gach freastalaí",
-  "← Newer": "← Níos nuaí"
+  "← Newer": "← Níos nuaí",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

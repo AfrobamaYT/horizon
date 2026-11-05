@@ -1094,5 +1094,6 @@
   "{version} is not installed": "Awụnyeghị {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ma ọ bụ .mcp.json na oru ngo)",
   "← All servers": "← Sava niile",
-  "← Newer": "← Ọhụrụ"
+  "← Newer": "← Ọhụrụ",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

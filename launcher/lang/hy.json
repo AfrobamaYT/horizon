@@ -1094,5 +1094,6 @@
   "{version} is not installed": "{version}-ը տեղադրված չէ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (կամ .mcp.json նախագծում)",
   "← All servers": "← Բոլոր սերվերները",
-  "← Newer": "← Ավելի նոր"
+  "← Newer": "← Ավելի նոր",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

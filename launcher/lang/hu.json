@@ -1094,5 +1094,6 @@
   "{version} is not installed": "{version} nincs telepítve",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (vagy .mcp.json egy projektben)",
   "← All servers": "← Minden szerver",
-  "← Newer": "← Újabb"
+  "← Newer": "← Újabb",
+    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }
