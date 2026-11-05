@@ -2767,17 +2767,6 @@ pub(super) mod tests {
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
-        let registry = game.pack.assets.registry;
-        let ids: std::collections::HashSet<_> = (0..registry.len())
-            .map(|i| {
-                registry
-                    .state(mod_api::BlockStateId(i as u32))
-                    .unwrap()
-                    .name
-                    .clone()
-            })
-            .collect();
-        mod_api::__private::part_tests::register_game_keys(ids);
 
         let level = game.native_level("minecraft:overworld").unwrap();
         assert!(
@@ -2939,17 +2928,6 @@ pub(super) mod tests {
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
-        let registry = game.pack.assets.registry;
-        let ids: std::collections::HashSet<_> = (0..registry.len())
-            .map(|i| {
-                registry
-                    .state(mod_api::BlockStateId(i as u32))
-                    .unwrap()
-                    .name
-                    .clone()
-            })
-            .collect();
-        mod_api::__private::part_tests::register_game_keys(ids);
 
         let level = game.native_level("minecraft:overworld").unwrap();
         let stone = game

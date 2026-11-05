@@ -613,7 +613,7 @@ mod tests {
             let spider = game.native_living(game.native_entity(13).unwrap()).unwrap();
             let cow = game.native_living(game.native_entity(14).unwrap()).unwrap();
 
-            // add_effect gives it, and the bare spelling reads the same.
+            // Reusing the registered key reads the applied instance.
             assert!(game.native_living_add_effect(zombie, &effect("minecraft:speed", 200, 0)));
             assert!(game.native_living_potion_affected(
                 zombie,
