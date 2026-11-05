@@ -6,7 +6,7 @@
 use super::native_hooks::{mod_particles_ok, mod_sound_ok};
 use super::{Dim, Game, creatures::NativeSound, lan_particles::QueuedParticle};
 use horizon_world::registry::BlockStateId;
-use mod_api::{LevelRef, NativeSoundSource, ParticleOptions};
+use mod_api::{LevelRef, ParticleOptions, SoundSource};
 
 impl Game<'_> {
     /// The level's dimension id, for a handle of this open on the server.
@@ -28,7 +28,7 @@ impl Game<'_> {
         level: LevelRef,
         sound: &str,
         at: [f64; 3],
-        source: NativeSoundSource,
+        source: SoundSource,
         volume: f32,
         pitch: f32,
     ) -> bool {
@@ -43,7 +43,7 @@ impl Game<'_> {
         level: LevelRef,
         sound: &str,
         at: [f64; 3],
-        source: NativeSoundSource,
+        source: SoundSource,
         volume: f32,
         pitch: f32,
         except: Option<u32>,

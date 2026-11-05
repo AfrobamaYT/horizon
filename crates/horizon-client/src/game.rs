@@ -7863,7 +7863,7 @@ impl Game<'_> {
                 let level = self.native_level(self.dim.id())?;
                 let source = match mob {
                     Some(living) => self.native_entity_sound_source(living.entity())?,
-                    None => mod_api::NativeSoundSource::Players,
+                    None => mod_api::SoundSource::Players,
                 };
                 self.native_queue_sound(level, sound, at, source, 1.0, 1.0, None)?;
                 true
