@@ -1675,8 +1675,41 @@ impl Game<'_> {
         self.take_screenshot();
         true
     }
+    /// Readback is complete: fire the client hook, then save, never exposing pixels.
+    pub(super) fn save_screenshot(
+        &mut self,
+        mut pending: horizon_client::gfx::PendingScreenshot,
+    ) -> Option<std::result::Result<[u32; 2], String>> {
+        if self.ui.screenshot_message.is_none() {
+            return Some(pending.save().map_err(|e| e.to_string()));
+        }
+        let mut file_name = pending
+            .path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let mut message = None;
+        let mut cancel = false;
+        self.native_screenshot(&mut file_name, &mut message, &mut cancel);
+        if cancel {
+            self.ui.screenshot_message = None;
+            return None;
+        }
+        let root = horizon_client::logging::player_dir().join("screenshots");
+        let result = pending
+            .save_in(&root, &file_name)
+            .map_err(|e| e.to_string());
+        self.ui.screenshot_message = Some(pending.path);
+        self.finish_screenshot(&result, message);
+        Some(result)
+    }
     /// After a frame: report a finished F2 screenshot in chat.
-    pub(super) fn finish_screenshot(&mut self, result: &std::result::Result<[u32; 2], String>) {
+    pub(super) fn finish_screenshot(
+        &mut self,
+        result: &std::result::Result<[u32; 2], String>,
+        message: Option<Text>,
+    ) {
         let Some(path) = self.ui.screenshot_message.take() else {
             return;
         };
@@ -1692,7 +1725,7 @@ impl Game<'_> {
                         ..Style::default()
                     },
                 );
-                Text::translate("screenshot.success", &[link])
+                message.unwrap_or_else(|| Text::translate("screenshot.success", &[link]))
             }
             Err(e) => Text::translate("screenshot.failure", &[Text::literal(e.clone())]),
         };

@@ -385,11 +385,16 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
             });
             for _ in 0..32 {
                 draw(&mut renderer)?;
-                if renderer.screenshot_result.is_some() {
+                if renderer.pending_screenshot.is_some() || renderer.screenshot_result.is_some() {
                     break;
                 }
             }
-            match renderer.screenshot_result.take() {
+            let result = renderer
+                .pending_screenshot
+                .take()
+                .map(|pending| pending.save().map_err(|e| e.to_string()))
+                .or_else(|| renderer.screenshot_result.take());
+            match result {
                 Some(Ok(_)) => {}
                 Some(Err(e)) => notes.push(format!("screenshot: {e}")),
                 None => notes.push("screenshot: not saved".into()),

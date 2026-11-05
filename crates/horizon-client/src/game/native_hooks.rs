@@ -2801,6 +2801,15 @@ impl Game<'_> {
     ) {
         self.fire_client_chat_received(system, overlay, sender, chat_type, message, cancel);
     }
+    /// An F2 frame is read back; mods may cancel, rename it or replace its success line.
+    pub(super) fn native_screenshot(
+        &mut self,
+        file_name: &mut String,
+        message: &mut Option<Text>,
+        cancel: &mut bool,
+    ) {
+        self.fire_screenshot(file_name, message, cancel);
+    }
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
     pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
         self.fire_client_pause_change_pre(paused, cancel);
