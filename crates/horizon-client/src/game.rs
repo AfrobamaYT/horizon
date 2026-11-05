@@ -11988,7 +11988,6 @@ impl Game<'_> {
         &mut self,
         camera: glam::DVec3,
         alpha: f64,
-        fov_degrees: f32,
         mut out: Vec<Vertex>,
     ) -> (
         Vec<Vertex>,
@@ -12403,81 +12402,16 @@ impl Game<'_> {
             }
         }
         laps.lap("eg_block_entities");
-        // Experience orbs (ExperienceOrbRenderer): pulsing billboards from a 4x4 icon sheet.
         self.mark_entity(out.len(), "minecraft:experience_orb");
-        if let Some(r) = self
-            .gui
-            .atlas
-            .sprites
-            .get("entity/experience/experience_orb")
-            .copied()
-        {
-            let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());
-            let forward = glam::Vec3::new(
-                -yaw.sin() * pitch.cos(),
-                -pitch.sin(),
-                yaw.cos() * pitch.cos(),
-            );
-            let right = forward.cross(glam::Vec3::Y).normalize_or_zero();
-            let up = right.cross(forward).normalize_or_zero();
-            let live = self.orbs.iter().map(|o| {
-                let at = [
-                    o.previous.x + (o.position.x - o.previous.x) * alpha,
-                    o.previous.y + (o.position.y - o.previous.y) * alpha,
-                    o.previous.z + (o.position.z - o.previous.z) * alpha,
-                ];
-                (o, at, alpha as f32)
-            });
-            // ItemPickupParticle: the render state extracted at partial tick 1.
-            let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
-                pickups::Taken::Orb(o) => Some((&**o, pickups::position(p, alpha), 1.0)),
-                _ => None,
-            });
-            for (o, at, partial) in live.chain(taken) {
-                let p = glam::DVec3::new(at[0], at[1] + 0.1, at[2]) - camera;
-                let icon = o.icon();
-                let (du, dv) = ((r.u1 - r.u0) / 4.0, (r.v1 - r.v0) / 4.0);
-                let (u0, v0) = (r.u0 + (icon % 4) as f32 * du, r.v0 + (icon / 4) as f32 * dv);
-                let t = (o.age as f32 + partial) / 2.0;
-                let red = ((t.sin() + 1.0) * 0.5 * 255.0) as u32;
-                let blue = (((t + 4.188_79).sin() + 1.0) * 0.1 * 255.0) as u32;
-                let color = 0x8000_0000 | blue << 16 | 255 << 8 | red;
-                // `ExperienceOrbRenderer.getBlockLightLevel` (the block light
-                // plus 7, clamped) at the block the orb's eye is in.
-                let light = self.world.light(
-                    o.position.x.floor() as i32,
-                    o.light_probe_y().floor() as i32,
-                    o.position.z.floor() as i32,
-                );
-                let packed = o.render_light(i32::from(light));
-                let c = p.as_vec3();
-                // `ExperienceOrbRenderer.submit`: the quad runs from
-                // (-0.5, -0.25) to (0.5, 0.75) and is scaled by 0.3, so the
-                // sprite hangs a quarter of its height below the orb's centre.
-                let s = horizon_client::entities::ORB_QUAD_SCALE;
-                for (k, uv) in horizon_client::entities::ORB_QUAD.iter().zip([
-                    [u0, v0 + dv],
-                    [u0 + du, v0 + dv],
-                    [u0 + du, v0],
-                    [u0, v0],
-                ]) {
-                    let v = c + right * (k[0] * s) + up * (k[1] * s);
-                    out.push(Vertex {
-                        normal: [0; 4],
-                        pos: v.to_array(),
-                        uv,
-                        // ExperienceOrbRenderer: `RenderTypes.entityTranslucent`; in HDR
-                        // output the orbs shine (entity.wgsl fs_hdr_mark).
-                        layer: horizon_client::gfx::OIT_ENTITY
-                            | u32::from(horizon_client::mesher::VERY_BRIGHT) << 16,
-                        color,
-                        light: packed,
-
-                        glint_uv: [0.0, 0.0],
-                    });
-                }
-            }
-        }
+        let live = self.orbs.iter().map(|o| {
+            let at = [
+                o.previous.x + (o.position.x - o.previous.x) * alpha,
+                o.previous.y + (o.position.y - o.previous.y) * alpha,
+                o.previous.z + (o.position.z - o.previous.z) * alpha,
+            ];
+            (o, at, alpha as f32)
+        });
+        self.orb_geometry(camera, live, &mut out);
         laps.lap("eg_orbs");
         // Falling blocks use their baked model, including non-cubic shapes.
         self.mark_entity(out.len(), "minecraft:falling_block");
@@ -12544,47 +12478,6 @@ impl Game<'_> {
         self.mark_entity(out.len(), "minecraft:splash_potion");
         self.thrown_potion_geometry(camera, alpha, &mut out);
         laps.lap("eg_objects");
-        // Particles (ParticleEngine.extract): camera-facing quads.
-        self.mark_stage(out.len(), "PARTICLES");
-        let world = &self.world;
-        let particle_mode = self.settings.horizon.particle_culling;
-        if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
-            self.particles.render(
-                camera,
-                self.yaw,
-                self.pitch,
-                alpha as f32,
-                &|b| world.light(b[0], b[1], b[2]),
-                &mut out,
-            );
-        } else {
-            let frustum = self.view_frustum;
-            let pixel_focal_length = self.renderer.as_ref().map_or(0.0, |renderer| {
-                let tangent = (f64::from(fov_degrees).to_radians() * 0.5).tan();
-                if tangent.is_finite() && tangent > 0.0 {
-                    (f64::from(renderer.config.height.max(1)) / (2.0 * tangent)) as f32
-                } else {
-                    0.0
-                }
-            });
-            {
-                let mut particle_culling = self.particle_occlusion_context(camera);
-                self.particles.render_culled(
-                    camera,
-                    self.yaw,
-                    self.pitch,
-                    alpha as f32,
-                    pixel_focal_length,
-                    true,
-                    frustum.as_ref(),
-                    &mut |min, max| particle_culling.hidden(min, max),
-                    &|b| world.light(b[0], b[1], b[2]),
-                    &mut out,
-                );
-            }
-            self.finish_async_particle_culling();
-        }
-        laps.lap("eg_particles");
         // Breaking progress overlays (destroy_stage_0..9): ours and the other players'.
         self.mark_stage(out.len(), "DESTROY");
         for &(pos, stage) in &cracks {
@@ -12624,6 +12517,170 @@ impl Game<'_> {
             visible_static_block_entity_sections,
             static_block_entity_stats,
         )
+    }
+
+    fn orb_geometry<'a>(
+        &self,
+        camera: glam::DVec3,
+        orbs: impl Iterator<Item = (&'a horizon_client::entities::ExperienceOrb, [f64; 3], f32)>,
+        out: &mut Vec<Vertex>,
+    ) {
+        if let Some(r) = self
+            .gui
+            .atlas
+            .sprites
+            .get("entity/experience/experience_orb")
+            .copied()
+        {
+            let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());
+            let forward = glam::Vec3::new(
+                -yaw.sin() * pitch.cos(),
+                -pitch.sin(),
+                yaw.cos() * pitch.cos(),
+            );
+            let right = forward.cross(glam::Vec3::Y).normalize_or_zero();
+            let up = right.cross(forward).normalize_or_zero();
+            for (o, at, partial) in orbs {
+                let p = glam::DVec3::new(at[0], at[1] + 0.1, at[2]) - camera;
+                let icon = o.icon();
+                let (du, dv) = ((r.u1 - r.u0) / 4.0, (r.v1 - r.v0) / 4.0);
+                let (u0, v0) = (r.u0 + (icon % 4) as f32 * du, r.v0 + (icon / 4) as f32 * dv);
+                let t = (o.age as f32 + partial) / 2.0;
+                let red = ((t.sin() + 1.0) * 0.5 * 255.0) as u32;
+                let blue = (((t + 4.188_79).sin() + 1.0) * 0.1 * 255.0) as u32;
+                let color = 0x8000_0000 | blue << 16 | 255 << 8 | red;
+                // `ExperienceOrbRenderer.getBlockLightLevel` (the block light
+                // plus 7, clamped) at the block the orb's eye is in.
+                let light = self.world.light(
+                    o.position.x.floor() as i32,
+                    o.light_probe_y().floor() as i32,
+                    o.position.z.floor() as i32,
+                );
+                let packed = o.render_light(i32::from(light));
+                let c = p.as_vec3();
+                // `ExperienceOrbRenderer.submit`: the quad runs from
+                // (-0.5, -0.25) to (0.5, 0.75) and is scaled by 0.3, so the
+                // sprite hangs a quarter of its height below the orb's centre.
+                let s = horizon_client::entities::ORB_QUAD_SCALE;
+                for (k, uv) in horizon_client::entities::ORB_QUAD.iter().zip([
+                    [u0, v0 + dv],
+                    [u0 + du, v0 + dv],
+                    [u0 + du, v0],
+                    [u0, v0],
+                ]) {
+                    let v = c + right * (k[0] * s) + up * (k[1] * s);
+                    out.push(Vertex {
+                        normal: [0; 4],
+                        pos: v.to_array(),
+                        uv,
+                        // ExperienceOrbRenderer: `RenderTypes.entityTranslucent`; in HDR
+                        // output the orbs shine (entity.wgsl fs_hdr_mark).
+                        layer: horizon_client::gfx::OIT_ENTITY
+                            | u32::from(horizon_client::mesher::VERY_BRIGHT) << 16,
+                        color,
+                        light: packed,
+
+                        glint_uv: [0.0, 0.0],
+                    });
+                }
+            }
+        }
+    }
+
+    /// Extract every particle group after the frame's entity, screen and hand callbacks.
+    /// Item model callbacks can clear during extraction too: roll back only this tail of
+    /// geometry (including GPU jobs and outlines), never the frame's ordinary entities.
+    fn client_particle_geometry(
+        &mut self,
+        camera: glam::DVec3,
+        alpha: f64,
+        fov_degrees: f32,
+        out: &mut Vec<Vertex>,
+    ) {
+        self.apply_mod_particle_clear();
+        if self.client_particle_count() == 0 {
+            return;
+        }
+        let first = out.len();
+        let skin = self.skin_frame.borrow().mark();
+        let outline_jobs = self.skin_frame.borrow().outline_jobs.len();
+        let outline_vertices = self.skin_frame.borrow().outline_vertices;
+        let spans = self.entity_spans.borrow().len();
+        let motion = self.entity_motion.borrow().len();
+        let glowing = self.glowing_vertices.borrow().len();
+        self.mark_motion(out.len(), 0);
+        // Particles (ParticleEngine.extract): camera-facing quads.
+        self.mark_stage(out.len(), "PARTICLES");
+        let world = &self.world;
+        let particle_mode = self.settings.horizon.particle_culling;
+        if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
+            self.particles.render(
+                camera,
+                self.yaw,
+                self.pitch,
+                alpha as f32,
+                &|b| world.light(b[0], b[1], b[2]),
+                out,
+            );
+        } else {
+            let frustum = self.view_frustum;
+            let pixel_focal_length = self.renderer.as_ref().map_or(0.0, |renderer| {
+                let tangent = (f64::from(fov_degrees).to_radians() * 0.5).tan();
+                if tangent.is_finite() && tangent > 0.0 {
+                    (f64::from(renderer.config.height.max(1)) / (2.0 * tangent)) as f32
+                } else {
+                    0.0
+                }
+            });
+            {
+                let mut particle_culling = self.particle_occlusion_context(camera);
+                self.particles.render_culled(
+                    camera,
+                    self.yaw,
+                    self.pitch,
+                    alpha as f32,
+                    pixel_focal_length,
+                    true,
+                    frustum.as_ref(),
+                    &mut |min, max| particle_culling.hidden(min, max),
+                    &|b| world.light(b[0], b[1], b[2]),
+                    out,
+                );
+            }
+            self.finish_async_particle_culling();
+        }
+        self.mark_entity(out.len(), "minecraft:item");
+        self.pickup_item_geometry(camera, alpha, out);
+        self.mark_motion(out.len(), 0);
+        self.mark_entity(out.len(), "minecraft:arrow");
+        self.pickup_arrow_geometry(camera, alpha, out);
+        self.mark_entity(out.len(), "minecraft:trident");
+        self.pickup_trident_geometry(camera, alpha, out);
+        self.mark_entity(out.len(), "minecraft:experience_orb");
+        // ItemPickupParticle: the render state extracted at partial tick 1.
+        let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
+            pickups::Taken::Orb(o) => Some((&**o, pickups::position(p, alpha), 1.0)),
+            _ => None,
+        });
+        self.orb_geometry(camera, taken, out);
+        self.mark_entity(out.len(), "minecraft:elder_guardian");
+        self.elder_apparition_geometry(alpha, out);
+        if self.mod_clear_particles.get() {
+            self.apply_mod_particle_clear();
+            out.truncate(first);
+            {
+                let mut frame = self.skin_frame.borrow_mut();
+                frame.truncate(skin);
+                frame.outline_jobs.truncate(outline_jobs);
+                frame.outline_vertices = outline_vertices;
+            }
+            self.entity_spans.borrow_mut().truncate(spans);
+            self.entity_motion.borrow_mut().truncate(motion);
+            self.glowing_vertices.borrow_mut().truncate(glowing);
+            return;
+        }
+        self.mark_motion(out.len(), 0);
+        self.mark_stage(out.len(), "NONE");
     }
 
     /// `LevelRenderer.destroyBlockProgress`: a player's crack on a block (0..=9), or none
@@ -16976,6 +17033,17 @@ impl Game<'_> {
         });
     }
     fn render(&mut self) -> Result<bool> {
+        self.render_with(|renderer, frame| {
+            horizon_client::spans::time("renderer", || renderer.render(frame))
+        })
+    }
+
+    /// Build the complete frame before handing its borrowed geometry and lighting to
+    /// the consumer. Tests use the same boundary as GPU submission.
+    fn render_with(
+        &mut self,
+        consume: impl FnOnce(&mut Renderer, &Frame<'_>) -> Result<bool>,
+    ) -> Result<bool> {
         // The window's GPU holds the atlas: its copy in memory is kept
         // compressed (a no-op once it is).
         if self.renderer.is_some() {
@@ -17211,10 +17279,10 @@ impl Game<'_> {
         let g = self.debug_gizmos(alpha as f32, camera.to_array());
         lines.extend(g.lines);
         let on_top = g.on_top;
-        let colored_lights = if self.title.is_none() {
-            self.native_frame_visuals(camera, alpha, &mut lines)
+        let visuals = if self.title.is_none() {
+            self.native_frame_visuals(alpha, &mut lines)
         } else {
-            Vec::new()
+            native_visuals::FrameVisuals::default()
         };
         let emissive_layers = if self.title.is_none() {
             let mut requests = Vec::new();
@@ -17391,7 +17459,7 @@ impl Game<'_> {
         if !title {
             let (built, static_sections, visible_static_sections, static_stats) =
                 spans::time("entity_geometry", || {
-                    self.entity_geometry(camera, alpha, fov_degrees, entities)
+                    self.entity_geometry(camera, alpha, entities)
                 });
             entities = built;
             static_block_entities = static_sections;
@@ -17476,6 +17544,17 @@ impl Game<'_> {
         } else {
             self.shader_pack_inputs(camera, alpha as f32, &sky)
         };
+        // Fog hooks may clear particles too. They must run before the final clear
+        // boundary, not while constructing Frame after geometry has been extracted.
+        let fog = self.frame_fog(camera, &sky, biome, water_fog);
+        if !title {
+            self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
+        }
+        let colored_lights = if self.title.is_none() {
+            visuals.finish(self, camera)
+        } else {
+            Vec::new()
+        };
         // Map textures and font glyphs changed while building this frame's
         // geometry (game/maps.rs, world text) upload with this batch; draining
         // map_patches any earlier leaves them a frame behind.
@@ -17539,7 +17618,7 @@ impl Game<'_> {
             environment_fog: (self.dim == Dim::Nether).then_some((sky.fog_start, sky.fog_end)),
             cave_culling,
             water_fog,
-            fog: Some(self.frame_fog(camera, &sky, biome, water_fog)),
+            fog: Some(fog),
             dark_disc: self.dark_disc(camera),
             outline,
             outline_after_terrain,
@@ -17645,7 +17724,7 @@ impl Game<'_> {
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
                 renderer.set_pass_timing(self.debug || self.gpu_passes);
-                horizon_client::spans::time("renderer", || renderer.render(&frame))
+                consume(renderer, &frame)
             }
             None => Err("renderer".into()),
         };
