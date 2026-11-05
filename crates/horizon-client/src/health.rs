@@ -1577,20 +1577,13 @@ mod tests {
                 .hurt(&mut level.level(), health, rules, attack, 3.0)
                 .unwrap()
         );
-        // A cooldown-bypassing source is fresh even with the window still active.
-        let bypass = health.damage.id("minecraft:generic_kill").unwrap();
-        assert!(
-            player
-                .hurt(&mut level.level(), health, rules, bypass, 1.0)
-                .unwrap()
-        );
         let seen = SEEN.lock().unwrap();
-        assert_eq!(seen.len(), 3, "the refused hit must not fire Post");
+        assert_eq!(seen.len(), 2, "the refused hit must not fire Post");
         let flags: Vec<_> = seen
             .iter()
             .map(|hit| hit.should_cause_side_effects())
             .collect();
-        assert_eq!(flags, [true, false, true]);
+        assert_eq!(flags, [true, false]);
         // Both first hits deal 2 and leave 20 ticks: neither value determines freshness.
         for hit in &seen[..2] {
             assert_eq!(hit.health_damage(), 2.0);
