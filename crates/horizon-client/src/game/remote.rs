@@ -3266,6 +3266,10 @@ impl Game<'_> {
                     Err(e) => log::debug!("Horizon: a bad menu extra payload: {e}"),
                 }
             }
+            // An anvil cost the data-slot short cannot hold, after that short.
+            C::CustomPayload(p) if p.channel == horizon_protocol::anvil_cost::CHANNEL => {
+                self.remote_anvil_wide_cost(&p.data);
+            }
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
