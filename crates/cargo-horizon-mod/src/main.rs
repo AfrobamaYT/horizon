@@ -5,7 +5,8 @@
 //!   `--template native [--horizon <commit>]`, a native trait mod's bundle, pinned to the
 //!   newest prebuilt game unless `--horizon` names a commit.
 //! - `update [--horizon <commit>]`: repin this native mod and diff/refresh declared internals.
-//! - `internals add <path>… [--kind <kind>]`: declare internals with hashes from the pinned prebuilt game.
+//! - `internals add <path>… [--kind <kind>]`: declare internals from the pinned prebuilt game
+//!   (native) or the newest prebuilt catalog (wasm).
 //! - `build`: the `.hmod` in `target/horizon-mod/`, with the mod's `assets/`
 //!   and `data/`; with `--wasm`, a Rust mod built to `mod.wasm` first (`wasm.rs`).
 //! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.

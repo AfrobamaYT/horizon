@@ -10,7 +10,7 @@ use std::{
     collections::BTreeMap,
     fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 use toml_edit::{DocumentMut, Item, Value};
 
@@ -50,11 +50,13 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
-    let native = manifest
-        .native
-        .as_ref()
-        .ok_or("internals add needs a [native] mod")?;
-    let catalog = load(dir, &native.horizon)?;
+    let (declared, catalog) = if let Some(wasm) = &manifest.wasm {
+        (wasm.internals(), internals::read(&wasm_catalog(dir)?)?)
+    } else if let Some(native) = &manifest.native {
+        (native.internals.as_slice(), load(dir, &native.horizon)?)
+    } else {
+        return Err("internals add needs a [native] or [wasm] mod".into());
+    };
     // Resolve every request before editing: any unavailable or ambiguous path leaves the file alone.
     let entries = paths
         .iter()
@@ -65,8 +67,7 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     let mut doc: DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut listed: BTreeMap<_, _> = native
-        .internals
+    let mut listed: BTreeMap<_, _> = declared
         .iter()
         .enumerate()
         .map(|(index, entry)| ((entry.path.as_str(), entry.kind.as_deref()), index))
@@ -202,6 +203,24 @@ pub fn set_string(value: &mut Value, text: &str) {
 
 /// The same release tags and archive layout the launcher reads. Keep each pin's catalog in
 /// the mod's build folder, so updating can still show the old signature after a release expires.
+/// The catalog a pinless wasm build uses, shared by `internals add` and the guest view build.
+/// An explicit catalog is useful for a build against a staged game instead of a daily release.
+pub(crate) fn wasm_catalog(dir: &Path) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("HORIZON_MOD_INTERNALS_CATALOG") {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() {
+            return Err("HORIZON_MOD_INTERNALS_CATALOG must be an absolute path".into());
+        }
+        return Ok(path);
+    }
+    let revision = crate::pin(None)?;
+    load(dir, &revision)?;
+    Ok(dir
+        .join("target/horizon-mod/prebuilt")
+        .join(revision)
+        .join(CATALOG))
+}
+
 pub fn load(dir: &Path, revision: &str) -> Result<Vec<ListedInternal>, String> {
     let cache = dir.join("target/horizon-mod/prebuilt").join(revision);
     let path = cache.join(CATALOG);

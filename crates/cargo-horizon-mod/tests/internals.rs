@@ -94,6 +94,45 @@ fn internals_add_writes_pinned_hashes_and_preserves_the_rest_of_the_manifest() {
 }
 
 #[test]
+fn internals_add_for_wasm_uses_the_shared_catalog_without_native_pins() {
+    let project = Project::new("wasm-add", "");
+    let text = format!(
+        "# A pinless mod\nid = 'example'\nname = 'Example'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'nightly'\n",
+        "a".repeat(128)
+    );
+    fs::write(project.dir.join(MANIFEST), &text).unwrap();
+    let catalog = project
+        .dir
+        .join("target/horizon-mod/prebuilt")
+        .join(OLD)
+        .join("internals.json");
+    let run = |catalog: &std::path::Path| {
+        Command::new(env!("CARGO_BIN_EXE_cargo-horizon-mod"))
+            .args(["internals", "add", "horizon_client::game::Game"])
+            .env("HORIZON_MOD_INTERNALS_CATALOG", catalog)
+            .current_dir(&project.dir)
+            .output()
+            .unwrap()
+    };
+    let failure = run(std::path::Path::new("internals.json"));
+    assert!(!failure.status.success());
+    assert!(
+        String::from_utf8_lossy(&failure.stderr).contains("must be an absolute path"),
+        "{}",
+        String::from_utf8_lossy(&failure.stderr)
+    );
+    assert_eq!(project.text(), text);
+    success(&run(&catalog));
+    let manifest = project.manifest();
+    assert!(manifest.native.is_none());
+    assert_eq!(manifest.wasm.unwrap().internals()[0].hash, "1111");
+    assert!(project.text().contains("# A pinless mod"));
+    let before = project.text();
+    success(&run(&catalog));
+    assert_eq!(project.text(), before);
+}
+
+#[test]
 fn internals_add_refuses_missing_gated_and_shape_only_paths_without_partial_edits() {
     let project = Project::new("refusals", "");
     for (path, code, wording) in [
