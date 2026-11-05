@@ -60,6 +60,8 @@ pub mod glass_icons {
         "ai-chat-02",
         "arrow-down-01",
         "arrow-right-01",
+        "book",
+        "map",
         "cancel-01",
         "color-picker",
         "computer",
