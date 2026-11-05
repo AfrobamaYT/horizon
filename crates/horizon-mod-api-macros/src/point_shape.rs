@@ -472,8 +472,10 @@ impl Shape {
                     fields: ::std::vec::Vec<crate::wire::Value>,
                 ) -> ::std::result::Result<(), crate::wire::Mismatch> {
                     let mut fields = fields.into_iter();
-                    #(crate::wire::write(&mut self.#fields, &mut fields)?;)*
-                    crate::wire::end(&mut fields)
+                    let taken = (#(crate::wire::taken(&self.#fields, &mut fields)?,)*);
+                    crate::wire::end(&mut fields)?;
+                    (#(self.#fields,)*) = taken;
+                    ::std::result::Result::Ok(())
                 }
             }
             #[cfg(target_arch = "wasm32")]

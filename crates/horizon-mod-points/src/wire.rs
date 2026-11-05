@@ -43,9 +43,10 @@ pub trait Wire<'v>: Sized {
     fn lift(value: &'v Value) -> Result<Self, Mismatch>;
 }
 
-/// A record field the game takes back as the listener left it.
-pub trait WriteBack {
-    fn write(&mut self, value: Value) -> Result<(), Mismatch>;
+/// A record field the game takes back as the listener left it: its new value, from the field as it
+/// was and what the listener answered.
+pub trait WriteBack: Sized {
+    fn taken(&self, value: Value) -> Result<Self, Mismatch>;
 }
 
 macro_rules! scalar {
@@ -62,9 +63,8 @@ macro_rules! scalar {
             }
         }
         impl WriteBack for $t {
-            fn write(&mut self, value: Value) -> Result<(), Mismatch> {
-                *self = Self::lift(&value)?;
-                Ok(())
+            fn taken(&self, value: Value) -> Result<Self, Mismatch> {
+                Self::lift(&value)
             }
         }
     )*};
@@ -86,9 +86,8 @@ macro_rules! exact {
             }
         }
         impl WriteBack for $t {
-            fn write(&mut self, value: Value) -> Result<(), Mismatch> {
-                *self = Self::lift(&value)?;
-                Ok(())
+            fn taken(&self, value: Value) -> Result<Self, Mismatch> {
+                Self::lift(&value)
             }
         }
     )*};
@@ -108,9 +107,8 @@ impl<'v> Wire<'v> for f32 {
 }
 
 impl WriteBack for f32 {
-    fn write(&mut self, value: Value) -> Result<(), Mismatch> {
-        *self = Self::lift(&value)?;
-        Ok(())
+    fn taken(&self, value: Value) -> Result<Self, Mismatch> {
+        Self::lift(&value)
     }
 }
 
@@ -127,9 +125,8 @@ impl<'v, T: Wire<'v>> Wire<'v> for Option<T> {
 }
 
 impl<T: WriteBack + for<'x> Wire<'x>> WriteBack for Option<T> {
-    fn write(&mut self, value: Value) -> Result<(), Mismatch> {
-        *self = Self::lift(&value)?;
-        Ok(())
+    fn taken(&self, value: Value) -> Result<Self, Mismatch> {
+        Self::lift(&value)
     }
 }
 
@@ -146,13 +143,11 @@ impl<'v> Wire<'v> for Cow<'v, str> {
 }
 
 impl WriteBack for Cow<'_, str> {
-    fn write(&mut self, value: Value) -> Result<(), Mismatch> {
+    fn taken(&self, value: Value) -> Result<Self, Mismatch> {
         match value {
-            Value::Str(text) if text == **self => Ok(()),
-            Value::Str(text) => {
-                *self = Cow::Owned(text);
-                Ok(())
-            }
+            // Unchanged text stays the game's own borrow.
+            Value::Str(text) if text == **self => Ok(self.clone()),
+            Value::Str(text) => Ok(Cow::Owned(text)),
             _ => Err(Mismatch),
         }
     }
@@ -163,12 +158,12 @@ pub fn field<'v, T: Wire<'v>>(fields: &mut std::slice::Iter<'v, Value>) -> Resul
     T::lift(fields.next().ok_or(Mismatch)?)
 }
 
-/// Takes `field` back from the next of the fields a listener left.
-pub fn write<T: WriteBack>(
-    field: &mut T,
+/// `field`'s new value, from the next of the fields a listener left.
+pub fn taken<T: WriteBack>(
+    field: &T,
     fields: &mut std::vec::IntoIter<Value>,
-) -> Result<(), Mismatch> {
-    field.write(fields.next().ok_or(Mismatch)?)
+) -> Result<T, Mismatch> {
+    field.taken(fields.next().ok_or(Mismatch)?)
 }
 
 /// The end of a record's fields: none may be left over.
@@ -179,7 +174,7 @@ pub fn end<T>(fields: &mut impl Iterator<Item = T>) -> Result<(), Mismatch> {
 /// A point's record, as it crosses: its fields in order, and back.
 pub trait Record {
     fn lower(&self) -> Vec<Value>;
-    /// Takes every field back as the listener left it.
+    /// Takes every field back as the listener left it, or none when they don't fit its shape.
     fn write_back(&mut self, fields: Vec<Value>) -> Result<(), Mismatch>;
 }
 
@@ -279,3 +274,70 @@ mod host {
 }
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub use host::{Forward, Forwarded, PointHost};
+
+#[cfg(all(test, feature = "wasm-host", not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::places::SHAPES;
+
+    /// The field types a record's shape may name: each one [`Wire`] carries.
+    const CARRIED: &[&str] = &[
+        "bool", "char", "str", "f32", "f64", "i8", "i16", "i32", "i64", "isize", "u8", "u16",
+        "u32", "u64", "usize",
+    ];
+
+    #[test]
+    fn every_point_of_the_game_crosses_to_a_wasm_mod() {
+        for shape in SHAPES.iter().filter(|shape| !shape.is_empty()) {
+            for field in shape.split(',') {
+                let (name, ty) = field.split_once(':').expect("a field is name:type");
+                let ty = ty
+                    .strip_prefix("Option<")
+                    .and_then(|ty| ty.strip_suffix('>'))
+                    .unwrap_or(ty);
+                assert!(
+                    !name.is_empty() && CARRIED.contains(&ty),
+                    "a point's record field {field} in ({shape}) doesn't cross"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_record_crosses_and_takes_back_what_a_listener_changed() {
+        let mut record = crate::HandleChatInputArgs::__new("hi");
+        let fields = record.lower();
+        assert!(matches!(&fields[..], [Value::Str(text), Value::B(false)] if text == "hi"));
+        record
+            .write_back(vec![Value::Str("hello".into()), Value::B(true)])
+            .unwrap();
+        assert_eq!((&*record.message, record.cancel), ("hello", true));
+        // Unchanged text stays the game's own borrow.
+        let mut kept = crate::HandleChatInputArgs::__new("hi");
+        kept.write_back(vec![Value::Str("hi".into()), Value::B(false)])
+            .unwrap();
+        assert!(matches!(kept.message, Cow::Borrowed("hi")));
+
+        let mut reach = crate::ReachArgs::__new();
+        assert!(matches!(&reach.lower()[..], [Value::None]));
+        reach.write_back(vec![Value::F(6.0)]).unwrap();
+        assert_eq!(reach.result, Some(6.0));
+        // A mod answering another shape is refused, and the record is left as it was.
+        let mut turn = crate::TurnPlayerArgs::__new(1.0, 2.0);
+        assert_eq!(turn.write_back(vec![Value::F(3.0)]), Err(Mismatch));
+        assert_eq!(
+            turn.write_back(vec![
+                Value::F(3.0),
+                Value::B(true),
+                Value::B(true),
+                Value::B(true)
+            ]),
+            Err(Mismatch)
+        );
+        assert_eq!(
+            turn.write_back(vec![Value::F(3.0), Value::Str("4".into()), Value::B(true)]),
+            Err(Mismatch)
+        );
+        assert_eq!((turn.xo, turn.yo, turn.cancel), (1.0, 2.0, false));
+    }
+}
