@@ -226,6 +226,7 @@ mod player_flyable_fall;
 mod player_food;
 mod player_game_mode_write;
 mod player_harvest_check;
+mod player_heart_type;
 mod player_item_smithed;
 mod player_modes;
 mod player_name_format;

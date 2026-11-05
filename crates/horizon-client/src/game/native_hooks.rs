@@ -3234,6 +3234,30 @@ impl Game<'_> {
     /// hearts, food, air and the heights (`left_height`/`right_height`)
     /// above the hotbar are the answer's to give; `bubble_pop_sound` too.
     /// Nothing set draws Horizon's own.
+    /// The hearts the local player's health bar draws (`Gui.HeartType.forPlayer`, then
+    /// NeoForge's `PlayerHeartTypeEvent`): poisoned, else withered, else frozen when fully
+    /// frozen, else normal, as a mod's `player_heart_type` leaves it. None without a player.
+    pub(super) fn player_heart_kind(&mut self) -> Option<mod_api::hud_layout::HeartKind> {
+        use mod_api::hud_layout::HeartKind;
+        let p = self.player.as_ref()?;
+        let effects = &self.potions.effects;
+        let mut kind = if effects.get("poison").is_some() {
+            HeartKind::Poisoned
+        } else if effects.get("wither").is_some() {
+            HeartKind::Withered
+        } else if p.is_fully_frozen() {
+            HeartKind::Frozen
+        } else {
+            HeartKind::Normal
+        };
+        self.native_player_heart_type(&mut kind);
+        Some(kind)
+    }
+    /// Which hearts the local player's health bar draws (`PlayerHeartTypeEvent`): `kind` is
+    /// vanilla's pick, and a mod may set another.
+    pub(super) fn native_player_heart_type(&mut self, kind: &mut mod_api::hud_layout::HeartKind) {
+        self.fire_player_heart_type(kind);
+    }
     pub(super) fn native_health_hud(
         &mut self,
         inputs: &mod_api::hud_layout::HealthInputs,
@@ -14424,5 +14448,55 @@ mod particle_count_tests {
     fn host_clear(game: &super::Game<'_>) -> bool {
         let host: &dyn ClientHost = game;
         host.clear_particles()
+    }
+}
+
+#[cfg(test)]
+mod player_heart_type_tests {
+    use mod_api::hud_layout::HeartKind;
+    use mod_api::{ClientHost, Hooks, ModEntry, PlayerHeartTypeEvent, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    /// Draws frozen hearts for normal ones and withered for frozen ones, logging each pick.
+    struct Swap(Arc<Mutex<Vec<HeartKind>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Swap {
+        fn player_heart_type(&self, _: &mut dyn ClientHost, event: &mut PlayerHeartTypeEvent) {
+            self.0.lock().unwrap().push(event.kind);
+            event.kind = match event.kind {
+                HeartKind::Normal => HeartKind::Frozen,
+                HeartKind::Frozen => HeartKind::Withered,
+                other => other,
+            };
+        }
+    }
+
+    /// `PlayerHeartTypeEvent`: the mod gets vanilla's pick and its answer is drawn; without a
+    /// listener the pick is vanilla's.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_changes_the_health_bars_hearts() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            assert_eq!(game.player_heart_kind(), Some(HeartKind::Normal));
+            game.player.as_mut().unwrap().ticks_frozen = 1000;
+            assert_eq!(game.player_heart_kind(), Some(HeartKind::Frozen));
+            game.player.as_mut().unwrap().ticks_frozen = 0;
+        });
+        let seen = Arc::default();
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("swap", Box::new(Swap(Arc::clone(&seen))))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                assert_eq!(game.player_heart_kind(), Some(HeartKind::Frozen));
+                game.player.as_mut().unwrap().ticks_frozen = 1000;
+                assert_eq!(game.player_heart_kind(), Some(HeartKind::Withered));
+                assert_eq!(
+                    *seen.lock().unwrap(),
+                    [HeartKind::Normal, HeartKind::Frozen]
+                );
+            });
+        });
     }
 }
