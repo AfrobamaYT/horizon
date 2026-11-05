@@ -1092,6 +1092,6 @@
   "Prebuilt": "Prebuilt",
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
-  "Rebuilds on Play": "Rebuilds on Play",
-  " The last build took {time}.": " The last build took {time}."
+  " The last build took {time}.": " The last build took {time}.",
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
 }

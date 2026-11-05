@@ -539,8 +539,8 @@ impl Launcher {
                 Route::Game { reason } => (
                     "clock",
                     pal.muted,
-                    tr("Rebuilds on Play"),
-                    format!("{reason}{last}"),
+                    tr("Needs rebuild"),
+                    format!("{reason}{last} {}", tr("Press Build to rebuild with your changes.")),
                 ),
             }
         };
