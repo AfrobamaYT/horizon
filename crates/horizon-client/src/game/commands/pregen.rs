@@ -244,7 +244,7 @@ impl Game<'_> {
     /// hand them the next jobs as soon as each one is done, rather than once
     /// a tick.
     pub(in crate::game) fn pump_chunks(&mut self, until: Instant, paused: bool) {
-        // Force-loaded chunks too: decorating in vanilla's order, a chunk
+        // Force-loaded chunks too, a mod's held ones as `/forceload`'s: decorating in vanilla's order, a chunk
         // waits for its neighbours far more often than once a tick allows.
         // And the players' chunks while they load, as vanilla's server runs
         // its chunk tasks while it waits for the next tick

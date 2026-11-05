@@ -41,13 +41,6 @@ impl<'a> LevelSound<'a> {
     pub fn in_source(self, source: SoundSource) -> Self {
         Self { source, ..self }
     }
-
-    pub fn bound_to(self, emitter: u32) -> Self {
-        Self {
-            emitter: Some(emitter),
-            ..self
-        }
-    }
 }
 
 /// A sound bound to an entity (`level.playSound(except, entity, ...)`),

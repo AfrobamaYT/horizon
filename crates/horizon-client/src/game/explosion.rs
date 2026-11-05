@@ -493,7 +493,7 @@ impl Game<'_> {
         }
         let rules = self.world.health_rules;
         if let Some(p) = self.player.as_mut()
-            && let Some(id) = self.motion.health.damage.id(damage_type)
+            && let Some(id) = self.health_resources.damage.id(damage_type)
         {
             // Creative players are invulnerable to explosions.
             if !creative

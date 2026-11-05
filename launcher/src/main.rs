@@ -78,7 +78,6 @@ mod switch_page;
 mod theme;
 mod themes_page;
 mod titlebar;
-mod wardrobe_page;
 mod while_playing;
 mod worlds_page;
 
@@ -111,8 +110,6 @@ enum Page {
     /// Mods, resource packs and modpacks (imported ones and the browser's).
     Mods,
     Servers,
-    /// What the player wears (`wardrobe_page.rs`), with the cosmetics flag on.
-    Wardrobe,
     Notes,
     Settings,
 }
@@ -127,7 +124,6 @@ impl Page {
         let page = match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
             Ok("mods" | "modpacks" | "resourcepacks" | "shaders" | "datapacks") => Page::Mods,
             Ok("servers") => Page::Servers,
-            Ok("wardrobe") if horizon_cosmetics::forced() => Page::Wardrobe,
             Ok("versions") => Page::Versions,
             Ok("notes") => Page::Notes,
             Ok("settings") => Page::Settings,
@@ -143,24 +139,20 @@ impl Page {
 
     /// Every page, with its name and icon: the top bar shows all but Settings, which has its
     /// own button.
-    const ALL: [(Page, &'static str, &'static str); 7] = [
+    const ALL: [(Page, &'static str, &'static str); 6] = [
         (Page::Play, "Home", "home"),
         (Page::Mods, "Mods", "package"),
         (Page::Servers, "Servers", "server"),
-        (Page::Wardrobe, "Wardrobe", "user"),
         (Page::Versions, "Versions", "archive"),
         (Page::Notes, "Patch notes", "notes"),
         (Page::Settings, "Settings", "sliders"),
     ];
 
-    /// The pages the top bar shows: all but Settings, and the Wardrobe only when `wardrobe`
-    /// (`Launcher::wardrobe_shown`).
-    fn in_top_bar(wardrobe: bool) -> impl Iterator<Item = (Page, &'static str, &'static str)> {
-        Self::ALL.into_iter().filter(move |(page, ..)| match page {
-            Page::Settings => false,
-            Page::Wardrobe => wardrobe,
-            _ => true,
-        })
+    /// The pages the top bar shows: all but Settings.
+    fn in_top_bar() -> impl Iterator<Item = (Page, &'static str, &'static str)> {
+        Self::ALL
+            .into_iter()
+            .filter(|(page, ..)| *page != Page::Settings)
     }
 }
 
@@ -301,16 +293,6 @@ struct Launcher {
     menu_closed_at: Option<Point<Pixels>>,
     /// Settings > Account's skin panel for an offline name (`skin_page.rs`).
     skin: Option<skin_page::SkinPanel>,
-    /// The Wardrobe page's account and outfit (`wardrobe_page.rs`).
-    wardrobe: Option<wardrobe_page::Wardrobe>,
-    /// Ask the service again on the next draw of the Wardrobe (set by each visit).
-    wardrobe_reload: bool,
-    /// The cosmetics service's last word on the founder set's window (`GET /v1/shop`): whether
-    /// the top bar has the Wardrobe page with cosmetics off (`wardrobe_shown`).
-    shop_status: Option<horizon_launcher::wardrobe::Claim>,
-    /// The selected account's own answer on it from its last Wardrobe visit, kept on disk (a
-    /// preview the service grants it, its claim).
-    shop_kept: Option<horizon_launcher::wardrobe::Claim>,
     /// Work the look out again on the next frame (a launcher theme put on or taken off).
     restyle: bool,
     /// Why the last picture for Home's background was refused.
@@ -613,10 +595,6 @@ impl Launcher {
             look: horizon_theme::glass::Glass::default_look(),
             menu_closed_at: None,
             skin: None,
-            wardrobe: None,
-            wardrobe_reload: false,
-            shop_status: None,
-            shop_kept: None,
             // The first draw takes the launcher theme from Settings.
             restyle: true,
             background_error: None,
@@ -752,7 +730,6 @@ impl Launcher {
         this.load_auth_statuses(true);
         this.fetch_startup_releases();
         this.fetch_links();
-        this.watch_shop(cx);
         if home::getting_ready_preview() {
             this.preparing = true;
             this.play_when_prepared = this.selected().cloned();
@@ -771,11 +748,6 @@ impl Launcher {
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
-        }
-        if cfg!(debug_assertions)
-            && std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("wardrobe")
-        {
-            this.wardrobe_preview();
         }
         this
     }
@@ -842,7 +814,6 @@ impl Launcher {
             self.load_auth_statuses(false);
         }
         self.load_profile_heads();
-        self.wardrobe_reload |= page == Page::Wardrobe;
         if page != self.page {
             self.page = page;
             self.switches += 1;
@@ -899,7 +870,10 @@ impl Launcher {
     /// When another launcher already put it there, this one only restarts.
     fn apply_launcher_update(&mut self, cx: &mut App) {
         match horizon_launcher::update_handoff::start_now() {
-            Ok(true) => shut_down(cx),
+            Ok(true) => {
+                servers_page::keep_running_through_update();
+                shut_down(cx)
+            }
             Ok(false) => self.self_update = SelfUpdate::Failed(backend::restart()),
             Err(e) => self.self_update = SelfUpdate::Failed(e),
         }
@@ -1016,9 +990,7 @@ impl Launcher {
         self.perf.tick();
         match self.bench.as_mut().map(|b| b.tick(&self.perf)) {
             Some(perf::Step::Go(page)) => {
-                let pages: Vec<Page> = (Page::ALL.iter().map(|p| p.0))
-                    .filter(|p| *p != Page::Wardrobe || self.wardrobe_shown())
-                    .collect();
+                let pages: Vec<Page> = (Page::ALL.iter().map(|p| p.0)).collect();
                 self.go(pages[page % pages.len()]);
                 changed = true;
             }
@@ -1114,8 +1086,10 @@ impl Launcher {
                             if e == account::NoOwner.to_string() {
                                 self.owner = Some(false);
                                 self.owner_screen_open = true;
+                                self.client_error = Some(account::NoOwner::in_window());
+                            } else {
+                                self.client_error = Some(e);
                             }
-                            self.client_error = Some(e);
                         }
                     }
                 }
@@ -1128,7 +1102,7 @@ impl Launcher {
                             Err(account::NoOwner) => {
                                 self.owner = Some(false);
                                 self.owner_screen_open = true;
-                                self.client_error = Some(format!("{}.", tr(account::NEEDS_OWNER)));
+                                self.client_error = Some(account::NoOwner::in_window());
                                 self.starting_pack = None;
                                 self.joining = None;
                                 self.quick_play = None;
@@ -2664,7 +2638,7 @@ impl Launcher {
             .flex_wrap()
             .items_center()
             .gap(px(4.));
-        for (page, label, _) in Page::in_top_bar(self.wardrobe_shown()) {
+        for (page, label, _) in Page::in_top_bar() {
             nav = nav.child(
                 shell::tab(format!("nav-{label}"), tr(label), self.page == page, &t).on_click(
                     cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -3881,7 +3855,8 @@ impl Launcher {
                     .child(group("Network", "globe"))
                     .child(self.proxy_row(n + 4, cx))
                     .child(group("Game", "gamepad"))
-                    .child(self.game_args_row(n + 5, cx))
+                    .child(self.game_architecture_row(n + 5, cx))
+                    .child(self.game_args_row(n + 6, cx))
                     .child(group("AI", "terminal"))
                     .child(self.no_ai_row(n + 6, cx))
                     .child(group("About", "info-box"))
@@ -3985,6 +3960,53 @@ impl Launcher {
 
     /// Settings' Game arguments row: the extra arguments the game starts with, kept in
     /// `settings.json` and appended to the launcher's own (quotes group a word with spaces).
+    fn game_architecture_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
+        if !backend::can_choose_game_architecture() {
+            return div();
+        }
+        let t = self.theme;
+        let picker = segments(
+            "game-architecture",
+            &[
+                (backend::GameArchitecture::Auto, "Automatic"),
+                (backend::GameArchitecture::X64, "x64"),
+                (backend::GameArchitecture::Arm64, "ARM64"),
+            ],
+            self.settings.game_architecture,
+            &t,
+            {
+                let this = cx.entity().downgrade();
+                move |choice, _, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.settings.game_architecture == choice {
+                            return;
+                        }
+                        this.settings.game_architecture = choice;
+                        this.save_settings();
+                        // The release and update lists contain the selected game's assets.
+                        this.releases = Load::Loading;
+                        this.updates = backend::Updates::default();
+                        this.fetch_startup_releases();
+                        cx.notify();
+                    });
+                }
+            },
+        );
+        index_row(
+            n,
+            tr("Game architecture"),
+            Some(
+                div()
+                    .child(tr(
+                        "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+                    ))
+                    .into_any_element(),
+            ),
+            Some(picker.into_any_element()),
+            &t,
+        )
+    }
+
     fn game_args_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let focused = self.args_focused;
@@ -4756,6 +4778,22 @@ impl Launcher {
                         .child(progress_bar(None, &t))
                         .child(text(theme::MICRO).text_color(t.muted).child("Removing…"))
                         .into_any_element()
+                } else if installed && backend::needs_game_architecture_install(&tag, &release) {
+                    let mut b = button(
+                        format!("install-selected-architecture-{tag}"),
+                        tr("Install selected build"),
+                        Kind::Secondary,
+                        &t,
+                    );
+                    if self.installing.is_some() {
+                        b = disabled(b);
+                    } else {
+                        b = b.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.install(&release);
+                            cx.notify();
+                        }));
+                    }
+                    b.into_any_element()
                 } else if installed {
                     self.version_actions(&tag, selected, cx).into_any_element()
                 } else if release.asset.is_none() {
@@ -5070,7 +5108,6 @@ impl Render for Launcher {
             Page::Versions => self.versions_page(cx),
             Page::Mods => self.mods_page(cx),
             Page::Servers => self.servers_page(cx),
-            Page::Wardrobe => self.wardrobe_page(cx),
             Page::Notes => self.notes_page(cx),
             Page::Settings => self.settings_page(cx),
         };
