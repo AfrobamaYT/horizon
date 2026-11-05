@@ -26,3 +26,17 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
 - `src/llms.txt` is the index for agents; keep it in step with `SUMMARY.md`.
 
 Build the book with `mdbook build docs/modding` and the reference with `cargo doc -p horizon-mod-api --no-deps`.
+
+# What a PR needs to show
+
+Prove only what your change can break.
+
+| Change | Proof |
+|---|---|
+| Docs, tests, CI, a refactor with no behaviour change, a new read-only method | A focused test, or nothing for docs |
+| A new hook, a world or game-state write, a timing or ordering change, a gameplay change | One in-game run on the side it affects, said in the PR body; a dedicated server only when the code path differs there |
+| Rendering or UI | The in-game run plus one screenshot |
+| Changes or removes something mods already use | Also run [horizon-machine-sample](https://github.com/arismoko/horizon-machine-sample) at your head (`tools/test_stage.py` and `horizon.py check`) |
+
+A new item's `///` doc is its reference. If you can't run the game, say so: a reviewer runs the check at your head, and
+the PR is judged on its code.
