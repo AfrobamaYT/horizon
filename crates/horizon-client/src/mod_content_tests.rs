@@ -3468,6 +3468,105 @@ fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
+/// Load the actual generated tables as the renderer and world generator do.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn declared_shapes_reach_render_and_worldgen_occlusion() {
+    use horizon_core::geometry::Direction;
+    use horizon_world::{
+        block_properties::{BlockPropertiesRegistry, BlockProperty},
+        collision::CachedCollisionRegistry,
+        registry::BlockTableFile,
+    };
+    let Some(base) = prepared() else { return };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-shape-occlusion-{}", std::process::id()));
+    let manifest = manifest("testmod", "");
+    let m = folder_mod(
+        &scratch.join("mod"),
+        &[
+            ("horizon-mod.toml", &manifest),
+            (
+                "data/testmod/horizon/block/full.json",
+                r#"{"template":"minecraft:stone","item":false,"shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/partial.json",
+                r#"{"template":"minecraft:stone","item":false,"shapes":{"default":[[0,0,0,1,0.5,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/open.json",
+                r#"{"template":"minecraft:stone","item":false,"properties":{"occludes":false},"shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+        ],
+    );
+    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let stone = registry.default_state("minecraft:stone").unwrap();
+    let full = registry.default_state("testmod:full").unwrap();
+    let partial = registry.default_state("testmod:partial").unwrap();
+    let open = registry.default_state("testmod:open").unwrap();
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    assert_eq!(
+        (facts.get(full).solid_render, facts.get(full).dampening),
+        (true, 15)
+    );
+    assert_eq!(
+        (
+            facts.get(partial).solid_render,
+            facts.get(partial).dampening
+        ),
+        (false, 0)
+    );
+    assert_eq!(
+        (facts.get(open).solid_render, facts.get(open).dampening),
+        (false, 1)
+    );
+    let mut visibility = crate::models::load_visibility(&root, registry).unwrap();
+    assert!(
+        !visibility
+            .should_render_face(stone, full, Direction::East, false)
+            .unwrap()
+    );
+    assert!(
+        visibility
+            .should_render_face(stone, partial, Direction::East, false)
+            .unwrap()
+    );
+    assert!(
+        visibility
+            .should_render_face(stone, open, Direction::East, false)
+            .unwrap()
+    );
+    let collisions =
+        BlockTableFile::open(&root.join("worldgen/blocks/cached-collision.nbt"), registry).unwrap();
+    let collisions =
+        CachedCollisionRegistry::from_table(collisions.table("collision").unwrap()).unwrap();
+    let properties =
+        BlockTableFile::open(&root.join("worldgen/blocks/block-properties.nbt"), registry).unwrap();
+    let properties =
+        BlockPropertiesRegistry::from_table(properties.table("properties").unwrap(), &collisions)
+            .unwrap();
+    assert!(
+        properties
+            .property(full, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(
+        !properties
+            .property(partial, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(
+        !properties
+            .property(open, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(!properties.bind_can_occlude().contains(open));
+    fs::remove_dir_all(scratch).unwrap();
+}
+
 #[test]
 fn collision_only_preserves_outline_and_shape_typos_are_errors() {
     let declaration = r#"{"template":"minecraft:test","collision_shapes":{"default":[]}}"#;
