@@ -13520,7 +13520,10 @@ mod player_tick_tests {
         fn record(&self, side: HostSide<'_>, player: PlayerRef, phase: &'static str) {
             let (host, side, cooldown): (&dyn Host, _, _) = match side {
                 HostSide::Server(host) => {
-                    assert_eq!(host.acting_player().unwrap().uuid, player.uuid());
+                    assert_eq!(
+                        host.players().acting_player().unwrap().uuid(),
+                        player.uuid()
+                    );
                     let cooldown = player
                         .item_cooldowns(host)
                         .unwrap()
