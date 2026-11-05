@@ -25,16 +25,11 @@ const MAX_TARGET_PARAMETERS: usize = 7;
 /// adds a hook never edits it, so no two PRs collide on it.
 const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
     "use_on",
-    "piston_pre",
     "projectile_impact",
     "entity_mount",
     "sign_changed",
-    "cauldron_level_changed",
     "ender_pearl_teleport",
-    "block_drops",
-    "bonemeal",
     "item_tooltip",
-    "note_block_play",
     "player_set_spawn",
 ];
 

@@ -489,7 +489,15 @@ pub trait Hooks {
         neoforge = "PistonEvent.Pre",
         target = "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_pre"
     )]
-    fn piston_pre();
+    fn piston_pre(
+        dimension: LevelDimension,
+        piston: BlockPos,
+        direction: [i32; 3],
+        extending: bool,
+        push: &[BlockPos],
+        destroy: &[BlockPos],
+        canceled: &mut bool,
+    );
     /// On an authoritative server, the piston at `piston` pushed the blocks at
     /// `push` one step `direction` (`[0, 1, 0]` is up; pulling when it
     /// retracts, `extending` false) and destroyed those at `destroy`
@@ -2585,7 +2593,15 @@ pub trait Hooks {
         cancellable = true,
         target = "horizon_client::game::native_hooks::GameLevel<'_>::native_cauldron_level_changed"
     )]
-    fn cauldron_level_changed();
+    fn cauldron_level_changed(
+        dimension: LevelDimension,
+        player: Option<u128>,
+        pos: BlockPos,
+        from_level: i32,
+        to_level: i32,
+        reason: &str,
+        cancel: &mut bool,
+    );
     /// A server player who ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
     /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's

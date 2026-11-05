@@ -1020,10 +1020,10 @@ pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProbl
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
     GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeItemDrop, NativeKeyMapping, NativeLifecycleContext,
-    NativeNoteBlockChange, NativeProgressType, NativeServerPlayer, PathComputationType, Placement,
-    PlayerRef, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
-    TicketController, ToolUse, WorldPhase,
+    NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
+    NativeProgressType, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BlockHit, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
@@ -1033,8 +1033,8 @@ use mod_api::{
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
-    NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativeNoteInstrument,
-    NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
+    NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use mod_api::{
     MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe,
@@ -1532,20 +1532,8 @@ impl GameLevel<'_> {
     /// amount, or set `cancel` for no drops, no experience and no
     /// `spawnAfterBreak` effects. Server-side, authoritative levels only.
     #[inline(always)]
-    pub(super) fn native_block_drops(
-        &self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        breaker: Option<u128>,
-        tool: Option<&ItemStack>,
-        drops: &mut Vec<NativeItemDrop>,
-        experience: &mut u32,
-        cancel: &mut bool,
-    ) {
-        self.fire_block_drops(
-            dimension, pos, state, breaker, tool, drops, experience, cancel,
-        );
+    pub(super) fn native_block_drops(&self, call: mod_api::__private::BlockDropsCall<'_>) {
+        self.fire_block_drops(call);
     }
 
     /// An authoritative server committed a changed state through `Level.setBlock`.
@@ -1869,25 +1857,8 @@ impl GameLevel<'_> {
     /// Set `cancel` and it doesn't play: no sound, no particle, no
     /// `note_block_play` game event. Server-side.
     #[inline(always)]
-    pub(super) fn native_note_block_play(
-        &self,
-        dimension: LevelDimension,
-        player: Option<u128>,
-        player_entity_id: Option<i32>,
-        pos: BlockPos,
-        instrument: &mut NativeNoteInstrument,
-        note: &mut i32,
-        cancel: &mut bool,
-    ) {
-        self.fire_note_block_play(
-            dimension,
-            player,
-            player_entity_id,
-            pos,
-            instrument,
-            note,
-            cancel,
-        );
+    pub(super) fn native_note_block_play(&self, call: mod_api::__private::NoteBlockPlayCall<'_>) {
+        self.fire_note_block_play(call);
     }
 
     /// A player is tuning a note block on the authoritative server, not in
@@ -1924,17 +1895,9 @@ impl GameLevel<'_> {
     #[inline(always)]
     pub(super) fn native_cauldron_level_changed(
         &self,
-        dimension: LevelDimension,
-        player: Option<u128>,
-        pos: BlockPos,
-        from_level: i32,
-        to_level: i32,
-        reason: &str,
-        cancel: &mut bool,
+        call: mod_api::__private::CauldronLevelChangedCall<'_>,
     ) {
-        self.fire_cauldron_level_changed(
-            dimension, player, pos, from_level, to_level, reason, cancel,
-        );
+        self.fire_cauldron_level_changed(call);
     }
 
     /// On an authoritative server, the piston at `piston` is about to push
@@ -1945,19 +1908,8 @@ impl GameLevel<'_> {
     /// structure can't; a sticky piston then retracts without its block, and
     /// clients are sent the blocks rather than the retraction to replay.
     #[inline(always)]
-    pub(super) fn native_piston_pre(
-        &self,
-        dimension: LevelDimension,
-        piston: BlockPos,
-        direction: [i32; 3],
-        extending: bool,
-        push: &[BlockPos],
-        destroy: &[BlockPos],
-        canceled: &mut bool,
-    ) {
-        self.fire_piston_pre(
-            dimension, piston, direction, extending, push, destroy, canceled,
-        );
+    pub(super) fn native_piston_pre(&self, call: mod_api::__private::PistonPreCall<'_>) {
+        self.fire_piston_pre(call);
     }
     /// On an authoritative server, the piston at `piston` pushed the blocks
     /// at `push` one step `direction` and destroyed those at `destroy`:
@@ -7748,31 +7700,8 @@ impl Game<'_> {
     /// own bone meal Parts and the meal's use: `growCrop` then answers
     /// `successful` (`setSuccessful`), which is `false` unless a mod sets it.
     /// Fired on both sides; changes to `stack` stay.
-    pub(super) fn native_bonemeal(
-        &mut self,
-        dimension: LevelDimension,
-        player: Option<u128>,
-        player_entity_id: Option<i32>,
-        pos: BlockPos,
-        state: BlockStateId,
-        source: BonemealSource,
-        stack: &mut ItemStack,
-        valid_bonemeal_target: bool,
-        successful: &mut bool,
-        canceled: &mut bool,
-    ) {
-        self.fire_bonemeal(
-            dimension,
-            player,
-            player_entity_id,
-            pos,
-            state,
-            source,
-            stack,
-            valid_bonemeal_target,
-            successful,
-            canceled,
-        );
+    pub(super) fn native_bonemeal(&mut self, call: mod_api::__private::BonemealCall<'_>) {
+        self.fire_bonemeal(call);
     }
     /// An explosion at `center` in `dimension` (`minecraft:overworld`) is
     /// about to break `blocks`: `ServerExplosion.explode` with its `toBlow`,
@@ -10939,18 +10868,18 @@ impl Game<'_> {
             (None, None)
         };
         let (mut successful, mut canceled) = (false, false);
-        self.native_bonemeal(
-            self.dim.level(),
+        self.native_bonemeal(mod_api::__private::BonemealCall {
+            dimension: self.dim.level(),
             player,
             player_entity_id,
             pos,
             state,
-            BonemealSource::Interaction,
+            source: BonemealSource::Interaction,
             stack,
-            valid,
-            &mut successful,
-            &mut canceled,
-        );
+            valid_bonemeal_target: valid,
+            successful: &mut successful,
+            canceled: &mut canceled,
+        });
         BonemealAsk {
             crop: canceled.then_some(successful),
             check: Some(check),
