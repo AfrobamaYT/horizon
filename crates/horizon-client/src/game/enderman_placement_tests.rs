@@ -7,6 +7,37 @@ use horizon_client::{
 use horizon_core::{geometry::Vec3, position::ChunkPos, random::LegacyRandom};
 use std::sync::Arc;
 
+/// The production tick lends the level's RNG and attachments to goals while
+/// they read its blocks. Keep that ownership boundary in the registered-goal test.
+fn tick_registered_goals(game: &mut Game<'_>, mob: &mut Mob) -> Vec<MobEvent> {
+    let mut goals = std::mem::take(&mut mob.ai.goals);
+    let snapshot = [super::creatures::seen(mob, None)];
+    let mut events = Vec::new();
+    let mut lent = horizon_client::health::LentLevel::take(&mut game.world);
+    {
+        let world = game.mob_world_base(&snapshot);
+        let mut level = horizon_client::health::DamageLevel::lent(
+            &game.world,
+            game.pack.assets.registry,
+            &mut lent,
+            Some(game.items()),
+            Some(&game.pack.block_registries),
+            &game.damage_hooks,
+        );
+        goals.tick(
+            mob,
+            &mut Cx {
+                w: &world,
+                level: &mut level,
+                events: &mut events,
+            },
+        );
+    }
+    lent.give_back(&mut game.world);
+    mob.ai.goals = goals;
+    events
+}
+
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn leave_block_goal_uses_real_neighbor_shapes_and_keeps_air_placement() {
@@ -19,7 +50,7 @@ fn leave_block_goal_uses_real_neighbor_shapes_and_keeps_air_placement() {
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        super::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -72,23 +103,7 @@ fn leave_block_goal_uses_real_neighbor_shapes_and_keeps_air_placement() {
         game.mobs.push(mob);
         for _ in 0..48_000 {
             let mut mob = game.mobs.pop().unwrap();
-            let mut goals = std::mem::take(&mut mob.ai.goals);
-            let snapshot = [super::creatures::seen(&mob, None)];
-            let mut events = Vec::<MobEvent>::new();
-            let mut lr = game.world.random.clone();
-            {
-                let world = game.mob_world_base(&snapshot);
-                goals.tick(
-                    &mut mob,
-                    &mut Cx {
-                        w: &world,
-                        lr: &mut lr,
-                        events: &mut events,
-                    },
-                );
-            }
-            game.world.random = lr;
-            mob.ai.goals = goals;
+            let events = tick_registered_goals(&mut game, &mut mob);
             game.mobs.push(mob);
             game.handle_mob_events(events).unwrap();
             if game.mobs[0].extra.carried.is_none() {
@@ -140,20 +155,7 @@ fn leave_block_goal_uses_real_neighbor_shapes_and_keeps_air_placement() {
     let mut attempt = None;
     for _ in 0..48_000 {
         let mut mob = game.mobs.pop().unwrap();
-        let mut goals = std::mem::take(&mut mob.ai.goals);
-        let snapshot = [super::creatures::seen(&mob, None)];
-        let mut events = Vec::new();
-        let mut lr = game.world.random.clone();
-        goals.tick(
-            &mut mob,
-            &mut Cx {
-                w: &game.mob_world_base(&snapshot),
-                lr: &mut lr,
-                events: &mut events,
-            },
-        );
-        game.world.random = lr;
-        mob.ai.goals = goals;
+        let events = tick_registered_goals(&mut game, &mut mob);
         game.mobs.push(mob);
         if let Some(event) = events
             .into_iter()
@@ -180,4 +182,70 @@ fn leave_block_goal_uses_real_neighbor_shapes_and_keeps_air_placement() {
     assert!(game.block_ticks.fluids.count() > before);
     assert_eq!(game.world.block(pos[0], pos[1], pos[2]), stone);
     assert_eq!(game.mobs[0].extra.carried, Some(fence));
+}
+
+/// Normalization must not bypass the existing entity_place cancel contract:
+/// even a carried flower that becomes AIR stays in the enderman's hand.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn canceled_normalized_placements_keep_the_original_carried_block() {
+    use horizon_core::position::BlockPos;
+    use mod_api::{EntityPlaceEvent, Flow, Hooks, ModEntry, ServerHost, testing::with_mods};
+    use std::sync::Mutex;
+
+    struct Cancel(Arc<Mutex<Vec<BlockPos>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Cancel {
+        fn entity_place(&self, _: &mut dyn ServerHost, event: &mut EntityPlaceEvent) -> Flow {
+            self.0.lock().unwrap().push(event.pos);
+            Flow::Cancel
+        }
+    }
+
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "enderman_place_probe",
+        Box::new(Cancel(heard.clone())),
+    )];
+    with_mods(mods.into(), || {
+        super::native_entity_refs::tests::with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            let registry = game.pack.assets.registry;
+            let air = registry.default_state("minecraft:air").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            game.world.set(3, 3, 3, stone).unwrap();
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:enderman")
+                .unwrap()
+                .clone();
+            for (i, name) in ["minecraft:poppy", "minecraft:note_block"]
+                .into_iter()
+                .enumerate()
+            {
+                let carried = registry.default_state(name).unwrap();
+                let mut mob = Mob::new(325, kind.clone(), Vec3::new(3.5, 4.0, 3.5), 0.0);
+                mob.extra.carried = Some(carried);
+                game.mobs.clear();
+                game.mobs.push(mob);
+                game.handle_mob_events(vec![MobEvent::EndermanPlaceBlock {
+                    mob: 325,
+                    pos: [3, 4, 3],
+                    carried,
+                    occupants: Vec::new(),
+                }])
+                .unwrap();
+                assert_eq!(game.world.block(3, 4, 3), air);
+                assert_eq!(game.mobs[0].extra.carried, Some(carried));
+                assert_eq!(heard.lock().unwrap().len(), i + 1, "one veto per attempt");
+            }
+        });
+    });
+    assert_eq!(*heard.lock().unwrap(), [BlockPos::new(3, 4, 3); 2]);
 }

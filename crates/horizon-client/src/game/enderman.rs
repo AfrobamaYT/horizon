@@ -38,7 +38,12 @@ impl Game<'_> {
                 f64::from(pos[2] + 1),
             ),
         );
-        let placed = self.with_level(|b, level, ticks| {
+        struct Candidate {
+            state: BlockStateId,
+            target: BlockStateId,
+            below: BlockStateId,
+        }
+        let candidate = self.with_level(|b, level, ticks| {
             let target = level.block_state(at);
             let below = level.block_state(at.offset(0, -1, 0));
             // Must run even when eligibility fails: updateShape can schedule
@@ -51,20 +56,57 @@ impl Game<'_> {
                 || !support.full_collision
                 || occupants.iter().any(|bounds| bounds.intersects(area))
             {
-                return false;
+                return None;
             }
-            // AIR is a legitimate normalized state. setBlock may report no
-            // change for it; the eligible operation still empties the hand.
-            b.set_block(level, ticks, at, state, flags::UPDATE_ALL);
-            true
-        });
-        if placed
-            && let Some(m) = self.mobs.iter_mut().find(|m| {
-                m.id == mob && m.species() == Species::Enderman && m.extra.carried == Some(carried)
+            Some(Candidate {
+                state,
+                target,
+                below,
             })
+        });
+        let Some(candidate) = candidate else {
+            return self.process_level_events();
+        };
+        // Keep the fork's entity_place veto, with the normalized state. A cancel
+        // leaves the original carried block intact, even when it normalized to AIR.
+        if self.place_canceled(mob, at, candidate.state, candidate.below, None) {
+            return self.process_level_events();
+        }
+        // A listener can change the candidate's blocks or the mob. Refuse that
+        // stale attempt instead of overwriting its writes or normalizing twice.
+        let kind = self
+            .mobs
+            .iter()
+            .find(|m| {
+                m.id == mob
+                    && m.alive()
+                    && m.species() == Species::Enderman
+                    && m.extra.carried == Some(carried)
+            })
+            .map(|m| m.kind.id.clone());
+        let Some(kind) = kind else {
+            return self.process_level_events();
+        };
+        if self.world.block(pos[0], pos[1], pos[2]) != candidate.target
+            || self.world.block(pos[0], pos[1] - 1, pos[2]) != candidate.below
         {
+            return self.process_level_events();
+        }
+        let facts = self.res.facts();
+        let from = facts.get(candidate.target).name.clone();
+        let to = facts.get(candidate.state).name.clone();
+        // AIR is a legitimate normalized state. setBlock may report no
+        // change for it; the eligible operation still empties the hand.
+        self.with_level(|b, level, ticks| {
+            b.set_block(level, ticks, at, candidate.state, flags::UPDATE_ALL);
+        });
+        if let Some(m) = self.mobs.iter_mut().find(|m| {
+            m.id == mob && m.species() == Species::Enderman && m.extra.carried == Some(carried)
+        }) {
             m.extra.carried = None;
         }
-        self.process_level_events()
+        self.process_level_events()?;
+        self.native_entity_change_block(mob, &kind, pos, &from, &to);
+        Ok(())
     }
 }
