@@ -1,1 +1,0 @@
-{"status":"pr_opened","pr":1060,"branch":"bulk-batch2-2j42fp-481adca9c964","head":"f39c8ed95cd3cd8e588cadb9c92a9e2325a60b43","notes":"Focused placement test passed; all-target check fails on existing client test errors; wasm target unavailable; no in-game proof."}
