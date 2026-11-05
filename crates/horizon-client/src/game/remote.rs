@@ -704,12 +704,10 @@ pub(super) struct Remote {
     /// slot updates (`creative_sync_stacks`).
     synced: Vec<Option<ItemStack>>,
     decode_errors: u32,
-    clock: Option<i32>,
-    /// `ClientClockManager.ClientClockInstance`'s rate and partial tick for
-    /// the level's clock (its total is `world.day_time`), and
-    /// `lastTickGameTime`.
-    clock_rate: f32,
-    clock_partial: f32,
+    /// Connection-owned `ClientClockManager` state, retained across dimensions.
+    clocks: HashMap<i32, play::ClockState>,
+    default_clock: Option<i32>,
+    overworld_clock: Option<i32>,
     clock_game_time: i64,
     /// `ClientChunkCache.Storage`'s view centre (ClientboundSetChunkCacheCenterPacket).
     chunk_center: (i32, i32),
@@ -1173,9 +1171,9 @@ impl Game<'_> {
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
             decode_errors: 0,
-            clock: None,
-            clock_rate: 1.0,
-            clock_partial: 0.0,
+            clocks: HashMap::new(),
+            default_clock: None,
+            overworld_clock: None,
             clock_game_time: 0,
             chunk_center: (0, 0),
             backlog: VecDeque::new(),
@@ -2232,6 +2230,7 @@ impl Game<'_> {
             r.chunk_format =
                 Arc::new(ChunkFormat::new(&r.dimension, biomes, bits).in_column(column));
             r.registries = registries;
+            r.resolve_clocks();
         }
     }
     /// Switch to a (possibly new) dimension: a fresh client level.
@@ -2272,6 +2271,8 @@ impl Game<'_> {
                 .in_column(shape.column()),
         );
         r.dimension = dimension;
+        r.resolve_clocks();
+        self.world.day_time = r.clock_time(r.default_clock);
         r.level = spawn.dimension.clone();
         r.hashed_seed = spawn.seed;
         r.game_mode = spawn.game_type;
@@ -3294,6 +3295,10 @@ impl Game<'_> {
                 if let Some(r) = self.remote.as_mut() {
                     r.reconfiguring = None;
                     r.attachments.clear();
+                    // A new ClientPacketListener owns a fresh clock manager.
+                    r.clocks.clear();
+                    r.clock_game_time = 0;
+                    self.world.game_time = 0;
                 }
                 // handleLogin makes a new MultiPlayerGameMode (carried index 0) and a
                 // new LocalPlayer (slot 0, no effects, riding nothing: the server
@@ -4498,42 +4503,22 @@ impl Game<'_> {
                     total: p.total,
                 }
             }
-            // ClientPacketListener.handleSetTime: the game time, then
-            // ClientClockManager.handleUpdates: the clock catches up with the
-            // game time and takes the server's state. Only this level's
-            // default world clock is applied — a packet that only updates
-            // another clock (the End's) must not overwrite day_time, or the
-            // sky follows game_time and looks inverted vs the server's day.
+            // ClientPacketListener.handleSetTime / ClientClockManager.handleUpdates:
+            // advance all clocks to the packet's game time before applying its
+            // (possibly partial) updates. The sky still uses only the default clock.
             C::SetTime(p) => {
                 self.world.game_time = p.game_time;
                 self.remote_clock_tick();
-                let clock = {
-                    let r = self.remote.as_ref();
-                    let names =
-                        r.and_then(|r| r.registries.registries.get("minecraft:world_clock"));
-                    let tracked = r.and_then(|r| r.clock);
-                    let wanted = r
-                        .and_then(|r| r.dimension.default_clock.clone())
-                        .or_else(|| r.map(|r| r.dimension.name.clone()))
-                        .unwrap_or_else(|| "minecraft:overworld".into());
-                    let name = |id: i32| {
-                        names
-                            .and_then(|n| n.get(id as usize))
-                            .map(|(n, _)| n.as_str())
-                    };
-                    p.clocks
-                        .iter()
-                        .find(|c| name(c.clock) == Some(wanted.as_str()))
-                        .or_else(|| tracked.and_then(|id| p.clocks.iter().find(|c| c.clock == id)))
-                        .cloned()
-                };
-                if let Some(c) = clock {
-                    self.world.day_time = c.total_ticks;
-                    if let Some(r) = self.remote.as_mut() {
-                        r.clock = Some(c.clock);
-                        r.clock_rate = c.rate;
-                        r.clock_partial = c.partial_tick;
+                if let Some(r) = self.remote.as_mut() {
+                    for clock in p.clocks {
+                        if r.registries
+                            .name("minecraft:world_clock", clock.clock)
+                            .is_some()
+                        {
+                            r.clocks.insert(clock.clock, clock);
+                        }
                     }
+                    self.world.day_time = r.clock_time(r.default_clock);
                 }
             }
             C::GameEvent(p) => match p.event {
@@ -10507,10 +10492,13 @@ impl Game<'_> {
         };
         let delta = self.world.game_time - r.clock_game_time;
         r.clock_game_time = self.world.game_time;
-        let partial = f64::from(r.clock_partial) + delta as f64 * f64::from(r.clock_rate);
-        let full = partial.floor();
-        r.clock_partial = (partial - full) as f32;
-        self.world.day_time += full as i64;
+        for clock in r.clocks.values_mut() {
+            let partial = f64::from(clock.partial_tick) + delta as f64 * f64::from(clock.rate);
+            let full = partial.floor();
+            clock.partial_tick = (partial - full) as f32;
+            clock.total_ticks += full as i64;
+        }
+        self.world.day_time = r.clock_time(r.default_clock);
     }
     pub(super) fn remote_status(&self) -> Option<serde_json::Value> {
         let r = self.remote.as_ref()?;
@@ -11135,6 +11123,38 @@ impl ClientMenu {
 }
 
 impl Remote {
+    /// Resolve registry keys only when registries or the dimension change.
+    fn resolve_clocks(&mut self) {
+        self.overworld_clock = self
+            .registries
+            .id("minecraft:world_clock", "minecraft:overworld");
+        self.default_clock = self
+            .dimension
+            .default_clock
+            .as_deref()
+            .and_then(|name| self.registries.id("minecraft:world_clock", name));
+        for id in [self.overworld_clock, self.default_clock]
+            .into_iter()
+            .flatten()
+        {
+            self.clocks.entry(id).or_insert(play::ClockState {
+                clock: id,
+                total_ticks: 0,
+                partial_tick: 0.0,
+                rate: 1.0,
+            });
+        }
+    }
+
+    fn clock_time(&self, id: Option<i32>) -> i64 {
+        id.and_then(|id| self.clocks.get(&id))
+            .map_or(0, |c| c.total_ticks)
+    }
+
+    pub(super) fn overworld_clock_time(&self) -> i64 {
+        self.clock_time(self.overworld_clock)
+    }
+
     /// `Minecraft.level != null`: from `handleLogin` until the next
     /// `handleConfigurationStart` (`clearClientLevel`). Minecraft.tick sends
     /// CLIENT_TICK_END only then, so a client waiting for the server's Login
@@ -12082,7 +12102,14 @@ mod tests {
             assert_eq!(game.world.chunks.len(), chunks);
 
             // The time of day, as the server's clock last set it.
-            game.remote.as_mut().unwrap().clock = Some(0);
+            game.set_registries({
+                let mut registries = (*game.remote.as_ref().unwrap().registries).clone();
+                registries.registries.insert(
+                    "minecraft:world_clock".into(),
+                    vec![("minecraft:overworld".into(), None)],
+                );
+                Arc::new(registries)
+            });
             game.handle_packet(C::SetTime(play::SetTime {
                 game_time: 100,
                 clocks: vec![play::ClockState {
@@ -12141,6 +12168,209 @@ mod tests {
             // The server's role keeps its own reads: a client handle names nothing there.
             game.options.execution_role = ExecutionRole::IntegratedServer;
             assert_eq!(game.native_entity_target(untracked), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_day_time_reads_overworld_clock_across_packets_and_levels() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_protocol::connection::Pipe;
+        use mod_api::LevelRef;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "ClockReadTest").unwrap();
+            let mut registries = (*game.remote.as_ref().unwrap().registries).clone();
+            for registry in ["minecraft:world_clock", "minecraft:dimension_type"] {
+                registries.registries.insert(
+                    registry.into(),
+                    vec![
+                        ("minecraft:overworld".into(), None),
+                        ("minecraft:the_end".into(), None),
+                        ("minecraft:the_nether".into(), None),
+                    ],
+                );
+            }
+            game.set_registries(Arc::new(registries));
+            let mut spawn = play::SpawnInfo {
+                dimension_type: 1,
+                dimension: "minecraft:the_end".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            let login = |spawn| {
+                C::Login(play::Login {
+                    player_id: 7,
+                    hardcore: false,
+                    levels: vec!["minecraft:overworld".into(), "minecraft:the_end".into()],
+                    max_players: 1,
+                    chunk_radius: 2,
+                    simulation_distance: 2,
+                    reduced_debug_info: false,
+                    show_death_screen: true,
+                    limited_crafting: false,
+                    spawn,
+                    online_mode: false,
+                    enforces_secure_chat: false,
+                })
+            };
+            let state = |clock, total_ticks, partial_tick, rate| play::ClockState {
+                clock,
+                total_ticks,
+                partial_tick,
+                rate,
+            };
+            game.handle_packet(login(spawn.clone())).unwrap();
+            let end = game.native_level("minecraft:the_end").unwrap();
+            let wrong_level = LevelRef::new(end.epoch(), "minecraft:overworld");
+            assert_eq!(wrong_level.day_time(game), None);
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 100,
+                clocks: vec![state(0, 30_000, 0.0, 1.0), state(1, 100, 0.0, 1.0)],
+            }))
+            .unwrap();
+            assert_eq!(end.day_time(game), Some(30_000));
+            assert_eq!(
+                game.world.day_time, 100,
+                "the sky follows the End default clock"
+            );
+
+            // An Overworld-only update must not select it as the End sky clock.
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 104,
+                clocks: vec![state(0, 40_000, 0.75, 0.5)],
+            }))
+            .unwrap();
+            assert_eq!(end.day_time(game), Some(40_000));
+            assert_eq!(game.world.day_time, 104);
+            game.tick_remote_level().unwrap();
+            assert_eq!(end.day_time(game), Some(40_001));
+            assert_eq!(game.world.day_time, 105);
+            game.tick_remote_level().unwrap();
+            assert_eq!(end.day_time(game), Some(40_001));
+            assert_eq!(game.world.day_time, 106);
+
+            // Empty time syncs advance every retained clock by the game-time delta.
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 110,
+                clocks: vec![],
+            }))
+            .unwrap();
+            assert_eq!(end.day_time(game), Some(40_003));
+            assert_eq!(game.world.day_time, 110);
+            // A paused clock stays put even while the client's game time runs.
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 110,
+                clocks: vec![state(0, 50_000, 0.25, 0.0)],
+            }))
+            .unwrap();
+            game.tick_remote_level().unwrap();
+            assert_eq!(end.day_time(game), Some(50_000));
+            assert_eq!(game.world.day_time, 111);
+
+            // A frozen world ticks neither clock; packets still catch both up.
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 111,
+                clocks: vec![state(0, 60_000, 0.0, 2.0)],
+            }))
+            .unwrap();
+            game.handle_packet(C::TickingState(play::TickingState {
+                rate: 20.0,
+                frozen: true,
+            }))
+            .unwrap();
+            game.tick_remote_level().unwrap();
+            assert_eq!(game.world.game_time, 111);
+            assert_eq!(end.day_time(game), Some(60_000));
+            assert_eq!(game.world.day_time, 111);
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 114,
+                clocks: vec![],
+            }))
+            .unwrap();
+            assert_eq!(end.day_time(game), Some(60_006));
+            assert_eq!(game.world.day_time, 114);
+            // Backward corrections use the same signed delta and fractional state.
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 113,
+                clocks: vec![],
+            }))
+            .unwrap();
+            assert_eq!(end.day_time(game), Some(60_004));
+            assert_eq!(game.world.day_time, 113);
+            game.handle_packet(C::TickingState(play::TickingState {
+                rate: 20.0,
+                frozen: false,
+            }))
+            .unwrap();
+
+            // Same-level respawn keeps the epoch and the connection's clocks.
+            game.handle_packet(C::Respawn(play::Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            assert_eq!(end.day_time(game), Some(60_004));
+            spawn.dimension_type = 0;
+            spawn.dimension = "minecraft:overworld".into();
+            game.handle_packet(C::Respawn(play::Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            assert_eq!(end.day_time(game), None);
+            let overworld = game.native_level("minecraft:overworld").unwrap();
+            assert_eq!(overworld.day_time(game), Some(60_004));
+            assert_eq!(
+                game.world.day_time, 60_004,
+                "select the new default from retained clocks"
+            );
+            game.tick_remote_level().unwrap();
+            assert_eq!(overworld.day_time(game), Some(60_006));
+            assert_eq!(game.world.day_time, 60_006);
+
+            // A dimension without a default clock must not select the prior one.
+            spawn.dimension_type = 2;
+            spawn.dimension = "minecraft:the_nether".into();
+            game.handle_packet(C::Respawn(play::Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            let nether = game.native_level("minecraft:the_nether").unwrap();
+            assert_eq!(overworld.day_time(game), None);
+            assert_eq!(nether.day_time(game), Some(60_006));
+            assert_eq!(game.world.day_time, 0);
+
+            // Login starts a new listener epoch, even on the same connection.
+            game.handle_packet(login(spawn.clone())).unwrap();
+            assert_eq!(nether.day_time(game), None);
+            let fresh = game.native_level("minecraft:the_nether").unwrap();
+            assert_eq!(fresh.day_time(game), Some(0));
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 1,
+                clocks: vec![state(0, 7_000, 0.0, 1.0)],
+            }))
+            .unwrap();
+            assert_eq!(fresh.day_time(game), Some(7_000));
+            assert_eq!(game.world.day_time, 0);
+            game.client_logging_out();
+            assert_eq!(fresh.day_time(game), None);
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "ClockReadTest").unwrap();
+            assert_eq!(fresh.day_time(game), None);
+            game.handle_packet(login(spawn)).unwrap();
+            let reconnected = game.native_level("minecraft:the_nether").unwrap();
+            assert_eq!(fresh.day_time(game), None);
+            assert_eq!(reconnected.day_time(game), Some(0));
         });
     }
 
