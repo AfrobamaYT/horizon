@@ -1614,7 +1614,6 @@ impl Launcher {
         if can_build {
             right = right.child(button("native-build", "Build", Kind::Primary, &t).on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.native_update = None;
                     this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
                     cx.notify();
                 }),

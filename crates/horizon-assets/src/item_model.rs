@@ -540,6 +540,7 @@ impl ItemModelNode {
                 }
             }
             "minecraft:special" if SpecialModel::is_foreign(required(m, "model")?) => {
+                SpecialModel::warn_foreign_once(required(m, "model")?);
                 // The mod's own renderer is not run: the base model stands in.
                 Self::Model(ModelLeaf {
                     model: ident(required(m, "base")?)?,

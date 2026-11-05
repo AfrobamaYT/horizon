@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Viselnivaló a játékosodnak, amit mindenki lát, aki Horizonon játszik.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Az indító ezen buildje nem rendelkezik Microsoft-bejelentkezéssel (HORIZON_MSA_CLIENT_ID), így nem tudja elindítani a játékot.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "A játék ezen forráskódjában nincs sablon a natív leltárbejegyzéshez. Frissítsd a Horizont, és építsd újra a modokat ehhez a játékhoz.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Ez áthelyezi a példányt a Horizontba {version}. A játékot a semmiből állítja össze, így tovább tart, mint egy normál újraépítés: akár 30 percet is.",
   "This server's Horizon": "Ez a szerver a Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Ennek a szervernek a Horizontja túl régi ahhoz, hogy itt felsorolja a biztonsági másolatait: a biztonsági mentések mappájában vannak. Frissítse lent.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Ennek a szervernek a horizontja túl régi ahhoz, hogy itt megmutassa a beállításait. Frissítse a Biztonsági másolatok lapon, majd megjelennek.",

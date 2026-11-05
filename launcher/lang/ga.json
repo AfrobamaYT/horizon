@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Rudaí le caitheamh ar d’imreoir, le feiceáil ag gach duine a imríonn ar Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Níl aon logáil isteach ag Microsoft (HORIZON_MSA_CLIENT_ID) sa leagan seo den tosaitheoir, mar sin ní féidir leis an gcluiche a thosú.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Bogann sé seo an cás go Horizon {version}. Déanann sé an cluiche a thiomsú ón tús, mar sin tógann sé níos faide ná gnáth-atógáil: suas le 30 nóiméad.",
   "This server's Horizon": "Tá Horizon ag an bhfreastalaí seo",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Tá Horizon an fhreastalaí seo ró-shean chun a chúltacaí a liostú anseo: tá siad ina fhillteán cúltacaí. Déan é a nuashonrú thíos.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Tá Horizon an fhreastalaí seo ró-shean chun a shocruithe a thaispeáint anseo. Nuashonraigh é ar an táb Cúltaca, ansin tá siad le feiceáil.",

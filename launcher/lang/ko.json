@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "내 플레이어가 착용하는 아이템으로, Horizon에서 플레이하는 모두에게 보여요.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "이 런처 빌드에는 Microsoft 로그인 정보(HORIZON_MSA_CLIENT_ID)가 없어 게임을 시작할 수 없습니다.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "이 게임 소스에는 네이티브 인벤토리 진입 템플릿이 없습니다. Horizon을 업데이트하고 이 게임에 맞게 모드를 다시 빌드하세요.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "이 인스턴스를 Horizon {version}(으)로 이동합니다. 게임을 처음부터 다시 컴파일하므로 일반 재빌드보다 오래 걸립니다(최대 30분 소요).",
   "This server's Horizon": "이 서버의 Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "이 서버의 Horizon 버전에 너무 오래되어 백업 목록을 표시할 수 없습니다. 백업 폴더에서 확인할 수 있으며 아래에서 업데이트할 수 있습니다.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "이 서버의 Horizon 버전이 너무 오래되어 설정을 표시할 수 없습니다. 백업 탭에서 업데이트하면 설정이 표시됩니다.",

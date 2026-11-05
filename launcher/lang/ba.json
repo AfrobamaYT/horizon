@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Уйынсыңа кейем, Horizon-да уйнаусы һәр кемгә күренә.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Был ҡоролма стартер Microsoft логин юҡ (HORIZON_MSA_CLIENT_ID), шуға күрә ул уйынды башлай алмай.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Был инстанцияны Horizon {version} тиклем күсерә. Ул уйынды нулдән төҙөй, шуға күрә ғәҙәти тергеҙеүгә ҡарағанда оҙағыраҡ ваҡыт талап итә: 30 минутҡа тиклем.",
   "This server's Horizon": "Был серверҙың Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Был сервер Horizon бик иҫке, уның резерв копияларын бында исемлеккә индерергә: улар уның резерв копиялары папкаһында. Уны түбәндә яңыртығыҙ.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Был сервер Horizon бик иҫке, бында уның параметрҙарын күрһәтергә ярамай. Яңыртыу уны өлөшөндә Резерв копиялары, һуңынан улар күренә.",

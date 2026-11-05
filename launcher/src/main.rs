@@ -260,10 +260,6 @@ struct Launcher {
     native_confirm: Option<Result<Vec<native_mods::Bundle>, String>>,
     /// The instance (id) the build under way, or the last one's error, is for.
     native_for: Option<String>,
-    /// The newer Horizon the open warning's build moves to (Update), else None: a build stays
-    /// on the Horizon the instance plays.
-    native_update: Option<String>,
-    /// The build waiting for the trust warning builds every mod on its Horizon's own commit,
     /// What each installed native build was made from, by version. A build's version names its
     /// contents, so an entry never goes stale.
     native_builds:
@@ -594,7 +590,6 @@ impl Launcher {
             native_error: None,
             native_confirm: None,
             native_for: None,
-            native_update: None,
             native_builds: Default::default(),
             native_log: Default::default(),
             confirm_remove: None,
@@ -941,10 +936,7 @@ impl Launcher {
         let instance = instances::selected();
         self.native_for = Some(instance.id.clone());
         let plays = self.version_of(&instance).cloned();
-        let base = match self.native_update.take() {
-            Some(newer) => Some(newer),
-            None => native_mods::base_for(plays.as_deref(), &self.installed, false),
-        };
+        let base = native_mods::base_for(plays.as_deref(), &self.installed, false);
         let Some(base) = base else {
             let error = tr("Install Horizon first.").to_string();
             self.native_log_preflight(&error);
@@ -3887,13 +3879,7 @@ impl Launcher {
             .child(div().text_color(t.danger).child(tr("These mods will run with full access to your computer").to_string()))
             .child(tr("They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.").to_string())
             .child(trf("Mods: {mods}", &[("mods", &list)]))
-            .child(tr("The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.").to_string())
-            .children(self.native_update.as_ref().map(|newer| {
-                div().text_color(t.warn).child(trf(
-                    "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.",
-                    &[("version", &native_status::horizon_label(newer))],
-                ))
-            }));
+            .child(tr("The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.").to_string());
         let mut buttons = div().flex().gap(px(8.)).mt(px(4.));
         if mods.is_ok() {
             buttons = buttons.child(
@@ -3913,7 +3899,6 @@ impl Launcher {
             button("native-cancel", "Cancel", Kind::Secondary, &t).on_click(cx.listener(
                 |this, _: &ClickEvent, _, cx| {
                     this.native_confirm = None;
-                    this.native_update = None;
                     cx.notify();
                 },
             )),

@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Àwọn ohun láti wọ̀ fún oṣere rẹ, tí gbogbo ẹni tó ń ṣeré lórí Horizon ń rí.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Ipilẹṣẹ ifilọlẹ yii ko ni Microsoft iwọle (HORIZON_MSA_CLIENT_ID), nitorina ko le bẹrẹ ere naa.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Eyi gbe apẹẹrẹ lọ si Horizon {version}. O ṣe akopọ ere lati ibere, nitorinaa o gba to gun ju atunkọ deede lọ: to iṣẹju 30.",
   "This server's Horizon": "olupin yii Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon olupin yii ti darugbo ju lati ṣe atokọ awọn afẹyinti rẹ nibi: wọn wa ninu folda awọn afẹyinti rẹ. Ṣe imudojuiwọn rẹ ni isalẹ.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon olupin yii ti dagba ju lati ṣafihan awọn eto rẹ nibi. Ṣe imudojuiwọn lori taabu Awọn afẹyinti, lẹhinna wọn han.",
