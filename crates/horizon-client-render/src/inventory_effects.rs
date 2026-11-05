@@ -156,15 +156,23 @@ fn background(batch: &mut HudBatch, atlas: &HudAtlas, panel: &EffectPanel) {
     strip(panel.width - 4, 28, 4);
 }
 
-/// Paint panels and return the hovered compact or clipped panel, whose
-/// tooltip shows. Its hover height follows the spacing of overlapping rows.
+/// A rendered panel under the cursor, whether or not vanilla gives it tooltip lines.
+pub struct HoveredEffectPanel<'p, 'a> {
+    /// The effect widget under the cursor.
+    pub panel: &'p EffectPanel<'a>,
+    /// Compact or clipped widgets show their full name and duration in a tooltip.
+    pub has_default_tooltip: bool,
+}
+
+/// Paint panels and return the hovered panel with its default-tooltip eligibility.
+/// Its hover height follows the spacing of overlapping rows.
 pub fn paint<'p, 'a>(
     batch: &mut HudBatch,
     atlas: &HudAtlas,
     panels: &'p [EffectPanel<'a>],
     cursor: [i32; 2],
-) -> Option<&'p EffectPanel<'a>> {
-    let mut tooltip = None;
+) -> Option<HoveredEffectPanel<'p, 'a>> {
+    let mut hovered = None;
     let mut icon = String::new();
     for panel in panels {
         background(batch, atlas, panel);
@@ -202,21 +210,27 @@ pub fn paint<'p, 'a>(
             let (x, y) = ((panel.x + 7) as f32, (panel.y + 7) as f32);
             batch.rect_uv(x, y, 18.0, 18.0, r, u32::MAX);
         }
-        if (text_width <= 0 || clipped)
-            && cursor[0] >= panel.x
+        if cursor[0] >= panel.x
             && cursor[0] <= panel.x + panel.width
             && cursor[1] >= panel.y
             && cursor[1] <= panel.y + panel.spacing
         {
-            tooltip = Some(panel);
+            hovered = Some(HoveredEffectPanel {
+                panel,
+                has_default_tooltip: text_width <= 0 || clipped,
+            });
         }
     }
-    tooltip
+    hovered
 }
 
-/// A hovered panel's tooltip as vanilla builds it: the full name, then the
-/// duration.
-pub fn tooltip(panel: &EffectPanel<'_>) -> Vec<(Text, u32)> {
+/// A hovered panel's default tooltip: the full name then duration for compact
+/// or clipped panels, no lines when its information is fully visible.
+pub fn tooltip(hovered: HoveredEffectPanel<'_, '_>) -> Vec<(Text, u32)> {
+    if !hovered.has_default_tooltip {
+        return Vec::new();
+    }
+    let panel = hovered.panel;
     vec![
         (Text::literal(&panel.name), u32::MAX),
         (Text::literal(&panel.duration), u32::MAX),
