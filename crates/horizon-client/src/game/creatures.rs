@@ -506,12 +506,13 @@ impl Game<'_> {
         site: SpawnSite,
     ) -> Option<u32> {
         // The spawn is not a natural one (no jockeys, the patrol leader roll
-        // stays), but the mob is not persistent.
-        let id = self.spawn_mob(kind, at, true, site)?;
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            m.persistent = false;
-        }
-        Some(id)
+        // stays), but the mob is not persistent: vanilla's SummonCommand
+        // never calls setPersistenceRequired. The flag is false from the
+        // start, before the mob joins the level, so a mod's own write in the
+        // entity_join hook survives it - clearing it after the join would
+        // wipe what the hook set (Mob.setPersistenceRequired from
+        // entity_join_level).
+        self.spawn_mob(kind, at, false, site)
     }
     fn create_mob_reason(
         &mut self,

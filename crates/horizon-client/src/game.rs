@@ -274,6 +274,7 @@ mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_effects;
+mod native_living_flags;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -373,6 +374,7 @@ mod screen_info;
 mod screens;
 mod sculk;
 mod sculk_fixture;
+mod server_lifecycle;
 mod server_links;
 mod server_packs;
 mod server_reload;
@@ -3032,6 +3034,10 @@ struct Game<'a> {
     /// Must precede session_lock: dropping the writer drains writes while the world is locked.
     player_autosaves: horizon_client::lan::playerdata::Autosaves,
     session_lock: Option<horizon_client::save::SessionLock>,
+    /// The prepared world is installed. The session lock is taken earlier so tag
+    /// reads see ready tables, and is not this marker: a final save before the
+    /// prepared `Level` is installed would replace the world with placeholder state.
+    world_adopted: bool,
     audio: Audio,
     /// The side, registries and mod settings of this game's resource generation, which
     /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
@@ -13470,6 +13476,9 @@ impl Game<'_> {
         let dim = Dim::from_id(&level.dimension);
         self.level_shapes = shapes;
         self.world_root = save_root.clone();
+        // The root moves before the prepared level is installed. Until then a
+        // final save must not run: the lock below only marks tag tables.
+        self.world_adopted = false;
         // The world's packs over the game's biomes (`Biomes::with_packs`),
         // the table its chunks were built with.
         self.world_biomes = self.packed_biomes();
@@ -13554,6 +13563,7 @@ impl Game<'_> {
         // The ride the player's file names, once the vehicle is in the world.
         self.pending_vehicle = level.root_vehicle;
         self.level = level;
+        self.world_adopted = true;
         // ServerRecipeBook.loadUntrusted: recipes the manager does not have are dropped.
         let index = &world_stations!(self).recipe_index;
         let book = &mut self.level.recipe_book;
@@ -13803,6 +13813,7 @@ impl Game<'_> {
         self.server_loot.set(None);
         self.server_items = None;
         self.session_lock = None;
+        self.world_adopted = false;
         self.world_icon = None;
         horizon_client::crash::clear_detail("World");
         self.debug_charts.reset();
@@ -16000,12 +16011,22 @@ impl Game<'_> {
                 return;
             }
         }
-        // LivingEntity.startSleeping: the shape the bed gives the player to
-        // lie on (`getSleepHeight`). A straw bed's head answers with its
-        // foot's shape, and with no foot of its own there is none, so the
-        // player stays up as `startSleeping` returning false leaves them.
+        if self.lie_in_bed(head) {
+            self.award_custom_stat("sleep_in_bed", 1);
+            self.trigger_player("minecraft:slept_in_bed");
+            self.stats.reset("custom", "minecraft:time_since_rest");
+        }
+    }
+    /// `LivingEntity.startSleeping`: the player takes the bed whose head
+    /// `head` names, moved onto it and asleep from now on. False when the
+    /// bed gives no shape to lie on.
+    fn lie_in_bed(&mut self, head: [i32; 3]) -> bool {
+        // The shape the bed gives the player to lie on (`getSleepHeight`).
+        // A straw bed's head answers with its foot's shape, and with no foot
+        // of its own there is none, so the player stays up as
+        // `startSleeping` returning false leaves them.
         let Some(at) = self.sleeping_position(head) else {
-            return;
+            return false;
         };
         // LivingEntity.startSleeping: stopRiding once the bed is valid.
         self.stop_riding();
@@ -16030,9 +16051,7 @@ impl Game<'_> {
             self.snap_player_model_pitch();
         }
         self.occupy_bed(head);
-        self.award_custom_stat("sleep_in_bed", 1);
-        self.trigger_player("minecraft:slept_in_bed");
-        self.stats.reset("custom", "minecraft:time_since_rest");
+        true
     }
     fn wake_up(&mut self) {
         if self.remote.is_some() {
@@ -20522,6 +20541,7 @@ impl<'a> Game<'a> {
             level,
             player_autosaves: Default::default(),
             session_lock: None,
+            world_adopted: false,
             audio,
             loop_context: Arc::new(res.core.item_data.context().loop_context(loop_side, [])),
             damage_hooks: native_hooks::DAMAGE_HOOKS,

@@ -1623,6 +1623,12 @@ impl Game<'_> {
         }
         self.award_leave_game_to_all();
         self.save_leaving_guests();
+        self.lan_disconnect(announce);
+    }
+
+    /// The transport close, separate from player callbacks and saves so that
+    /// server shutdown can still disconnect after one of those unwinds.
+    pub(super) fn lan_disconnect(&mut self, announce: bool) {
         let Some(mut host) = self.lan.take() else {
             return;
         };

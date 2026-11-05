@@ -700,6 +700,11 @@ struct NewBlock<'a> {
     item: Option<String>,
     shapes: Option<Vec<VoxelShape>>,
     collision_shapes: Option<Vec<VoxelShape>>,
+    /// Whether each template state contains water.
+    waterlogged: Vec<bool>,
+    /// The template overrides BlockBehaviour.propagatesSkylightDown.
+    custom_skylight: bool,
+    custom_dampening: bool,
     default: u32,
     /// The declared state properties' combinations, every property at its
     /// default first (one empty combination when the block declares none):
@@ -1028,6 +1033,46 @@ impl<'a> Plan<'a> {
             },
             false => BTreeSet::new(),
         };
+        // Preserve blocks whose vanilla class overrides the default shape-based
+        // skylight rule (for example glass, barriers, fences and chorus plants).
+        let (custom_skylight, custom_dampening): (BTreeSet<String>, BTreeSet<String>) = if base
+            .join("block-behaviours.json")
+            .exists()
+        {
+            let behaviors = read_json(&base.join("block-behaviours.json"))?;
+            let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
+                return Err("block-behaviours.json has no blocks".into());
+            };
+            let names_with = |overrides: &[&str]| -> BTreeSet<String> {
+                blocks.iter().filter_map(|block| {
+                    let Some(J::Arr(classes)) = block.get("class") else { return None };
+                    if !classes.iter().any(|class| matches!(class, J::Str(name) if overrides.contains(&name.as_str()))) { return None }
+                    match block.get("name") { Some(J::Str(name)) => Some(name.clone()), _ => None }
+                }).collect()
+            };
+            (
+                names_with(&[
+                    "BambooStalkBlock",
+                    "BarrierBlock",
+                    "CrossCollisionBlock",
+                    "GlowLichenBlock",
+                    "HangingMossBlock",
+                    "LightBlock",
+                    "LiquidBlock",
+                    "MossyCarpetBlock",
+                    "PipeBlock",
+                    "ShulkerBoxBlock",
+                    "TintedGlassBlock",
+                    "TransparentBlock",
+                    "VegetationBlock",
+                    "VineBlock",
+                    "WallBlock",
+                ]),
+                names_with(&["LeavesBlock", "TintedGlassBlock"]),
+            )
+        } else {
+            (BTreeSet::new(), BTreeSet::new())
+        };
         let mut facts = read_json(&base.join("facts.json"))?;
         let names: Vec<String> = match facts.at("states") {
             Some(J::Arr(states)) => states
@@ -1263,6 +1308,16 @@ impl<'a> Plan<'a> {
                     })
                 };
                 let collision_shapes = decl.collision_shapes.as_ref().map(resolve).transpose()?;
+                let waterlogged = order
+                    .iter()
+                    .map(|&(state, combo)| {
+                        combos[combo as usize]
+                            .iter()
+                            .any(|(name, value)| name == "waterlogged" && value == "true")
+                            || properties(states.start + state).and_then(|p| p.get("waterlogged"))
+                                == Some(&J::Str("true".into()))
+                    })
+                    .collect();
                 // The lookup from (template state, combination) to the state's row.
                 let mut rows = vec![0; order.len()];
                 for (position, &(state, combo)) in order.iter().enumerate() {
@@ -1289,6 +1344,9 @@ impl<'a> Plan<'a> {
                     item: None,
                     shapes,
                     collision_shapes,
+                    waterlogged,
+                    custom_skylight: custom_skylight.contains(&decl.template),
+                    custom_dampening: custom_dampening.contains(&decl.template),
                     default,
                     combos,
                     order,
@@ -1473,6 +1531,33 @@ impl<'a> Plan<'a> {
                                 )
                             })
                             .collect();
+                        // BlockState.initCache and BlockBehaviour.getLightDampening:
+                        // the declared outline is the block's occlusion shape.
+                        let full = !shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
+                        let can_occlude = matches!(row.get("can_occlude"), Some(J::Bool(true)));
+                        let solid = can_occlude && full;
+                        let down = if b.custom_skylight {
+                            matches!(row.get("skylight_down"), Some(J::Bool(true)))
+                        } else {
+                            !full && !b.waterlogged[state_index]
+                        };
+                        row.set("solid_render", J::Bool(solid));
+                        row.set("skylight_down", J::Bool(down));
+                        if !b.custom_dampening {
+                            row.set(
+                                "dampening",
+                                J::Num(
+                                    (if solid {
+                                        15
+                                    } else if down {
+                                        0
+                                    } else {
+                                        1
+                                    })
+                                    .into(),
+                                ),
+                            );
+                        }
                         row.set("outline", J::Arr(boxes));
                         row.set("outline_edges", J::Arr(shape_edges(shape)));
                     }
@@ -1890,7 +1975,7 @@ impl<'a> Plan<'a> {
         Ok(())
     }
 
-    fn collision_shapes(&self, tag: &mut Tag) -> Result<()> {
+    fn declared_shapes(&self, tag: &mut Tag, collision: bool) -> Result<()> {
         let Tag::Compound(root) = tag else {
             return Err("collision table is not a compound".into());
         };
@@ -1899,7 +1984,12 @@ impl<'a> Plan<'a> {
             return Err("collision table has no shapes".into());
         };
         for block in &self.blocks {
-            if let Some(shapes) = block.collision_shapes.as_ref().or(block.shapes.as_ref()) {
+            let shapes = if collision {
+                block.collision_shapes.as_ref().or(block.shapes.as_ref())
+            } else {
+                block.shapes.as_ref()
+            };
+            if let Some(shapes) = shapes {
                 let mut encoded = BTreeMap::new();
                 for (offset, shape) in shapes.iter().enumerate() {
                     let key: Vec<_> = shape
@@ -2046,6 +2136,11 @@ impl<'a> Plan<'a> {
                         else {
                             continue;
                         };
+                        if b.decl.properties.occludes == Some(false)
+                            && let Tag::Byte(flags) = &mut v
+                        {
+                            *flags &= !16;
+                        }
                         if let (Some(f), Some(slot)) =
                             (b.decl.properties.friction, v.get_mut("friction"))
                         {
@@ -2634,7 +2729,15 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
                 .map_err(|e| format!("{name}: {e}"))?;
             plan.nbt(&mut named.tag);
             if name == "cached-collision.nbt" || name == "worldgen/blocks/cached-collision.nbt" {
-                plan.collision_shapes(&mut named.tag)?;
+                plan.declared_shapes(&mut named.tag, true)?;
+            } else if name == "occlusion.nbt" {
+                plan.declared_shapes(&mut named.tag, false)?;
+            } else if name == "worldgen/blocks/block-properties.nbt" {
+                let occlusion = named
+                    .tag
+                    .get_mut("occlusion")
+                    .ok_or("block properties have no occlusion")?;
+                plan.declared_shapes(occlusion, false)?;
             }
             nbt::write_named(&named, Limits::tables()).map_err(|e| format!("{name}: {e}"))?
         };

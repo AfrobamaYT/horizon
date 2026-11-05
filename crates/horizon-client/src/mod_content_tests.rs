@@ -3363,7 +3363,7 @@ fn tuple_shapes_follow_final_state_order_and_separate_collision() {
         ),
     ]));
     plan.nbt(&mut tag);
-    plan.collision_shapes(&mut tag).unwrap();
+    plan.declared_shapes(&mut tag, true).unwrap();
     let Some(Tag::List(entries)) = tag.get("shapes") else {
         panic!("shapes")
     };
@@ -3374,6 +3374,197 @@ fn tuple_shapes_follow_final_state_order_and_separate_collision() {
         assert_eq!(entries[mapping[2 + index] as usize], encode_shape(shape));
     }
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+/// Declared outline shapes feed gameplay lighting and both occlusion tables,
+/// independently of the optional collision shape.
+#[test]
+fn declared_shapes_drive_lighting_and_occlusion() {
+    for (label, no_occlusion) in [("occluding", false), ("nonoccluding", true)] {
+        let declaration = format!(
+            r#"{{"template":"minecraft:test","item":false,
+          "properties":{{"occludes":{}}},
+          "shapes":{{"properties":["axis"],"values":{{"x":[[0,0,0,1,1,1]],"y":[[0,0,0,0.5,1,1]]}}}},
+          "collision_shapes":{{"default":[]}}}}"#,
+            !no_occlusion
+        );
+        let (base, mods) = block_base(label, &[&declaration]);
+        let plan = Plan::new(&base, &mods).unwrap();
+        let row =
+            r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+        let mut gameplay: J =
+            serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+        plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+        let Some(J::Arr(rows)) = gameplay.get("states") else {
+            panic!("states")
+        };
+        let full = &rows[2];
+        let partial = &rows[3];
+        assert_eq!(full.get("solid_render"), Some(&J::Bool(!no_occlusion)));
+        assert_eq!(
+            full.get("dampening"),
+            Some(&J::Num((if no_occlusion { 1 } else { 15 }).into()))
+        );
+        assert_eq!(partial.get("solid_render"), Some(&J::Bool(false)));
+        assert_eq!(partial.get("skylight_down"), Some(&J::Bool(true)));
+        assert_eq!(partial.get("dampening"), Some(&J::Num(0.into())));
+        let mut shapes = Tag::Compound(Compound::from([
+            (
+                JavaString::from("states"),
+                Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+            ),
+            (JavaString::from("shapes"), Tag::List(Vec::new())),
+            (
+                JavaString::from("cached_shapes"),
+                Tag::IntArray(vec![-1, -1]),
+            ),
+        ]));
+        plan.nbt(&mut shapes);
+        plan.declared_shapes(&mut shapes, false).unwrap();
+        let Some(Tag::List(entries)) = shapes.get("shapes") else {
+            panic!("shapes")
+        };
+        let Some(Tag::IntArray(indices)) = shapes.get("cached_shapes") else {
+            panic!("indices")
+        };
+        let expected = plan.blocks[0].shapes.as_ref().unwrap();
+        for (index, shape) in expected.iter().enumerate() {
+            assert_eq!(entries[indices[2 + index] as usize], encode_shape(shape));
+        }
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
+    let declaration = r#"{"template":"minecraft:test","item":false,
+      "shapes":{"default":[[0,0,0,1,0.5,1]]}}"#;
+    let facts = r#"{"states":[
+      ["minecraft:test",false,false,"",{"id":"minecraft:test","properties":{"waterlogged":"false"}}],
+      ["minecraft:test",false,false,"",{"id":"minecraft:test","properties":{"waterlogged":"true"}}]],
+      "defaults":{"minecraft:test":0}}"#;
+    let (base, mods) = block_base_of("shape-light-water", &[declaration], facts);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(rows[3].get("skylight_down"), Some(&J::Bool(false)));
+    assert_eq!(rows[3].get("dampening"), Some(&J::Num(1.into())));
+    drop(plan);
+    fs::write(base.join("block-behaviours.json"), r#"{"blocks":[{"name":"minecraft:test","class":["TintedGlassBlock","TransparentBlock","Block"]}]}"#).unwrap();
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(false)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(15.into())));
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+/// Load the actual generated tables as the renderer and world generator do.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn declared_shapes_reach_render_and_worldgen_occlusion() {
+    use horizon_core::geometry::Direction;
+    use horizon_world::{
+        block_properties::{BlockPropertiesRegistry, BlockProperty},
+        collision::CachedCollisionRegistry,
+        registry::BlockTableFile,
+    };
+    let Some(base) = prepared() else { return };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-shape-occlusion-{}", std::process::id()));
+    let manifest = manifest("testmod", "");
+    let m = folder_mod(
+        &scratch.join("mod"),
+        &[
+            ("horizon-mod.toml", &manifest),
+            (
+                "data/testmod/horizon/block/full.json",
+                r#"{"template":"minecraft:stone","item":false,"shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/partial.json",
+                r#"{"template":"minecraft:stone","item":false,"shapes":{"default":[[0,0,0,1,0.5,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/open.json",
+                r#"{"template":"minecraft:stone","item":false,"properties":{"occludes":false},"shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+        ],
+    );
+    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let stone = registry.default_state("minecraft:stone").unwrap();
+    let full = registry.default_state("testmod:full").unwrap();
+    let partial = registry.default_state("testmod:partial").unwrap();
+    let open = registry.default_state("testmod:open").unwrap();
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    assert_eq!(
+        (facts.get(full).solid_render, facts.get(full).dampening),
+        (true, 15)
+    );
+    assert_eq!(
+        (
+            facts.get(partial).solid_render,
+            facts.get(partial).dampening
+        ),
+        (false, 0)
+    );
+    assert_eq!(
+        (facts.get(open).solid_render, facts.get(open).dampening),
+        (false, 1)
+    );
+    let mut visibility = crate::models::load_visibility(&root, registry).unwrap();
+    assert!(
+        !visibility
+            .should_render_face(stone, full, Direction::East, false)
+            .unwrap()
+    );
+    assert!(
+        visibility
+            .should_render_face(stone, partial, Direction::East, false)
+            .unwrap()
+    );
+    assert!(
+        visibility
+            .should_render_face(stone, open, Direction::East, false)
+            .unwrap()
+    );
+    let collisions =
+        BlockTableFile::open(&root.join("worldgen/blocks/cached-collision.nbt"), registry).unwrap();
+    let collisions =
+        CachedCollisionRegistry::from_table(collisions.table("collision").unwrap()).unwrap();
+    let properties =
+        BlockTableFile::open(&root.join("worldgen/blocks/block-properties.nbt"), registry).unwrap();
+    let properties =
+        BlockPropertiesRegistry::from_table(properties.table("properties").unwrap(), &collisions)
+            .unwrap();
+    assert!(
+        properties
+            .property(full, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(
+        !properties
+            .property(partial, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(
+        !properties
+            .property(open, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(!properties.bind_can_occlude().contains(open));
+    fs::remove_dir_all(scratch).unwrap();
 }
 
 #[test]
@@ -3897,7 +4088,7 @@ fn a_shape_and_the_state_count_cover_every_combination() {
         ),
     ]));
     plan.nbt(&mut tag);
-    plan.collision_shapes(&mut tag).unwrap();
+    plan.declared_shapes(&mut tag, true).unwrap();
     let Some(Tag::List(entries)) = tag.get("shapes") else {
         panic!("no shapes")
     };
