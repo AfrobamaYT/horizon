@@ -1,7 +1,7 @@
-//! A level's world settings for native server mods, through a `LevelRef`
-//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the seed, the
-//! difficulty, game rules and weather. They return `None` on a client or for
-//! a handle of an earlier open.
+//! A level's world settings through a `LevelRef`
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the seed,
+//! difficulty and game rules on the server, and weather on both sides.
+//! Stale handles return `None`.
 use super::{Dim, Game};
 use horizon_client::command::vanilla::DIFFICULTIES;
 use horizon_client::world::World;
@@ -112,10 +112,11 @@ impl Game<'_> {
         self.ui.rules.get(r.name)
     }
     /// The rain and thunder levels, each 0.0 to 1.0 (`Level.getRainLevel`,
-    /// `getThunderLevel`): both 0 in a level with no weather, as the Nether
-    /// and the End.
+    /// `getThunderLevel` at partial tick 1.0): both 0 in a level with no weather.
+    /// Reads any open server level or the client's current synchronized level;
+    /// None for a stale handle, an unavailable level or a client not logged in.
     pub(super) fn native_level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
-        let world = self.native_level_world(level)?;
+        let world = self.native_level_read_world(level)?;
         Some(weather_for_level(
             world.shape,
             level.dimension() == super::Dim::End.id(),
@@ -269,6 +270,32 @@ mod tests {
             });
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn weather_read_resolves_levels_and_refuses_stale_or_unavailable_handles() {
+        use super::super::execution_role::ExecutionRole;
+        use mod_api::{LevelRef, NativeWorldEpoch};
+
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            game.world.weather.rain_level = (0.0, 0.5);
+            game.world.weather.thunder_level = (0.0, 0.75);
+            assert_eq!(level.weather(game), Some((0.5, 0.375)));
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            assert_eq!(stale.weather(game), None);
+            let absent = LevelRef::new(level.epoch(), "missing:level");
+            assert_eq!(absent.weather(game), None);
+            // The current world's dimension type, not its id alone, gates weather.
+            game.world.shape.has_ceiling = true;
+            assert_eq!(level.weather(game), Some((0.0, 0.0)));
+            game.options.execution_role = ExecutionRole::Client;
+            assert_eq!(level.weather(game), None, "no logged-in remote level");
+        });
+    }
+
     #[test]
     fn weather_requires_skylight_no_ceiling_and_not_end() {
         use horizon_client::chunk::LevelShape;
