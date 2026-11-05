@@ -326,7 +326,6 @@ mod tests {
     fn a_trader_does_not_drink_in_the_end() {
         use crate::mobs::world::with_test_world;
         use horizon_core::geometry::Vec3;
-        use horizon_core::random::LegacyRandom;
         use std::sync::Arc;
         let _ = with_test_world(&[], |w, types| {
             let kind = Arc::new(types.types["minecraft:wandering_trader"].clone());
@@ -343,11 +342,11 @@ mod tests {
             };
             let decide =
                 |world: &MobWorld, m: &mut Mob, potion: &mut DrinkItem, milk: &mut DrinkItem| {
-                    let mut lr = LegacyRandom::new(1);
+                    let mut test_level = crate::health::TestLevel::new(1);
                     let mut events = Vec::new();
                     let mut cx = Cx {
                         w: world,
-                        lr: &mut lr,
+                        level: &mut test_level.level(),
                         events: &mut events,
                     };
                     let dark = potion.can_use(m, &mut cx);

@@ -807,11 +807,11 @@ mod tests {
                     m.extra.mount = Some(9);
                 }
                 let mut goal = Celebration;
-                let mut lr = LegacyRandom::new(1);
+                let mut test_level = crate::health::TestLevel::new(1);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 goal.tick(&mut m, &mut cx);

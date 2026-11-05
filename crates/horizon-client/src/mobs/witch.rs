@@ -422,7 +422,12 @@ mod tests {
         let mut events = Vec::new();
         for _ in 0..40 {
             m.extra.flag = false;
-            drink(&mut m, &mut events, true);
+            drink(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut events,
+                true,
+            );
         }
         events
             .iter()

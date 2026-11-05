@@ -1259,7 +1259,6 @@ mod tests {
     use crate::mobs::world::with_test_world;
     use crate::mobs::{Mob, MobEvent, Species, Who, sensor_scan_tests::kind};
     use horizon_core::geometry::Vec3;
-    use horizon_core::random::LegacyRandom;
 
     fn bee() -> Mob {
         let mut kind = kind();
@@ -1276,10 +1275,10 @@ mod tests {
         with_test_world(&[], |w, _| {
             let mut m = bee();
             let mut events = Vec::new();
-            let mut random = LegacyRandom::new(1);
+            let mut test_level = crate::health::TestLevel::new(1);
             let mut cx = Cx {
                 w,
-                lr: &mut random,
+                level: &mut test_level.level(),
                 events: &mut events,
             };
             sting(&mut m, Who::Mob(9), &mut cx);
