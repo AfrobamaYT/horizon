@@ -82,7 +82,7 @@ impl BlockKey {
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         crate::part_table::with_registering_keys(|registering| {
             registering
-                .unwrap_or_else(crate::part_table::requested_keys)
+                .unwrap_or(crate::part_table::requested_keys())
                 .blocks
                 .id(slot)
                 .ok_or("unknown BlockKey slot")?;
