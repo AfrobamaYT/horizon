@@ -4420,6 +4420,11 @@ impl Game<'_> {
                 self.guest_die(gi, conn);
                 continue;
             }
+            // Native mods, at the start of the living player's tick
+            // (PlayerTickEvent.Pre). The guest is swapped in only for a listener.
+            if mod_api::__private::listened(mod_api::HookId::PlayerTickPre) {
+                self.as_guest(conn, |g| g.native_player_tick_pre());
+            }
             // ServerPlayerGameMode.tick stops an active destroy when its block is air.
             let Some(host) = self.lan.as_mut() else {
                 return;
@@ -4531,8 +4536,8 @@ impl Game<'_> {
                 g.tick_advancements();
                 g.update_player_attributes();
                 g.record_player_scores(&mut recorded);
-                // Native mods, at the end of ServerPlayer.tick.
-                g.native_player_tick();
+                // Native mods, at the end of ServerPlayer.tick (PlayerTickEvent.Post).
+                g.native_player_tick_post();
             });
             if let Some(host) = self.lan.as_mut() {
                 host.play.entry(conn).or_default().score_recorded = recorded;
@@ -7764,6 +7769,62 @@ mod respawn_position_tests {
                 assert_eq!(g.position, found);
                 assert_eq!((g.yaw, g.pitch), (0.0, 0.0));
                 assert_eq!(g.spawn, Some([5.5, 64.0, 5.5]));
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod player_tick_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use std::sync::{Arc, Mutex};
+
+    /// Logs each player tick moment it hears.
+    struct Log(Arc<Mutex<Vec<&'static str>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Log {
+        fn player_tick_pre(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::PlayerTickPreEvent,
+        ) {
+            self.0.lock().unwrap().push("pre");
+        }
+        fn player_tick_post(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::PlayerTickPostEvent,
+        ) {
+            self.0.lock().unwrap().push("post");
+        }
+    }
+
+    /// `PlayerTickEvent.Pre` and `.Post`: once each a tick for a living
+    /// player, Pre first; a dead player hears neither.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_living_guest_ticks_pre_then_post() {
+        let heard: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+        let mods = vec![mod_api::ModEntry::new(
+            "log",
+            Box::new(Log(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                open_to_lan(game);
+                let mut g = guest(1);
+                g.loaded = true;
+                game.lan.as_mut().unwrap().hub.guests.push(g);
+                game.tick_guests();
+                assert_eq!(*heard.lock().unwrap(), ["pre", "post"]);
+                game.tick_guests();
+                assert_eq!(*heard.lock().unwrap(), ["pre", "post", "pre", "post"]);
+                heard.lock().unwrap().clear();
+                game.lan.as_mut().unwrap().hub.guests[0].dead = true;
+                game.tick_guests();
+                assert!(heard.lock().unwrap().is_empty());
             });
         });
     }

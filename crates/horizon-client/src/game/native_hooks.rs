@@ -3115,13 +3115,17 @@ impl Game<'_> {
     ) {
         self.fire_left_click_block(pos, face, state, canceled);
     }
-    /// A living player's server tick ends (`ServerPlayer.tick`): once a tick
-    /// for every player in the world, after their digging, item use,
-    /// cooldowns, statistics and advancements. The helpers read that player.
-    /// Players still tick under `/tick freeze`; a dead player doesn't, nor
-    /// does one killed earlier in the same tick.
-    pub(super) fn native_player_tick(&mut self) {
-        self.fire_player_tick();
+    /// A living player's server tick starts (`PlayerTickEvent.Pre`): before
+    /// their digging, item use, cooldowns, statistics and advancements. The
+    /// helpers read that player.
+    pub(super) fn native_player_tick_pre(&mut self) {
+        self.fire_player_tick_pre();
+    }
+    /// A living player's server tick ends (`PlayerTickEvent.Post`, the end of
+    /// `ServerPlayer.tick`): after their digging, item use, cooldowns,
+    /// statistics and advancements. The helpers read that player.
+    pub(super) fn native_player_tick_post(&mut self) {
+        self.fire_player_tick_post();
     }
     /// The player-health HUD rows, once a frame the HUD draws them
     /// (`HealthHud::layout`, not under F1): `inputs` carries the health,

@@ -248,8 +248,9 @@ requires a farmer at work and `mob_griefing` enabled.
   creative. A mod that cancels it keeps the block: on the server it isn't attacked, dug or broken, and the player's client
   gets it back. The clicking player's own client still predicts the crack until then.
 
-- A player's server tick: `native_player_tick` runs once a tick for every living player in the world, at the
-  end of their `ServerPlayer.tick`, with the helpers reading that player. Players still tick while the game is frozen
+- A player's server tick: `native_player_tick_pre` (NeoForge's `PlayerTickEvent.Pre`) runs once a tick for every
+  living player in the world before their digging, item use and cooldowns, and `native_player_tick_post`
+  (`PlayerTickEvent.Post`) at the end of their `ServerPlayer.tick`, both with the helpers reading that player. Players still tick while the game is frozen
   (`/tick freeze`), as in vanilla. A dead player isn't called, and neither is one killed earlier in the same tick; it
   runs again once they respawn.
 
