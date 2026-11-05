@@ -88,6 +88,10 @@ pub type ThunkFn = unsafe fn(Option<*mut ()>, Vec<Arg>) -> Result<Reply, Refusal
 pub struct Thunk {
     /// Its `internals.json` path.
     pub path: &'static str,
+    /// Its receiver's node type, for a method; `None` for a free or associated function.
+    pub receiver: Option<u32>,
+    /// Each argument's node type, or `None` for one given as a copy.
+    pub args: &'static [Option<u32>],
     /// Which nodes it writes through: bit 0 the receiver, bit `i + 1` argument `i`. The runtime
     /// refuses a shared node there.
     pub writes: u64,

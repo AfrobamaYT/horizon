@@ -17,8 +17,6 @@ pub enum Step<V> {
     Index(u64),
     /// A map's entry.
     Key(V),
-    /// An `Option`'s value, or an enum's case by index.
-    Case(u32),
 }
 
 /// Where a node is: one of the call's roots, then steps.
@@ -74,6 +72,11 @@ impl<V: PartialEq> Journal<V> {
             }
         }
         gone
+    }
+
+    /// Whether any write's path satisfies `under`.
+    pub fn any(&self, mut under: impl FnMut(&Path<V>) -> bool) -> bool {
+        self.writes.iter().any(|(path, _, _)| under(path))
     }
 
     /// Whether the call wrote nothing yet.

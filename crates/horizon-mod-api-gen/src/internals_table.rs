@@ -672,57 +672,67 @@ impl<'r> Gen<'r> {
             return None;
         }
         let mut writes = 0u64;
-        let mut receiver = quote!();
+        let mut receiver = None;
         let mut inputs = sig.inputs.iter();
         if let Some(this) = &this {
             let Some(syn::FnArg::Receiver(r)) = inputs.next() else {
                 // An associated function: called on the type, no receiver.
-                return self.thunk_tail(
+                let callee = Callee {
                     internal,
-                    &module,
-                    Some(this),
-                    None,
-                    sig.inputs.iter(),
-                    &sig.output,
-                    0,
-                    &name,
-                );
+                    module: &module,
+                    this: Some(this),
+                    name: &name,
+                    receiver: None,
+                };
+                return self.thunk_tail(&callee, sig.inputs.iter(), &sig.output, 0);
             };
             self.skip_reason = "by-value receiver";
             r.reference.as_ref()?;
-            let ty = spell(&Shape::Named(this.clone(), rule.named(this)?.lifetimes))?;
+            let shape = Shape::Named(this.clone(), rule.named(this)?.lifetimes);
+            self.skip_reason = "receiver cannot cross";
+            if rule.crossing_of(&shape) == Crossing::Opaque {
+                return None;
+            }
+            let ty = spell(&shape)?;
             if r.mutability.is_some() {
                 writes |= 1;
-                receiver = quote!(&mut *(this.ok_or(I::changed("a receiver"))? as *mut #ty),);
+                receiver = Some((
+                    quote!(&mut *(this.ok_or(I::changed("a receiver"))? as *mut #ty),),
+                    self.node(&shape),
+                ));
             } else {
-                receiver = quote!(&*(this.ok_or(I::changed("a receiver"))? as *const #ty),);
+                receiver = Some((
+                    quote!(&*(this.ok_or(I::changed("a receiver"))? as *const #ty),),
+                    self.node(&shape),
+                ));
             }
         }
-        self.thunk_tail(
+        let callee = Callee {
             internal,
-            &module,
-            this.as_deref(),
-            Some(receiver),
-            inputs,
-            &sig.output,
-            writes,
-            &name,
-        )
+            module: &module,
+            this: this.as_deref(),
+            name: &name,
+            receiver,
+        };
+        self.thunk_tail(&callee, inputs, &sig.output, writes)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn thunk_tail<'a>(
         &mut self,
-        internal: &Internal,
-        module: &str,
-        this: Option<&str>,
-        receiver: Option<TokenStream>,
+        callee: &Callee<'_>,
         inputs: impl Iterator<Item = &'a syn::FnArg>,
         output: &syn::ReturnType,
         mut writes: u64,
-        name: &syn::Ident,
     ) -> Option<TokenStream> {
         let rule = self.rule;
+        let Callee {
+            internal,
+            module,
+            this,
+            name,
+            ..
+        } = *callee;
+        let mut nodes = Vec::new();
         let mut lets = Vec::new();
         let mut args = Vec::new();
         // Named input lifetimes can be tied to a receiver's stored borrows. Spelling a listed
@@ -771,6 +781,8 @@ impl<'r> Gen<'r> {
                     if *mutable || rule.crossing_of(to) == Crossing::Handle =>
                 {
                     let ty = spell(to)?;
+                    let id = self.node(to);
+                    nodes.push(quote!(::std::option::Option::Some(#id)));
                     if *mutable {
                         writes |= 1 << (i + 1);
                         lets.push(quote!(let #arg = &mut *(I::node(#arg)? as *mut #ty);));
@@ -785,10 +797,12 @@ impl<'r> Gen<'r> {
                             self.decode(&Shape::Scalar(Scalar::String), quote!(I::value(#arg)?));
                         lets.push(quote!(let #arg: ::std::string::String = #value;));
                         args.push(quote!(&#arg[..]));
+                        nodes.push(quote!(::std::option::Option::None));
                     } else if buildable(to, rule) {
                         let value = self.decode(to, quote!(I::value(#arg)?));
                         lets.push(quote!(let #arg = #value;));
                         args.push(quote!(&#arg));
+                        nodes.push(quote!(::std::option::Option::None));
                     } else {
                         return None;
                     }
@@ -797,6 +811,7 @@ impl<'r> Gen<'r> {
                     let value = self.decode(&shape, quote!(I::value(#arg)?));
                     lets.push(quote!(let #arg = #value;));
                     args.push(quote!(#arg));
+                    nodes.push(quote!(::std::option::Option::None));
                 }
                 _ => return None,
             }
@@ -823,7 +838,7 @@ impl<'r> Gen<'r> {
                 }
             }
         };
-        let callee = match this {
+        let function = match this {
             Some(this) => {
                 let ty = path_tokens(this);
                 quote!(#ty::#name)
@@ -833,7 +848,10 @@ impl<'r> Gen<'r> {
                 path_tokens(&owner)
             }
         };
-        let receiver = receiver.unwrap_or_default();
+        let (receiver, receiver_ty) = match &callee.receiver {
+            Some((receiver, id)) => (receiver.clone(), quote!(::std::option::Option::Some(#id))),
+            None => (quote!(), quote!(::std::option::Option::None)),
+        };
         let thunk = format_ident!("thunk_{}", self.items.len());
         let path = &internal.path;
         self.items.push(quote! {
@@ -842,13 +860,27 @@ impl<'r> Gen<'r> {
                 unsafe {
                     let [#(#names),*] = I::fields::<_, #n>(args)?;
                     #(#lets)*
-                    let result = #callee(#receiver #(#args),*);
+                    let result = #function(#receiver #(#args),*);
                     #result
                 }
             }
         });
-        Some(quote!(I::Thunk { path: #path, writes: #writes, call: #thunk },))
+        Some(
+            quote!(I::Thunk { path: #path, receiver: #receiver_ty, args: &[#(#nodes),*], writes: #writes, call: #thunk },),
+        )
     }
+}
+
+/// A function a thunk calls, and how.
+struct Callee<'c> {
+    internal: &'c Internal,
+    /// The module its signature is written in.
+    module: &'c str,
+    /// Its receiver's type, for a method or an associated function.
+    this: Option<&'c str>,
+    name: &'c syn::Ident,
+    /// The receiver argument and its node type, for a method.
+    receiver: Option<(TokenStream, u32)>,
 }
 
 /// The manifest records impl bounds as well as the method signature. A bounded or type-generic
