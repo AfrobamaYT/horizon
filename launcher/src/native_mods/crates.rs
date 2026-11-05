@@ -37,6 +37,76 @@ pub(super) fn downloaded(text: &str) -> Result<BTreeSet<Locked>, String> {
         .collect())
 }
 
+/// Refuse game crates reached through a mod's dependencies rather than its generated facade.
+/// Cargo lock dependency references may include a version and source; retaining the complete
+/// package set for a name makes ambiguous references conservative.
+pub(super) fn check_game_graph(stage: &Path, text: &str) -> Result<(), String> {
+    let lock: toml::Table = text.parse().map_err(|e| format!("Cargo.lock: {e}"))?;
+    let packages = lock
+        .get("package")
+        .and_then(toml::Value::as_array)
+        .ok_or("Cargo.lock: missing packages")?;
+    let game_names: BTreeSet<String> = fs::read_dir(stage.join("crates"))
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let text = fs::read_to_string(entry.path().join("Cargo.toml")).ok()?;
+            let manifest: toml::Table = text.parse().ok()?;
+            Some(manifest.get("package")?.get("name")?.as_str()?.to_owned())
+        })
+        .collect();
+    for (mod_id, manifest) in manifests(&stage.join(DIR))? {
+        let text = fs::read_to_string(manifest).map_err(|e| e.to_string())?;
+        let value: toml::Table = text.parse().map_err(|e| format!("Cargo.toml: {e}"))?;
+        let name = value
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(toml::Value::as_str)
+            .ok_or("Cargo.toml: missing package name")?;
+        let mut todo = vec![(name.to_owned(), name.to_owned())];
+        let mut seen = BTreeSet::new();
+        while let Some((current, via)) = todo.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            for package in packages
+                .iter()
+                .filter(|p| p.get("name").and_then(toml::Value::as_str) == Some(&current))
+            {
+                for dep in package
+                    .get("dependencies")
+                    .and_then(toml::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(toml::Value::as_str)
+                {
+                    let dep = dep.split_whitespace().next().unwrap_or(dep);
+                    if dep == super::internals::package(&mod_id)
+                        || dep == super::api::API_PACKAGE
+                        || dep == super::api::POINTS_PACKAGE
+                    {
+                        continue;
+                    }
+                    let first = if current == name {
+                        dep.to_owned()
+                    } else {
+                        via.clone()
+                    };
+                    if game_names.contains(dep) {
+                        return Err(super::api::ProjectError::GameDependency {
+                            mod_id: mod_id.clone(),
+                            key: format!("{first} -> {dep}"),
+                        }
+                        .to_string());
+                    }
+                    todo.push((dep.to_owned(), first));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// A crate a mod's crate asks for in its `Cargo.toml`: under its own name or `package`, in any
 /// dependency table (dev and build ones too: the lock has them all).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -405,6 +475,41 @@ mod tests {
             format!("[package]\nname = {package:?}\nversion = \"0.1.0\"\n{body}"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn game_graph_refuses_transitive_game_dependency_but_allows_facade() {
+        let stage = StageFixture::new();
+        stage.add_crate("bake", "engine", "bake", "");
+        write_manifest(
+            &stage.root().join("crates/horizon-client"),
+            "horizon-client",
+            "",
+        );
+        let lock = r#"
+[[package]]
+name = "bake"
+version = "0.1.0"
+dependencies = ["bridge", "horizon-internals-bake"]
+[[package]]
+name = "bridge"
+version = "0.1.0"
+dependencies = ["horizon-client"]
+[[package]]
+name = "horizon-internals-bake"
+version = "0.1.0"
+dependencies = ["horizon-client"]
+[[package]]
+name = "horizon-client"
+version = "0.1.0"
+"#;
+        let error = check_game_graph(stage.root(), lock).unwrap_err();
+        assert!(error.contains("bridge -> horizon-client"), "{error}");
+        let safe = lock.replace(
+            "dependencies = [\"bridge\", \"horizon-internals-bake\"]",
+            "dependencies = [\"horizon-internals-bake\"]",
+        );
+        assert!(check_game_graph(stage.root(), &safe).is_ok());
     }
 
     fn wanted(stage: &Path) -> Result<Vec<Wanted>, String> {
