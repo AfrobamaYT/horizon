@@ -152,14 +152,11 @@ impl<'a> Project<'a> {
                     });
                     continue;
                 }
-                match package {
-                    "horizon-client" => {
-                        return Err(ProjectError::GameDependency {
-                            mod_id: mod_id(),
-                            key: key.clone(),
-                        });
-                    }
-                    _ => {}
+                if package == "horizon-client" {
+                    return Err(ProjectError::GameDependency {
+                        mod_id: mod_id(),
+                        key: key.clone(),
+                    });
                 }
             }
         }
