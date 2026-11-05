@@ -1349,12 +1349,24 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        let (tree, levels, problems) = command_tree(&commands, |name| {
+        // Horizon's own moderation commands go in the same tree, so operators' clients complete them
+        // instead of showing them as unknown; the game still runs them itself (`run_guest_command`).
+        let extras = super::tempban::moderation_commands(
+            host.hub.chat_filter_on(),
+            self.server_lists.is_some(),
+        );
+        commands.extend(extras.iter().cloned());
+        let (tree, mut levels, problems) = command_tree(&commands, |name| {
             host.hub.vanilla_command(name) || vanilla.find(name).is_some()
         });
         for p in problems {
             log::warn!("Horizon: a native mod's command was left out: {p}");
         }
+        levels.retain(|name, _| {
+            !extras
+                .iter()
+                .any(|c| c.usage.split(' ').next() == Some(name.as_str()))
+        });
         let mut dispatcher = Dispatcher::new();
         register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
         let dispatcher = Arc::new(dispatcher);

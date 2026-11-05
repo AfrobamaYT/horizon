@@ -1005,6 +1005,7 @@ use horizon_client::{
 use horizon_core::{
     geometry::Direction,
     position::BlockPos,
+    random::LegacyRandom,
     ticks::{ScheduleResult, TickPriority},
 };
 use horizon_world::level::{BonemealCheck, PlaceContext};
@@ -1501,7 +1502,7 @@ pub(super) use horizon_world::level::flags;
 /// The hook points' API version. The launcher reads this line from the
 /// source it builds; keep its form.
 #[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 399;
+pub(crate) const NATIVE_HOOKS_API: u32 = 409;
 
 impl GameLevel<'_> {
     /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
@@ -3412,7 +3413,7 @@ impl Game<'_> {
     /// draw the world from anywhere: a cinematic or replay camera. Only the picture, the sound's
     /// listener and the billboards facing the camera follow it; the player, where they aim, the
     /// first-person hand and which chunks load stay the player's. Values that aren't finite keep
-    /// vanilla's. Not called on the title screen's panorama. API @API:camera_pose@.
+    /// vanilla's. Not called on the title screen's panorama. API 402.
     pub(super) fn native_camera_pose(
         &self,
         partial: f32,
@@ -3703,6 +3704,36 @@ impl Game<'_> {
         tag: &mut Option<Compound>,
     ) {
         Self::fire_block_entity_update_tag(pos, entity, tag);
+    }
+    /// May `stack` go into slot `slot` of the mod block entity at `pos`
+    /// (`entity`, read only), put in through `face` (none when no face is
+    /// asked)? NeoForge's `IItemHandler.isItemValid`, vanilla's
+    /// `Container.canPlaceItem`: a millstone takes only what it has a recipe
+    /// for, so a wrong item can't block it. Asked on the server for every
+    /// item a hopper, a dropper or `native_insert_item` would put in, once
+    /// the block's `ModContainer` lets that slot be filled through that face
+    /// (its `inputs` and `faces`). Set `cancel` to refuse the item there; the
+    /// mover tries the next slot. Not asked for a player's clicks in a menu
+    /// (`native_menu_slot_rules`). Bundles need "hooks": @API:container_accepts@.
+    pub(super) fn native_container_accepts(
+        &self,
+        pos: [i32; 3],
+        entity: &ModBlockEntity,
+        slot: usize,
+        stack: &ItemStack,
+        face: Option<Direction>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_container_accepts(
+            self,
+            mod_api::mods(),
+            pos,
+            entity,
+            slot,
+            stack,
+            face,
+            cancel,
+        );
     }
     /// Draw the mod block entity at `pos`, of block `block`
     /// (`mymod:machine`), on this client: once a frame while it is in view
@@ -5784,7 +5815,7 @@ impl Game<'_> {
     /// client reads with `native_screen_extra_data` while the screen is open
     /// (NeoForge's `openMenu` with an extra-data writer). The first mod to
     /// set it wins, so answer only for your blocks. The player's state is not
-    /// swapped in. @API:menu_extra_data@.
+    /// swapped in. 401.
     pub(super) fn native_menu_extra_data(
         &mut self,
         player: u128,
@@ -10375,7 +10406,7 @@ impl Game<'_> {
     }
     /// The block of the mod screen that is open (`native_screen`), as the
     /// server named it when the block opened its menu type; None when no mod
-    /// screen is open. @API:menu_extra_data@.
+    /// screen is open. 401.
     pub(super) fn native_screen_pos(&self) -> Option<[i32; 3]> {
         self.shown_native_screen()?.pos()
     }
@@ -13400,6 +13431,7 @@ mod tests {
                     kind,
                     attacker,
                     from: None,
+                    attacker_species: None,
                 },
                 &Attack {
                     attacker: 7,

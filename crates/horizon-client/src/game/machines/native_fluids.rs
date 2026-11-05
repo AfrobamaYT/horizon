@@ -9,6 +9,26 @@ use horizon_world::nbt::{Compound, JavaString, Tag};
 use mod_api::{BlockSide, FluidStack, Transaction};
 use std::sync::Arc;
 
+/// A fluid a tank may hold: vanilla's water and lava, or a mod's own
+/// (`create:chocolate`), any id in a namespace other than `minecraft`, of
+/// vanilla's identifier characters. A mod's fluid lives in tanks only, the
+/// world has vanilla's alone, and its mod draws it; a cauldron takes only
+/// water and lava. Variants of one fluid (a potion's kinds) are fluids of
+/// their own (`create:potion/healing`): equal ids merge, others don't.
+fn tank_fluid(fluid: &str) -> bool {
+    if matches!(fluid, "minecraft:water" | "minecraft:lava") {
+        return true;
+    }
+    let ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b);
+    fluid.split_once(':').is_some_and(|(namespace, path)| {
+        !namespace.is_empty()
+            && namespace != "minecraft"
+            && namespace.bytes().all(ok)
+            && !path.is_empty()
+            && path.bytes().all(|b| ok(b) || b == b'/')
+    })
+}
+
 /// A cauldron level's contents: level `level` holds `level * 1000 / 3`
 /// millibuckets (`LayeredCauldronBlock` has no finer unit than a bottle's
 /// third of a bucket).
@@ -109,14 +129,15 @@ fn side_tanks(tanks: &ModFluidTanks, side: Option<Direction>) -> Vec<usize> {
     }
 }
 
-/// Whether the game's tanks at `at` take `fluid`: water or lava, the game's only fluids. A mod
-/// block's saved tanks keep an id and an amount, so they take none with components. A cauldron
-/// takes water and lava whatever their components and discards them, as NeoForge's
-/// `CauldronFluidContent` does: the one place a fluid's components are dropped, and what comes
-/// out of a cauldron is plain.
+/// Whether the tanks at `at` take `fluid`. A mod block's saved tanks keep an id and an amount,
+/// so they take vanilla's fluids and a mod's own, without components. A cauldron takes only
+/// water and lava, discarding their components as NeoForge's `CauldronFluidContent` does:
+/// the one place a fluid's components are dropped, and what comes out of a cauldron is plain.
 fn game_holds(fluid: &FluidStack, at: &FluidAt) -> bool {
-    matches!(&*fluid.fluid, "minecraft:water" | "minecraft:lava")
-        && (matches!(at, FluidAt::Cauldron(_)) || !fluid.has_components())
+    match at {
+        FluidAt::Mod(_) => tank_fluid(&fluid.fluid) && !fluid.has_components(),
+        FluidAt::Cauldron(_) => matches!(&*fluid.fluid, "minecraft:water" | "minecraft:lava"),
+    }
 }
 
 /// A capability amount in the fluid helpers' millibuckets.
@@ -400,6 +421,31 @@ mod tests {
     use super::*;
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
+
+    /// Tanks hold vanilla's two fluids and any of a mod's own; not a
+    /// made-up vanilla one, nor a name that isn't an identifier.
+    #[test]
+    fn a_tank_holds_vanilla_fluids_and_mods_own() {
+        for fluid in [
+            "minecraft:water",
+            "minecraft:lava",
+            "create:chocolate",
+            "create:potion/healing",
+        ] {
+            assert!(tank_fluid(fluid), "{fluid}");
+        }
+        for fluid in [
+            "minecraft:milk",
+            "minecraft:empty",
+            "chocolate",
+            ":x",
+            "create:",
+            "Create:honey",
+            "create:honey cake",
+        ] {
+            assert!(!tank_fluid(fluid), "{fluid}");
+        }
+    }
 
     #[test]
     fn a_cauldron_level_holds_a_third_of_a_bucket() {

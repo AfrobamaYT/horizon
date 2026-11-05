@@ -98,7 +98,6 @@ pub fn main_with(
         // The log's first line names the build, so a bug report that carries the log says which one it was.
         log::info!("Horizon {}", crash::version());
         crash::install(home.clone(), side);
-        ram_limit::start(&home, side);
     }
     let renderers = mod_api::__private::mods()
         .iter()
