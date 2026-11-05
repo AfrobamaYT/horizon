@@ -29,14 +29,14 @@ Build the book with `mdbook build docs/modding` and the reference with `cargo do
 
 # What a PR needs to show
 
-Prove only what your change can break.
+Code review, CI and your own focused tests are the proof. You don't need to run the game.
 
-| Change | Proof |
-|---|---|
-| Docs, tests, CI, a refactor with no behaviour change, a new read-only method | A focused test, or nothing for docs |
-| A new hook, a world or game-state write, a timing or ordering change, a gameplay change | One in-game run on the side it affects, said in the PR body; a dedicated server only when the code path differs there |
-| Rendering or UI | The in-game run plus one screenshot |
-| Changes or removes something mods already use | Also run [horizon-machine-sample](https://github.com/arismoko/horizon-machine-sample) at your head (`tools/test_stage.py` and `horizon.py check`) |
+A reviewer runs your change in game at your head only when a test can't cover one of these, and says which:
 
-A new item's `///` doc is its reference. If you can't run the game, say so: a reviewer runs the check at your head, and
-the PR is judged on its code.
+- rendering or UI, what the player sees;
+- client-server sync: LAN guests, a dedicated server, packets;
+- when or in what order something happens compared with vanilla, such as a hook's firing point.
+
+If your PR changes or removes something mods already use, the reviewer also runs
+[horizon-machine-sample](https://github.com/arismoko/horizon-machine-sample) against it. A new item's `///` doc is its
+reference.
