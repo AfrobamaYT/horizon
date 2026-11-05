@@ -6,7 +6,8 @@
 //! `canBeAffected` and the added-effect hooks. Reads return `None`, writes
 //! false, for a stale handle or on a client; armor stands and the dragon
 //! keep no effects, as `/effect` skips them. `effect` and `effects` also read
-//! on a client, for the local player, from the effects the server sent it.
+//! on a client, for the local player, from the effects the server sent it, and
+//! `effect_blend_factor` reads only there, from the fades the client ticks.
 use super::Game;
 use super::commands::Target;
 use horizon_client::brewing;
@@ -203,6 +204,38 @@ impl Game<'_> {
         }
     }
 
+    /// `LivingEntity.getEffectBlendFactor(effect, partialTick)` on a client:
+    /// how far the effect has faded in, from 0 to 1, between the last tick
+    /// and the next at `partial`. Darkness fades in and out over 22 ticks and
+    /// nausea in over 150 and out over 20 (`MobEffect.setBlendDuration`), the
+    /// fades the fog, lightmap and screen spin draw; any other effect has no
+    /// fade and reads 1 while it lasts (vanilla's reaches 1 over the first
+    /// tick after a blended add). A bare vanilla id reads as `minecraft:`'s.
+    /// 0 when the entity lacks the effect. None for an unknown id, a stale
+    /// handle, or an entity other than the local player: the client keeps no
+    /// other entity's effects.
+    pub(super) fn native_living_effect_blend_factor(
+        &self,
+        living: LivingRef,
+        effect: &str,
+        partial: f32,
+    ) -> Option<f32> {
+        let def = brewing::effect(effect)?;
+        let Target::Player = self.native_living_read_target(living)? else {
+            return None;
+        };
+        let Some(e) = self.potions.effects.get(def.id) else {
+            return Some(0.0);
+        };
+        Some(match def.id {
+            "darkness" => self.darkness_blend(partial),
+            "nausea" => self.nausea_blend(partial),
+            // `BlendState.tick` with no blend duration: on until its last tick.
+            _ if e.ends_within(0) => 0.0,
+            _ => 1.0,
+        })
+    }
+
     /// `LivingEntity.removeEffect(effect)` the way its running out goes
     /// (`LivingEntity.tickEffects` drops it): what the effect gave the
     /// player goes with it — the attribute modifiers recompute
@@ -397,6 +430,97 @@ mod tests {
             ));
             assert_eq!(
                 game.native_living_apply_consume_effect(stale, &item("minecraft:pufferfish"), 0),
+                None
+            );
+        });
+    }
+
+    /// `LivingEntity.getEffectBlendFactor` on a client: the local player's
+    /// darkness fades in a 22nd a tick and nausea a 150th
+    /// (`MobEffect.setBlendDuration` in `MobEffects`), an effect with no fade
+    /// is on at once, a missing one reads 0, and no other entity reads.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_reads_the_local_players_effect_blend_factors() {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_client::{effects::EffectInstance, motion::PlayerMotion};
+        use horizon_protocol::connection::Pipe;
+        let close =
+            |read: Option<f32>, expected: f32| read.is_some_and(|f| (f - expected).abs() < 1e-6);
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "BlendReadTest").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let me = game.native_living(game.native_entity(7).unwrap()).unwrap();
+            assert_eq!(
+                me.effect_blend_factor(game, "minecraft:darkness", 0.5),
+                Some(0.0)
+            );
+
+            // A blended darkness starts from nothing; two client ticks later
+            // it is between 1/22 and 2/22.
+            game.potions
+                .effects
+                .list
+                .push(EffectInstance::new("darkness", 200, 0));
+            game.sculk.darkness = (0.0, 0.0);
+            assert_eq!(me.effect_blend_factor(game, "darkness", 1.0), Some(0.0));
+            game.tick_client_effects();
+            game.tick_client_effects();
+            assert!(close(
+                me.effect_blend_factor(game, "minecraft:darkness", 0.0),
+                1.0 / 22.0
+            ));
+            assert!(close(
+                me.effect_blend_factor(game, "minecraft:darkness", 0.5),
+                1.5 / 22.0
+            ));
+
+            // Nausea fades in over 150 ticks, as the screen spin ticks it.
+            game.potions
+                .effects
+                .list
+                .push(EffectInstance::new("nausea", 600, 0));
+            game.screen_fx.tick_spinning(Some(true));
+            assert!(close(
+                me.effect_blend_factor(game, "minecraft:nausea", 0.5),
+                0.5 / 150.0
+            ));
+
+            // Speed has no fade: it is on while it lasts.
+            game.potions
+                .effects
+                .list
+                .push(EffectInstance::new("speed", 100, 0));
+            assert_eq!(
+                me.effect_blend_factor(game, "minecraft:speed", 0.0),
+                Some(1.0)
+            );
+
+            // Gone, darkness reads 0 though its fade had not reached 0.
+            game.potions.effects.list.retain(|e| e.id != "darkness");
+            assert_eq!(
+                me.effect_blend_factor(game, "minecraft:darkness", 0.5),
+                Some(0.0)
+            );
+
+            // An unknown id, another entity and a stale handle read nothing.
+            assert_eq!(me.effect_blend_factor(game, "minecraft:bogus", 0.5), None);
+            let epoch = me.entity().epoch();
+            let other = LivingRef::new(EntityRef::new(epoch, 8));
+            assert_eq!(
+                other.effect_blend_factor(game, "minecraft:speed", 0.5),
+                None
+            );
+            let stale = LivingRef::new(EntityRef::new(NativeWorldEpoch::new(epoch.get() + 1), 7));
+            assert_eq!(
+                stale.effect_blend_factor(game, "minecraft:speed", 0.5),
                 None
             );
         });
