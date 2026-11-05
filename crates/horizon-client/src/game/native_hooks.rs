@@ -991,7 +991,6 @@ use horizon_client::{
         Victim,
     },
     hud::{HudBatch, rgba},
-    item_tooltip::TooltipDisplay,
     items::ItemStack,
     keybinds,
     lan::menu::Slots,
@@ -1026,7 +1025,7 @@ use mod_api::{
     TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentStore, BlockHit, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
+    AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
     LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, TooltipPlace, UsePhase,
