@@ -614,16 +614,13 @@ pub fn build_overlay(vanilla: &Path, packs: &[Pack], out: &Path) -> io::Result<(
     cache::build(vanilla, packs, out)
 }
 
-fn build_overlay_uncached(
-    vanilla: &Path,
-    packs: &[Pack],
-    out: &Path,
-    dependencies: &mut cache::Dependencies,
-) -> io::Result<()> {
-    if out.exists() {
-        fs::remove_dir_all(out)?;
-    }
-    fs::create_dir_all(out)?;
+struct ResolvedPacks {
+    files: BTreeMap<String, (usize, Provided)>,
+    stacks: BTreeMap<String, Vec<(usize, Provided)>>,
+    hidden: BTreeSet<String>,
+}
+
+fn resolve(packs: &[Pack]) -> io::Result<ResolvedPacks> {
     let sources: Vec<_> = packs
         .iter()
         .map(|pack| pack.source.open())
@@ -681,24 +678,60 @@ fn build_overlay_uncached(
     for name in &hidden {
         files.remove(name);
     }
-    // Vanilla sits below every pack, so filters hide its files too.
-    let filters: Vec<&Filter> = packs.iter().flat_map(|p| &p.filter).collect();
-    let touched_dirs: BTreeSet<String> = files
-        .keys()
-        .flat_map(|f| {
-            let parts: Vec<&str> = f.split('/').collect();
-            (1..parts.len()).map(move |n| parts[..n].join("/"))
+    Ok(ResolvedPacks {
+        files,
+        stacks,
+        hidden,
+    })
+}
+
+/// Resolve a pack selection without creating an overlay directory. Files keep
+/// their open source; only vanilla's resource-stack merges are held as bytes.
+/// Diverges from upstream: jars and zip packs remain in place during loading.
+pub fn resources(
+    base: crate::resource_source::ResourceSource,
+    packs: &[Pack],
+) -> io::Result<crate::resource_source::ResourceSource> {
+    use crate::resource_source::{Resource, ResourceSource};
+    if packs.is_empty() {
+        return Ok(base);
+    }
+    let ResolvedPacks {
+        files,
+        stacks,
+        hidden,
+    } = resolve(packs)?;
+    let filters: Vec<_> = packs.iter().flat_map(|pack| &pack.filter).collect();
+    let mut index: BTreeMap<_, _> = base
+        .list("")
+        .into_iter()
+        .filter(|name| {
+            !hidden.contains(name)
+                && !filters.iter().any(|filter| filter.blocks(name))
+                && name != horizon_core::prepared_files::FILE_NAME
         })
+        .map(|name| (name.clone(), Resource::file(base.clone(), name)))
         .collect();
-    // Stacked files merge every layer, vanilla's first (unless filtered).
-    let mut merged: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    for (name, stack) in &stacks {
+    for (name, (_, (_, source, inner))) in files {
+        index.insert(name, Resource::file(source, inner));
+    }
+    for (name, bytes) in merged_resources(&base, packs, &stacks) {
+        index.insert(name, Resource::bytes(bytes));
+    }
+    Ok(ResourceSource::indexed(index))
+}
+
+fn merged_resources(
+    base: &crate::resource_source::ResourceSource,
+    packs: &[Pack],
+    stacks: &BTreeMap<String, Vec<(usize, Provided)>>,
+) -> BTreeMap<String, Vec<u8>> {
+    let filters: Vec<_> = packs.iter().flat_map(|pack| &pack.filter).collect();
+    let mut merged = BTreeMap::new();
+    for (name, stack) in stacks {
         let mut layers = Vec::new();
-        dependencies.file(&vanilla.join(name));
-        if !filters.iter().any(|f| f.blocks(name))
-            && let Ok(bytes) = fs::read(vanilla.join(name))
-        {
-            layers.push(bytes);
+        if !filters.iter().any(|filter| filter.blocks(name)) {
+            layers.extend(base.read(name).ok());
         }
         for (_, (_, source, inner)) in stack {
             layers.extend(source.read(inner).ok());
@@ -709,6 +742,41 @@ fn build_overlay_uncached(
             merged.insert(name.clone(), bytes);
         }
     }
+    merged
+}
+
+fn build_overlay_uncached(
+    vanilla: &Path,
+    packs: &[Pack],
+    out: &Path,
+    dependencies: &mut cache::Dependencies,
+) -> io::Result<()> {
+    if out.exists() {
+        fs::remove_dir_all(out)?;
+    }
+    fs::create_dir_all(out)?;
+    let ResolvedPacks {
+        files,
+        stacks,
+        hidden,
+    } = resolve(packs)?;
+    // Vanilla sits below every pack, so filters hide its files too.
+    let filters: Vec<&Filter> = packs.iter().flat_map(|p| &p.filter).collect();
+    let touched_dirs: BTreeSet<String> = files
+        .keys()
+        .flat_map(|f| {
+            let parts: Vec<&str> = f.split('/').collect();
+            (1..parts.len()).map(move |n| parts[..n].join("/"))
+        })
+        .collect();
+    for name in stacks.keys() {
+        dependencies.file(&vanilla.join(name));
+    }
+    let merged = merged_resources(
+        &crate::resource_source::ResourceSource::directory(vanilla.to_owned()),
+        packs,
+        &stacks,
+    );
     /// A zip entry to write: its pack, its name in the zip and where it goes.
     type Extract<'a> = (&'a crate::resource_source::ResourceSource, &'a str, PathBuf);
     #[allow(clippy::too_many_arguments)]
@@ -1225,6 +1293,135 @@ impl SelectionModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indexed_layers_keep_priority_filters_metadata_and_reload_without_unpacking() {
+        use crate::resource_source::ResourceSource;
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("horizon-indexed-packs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let vanilla = root.join("vanilla");
+        let low = root.join("low");
+        let maps = root.join("maps");
+        let write = |base: &Path, name: &str, bytes: &[u8]| {
+            let path = base.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        };
+        for (name, bytes) in [
+            ("assets/demo/common.txt", b"vanilla".as_slice()),
+            ("assets/demo/hidden.txt", b"vanilla"),
+            ("assets/demo/only_base.txt", b"base-only"),
+            ("assets/demo/textures/stone.png", b"base-colour"),
+            ("assets/demo/textures/stone_n.png", b"base-normal"),
+            ("assets/demo/textures/stone_s.png", b"base-specular"),
+            ("assets/demo/textures/stone.png.mcmeta", b"old-metadata"),
+            (
+                "assets/demo/lang/en_us.json",
+                br#"{"vanilla":"v","key":"v"}"#,
+            ),
+            ("tables.json", b"tables"),
+        ] {
+            write(&vanilla, name, bytes);
+        }
+        write(&low, "assets/demo/common.txt", b"folder");
+        write(&low, "assets/demo/hidden.txt", b"folder");
+        write(&low, "assets/demo/lang/en_us.json", br#"{"key":"folder"}"#);
+        write(&maps, "assets/demo/textures/stone_n.png", b"new-normal");
+        let archive_path = root.join("passive.jar");
+        let archive = |path: &Path, replacement: &[u8]| {
+            let mut writer = zip::ZipWriter::new(fs::File::create(path).unwrap());
+            for (name, bytes) in [
+                ("assets/demo/common.txt", b"jar".as_slice()),
+                ("new/assets/demo/common.txt", replacement),
+                ("assets/demo/hidden.txt", b"own-filtered-name"),
+                ("assets/demo/textures/stone.png", b"jar-colour"),
+                ("assets/demo/lang/en_us.json", br#"{"jar":"j"}"#),
+                ("assets/../../escape.txt", b"unsafe"),
+                ("Ignored.class", b"passive bytes"),
+            ] {
+                writer
+                    .start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            writer.finish().unwrap();
+        };
+        archive(&archive_path, b"overlay");
+        let low = Pack::mod_layer("folder".into(), Source::Dir(low));
+        let mut jar = Pack::mod_layer("jar".into(), Source::Zip(archive_path.clone()));
+        jar.overlays = vec!["new".into()];
+        jar.filter = filter_of(
+            &serde_json::json!({"filter":{"block":[{"namespace":"demo","path":"hidden\\.txt"}]}}),
+        );
+        let base = ResourceSource::directory(vanilla);
+        let before = ResourceSource::directory(root.clone()).list("");
+        let loaded = resources(base.clone(), &[low.clone(), jar.clone()]).unwrap();
+        assert_eq!(loaded.read("assets/demo/common.txt").unwrap(), b"overlay");
+        // A pack's own files survive its filter; only lower copies are hidden.
+        assert_eq!(
+            loaded.read("assets/demo/hidden.txt").unwrap(),
+            b"own-filtered-name"
+        );
+        assert_eq!(
+            loaded.read("assets/demo/only_base.txt").unwrap(),
+            b"base-only"
+        );
+        assert_eq!(loaded.read("tables.json").unwrap(), b"tables");
+        let lang: serde_json::Value =
+            serde_json::from_slice(&loaded.read("assets/demo/lang/en_us.json").unwrap()).unwrap();
+        assert_eq!(
+            lang,
+            serde_json::json!({"vanilla":"v","key":"folder","jar":"j"})
+        );
+        for hidden in [
+            "assets/demo/textures/stone_n.png",
+            "assets/demo/textures/stone_s.png",
+            "assets/demo/textures/stone.png.mcmeta",
+            "Ignored.class",
+        ] {
+            assert_eq!(
+                loaded.read(hidden).unwrap_err().kind(),
+                io::ErrorKind::NotFound
+            );
+            assert!(!loaded.list("").iter().any(|name| name == hidden));
+        }
+        assert_eq!(ResourceSource::directory(root.clone()).list(""), before);
+        assert!(!root.join("assets").exists());
+        assert!(!root.join("escape.txt").exists());
+        let maps = Pack::mod_layer("maps".into(), Source::Dir(maps));
+        let with_maps = resources(base.clone(), &[low.clone(), jar.clone(), maps]).unwrap();
+        assert_eq!(
+            with_maps.read("assets/demo/textures/stone_n.png").unwrap(),
+            b"new-normal"
+        );
+        let mut filter_only = jar.clone();
+        filter_only.source = Source::Dir(root.join("empty"));
+        filter_only.overlays.clear();
+        let filtered = resources(base.clone(), &[low.clone(), filter_only]).unwrap();
+        assert_eq!(
+            filtered.read("assets/demo/hidden.txt").unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert!(
+            !filtered
+                .list("assets/demo/")
+                .iter()
+                .any(|name| name.ends_with("hidden.txt"))
+        );
+        let replacement = root.join("replacement.jar");
+        archive(&replacement, b"reloaded");
+        fs::rename(&archive_path, root.join("old.jar")).unwrap();
+        fs::rename(replacement, &archive_path).unwrap();
+        let reloaded = resources(base, &[low, jar]).unwrap();
+        assert_eq!(
+            reloaded.read("assets/demo/common.txt").unwrap(),
+            b"reloaded"
+        );
+        assert_eq!(loaded.read("assets/demo/common.txt").unwrap(), b"overlay");
+        let _ = fs::remove_dir_all(root);
+    }
 
     /// `DownloadedPackSource.DOWNLOADED_PACK_SELECTION`: the pack is selected,
     /// fixed at the top, cannot be removed, and stays out of options.txt.

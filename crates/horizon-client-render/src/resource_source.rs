@@ -3,6 +3,7 @@
 //! Diverges from upstream: asset and passive jar-data layers share this source.
 use crate::zip::Zip;
 use std::{
+    collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
     sync::Arc,
@@ -15,6 +16,34 @@ enum Storage {
         source: ResourceSource,
         prefix: String,
     },
+    Index(BTreeMap<String, Resource>),
+}
+
+/// A winning resource keeps its source alive; merged resources keep only their
+/// derived bytes. Reading an archive entry remains lazy after pack resolution.
+#[derive(Clone)]
+pub struct Resource(ResourceStorage);
+#[derive(Clone)]
+enum ResourceStorage {
+    File {
+        source: ResourceSource,
+        name: String,
+    },
+    Bytes(Arc<[u8]>),
+}
+impl Resource {
+    pub fn file(source: ResourceSource, name: String) -> Self {
+        Self(ResourceStorage::File { source, name })
+    }
+    pub fn bytes(bytes: Vec<u8>) -> Self {
+        Self(ResourceStorage::Bytes(bytes.into()))
+    }
+    pub fn read(&self) -> io::Result<Vec<u8>> {
+        match &self.0 {
+            ResourceStorage::File { source, name } => source.read(name),
+            ResourceStorage::Bytes(bytes) => Ok(bytes.to_vec()),
+        }
+    }
 }
 
 /// A folder or an open zip/jar, with the same relative-name lookup and listing.
@@ -55,6 +84,9 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
 }
 
 impl ResourceSource {
+    pub fn indexed(files: BTreeMap<String, Resource>) -> Self {
+        Self(Arc::new(Storage::Index(files)))
+    }
     pub fn directory(root: PathBuf) -> Self {
         Self(Arc::new(Storage::Directory(root)))
     }
@@ -95,6 +127,10 @@ impl ResourceSource {
             Storage::Directory(root) => horizon_core::prepared_files::read(&root.join(name)),
             Storage::Archive(archive) => archive.read(name),
             Storage::Prefix { source, prefix } => source.read(&format!("{prefix}{name}")),
+            Storage::Index(files) => files
+                .get(name)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
+                .read(),
         }
     }
     /// File names from the layer root, in name order. A directory prefix ends
@@ -128,6 +164,10 @@ impl ResourceSource {
                 .list(&format!("{base}{prefix}"))
                 .into_iter()
                 .filter_map(|name| name.strip_prefix(base).map(str::to_owned))
+                .collect(),
+            Storage::Index(files) => files
+                .range(prefix.to_owned()..)
+                .map_while(|(name, _)| name.starts_with(prefix).then(|| name.clone()))
                 .collect(),
         }
     }
