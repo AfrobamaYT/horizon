@@ -392,6 +392,13 @@ pub(super) fn stop_on_quit() {
     }
 }
 
+/// Update closes the window to open the new launcher at once: a server is its own process and the
+/// new window finds it running, so an update doesn't end anyone's game. It stays up when that new
+/// window closes too, until it is stopped on the Servers page.
+pub(super) fn keep_running_through_update() {
+    STARTED_HERE.lock().unwrap().clear();
+}
+
 /// The player's own name, to let them in on a friends-only server: the Microsoft account that plays,
 /// else the name the game made up for them (`horizon-player.txt`).
 fn own_name(accounts: &Accounts) -> Option<String> {
@@ -1367,34 +1374,12 @@ impl Launcher {
         {
             page = page.child(self.problem_notice(p, cx));
         }
-        // The banner, with a "Hide" once it has been on screen a while: hiding it hides the
-        // sidebar's card too, for good. Nothing at all once hidden.
-        let partner = (!self.settings.partner_hidden).then(|| {
-            let mut slot = div().relative().w(px(600.)).child(super::partner::banner(
-                "partner-servers",
-                600.,
-                &t,
-            ));
-            if self.settings.partner_seen_secs >= super::partner::SEEN_BEFORE_HIDE {
-                slot = slot.child(
-                    super::partner::hide_button("partner-servers-hide", &t).on_click(cx.listener(
-                        |this, _: &ClickEvent, _, cx| {
-                            this.settings.partner_hidden = true;
-                            this.save_settings();
-                            cx.notify();
-                        },
-                    )),
-                );
-            }
-            slot
-        });
         if self.servers.list.is_empty() {
             return page
                 .child(centered(
                     tr("No server yet. Create one: it takes a few seconds, and with the defaults (tick the EULA, press Create) you get a friends-only survival world."),
                     &t,
-                ))
-                .children(partner);
+                ));
         }
         let mut list = div().flex().flex_col().border_t_1().border_color(t.rule);
         for (i, e) in self.servers.list.clone().into_iter().enumerate() {
@@ -1440,7 +1425,7 @@ impl Launcher {
                 &t,
             ));
         }
-        page.child(list).children(partner)
+        page.child(list)
     }
 
     fn add_server_folder(&mut self, cx: &mut Context<Self>) {

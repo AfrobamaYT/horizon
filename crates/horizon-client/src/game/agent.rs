@@ -696,7 +696,7 @@ impl Game<'_> {
                 v["villager"] = json!({
                     "type": VILLAGER_TYPES[m.extra.variant as usize % VILLAGER_TYPES.len()],
                     "profession": PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()],
-                    "level": m.extra.variant3,
+                    "level": m.extra.villager_level,
                 });
             }
             push(
@@ -1648,6 +1648,11 @@ impl Game<'_> {
                     .trim_start_matches('/');
                 if text.is_empty() {
                     return Err("command TEXT".into());
+                }
+                // A native mod's command first, as typed chat does; the
+                // server's console cannot run a client mod's command.
+                if self.client_mod_command(text) {
+                    return ok(json!({ "ok": true, "chat": self.ui.chat.recent_lines(5) }));
                 }
                 let command = format!("/{text}");
                 // Single player's console is its server thread's.

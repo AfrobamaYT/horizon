@@ -495,12 +495,14 @@ impl Game<'_> {
         const BACKGROUND: u32 = 0x3F00_0000;
         // The camera's facing (Camera.rotation()), turned round in third-person
         // front view, so the text reads the right way from where it is seen.
-        let (view_yaw, view_pitch) =
-            if self.camera_type == super::perspective::CameraType::ThirdPersonFront {
+        let (view_yaw, view_pitch) = match self.posed_rotation {
+            // The frame's camera, already turned round in front view.
+            Some(rotation) => rotation,
+            None if self.camera_type == super::perspective::CameraType::ThirdPersonFront => {
                 (self.yaw + 180.0, -self.pitch)
-            } else {
-                (self.yaw, self.pitch)
-            };
+            }
+            None => (self.yaw, self.pitch),
+        };
         let forward = glam::DVec3::from_array(view_vector(view_yaw, view_pitch));
         let right = forward.cross(glam::DVec3::Y).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
@@ -573,7 +575,7 @@ impl Game<'_> {
 fn named_by_player_list(players: &[(&Mob, String)]) -> std::collections::HashSet<u32> {
     players.iter().map(|(player, _)| player.id).collect()
 }
-fn name_tag_at(m: &Mob, alpha: f64) -> glam::DVec3 {
+pub(super) fn name_tag_at(m: &Mob, alpha: f64) -> glam::DVec3 {
     glam::DVec3::new(
         m.previous.x + (m.position.x - m.previous.x) * alpha,
         m.previous.y + (m.position.y - m.previous.y) * alpha + f64::from(m.height()) + 0.5,

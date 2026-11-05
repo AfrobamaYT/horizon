@@ -1,5 +1,32 @@
 # Hook notes
 
+## Foreground GUI and client lifecycle
+
+`Hooks::gui_render_post` runs after the frame's GUI, including menus and the
+F1-hidden HUD. Its `batch` is a `DrawContext`, not an engine `HudBatch`; use
+its drawing methods and `size()` to place overlays. `gui_hidden` and `focused`
+let a listener choose whether to draw. The GUI paint, nine-slice, and tooltip
+operations also use this drawing context and the window's existing atlas.
+`Hooks::menu_background` can adjust the requested blur radius or set it to
+`None` before the game validates it.
+
+`Hooks::entity_outline` receives the entity id, kind, and mutable optional RGB
+outline for the current client render. Leave the existing value unchanged to
+preserve vanilla glowing; `None` disables it. These read-only client hooks
+receive `&dyn ClientHost`. They do not grant server writes.
+
+`Hooks::client_disconnecting` runs before an actual connection is discarded,
+not for a dimension change. Initialization and final shutdown still use the
+existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
+
+## Sending a map image
+
+`PlayerRef::send_map` sends a complete 128-by-128 map image through a
+`&mut dyn ServerHost`. It validates the live player handle and refuses fake
+players; a connectionless actor never produces a protocol packet. The image
+uses map colour bytes and is not saved in the world's map storage. Send it
+again after a player reconnects if no saved map owns that id.
+
 ## Decoded client packets
 
 `Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
@@ -162,9 +189,13 @@ requires a farmer at work and `mob_griefing` enabled.
 
 - Breaking and placing a block, on the server for every player: `native_break_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
-  drops; `native_entity_place` (`EntityPlaceEvent`, `EntityMultiPlaceEvent`) hears a block placed from an item
+  drops. Set `exp_to_drop` to `Some(amount)` to replace the vanilla XP sample later, after item drops are prepared;
+  `None` retains vanilla sampling. The subsequent `block_drops` event can edit the resulting experience or cancel
+  the drops, and disabled block drops suppress both items and XP. `native_entity_place` (`EntityPlaceEvent`, `EntityMultiPlaceEvent`) hears a block placed from an item
   (`BlockItem.place`), an enderman putting its block down or a snow golem's trail, before it is written, and may cancel it:
-  nothing is placed and the stack is kept. A bed, door or tall plant arrives as one `Placement::Multi`. Silverfish
+  nothing is placed and the stack is kept. For a player, `placed_against` is the state next to the primary placed
+  block opposite the clicked face, even when the clicked block is replaceable; for mobs it is the state below.
+  A bed, door or tall plant arrives as one `Placement::Multi`. Silverfish
   infesting, turtle eggs and falling blocks are not placements yet.
 
 - Block entities for a mod's blocks (`native_block_entity`, `native_block_entity_ticks`,
@@ -189,8 +220,8 @@ requires a farmer at work and `mob_griefing` enabled.
   own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`).
 
 - Buttons, tooltips and item icons on mod screens: `native_screen_click` and `native_screen_tooltip` (the client), `native_menu_button`
-  (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_block`,
-  `native_block_property` and `native_cursor`. A mod inserts items through the block's item capability,
+  (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `LevelRef::block`,
+  `LevelRef::block_property` and `native_cursor`. A mod inserts items through the block's item capability,
   `level.capability(host, &ITEMS, pos, side)`.
 - `click_menu_button(button)`, a client helper, presses button `button` of the open menu as a click on one of its buttons does
   (`MultiPlayerGameMode.handleInventoryButtonClick`, `ServerboundContainerButtonClickPacket`); the server's menu decides what it does
@@ -679,6 +710,8 @@ or transactions. Declarations still go on each event or registrar.
 `native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen` (the answering mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins, and the dispatch records its id, so a mod can open only its own screen. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game where no mod listens to `screen_opening` or `screen_closing` assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs, and the command, link, code-of-conduct and server-pack prompts) open through `Game::open_screen_overlay`, which fires `screen_opening` before the overlay is set and honours `Cancel` and `ModScreen` in the same way (a canceled server-pack prompt leaves its packs unanswered, a canceled code of conduct leaves the server waiting, as in NeoForge), then `screen_closing` for an overlay it replaces. The title's own screens (`world_select`, `world_create`, `world_edit`, `multiplayer`, `onboarding`…) open in the same way: `Title::set_mode` asks for the screen while a mod listens to `screen_opening` or `screen_closing`, and the game fires `screen_opening` (from the title screen shown) and `screen_closing` for the one left before it applies it, after the window event or control command that asked; `Cancel` keeps the screen shown, and `ModScreen` opens the screen asked for, since a mod's own screen can't open over the title. The multiplayer list's own steps (`add_server`, `edit_server`, `direct_connect`, `server_delete`, `friends_join`, and back to `multiplayer`) are title screens too and go the same way. The title appearing as a whole (at startup, when a world closes, after a disconnect or a failed join) and going (when a world opens) goes through `Game::show_title` and `Game::hide_title`: `screen_opening` (from no screen to the title's screen, or back) and `screen_closing` for what it leaves fire before the change, and `screen_init_post` follows an appearance; a `Cancel` doesn't keep the title shut when there is no world to show instead, nor keep it open over a world that opens. Still announced by the per-frame observer, through the same function and in the same order but after the change, so a mod's answer can't keep it shut: an overlay's closing. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
 
 - `native_client_resources_reloaded()` fires on the render thread after successful client resource-pack application: the atlas, models, renderer and client caches already use the new resources. It covers selection/F3+T and server-pack reloads. Failed staging or application and initial startup do not fire it. This is a completion notification, not a reload-listener registration or staging API.
+
+- `client_stopped` fires after the client shutdown finishes. `game_shutting_down` fires after that on clients and after the dedicated server stops, with a side-typed host. Both fire once on orderly process exit; neither fires for a splitscreen guest. There is no separate `client_started`: `client_setup` covers that moment.
 
 - `native_client_stopping()` (Fabric's `ClientLifecycleEvents.CLIENT_STOPPING`; NeoForge has no event for it) fires once per game process, on the render thread, when the game shuts down: after the world the player was in is left and saved, with the settings and resources still held, so a listener can read them through the `ClientHost` and save its own client state. Closing the window, a quit shortcut and the stop signals reach it; a crash does not. A dedicated server and a splitscreen guest never fire it, as they never fire `client_setup`. Listeners are pure functions of the `ClientHost` reads and the mod's own state. Tick-time effect: none, it fires once at exit. Diverges from upstream: new hook.
 
@@ -2155,6 +2188,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `host.entity(id)` and `host.level(dimension)`: the local player or an entity the server told the client of, and the
   one level the client shows. `host.living(entity)` is the local player only.
 - `entity.position(host)`, `rotation(host)` and `velocity(host)`: the client's copy, interpolated as it draws it.
+- `entity.name(host)`: the synced custom name or type name, and a player's profile name, from either side's host.
 - `level.block_state(host, pos)`, `block`, `block_property` and `is_loaded`: blocks of the chunks the client holds.
   A chunk it doesn't hold reads as unloaded; no read loads one.
 - `living.equipment(host, slot)`, `hand_item`, `effect`, `effects`, `health` and `max_health`, for the local player.
@@ -2469,6 +2503,11 @@ negative interval, an empty `items` list, and a species id no mob type carries. 
 for a stale handle, a client, the dragon, and a mob whose copy is held out — nothing in a mob's own tick resolves, as
 `Host` is not there yet: change goals in `entity_join`, which fires for a loaded chunk's mobs too. Goals are not saved,
 as in vanilla: after a reload the mob has its species' set again, and a mod's `entity_join` adds its own back.
+
+These methods reuse built-in goal kinds; they do not define arbitrary goal callbacks or run at construction's
+`Mob.registerGoals` moment. [Custom mob goals at construction](https://github.com/arismoko/horizon/issues/1077)
+tracks a typed goal registrar and callbacks on `MobRef` and Parts, shared by native and wasm mods. NeoForge has
+no bus event at this moment. The upstream raw-`Mob` `register_goals` interface is not part of this fork's API.
 
 ### Mobs drawn by a mod
 
@@ -2935,3 +2974,5 @@ Horizon ticks vanilla's spawners where it always has: the trader, patrol, cat an
 ## Finalize spawn
 
 - **`finalize_spawn(dimension, kind, reason, pos, spawner, difficulty, spawn_cancelled, cancel)`** (NeoForge's `FinalizeSpawnEvent`): fires where the game calls `Mob.finalizeSpawn` for a mob it made, before it runs. There are two cancels, as in NeoForge: return `Flow::Cancel` to skip finalization (no equipment, attributes or class setup; the mob still spawns uninitialised, and finalization's random draws are skipped), or set `spawn_cancelled` so no mob is added. `difficulty` (`NativeDifficulty`) is settable and is what finalization reads. `spawner` is `NativeSpawner::Block` for a spawner or trial spawner, none otherwise. Fired only where vanilla 26.3 calls `finalizeSpawn`, with vanilla's reason at that call: natural spawning, chunk generation, spawners, trial spawners, patrols, raids and sieges, reinforcements, cat spawners, phantoms, jockeys, `/summon`, `/raid`, spawn eggs, dispensers, the nether portal's piglin (`Structure`), skeleton traps, evoker vexes, wandering traders and conversions. Not fired where vanilla creates the mob without it (breeding, an infested block's silverfish, a thrown egg's chick, a thrown pearl's endermite, hatching eggs, built golems, the oozing effect's slimes, a lightning trap's horse), for loads (`persist.rs` finalizes a placed entity only through its `horizon:finalize` marker, which is a load) or for structure mobs placed by world generation. Group data is left out: it lives only in the worldgen `finalize` path, which has no host. Both new types are plain data (`NativeDifficulty` and `NativeSpawner`, `#[non_exhaustive]`). Read-only host; replayed ticks, so listeners are pure functions of their inputs. Tick-time effect: one `listened` branch with no listeners. Beyond NeoForge: none.
+
+`window_resize` notifies client mods after a window resize or applying a changed GUI scale, fullscreen, or Unicode font setting. Its width and height are physical pixels; duplicate physical resize events are suppressed.

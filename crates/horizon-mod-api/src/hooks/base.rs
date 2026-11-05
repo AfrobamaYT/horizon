@@ -437,7 +437,11 @@ pub trait Hooks {
     /// (the held item can break blocks, the debug stick didn't take the
     /// click): where `ServerPlayerGameMode.destroyBlock` starts. Set
     /// `canceled` to keep the block: nothing is destroyed or dropped, and a
-    /// guest sees it back. Server-side, for every player of the world (the
+    /// guest sees it back. Set `exp_to_drop` to `Some(amount)` to replace
+    /// the vanilla experience sample later, after item drops are prepared;
+    /// `None` keeps vanilla sampling. `block_drops` sees and may change that
+    /// amount afterwards; cancellation or disabled block drops suppresses it.
+    /// Server-side, for every player of the world (the
     /// helpers read the acting one). Diverges from upstream: renamed from
     /// `destroy_block`, to NeoForge's `BlockEvent.BreakEvent`.
     #[hook(
@@ -4660,10 +4664,6 @@ pub trait Helpers {
     fn item();
     #[helper(side = "client")]
     fn screen_title();
-    #[helper(side = "both")]
-    fn block();
-    #[helper(side = "both")]
-    fn block_property();
     #[helper(side = "client")]
     fn cursor();
     #[helper(side = "client")]
