@@ -1358,7 +1358,7 @@ impl Hub {
         let joined = C::SystemChat(play::SystemChat {
             content: yellow_names(
                 "multiplayer.player.joined",
-                vec![display_name(&self.loop_context, self.guests[i].uuid, &name)],
+                vec![self.player_display_name(self.guests[i].uuid, &name)],
             ),
             overlay: false,
         })
@@ -2195,7 +2195,7 @@ impl Hub {
         let left = C::SystemChat(play::SystemChat {
             content: yellow_names(
                 "multiplayer.player.left",
-                vec![display_name(&self.loop_context, g.uuid, &g.name)],
+                vec![self.player_display_name(g.uuid, &g.name)],
             ),
             overlay: false,
         })
