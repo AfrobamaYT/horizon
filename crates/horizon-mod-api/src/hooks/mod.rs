@@ -90,6 +90,7 @@ mod client_setup;
 mod client_stopping;
 mod client_tick_post;
 mod client_tick_pre;
+mod clipboard;
 mod clone_item_stack;
 mod compute_fov_modifier;
 mod connects_to;

@@ -3458,6 +3458,9 @@ struct Game<'a> {
     gamemode_switcher: Option<horizon_client::game_mode_switcher::GameModeSwitcher>,
     /// The system clipboard (`KeyboardHandler.clipboardManager`).
     clipboard: horizon_client::clipboard::SystemClipboard,
+    /// The game is handling a key, mouse or typed-text event, from the window or the
+    /// control socket: the only time a mod reaches the clipboard (`with_user_input`).
+    user_input: std::cell::Cell<bool>,
     /// Select All in the append-only text fields.
     text_selection: horizon_client::clipboard::AppendSelection,
     /// The world was saved for the application ending (`save_for_exit`).
@@ -18279,7 +18282,10 @@ impl ApplicationHandler for Game<'_> {
                 (_, false) => mod_api::KeyAction::Press,
                 (_, true) => mod_api::KeyAction::Repeat,
             };
-            self.native_input_key(name.unwrap_or("key.keyboard.unknown"), action, modifiers);
+            // Still the key's handling: a mod's key hook may reach the clipboard.
+            self.with_user_input(true, |game| {
+                game.native_input_key(name.unwrap_or("key.keyboard.unknown"), action, modifiers);
+            });
         }
     }
     fn device_event(&mut self, event_loop: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
@@ -18322,6 +18328,24 @@ impl Game<'_> {
     /// winit's `window_event`. The control socket and the pad menu call it too, with the
     /// input they make up.
     pub(super) fn handle_window_event(
+        &mut self,
+        event_loop: &dyn EventLoopCtl,
+        id: WindowId,
+        event: WindowEvent,
+        origin: input_trace::InputOrigin,
+    ) {
+        let input = matches!(
+            event,
+            WindowEvent::KeyboardInput { .. }
+                | WindowEvent::MouseInput { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::Ime(_)
+        );
+        self.with_user_input(input, |game| {
+            game.handle_window_event_as(event_loop, id, event, origin);
+        });
+    }
+    fn handle_window_event_as(
         &mut self,
         event_loop: &dyn EventLoopCtl,
         id: WindowId,
@@ -20462,6 +20486,7 @@ impl<'a> Game<'a> {
             previous_mode: None,
             gamemode_switcher: None,
             clipboard: Default::default(),
+            user_input: Default::default(),
             text_selection: Default::default(),
             saved_for_exit: false,
             pending_save: None,
