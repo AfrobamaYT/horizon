@@ -794,11 +794,35 @@ mod tests {
                         backend.functions.keys()
                     );
                 }
+                let reads = &resolve.interfaces[package.interfaces["backend"]];
+                for name in ["player-address", "player-permission-level"] {
+                    assert!(reads.functions.contains_key(name), "missing {name}");
+                    assert!(!wasm.unbound.iter().any(|method| {
+                        method == &format!("Backend::{}", name.replace('-', "_"))
+                    }));
+                }
+                for interface in package.interfaces.values() {
+                    assert!(!resolve.interfaces[*interface].functions.contains_key("player-op-level"));
+                }
+                let declarations = syn::parse_file(&generated.host).unwrap();
+                let player = declarations.items.iter().find_map(|item| match item {
+                    syn::Item::Impl(item)
+                        if matches!(&*item.self_ty, syn::Type::Path(ty) if ty.path.is_ident("PlayerRef")) => Some(item),
+                    _ => None,
+                }).unwrap();
+                let methods: Vec<_> = player.items.iter().filter_map(|item| match item {
+                    syn::ImplItem::Fn(method) => Some(method.sig.ident.to_string()),
+                    _ => None,
+                }).collect();
+                assert!(methods.iter().any(|method| method == "address"));
+                assert!(methods.iter().any(|method| method == "permission_level"));
+                assert!(!methods.iter().any(|method| method == "op_level"));
                 let implementation = syn::parse_file(&generated.implementation).unwrap();
                 for (service, methods) in [
                     ("Commands", &["run_command", "feedback"][..]),
                     ("Messages", &["broadcast", "text_allowed"][..]),
                     ("Players", &["acting_player", "server_players"][..]),
+                    ("Backend", &["player_address", "player_permission_level"][..]),
                 ] {
                     let item = implementation
                         .items
