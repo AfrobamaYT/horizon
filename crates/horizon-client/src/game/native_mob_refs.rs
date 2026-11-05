@@ -342,10 +342,18 @@ impl Game<'_> {
         self.native_mob_set_flag(mob, MobFlag::Persistent, true)
     }
 
-    /// `Mob.requiresCustomPersistence`. The game's despawn rule holds
-    /// exactly the `PersistenceRequired` mobs, so this is that flag.
+    /// `Mob.requiresCustomPersistence` and its species overrides: passengers,
+    /// leashed mobs and species-specific reasons to stay, such as an enderman
+    /// carrying a block. Independent of `PersistenceRequired` and `NoAI`.
+    /// None for an unavailable mob or the separately modeled dragon.
     pub(super) fn native_mob_requires_custom_persistence(&self, mob: MobRef) -> Option<bool> {
-        self.native_mob_flag(mob, MobFlag::Persistent)
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        self.mobs
+            .iter()
+            .find(|m| m.id == id)
+            .map(mobs::ai::requires_custom_persistence)
     }
 
     /// `Mob.isNoAi`: the mob stands where it is and its goals do not run,
@@ -373,19 +381,24 @@ impl Game<'_> {
             .is_some()
     }
 
-    /// `Mob.setBaby`: with `baby`, the mob becomes a baby (age `-24000`, a
-    /// full day of growing up, saved with it as `Age` where the kind saves
-    /// an age); without it, it grows up on the spot (age `0`). False for
-    /// anything but a mob.
+    /// `Mob.setBaby` through the species' setter: ageable mobs use their
+    /// baby start age (`-48000` for sniffers, otherwise `-24000`) or `0`,
+    /// including age-boundary attribute and AI setup changes. Non-ageable
+    /// babies, such as zombies, keep their non-growing baby state instead.
+    /// Leaves `NoAI` and `PersistenceRequired` unchanged. False, with no
+    /// changes, for an unavailable mob or a species with no baby form.
     pub(super) fn native_mob_set_baby(&mut self, mob: MobRef, baby: bool) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;
         };
-        self.mobs
-            .iter_mut()
-            .find(|m| m.id == id && !m.removed)
-            .map(|m| m.extra.age = if baby { -24000 } else { 0 })
-            .is_some()
+        let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
+            return false;
+        };
+        if !mobs::drops::can_be_baby(mob.species()) {
+            return false;
+        }
+        mobs::finalize::set_baby(mob, baby);
+        true
     }
 }
 
@@ -396,6 +409,172 @@ mod tests {
     use horizon_client::{entities::ArmorStand, mobs::Mob};
     use horizon_core::geometry::Vec3;
     use mod_api::NativeWorldEpoch;
+
+    fn add_mob(game: &mut Game<'_>, id: u32, name: &str) -> MobRef {
+        let kind = game.res.mob_types().get(name).unwrap().clone();
+        game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+        game.native_mob_ref(game.native_entity(id).unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_flags_custom_persistence_is_independent_of_stored_flags() {
+        with_game(|game| {
+            let mob = add_mob(game, 12, "minecraft:cow");
+            for no_ai in [false, true] {
+                assert!(mob.set_no_ai(game, no_ai));
+                for (persistent, leash, expected) in [
+                    (false, None, false),
+                    (false, Some(mobs::leash::Holder::Knot([5, 64, 5])), true),
+                    (true, None, false),
+                    (true, Some(mobs::leash::Holder::Knot([5, 64, 5])), true),
+                ] {
+                    game.mobs[0].persistent = persistent;
+                    game.mobs[0].extra.leash = leash;
+                    assert_eq!(mob.requires_custom_persistence(game), Some(expected));
+                    assert_eq!(mob.persistence_required(game), Some(persistent));
+                    assert_eq!(mob.no_ai(game), Some(no_ai));
+                }
+            }
+            let enderman = add_mob(game, 13, "minecraft:enderman");
+            assert_eq!(enderman.requires_custom_persistence(game), Some(false));
+            game.mobs[1].extra.carried = Some(
+                game.pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap(),
+            );
+            assert_eq!(enderman.requires_custom_persistence(game), Some(true));
+            assert_eq!(enderman.persistence_required(game), Some(false));
+            game.mobs[1].extra.carried = None;
+            assert!(enderman.set_persistence_required(game));
+            assert_eq!(enderman.requires_custom_persistence(game), Some(false));
+            assert_eq!(enderman.persistence_required(game), Some(true));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_flags_baby_setter_uses_species_age_and_attribute_boundaries() {
+        use mobs::finalize::{Attr, base_value};
+
+        with_game(|game| {
+            let mut id = 12;
+            for (no_ai, persistent) in [(false, false), (false, true), (true, false), (true, true)]
+            {
+                for (name, baby_age, damage) in [
+                    ("minecraft:sniffer", -48000, None),
+                    ("minecraft:goat", -24000, Some((1.0, 2.0))),
+                    ("minecraft:hoglin", -24000, Some((0.5, 6.0))),
+                    // Non-ageable babies keep a sentinel age instead of growing up.
+                    ("minecraft:zombie", -1073741824, None),
+                    ("minecraft:piglin", -1073741824, None),
+                ] {
+                    let mob = add_mob(game, id, name);
+                    id += 1;
+                    assert!(mob.set_no_ai(game, no_ai));
+                    if persistent {
+                        assert!(mob.set_persistence_required(game));
+                    }
+                    for baby in [true, false, true, false] {
+                        assert!(mob.set_baby(game, baby), "{name}");
+                        let state = game.mobs.last().unwrap();
+                        assert_eq!(state.extra.age, if baby { baby_age } else { 0 }, "{name}");
+                        assert_eq!(mob.living().baby(game), Some(baby), "{name}");
+                        if let Some((baby_damage, adult_damage)) = damage {
+                            assert_eq!(
+                                base_value(state, Attr::AttackDamage),
+                                if baby { baby_damage } else { adult_damage },
+                                "{name}"
+                            );
+                        }
+                        assert_eq!(mob.no_ai(game), Some(no_ai), "{name}");
+                        assert_eq!(mob.persistence_required(game), Some(persistent), "{name}");
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_flags_baby_setter_runs_ghastling_setup_in_both_directions() {
+        use mobs::{control::MoveKind, nav::NavKind};
+
+        with_game(|game| {
+            let ghast = add_mob(game, 12, "minecraft:happy_ghast");
+            assert!(ghast.set_no_ai(game, true));
+            assert!(ghast.set_persistence_required(game));
+            assert!(game.mobs[0].ai.goals.has("HappyGhastFloatGoal"));
+            for baby in [true, false, true, false] {
+                assert!(ghast.set_baby(game, baby));
+                let state = &game.mobs[0];
+                assert_eq!(ghast.living().baby(game), Some(baby));
+                assert_eq!(state.ai.goals.has("HappyGhastFloatGoal"), !baby);
+                assert_eq!(state.ai.goals.has("RandomFloatAroundGoal"), !baby);
+                if baby {
+                    assert!(matches!(state.ai.nav.kind, NavKind::Flying));
+                    assert!(matches!(state.ai.mov.kind, MoveKind::Flying { .. }));
+                } else {
+                    assert!(matches!(state.ai.nav.kind, NavKind::Ground));
+                    assert!(matches!(state.ai.mov.kind, MoveKind::Custom));
+                }
+                assert_eq!(ghast.no_ai(game), Some(true));
+                assert_eq!(ghast.persistence_required(game), Some(true));
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_flags_baby_setter_refuses_no_baby_species_and_unavailable_mobs() {
+        with_game(|game| {
+            for (id, name) in [(12, "minecraft:skeleton"), (13, "minecraft:parrot")] {
+                let mob = add_mob(game, id, name);
+                assert!(mob.set_no_ai(game, true));
+                assert!(mob.set_persistence_required(game));
+                for baby in [true, false] {
+                    assert!(!mob.set_baby(game, baby), "{name}");
+                    assert_eq!(game.mobs.last().unwrap().extra.age, 0, "{name}");
+                    assert_eq!(mob.living().baby(game), Some(false), "{name}");
+                    assert_eq!(mob.no_ai(game), Some(true), "{name}");
+                    assert_eq!(mob.persistence_required(game), Some(true), "{name}");
+                }
+            }
+            let mob = add_mob(game, 14, "minecraft:sniffer");
+            let stale = MobRef::new(EntityRef::new(
+                NativeWorldEpoch::new(mob.entity().epoch().get() + 1),
+                14,
+            ));
+            assert_eq!(stale.requires_custom_persistence(game), None);
+            assert!(!stale.set_baby(game, true));
+            game.held_out.push(14);
+            assert_eq!(mob.requires_custom_persistence(game), None);
+            assert!(!mob.set_baby(game, true));
+            game.held_out.pop();
+            game.mobs.last_mut().unwrap().removed = true;
+            assert_eq!(mob.requires_custom_persistence(game), None);
+            assert!(!mob.set_baby(game, true));
+            assert_eq!(game.mobs.last().unwrap().extra.age, 0);
+            game.mobs.last_mut().unwrap().removed = false;
+            let taken = std::mem::take(&mut game.mobs);
+            assert_eq!(mob.requires_custom_persistence(game), None);
+            assert!(!mob.set_baby(game, true));
+            game.mobs = taken;
+            assert!(mob.set_baby(game, true));
+
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 15;
+            game.dragon = Some(dragon);
+            let dragon = game
+                .native_mob_ref(game.native_entity(15).unwrap())
+                .unwrap();
+            assert_eq!(dragon.requires_custom_persistence(game), None);
+            assert!(!dragon.set_baby(game, true));
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

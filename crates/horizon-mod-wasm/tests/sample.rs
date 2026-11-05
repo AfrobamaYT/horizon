@@ -45,6 +45,12 @@ struct Server(Mutex<Vec<String>>);
 impl mod_api::Host for Server {}
 
 impl mod_api::ServerHost for Server {
+    fn messages(&self) -> &dyn mod_api::Messages {
+        self
+    }
+}
+
+impl mod_api::Messages for Server {
     fn broadcast(&self, line: Text) {
         self.0.lock().unwrap().push(line.plain());
     }

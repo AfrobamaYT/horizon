@@ -22,7 +22,7 @@ impl Points for Quiet {
 
 fn raw_listener() {}
 
-fn erased_listener(place: usize, receiver: *mut (), raw: *mut ()) {
+unsafe fn erased_listener(place: usize, receiver: *mut (), raw: *mut ()) {
     assert_eq!(place, PointId::Tick as usize);
     assert!(receiver.is_null() && raw.is_null());
 }
@@ -83,7 +83,7 @@ fn one_list_registered_sealed_and_stopped() {
                 order.push("typed");
             }
             RawKind::Erased(function) => {
-                function(place as usize, std::ptr::null_mut(), std::ptr::null_mut());
+                assert_eq!(function as usize, erased_listener as *const () as usize);
                 order.push("erased");
             }
         }

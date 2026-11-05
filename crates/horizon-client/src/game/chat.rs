@@ -1359,7 +1359,16 @@ impl Game<'_> {
         // The fractional tick makes the smooth chat extra's slide move every
         // frame; vanilla's fade reads it too.
         let now = self.visual_ticks() as f32 + self.clock.fraction() as f32;
-        self.ui.chat.draw(batch, &self.gui.atlas, now, focused);
+        // NeoForge's `CustomizeGuiOverlayEvent.Chat`: a mod may move the chat's bottom-left
+        // corner, and the chat is drawn shifted by as much (`Gui.renderChat`'s translate).
+        let (width, height) = (batch.width as i32, batch.height as i32);
+        let (home_x, home_y) = (0, height - 40);
+        let (mut x, mut y) = (home_x, home_y);
+        self.native_customize_chat_overlay(width, height, focused, &mut x, &mut y);
+        let offset = [(x - home_x) as f32, (y - home_y) as f32];
+        self.ui
+            .chat
+            .draw_at(batch, &self.gui.atlas, now, focused, offset);
     }
     /// `HoverEvent.EntityTooltipInfo.getTooltipLines`: the name when the
     /// event has one, the entity type and the UUID.
