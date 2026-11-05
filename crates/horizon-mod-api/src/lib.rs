@@ -4777,14 +4777,16 @@ mod tests {
             let hit = top_hit();
             dispatch_use_on(
                 &mut host,
-                &stack,
-                pos,
-                face,
-                Hand::Main,
-                hit,
-                7,
-                41,
-                &mut claimed,
+                calls::UseOnCall {
+                    stack: &stack,
+                    pos,
+                    face,
+                    hand: Hand::Main,
+                    hit,
+                    player: 7,
+                    player_entity_id: 41,
+                    claimed: &mut claimed,
+                },
             );
             assert_eq!(claimed, expected, "{block}");
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
@@ -4858,14 +4860,16 @@ mod tests {
         let (pos, face) = ([0; 3], [0, 1, 0]);
         dispatch_use_on(
             &mut host,
-            &stick(),
-            pos,
-            face,
-            Hand::Main,
-            top_hit(),
-            7,
-            41,
-            &mut claimed,
+            calls::UseOnCall {
+                stack: &stick(),
+                pos,
+                face,
+                hand: Hand::Main,
+                hit: top_hit(),
+                player: 7,
+                player_entity_id: 41,
+                claimed: &mut claimed,
+            },
         );
     }
 
@@ -4935,14 +4939,16 @@ mod tests {
         let mut claimed = false;
         dispatch_use_on(
             &mut host,
-            &stick(),
-            [0; 3],
-            [0, 1, 0],
-            Hand::Off,
-            top_hit(),
-            7,
-            41,
-            &mut claimed,
+            calls::UseOnCall {
+                stack: &stick(),
+                pos: [0; 3],
+                face: [0, 1, 0],
+                hand: Hand::Off,
+                hit: top_hit(),
+                player: 7,
+                player_entity_id: 41,
+                claimed: &mut claimed,
+            },
         );
         assert!(!claimed);
         assert!(HEARD_STICK.load(std::sync::atomic::Ordering::SeqCst));
