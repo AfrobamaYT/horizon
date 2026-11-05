@@ -263,8 +263,9 @@ impl super::Game<'_> {
         if !self.settings.file.bool("joinedFirstServer")
             && (!self.has_singleplayer_server() || self.is_published())
         {
-            let toast = self.tutorial_toast(Hint::SocialInteractions, Some(0.0));
-            self.tutorial_toasts.push(toast);
+            if let Some(toast) = self.tutorial_toast(Hint::SocialInteractions, Some(0.0)) {
+                self.tutorial_toasts.push(toast);
+            }
             self.settings.file.set(
                 "joinedFirstServer",
                 horizon_client::options_file::V::Bool(true),
