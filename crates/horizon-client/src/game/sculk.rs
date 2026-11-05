@@ -1046,7 +1046,7 @@ impl Game<'_> {
                 }
             }
         }
-        let ctx = self.who_context(source, None);
+        let ctx = self.event_source_context(source, None);
         self.post_game_event(sculk::TENDRILS_CLICKING, center(key), ctx);
         self.with_level(|b, level, ticks| b.sculk_sensor_click(level, ticks, pos));
         self.process_level_events()

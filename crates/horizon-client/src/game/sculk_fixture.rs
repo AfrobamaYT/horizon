@@ -239,7 +239,14 @@ impl Game<'_> {
             d(i.pos[0]),
             d(i.pos[1]),
             d(i.pos[2]),
-            self.fixture_who(alive(i.source), names),
+            match i.source {
+                Some(horizon_client_core::who::EventSource::Entity(id))
+                    if self.level_entity(id as i32).is_some() =>
+                {
+                    names.get(&id).cloned().unwrap_or_else(|| format!("e{id}"))
+                }
+                source => self.fixture_who(alive(source.and_then(|s| s.actor())), names),
+            },
             self.fixture_who(alive(i.owner), names)
         )
     }
