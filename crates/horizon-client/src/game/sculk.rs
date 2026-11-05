@@ -17,8 +17,8 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use horizon_protocol::entity_data::PositionSource;
 use horizon_world::registry::BlockStateId;
+use mod_api::particles::PositionSource;
 use std::collections::HashSet;
 use winit::keyboard::KeyCode;
 
@@ -1607,14 +1607,15 @@ impl Game<'_> {
             randomization: 0,
         });
     }
-    /// A vibration travelling to a warden (`MobEvent::Vibration`).
+    /// A vibration travelling to a warden or allay (`MobEvent::Vibration`).
     pub(super) fn mob_vibration_particle(
         &mut self,
-        source: PositionSource,
+        source: horizon_protocol::entity_data::PositionSource,
         from: [f64; 3],
         to: [f64; 3],
         ticks: i32,
     ) {
+        let source = super::lan_particles::particle_position_source(&source);
         self.vibration_particle(source, from, to, ticks);
     }
     /// `Warden.clientDiggingParticles`: thirty crumbs of the block underfoot.
