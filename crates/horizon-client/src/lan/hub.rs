@@ -323,7 +323,7 @@ pub struct Hub {
     /// game replaces it on each reload.
     pub loop_context: Arc<LoopContext>,
     pub encoder: ChunkEncoder,
-    pub guests: Vec<Guest>,
+    pub guests: super::guest_list::GuestList,
     pub(super) sync: Arc<SyncData>,
     pub ticks: u64,
     /// The next `Guest.vehicle_order`: a rider that boards later sits behind.
@@ -708,7 +708,7 @@ impl Hub {
             config,
             loop_context,
             encoder,
-            guests: Vec::new(),
+            guests: Default::default(),
             sync,
             ticks: 0,
             seat_order: 0,
@@ -766,10 +766,11 @@ impl Hub {
     }
 
     pub fn guest(&self, conn: u32) -> Option<&Guest> {
-        self.guests.iter().find(|g| g.conn == conn)
+        self.guests.get(self.guests.connection_index(conn)?)
     }
     pub fn guest_mut(&mut self, conn: u32) -> Option<&mut Guest> {
-        self.guests.iter_mut().find(|g| g.conn == conn)
+        let index = self.guests.connection_index(conn)?;
+        self.guests.get_mut(index)
     }
 
     /// The network id of a name in a built-in or synchronized registry.
@@ -921,13 +922,13 @@ impl Hub {
     /// Placed network players in join order.
     pub fn online_players(&self) -> impl Iterator<Item = &Guest> {
         self.guests
-            .iter()
+            .simulation_iter()
             .filter(|g| g.placed && g.participates_online())
     }
     /// The number of network guests, including those still joining.
     pub fn online_count(&self) -> usize {
         self.guests
-            .iter()
+            .simulation_iter()
             .filter(|g| g.participates_online())
             .count()
     }
@@ -939,7 +940,7 @@ impl Hub {
     /// level in place.
     pub fn broadcast_level(&self, packet: &C) {
         let mut body = None;
-        for g in self.guests.iter().filter(|g| self.here(g)) {
+        for g in self.guests.simulation_iter().filter(|g| self.here(g)) {
             g.sender
                 .send(body.get_or_insert_with(|| packet.encode()).clone());
         }
@@ -948,7 +949,11 @@ impl Hub {
     /// `PermissionLevel.ADMINS` (3) or more get `ClientboundLowDiskSpaceWarningPacket`.
     pub fn send_low_disk_space_warning(&self) {
         let body = C::LowDiskSpaceWarning(horizon_protocol::packets::Empty).encode();
-        for g in self.guests.iter().filter(|g| g.placed && g.permission >= 3) {
+        for g in self
+            .guests
+            .simulation_iter()
+            .filter(|g| g.placed && g.permission >= 3)
+        {
             g.sender.send(body.clone());
         }
     }
@@ -956,7 +961,7 @@ impl Hub {
         let mut body = None;
         for g in self
             .guests
-            .iter()
+            .simulation_iter()
             .filter(|g| g.placed && g.conn != conn && g.participates_online())
         {
             g.sender

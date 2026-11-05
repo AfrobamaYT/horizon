@@ -361,7 +361,7 @@ fn direction(face: i32) -> [i32; 3] {
 fn building_players(host: &LanHost) -> Vec<BuildingPlayer> {
     host.hub
         .guests
-        .iter()
+        .simulation_iter()
         .map(|g| BuildingPlayer {
             conn: Some(g.conn),
             dimension: Dim::from_id(&g.dimension),
@@ -397,7 +397,7 @@ impl Game<'_> {
         super::dedicated::crash_fixture("guest", || {
             self.lan
                 .as_ref()
-                .is_some_and(|host| host.hub.guests.iter().any(|g| g.conn == conn && g.placed))
+                .is_some_and(|host| host.hub.guest(conn).is_some_and(|g| g.placed))
         });
         let dimension =
             (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
@@ -409,12 +409,7 @@ impl Game<'_> {
 
     /// Where guest `conn` is in the hub's list.
     pub(super) fn guest_index(&self, conn: u32) -> Option<usize> {
-        self.lan
-            .as_ref()?
-            .hub
-            .guests
-            .iter()
-            .position(|g| g.conn == conn)
+        self.lan.as_ref()?.hub.guests.connection_index(conn)
     }
 
     /// `as_guest`, with the system messages the guest's action earns (the
