@@ -87,9 +87,12 @@ def build(out: Path, server: bool) -> None:
     staged = stage(target_dir)
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
+    # On macOS this also gives both dylibs an @rpath install name instead of an absolute build path.
+    if sys.platform == "darwin":
+        rustflags += " -C rpath"
     features = ["--no-default-features"] if server else []
     # Linux's executable RUNPATH doesn't cover transitive dependencies: the game itself must find
-    # the wasm runtime beside it. macOS resolves its dylib dependencies through the executable's rpath.
+    # the wasm runtime beside it. macOS's @rpath install names use the executable's rpath.
     link = ["--", "-C", "link-arg=-Wl,-rpath,$ORIGIN"] if sys.platform == "linux" else []
     messages = run(
         ["cargo", "rustc", "--locked", "-p", "horizon-client", "--lib", "--crate-type", "dylib",
