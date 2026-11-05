@@ -1606,8 +1606,12 @@ impl Game<'_> {
         else {
             return false;
         };
-        // The mods may stop the menu; the click is spent.
+        // The mods may stop the menu; the click is spent. A fake player is
+        // stopped here too: the stand-in the open staged leaves the level
+        // through the close path, its items back on the vehicle, where a
+        // later transfer finds them.
         if !self.guest_may_open(conn, menu, None) {
+            self.close_cart_container(pos);
             return true;
         }
         // ServerPlayer.openMenu closes the menu that was open.

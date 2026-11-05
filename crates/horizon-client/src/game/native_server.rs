@@ -2216,10 +2216,233 @@ mod fake_action_tests {
         }
     }
 
+    use super::super::{
+        boats::Boat, minecarts::CART_KEY_Y, minecarts::CartKind, minecarts::Minecart,
+        respawn_anchor::RespawnConfig, stations::Kind, stations::Station,
+    };
+
     fn held(game: &Game<'_>, uuid: u128) -> Option<ItemStack> {
         let host = game.lan.as_ref().unwrap();
         let g = host.hub.guests.iter().find(|g| g.uuid == uuid).unwrap();
         g.inventory[g.selected].clone()
+    }
+
+    /// A wandering trader at `at`, entity id `id`, and its handle.
+    fn trader(game: &mut Game<'_>, id: u32, at: [f64; 3]) -> mod_api::EntityRef {
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:wandering_trader")
+            .unwrap()
+            .clone();
+        let [x, y, z] = at;
+        game.mobs.push(horizon_client::mobs::Mob::new(
+            id,
+            kind,
+            horizon_core::geometry::Vec3::new(x, y, z),
+            0.0,
+        ));
+        mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id)
+    }
+
+    /// A fake player's use on a trader frees it again: the session the use
+    /// opened closes through the merchant's own close path, so the trader is
+    /// not left trading and the next use opens it as the first did.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_trader_a_fake_player_used_trades_with_the_next_one() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:stick"), 0);
+            let id = 6000;
+            let target = trader(game, id, [2.5, 64.0, 0.5]);
+            let interact = PlayerAction::InteractOn {
+                hand: Hand::Main,
+                target,
+                location: [0.0, 0.5, 0.0],
+            };
+            assert_eq!(
+                game.native_player_perform_action(player, interact),
+                Ok(ActionOutcome::Consumed)
+            );
+            let mob = game.mobs.iter().find(|m| m.id == id).unwrap();
+            // With no offers the menu never opens, and this test would say nothing.
+            let offers = mob.extra.trade.as_ref().map_or(0, |t| t.offers.len());
+            assert!(offers > 0, "a wandering trader has offers");
+            assert!(!mob.extra.flag2, "the trader is not left trading");
+            assert!(game.station.is_none(), "the session is not left open");
+            assert_eq!(
+                game.native_player_perform_action(player, interact),
+                Ok(ActionOutcome::Consumed),
+                "the next use opens it again",
+            );
+        });
+    }
+
+    /// A chest minecart, a hopper minecart and a chest boat: the items stay
+    /// on the vehicle, and the menu's stand-in is out of the level, where a
+    /// transfer would edit it instead of the vehicle.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_vehicles_chest_a_fake_player_used_keeps_its_items_and_no_stand_in() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, fake_conn, _) = fake(game, None, 0);
+            let at = horizon_core::geometry::Vec3::new(2.5, 64.0, 0.5);
+            let diamonds = Some(ItemStack::new("minecraft:diamond", 5));
+            let mut vehicles = Vec::new();
+            for (id, kind) in [(6100, CartKind::Chest), (6101, CartKind::Hopper)] {
+                let mut cart = Minecart::new(id, kind, at);
+                cart.items[3] = diamonds.clone();
+                vehicles.push((id, false));
+                game.carts.push(cart);
+            }
+            let mut boat = Boat::new(6102, "oak".into(), at, 0.0).with_chest();
+            boat.items[3] = diamonds.clone();
+            // ChestBoat.interact opens the chest for a sneaking player.
+            vehicles.push((6102, true));
+            game.boats.push(boat);
+
+            for (id, sneaking) in vehicles {
+                let target = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id);
+                let interact = PlayerAction::InteractOn {
+                    hand: Hand::Main,
+                    target,
+                    location: [0.0, 0.5, 0.0],
+                };
+                // Twice: the second use is the next one finding it as it was.
+                for _ in 0..2 {
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guest_mut(fake_conn)
+                        .unwrap()
+                        .sneaking = sneaking;
+                    assert_eq!(
+                        game.native_player_perform_action(player, interact),
+                        Ok(ActionOutcome::Consumed)
+                    );
+                    let key = (i32::MAX - 15, CART_KEY_Y, id as i32);
+                    assert!(
+                        game.world.block_entities.get(&key).is_none(),
+                        "vehicle {id} left a stand-in",
+                    );
+                    assert!(game.container.is_none());
+                    let items = game
+                        .carts
+                        .iter()
+                        .find(|c| c.id == id)
+                        .map(|c| &c.items)
+                        .or_else(|| game.boats.iter().find(|b| b.id == id).map(|b| &b.items))
+                        .unwrap();
+                    assert_eq!(items[3], diamonds, "vehicle {id} lost its items");
+                }
+            }
+        });
+    }
+
+    /// A fake player's click on a shulker box or an ender chest leaves both
+    /// shut: no open count climbs, no stand-in chest stays in the level and
+    /// no lid stays open.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_shulker_box_and_an_ender_chest_a_fake_player_used_are_left_shut() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, None, 0);
+            let shulker = [1, 64, 0];
+            place(game, shulker, "minecraft:shulker_box");
+            let count =
+                |game: &Game<'_>| game.be_anims.shulkers.get(&shulker).map(|s| s.open_count);
+            assert_eq!(
+                game.native_player_perform_action(player, on_top(shulker)),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+            assert!(
+                count(game).is_none_or(|c| c == 0),
+                "the use opened it, and it shut"
+            );
+            assert!(game.container.is_none());
+            assert_eq!(
+                game.native_player_perform_action(player, on_top(shulker)),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu)),
+                "the next use opens it again",
+            );
+            assert!(
+                count(game).is_none_or(|c| c == 0),
+                "the count doesn't climb"
+            );
+
+            let ender = [2, 64, 0];
+            place(game, ender, "minecraft:ender_chest");
+            assert_eq!(
+                game.native_player_perform_action(player, on_top(ender)),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+            assert!(game.ender_open.is_none());
+            let key = (ender[0], ender[1], ender[2]);
+            assert!(
+                game.world.block_entities.get(&key).is_none(),
+                "a stand-in chest stayed",
+            );
+            assert!(!game.lid_openers.contains_key(&key), "its lid stayed open");
+        });
+    }
+
+    /// Each field holds a value the use can't have written, so a swap that
+    /// forgets one fails whether the use changed it or not.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_servers_own_player_state_comes_back_after_a_fake_use() {
+        use mod_api::PlayerActionSetup;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, None, 0);
+            let dim = game.dim;
+            let config = RespawnConfig {
+                dim,
+                pos: [1, 2, 3],
+                yaw: 0.0,
+                forced: false,
+            };
+            let spawn = horizon_core::geometry::Vec3::new(1.0, 2.0, 3.0);
+            game.station = Some(Station::new_kind(Kind::Anvil, [4, 5, 6]));
+            game.craft_table = Some([7, 8, 9]);
+            game.experience.level = 7;
+            game.respawn_config = Some(config);
+            game.spawn = Some(spawn);
+            // An ender inventory left open goes back while the fake player
+            // acts, and its stand-in returns afterwards, as a guest's turn does.
+            let stand_in = (12, 64, 8);
+            game.open_ender_chest(stand_in);
+            game.container = None;
+
+            place(game, [1, 64, 0], "minecraft:crafting_table");
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 64, 0])),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+            assert_eq!(
+                game.station.as_ref().map(|s| (s.kind, s.pos)),
+                Some((Kind::Anvil, [4, 5, 6])),
+            );
+            assert_eq!(game.craft_table, Some([7, 8, 9]));
+            assert_eq!(game.experience.level, 7);
+            assert_eq!(game.respawn_config, Some(config));
+            assert_eq!(game.spawn, Some(spawn));
+            assert_eq!(game.ender_open, Some(stand_in));
+            assert!(game.world.block_entities.get(&stand_in).is_some());
+
+            let setup = PlayerActionSetup::new(
+                ItemStack::new("minecraft:fishing_rod", 1),
+                [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                0.0,
+                0.0,
+                false,
+            );
+            let rod = player
+                .perform_action_scoped(game, PlayerAction::UseItem { hand: Hand::Main }, setup)
+                .unwrap();
+            assert_eq!(rod.outcome, ActionOutcome::Consumed, "the rod casts");
+            assert!(game.hook.is_none(), "no hook is left for nobody to reel in");
+        });
     }
 
     #[test]
