@@ -486,7 +486,7 @@ impl<'r> Gen<'r> {
             _ => quote!(),
         };
         let len =
-            quote!(I::Op::Len => Ok(I::Reply::Value(V::U((*(p as *const #rust)).len() as u64))),);
+            quote!(I::Op::Len => Ok(I::Reply::Value(V::U((&*(p as *const #rust)).len() as u64))),);
         let arms = match shape {
             Shape::Named(path, _) => {
                 let named = rule.named(path).expect("listed");
@@ -539,7 +539,7 @@ impl<'r> Gen<'r> {
                     Self::matched(&rust, quote!(::std::option::Option::Some(field)));
                 let some = self.part(0, inner, get, set, ptr);
                 quote! {
-                    I::Op::Case => Ok(I::Reply::Value(V::U((*(p as *const #rust)).is_some() as u64))),
+                    I::Op::Case => Ok(I::Reply::Value(V::U((&*(p as *const #rust)).is_some() as u64))),
                     #some
                 }
             }
@@ -560,9 +560,9 @@ impl<'r> Gen<'r> {
                         I::Op::Key(key) => {
                             let key = #key;
                             let item: ::std::option::Option<*mut ()> = if w {
-                                (*(p as *mut #rust)).get_mut(&key).map(|item| item as *mut _ as *mut ())
+                                (&mut *(p as *mut #rust)).get_mut(&key).map(|item| item as *mut _ as *mut ())
                             } else {
-                                (*(p as *const #rust)).get(&key).map(|item| item as *const _ as *mut ())
+                                (&*(p as *const #rust)).get(&key).map(|item| item as *const _ as *mut ())
                             };
                             match item { Some(q) => #entry, None => Err(I::not_here("no such key")) }
                         }
@@ -604,9 +604,9 @@ impl<'r> Gen<'r> {
             I::Op::Index(i) => {
                 let i = usize::try_from(i).unwrap_or(usize::MAX);
                 let item: ::std::option::Option<*mut ()> = if w {
-                    (*(p as *mut #rust)).#get_mut.map(|item| item as *mut _ as *mut ())
+                    (&mut *(p as *mut #rust)).#get_mut.map(|item| item as *mut _ as *mut ())
                 } else {
-                    (*(p as *const #rust)).#get.map(|item| item as *const _ as *mut ())
+                    (&*(p as *const #rust)).#get.map(|item| item as *const _ as *mut ())
                 };
                 match item { Some(q) => #element, None => Err(I::not_here("an index past the end")) }
             }
@@ -768,10 +768,7 @@ impl<'r> Gen<'r> {
         let names: Vec<_> = (0..n).map(|i| format_ident!("a{i}")).collect();
         self.skip_reason = "result cannot cross";
         let result = match output {
-            syn::ReturnType::Default => quote!({
-                result;
-                Ok(I::Reply::Done)
-            }),
+            syn::ReturnType::Default => quote!(Ok(I::Reply::Done)),
             syn::ReturnType::Type(_, ty) => {
                 let shape = rule.shape(module, this, ty);
                 match (&shape, rule.crossing_of(&shape)) {
@@ -916,6 +913,64 @@ pub fn table(internals: &[Internal]) -> (String, Counts) {
 mod tests {
     use super::*;
     use crate::crossing::tests::internal;
+
+    #[test]
+    fn generated_collection_nodes_compile_and_read_the_actual_element() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let build = std::env::var_os("CARGO_TARGET_DIR")
+            .map_or_else(|| root.join("target"), std::path::PathBuf::from)
+            .join(format!("internals-table-fixture-{}", std::process::id()));
+        std::fs::create_dir_all(&build).unwrap();
+        let runtime = root
+            .join("crates/horizon-mod-points/src/internals.rs")
+            .canonicalize()
+            .unwrap();
+        let (code, _) = table(&[internal(
+            "horizon_client::Bag",
+            "struct",
+            "struct Bag { items: Vec<u8> }",
+        )]);
+        let source = format!(
+            r#"
+            extern crate self as mod_points;
+            #[path = {runtime:?}] pub mod internals;
+            struct Bag {{ items: Vec<u8> }}
+            {code}
+            fn main() {{
+                use internals::{{Op, Reply, Value}};
+                let mut bag = Bag {{ items: vec![7] }};
+                let (_, walk) = __internals::TABLE.types.iter().find(|(name, _)| name.ends_with("Bag")).unwrap();
+                unsafe {{
+                    let Reply::Node(p, ty, writable) = walk(&raw mut bag as *mut (), false, Op::Field(0)).unwrap() else {{ panic!("not a node") }};
+                    assert!(!writable);
+                    assert_eq!(__internals::TABLE.types[ty as usize].1(p, writable, Op::Index(0)), Ok(Reply::Value(Value::U(7))));
+                }}
+            }}
+        "#
+        );
+        let input = build.join("main.rs");
+        let output = build.join("fixture");
+        std::fs::write(&input, source).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2024", "-Dwarnings"])
+            .arg(&input)
+            .arg("-o")
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        assert!(
+            std::process::Command::new(output)
+                .status()
+                .unwrap()
+                .success()
+        );
+        std::fs::remove_dir_all(build).unwrap();
+    }
 
     #[test]
     fn method_signatures_accept_bare_and_impl_forms_but_not_bounded_impls() {
