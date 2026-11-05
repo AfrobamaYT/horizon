@@ -112,14 +112,14 @@ impl<'t> Frame<'t> {
     }
 
     fn op(&self, at: Resolved, op: Op<'_>) -> Result<Reply, Refusal> {
-        let (_, node) = self
+        let ty = self
             .table
             .types
             .get(at.ty as usize)
             .ok_or_else(|| gone("no such type"))?;
         // SAFETY: `at` was resolved in this generation from a root by the table's own steps, so it
         // points to a live value of type `at.ty`, writable only when `at.writable`.
-        unsafe { node(at.ptr, at.writable, op) }
+        unsafe { (ty.node)(at.ptr, at.writable, op) }
     }
 
     /// Where `path` leads now, step by step from its root.
@@ -368,12 +368,12 @@ pub enum Call<'n> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use mod_points::internals::{NodeFn, Thunk};
+    use mod_points::internals::{Thunk, Type};
 
     /// A tiny game: its players, each with health, and a flag.
-    struct Game {
+    pub(crate) struct Game {
         players: Vec<Player>,
         flag: bool,
     }
@@ -447,11 +447,27 @@ mod tests {
         Ok(Reply::Done)
     }
 
-    static TYPES: [(&str, NodeFn); 3] =
-        [("Game", game), ("Vec<Player>", players), ("Player", player)];
+    static TYPES: [Type; 3] = [
+        Type {
+            path: "Game",
+            hash: "game-hash",
+            node: game,
+        },
+        Type {
+            path: "Vec<Player>",
+            hash: "",
+            node: players,
+        },
+        Type {
+            path: "Player",
+            hash: "player-hash",
+            node: player,
+        },
+    ];
     static THUNKS: [Thunk; 3] = [
         Thunk {
             path: "Game::kick",
+            hash: "kick-hash",
             receiver: Some(GAME),
             args: &[],
             writes: 1,
@@ -459,6 +475,7 @@ mod tests {
         },
         Thunk {
             path: "Game::first",
+            hash: "first-hash",
             receiver: Some(GAME),
             args: &[],
             writes: 1,
@@ -466,25 +483,27 @@ mod tests {
         },
         Thunk {
             path: "heal",
+            hash: "heal-hash",
             receiver: None,
             args: &[Some(PLAYER), Some(PLAYER)],
             writes: 0b110,
             call: heal,
         },
     ];
-    static TABLE: Table = Table {
+    pub(crate) static TABLE: Table = Table {
         types: &TYPES,
         thunks: &THUNKS,
+        places: &[],
     };
 
-    fn world() -> Game {
+    pub(crate) fn world() -> Game {
         Game {
             players: (0..3).map(|i| Player { health: 10 + i }).collect(),
             flag: false,
         }
     }
 
-    fn frame(game: &mut Game) -> Frame<'static> {
+    pub(crate) fn frame(game: &mut Game) -> Frame<'static> {
         let root = Root {
             ptr: game as *mut Game as *mut (),
             ty: GAME,
