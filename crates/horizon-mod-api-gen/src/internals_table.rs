@@ -824,7 +824,10 @@ fn signature(written: &str) -> Option<syn::Signature> {
             let generics: syn::Generics = input.parse()?;
             let _: syn::Type = input.parse()?;
             let bounds: Option<syn::WhereClause> = input.parse()?;
-            if generics.params.len() != generics.lifetimes().count() || bounds.is_some() {
+            if generics.params.len() != generics.lifetimes().count()
+                || generics.lifetimes().any(|l| !l.bounds.is_empty())
+                || bounds.is_some()
+            {
                 return Err(input.error("a generic or bounded impl"));
             }
             let content;
@@ -949,7 +952,7 @@ mod tests {
         "#
         );
         let input = build.join("main.rs");
-        let output = build.join("fixture");
+        let output = build.join(format!("fixture{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&input, source).unwrap();
         let compiled = std::process::Command::new("rustc")
             .args(["--edition=2024", "-Dwarnings"])
@@ -989,6 +992,7 @@ mod tests {
             assert_eq!(counts.thunks, 1, "{written}");
         }
         assert!(signature("impl<T> Game<T> { fn count(&self) -> usize }").is_none());
+        assert!(signature("impl<'a: 'static> Game<'a> { fn count(&self) -> usize }").is_none());
         assert!(signature("impl Game where Self: Sized { fn count(&self) -> usize }").is_none());
     }
 
