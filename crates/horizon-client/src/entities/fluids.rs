@@ -465,6 +465,7 @@ mod tests {
             None,
             &fluids,
             crate::test_resources::server_loop_context(),
+            &mut |_, _| {},
         ));
         assert_eq!(still.position.x, at.x);
         assert_eq!(still.velocity.x, 0.0);
@@ -480,11 +481,14 @@ mod tests {
             None,
             &fluids,
             crate::test_resources::server_loop_context(),
+            &mut |_, _| {},
         ));
-        // Current pushes the orb, underwater drag damps before motion, then air
-        // drag: `ExperienceOrb.tick`'s `0.98F`, a float widened to double.
-        assert!((carried.position.x - at.x - 0.014 * 0.99).abs() < 1e-12);
-        assert!((carried.velocity.x - 0.014 * 0.99 * f64::from(0.98_f32)).abs() < 1e-12);
+        // Current pushes the orb, then underwater and air drag each widen
+        // their float constants before multiplying the double motion.
+        assert!((carried.position.x - at.x - 0.014 * f64::from(0.99_f32)).abs() < 1e-12);
+        assert!(
+            (carried.velocity.x - 0.014 * f64::from(0.99_f32) * f64::from(0.98_f32)).abs() < 1e-12
+        );
         for _ in 0..20 {
             carried.tick(
                 &world,
@@ -496,6 +500,7 @@ mod tests {
                 None,
                 &fluids,
                 crate::test_resources::server_loop_context(),
+                &mut |_, _| {},
             );
         }
         assert!(carried.position.x > at.x + 0.5);

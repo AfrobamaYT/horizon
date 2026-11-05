@@ -143,8 +143,13 @@ pub fn spawn(
     resources: &Path,
     dir: &Path,
     low_memory: bool,
+    transfers: Option<&str>,
 ) -> std::io::Result<Child> {
-    horizon_server_launch::command(program, resources, dir, low_memory)?.spawn()
+    let mut command = horizon_server_launch::command(program, resources, dir, low_memory)?;
+    if let Some(transfers) = transfers {
+        command.arg("--transfers").arg(transfers);
+    }
+    command.spawn()
 }
 
 /// A connection to the game's control endpoint: one JSON line asked, one answered.
@@ -332,6 +337,7 @@ mod tests {
                 &root.join("res"),
                 &server,
                 false,
+                None,
             ) {
                 Err(e) if e.raw_os_error() == Some(26) && tries < 50 => {
                     tries += 1;

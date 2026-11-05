@@ -151,6 +151,7 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+                health: &self.health_resources,
                 loop_context: &self.loop_context,
                 damage_hooks: &self.damage_hooks,
                 tag_items: Some(world_items!(self)),
