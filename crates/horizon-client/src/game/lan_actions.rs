@@ -4625,12 +4625,25 @@ impl Game<'_> {
             // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
             play.suggestion_budget = true;
             self.guest_try_suggestions(conn);
+            self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPre, |game, player| {
+                game.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player })
+            });
             self.guest_sleep_tick(gi);
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
             if host.hub.guests[gi].dead {
                 self.guest_tick_death(gi);
+                self.guest_player_tick(
+                    gi,
+                    conn,
+                    mod_api::HookId::PlayerTickPost,
+                    |game, player| {
+                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                            player,
+                        })
+                    },
+                );
                 continue;
             }
             if self.on_server_trip(conn) {
@@ -4638,6 +4651,16 @@ impl Game<'_> {
                 // has loaded around the player or not: its respawn request
                 // is taken as soon as it comes.
                 self.guest_die(gi, conn);
+                self.guest_player_tick(
+                    gi,
+                    conn,
+                    mod_api::HookId::PlayerTickPost,
+                    |game, player| {
+                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                            player,
+                        })
+                    },
+                );
                 continue;
             }
             // ServerPlayerGameMode.tick stops an active destroy when its block is air.
@@ -4751,8 +4774,6 @@ impl Game<'_> {
                 g.tick_advancements();
                 g.update_player_attributes();
                 g.record_player_scores(&mut recorded);
-                // Native mods, at the end of ServerPlayer.tick.
-                g.native_player_tick();
             });
             if let Some(host) = self.lan.as_mut() {
                 host.play.entry(conn).or_default().score_recorded = recorded;
@@ -4773,7 +4794,32 @@ impl Game<'_> {
                 self.guest_orbs(gi);
             }
             self.guest_die(gi, conn);
+            self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPost, |game, player| {
+                game.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player })
+            });
         }
+    }
+
+    /// Only listeners pay for a guest swap; reuse the loop's resolved index.
+    fn guest_player_tick(
+        &mut self,
+        gi: usize,
+        conn: u32,
+        hook: mod_api::HookId,
+        fire: fn(&mut Self, mod_api::PlayerRef),
+    ) {
+        if !mod_api::__private::listened(hook) {
+            return;
+        }
+        let (Some(epoch), Some(host)) = (self.native_lifecycle.epoch(), self.lan.as_ref()) else {
+            return;
+        };
+        let guest = &host.hub.guests[gi];
+        let player = mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, guest.entity_id as u32),
+            guest.uuid,
+        );
+        let _ = self.as_guest_at(gi, conn, |game| fire(game, player));
     }
 
     /// `ServerPlayer.die` for a guest whose health has run out: the death

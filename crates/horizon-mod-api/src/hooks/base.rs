@@ -670,13 +670,21 @@ pub trait Hooks {
     /// every player of the world (the helpers read the acting one).
     #[hook(side = "server", contract = "cancel", out = "canceled")]
     fn left_click_block();
-    /// A living player's server tick ends (`ServerPlayer.tick`): once a tick
-    /// for every player in the world, after their digging, item use,
-    /// cooldowns, statistics and advancements. The helpers read that player.
-    /// Players still tick under `/tick freeze`; a dead player doesn't, nor
-    /// does one killed earlier in the same tick.
-    #[hook(side = "server", contract = "listen")]
-    fn player_tick();
+    /// Before a player's tick on both logical sides (NeoForge 26.3
+    /// `PlayerTickEvent.Pre`). Non-cancellable, including death-screen ticks.
+    /// `player` identifies the ticked player; on the server their state is
+    /// acting. Fires before sleep, cooldowns and body work. Players still tick
+    /// under `/tick freeze`, but not while the level is paused.
+    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Pre")]
+    fn player_tick_pre(player: PlayerRef);
+    /// After a player's tick on both logical sides (NeoForge 26.3
+    /// `PlayerTickEvent.Post`). Non-cancellable, including death-screen ticks.
+    /// `player` is the same identity as in `player_tick_pre`; on the server
+    /// their state is acting. Runs after body work and server-side item,
+    /// arrow and XP pickups, so reads see the completed tick. Client reads
+    /// see only the state available to that client, not future server updates.
+    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Post")]
+    fn player_tick_post(player: PlayerRef);
     /// An entity joins the server level `dimension` (NeoForge's
     /// `EntityJoinLevelEvent`): vanilla's `PersistentEntitySectionManager.addEntity`.
     /// `loaded_from_disk` is true for an entity coming back with its chunk,
@@ -701,7 +709,9 @@ pub trait Hooks {
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) by `source`: its damage
     /// type (`minecraft:fall`), causing entity (`DamageSource.getEntity`: the shooter of an
-    /// arrow), direct entity (`getDirectEntity`: the arrow), 0 for none or not known, and
+    /// arrow), direct entity (`getDirectEntity`: the projectile's entity id when the
+    /// damage type names one, on a player, mob or ender dragon; 0 for `magic()` and any
+    /// other source with no direct entity, even during that projectile's impact), and
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
     /// `container` holds the damage before any reduction: change its `new_damage`, or the
