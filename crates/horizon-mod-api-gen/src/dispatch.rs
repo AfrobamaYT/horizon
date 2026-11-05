@@ -438,7 +438,7 @@ pub(super) fn emit(
             let target_path: syn::Path = syn::parse_str(target)
                 .map_err(|error| format!("invalid target for {name}: {error}"))?;
             let receiver = &target_path.segments[target_path.segments.len() - 2].ident;
-            fire.push_str(&format!("impl {receiver}<'_> {{ #[allow(dead_code)] #[inline] pub(super) {signature} {{ mod_api::{call}({passed}); }} }}\n", signature = signature.to_token_stream()));
+            fire.push_str(&format!("impl {receiver}<'_> {{ #[inline] pub(super) {signature} {{ mod_api::{call}({passed}); }} }}\n", signature = signature.to_token_stream()));
             if fill {
                 let passed = sig
                     .inputs
