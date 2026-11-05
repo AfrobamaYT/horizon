@@ -99,7 +99,6 @@ mod composter;
 mod consume;
 mod control;
 mod copper_golems;
-mod cosmetics;
 mod creaking;
 #[cfg(test)]
 mod create_fluid_source_tests;
@@ -3318,8 +3317,6 @@ struct Game<'a> {
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<horizon_client::skins::Resolver>,
     skin_slots: horizon_client::skins::SkinSlots,
-    /// Cosmetics on players (game/cosmetics.rs), off by default.
-    cosmetics: cosmetics::Cosmetics,
     /// 3D skin layers: each player's outer layer as one slab per painted
     /// texel, built once per (skin, slim) (`mobs::skin_layers`).
     skin_3d: RefCell<skin_models::SkinModels>,
@@ -20603,7 +20600,6 @@ impl<'a> Game<'a> {
             }),
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
-            cosmetics: Default::default(),
             skin_3d: Default::default(),
             trim_slots: Vec::new(),
             cart_models: prepared.cart_models,
@@ -22577,7 +22573,9 @@ fn start_game<'a>(
         return Ok(None);
     }
     if game.options.execution_role == execution_role::ExecutionRole::DedicatedServer {
-        game.run_dedicated()?;
+        let result = game.run_dedicated();
+        game.native_game_shutting_down();
+        result?;
         return Ok(None);
     }
     // FMLClientSetupEvent: once per process, here in `run`, after the initial load applied.
@@ -22690,21 +22688,28 @@ fn run_event_loop(mut game: Game<'_>) -> Result<()> {
         game.run_headless();
         // narrator::start ran for it too (options.txt's narrator setting).
         narrator::stop();
-        write_report(&game)?;
-        return game.error.take().map_or(Ok(()), Err);
+        let result = write_report(&game).and_then(|()| game.error.take().map_or(Ok(()), Err));
+        if game.options.is_client_start() {
+            game.native_client_stopped();
+            game.native_game_shutting_down();
+        }
+        return result;
     }
     let mut split = split::Split::new(game);
     let result = EventLoop::new()?.run_app(&mut split);
     game = split.host;
     narrator::stop();
     leave_fullscreen_after(&result, &mut game.settings);
-    result?;
     horizon_client::discord_presence::stop();
-    write_report(&game)?;
-    if let Some(e) = game.error.take() {
-        return Err(e);
+    let result = result
+        .map_err(Into::into)
+        .and_then(|()| write_report(&game))
+        .and_then(|()| game.error.take().map_or(Ok(()), Err));
+    if game.options.is_client_start() {
+        game.native_client_stopped();
+        game.native_game_shutting_down();
     }
-    Ok(())
+    result
 }
 
 /// The loading screen's state while the worker loads the resources.
