@@ -3523,7 +3523,35 @@ fn declared_shapes_reach_render_and_worldgen_occlusion() {
         (facts.get(open).solid_render, facts.get(open).dampening),
         (false, 1)
     );
+    // Compare against the actual vanilla exports, including the lower slab's
+    // partial outline and leaves' full, non-occluding shape.
+    let slab = registry.default_state("minecraft:stone_slab").unwrap();
+    let leaves = registry.default_state("minecraft:oak_leaves").unwrap();
+    for (content, vanilla) in [(full, stone), (partial, slab), (open, leaves)] {
+        assert_eq!(
+            (
+                facts.get(content).solid_render,
+                facts.get(content).dampening,
+                facts.get(content).skylight_down
+            ),
+            (
+                facts.get(vanilla).solid_render,
+                facts.get(vanilla).dampening,
+                facts.get(vanilla).skylight_down
+            ),
+        );
+    }
     let mut visibility = crate::models::load_visibility(&root, registry).unwrap();
+    for (content, vanilla) in [(full, stone), (partial, slab), (open, leaves)] {
+        assert_eq!(
+            visibility
+                .should_render_face(stone, content, Direction::East, false)
+                .unwrap(),
+            visibility
+                .should_render_face(stone, vanilla, Direction::East, false)
+                .unwrap(),
+        );
+    }
     assert!(
         !visibility
             .should_render_face(stone, full, Direction::East, false)
