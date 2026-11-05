@@ -35,8 +35,6 @@ const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
     "bonemeal",
     "finalize_spawn",
     "item_tooltip",
-    "living_drops",
-    "get_equipment_drop_chance",
     "note_block_play",
     "player_set_spawn",
 ];

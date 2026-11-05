@@ -1853,15 +1853,17 @@ impl Game<'_> {
                 };
                 let mut chance = choice.chance;
                 self.native_get_equipment_drop_chance(
-                    id,
-                    &kind,
-                    EquipmentSlot::ALL[choice.slot],
-                    hurt,
-                    by_player,
-                    &stack,
-                    choice.original,
-                    choice.preserved,
-                    &mut chance,
+                    mod_api::__private::GetEquipmentDropChanceCall {
+                        entity: id,
+                        kind: &kind,
+                        slot: EquipmentSlot::ALL[choice.slot],
+                        source: hurt,
+                        recently_hit: by_player,
+                        stack: &stack,
+                        original_chance: choice.original,
+                        preserved: choice.preserved,
+                        chance: &mut chance,
+                    },
                 );
                 chance
             };
@@ -1974,15 +1976,15 @@ impl Game<'_> {
             })
             .collect();
         let mut cancel = false;
-        self.native_living_drops(
-            dying.entity,
-            dying.kind,
-            dying.player,
+        self.native_living_drops(mod_api::__private::LivingDropsCall {
+            entity: dying.entity,
+            kind: dying.kind,
+            player: dying.player,
             source,
-            dying.recently_hit,
-            &mut drops,
-            &mut cancel,
-        );
+            recently_hit: dying.recently_hit,
+            drops: &mut drops,
+            cancel: &mut cancel,
+        });
         if cancel {
             return;
         }

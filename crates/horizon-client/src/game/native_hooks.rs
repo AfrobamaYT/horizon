@@ -5429,17 +5429,8 @@ impl Game<'_> {
     /// (`native_living_experience_drop`); a spectator, who drops nothing,
     /// doesn't call this. Item entity state such as no-gravity, owner and
     /// lifetime isn't in `NativeItemDrop`. Server-side.
-    pub(super) fn native_living_drops(
-        &mut self,
-        entity: u32,
-        kind: &str,
-        player: Option<u128>,
-        source: &HurtSource<'_>,
-        recently_hit: bool,
-        drops: &mut Vec<NativeItemDrop>,
-        cancel: &mut bool,
-    ) {
-        self.fire_living_drops(entity, kind, player, source, recently_hit, drops, cancel);
+    pub(super) fn native_living_drops(&mut self, call: mod_api::__private::LivingDropsCall<'_>) {
+        self.fire_living_drops(call);
     }
     /// A dying mob `entity` of `kind` is about to roll its drop chance for
     /// the item `stack` in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's
@@ -5457,27 +5448,9 @@ impl Game<'_> {
     /// Server-side.
     pub(super) fn native_get_equipment_drop_chance(
         &mut self,
-        entity: u32,
-        kind: &str,
-        slot: EquipmentSlot,
-        source: &HurtSource<'_>,
-        recently_hit: bool,
-        stack: &ItemStack,
-        original_chance: f32,
-        preserved: bool,
-        chance: &mut f32,
+        call: mod_api::__private::GetEquipmentDropChanceCall<'_>,
     ) {
-        self.fire_get_equipment_drop_chance(
-            entity,
-            kind,
-            slot,
-            source,
-            recently_hit,
-            stack,
-            original_chance,
-            preserved,
-            chance,
-        );
+        self.fire_get_equipment_drop_chance(call);
     }
     /// A server player's experience points are about to change through
     /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
