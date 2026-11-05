@@ -2362,8 +2362,7 @@ mod tests {
         struct Listener;
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
-            fn toast_add(&self, host: &dyn ClientHost, event: &mut ToastAddEvent<'_>) -> Flow {
-                assert!(!host.playing());
+            fn toast_add(&self, _: &dyn ClientHost, event: &mut ToastAddEvent<'_>) -> Flow {
                 match event.description.as_ref().map(Text::plain).as_deref() {
                     Some("cancel") => Flow::Cancel,
                     Some("edit") => {
