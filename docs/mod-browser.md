@@ -98,7 +98,7 @@ file and the checksum they were checked against, with **Update to …** when a n
 (asked twice). **Update all (N)** above the list updates every pack a newer version was found for, of every kind,
 one after the other; one that fails is named and doesn't stop the others.
 
-**Automatic updates** apply to eligible content packages only. Native and wasm code packages are not automatically updated, and Play does not rebuild them. The replaced file is retained for recovery if an update is interrupted.
+**Automatic updates** run at launcher start and before Play for eligible content packages from Horizon's registry, when enabled in Settings. They never update a modpack's pinned files or native and wasm code packages. Updates that remove content used by worlds wait for an explicit update on the Mods page. Native and wasm updates are explicit too: Play never rebuilds code mods or repins their game revision. The replaced file is retained for recovery if an update is interrupted; recovery runs before checking the automatic-update setting or fetching the registry, even when updates are disabled or the registry is offline. Failed recovery keeps the backup for retry.
 
 ### Project pages, filters and icons
 
