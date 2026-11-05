@@ -5770,9 +5770,10 @@ impl Game<'_> {
                 // The blast's source names the owner, so a dragon it kills
                 // remembers the player who shot it.
                 self.set_blast_by_player(p.owner == Some(Who::Player));
-                // LargeFireball.onHit: both fire and MOB block destruction
-                // follow mob_griefing; other mob explosions keep their default.
-                let fire = self.ui.rules.bool("mob_griefing");
+                // LargeFireball.onHit: the fire follows
+                // `EventHooks.canEntityGrief(level, getOwner())`, so a mod's
+                // answer for the ghast that shot it decides.
+                let fire = self.large_fireball_fire(p.owner);
                 let result = self.explode_mob(atp, *power as f32, fire);
                 self.set_blast_by_player(false);
                 self.combat.explosion_owner = None;
@@ -8311,6 +8312,15 @@ impl Game<'_> {
         let rule = self.ui.rules.bool("mob_griefing");
         entity.map_or(rule, |entity| self.entity_grief(entity, rule))
     }
+    /// Whether a large fireball's blast lights fire (`LargeFireball.onHit`):
+    /// [`Self::can_entity_grief`] for the mob that shot it, the rule for any
+    /// other owner.
+    pub(super) fn large_fireball_fire(&self, owner: Option<Who>) -> bool {
+        self.can_entity_grief(match owner {
+            Some(Who::Mob(id)) => Some(id),
+            _ => None,
+        })
+    }
     /// Whether a mod may answer `can_entity_grief` differently from the rule:
     /// the sites that skip their whole work while griefing is off skip it only
     /// when no mod listens.
@@ -8384,6 +8394,13 @@ mod mob_griefing_tests {
                     asked,
                     [(denied, true), (other, true), (denied, true), (other, true)]
                 );
+                // A ghast's large fireball: the one the mod denies lights no
+                // fire, another ghast's still does, and a player's follows the rule.
+                use super::Who;
+                assert!(!game.large_fireball_fire(Some(Who::Mob(denied))));
+                assert!(game.large_fireball_fire(Some(Who::Mob(other))));
+                assert!(game.large_fireball_fire(Some(Who::Player)));
+                assert!(game.large_fireball_fire(None));
             });
         });
     }
