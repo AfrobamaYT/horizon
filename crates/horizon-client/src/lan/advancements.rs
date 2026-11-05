@@ -64,6 +64,90 @@ impl ServerAdvancements {
         }
     }
 
+    /// The unconditional tick criteria in tree order. A caller grants these one
+    /// at a time so it can notify mods before applying each completion's rewards.
+    pub fn tick_candidates(&self, progress: &Progress) -> Vec<CriterionGrant> {
+        let mut candidates = Vec::new();
+        for advancement in &self.tree.list {
+            if progress.done(advancement) {
+                continue;
+            }
+            for criterion in &advancement.criteria {
+                if criterion.trigger == "minecraft:tick"
+                    && criterion.conditions.is_null()
+                    && !progress.has(&advancement.id, &criterion.name)
+                {
+                    candidates.push(CriterionGrant {
+                        advancement: advancement.id.clone(),
+                        criterion: criterion.name.clone(),
+                    });
+                }
+            }
+        }
+        candidates
+    }
+
+    /// Grant one candidate, returning whether its advancement was already complete.
+    /// Recheck against the live tree and progress: a preceding hook may have changed either.
+    pub fn grant_tick(
+        &self,
+        progress: &mut Progress,
+        grant: &CriterionGrant,
+        now_millis: i64,
+    ) -> Option<bool> {
+        let advancement = self.tree.list.iter().find(|a| a.id == grant.advancement)?;
+        if progress.done(advancement)
+            || !advancement.criteria.iter().any(|c| {
+                c.name == grant.criterion && c.trigger == "minecraft:tick" && c.conditions.is_null()
+            })
+        {
+            return None;
+        }
+        let was_done = progress.done(advancement);
+        let date = crate::advancements::date_text(now_millis.div_euclid(1000));
+        progress
+            .grant(&advancement.id, &grant.criterion, &date)
+            .then_some(was_done)
+    }
+
+    /// Complete the grant after the listener returns, if it still completes the advancement.
+    pub fn reward_tick(
+        &self,
+        sync: &SyncData,
+        progress: &Progress,
+        book: &mut Settings,
+        grant: &CriterionGrant,
+        was_done: bool,
+    ) -> Option<Vec<u8>> {
+        let advancement = self.tree.list.iter().find(|a| a.id == grant.advancement)?;
+        if was_done || !progress.done(advancement) {
+            return None;
+        }
+        book.add_recipes(&self.displays, &advancement.rewards.recipes);
+        let entries = advancement
+            .rewards
+            .recipes
+            .iter()
+            .flat_map(|id| self.book_entries(id, sync, NOTIFY_AND_HIGHLIGHT))
+            .collect::<Vec<_>>();
+        (!entries.is_empty()).then(|| book_add(entries, false))
+    }
+
+    /// Drop progress for advancements or criteria absent from the reloaded tree.
+    pub fn prune_progress(&self, progress: &mut Progress) {
+        let by_id: HashMap<&str, &crate::advancements::Advancement> =
+            self.tree.list.iter().map(|a| (a.id.as_str(), a)).collect();
+        progress
+            .criteria
+            .retain(|id, got| match by_id.get(id.as_str()) {
+                Some(a) => {
+                    got.retain(|name, _| a.criteria.iter().any(|c| &c.name == name));
+                    true
+                }
+                None => false,
+            });
+    }
+
     /// The first tick of a player without advancements: the criteria
     /// `minecraft:tick` meets go into `progress` and the recipes their
     /// advancements reward into `book`.
@@ -165,17 +249,7 @@ impl ServerAdvancements {
         book: &mut Settings,
         granted: &mut Vec<CriterionGrant>,
     ) -> Option<Vec<u8>> {
-        let by_id: HashMap<&str, &crate::advancements::Advancement> =
-            self.tree.list.iter().map(|a| (a.id.as_str(), a)).collect();
-        progress
-            .criteria
-            .retain(|id, got| match by_id.get(id.as_str()) {
-                Some(a) => {
-                    got.retain(|name, _| a.criteria.iter().any(|c| &c.name == name));
-                    true
-                }
-                None => false,
-            });
+        self.prune_progress(progress);
         let date = crate::advancements::date_text(now_millis.div_euclid(1000));
         let mut entries = Vec::new();
         for a in &self.tree.list {
