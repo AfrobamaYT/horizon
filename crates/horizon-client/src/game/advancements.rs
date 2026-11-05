@@ -764,23 +764,46 @@ impl Game<'_> {
             );
         }
     }
-    /// The criteria `CriteriaTriggers.TICK` granted network players in the hub
-    /// (their first tick and a reload), told to the mods.
+    /// Grant the hub's tick criteria one at a time: each hook sees the new
+    /// progress before the completion's rewards and packets are applied.
     pub(super) fn run_native_advancement_grants(&mut self) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        for batch in std::mem::take(&mut host.hub.native_advancement_grants) {
-            for grant in batch.grants {
+        let tasks = std::mem::take(&mut host.hub.native_advancement_grants);
+        for task in tasks {
+            let mut fresh = Vec::new();
+            for grant in &task.grants {
+                let Some(was_done) = self
+                    .lan
+                    .as_mut()
+                    .and_then(|host| host.hub.grant_native_tick(&task, grant))
+                else {
+                    continue;
+                };
+                fresh.push(grant.clone());
                 self.native_player_advancement_progress(
-                    batch.player,
-                    batch.entity_id,
-                    &batch.name,
+                    task.player,
+                    task.entity_id,
+                    &task.name,
                     &grant.advancement,
                     &grant.criterion,
                     NativeProgressType::Grant,
                 );
+                if let Some(host) = self.lan.as_mut() {
+                    host.hub.reward_native_tick(&task, grant, was_done);
+                }
             }
+            if let Some(host) = self.lan.as_mut() {
+                host.hub.finish_native_first_tick(&task, &fresh);
+            }
+        }
+        if let Some(host) = self
+            .lan
+            .as_mut()
+            .filter(|host| host.hub.native_reload_pending)
+        {
+            host.hub.finish_reload_resources();
         }
     }
     /// `PlayerAdvancements.progressChanged`, kept for a network player's client.
