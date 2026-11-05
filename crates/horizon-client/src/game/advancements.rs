@@ -783,7 +783,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             let criterion = &a.criteria[ci].name;
             if self.adv.progress.grant(&a.id, criterion, &date) {
-                self.advancement_progress(&a.id, criterion, NativeProgressType::Grant);
+                self.advancement_progress(a, criterion, NativeProgressType::Grant);
             }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
@@ -794,7 +794,7 @@ impl Game<'_> {
     /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
     fn advancement_progress(
         &mut self,
-        advancement: &str,
+        advancement: &adv::Advancement,
         criterion: &str,
         progress_type: NativeProgressType,
     ) {
@@ -806,14 +806,13 @@ impl Game<'_> {
             self.lan_acting_entity,
             self.lan_acting_name.clone(),
         ) {
-            let definition = self.adv.tree.get(advancement).expect("changed advancement");
-            let progress = progress_snapshot(definition, &self.adv.progress);
+            let progress = progress_snapshot(advancement, &self.adv.progress);
             self.native_player_advancement_progress(
                 mod_api::__private::PlayerAdvancementProgressCall {
                     player: uuid,
                     player_entity_id: entity_id as i32,
                     name: &name,
-                    advancement,
+                    advancement: &advancement.id,
                     criterion,
                     progress_type,
                     progress: &progress,
@@ -2329,7 +2328,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
-                self.advancement_progress(&a.id, c, NativeProgressType::Grant);
+                self.advancement_progress(a, c, NativeProgressType::Grant);
                 self.progress_changed(index);
                 if !was && self.adv.progress.done(a) {
                     self.award(index);
@@ -2347,11 +2346,11 @@ impl Game<'_> {
         let a = &tree.list[index];
         self.progress_changed(index);
         match criterion {
-            Some(c) => self.revoke_criterion(&a.id, c),
+            Some(c) => self.revoke_criterion(a, c),
             None => {
                 let mut any = false;
                 for c in &a.criteria {
-                    any |= self.revoke_criterion(&a.id, &c.name);
+                    any |= self.revoke_criterion(a, &c.name);
                 }
                 any
             }
@@ -2359,8 +2358,8 @@ impl Game<'_> {
     }
     /// `PlayerAdvancements.revoke(holder, criterion)`: the progress change and
     /// the hook for it.
-    fn revoke_criterion(&mut self, advancement: &str, criterion: &str) -> bool {
-        let revoked = self.adv.progress.revoke(advancement, criterion);
+    fn revoke_criterion(&mut self, advancement: &adv::Advancement, criterion: &str) -> bool {
+        let revoked = self.adv.progress.revoke(&advancement.id, criterion);
         if revoked {
             self.advancement_progress(advancement, criterion, NativeProgressType::Revoke);
         }
