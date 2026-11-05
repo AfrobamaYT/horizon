@@ -4585,8 +4585,6 @@ pub trait Helpers {
     #[helper(side = "both")]
     fn day_time();
     #[helper(side = "both")]
-    fn world_height();
-    #[helper(side = "both")]
     fn max_stack_size();
     #[helper(side = "client")]
     fn item_model();

@@ -744,7 +744,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - Redstone signals as a block reads them, on a level handle (`LevelRef`) on a server, through the game's own `SignalGetter`, mods' `block_signal` and `should_check_weak_power` parts included: `level.signal(host, pos, direction)` (`getSignal`, how strongly the block at `pos` powers its neighbour on the `direction` side, conducted power included), `level.direct_signal(host, pos, direction)` (`getDirectSignal`, the strong power alone), `level.direct_signal_to(host, pos)` (`getDirectSignalTo`), `level.best_neighbor_signal(host, pos)` (`getBestNeighborSignal`, the strongest power reaching `pos`, as a dispenser or a piston reads it) and `level.has_neighbor_signal(host, pos)` (`hasNeighborSignal`, stopping at the first powered side). Each costs what the game's own call does. They take `&mut dyn ServerHost`, not `&dyn Host`: the signal path asks mods' parts, which get the level as their host, and only a write borrow of the game builds it. They read the level in place: None (or false) for another level, a stale handle or a client.
 
-- `native_weather()` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `native_world_height()` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light and `level.is_raining_at(host, pos)` for rain at a position: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
+- `native_weather()` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `level.height(host)` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light and `level.is_raining_at(host, pos)` for rain at a position: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
 
 - Giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
   the player's [`ENTITY_ITEMS`](../concepts/trait-mods.md#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
@@ -2216,6 +2216,11 @@ handle, an entity the client doesn't track and a level it doesn't show:
   level the server has loaded, not only the one in place. A block in a chunk that isn't loaded or a `y` outside
   the world's height reads as `None`. `level.brightness(host, LightLayer::Block | Sky, pos)` reads the stored light
   (`getBrightness`) the same way, as the game's own light query holds it, and is `None` where the block read is.
+  `level.height(host)` (`LevelHeightAccessor.getMinY`, `getHeight`) also works with `&dyn Host` in client
+  hooks, including render, screen and mouse hooks. Obtain the handle with `host.level(dimension)`; on a
+  client only its current dimension is available, after login. It reads that client's synchronized level
+  shape, without loading chunks or allocating. A stale handle, logout or a different dimension returns
+  `None`, not guessed Overworld bounds. On a server it still reads parked loaded levels as well.
   `level.fluid_state(host, pos)` reads the fluid there the same way.
   `level.fluid_flow(host, pos)` (`FluidState.getFlow`) reads its current as a `Vec3`, through the function that pushes
   entities, so a `fluid_flow` listener's change is what it reads: zero where no fluid flows, `None` where the block read
