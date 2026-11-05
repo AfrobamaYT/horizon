@@ -14,6 +14,10 @@ use syn::{Fields, ImplItem, Item, Visibility, spanned::Spanned};
 pub struct Internal {
     pub path: String,
     pub kind: &'static str,
+    /// The `cfg` it exists under (`all(...)` of several), empty where every build has it: a
+    /// guarded alternative is listed under its own condition, not in place of the other.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub cfg: String,
     pub signature: String,
     pub hash: String,
 }
@@ -62,19 +66,16 @@ impl Source {
 #[derive(Default)]
 struct Pass {
     sources: Vec<Source>,
-    entries: BTreeMap<String, Internal>,
+    /// By path, kind and condition: a field and a method of one name are two entries, and so are
+    /// two guarded alternatives of one item.
+    entries: BTreeMap<(String, &'static str, String), Internal>,
+    /// The conditions of the module being visited.
+    cfg: Vec<String>,
 }
 
-// Only test-only declarations are excluded. Other cfgs keep their spelling and visibility;
-// changing visibility doesn't select an OS or feature for the staged build.
-fn test_only(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("cfg")
-            && matches!(
-                attr.parse_args::<syn::Meta>(), Ok(syn::Meta::Path(path)) if path.is_ident("test")
-            )
-    })
-}
+// Only test-only declarations are excluded. Other cfgs keep their spelling and visibility, and
+// each entry records them: changing visibility doesn't select an OS or feature for the build.
+use crate::points::{conditions, test_only};
 
 fn clean_fields(fields: &Fields) -> Fields {
     let mut fields = fields.clone();
@@ -124,7 +125,19 @@ impl Pass {
         Ok(index)
     }
 
-    fn entry(&mut self, path: &str, kind: &'static str, tokens: impl ToTokens) {
+    fn entry(
+        &mut self,
+        path: &str,
+        kind: &'static str,
+        attrs: &[syn::Attribute],
+        tokens: impl ToTokens,
+    ) {
+        let all: Vec<String> = self.cfg.iter().cloned().chain(conditions(attrs)).collect();
+        let cfg = match &all[..] {
+            [] => String::new(),
+            [one] => one.clone(),
+            many => format!("all({})", many.join(", ")),
+        };
         let signature = tokens.to_token_stream().to_string();
         let digest = Sha256::digest(signature.as_bytes());
         let hash = digest[..8]
@@ -132,10 +145,11 @@ impl Pass {
             .map(|byte| format!("{byte:02x}"))
             .collect();
         self.entries.insert(
-            path.to_owned(),
+            (path.to_owned(), kind, cfg.clone()),
             Internal {
                 path: path.to_owned(),
                 kind,
+                cfg,
                 signature,
                 hash,
             },
@@ -158,18 +172,24 @@ impl Pass {
                     .map_or_else(|| field.ty.span(), |ident| ident.span());
                 self.sources[file].public(&field.vis, start, "field");
             }
-            self.entry(&format!("{path}::{name}"), "field", &field.ty);
+            self.entry(&format!("{path}::{name}"), "field", &field.attrs, &field.ty);
         }
     }
 
-    fn member(&mut self, file: usize, path: &str, item: &ImplItem) {
+    /// A member of `block`: its fingerprint includes the `impl`'s generics and bounds, which decide
+    /// who may call it as much as its own signature does.
+    fn member(&mut self, file: usize, path: &str, block: &syn::ItemImpl, item: &ImplItem) {
+        let (impl_generics, self_ty) = (&block.generics, &block.self_ty);
+        let where_clause = &impl_generics.where_clause;
         match item {
             ImplItem::Fn(method) if !test_only(&method.attrs) => {
                 self.sources[file].public(&method.vis, method.sig.span(), "method");
+                let sig = &method.sig;
                 self.entry(
                     &format!("{path}::{}", method.sig.ident),
                     "method",
-                    &method.sig,
+                    &method.attrs,
+                    quote!(impl #impl_generics #self_ty #where_clause { #sig }),
                 );
             }
             ImplItem::Const(value) if !test_only(&value.attrs) => {
@@ -178,7 +198,8 @@ impl Pass {
                 self.entry(
                     &format!("{path}::{ident}"),
                     "const",
-                    quote!(const #ident #generics: #ty),
+                    &value.attrs,
+                    quote!(impl #impl_generics #self_ty #where_clause { const #ident #generics: #ty }),
                 );
             }
             ImplItem::Type(value) if !test_only(&value.attrs) => {
@@ -187,7 +208,8 @@ impl Pass {
                 self.entry(
                     &format!("{path}::{ident}"),
                     "type",
-                    quote!(type #ident #generics = #ty),
+                    &value.attrs,
+                    quote!(impl #impl_generics #self_ty #where_clause { type #ident #generics = #ty; }),
                 );
             }
             _ => {}
@@ -210,14 +232,19 @@ impl Pass {
                 }
                 let path = format!("{module}::{}", value.ident);
                 self.sources[file].public(&value.vis, $start, $kind);
-                self.entry(&path, $kind, $signature);
+                self.entry(&path, $kind, &value.attrs, $signature);
                 path
             }};
         }
         match item {
             Item::Fn(value) if !test_only(&value.attrs) => {
                 self.sources[file].public(&value.vis, value.sig.span(), "fn");
-                self.entry(&format!("{module}::{}", value.sig.ident), "fn", &value.sig);
+                self.entry(
+                    &format!("{module}::{}", value.sig.ident),
+                    "fn",
+                    &value.attrs,
+                    &value.sig,
+                );
             }
             Item::Struct(value) => {
                 let (ident, generics) = (&value.ident, &value.generics);
@@ -304,11 +331,22 @@ impl Pass {
                 let mut signature = value.clone();
                 signature.attrs.clear();
                 signature.vis = Visibility::Inherited;
-                // Trait method defaults are implementations, not part of the signature.
+                // Trait method defaults are implementations, and docs aren't contract: neither is
+                // part of the signature.
                 for member in &mut signature.items {
-                    if let syn::TraitItem::Fn(method) = member {
-                        method.default = None;
-                        method.semi_token = Some(Default::default());
+                    match member {
+                        syn::TraitItem::Fn(method) => {
+                            method.attrs.retain(|attr| !attr.path().is_ident("doc"));
+                            method.default = None;
+                            method.semi_token = Some(Default::default());
+                        }
+                        syn::TraitItem::Const(value) => {
+                            value.attrs.retain(|attr| !attr.path().is_ident("doc"))
+                        }
+                        syn::TraitItem::Type(value) => {
+                            value.attrs.retain(|attr| !attr.path().is_ident("doc"))
+                        }
+                        _ => {}
                     }
                 }
                 expose!(value, "trait", value.trait_token.span(), signature);
@@ -317,14 +355,20 @@ impl Pass {
                 let ident = &value.ident;
                 let path = expose!(value, "mod", value.mod_token.span(), quote!(mod #ident));
                 if children && let Some((_, items)) = &value.content {
+                    let outer = self.cfg.len();
+                    self.cfg.extend(conditions(&value.attrs));
                     self.items(file, &path, items);
+                    self.cfg.truncate(outer);
                 }
             }
             Item::Impl(value) if children && value.trait_.is_none() && !test_only(&value.attrs) => {
                 let path = format!("{module}::{}", owner(&value.self_ty));
+                let outer = self.cfg.len();
+                self.cfg.extend(conditions(&value.attrs));
                 for member in &value.items {
-                    self.member(file, &path, member);
+                    self.member(file, &path, value, member);
                 }
+                self.cfg.truncate(outer);
             }
             _ => {}
         }
@@ -452,6 +496,7 @@ impl Pass {
                                 self.member(
                                     file,
                                     &format!("{module}::{}", owner(&block.self_ty)),
+                                    block,
                                     member,
                                 );
                                 found = true;
@@ -515,20 +560,23 @@ pub fn widen(root: &Path) -> Result<Widened, String> {
 fn widen_with(root: &Path, list: &str) -> Result<Widened, String> {
     let mut pass = Pass::default();
     let src = root.join("crates/horizon-client/src");
-    for source in crate::points::game_files(&src)?
+    for source in crate::points::game_files(&src, false)?
         .into_iter()
         .chain(std::iter::once(crate::points::GameFile {
             module: "horizon_client::entry".into(),
             path: src.join("entry.rs"),
+            cfg: Vec::new(),
         }))
     {
         let file = pass.load(&source.path)?;
+        pass.cfg = source.cfg;
         pass.items(
             file,
             &source.module,
             &pass.sources[file].parsed.items.clone(),
         );
     }
+    pass.cfg.clear();
     for (line, declaration) in list.lines().enumerate() {
         let path = declaration.split('#').next().unwrap_or_default().trim();
         if !path.is_empty() {
@@ -762,5 +810,84 @@ const LABEL: &str = "é"; struct AfterUnicode;
         let again = widen_with(&one.0, "").unwrap();
         assert_eq!(first.entries, again.entries);
         assert!(again.changed.is_empty());
+    }
+
+    fn by_key(entries: &[Internal]) -> BTreeMap<(String, &'static str, String), String> {
+        entries
+            .iter()
+            .map(|e| ((e.path.clone(), e.kind, e.cfg.clone()), e.hash.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_field_and_a_method_of_one_name_are_both_listed() {
+        let fixture = Fixture::new(
+            "struct Round { listening: bool }\nimpl Round { fn listening(&self) -> bool { self.listening } }\n",
+        );
+        let entries = by_key(&widen_with(&fixture.0, "").unwrap().entries);
+        let path = "horizon_client::game::Round::listening".to_owned();
+        assert!(entries.contains_key(&(path.clone(), "field", String::new())));
+        assert!(entries.contains_key(&(path, "method", String::new())));
+    }
+
+    #[test]
+    fn a_method_fingerprint_follows_its_impl_bounds_but_not_trait_docs() {
+        let hashes = |game: &str| by_key(&widen_with(&Fixture::new(game).0, "").unwrap().entries);
+        let key = |path: &str, kind| (format!("horizon_client::game::{path}"), kind, String::new());
+        let loose = hashes(
+            "struct Slots<K>(K);\nimpl<K: PartialEq> Slots<K> { fn new(k: K) -> Self { Self(k) } }\ntrait Ctl {\n    /// One.\n    fn go(&self);\n}\n",
+        );
+        let tight = hashes(
+            "struct Slots<K>(K);\nimpl<K: PartialEq + Clone> Slots<K> { fn new(k: K) -> Self { Self(k) } }\ntrait Ctl {\n    /// Two.\n    fn go(&self);\n}\n",
+        );
+        let new = key("Slots<K>::new", "method");
+        assert_ne!(loose[&new], tight[&new]);
+        let ctl = key("Ctl", "trait");
+        assert_eq!(loose[&ctl], tight[&ctl]);
+    }
+
+    #[test]
+    fn guarded_alternatives_are_listed_under_their_conditions() {
+        let fixture = Fixture::new(
+            "mod pad {\n    #[cfg(feature = \"controllers\")]\n    mod hardware;\n    #[cfg(not(feature = \"controllers\"))]\n    mod hardware { type PadId = usize; }\n    mod nested { mod leaf; }\n}\n",
+        );
+        fixture.put(
+            "crates/horizon-client/src/game/pad/hardware.rs",
+            "type PadId = gilrs::GamepadId;\n",
+        );
+        fixture.put(
+            "crates/horizon-client/src/game/pad/nested/leaf.rs",
+            "struct Leaf;\n",
+        );
+        let entries = widen_with(&fixture.0, "").unwrap().entries;
+        let pad: Vec<_> = entries
+            .iter()
+            .filter(|e| e.path == "horizon_client::game::pad::hardware::PadId")
+            .map(|e| (e.cfg.as_str(), e.signature.as_str()))
+            .collect();
+        assert_eq!(
+            pad,
+            [
+                (
+                    "feature = \"controllers\"",
+                    "type PadId = gilrs :: GamepadId ;"
+                ),
+                ("not (feature = \"controllers\")", "type PadId = usize ;"),
+            ]
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.path == "horizon_client::game::pad::nested::leaf::Leaf")
+        );
+        assert!(
+            fs::read_to_string(
+                fixture
+                    .0
+                    .join("crates/horizon-client/src/game/pad/hardware.rs")
+            )
+            .unwrap()
+            .starts_with("pub type PadId")
+        );
     }
 }

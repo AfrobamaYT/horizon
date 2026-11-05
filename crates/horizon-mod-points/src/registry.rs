@@ -33,10 +33,12 @@ struct Raw {
 unsafe impl Send for Raw {}
 unsafe impl Sync for Raw {}
 
+/// The list while mods load: registrations, and stops that came before the seal.
 #[derive(Default)]
 struct Open {
     listeners: Vec<Listener>,
     raw: Vec<(PointId, Raw)>,
+    stopped: Vec<String>,
 }
 
 struct Sealed {
@@ -47,9 +49,12 @@ struct Sealed {
     raw: Box<[Box<[Raw]>]>,
 }
 
+/// Registering, stopping and sealing all hold this lock, so a registration either lands in the
+/// sealed list or is refused, and a stop before the seal still holds after it.
 static OPEN: Mutex<Open> = Mutex::new(Open {
     listeners: Vec::new(),
     raw: Vec::new(),
+    stopped: Vec::new(),
 });
 static SEALED: OnceLock<Sealed> = OnceLock::new();
 
@@ -74,12 +79,17 @@ impl std::fmt::Display for RegisterError {
 
 impl std::error::Error for RegisterError {}
 
+fn lock() -> std::sync::MutexGuard<'static, Open> {
+    OPEN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// The open list, while listeners may still register.
 fn open() -> Result<std::sync::MutexGuard<'static, Open>, RegisterError> {
+    let open = lock();
     if SEALED.get().is_some() {
         return Err(RegisterError::Sealed);
     }
-    Ok(OPEN.lock().unwrap_or_else(|e| e.into_inner()))
+    Ok(open)
 }
 
 /// Mod `id`'s entry in the open list, added on its first registration.
@@ -124,21 +134,32 @@ pub fn register_raw(
     Ok(())
 }
 
-/// Stops mod `id`'s listeners: none of them runs again. A trap that stops a wasm group and the
-/// game giving up on a native mod both end here.
+/// Stops mod `id`'s listeners: none of them runs again, whether the list is sealed yet or not. A
+/// trap that stops a wasm group and the game giving up on a native mod both end here.
 pub fn stop(id: &str) {
-    if let Some(sealed) = SEALED.get() {
-        for listener in sealed.listeners.iter().filter(|listener| listener.id == id) {
-            listener.stopped.store(true, Ordering::Release);
+    let mut open = lock();
+    match SEALED.get() {
+        Some(sealed) => {
+            for listener in sealed.listeners.iter().filter(|listener| listener.id == id) {
+                listener.stopped.store(true, Ordering::Release);
+            }
         }
+        None => open.stopped.push(id.to_owned()),
     }
 }
 
 /// Seals the list, so no listener registers after it, and sets each slot a mod listens at. The game
 /// calls it once, after the mods load.
 pub fn seal() {
+    let mut guard = lock();
+    // Published while the lock is held: nothing registers or stops in between.
     let sealed = SEALED.get_or_init(|| {
-        let open = std::mem::take(&mut *OPEN.lock().unwrap_or_else(|e| e.into_inner()));
+        let open = std::mem::take(&mut *guard);
+        for listener in &open.listeners {
+            if open.stopped.iter().any(|id| id == listener.id) {
+                listener.stopped.store(true, Ordering::Release);
+            }
+        }
         let mut places = vec![Vec::new(); POINT_COUNT];
         for (index, listener) in open.listeners.iter().enumerate() {
             for place in listener
@@ -222,6 +243,9 @@ mod tests {
         assert_eq!(register("tick_mod", &Tick), Ok(()));
         assert_eq!(register("tick_mod", &Quiet), Err(RegisterError::Twice));
         assert_eq!(register("quiet_mod", &Quiet), Ok(()));
+        // A stop before the seal holds after it.
+        assert_eq!(register("stopped_early", &Tick), Ok(()));
+        stop("stopped_early");
         let raw = PointId::Tick as usize + 2;
         let place = PointId::Tick;
         assert_eq!(

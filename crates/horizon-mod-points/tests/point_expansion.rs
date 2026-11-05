@@ -7,7 +7,7 @@ use mod_api::ServerHost;
 use std::sync::atomic::Ordering;
 
 pub struct Counter {
-    total: u32,
+    total: usize,
 }
 
 impl mod_api::Host for Counter {}
@@ -23,14 +23,18 @@ mod mod_points {
     use std::sync::Mutex;
     use std::sync::atomic::AtomicBool;
 
+    /// A native width crosses as 64 bits, as a wasm guest sees it.
     pub struct AddArgs {
-        pub step: u32,
-        pub result: Option<u32>,
+        pub step: u64,
+        pub result: Option<u64>,
     }
 
     impl AddArgs {
-        pub fn __new(step: u32) -> Self {
-            Self { step, result: None }
+        pub fn __new(step: usize) -> Self {
+            Self {
+                step: step as u64,
+                result: None,
+            }
         }
     }
 
@@ -137,7 +141,7 @@ mod mod_points {
 
 impl Counter {
     #[point(side = "server", raw)]
-    fn add(&mut self, step: u32) -> u32 {
+    fn add(&mut self, step: usize) -> usize {
         self.total += step;
         self.total
     }
@@ -149,7 +153,7 @@ impl Counter {
 
     /// Its value borrows the counter: a head, and a raw-only return that gets the value.
     #[point(side = "server", raw)]
-    fn slot(&mut self) -> &mut u32 {
+    fn slot(&mut self) -> &mut usize {
         &mut self.total
     }
 }
@@ -159,11 +163,11 @@ pub struct __AddRaw<'r, T0, R> {
     pub step: &'r mut T0,
     pub result: &'r mut Option<R>,
 }
-pub type __AddListener = for<'r> fn(&'r mut Counter, &'r mut __AddRaw<'r, u32, u32>);
+pub type __AddListener = for<'r> fn(&'r mut Counter, &'r mut __AddRaw<'r, usize, usize>);
 pub struct __SlotRaw {}
-pub type __AddReturnListener = for<'r> fn(&'r mut Counter, &'r mut u32);
+pub type __AddReturnListener = for<'r> fn(&'r mut Counter, &'r mut usize);
 pub type __SlotListener = for<'r> fn(&'r mut Counter, &'r mut __SlotRaw);
-pub type __SlotReturnListener = for<'r> fn(&'r mut &mut u32);
+pub type __SlotReturnListener = for<'r> fn(&'r mut &mut usize);
 
 impl Pen {
     #[point(name = "pen_label", raw)]
@@ -221,12 +225,12 @@ impl mod_points::Points for Listener {
 }
 
 /// A raw listener after the API one: it sees the API's change and reads the receiver.
-fn raw_add(counter: &mut Counter, raw: &mut __AddRaw<'_, u32, u32>) {
+fn raw_add(counter: &mut Counter, raw: &mut __AddRaw<'_, usize, usize>) {
     *raw.step += counter.total;
 }
 
 /// The borrowed value itself: the listener writes through it.
-fn raw_slot_return(slot: &mut &mut u32) {
+fn raw_slot_return(slot: &mut &mut usize) {
     **slot += 50;
 }
 

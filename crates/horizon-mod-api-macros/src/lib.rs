@@ -222,6 +222,8 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let mut passed = Vec::new();
     // Where each typed parameter lives while the listeners run: in the API record, or a local.
     let mut places = std::collections::HashMap::new();
+    // For each native-width parameter: the raw listener's local, and its write-back.
+    let mut widened = Vec::new();
     for (i, input) in outer.sig.inputs.iter_mut().enumerate() {
         let syn::FnArg::Typed(typed) = input else {
             continue;
@@ -236,11 +238,26 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
             Some(arg) => {
                 let name = &arg.name;
                 passed.push(plain);
-                places.insert(i, quote!(__args.#name));
-                call.push(match arg.ty {
-                    syn::Type::Reference(_) => quote!(&*__args.#name),
-                    _ => quote!(__args.#name),
-                });
+                match point_shape::wide(&arg.ty) {
+                    // A native width crosses the record as 64 bits, and a raw listener gets it
+                    // back in its own type, in a local written back after it.
+                    Some(wide) => {
+                        let (ty, local) = (&arg.ty, format_ident!("__w{i}"));
+                        places.insert(i, quote!(#local));
+                        widened.push((
+                            quote!(let mut #local = __args.#name as #ty;),
+                            quote!(__args.#name = #local as #wide;),
+                        ));
+                        call.push(quote!(__args.#name as #ty));
+                    }
+                    None => {
+                        places.insert(i, quote!(__args.#name));
+                        call.push(match arg.ty {
+                            syn::Type::Reference(_) => quote!(&*__args.#name),
+                            _ => quote!(__args.#name),
+                        });
+                    }
+                }
             }
             None => {
                 places.insert(i, quote!(#plain));
@@ -285,11 +302,27 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let outcome = shape.raw_outcome(&function.sig);
     // A raw `result` is the API record's when the API carries the value, else a slot of its own.
     let api_result = matches!(shape.returns, point_shape::Returns::Value(_));
-    let result_place = if api_result {
-        quote!(__args.result)
-    } else {
-        quote!(__result_slot)
+    // A native-width value crosses the record as 64 bits.
+    let (widen, narrow) = match &shape.returns {
+        point_shape::Returns::Value(ty) => match point_shape::wide(ty) {
+            Some(wide) => (quote!(as #wide), quote!(as #ty)),
+            None => (quote!(), quote!()),
+        },
+        _ => (quote!(), quote!()),
     };
+    let result_place = match (&shape.returns, api_result) {
+        (point_shape::Returns::Value(ty), true) if point_shape::wide(ty).is_some() => {
+            let wide = point_shape::wide(ty);
+            widened.push((
+                quote!(let mut __w_result = __args.result.map(|__value| __value as #ty);),
+                quote!(__args.result = __w_result.map(|__value| __value as #wide);),
+            ));
+            quote!(__w_result)
+        }
+        (_, true) => quote!(__args.result),
+        (_, false) => quote!(__result_slot),
+    };
+    let (unpack, repack): (Vec<_>, Vec<_>) = widened.into_iter().unzip();
     // The raw record, built afresh for each firing from the places the parameters live.
     let raw_record = {
         let ty = shape.raw_record();
@@ -320,6 +353,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         let raw = shape.raw.then(|| {
             let listener = shape.raw_listener();
             quote! {
+                #(#unpack)*
                 mod_points::__private::fire_raw(
                     mod_points::PointId::#variant,
                     #name,
@@ -331,6 +365,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                         )
                     },
                 );
+                #(#repack)*
             }
         });
         quote!(#api #raw)
@@ -357,7 +392,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         }),
         (point_shape::Returns::Value(_), _) => {
             quote!(if let Some(__result) = __args.result.take() {
-                return __result;
+                return __result #narrow;
             })
         }
         (_, point_shape::RawOutcome::Result(_)) if shape.raw => {
@@ -377,13 +412,13 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         let api = match (&shape.returns, shape.has_return()) {
             (_, false) => quote!(),
             (point_shape::Returns::Value(_), true) => quote! {
-                __args.result = Some(__result);
+                __args.result = Some(__result #widen);
                 mod_points::__private::fire(
                     mod_points::PointId::#variant,
                     #name,
                     &mut |__points| __points.#method(#host &mut __args),
                 );
-                let __result = __args.result.unwrap_or(__result);
+                let __result = __args.result.map_or(__result, |__value| __value #narrow);
             },
             (_, true) => quote! {
                 mod_points::__private::fire(
