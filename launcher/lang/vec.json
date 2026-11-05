@@ -1133,5 +1133,8 @@
   "Tags": "Tag",
   "Builds on the Horizon you play": "Builds on the Horizon you play",
   "Made for Horizon {pin}, but {mods} pin another commit: the build requires all native mods to match the game revision": "Made for Horizon {pin}, but {mods} pin another commit: the build requires all native mods to match the game revision",
-  "Made for Horizon {pin}, you play {yours}: choose matching mod versions or a matching Horizon version before building": "Made for Horizon {pin}, you play {yours}: choose matching mod versions or a matching Horizon version before building"
+  "Made for Horizon {pin}, you play {yours}: choose matching mod versions or a matching Horizon version before building": "Made for Horizon {pin}, you play {yours}: choose matching mod versions or a matching Horizon version before building",
+  "Star on GitHub": "Dà na stela su GitHub",
+  "Windows' Smart App Control is blocking the build (os error 4551). It only lets signed programs run, and a native build runs programs no one has signed: the ones it compiles on this computer and some of the compiler's own. To build native mods, turn it off in Windows Security > App & browser control > Smart App Control settings, then build again. On some Windows versions it can't be turned back on without reinstalling Windows. Content mods (.hmod) need no build and work with it on.": "Windows' Smart App Control is blocking the build (os error 4551). It only lets signed programs run, and a native build runs programs no one has signed: the ones it compiles on this computer and some of the compiler's own. To build native mods, turn it off in Windows Security > App & browser control > Smart App Control settings, then build again. On some Windows versions it can't be turned back on without reinstalling Windows. Content mods (.hmod) need no build and work with it on.",
+  "{count} stars on GitHub": "{count} stele su GitHub"
 }
