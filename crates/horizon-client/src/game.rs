@@ -133,7 +133,7 @@ mod event_loop;
 mod events;
 mod execution_role;
 /// The injection points' slots (#589): one per point's head and return, indexed by
-/// `mod_api::points::PointId`, set once after the mods are installed where one listens.
+/// `mod_points::PointId`, set once after the mods are installed where one listens.
 #[doc(hidden)]
 pub mod points {
     pub(crate) use mod_points::__private::listeners;

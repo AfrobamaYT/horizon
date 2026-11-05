@@ -232,7 +232,8 @@ fn camel(name: &str) -> String {
         .collect()
 }
 
-/// Whether the API can carry `ty` to a listener: a scalar, or `&str`.
+/// Whether the API can carry `ty` to a listener: a scalar, or `&str` with its lifetime elided (a listener
+/// may replace that text with its own, which a named lifetime such as `'static` couldn't hold).
 fn api_typed(ty: &Type) -> bool {
     const SCALARS: [&str; 15] = [
         "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16",
@@ -244,6 +245,7 @@ fn api_typed(ty: &Type) -> bool {
         }
         Type::Reference(reference) => {
             reference.mutability.is_none()
+                && reference.lifetime.is_none()
                 && matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"))
         }
         _ => false,
@@ -261,7 +263,7 @@ impl Shape {
         syn::Ident::new(&camel(&format!("{}_return", self.name)), Span::call_site())
     }
 
-    /// The record its listeners get, in `mod_api::points`: `TickArgs` for `tick`.
+    /// The record its listeners get, in `mod_points`: `TickArgs` for `tick`.
     pub fn record(&self) -> syn::Ident {
         syn::Ident::new(&format!("{}Args", camel(&self.name)), Span::call_site())
     }
@@ -273,7 +275,7 @@ impl Shape {
             .any(|arg| matches!(arg.ty, Type::Reference(_)))
     }
 
-    /// The record's declaration in `mod_api::points`, documented from the function's `target`.
+    /// The record's declaration in `mod_points`, documented from the function's `target`.
     pub fn record_item(&self, target: &str) -> TokenStream {
         let record = self.record();
         let lifetime = if self.borrows() {
@@ -282,14 +284,22 @@ impl Shape {
             quote!()
         };
         let names: Vec<_> = self.args.iter().map(|arg| &arg.name).collect();
-        let types: Vec<_> = self
+        // Text crosses as a `Cow`, so a listener may replace it with an owned `String`.
+        let (types, fields): (Vec<_>, Vec<_>) = self
             .args
             .iter()
             .map(|arg| match &arg.ty {
-                Type::Reference(_) => quote!(&'a str),
-                ty => quote!(#ty),
+                Type::Reference(_) => (quote!(&'a str), quote!(::std::borrow::Cow<'a, str>)),
+                ty => (quote!(#ty), quote!(#ty)),
             })
-            .collect();
+            .unzip();
+        let inits = self.args.iter().map(|arg| {
+            let name = &arg.name;
+            match &arg.ty {
+                Type::Reference(_) => quote!(#name: ::std::borrow::Cow::Borrowed(#name)),
+                _ => quote!(#name),
+            }
+        });
         let field_docs = names.iter().map(|name| {
             format!(
                 "`{name}`: a head listener may change it, and the function runs with the change."
@@ -321,7 +331,7 @@ impl Shape {
             #[doc = #doc]
             #[non_exhaustive]
             pub struct #record #lifetime {
-                #( #[doc = #field_docs] pub #names: #types, )*
+                #( #[doc = #field_docs] pub #names: #fields, )*
                 #extra
             }
             impl #lifetime #record #lifetime {
@@ -329,7 +339,7 @@ impl Shape {
                 #[doc(hidden)]
                 #[inline]
                 pub fn __new(#(#names: #types),*) -> Self {
-                    Self { #(#names,)* #extra_init }
+                    Self { #(#inits,)* #extra_init }
                 }
             }
         }
@@ -337,7 +347,7 @@ impl Shape {
 
     /// The `Points` methods for this point (its head, then its return when it has one), their
     /// `PointId` variants, and the `Option<PointId>` consts `#[horizon_mod]` subscribes a mod by:
-    /// generated into `mod_api::points`.
+    /// generated into `mod_points`.
     pub fn api_items(&self, target: &str) -> (TokenStream, TokenStream, TokenStream) {
         let record = self.record();
         let record = if self.borrows() {

@@ -227,10 +227,14 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         };
         let plain = format_ident!("__p{i}");
         *typed.pat = syn::parse_quote!(#plain);
-        match original.filter(|name| shape.args.iter().any(|arg| arg.name == *name)) {
-            Some(name) => {
+        match original.and_then(|name| shape.args.iter().find(|arg| arg.name == name)) {
+            Some(arg) => {
+                let name = &arg.name;
                 passed.push(plain);
-                call.push(quote!(__args.#name));
+                call.push(match arg.ty {
+                    syn::Type::Reference(_) => quote!(&*__args.#name),
+                    _ => quote!(__args.#name),
+                });
             }
             None => call.push(quote!(#plain)),
         }

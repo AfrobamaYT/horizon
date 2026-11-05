@@ -46,15 +46,15 @@ pub struct GamePoint {
 const ATTRIBUTE: &str = "side = \"both\"";
 
 /// A source file of the game module, with its module path.
-struct GameFile {
-    module: String,
-    path: PathBuf,
+pub(crate) struct GameFile {
+    pub(crate) module: String,
+    pub(crate) path: PathBuf,
 }
 
 /// The files of `horizon_client::game` that every build compiles, following its `mod`
 /// declarations (and `#[path]`s) from `game.rs`: a module behind a `cfg` is left out with
 /// everything under it.
-fn game_files(src: &Path) -> Result<Vec<GameFile>, String> {
+pub(crate) fn game_files(src: &Path) -> Result<Vec<GameFile>, String> {
     let mut files = Vec::new();
     let mut pending = vec![(
         "horizon_client::game".to_owned(),
@@ -336,7 +336,7 @@ mod tests {
     fn a_point_passes_only_api_typed_parameters() {
         let shape = point(
             r#"side = "client""#,
-            "fn turn(&mut self, mut yaw: f64, button: MouseButton, text: &str, batch: &mut HudBatch) {}",
+            "fn turn(&mut self, mut yaw: f64, button: MouseButton, text: &str, event: &'static str, batch: &mut HudBatch) {}",
         )
         .unwrap();
         let args: Vec<_> = shape.args.iter().map(|arg| arg.name.to_string()).collect();
@@ -345,7 +345,7 @@ mod tests {
         let item = shape.record_item("t").to_string();
         assert!(
             item.contains("pub yaw : f64")
-                && item.contains("pub text : & 'a str")
+                && item.contains("pub text : :: std :: borrow :: Cow < 'a , str >")
                 && item.contains("pub cancel : bool"),
             "{item}"
         );
