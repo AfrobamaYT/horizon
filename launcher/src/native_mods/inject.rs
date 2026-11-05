@@ -32,10 +32,10 @@ pub(super) const POINTS: &str = "points.json";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PointError {
     /// The target isn't a point in this game build.
-    NotAPoint { injection: PointInjection },
+    NotAPoint { injection: Box<PointInjection> },
     /// The method isn't that point's head or return method.
     WrongMethod {
-        injection: PointInjection,
+        injection: Box<PointInjection>,
         expected: String,
     },
 }
@@ -96,7 +96,7 @@ pub(super) fn check(
     for injection in injections {
         let Some(point) = points.iter().find(|point| point.target == injection.target) else {
             return Err(PointError::NotAPoint {
-                injection: injection.clone(),
+                injection: Box::new(injection.clone()),
             });
         };
         let expected = match injection.at_return {
@@ -105,7 +105,7 @@ pub(super) fn check(
         };
         if injection.method != expected {
             return Err(PointError::WrongMethod {
-                injection: injection.clone(),
+                injection: Box::new(injection.clone()),
                 expected,
             });
         }
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(
             wrong,
             PointError::WrongMethod {
-                injection: injection(tick, "tick", true),
+                injection: Box::new(injection(tick, "tick", true)),
                 expected: "tick_return".into()
             }
         );
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(
             check(&[injection(other, "use_with_hand", false)], &points),
             Err(PointError::NotAPoint {
-                injection: injection(other, "use_with_hand", false)
+                injection: Box::new(injection(other, "use_with_hand", false))
             })
         );
     }
