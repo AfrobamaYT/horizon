@@ -64,6 +64,9 @@ jobs:
             ENABLED=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_SELF_HOSTED" -q .value 2>/dev/null || true)
             LEASE=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_POOL_UNTIL" -q .value 2>/dev/null || true)
           fi
+          # A refused read prints GitHub's error JSON: keep only a well-formed answer, else use the snapshot.
+          case "${LEASE:-}" in '' | *[!0-9]*) LEASE= ;; esac
+          case "${ENABLED:-}" in true | false) ;; *) ENABLED= ;; esac
           echo "pool lease: live=${LEASE:-unreadable} snapshot=${VARS_LEASE:-none}"
           ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - name: The ignored-tests shard matrix
@@ -312,7 +315,7 @@ jobs:
 
   verify:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -321,7 +324,7 @@ jobs:
     env:
       VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
       VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
-      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
+      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j4' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -379,8 +382,8 @@ jobs:
         with:
           shared-key: verify
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # A dyna-medium runner has a hard 8 GiB limit and 4 CPUs; four horizon-client rustc processes at about 2.6 GB
-      # each go past it, so Dyna runs build two crates at a time. Formatting and lint run in parallel on GitHub's
+      # A dyna-large runner has a hard 16 GiB limit and 8 CPUs; horizon-client rustc processes take about 2.6 GB
+      # each, so Dyna runs build four crates at a time. Formatting and lint run in parallel on GitHub's
       # runners (the lint job), so this job only tests. A cargo flag, not CARGO_BUILD_JOBS: sccache hashes
       # CARGO_* variables, and that would split the runners' cache from the boxes'.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
