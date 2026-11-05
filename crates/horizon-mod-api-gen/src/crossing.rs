@@ -212,7 +212,9 @@ impl Rule {
                 }),
                 _ => false,
             };
-            let opaque_reason = if generic {
+            let opaque_reason = if let Some(reason) = internal.opaque_reason {
+                Some(reason)
+            } else if generic {
                 Some("generic type")
             } else if guarded {
                 Some("conditional field or variant")
@@ -568,6 +570,7 @@ pub(crate) mod tests {
             signature: signature.into(),
             hash: String::new(),
             shape_only: false,
+            opaque_reason: None,
             refs: BTreeMap::new(),
         }
     }
