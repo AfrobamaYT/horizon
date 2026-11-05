@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "Был модтар һеҙҙең компьютерға тулы рөхсәт менән эшләйәсәк .",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Улар уҡый ала, үҙгәртә йәки юйып һеҙҙең файлдар, һәм һеҙҙең иҫәп яҙмаларын һәм селтәрен ҡуллана, һеҙ эшләгән теләһә ниндәй программа кеүек. Уларҙы авторҙарына ышанһағыҙ ғына төҙөгөҙ: Модтар битендә уларҙы атайҙар.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Был ҡоролма стартер Microsoft логин юҡ (HORIZON_MSA_CLIENT_ID), шуға күрә ул уйынды башлай алмай.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "Лаунчерҙың был күсермәһе үҙен алмаштыра алмай. Уны бер тапҡыр яңынан йөкләгеҙ; шунан һуң ул үҙе яңыртыла.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "Был серверҙың Horizon",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Update this launcher with your package manager.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Close this launcher, move it to {folder}, and open it there to enable updates."
 }

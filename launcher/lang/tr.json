@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "Bu modlar bilgisayarınıza tam erişimle çalışacaktır",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Çalıştırdığınız herhangi bir program gibi dosyalarınızı okuyabilir, değiştirebilir veya silebilir, hesaplarınızı ve ağınızı kullanabilirler. Yalnızca yazarlarına güveniyorsanız bunları derleyin: Modlar sayfasında adları belirtilmektedir.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Başlatıcının bu derlemesinde Microsoft oturum açma özelliği (HORIZON_MSA_CLIENT_ID) bulunmuyor, bu nedenle oyunu başlatamıyor.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "Başlatıcının bu kopyası kendini değiştiremiyor. Onu bir kez yeniden indir; sonrasında kendini kendisi günceller.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Bu oyun kaynak kodunda yerel envanter giriş şablonu yok. Horizon'u güncelleyin ve modları bu oyuna karşı yeniden derleyin.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "Bu sunucunun Horizon sürümü",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Update this launcher with your package manager.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Close this launcher, move it to {folder}, and open it there to enable updates."
 }

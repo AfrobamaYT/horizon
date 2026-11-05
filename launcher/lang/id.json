@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "Mod ini akan berjalan dengan akses penuh ke komputer Anda",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Mereka dapat membaca, mengubah, atau menghapus file Anda, serta menggunakan akun dan jaringan Anda, seperti program apa pun yang Anda jalankan. Bangun mod tersebut hanya jika Anda mempercayai pembuatnya: halaman Mod mencantumkan nama mereka.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Build peluncur ini tidak memiliki fitur masuk Microsoft (HORIZON_MSA_CLIENT_ID), sehingga tidak dapat memulai game.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "Salinan launcher ini tidak bisa mengganti dirinya sendiri. Unduh lagi sekali; setelah itu ia memperbarui dirinya sendiri.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Sumber game ini tidak memiliki templat entri inventaris native. Perbarui Horizon dan bangun ulang mod terhadap game ini.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "Versi Horizon server ini",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Perbarui peluncur ini dengan pengelola paket Anda.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Tutup peluncur ini, pindahkan ke {folder}, lalu buka dari sana untuk mengaktifkan pembaruan."
 }

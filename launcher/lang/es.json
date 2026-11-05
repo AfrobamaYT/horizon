@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "Estos mods se ejecutarán con acceso completo a tu ordenador",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Pueden leer, modificar o eliminar tus archivos y usar tus cuentas y red, como cualquier programa que ejecutes. Compílalos únicamente si confías en sus autores: la página Mods los enumera.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Esta compilación del lanzador no tiene inicio de sesión con Microsoft (HORIZON_MSA_CLIENT_ID), por lo que no puede iniciar el juego.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "Esta copia del launcher no puede reemplazarse a sí misma. Descárgalo de nuevo una vez; después se actualiza solo.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "El código fuente de este juego no tiene plantilla de entrada de inventario nativo. Actualiza Horizon y recompila los mods contra este juego.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "Horizon de este servidor",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Actualiza este lanzador con tu gestor de paquetes.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Cierra este lanzador, muévelo a {folder} y ábrelo allí para permitir las actualizaciones."
 }
