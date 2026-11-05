@@ -77,11 +77,12 @@ impl Selection {
 
 struct Gen<'r> {
     rule: &'r Rule,
+    hashes: &'r HashMap<String, (&'r str, &'r str)>,
     selection: Selection,
     /// Each walked type's id, by its spelling.
     ids: HashMap<String, u32>,
     /// Each walked type, in id order: its spelling and node function.
-    nodes: Vec<(String, TokenStream)>,
+    nodes: Vec<(String, String, TokenStream)>,
     /// Each listed copy type's codec, by path: already generated.
     codecs: HashMap<String, bool>,
     items: Vec<TokenStream>,
@@ -202,9 +203,14 @@ fn codec_names(path: &str) -> (syn::Ident, syn::Ident) {
 }
 
 impl<'r> Gen<'r> {
-    fn new(rule: &'r Rule, selection: Selection) -> Self {
+    fn new(
+        rule: &'r Rule,
+        hashes: &'r HashMap<String, (&'r str, &'r str)>,
+        selection: Selection,
+    ) -> Self {
         Self {
             rule,
+            hashes,
             selection,
             ids: HashMap::new(),
             nodes: Vec::new(),
@@ -432,7 +438,15 @@ impl<'r> Gen<'r> {
         }
         let id = self.nodes.len() as u32;
         self.ids.insert(ty.clone(), id);
-        self.nodes.push((ty, TokenStream::new()));
+        let (path, hash) = match shape {
+            Shape::Named(path, _) => self
+                .hashes
+                .get(path)
+                .map(|(p, h)| (p.to_string(), h.to_string()))
+                .unwrap_or((path.clone(), String::new())),
+            _ => (ty, String::new()),
+        };
+        self.nodes.push((path, hash, TokenStream::new()));
         let body = self.node_body(shape);
         let name = format_ident!("node_{id}");
         self.items.push(quote! {
@@ -441,7 +455,7 @@ impl<'r> Gen<'r> {
                 unsafe { #body }
             }
         });
-        self.nodes[id as usize].1 = quote!(#name);
+        self.nodes[id as usize].2 = quote!(#name);
         id
     }
 
@@ -684,6 +698,126 @@ impl<'r> Gen<'r> {
         }
     }
 
+    /// A raw head record uses the exact generic layout emitted by `point_shape::raw_items`.
+    /// References in that record borrow the live arguments; operations address their pointees,
+    /// not the reference slots. The receiver is a separate root, never a full-layout opt-in.
+    fn raw_place(
+        &mut self,
+        internal: &Internal,
+        point: &crate::points::GamePoint,
+    ) -> Option<Vec<TokenStream>> {
+        let rule = self.rule;
+        self.skip_reason = "raw record has an opaque parameter";
+        let sig = signature(&internal.signature)?;
+        let name = &point.name;
+        let shape = point_shape::shape(quote!(name = #name, raw), &sig).ok()?;
+        let (module, _) = point.listener.as_ref()?.rsplit_once("::")?;
+        let owner = if internal.kind == "method" {
+            let (owner, _) = bare(&internal.path)
+                .rsplit_once("::")
+                .map(|(o, n)| (o.to_owned(), n.to_owned()))?;
+            let (_, name) = owner.rsplit_once("::")?;
+            let ty: syn::Type = syn::parse_str(name).ok()?;
+            match rule.shape(module, None, &ty) {
+                Shape::Named(path, _) => Some(path),
+                _ => return None,
+            }
+        } else {
+            None
+        };
+        let receiver = if sig.receiver().is_some() {
+            let path = owner.as_ref()?;
+            let ty = Shape::Named(path.clone(), rule.named(path)?.lifetimes);
+            if rule.crossing_of(&ty) == Crossing::Opaque {
+                return None;
+            }
+            self.selection.owners.entry(path.clone()).or_default();
+            let id = self.node(&ty);
+            quote!(Some(#id))
+        } else {
+            quote!(None)
+        };
+        let mut fields = Vec::new();
+        let mut args = Vec::new();
+        for field in point_shape::raw_fields(&sig) {
+            // API text parameters are the point's Cow, shared with its API listener.
+            let ty = if shape.args.iter().any(|a| a.name == field.name)
+                && matches!(field.ty, syn::Type::Reference(_))
+            {
+                syn::parse_quote!(::std::borrow::Cow<'static, str>)
+            } else {
+                field.ty
+            };
+            let ty = rule.shape(module, owner.as_deref(), &ty);
+            args.push(spell(&ty)?);
+            self.selection.reach(&ty, rule);
+            fields.push((field.name, ty));
+        }
+        match shape.raw_outcome(&sig) {
+            point_shape::RawOutcome::Cancel => {
+                fields.push((format_ident!("cancel"), Shape::Scalar(Scalar::Bool)))
+            }
+            point_shape::RawOutcome::Result(ty) => {
+                let ty = rule.shape(module, owner.as_deref(), &ty);
+                args.push(spell(&ty)?);
+                let ty = Shape::Option(Box::new(ty));
+                self.selection.reach(&ty, rule);
+                fields.push((format_ident!("result"), ty));
+            }
+            point_shape::RawOutcome::None => {}
+        }
+        let record = path_tokens(&format!("{module}::{}", shape.raw_record()));
+        let rust = if fields.is_empty() {
+            record
+        } else {
+            quote!(#record<'static, #(#args),*>)
+        };
+        let key = rust.to_string();
+        let id = self.nodes.len() as u32;
+        self.ids.insert(key.clone(), id);
+        self.nodes.push((key, String::new(), TokenStream::new()));
+        let arms: Vec<_> = fields
+            .iter()
+            .enumerate()
+            .map(|(i, (member, ty))| {
+                self.part(
+                    i as u32,
+                    ty,
+                    quote!(&*(*(p as *const #rust)).#member),
+                    quote!(&mut *(*(p as *mut #rust)).#member),
+                    quote!(&raw mut *(*(p as *mut #rust)).#member as *mut ()),
+                )
+            })
+            .collect();
+        let node = format_ident!("node_{id}");
+        self.items.push(quote! {
+            #[allow(unused_variables, unused_unsafe, clippy::all)]
+            unsafe fn #node(p: *mut (), w: bool, op: I::Op<'_>) -> ::std::result::Result<I::Reply, I::Refusal> {
+                unsafe { match op { #(#arms)* _ => Err(I::not_here("not on this raw record")) } }
+            }
+        });
+        self.nodes[id as usize].2 = quote!(#node);
+        let variant = shape.variant();
+        let target = &point.target;
+        let hash = &point.wire_shape;
+        let mut places = vec![
+            quote!(I::Place { place: ::mod_points::PointId::#variant as usize, target: #target, hash: #hash, receiver: #receiver, record: #id },),
+        ];
+        // A RETURN borrows the returned value directly, not the head's Option<R> slot.
+        let returned = match &sig.output {
+            syn::ReturnType::Default => Shape::Unit,
+            syn::ReturnType::Type(_, ty) => rule.shape(module, owner.as_deref(), ty),
+        };
+        if rule.crossing_of(&returned) != Crossing::Opaque && !matches!(returned, Shape::Ref { .. })
+        {
+            self.selection.reach(&returned, rule);
+            let id = self.node(&returned);
+            let variant = shape.return_variant();
+            places.push(quote!(I::Place { place: ::mod_points::PointId::#variant as usize, target: #target, hash: #hash, receiver: #receiver, record: #id },));
+        }
+        Some(places)
+    }
+
     /// The thunk of the listed function `internal`, if every part of it can cross.
     fn thunk(&mut self, internal: &Internal) -> Option<TokenStream> {
         let rule = self.rule;
@@ -923,6 +1057,7 @@ impl<'r> Gen<'r> {
         };
         let thunk = format_ident!("thunk_{}", self.items.len());
         let path = &internal.path;
+        let hash = &internal.hash;
         self.items.push(quote! {
             #[allow(unused_variables, unused_mut, clippy::all)]
             unsafe fn #thunk(this: ::std::option::Option<*mut ()>, args: ::std::vec::Vec<I::Arg>) -> ::std::result::Result<I::Reply, I::Refusal> {
@@ -935,7 +1070,7 @@ impl<'r> Gen<'r> {
             }
         });
         Some(
-            quote!(I::Thunk { path: #path, receiver: #receiver_ty, args: &[#(#nodes),*], writes: #writes, call: #thunk },),
+            quote!(I::Thunk { path: #path, hash: #hash, receiver: #receiver_ty, args: &[#(#nodes),*], writes: #writes, call: #thunk },),
         )
     }
 }
@@ -981,6 +1116,20 @@ fn signature(written: &str) -> Option<syn::Signature> {
 /// The `__internals` module for the union of declared manifest paths, and what it holds.
 /// Missing or unsupported declarations are reported, not fatal: the loader refuses that mod.
 pub fn table(internals: &[Internal], declared: &[String]) -> (String, Counts) {
+    table_with_points(internals, declared, &[])
+}
+
+/// The table, including the declared raw injection places of the staged game.
+pub fn table_with_points(
+    internals: &[Internal],
+    declared: &[String],
+    points: &[crate::points::GamePoint],
+) -> (String, Counts) {
+    let hashes: HashMap<_, _> = internals
+        .iter()
+        .filter(|i| matches!(i.kind, "struct" | "enum") && i.cfg.is_empty())
+        .map(|i| (bare(&i.path), (i.path.as_str(), i.hash.as_str())))
+        .collect();
     let rule = Rule::new(internals);
     let declared: BTreeSet<_> = declared.iter().map(String::as_str).collect();
     let mut counts = Counts {
@@ -1066,12 +1215,22 @@ pub fn table(internals: &[Internal], declared: &[String]) -> (String, Counts) {
     // Validate functions before generating the final nodes: arguments/results may promote a
     // partial owner to a full layout. Discard each refused probe, including its nodes/codecs.
     let mut accepted = Vec::new();
+    let mut raw = Vec::new();
     for internal in functions {
-        let mut probe = Gen::new(&rule, selection.clone());
+        let mut has_place = false;
+        if let Some(point) = points.iter().find(|p| p.raw && p.target == internal.path) {
+            let mut probe = Gen::new(&rule, &hashes, selection.clone());
+            if probe.raw_place(internal, point).is_some() {
+                selection = probe.selection;
+                raw.push((internal, point));
+                has_place = true;
+            }
+        }
+        let mut probe = Gen::new(&rule, &hashes, selection.clone());
         if probe.thunk(internal).is_some() {
             selection = probe.selection;
             accepted.push(internal);
-        } else {
+        } else if !has_place {
             *counts
                 .skipped_functions
                 .entry(probe.skip_reason)
@@ -1083,7 +1242,7 @@ pub fn table(internals: &[Internal], declared: &[String]) -> (String, Counts) {
     }
     let mut roots: BTreeSet<_> = selection.full.iter().cloned().collect();
     roots.extend(selection.owners.keys().cloned());
-    let mut generator = Gen::new(&rule, selection);
+    let mut generator = Gen::new(&rule, &hashes, selection);
     for path in roots {
         generator.node(&Shape::Named(
             path.clone(),
@@ -1094,28 +1253,33 @@ pub fn table(internals: &[Internal], declared: &[String]) -> (String, Counts) {
         .into_iter()
         .map(|i| generator.thunk(i).expect("validated thunk"))
         .collect();
+    let places: Vec<_> = raw
+        .into_iter()
+        .flat_map(|(internal, point)| {
+            generator
+                .raw_place(internal, point)
+                .expect("validated raw place")
+        })
+        .collect();
     counts.skipped = counts.refused.len();
     counts.types = generator.nodes.len();
     counts.thunks = thunks.len();
     let types = generator
         .nodes
         .iter()
-        .map(|(ty, node)| quote!((#ty, #node),));
+        .map(|(path, hash, node)| quote!(I::Type { path: #path, hash: #hash, node: #node },));
     let items = &generator.items;
     let code = quote! {
-        /// The game's internals for the wasm runtime (#589 W): generated by the staging pass.
-        #[doc(hidden)]
-        #[allow(unsafe_code, unused_unsafe, unused_parens, non_snake_case, dead_code)]
-        pub mod __internals {
-            use ::mod_points::internals as I;
-            use I::Value as V;
-            #(#items)*
-            /// The table.
-            pub static TABLE: I::Table = I::Table {
-                types: &[#(#types)*],
-                thunks: &[#(#thunks)*],
-            };
-        }
+        #![allow(unsafe_code, unused_unsafe, unused_parens, non_snake_case, dead_code)]
+        use ::mod_points::internals as I;
+        use I::Value as V;
+        #(#items)*
+        /// The game's opt-in internals table, generated by the staging pass.
+        pub static TABLE: I::Table = I::Table {
+            types: &[#(#types)*],
+            thunks: &[#(#thunks)*],
+            places: &[#(#places)*],
+        };
     };
     (code.to_string(), counts)
 }
@@ -1132,38 +1296,27 @@ mod tests {
         )
     }
 
-    #[test]
-    fn generated_collection_nodes_compile_and_read_the_actual_element() {
+    fn run_fixture(code: &str, declarations: &str, body: &str) {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let build = std::env::var_os("CARGO_TARGET_DIR")
             .map_or_else(|| root.join("target"), std::path::PathBuf::from)
-            .join(format!("internals-table-fixture-{}", std::process::id()));
+            .join(format!(
+                "internals-table-fixture-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
         std::fs::create_dir_all(&build).unwrap();
         let runtime = root
             .join("crates/horizon-mod-points/src/internals.rs")
             .canonicalize()
             .unwrap();
-        let (code, _) = all_table(&[internal(
-            "horizon_client::Bag",
-            "struct",
-            "struct Bag { items: Vec<u8> }",
-        )]);
         let source = format!(
             r#"
             extern crate self as mod_points;
             #[path = {runtime:?}] pub mod internals;
-            struct Bag {{ items: Vec<u8> }}
-            {code}
-            fn main() {{
-                use internals::{{Op, Reply, Value}};
-                let mut bag = Bag {{ items: vec![7] }};
-                let (_, walk) = __internals::TABLE.types.iter().find(|(name, _)| name.ends_with("Bag")).unwrap();
-                unsafe {{
-                    let Reply::Node(p, ty, writable) = walk(&raw mut bag as *mut (), false, Op::Field(0)).unwrap() else {{ panic!("not a node") }};
-                    assert!(!writable);
-                    assert_eq!(__internals::TABLE.types[ty as usize].1(p, writable, Op::Index(0)), Ok(Reply::Value(Value::U(7))));
-                }}
-            }}
+            {declarations}
+            mod __internals {{ {code} }}
+            fn main() {{ use internals::{{Op, Reply, Value}}; {body} }}
         "#
         );
         let input = build.join("main.rs");
@@ -1188,6 +1341,150 @@ mod tests {
                 .success()
         );
         std::fs::remove_dir_all(build).unwrap();
+    }
+
+    #[test]
+    fn generated_collection_nodes_compile_and_read_the_actual_element() {
+        let (code, _) = all_table(&[internal(
+            "horizon_client::Bag",
+            "struct",
+            "struct Bag { items: Vec<u8> }",
+        )]);
+        run_fixture(
+            &code,
+            "struct Bag { items: Vec<u8> }",
+            r#"
+            let mut bag = Bag { items: vec![7] };
+            let walk = __internals::TABLE.types.iter().find(|ty| ty.path.ends_with("Bag")).unwrap().node;
+            unsafe {
+                let Reply::Node(p, ty, writable) = walk(&raw mut bag as *mut (), false, Op::Field(0)).unwrap() else { panic!("not a node") };
+                assert!(!writable);
+                assert_eq!((__internals::TABLE.types[ty as usize].node)(p, writable, Op::Index(0)), Ok(Reply::Value(Value::U(7))));
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn undeclared_types_and_methods_are_absent() {
+        let entries = [
+            internal(
+                "horizon_client::Hidden",
+                "struct",
+                "struct Hidden { n: u8 }",
+            ),
+            internal("horizon_client::skip", "fn", "fn skip()"),
+        ];
+        let (_, counts) = table(&entries, &[]);
+        assert_eq!(counts.types, 0);
+        assert_eq!(counts.thunks, 0);
+    }
+
+    #[test]
+    fn declared_fields_are_partial_and_keep_global_ids() {
+        let entries = [
+            internal(
+                "horizon_client::Owner",
+                "struct",
+                "struct Owner { first: u8, second: u8 }",
+            ),
+            internal("horizon_client::Owner::first", "field", "u8"),
+            internal("horizon_client::Owner::second", "field", "u8"),
+        ];
+        for first in [false, true] {
+            let mut declared = vec!["horizon_client::Owner::second".into()];
+            if first {
+                declared.push("horizon_client::Owner::first".into());
+            }
+            let (code, counts) = table(&entries, &declared);
+            assert_eq!(counts.types, 1);
+            run_fixture(
+                &code,
+                "struct Owner { first: u8, second: u8 }",
+                &format!(
+                    r#"
+                let mut owner = Owner {{ first: 3, second: 7 }};
+                let walk = __internals::TABLE.types[0].node;
+                let ptr = &raw mut owner as *mut ();
+                unsafe {{
+                    assert_eq!(walk(ptr, true, Op::Get(1)), Ok(Reply::Value(Value::U(7))));
+                    assert_eq!(walk(ptr, true, Op::Get(0)).is_ok(), {first});
+                    assert!(walk(ptr, true, Op::Read).is_err());
+                    assert_eq!(walk(ptr, true, Op::Set(1, Value::U(9))), Ok(Reply::Done));
+                    assert_eq!(owner.second, 9);
+                }}
+            "#
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn declared_methods_reach_arguments_results_and_fields_transitively_but_not_receiver_siblings()
+    {
+        let entries = [
+            internal(
+                "horizon_client::Game",
+                "struct",
+                "struct Game { hidden: Hidden }",
+            ),
+            internal(
+                "horizon_client::Hidden",
+                "struct",
+                "struct Hidden { n: u8 }",
+            ),
+            internal(
+                "horizon_client::Arg",
+                "struct",
+                "struct Arg { children: Vec<Child> }",
+            ),
+            internal("horizon_client::Child", "struct", "struct Child { n: u8 }"),
+            internal("horizon_client::Answer", "enum", "enum Answer { Yes, No }"),
+            internal(
+                "horizon_client::Game::inspect",
+                "method",
+                "fn inspect(&self, arg: &Arg) -> Answer",
+            ),
+            internal("horizon_client::Game::skip", "method", "fn skip(&self)"),
+        ];
+        let (code, counts) = table(&entries, &["horizon_client::Game::inspect".into()]);
+        assert_eq!(counts.types, 5); // Game, Arg, Child, Vec<Child>, Answer.
+        assert_eq!(counts.thunks, 1);
+        assert!(!code.contains("Hidden"));
+        assert!(!code.contains("Game :: skip"));
+        assert!(code.contains("horizon_client::Arg"));
+        assert!(code.contains("horizon_client::Answer"));
+    }
+
+    #[test]
+    fn refused_declarations_do_not_leave_nodes_or_codecs() {
+        let entries = [
+            internal(
+                "horizon_client::Arg",
+                "struct",
+                "struct Arg { items: Vec<u8> }",
+            ),
+            internal("horizon_client::bad", "fn", "fn bad(arg: &Arg) -> Unknown"),
+            internal(
+                "horizon_client::Opaque",
+                "struct",
+                "struct Opaque<T> { x: T }",
+            ),
+        ];
+        let (_, counts) = table(
+            &entries,
+            &[
+                "missing".into(),
+                "horizon_client::bad".into(),
+                "horizon_client::Opaque".into(),
+                "missing".into(),
+            ],
+        );
+        assert_eq!(counts.declared, 3);
+        assert_eq!(counts.skipped, 3);
+        assert_eq!(counts.types, 0);
+        assert_eq!(counts.refused["missing"], "not in internals.json");
+        assert_eq!(counts.refused["horizon_client::Opaque"], "generic type");
     }
 
     #[test]

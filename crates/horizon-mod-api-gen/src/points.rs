@@ -49,7 +49,7 @@ pub struct GamePoint {
     /// Its record's shape, as a wasm mod's listener and the game check it
     /// ([`point_shape::Shape::wire_shape`]).
     #[serde(skip)]
-    wire_shape: String,
+    pub(crate) wire_shape: String,
 }
 
 /// A source file of the game's crates, with its module path and the `cfg`s it is compiled under.

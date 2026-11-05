@@ -52,8 +52,12 @@ fn main() {
             .map_err(|e| format!("{}: {e}", internals.display()))?;
         // The table a wasm mod reaches the internals through, at the game crate's root.
         let declared = declarations(root)?;
-        let (table, counts) =
-            horizon_mod_api_gen::internals_table::table(&widened.entries, &declared);
+        let points = horizon_mod_api_gen::points::game_points(root)?;
+        let (table, counts) = horizon_mod_api_gen::internals_table::table_with_points(
+            &widened.entries,
+            &declared,
+            &points,
+        );
         let lib = root.join("crates/horizon-client/src/lib.rs");
         let text = std::fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
         std::fs::write(&lib, with_internals_table(&text, &table))
@@ -66,7 +70,6 @@ fn main() {
             println!("internals table: skipped {path}: {reason}");
         }
         let staged = horizon_mod_api_gen::points::stage(root)?;
-        let points = horizon_mod_api_gen::points::game_points(root)?;
         let text = serde_json::to_string_pretty(&points).map_err(|e| e.to_string())?;
         std::fs::write(list, text + "\n").map_err(|e| format!("{}: {e}", list.display()))?;
         Ok((staged, widened))
