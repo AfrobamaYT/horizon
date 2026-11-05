@@ -391,6 +391,11 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         (point_shape::Receiver::Shared, _) => (quote!(self,), quote!(self.#inner)),
         (point_shape::Receiver::Mut, _) => (quote!(&mut *self,), quote!(self.#inner)),
     };
+    let erased_receiver = match shape.receiver {
+        point_shape::Receiver::None => quote!(::std::ptr::null_mut()),
+        point_shape::Receiver::Shared => quote!(self as *const Self as *mut ()),
+        point_shape::Receiver::Mut => quote!(&mut *self as *mut Self as *mut ()),
+    };
     // What the API listeners get before their record: the shape's host, if it has one.
     let host = match (shape.receiver, shape.side) {
         (_, None) => quote!(),
@@ -459,12 +464,20 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 mod_points::__private::fire_raw(
                     mod_points::PointId::#variant,
                     #name,
-                    // SAFETY: the generated `main` registered only functions of this point's
-                    // listener type here, checked by a typed `let` before erasing them.
-                    &mut |__function| unsafe {
-                        ::std::mem::transmute::<*const (), #listener>(__function)(
-                            #receiver &mut #raw_record,
-                        )
+                    &mut |__kind| match __kind {
+                        mod_points::__private::RawKind::Typed(__function) => {
+                            // SAFETY: registration guarantees this point's listener type.
+                            unsafe {
+                                ::std::mem::transmute::<*const (), #listener>(__function)(
+                                    #receiver &mut #raw_record,
+                                )
+                            }
+                        }
+                        mod_points::__private::RawKind::Erased(__function) => __function(
+                            mod_points::PointId::#variant as usize,
+                            #erased_receiver,
+                            &mut #raw_record as *mut _ as *mut (),
+                        ),
                     },
                 );
                 #(#repack)*
@@ -532,10 +545,10 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         };
         let raw = shape.raw.then(|| {
             let listener = shape.raw_return_listener();
-            let receiver = if shape.borrowed_return {
-                quote!()
+            let (receiver, erased_receiver) = if shape.borrowed_return {
+                (quote!(), quote!(::std::ptr::null_mut()))
             } else {
-                receiver.clone()
+                (receiver.clone(), erased_receiver.clone())
             };
             let value = match &function.sig.output {
                 syn::ReturnType::Type(..) => quote!(&mut __result),
@@ -547,9 +560,20 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 mod_points::__private::fire_raw(
                     mod_points::PointId::#variant,
                     #name,
-                    // SAFETY: as at the head, with this place's return listener type.
-                    &mut |__function| unsafe {
-                        ::std::mem::transmute::<*const (), #listener>(__function)(#receiver #value)
+                    &mut |__kind| match __kind {
+                        mod_points::__private::RawKind::Typed(__function) => {
+                            // SAFETY: registration guarantees this place's return listener type.
+                            unsafe {
+                                ::std::mem::transmute::<*const (), #listener>(__function)(
+                                    #receiver #value
+                                )
+                            }
+                        }
+                        mod_points::__private::RawKind::Erased(__function) => __function(
+                            mod_points::PointId::#variant as usize,
+                            #erased_receiver,
+                            &mut __result as *mut _ as *mut (),
+                        ),
                     },
                 );
             }

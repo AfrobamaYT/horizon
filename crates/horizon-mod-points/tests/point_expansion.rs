@@ -107,11 +107,12 @@ mod mod_points {
     }
 
     pub static LISTENER: Mutex<Option<&'static dyn Points>> = Mutex::new(None);
-    pub static RAW: Mutex<Vec<(PointId, usize)>> = Mutex::new(Vec::new());
+    pub static RAW: Mutex<Vec<(PointId, __private::RawKind)>> = Mutex::new(Vec::new());
     pub static HEARD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
     pub mod __private {
         use super::*;
+        pub use ::mod_points::__private::RawKind;
 
         pub static POINTS: [AtomicBool; 10] = [const { AtomicBool::new(false) }; 10];
 
@@ -121,7 +122,7 @@ mod mod_points {
             listener.into_iter().for_each(call);
         }
 
-        pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(*const ())) {
+        pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
             let functions: Vec<_> = RAW
                 .lock()
                 .unwrap()
@@ -133,7 +134,7 @@ mod mod_points {
                 HEARD.lock().unwrap().push(name);
             }
             for function in functions {
-                call(function as *const ());
+                call(function);
             }
         }
     }
@@ -229,6 +230,10 @@ fn raw_add(counter: &mut Counter, raw: &mut __AddRaw<'_, usize, usize>) {
     *raw.step += counter.total;
 }
 
+fn raw_add_return(_: &mut Counter, value: &mut usize) {
+    *value += 10;
+}
+
 /// The borrowed value itself: the listener writes through it.
 fn raw_slot_return(slot: &mut &mut usize) {
     **slot += 50;
@@ -254,9 +259,66 @@ fn raw_double(raw: &mut __DoubleRaw<'_, i64, i64>) {
     }
 }
 
+/// Erased callbacks interpret the pointers with the exact types for their registered place,
+/// use them only during the call, and keep shared receivers read-only.
+fn erased_add(place: usize, receiver: *mut (), raw: *mut ()) {
+    assert_eq!(place, mod_points::PointId::Add as usize);
+    // SAFETY: this callback is registered only at Add, whose receiver is mutable.
+    let (counter, raw) = unsafe {
+        (
+            &mut *receiver.cast::<Counter>(),
+            &mut *raw.cast::<__AddRaw<'_, usize, usize>>(),
+        )
+    };
+    assert!(counter.total == 2 || counter.total == 18);
+    *raw.step *= 2;
+}
+
+fn erased_add_return(place: usize, receiver: *mut (), value: *mut ()) {
+    assert_eq!(place, mod_points::PointId::AddReturn as usize);
+    // SAFETY: this callback is registered only at AddReturn with these mutable types.
+    let (counter, value) = unsafe {
+        (
+            &mut *receiver.cast::<Counter>(),
+            &mut *value.cast::<usize>(),
+        )
+    };
+    assert_eq!(counter.total, 18);
+    *value *= 2;
+}
+
+fn erased_slot_return(place: usize, receiver: *mut (), value: *mut ()) {
+    assert_eq!(place, mod_points::PointId::SlotReturn as usize);
+    assert!(receiver.is_null(), "the value still borrows the receiver");
+    // SAFETY: SlotReturn passes a mutable place holding its returned &mut usize.
+    let value = unsafe { &mut *value.cast::<&mut usize>() };
+    **value += 5;
+}
+
+fn erased_label(place: usize, receiver: *mut (), raw: *mut ()) {
+    assert_eq!(place, mod_points::PointId::PenLabel as usize);
+    // SAFETY: PenLabel has a shared Pen receiver and this raw record; neither escapes the call.
+    let (pen, raw) = unsafe {
+        (
+            &*receiver.cast::<Pen>(),
+            &mut *raw
+                .cast::<__PenLabelRaw<'_, std::borrow::Cow<'_, str>, Vec<String>, Vec<String>>>(),
+        )
+    };
+    raw.tags.push(format!("{} erased tags", pen.tags.len()));
+}
+
+fn erased_double(place: usize, receiver: *mut (), raw: *mut ()) {
+    assert_eq!(place, mod_points::PointId::Double as usize);
+    assert!(receiver.is_null(), "a free function has no receiver");
+    // SAFETY: Double passes its mutable raw record.
+    let raw = unsafe { &mut *raw.cast::<__DoubleRaw<'_, i64, i64>>() };
+    *raw.x += 1;
+}
+
 #[test]
 fn slots_change_arguments_stop_the_function_and_change_its_value() {
-    use mod_points::__private::POINTS;
+    use mod_points::__private::{POINTS, RawKind};
     use mod_points::{HEARD, LISTENER, PointId, RAW};
     let mut counter = Counter { total: 0 };
     let pen = Pen {
@@ -270,19 +332,30 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
     assert_eq!(double(4), 8);
     assert!(HEARD.lock().unwrap().is_empty());
 
+    counter.total = 2;
     *LISTENER.lock().unwrap() = Some(&Listener);
     // As the generated `main` registers raw listeners: a typed `let`, then erased.
     let add: __AddListener = raw_add;
+    let add_return: __AddReturnListener = raw_add_return;
     let slot: __SlotReturnListener = raw_slot_return;
     let label: __PenLabelListener = raw_label;
     let label_return: __PenLabelReturnListener = raw_label_return;
     let head: __DoubleListener = raw_double;
     RAW.lock().unwrap().extend([
-        (PointId::Add, add as usize),
-        (PointId::SlotReturn, slot as usize),
-        (PointId::PenLabel, label as usize),
-        (PointId::PenLabelReturn, label_return as usize),
-        (PointId::Double, head as usize),
+        (PointId::Add, RawKind::Typed(add as *const ())),
+        (PointId::Add, RawKind::Erased(erased_add)),
+        (PointId::AddReturn, RawKind::Typed(add_return as *const ())),
+        (PointId::AddReturn, RawKind::Erased(erased_add_return)),
+        (PointId::SlotReturn, RawKind::Typed(slot as *const ())),
+        (PointId::SlotReturn, RawKind::Erased(erased_slot_return)),
+        (PointId::PenLabel, RawKind::Typed(label as *const ())),
+        (PointId::PenLabel, RawKind::Erased(erased_label)),
+        (
+            PointId::PenLabelReturn,
+            RawKind::Typed(label_return as *const ()),
+        ),
+        (PointId::Double, RawKind::Typed(head as *const ())),
+        (PointId::Double, RawKind::Erased(erased_double)),
     ]);
     for id in [
         PointId::Add,
@@ -296,33 +369,35 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
     ] {
         POINTS[id as usize].store(true, Ordering::Release);
     }
-    // The API listener doubles the step to 6, the raw one adds the total (0): the body adds 6,
-    // and the API return listener changes the value.
-    assert_eq!(counter.add(3), 1006);
-    assert_eq!(counter.total, 6);
+    // The API doubles the step to 6, the typed raw listener adds the total (2), and the erased
+    // one doubles it to 16. The body returns 18; API, typed raw and erased returns then make it
+    // (18 + 1000 + 10) * 2. Swapping either pair of raw listeners would change the answer.
+    assert_eq!(counter.add(3), 2056);
+    assert_eq!(counter.total, 18);
     // A head result returns at once: no body, no return place.
     assert_eq!(counter.add(100), 7);
-    assert_eq!(counter.total, 6);
+    assert_eq!(counter.total, 18);
     // A head cancel skips the body; its unset return slot isn't asked.
     counter.reset();
-    assert_eq!(counter.total, 6);
+    assert_eq!(counter.total, 18);
     // The borrowed return reaches its raw listener as itself.
     *counter.slot() += 1;
-    assert_eq!(counter.total, 57);
+    assert_eq!(counter.total, 74);
     // Off `Game`: the API listener changes the text, the raw one an internal argument at the
     // head and the value the API can't carry at the return.
     assert_eq!(
         pen.label("b", Vec::new()),
-        ["1 tags", "b!", "own", "returned"]
+        ["1 tags", "1 erased tags", "b!", "own", "returned"]
     );
     // A free function: a raw head result skips the body.
     assert_eq!(double(-5), 0);
-    assert_eq!(double(5), 10);
+    assert_eq!(double(5), 12);
     assert_eq!(
         *HEARD.lock().unwrap(),
         [
             "add",
             "add",
+            "add_return",
             "add_return",
             "add",
             "add",

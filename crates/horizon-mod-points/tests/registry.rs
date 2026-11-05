@@ -1,6 +1,6 @@
 //! The registry's lifecycle, registering, sealing and stopping, on the real points: an integration
 //! test, so the generated points compile once for the tests.
-use mod_points::__private::{POINTS, RawListener, register_raw, seal};
+use mod_points::__private::{POINTS, RawKind, RawListener, register_raw, seal};
 use mod_points::{PointId, Points, RegisterError, register, stop};
 use std::sync::atomic::Ordering;
 
@@ -21,6 +21,11 @@ impl Points for Quiet {
 }
 
 fn raw_listener() {}
+
+fn erased_listener(place: usize, receiver: *mut (), raw: *mut ()) {
+    assert_eq!(place, PointId::Tick as usize);
+    assert!(receiver.is_null() && raw.is_null());
+}
 
 /// `raw_listener` at `place`: the test's slots never call it.
 fn raw_at(id: &'static str, place: PointId) -> RawListener {
@@ -51,6 +56,10 @@ fn one_list_registered_sealed_and_stopped() {
     let raw = PointId::Tick as usize + 2;
     let place = PointId::Tick;
     assert_eq!(register_raw(&raw_at("raw_mod", place)), Ok(()));
+    // SAFETY: the callback checks its place and never dereferences the pointers.
+    let erased = unsafe { RawListener::erased("raw_mod", place, erased_listener) };
+    assert_eq!(register_raw(&erased), Ok(()));
+    assert_eq!(register_raw(&raw_at("raw_mod", place)), Ok(()));
     assert!(
         !POINTS[PointId::Tick as usize].load(Ordering::Acquire),
         "nothing listens before the seal"
@@ -66,16 +75,27 @@ fn one_list_registered_sealed_and_stopped() {
     assert!(!POINTS[raw].load(Ordering::Acquire));
     let (mut heard, mut raw_heard) = (0, 0);
     mod_points::__private::fire(PointId::Tick, "tick", &mut |_| heard += 1);
-    mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |function| {
-        assert_eq!(function, raw_listener as *const ());
+    let mut order = Vec::new();
+    mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |kind| {
+        match kind {
+            RawKind::Typed(function) => {
+                assert_eq!(function, raw_listener as *const ());
+                order.push("typed");
+            }
+            RawKind::Erased(function) => {
+                function(place as usize, std::ptr::null_mut(), std::ptr::null_mut());
+                order.push("erased");
+            }
+        }
         raw_heard += 1;
     });
-    assert_eq!((heard, raw_heard), (1, 1));
+    assert_eq!(order, ["typed", "erased", "typed"]);
+    assert_eq!((heard, raw_heard), (1, 3));
     stop("tick_mod");
     stop("raw_mod");
     mod_points::__private::fire(PointId::Tick, "tick", &mut |_| heard += 1);
     mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |_| raw_heard += 1);
-    assert_eq!((heard, raw_heard), (1, 1), "stopped mods are skipped");
+    assert_eq!((heard, raw_heard), (1, 3), "stopped mods are skipped");
 }
 
 #[test]

@@ -28,7 +28,7 @@ pub use registry::{RegisterError, register, stop};
 // hidden: the game's side of the points, not part of the API a mod is written against
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::registry::{POINTS, RawListener, register_raw, seal};
+    pub use crate::registry::{POINTS, RawKind, RawListener, register_raw, seal};
     #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
     pub use crate::wire;
     use crate::{PointId, Points};
@@ -41,11 +41,12 @@ pub mod __private {
         crate::registry::fire(place, name, call);
     }
 
-    /// Runs the raw listeners at `place`, each through `call` with its erased function, which the
-    /// slot casts back to the place's listener type.
+    /// Runs the raw listeners at `place`, each through `call` with its kind and function. The
+    /// slot casts a typed function back to the place's listener type, or calls an erased one
+    /// with the place index and its receiver and raw record or return value pointers.
     #[cold]
     #[inline(never)]
-    pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(*const ())) {
+    pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
         crate::registry::fire_raw(place, name, call);
     }
 
