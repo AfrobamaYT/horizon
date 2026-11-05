@@ -132,12 +132,31 @@ mod entity_sounds;
 mod event_loop;
 mod events;
 mod execution_role;
-/// The injection points' slots (`#[point]`, #589), generated from the game's source.
+/// The injection points' slots (#589): one per point's head and return, indexed by
+/// `mod_points::PointId`, set once after the mods are installed where one listens.
 #[doc(hidden)]
 pub mod points {
-    include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
+    // `fire` and `host_side` are called only by the `#[point]`s the stage adds to its copy.
+    #[allow(unused_imports, reason = "used by the staged copy's points")]
+    pub(crate) use mod_points::__private::fire;
+    pub(crate) use mod_points::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
-    /// A `side = "both"` point's host.
+    pub(crate) static POINTS: [AtomicBool; POINT_COUNT] =
+        [const { AtomicBool::new(false) }; POINT_COUNT];
+
+    /// Seals the listener list and sets each slot a mod listens at, once, after the mods are
+    /// installed and their listeners registered.
+    pub(crate) fn attach_installed() {
+        mod_points::__private::seal();
+        for (index, slot) in POINTS.iter().enumerate() {
+            slot.store(mod_points::__private::listened_at(index), Ordering::Release);
+        }
+    }
+
+    /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
+    #[inline(never)]
+    #[allow(dead_code, reason = "used by the staged copy's points")]
     pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
         super::execution_role::host_side(game)
     }
@@ -2751,6 +2770,22 @@ struct QueuedLevelEvent {
     source: Option<horizon_world::level::LevelEventPlayer>,
 }
 
+/// The inputs of the scaled GUI size, compared so `window_resize` fires once per change.
+#[derive(Clone, Copy, PartialEq)]
+struct ResizeState {
+    size: winit::dpi::PhysicalSize<u32>,
+    gui_scale: u32,
+    fullscreen: bool,
+    force_unicode: bool,
+}
+
+impl ResizeState {
+    /// Records `self` as the last report and says whether it differs from the previous one.
+    fn differs_from(self, last: &mut Option<Self>) -> bool {
+        last.replace(self) != Some(self)
+    }
+}
+
 struct Game<'a> {
     /// Shared with an integrated server; `collision` and `motion` borrow from it.
     res: Arc<Resources>,
@@ -2935,6 +2970,8 @@ struct Game<'a> {
     /// The layout the last frame drew the inventory's effect panels with.
     effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
+    /// What `window_resize` last reported: the physical size and the GUI settings behind the scaled size.
+    resize_state: Option<ResizeState>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
     last_device_recovery: Option<Instant>,
@@ -3906,7 +3943,6 @@ impl Game<'_> {
         Some((self.eye_position()?, view_vector(self.yaw, self.pitch)))
     }
     /// `Player.blockInteractionRange`: the block pick's and mining's reach.
-    #[horizon_mod_api_macros::point(side = "both")]
     fn reach(&self) -> f64 {
         self.block_reach
     }
@@ -4212,7 +4248,6 @@ impl Game<'_> {
     /// (PowderSnowBlock.canEntityWalkOnPowderSnow), freeze-immune wear
     /// (LivingEntity.canFreeze), the dimension's FAST_LAVA, the sleeping
     /// pose and blindness (Player.isMobilityRestricted, which stops a sprint).
-    #[horizon_mod_api_macros::point(side = "both")]
     pub(crate) fn sync_player_body(&mut self) {
         let glider = self.glider_worn();
         let sleeping = self.sleeping.is_some();
@@ -8324,7 +8359,6 @@ impl Game<'_> {
         }
         None
     }
-    #[horizon_mod_api_macros::point(side = "both")]
     fn spawn_player(&mut self) -> Result<()> {
         if self.player.is_some() || self.remote.is_some() {
             return Ok(());
@@ -8481,7 +8515,6 @@ impl Game<'_> {
             self.texture_ticks
         }
     }
-    #[horizon_mod_api_macros::point(side = "both")]
     fn tick(&mut self) -> Result<()> {
         if self.agent.hold_server {
             return Ok(());
@@ -8949,7 +8982,6 @@ impl Game<'_> {
     /// `MouseHandler.handleAccumulatedMovement` and `Entity.turn`, once per frame.
     /// An agent moving the mouse (`mouse-move`) counts as a grabbed pointer in
     /// an active window, as it cannot grab the real one.
-    #[horizon_mod_api_macros::point(side = "client", hot)]
     fn apply_mouse_look(&mut self) {
         let mut look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
@@ -12939,7 +12971,6 @@ impl Game<'_> {
         scale > 0.9 && falling && !restricted
     }
     /// Player.attack with the attack-strength charge, crits and knockback.
-    #[horizon_mod_api_macros::point(side = "both")]
     fn attack(&mut self) -> bool {
         if self.spectator() {
             return false;
@@ -15642,10 +15673,6 @@ impl Game<'_> {
         if self.settings.sound_device != self.audio.device() {
             let _ = self.audio.set_device(&self.settings.sound_device);
         }
-        horizon_client::hud::GUI_SCALE.store(
-            self.settings.gui_scale,
-            std::sync::atomic::Ordering::Relaxed,
-        );
         self.apply_ui_settings();
     }
     /// The sprite layers a shader pack draws in the translucent pass: every section is meshed
@@ -16876,7 +16903,6 @@ impl Game<'_> {
             scaled: false,
         });
     }
-    #[horizon_mod_api_macros::point(side = "client", hot)]
     fn render(&mut self) -> Result<bool> {
         // The window's GPU holds the atlas: its copy in memory is kept
         // compressed (a no-op once it is).
@@ -18504,6 +18530,7 @@ impl ApplicationHandler for Game<'_> {
                 return;
             }
         }
+        self.resize_state = Some(self.resize_state_of(window.inner_size()));
         self.window = Some(window);
         self.ime_allowed = false;
         self.ime_area = None;
@@ -18662,7 +18689,11 @@ impl Game<'_> {
                 return;
             }
         }
+        let resized = matches!(event, WindowEvent::Resized(_));
         self.handle_window_event_inner(event_loop, event);
+        if resized {
+            self.notify_window_resize();
+        }
         // A title screen the event asked for opens before the next event.
         self.settle_title_mode();
         if let Some((button, pressed, modifiers)) = mouse {
@@ -20432,6 +20463,7 @@ impl<'a> Game<'a> {
             observed_screen: None,
             effects_layout: std::cell::Cell::new(None),
             window: None,
+            resize_state: None,
             renderer: None,
             last_device_recovery: None,
             entity_vertices: Vec::new(),
@@ -23081,6 +23113,7 @@ impl Loading {
         };
         drop(game_step);
         let game_ms = game_at.elapsed().as_millis();
+        game.resize_state = Some(game.resize_state_of(window.inner_size()));
         game.window = Some(window);
         game.renderer = Some(renderer);
         game.world_renderer_ready = true;
