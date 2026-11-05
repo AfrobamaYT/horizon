@@ -13,6 +13,10 @@
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
 mod registry;
+// hidden: how records cross to wasm mods, the runtime's and the guest glue's, not the API's
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+#[doc(hidden)]
+pub mod wire;
 
 pub use registry::{RegisterError, register, stop};
 
@@ -20,6 +24,8 @@ pub use registry::{RegisterError, register, stop};
 #[doc(hidden)]
 pub mod __private {
     pub use crate::registry::{listened_at, listeners, seal};
+    #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+    pub use crate::wire;
 
     /// Runs a point's listeners, out of the pointed function's own code.
     #[cold]

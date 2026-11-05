@@ -11,6 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+mod points;
+
 /// The game's shared Rust standard library member, shipped beside the executable and linked
 /// first into every group (members are built against the same pinned toolchain).
 pub const STD_MEMBER: &str = "horizon-wasm-std.wasm";
@@ -53,6 +55,20 @@ pub enum Refusal {
     Package(String),
     /// The group didn't instantiate or its exports aren't this game's.
     Load(LoadError),
+    /// An injection, or a place the mod listens at, names no point of this game.
+    NoSuchPoint { point: String },
+    /// The mod listens at a place its `horizon-mod.toml` doesn't list.
+    UndeclaredPoint { point: String },
+    /// Its `horizon-mod.toml` lists a place the mod doesn't listen at.
+    UnfilledPoint { point: String },
+    /// The mod was built for another shape of a point's record than this game's.
+    ChangedPoint {
+        point: String,
+        built: String,
+        game: String,
+    },
+    /// Its listeners couldn't be set up.
+    Points(String),
 }
 
 impl std::fmt::Display for Refusal {
@@ -81,6 +97,22 @@ impl std::fmt::Display for Refusal {
             ),
             Self::Package(why) => write!(f, "{why}"),
             Self::Load(why) => write!(f, "{why}"),
+            Self::NoSuchPoint { point } => {
+                write!(f, "listens at {point}, which this game has no point at")
+            }
+            Self::UndeclaredPoint { point } => write!(
+                f,
+                "listens at {point}, which its horizon-mod.toml doesn't list"
+            ),
+            Self::UnfilledPoint { point } => write!(
+                f,
+                "lists {point} in its horizon-mod.toml but doesn't listen there"
+            ),
+            Self::ChangedPoint { point, built, game } => write!(
+                f,
+                "was built for another {point}: its record is ({built}), this game's ({game}); rebuild it"
+            ),
+            Self::Points(why) => write!(f, "{why}"),
         }
     }
 }
@@ -360,6 +392,7 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
     let (groups, mut refused) = groups(&packages);
     let mut mods = Vec::new();
     for members in groups {
+        let members_of_group = members.clone();
         let ids: Vec<&'static str> = members
             .iter()
             .map(|&i| &*Box::leak(packages[i].manifest.id.clone().into_boxed_str()))
@@ -382,7 +415,14 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
                 .map_err(Refusal::Load)
             });
         match loaded {
-            Ok(entries) => mods.extend(entries),
+            Ok(members) => {
+                for (member, &i) in members.into_iter().zip(&members_of_group) {
+                    match points::listen(&packages[i].manifest, &member.exports) {
+                        Ok(()) => mods.push(member.entry),
+                        Err(why) => refused.push((member.exports.id().to_string(), why)),
+                    }
+                }
+            }
             Err(why) => refused.extend(ids.iter().map(|id| (id.to_string(), why.clone()))),
         }
     }

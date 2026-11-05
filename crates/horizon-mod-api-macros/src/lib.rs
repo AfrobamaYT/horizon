@@ -124,12 +124,31 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
 fn expand_points(mut implementation: ItemImpl) -> TokenStream {
     let mut methods = Vec::new();
     let mut cfgs = Vec::new();
+    let mut records = Vec::new();
     for item in &implementation.items {
         if let ImplItem::Fn(method) = item {
             methods.push(method.sig.ident.clone());
             cfgs.push(cfg_attributes(method));
+            // The record a listener takes, `args: &mut XArgs`: what crosses to it in a wasm mod.
+            let record = match method.sig.inputs.iter().nth(2) {
+                Some(syn::FnArg::Typed(typed)) => match &*typed.ty {
+                    syn::Type::Reference(reference) => Some((*reference.elem).clone()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(record) = record else {
+                return syn::Error::new_spanned(
+                    &method.sig,
+                    "a point listener takes `&self`, its host and `args: &mut <Point>Args`",
+                )
+                .into_compile_error()
+                .into();
+            };
+            records.push(record);
         }
     }
+    let guest = wasm_listeners(&implementation.self_ty, &methods, &cfgs, &records);
     implementation.items.push(syn::parse_quote! {
         fn subscribed(&self) -> &'static [Option<mod_points::PointId>] {
             &[#(#(#cfgs)* mod_points::ids::#methods),*]
@@ -151,8 +170,74 @@ fn expand_points(mut implementation: ItemImpl) -> TokenStream {
                 .downcast_ref::<#ty>()
                 .expect("a mod's Points and Hooks are one type")
         }
+        #guest
     }
     .into()
+}
+
+/// A wasm mod's listeners at points: the `listeners` export (`mod_points::wire`), each place the
+/// mod's `impl Points` overrides at its index in `subscribed`, with its record's shape, which the
+/// game checks at load. Only the methods the mod overrides are bound, so the mod carries none of
+/// the other points' records.
+fn wasm_listeners(
+    ty: &syn::Type,
+    methods: &[syn::Ident],
+    cfgs: &[Vec<syn::Attribute>],
+    records: &[syn::Type],
+) -> proc_macro2::TokenStream {
+    let names = methods.iter().map(|method| method.to_string());
+    let records = records.iter().map(|record| {
+        // The record's own lifetime, if any, elided: `<XArgs<'_> as Lift<'_>>`.
+        let mut record = record.clone();
+        if let syn::Type::Path(path) = &mut record
+            && let Some(last) = path.path.segments.last_mut()
+            && let syn::PathArguments::AngleBracketed(arguments) = &mut last.arguments
+        {
+            for argument in &mut arguments.args {
+                if let syn::GenericArgument::Lifetime(lifetime) = argument {
+                    *lifetime = syn::Lifetime::new("'_", lifetime.span());
+                }
+            }
+        }
+        record
+    });
+    quote! {
+        #[cfg(target_arch = "wasm32")]
+        const _: () = {
+            struct HorizonListeners;
+            impl mod_points::__private::wire::Guest for HorizonListeners {
+                fn subscribed() -> ::std::vec::Vec<(::std::string::String, ::std::string::String)> {
+                    ::std::vec![#(#(#cfgs)* (
+                        ::std::string::String::from(#names),
+                        ::std::string::String::from(
+                            <#records as mod_points::__private::wire::Lift<'_>>::SHAPE,
+                        ),
+                    )),*]
+                }
+                #[allow(unused_assignments)]
+                fn fire(
+                    place: u32,
+                    host: mod_points::__private::wire::HostKind,
+                    fields: ::std::vec::Vec<mod_points::__private::wire::Value>,
+                ) -> ::std::vec::Vec<mod_points::__private::wire::Value> {
+                    let this = mod_points::__private::wire::listener::<#ty>();
+                    let mut index = 0u32;
+                    #(#(#cfgs)* {
+                        if place == index {
+                            return mod_points::__private::wire::fire(host, &fields, |host, args| {
+                                <#ty as mod_points::Points>::#methods(this, host, args)
+                            });
+                        }
+                        index += 1;
+                    })*
+                    panic!("the game fired a place this mod doesn't listen at")
+                }
+            }
+            mod_points::export_listeners!(
+                HorizonListeners with_types_in mod_points::__private::wire::bindings
+            );
+        };
+    }
 }
 
 /// Mark a trait mod or its renderer and derive its hook subscriptions.

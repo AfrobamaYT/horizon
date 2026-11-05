@@ -73,11 +73,18 @@ fn chat(hooks: &dyn Hooks, work: &str) -> String {
 
 /// The median time per call of `calls` calls, over 9 batches after one warm-up batch.
 fn per_call(hooks: &dyn Hooks, work: &str, calls: u32) -> Duration {
+    timed(calls, || {
+        std::hint::black_box(chat(hooks, std::hint::black_box(work)));
+    })
+}
+
+/// The median time of one `call`, over 9 batches of `calls` after one warm-up batch.
+fn timed(calls: u32, mut call: impl FnMut()) -> Duration {
     let mut batches: Vec<Duration> = (0..10)
         .map(|_| {
             let started = Instant::now();
             for _ in 0..calls {
-                std::hint::black_box(chat(hooks, std::hint::black_box(work)));
+                call();
             }
             started.elapsed() / calls
         })
@@ -89,6 +96,7 @@ fn per_call(hooks: &dyn Hooks, work: &str, calls: u32) -> Duration {
 
 fn shown(time: Duration) -> String {
     match time.as_nanos() {
+        n if n < 10 => format!("{:.2} ns", time.as_secs_f64() * 1e9),
         n if n < 10_000 => format!("{n} ns"),
         n if n < 10_000_000 => format!("{:.1} µs", n as f64 / 1e3),
         n => format!("{:.1} ms", n as f64 / 1e6),
@@ -273,6 +281,81 @@ fn a_wasm_mod_against_the_same_mod_native() {
             wasm_time.as_secs_f64() / native_time.as_secs_f64().max(1e-12)
         ));
     }
+    println!("{table}");
+    if let Ok(summary) = std::env::var("GITHUB_STEP_SUMMARY") {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(summary)
+            .unwrap();
+        writeln!(file, "{table}").unwrap();
+    }
+}
+
+/// A server's tick for a point's listeners.
+fn tick_at_point(listeners: impl Iterator<Item = &'static dyn mod_points::Points>) -> bool {
+    let mut args = mod_points::TickArgs::__new();
+    for listener in listeners {
+        listener.tick(mod_api::HostSide::Server(&mut World), &mut args);
+    }
+    args.cancel
+}
+
+#[test]
+#[ignore = "needs tests/bench built to mod.wasm and a release build (CI's wasm-bench job)"]
+fn a_point_filled_by_a_wasm_mod() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    // The bench mod, its manifest listing the tick point it listens at (its own lists none, so
+    // the other tests here load it without registering a listener).
+    let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
+    let package = path("HORIZON_WASM_BENCH");
+    let built = horizon_mods::Package::read(&package).unwrap().manifest;
+    let wasm = built.wasm.as_ref().unwrap();
+    let manifest = horizon_mods::manifest::Manifest::parse(&format!(
+        "id = \"bench_mod\"\nname = \"Benchmark mod\"\nversion = \"1.0.0\"\napi = \"0.2\"\n\
+         capabilities = [\"registries\"]\n\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"{}\"\n\n\
+         [[native.injection]]\nid = \"tick\"\ntarget = \"horizon_client::game::Game<'_>::tick\"\n\
+         kind = \"HEAD\"\ntrait_method = \"tick\"\n",
+        wasm.sha512(),
+        wasm.toolchain()
+    ))
+    .unwrap();
+    let loaded = horizon_mod_wasm::load(
+        &horizon_mod_wasm::RuntimeConfig::default(),
+        &std::fs::read(path("HORIZON_WASM_STD")).unwrap(),
+        vec![horizon_mod_wasm::WasmPackage {
+            manifest,
+            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+        }],
+    );
+    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
+    mod_points::__private::seal();
+    // The game's slot table: a place nobody listens at costs this check.
+    let slots: Vec<AtomicBool> = (0..mod_points::POINT_COUNT)
+        .map(|place| AtomicBool::new(mod_points::__private::listened_at(place)))
+        .collect();
+    let quiet = mod_points::PointId::TickWorld as usize;
+    assert!(!slots[quiet].load(Ordering::Relaxed));
+    let empty = timed(1_000_000, || {
+        std::hint::black_box(slots[std::hint::black_box(quiet)].load(Ordering::Relaxed));
+    });
+    let native: &'static dyn mod_points::Points = Box::leak(Box::new(bench_mod::Mod));
+    let native_time = timed(20_000, || {
+        std::hint::black_box(tick_at_point(std::iter::once(native)));
+    });
+    let wasm_time = timed(20_000, || {
+        std::hint::black_box(tick_at_point(mod_points::__private::listeners(
+            mod_points::PointId::Tick,
+            "tick",
+        )));
+    });
+    let table = format!(
+        "### A point filled by a mod\n\n| Slot | Per tick |\n| --- | --- |\n\
+         | Nobody listens | {} |\n| A native listener | {} |\n| A wasm listener | {} |\n",
+        shown(empty),
+        shown(native_time),
+        shown(wasm_time)
+    );
     println!("{table}");
     if let Ok(summary) = std::env::var("GITHUB_STEP_SUMMARY") {
         use std::io::Write;

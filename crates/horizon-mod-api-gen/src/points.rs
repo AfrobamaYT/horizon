@@ -35,10 +35,14 @@ pub struct GamePoint {
     pub at_return: bool,
     #[serde(skip)]
     record_item: String,
-    /// Its `Points` methods, `PointId` variants and subscription consts
+    /// Its `Points` methods, `PointId` variants, subscription consts and forwarding methods
     /// ([`point_shape::Shape::api_items`]).
     #[serde(skip)]
-    api: [String; 3],
+    api: [String; 4],
+    /// Its record's shape, as a wasm mod's listener and the game check it
+    /// ([`point_shape::Shape::wire_shape`]).
+    #[serde(skip)]
+    wire_shape: String,
 }
 
 /// The attribute the staging pass writes: every point fires on both sides, its listeners
@@ -166,7 +170,13 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
             let api = shape.api_items(&target);
             points.push(GamePoint {
                 record_item: shape.record_item(&target).to_string(),
-                api: [api.0.to_string(), api.1.to_string(), api.2.to_string()],
+                api: [
+                    api.methods.to_string(),
+                    api.variants.to_string(),
+                    api.consts.to_string(),
+                    api.forwards.to_string(),
+                ],
+                wire_shape: shape.wire_shape(),
                 at_return: shape.has_return(),
                 target,
                 side: shape.side.name(),
@@ -287,6 +297,30 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
     let methods = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let consts = points.iter().map(|point| parse(&point.api[2]));
+    let forwards = points.iter().map(|point| parse(&point.api[3]));
+    // Each place's name, function and record shape, in `PointId` order: a point's head, then its
+    // return.
+    let places: Vec<(String, &str, &str)> = points
+        .iter()
+        .flat_map(|point| {
+            let head = (point.name.clone(), &*point.target, &*point.wire_shape);
+            let back = (
+                format!("{}_return", point.name),
+                &*point.target,
+                &*point.wire_shape,
+            );
+            std::iter::once(head).chain(point.at_return.then_some(back))
+        })
+        .collect();
+    let names = places.iter().map(|place| &place.0);
+    let targets = places.iter().map(|place| place.1);
+    let shapes = places.iter().map(|place| place.2);
+    let ids = places.iter().map(|place| {
+        proc_macro2::Ident::new(
+            &point_shape::camel(&place.0),
+            proc_macro2::Span::call_site(),
+        )
+    });
     quote! {
         #(#records)*
         /// A point's place: each point's head and return, in the order of [`Points`]' methods.
@@ -313,6 +347,29 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
         pub mod ids {
             use super::PointId;
             #(#consts)*
+        }
+        /// A wasm mod's listeners as the game's `Points`: every place forwarded with its record.
+        #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+        impl Points for crate::wire::Forwarded {
+            fn subscribed(&self) -> &'static [Option<PointId>] {
+                self.0.subscribed()
+            }
+            #(#forwards)*
+        }
+        /// Each place's name, function and record shape, by `PointId`: what the game checks a
+        /// wasm mod's listeners against at load.
+        #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+        #[doc(hidden)]
+        pub mod places {
+            use super::{POINT_COUNT, PointId};
+            /// Each place.
+            pub static IDS: [PointId; POINT_COUNT] = [#(PointId::#ids),*];
+            /// Each place's `Points` method.
+            pub static NAMES: [&str; POINT_COUNT] = [#(#names),*];
+            /// Each place's function, as an injection's `target` names it.
+            pub static TARGETS: [&str; POINT_COUNT] = [#(#targets),*];
+            /// Each place's record shape.
+            pub static SHAPES: [&str; POINT_COUNT] = [#(#shapes),*];
         }
     }
     .to_string()
