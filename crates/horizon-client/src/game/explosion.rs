@@ -1221,7 +1221,7 @@ impl Game<'_> {
                     edited.push(item);
                 }
             }
-            // Explosion spawnAfterBreak does not award XP, but the event can.
+            // Keep the blast path's zero base XP; the event may award some.
             if dropped.experience > 0 {
                 self.spawn_orbs(block.pos.map(|v| f64::from(v) + 0.5), dropped.experience);
             }

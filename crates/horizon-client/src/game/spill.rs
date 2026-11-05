@@ -509,8 +509,8 @@ impl GameLevel<'_> {
         NativeItemDrop::new(stack, position, new_item_motion(), 10)
     }
     /// The one event/filter boundary for prepared block item entities and XP.
-    /// Explosions supply their merged entities with zero initial experience
-    /// (`BlockBehaviour.onExplosionHit` passes false to `spawnAfterBreak`).
+    /// Explosions supply their merged entities, keeping that caller's zero
+    /// initial experience; the event may still award it.
     pub(super) fn block_drops_ready(
         &mut self,
         pos: BlockPos,
