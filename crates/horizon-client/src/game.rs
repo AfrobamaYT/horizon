@@ -4050,7 +4050,7 @@ impl Game<'_> {
         let boxes = if context.is_some() {
             &[][..]
         } else {
-            f.outline.as_slice()
+            &f.outline[..]
         };
         context
             .map(|b| std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i]))
