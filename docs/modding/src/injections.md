@@ -14,8 +14,10 @@ It comes in two forms:
   [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) before it is compiled. The game is
   rebuilt from source.
 
-Injections are **native-only**. A `mod.wasm` has no injections; a mod that needs one cannot be a wasm mod
-until the hook exists.
+A `mod.wasm` listens at points too: its `horizon-mod.toml` lists the same point injections, with no
+`[native]` pins, and the game fills those places from the `mod.wasm` at load, with no game rebuild and no
+compiler ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)). Helper injections are
+native-only: a mod that needs one cannot be a wasm mod until the hook exists.
 
 ## For agents
 
@@ -70,7 +72,7 @@ the event, and writes take `host`.
 
 | Form | Kinds | Where | Order | Game rebuild | `mod.wasm` |
 | --- | --- | --- | --- | --- | --- |
-| `trait_method` (point) | `HEAD`, `RETURN` | `Game` methods | dependency order | no | no |
+| `trait_method` (point) | `HEAD`, `RETURN` | `Game` methods | dependency order | no | yes |
 | `helper` | any | any crate | priority descending, then mod id, then injection id | yes | no |
 | Hook or Part method (no injection) | — | — | dependency order | no | yes |
 
