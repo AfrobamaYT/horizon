@@ -336,7 +336,7 @@ mod tests {
     fn a_point_passes_only_api_typed_parameters() {
         let shape = point(
             r#"side = "client""#,
-            "fn turn(&mut self, mut yaw: f64, button: MouseButton, text: &str, batch: &mut HudBatch) {}",
+            "fn turn(&mut self, mut yaw: f64, button: MouseButton, text: &str, event: &'static str, batch: &mut HudBatch) {}",
         )
         .unwrap();
         let args: Vec<_> = shape.args.iter().map(|arg| arg.name.to_string()).collect();

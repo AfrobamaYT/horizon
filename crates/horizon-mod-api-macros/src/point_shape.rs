@@ -232,7 +232,8 @@ fn camel(name: &str) -> String {
         .collect()
 }
 
-/// Whether the API can carry `ty` to a listener: a scalar, or `&str`.
+/// Whether the API can carry `ty` to a listener: a scalar, or `&str` with its lifetime elided (a listener
+/// may replace that text with its own, which a named lifetime such as `'static` couldn't hold).
 fn api_typed(ty: &Type) -> bool {
     const SCALARS: [&str; 15] = [
         "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16",
@@ -244,6 +245,7 @@ fn api_typed(ty: &Type) -> bool {
         }
         Type::Reference(reference) => {
             reference.mutability.is_none()
+                && reference.lifetime.is_none()
                 && matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"))
         }
         _ => false,
