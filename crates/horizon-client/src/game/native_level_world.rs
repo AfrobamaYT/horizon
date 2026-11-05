@@ -24,6 +24,10 @@ fn weather_for_level(
     }
 }
 
+fn weather_for_world(world: &World, is_end: bool) -> (f32, f32) {
+    weather_for_level(world.shape, is_end, world.weather.levels(1.0))
+}
+
 /// `Level.isRaining` and `isThundering` from the rain and thunder levels.
 fn weather_flags((rain, thunder): (f32, f32)) -> (bool, bool) {
     (rain > 0.2, thunder > 0.9)
@@ -117,15 +121,12 @@ impl Game<'_> {
     /// None for a stale handle, an unavailable level or a client not logged in.
     pub(super) fn native_level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
         let world = self.native_level_read_world(level)?;
-        Some(weather_for_level(
-            world.shape,
-            level.dimension() == super::Dim::End.id(),
-            world.weather.levels(1.0),
-        ))
+        Some(weather_for_world(world, level.dimension() == Dim::End.id()))
     }
     /// Whether it rains (`Level.isRaining`: a rain level above 0.2).
     pub(super) fn native_level_is_raining(&self, level: LevelRef) -> Option<bool> {
-        Some(weather_flags(self.native_level_weather(level)?).0)
+        let world = self.native_level_world(level)?;
+        Some(weather_flags(weather_for_world(world, level.dimension() == Dim::End.id())).0)
     }
     /// `Level.isRainingAt(pos)` in the level a handle names, the one in place or a parked one:
     /// it rains there and `pos` is under open sky in a biome that rains. None for a stale
@@ -162,7 +163,8 @@ impl Game<'_> {
     }
     /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
     pub(super) fn native_level_is_thundering(&self, level: LevelRef) -> Option<bool> {
-        Some(weather_flags(self.native_level_weather(level)?).1)
+        let world = self.native_level_world(level)?;
+        Some(weather_flags(weather_for_world(world, level.dimension() == Dim::End.id())).1)
     }
 }
 
@@ -307,6 +309,9 @@ mod tests {
                 "client shows only its current level"
             );
             assert_eq!(stale.weather(game), None);
+            // Only the weather pair is a both-side read; the server queries keep their guard.
+            assert_eq!(game.native_level_is_raining(level), None);
+            assert_eq!(game.native_level_is_thundering(level), None);
         });
     }
 
