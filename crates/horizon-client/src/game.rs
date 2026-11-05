@@ -132,29 +132,11 @@ mod entity_sounds;
 mod event_loop;
 mod events;
 mod execution_role;
-/// The injection points' slots (#589): one per point's head and return, indexed by
-/// `mod_points::PointId`, set once after the mods are installed where one listens.
+/// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
 pub mod points {
-    // `fire` and `host_side` are called only by the `#[point]`s the stage adds to its copy.
-    #[allow(unused_imports, reason = "used by the staged copy's points")]
-    pub(crate) use mod_points::__private::fire;
-    pub(crate) use mod_points::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    pub(crate) static POINTS: [AtomicBool; POINT_COUNT] =
-        [const { AtomicBool::new(false) }; POINT_COUNT];
-
-    /// Seals the listener list and sets each slot a mod listens at, once, after the mods are
-    /// installed and their listeners registered.
-    pub(crate) fn attach_installed() {
-        mod_points::__private::seal();
-        for (index, slot) in POINTS.iter().enumerate() {
-            slot.store(mod_points::__private::listened_at(index), Ordering::Release);
-        }
-    }
-
     /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
+    /// Called only by the `#[point]`s the stage adds to its copy.
     #[inline(never)]
     #[allow(dead_code, reason = "used by the staged copy's points")]
     pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
@@ -292,6 +274,7 @@ mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_effects;
+mod native_living_flags;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -391,6 +374,7 @@ mod screen_info;
 mod screens;
 mod sculk;
 mod sculk_fixture;
+mod server_lifecycle;
 mod server_links;
 mod server_packs;
 mod server_reload;
@@ -3000,6 +2984,9 @@ struct Game<'a> {
     /// Client mods' sounds (`native_play_local_sound`), with the ticks each waits, until the
     /// next audio update plays them (`tick_sound_engine`).
     mod_sounds: std::cell::RefCell<Vec<(mod_api::SoundPlay, u32)>>,
+    /// A client mod asked to clear the particles (`native_clear_particles`), done before
+    /// the next frame or particle tick (`apply_mod_particle_clear`).
+    mod_clear_particles: std::cell::Cell<bool>,
     /// The shader pack's entity and block entity ids, while one draws entities.
     pack_ids: Option<shader_packs::PackIds>,
     started: Instant,
@@ -3047,6 +3034,10 @@ struct Game<'a> {
     /// Must precede session_lock: dropping the writer drains writes while the world is locked.
     player_autosaves: horizon_client::lan::playerdata::Autosaves,
     session_lock: Option<horizon_client::save::SessionLock>,
+    /// The prepared world is installed. The session lock is taken earlier so tag
+    /// reads see ready tables, and is not this marker: a final save before the
+    /// prepared `Level` is installed would replace the world with placeholder state.
+    world_adopted: bool,
     audio: Audio,
     /// The side, registries and mod settings of this game's resource generation, which
     /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
@@ -3601,10 +3592,10 @@ struct Game<'a> {
     /// the song's network id is only known once the hub is in hand.
     lan_songs: Vec<([i32; 3], Option<String>)>,
     lan_cushion_breaks: Vec<(horizon_world::registry::BlockStateId, [f64; 3])>,
-    /// Block events (position, b0, b1, state) and entity events (id, event,
-    /// position) for the guests.
+    /// Block events (position, b0, b1, state) and entity events (id, event)
+    /// for the guests.
     lan_block_events: Vec<([i32; 3], i32, i32, u32)>,
-    lan_entity_events: Vec<(i32, i8, [f64; 3])>,
+    lan_entity_events: Vec<(i32, i8)>,
     /// Successful crits (attacking guest, hit entity), queued while the hub is taken.
     lan_critical_hits: Vec<(Option<u32>, i32, bool)>,
     /// Spear stabs that landed (the stabbing guest), queued while the hub is
@@ -3663,9 +3654,9 @@ struct Game<'a> {
     /// The acting guest's own entity events (`ServerPlayer.connection.send`),
     /// sent with their entity id, which the guest's turn does not hold.
     guest_entity_events: Vec<i8>,
-    /// The acting guest's equipment breaks (`onEquippedItemBroken`: event and
-    /// position), broadcast with their entity id once their turn ends.
-    guest_equipment_breaks: Vec<(i8, [f64; 3])>,
+    /// The acting guest's equipment breaks (`onEquippedItemBroken`'s entity
+    /// events), broadcast with their entity id once their turn ends.
+    guest_equipment_breaks: Vec<i8>,
     /// `Player.playSound` of the acting guest (event, position, volume,
     /// pitch): `level.playSound(player, ...)` leaves the guest out, whose
     /// own client plays it.
@@ -6954,19 +6945,8 @@ impl Game<'_> {
                         exp_to_drop,
                     )
                 });
-                for item in dropped.items {
-                    self.spawn_item(item.stack, item.position, item.velocity, item.pickup_delay);
-                }
-                if dropped.experience > 0 {
-                    self.spawn_orbs(
-                        [
-                            f64::from(pos[0]) + 0.5,
-                            f64::from(pos[1]) + 0.5,
-                            f64::from(pos[2]) + 0.5,
-                        ],
-                        dropped.experience,
-                    );
-                }
+                let canceled = dropped.canceled;
+                self.spawn_block_drops(pos, dropped);
                 // BeehiveBlock.playerDestroy: silk touch keeps the bees in, so
                 // the trigger counts them; otherwise they are out already.
                 if let Some((hive, (honey, facing))) = hive {
@@ -6980,7 +6960,7 @@ impl Game<'_> {
                 // tool has silk touch (#prevents_infested_spawns) or blocks don't drop.
                 if facts.name.starts_with("minecraft:infested_")
                     && !silk
-                    && !dropped.canceled
+                    && !canceled
                     && self.ui.rules.bool("block_drops")
                 {
                     let at = [
@@ -7604,7 +7584,12 @@ impl Game<'_> {
             }
             return Ok(true);
         }
-        if block_hit.is_some() && (self.use_bone_meal(&stack)? || self.ignite_tnt(&stack)?) {
+        // TntBlock.useItemOn is the block's own: a sneak with something in hand skips it, and
+        // the flint and steel or fire charge lights a fire on the TNT instead.
+        if block_hit.is_some()
+            && (self.use_bone_meal(&stack)?
+                || (!(sneaking && hands_full) && self.ignite_tnt(&stack)?))
+        {
             return Ok(true);
         }
         // ShearsItem.useOn: shears crop a growing plant's head to its top age.
@@ -7674,6 +7659,16 @@ impl Game<'_> {
         if !on_block && &*stack.item == "minecraft:spyglass" {
             self.use_spyglass();
             return Ok(true);
+        }
+        // FoodOnAStickItem.use with no boost (not riding its mount, or the
+        // mount refused): PASS, but counted as a use of the stick.
+        if !on_block
+            && matches!(
+                &*stack.item,
+                "minecraft:carrot_on_a_stick" | "minecraft:warped_fungus_on_a_stick"
+            )
+        {
+            self.award_stat("used", &stack.item, 1);
         }
         // BundleItem.use: startUsingItem, then onUseTick empties it.
         if !on_block && info.bundle {
@@ -9504,8 +9499,8 @@ impl Game<'_> {
             self.draw_split_hud(&mut batch, true);
             return batch;
         }
+        self.settle_title_toasts();
         if let Some(title) = &mut self.title {
-            title.poll_backup();
             if std::mem::take(&mut title.onboarding_finished) {
                 // Options.onboardingAccessibilityFinished.
                 self.settings.file.set(
@@ -13481,6 +13476,9 @@ impl Game<'_> {
         let dim = Dim::from_id(&level.dimension);
         self.level_shapes = shapes;
         self.world_root = save_root.clone();
+        // The root moves before the prepared level is installed. Until then a
+        // final save must not run: the lock below only marks tag tables.
+        self.world_adopted = false;
         // The world's packs over the game's biomes (`Biomes::with_packs`),
         // the table its chunks were built with.
         self.world_biomes = self.packed_biomes();
@@ -13565,6 +13563,7 @@ impl Game<'_> {
         // The ride the player's file names, once the vehicle is in the world.
         self.pending_vehicle = level.root_vehicle;
         self.level = level;
+        self.world_adopted = true;
         // ServerRecipeBook.loadUntrusted: recipes the manager does not have are dropped.
         let index = &world_stations!(self).recipe_index;
         let book = &mut self.level.recipe_book;
@@ -13814,6 +13813,7 @@ impl Game<'_> {
         self.server_loot.set(None);
         self.server_items = None;
         self.session_lock = None;
+        self.world_adopted = false;
         self.world_icon = None;
         horizon_client::crash::clear_detail("World");
         self.debug_charts.reset();
@@ -13878,8 +13878,7 @@ impl Game<'_> {
         self.tridents.clear();
         self.rockets.clear();
         self.bolts.clear();
-        self.particles.clear();
-        self.pickups.clear();
+        self.clear_client_particles();
         self.riding = None;
         self.persist = Default::default();
         self.entity_attachments.clear();
@@ -14758,6 +14757,15 @@ impl Game<'_> {
                         &mut self.world.random,
                     ),
                 );
+                // FlintAndSteelItem / FireChargeItem.useOn: BLOCK_CHANGE at the lit block,
+                // and ItemStack.useOn's used statistic.
+                self.post_block_game_event(
+                    "minecraft:block_change",
+                    hit.pos,
+                    self.sculk_actor(),
+                    None,
+                );
+                self.award_stat("used", &stack.item, 1);
                 if item == "fire_charge" {
                     self.consume_held();
                 } else {
@@ -14783,6 +14791,20 @@ impl Game<'_> {
                     &mut self.world.random,
                 );
                 self.audio.play(sound, Some(at(target)), 1.0, pitch);
+                // BLOCK_PLACE: flint and steel names the clicked block, a fire charge the
+                // fire. Then ItemStack.useOn's used statistic.
+                let placed_at = if item == "fire_charge" {
+                    target
+                } else {
+                    hit.pos
+                };
+                self.post_block_game_event(
+                    "minecraft:block_place",
+                    placed_at,
+                    self.sculk_actor(),
+                    None,
+                );
+                self.award_stat("used", &stack.item, 1);
                 if item == "fire_charge" {
                     self.consume_held();
                 } else {
@@ -15203,6 +15225,7 @@ impl Game<'_> {
             .map_or(eye, |pl| [pl.position.x, pl.position.y, pl.position.z]);
         self.audio
             .play("minecraft:entity.arrow.shoot", Some(feet), 1.0, pitch);
+        self.award_stat("used", "minecraft:bow", 1);
         if !self.creative
             && !infinity
             && let Some(i) = arrow_slot
@@ -15988,12 +16011,22 @@ impl Game<'_> {
                 return;
             }
         }
-        // LivingEntity.startSleeping: the shape the bed gives the player to
-        // lie on (`getSleepHeight`). A straw bed's head answers with its
-        // foot's shape, and with no foot of its own there is none, so the
-        // player stays up as `startSleeping` returning false leaves them.
+        if self.lie_in_bed(head) {
+            self.award_custom_stat("sleep_in_bed", 1);
+            self.trigger_player("minecraft:slept_in_bed");
+            self.stats.reset("custom", "minecraft:time_since_rest");
+        }
+    }
+    /// `LivingEntity.startSleeping`: the player takes the bed whose head
+    /// `head` names, moved onto it and asleep from now on. False when the
+    /// bed gives no shape to lie on.
+    fn lie_in_bed(&mut self, head: [i32; 3]) -> bool {
+        // The shape the bed gives the player to lie on (`getSleepHeight`).
+        // A straw bed's head answers with its foot's shape, and with no foot
+        // of its own there is none, so the player stays up as
+        // `startSleeping` returning false leaves them.
         let Some(at) = self.sleeping_position(head) else {
-            return;
+            return false;
         };
         // LivingEntity.startSleeping: stopRiding once the bed is valid.
         self.stop_riding();
@@ -16018,9 +16051,7 @@ impl Game<'_> {
             self.snap_player_model_pitch();
         }
         self.occupy_bed(head);
-        self.award_custom_stat("sleep_in_bed", 1);
-        self.trigger_player("minecraft:slept_in_bed");
-        self.stats.reset("custom", "minecraft:time_since_rest");
+        true
     }
     fn wake_up(&mut self) {
         if self.remote.is_some() {
@@ -20066,15 +20097,19 @@ impl Game<'_> {
                         );
                     }
                     self.clock.end_frame(self.pause);
-                    let mut consumed = false;
+                    let mut consumed = self.ui.screenshot_message.is_some();
                     let finished = self
                         .renderer
                         .as_mut()
-                        .and_then(|r| r.screenshot_result.take());
+                        .and_then(|r| r.screenshot_result.take())
+                        .and_then(|result| match result {
+                            Ok(pending) => self.save_screenshot(pending),
+                            Err(error) => Some(Err(error)),
+                        });
                     if let Some(result) = &finished
                         && self.ui.screenshot_message.is_some()
                     {
-                        self.finish_screenshot(result);
+                        self.finish_screenshot(result, None);
                         consumed = true;
                     }
                     if let Some(result) = &finished
@@ -20480,6 +20515,7 @@ impl<'a> Game<'a> {
             skin_frame: Default::default(),
             glowing_vertices: Default::default(),
             mod_sounds: Default::default(),
+            mod_clear_particles: Default::default(),
             pack_ids: None,
             health_hud: hud_layout::HealthHud::default(),
             started: now,
@@ -20505,6 +20541,7 @@ impl<'a> Game<'a> {
             level,
             player_autosaves: Default::default(),
             session_lock: None,
+            world_adopted: false,
             audio,
             loop_context: Arc::new(res.core.item_data.context().loop_context(loop_side, [])),
             damage_hooks: native_hooks::DAMAGE_HOOKS,

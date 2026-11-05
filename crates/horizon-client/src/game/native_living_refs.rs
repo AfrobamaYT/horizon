@@ -1075,13 +1075,7 @@ mod tests {
                 let expected_random = game.world.random.next_float();
                 assert_eq!(broken.len(), 2);
                 if guest {
-                    assert_eq!(
-                        expected_events
-                            .iter()
-                            .map(|event| event.0)
-                            .collect::<Vec<_>>(),
-                        [49, 50]
-                    );
+                    assert_eq!(expected_events, [49, 50]);
                 } else {
                     assert_eq!(expected_sounds.get("minecraft:entity.item.break"), Some(&1));
                     assert_eq!(expected_sounds.get("minecraft:block.anvil.break"), Some(&1));

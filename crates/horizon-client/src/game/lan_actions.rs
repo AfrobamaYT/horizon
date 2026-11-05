@@ -6,8 +6,8 @@
 //! host, and every world change they cause reaches all players through the
 //! block log, the level events and the entity tracker.
 use super::{
-    Dim, Game, GuestUse, Hit, InteractTarget, Mining, Screen, level_sounds::LevelSound,
-    respawn_anchor::RespawnConfig,
+    Dim, Game, GuestUse, Hit, InteractTarget, Mining, Screen, lan_crafting::MenuRemoval,
+    level_sounds::LevelSound, respawn_anchor::RespawnConfig,
 };
 use horizon_client::{
     command::vanilla,
@@ -249,7 +249,7 @@ pub(super) struct GuestSwap {
     /// The entity events queued for that guest.
     entity_events: Vec<i8>,
     /// The equipment breaks queued for that guest.
-    equipment_breaks: Vec<(i8, [f64; 3])>,
+    equipment_breaks: Vec<i8>,
     /// The cooldown packets queued for that guest.
     cooldown_events: Vec<(std::sync::Arc<str>, i32)>,
     /// The player-source sounds queued for that guest.
@@ -959,8 +959,8 @@ impl Game<'_> {
             }
         }
         // LivingEntity.onEquippedItemBroken: `broadcastEntityEvent`, the guest too.
-        for (event, at) in std::mem::replace(&mut self.guest_equipment_breaks, equipment_breaks) {
-            host.hub.entity_event(entity_id, event, at);
+        for event in std::mem::replace(&mut self.guest_equipment_breaks, equipment_breaks) {
+            host.hub.entity_event(entity_id, event);
         }
         // ServerItemCooldowns.onCooldownStarted: the guest's own cooldown.
         let outgoing_cooldowns = std::mem::replace(&mut self.guest_cooldowns, cooldown_events);
@@ -1219,11 +1219,10 @@ impl Game<'_> {
             g.send(&g.abilities_packet());
         }
         // LivingEntity.checkTotemDeathProtection's entity event, to every
-        // client around, the guest's own included; this window draws it too.
+        // client tracking the guest and its own; this window draws it too.
         if let Some(body) = totem {
             let id = host.hub.guests[i].entity_id;
-            host.hub
-                .entity_event(id, super::totem::TOTEM_EVENT, body.at);
+            host.hub.entity_event(id, super::totem::TOTEM_EVENT);
             if self.player.is_some() {
                 self.totem_event(body, false);
             }
@@ -1616,20 +1615,21 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return false;
         };
-        let Some(items) = host
-            .hub
-            .guest(conn)
-            .and_then(|g| slots.read(&self.world, g))
-        else {
-            return false;
-        };
         // The mods may stop the menu; the click is spent. A fake player is
         // stopped here too: the stand-in the open staged leaves the level
         // through the close path, its items back on the vehicle, where a
         // later transfer finds them. A stand-in another guest's menu still
         // backs is not this use's to remove: the close is only for the one
         // nobody is looking at.
-        if !self.guest_may_open(conn, menu, None) {
+        let boat = self
+            .boats
+            .iter()
+            .position(|b| b.id as i32 == pos.2 && b.chest);
+        let spectator_pending = boat.is_some_and(|i| {
+            host.hub.guest(conn).is_some_and(|g| g.spectator())
+                && self.boat_loot_pending(self.boats[i].id)
+        });
+        if spectator_pending || !self.guest_may_open(conn, menu, None) {
             let viewed = self.lan.as_ref().is_some_and(|host| {
                 host.hub
                     .guests
@@ -1646,6 +1646,27 @@ impl Game<'_> {
             }
             return true;
         }
+        if let Some(i) = boat
+            && self.boat_loot_pending(self.boats[i].id)
+        {
+            // The placeholder is the authoritative container while any menu is open.
+            self.store_cart_items(pos);
+            self.unpack_boat_loot(i);
+            if !self.boat_loot_pending(self.boats[i].id)
+                && let Some(horizon_client::containers::BlockEntity::Chest(items)) =
+                    self.world.block_entities.get_mut(&pos)
+            {
+                *items = self.boats[i].items.clone();
+            }
+        }
+        let Some(items) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .and_then(|g| slots.read(&self.world, g))
+        else {
+            return false;
+        };
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(conn);
         let Some(host) = self.lan.as_mut() else {
@@ -1654,6 +1675,68 @@ impl Game<'_> {
         host.hub
             .open_container(conn, menu, title, pos, slots, items, None);
         true
+    }
+
+    /// `ContainerEntity.unpackChestVehicleLootTable` for a chest boat: the table
+    /// its raw NBT still holds rolls into the slots on the first open (an empty
+    /// boat, as a command leaves one), and `player_generates_container_loot`
+    /// fires for the player who opened it.
+    fn boat_loot_pending(&self, id: u32) -> bool {
+        matches!(
+            self.persist.raw.get(&id),
+            Some(horizon_world::nbt::Tag::Compound(map)) if map.contains_key(&"LootTable".into())
+        )
+    }
+
+    fn unpack_boat_loot(&mut self, i: usize) {
+        use horizon_world::nbt::Tag;
+        let id = self.boats[i].id;
+        let (table, seed) = {
+            let Some(Tag::Compound(map)) = self.persist.raw.get_mut(&id) else {
+                return;
+            };
+            let Some(table) = crate::save::text(map.get(&"LootTable".into()))
+                .and_then(|id| horizon_client_core::identifier::normalize_id(&id))
+            else {
+                return;
+            };
+            let seed = match map.get(&"LootTableSeed".into()) {
+                Some(Tag::Long(seed)) => Some(*seed),
+                _ => None,
+            };
+            // The table is spent even when nothing can be rolled into it (the
+            // loot data is not loaded): vanilla clears it before filling.
+            map.remove(&"LootTable".into());
+            map.remove(&"LootTableSeed".into());
+            (table, seed)
+        };
+        // `LootTable.fill` sets the slots it rolls and leaves the rest; a boat
+        // that already holds something keeps it, so no table is applied over it.
+        if self.boats[i].items.iter().any(Option::is_some) {
+            return;
+        }
+        let loot = crate::structure_blocks::loot_data(
+            &self.options.resources,
+            &self.pack_files(),
+            self.res.item_defaults(),
+        );
+        let b = &self.boats[i];
+        let at = Vec3::new(b.position.x, b.position.y, b.position.z);
+        let biome = self.biome_name_at(at).unwrap_or_default();
+        let pos = (
+            b.position.x.floor() as i32,
+            b.position.y.floor() as i32,
+            b.position.z.floor() as i32,
+        );
+        crate::structure_blocks::roll_container(
+            &mut self.boats[i].items,
+            loot.as_deref(),
+            table.clone(),
+            seed,
+            pos,
+            &biome,
+        );
+        self.trigger_loot_table(&table);
     }
 
     /// The guest's open container is closing (`AbstractContainerMenu.removed`):
@@ -1684,17 +1767,28 @@ impl Game<'_> {
     /// whose server is closing. The guest must be in `host.hub.guests` and the
     /// level they are in must be the one in place.
     pub(super) fn guest_close_all(&mut self, conn: u32) {
+        self.guest_remove_menus(conn, MenuRemoval::Live);
+    }
+
+    pub(super) fn guest_disconnected(&mut self, conn: u32) {
+        self.guest_remove_menus(conn, MenuRemoval::Disconnected);
+    }
+
+    fn guest_remove_menus(&mut self, conn: u32, removal: MenuRemoval) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
-        if let Some((window, slots)) = host.hub.guests[gi]
+        let open_menu = host.hub.guests[gi]
             .menu
             .as_ref()
-            .map(|m| (m.window, m.slots))
-        {
+            .map(|m| (m.window, m.slots));
+        if removal == MenuRemoval::Disconnected {
+            self.guest_drop_carried(gi);
+        }
+        if let Some((window, slots)) = open_menu {
             self.guest_container_closed(conn);
             if let Slots::Block(key) = slots
                 && key.1 == super::minecarts::CART_KEY_Y
@@ -1706,10 +1800,15 @@ impl Game<'_> {
             }
         }
         self.lan_merchant_closed(conn, None);
-        self.lan_crafting_closed(conn, None);
+        self.lan_crafting_removed(conn, None, removal);
+        if removal == MenuRemoval::Disconnected {
+            self.lan_crafting_removed(conn, Some(0), removal);
+        }
         self.lan_station_closed(conn, None);
         self.lan_mount_closed(conn, None);
-        self.guest_carried_back(gi);
+        if removal == MenuRemoval::Live {
+            self.guest_carried_back(gi);
+        }
         // `PlayerContainerEvent.Close`, after the menu's `removed`.
         self.player_menu_closing(conn);
     }
@@ -4441,12 +4540,25 @@ impl Game<'_> {
             // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
             play.suggestion_budget = true;
             self.guest_try_suggestions(conn);
+            self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPre, |game, player| {
+                game.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player })
+            });
             self.guest_sleep_tick(gi);
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
             if host.hub.guests[gi].dead {
                 self.guest_tick_death(gi);
+                self.guest_player_tick(
+                    gi,
+                    conn,
+                    mod_api::HookId::PlayerTickPost,
+                    |game, player| {
+                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                            player,
+                        })
+                    },
+                );
                 continue;
             }
             if self.on_server_trip(conn) {
@@ -4454,6 +4566,16 @@ impl Game<'_> {
                 // has loaded around the player or not: its respawn request
                 // is taken as soon as it comes.
                 self.guest_die(gi, conn);
+                self.guest_player_tick(
+                    gi,
+                    conn,
+                    mod_api::HookId::PlayerTickPost,
+                    |game, player| {
+                        game.native_player_tick_post(mod_api::__private::PlayerTickPostCall {
+                            player,
+                        })
+                    },
+                );
                 continue;
             }
             // ServerPlayerGameMode.tick stops an active destroy when its block is air.
@@ -4567,8 +4689,6 @@ impl Game<'_> {
                 g.tick_advancements();
                 g.update_player_attributes();
                 g.record_player_scores(&mut recorded);
-                // Native mods, at the end of ServerPlayer.tick.
-                g.native_player_tick();
             });
             if let Some(host) = self.lan.as_mut() {
                 host.play.entry(conn).or_default().score_recorded = recorded;
@@ -4582,7 +4702,32 @@ impl Game<'_> {
             self.guest_arrows(gi);
             self.guest_orbs(gi);
             self.guest_die(gi, conn);
+            self.guest_player_tick(gi, conn, mod_api::HookId::PlayerTickPost, |game, player| {
+                game.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player })
+            });
         }
+    }
+
+    /// Only listeners pay for a guest swap; reuse the loop's resolved index.
+    fn guest_player_tick(
+        &mut self,
+        gi: usize,
+        conn: u32,
+        hook: mod_api::HookId,
+        fire: fn(&mut Self, mod_api::PlayerRef),
+    ) {
+        if !mod_api::__private::listened(hook) {
+            return;
+        }
+        let (Some(epoch), Some(host)) = (self.native_lifecycle.epoch(), self.lan.as_ref()) else {
+            return;
+        };
+        let guest = &host.hub.guests[gi];
+        let player = mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, guest.entity_id as u32),
+            guest.uuid,
+        );
+        let _ = self.as_guest_at(gi, conn, |game| fire(game, player));
     }
 
     /// `ServerPlayer.die` for a guest whose health has run out: the death
@@ -4707,7 +4852,7 @@ impl Game<'_> {
                 &C::PlayerCombatKill(play::PlayerCombatKill { id, message }),
             );
             // LivingEntity.die: the death animation, the dying player included.
-            host.hub.entity_event(id, 3, at);
+            host.hub.entity_event(id, 3);
             let recently_hit = blow.is_some()
                 && self
                     .guest_combat
@@ -5651,7 +5796,7 @@ impl Game<'_> {
                     if let Some(host) = self.lan.as_ref()
                         && let Some(id) = host.hub.guest(conn).map(|g| g.entity_id)
                     {
-                        host.hub.entity_event(id, event as i8, at);
+                        host.hub.entity_event(id, event as i8);
                     }
                 }
                 MotionEvent::Fall(event) => self.landing_block_updates(&event),
@@ -5667,13 +5812,13 @@ impl Game<'_> {
                     }
                 }
                 // LivingEntity.baseTick's entity event 67, to every client
-                // around, the guest's own included; this window draws it too.
+                // tracking the guest and its own; this window draws it too.
                 MotionEvent::Drown => {
                     if let Some(host) = self.lan.as_ref()
                         && let Some(g) = host.hub.guest(conn)
                     {
                         host.hub
-                            .entity_event(g.entity_id, super::combat::DROWN_EVENT, at);
+                            .entity_event(g.entity_id, super::combat::DROWN_EVENT);
                     }
                     self.drown_particles(at, [0.0; 3]);
                 }
@@ -5704,7 +5849,7 @@ impl Game<'_> {
                     if particles {
                         self.honey_slide_particles(at);
                         if let Some(host) = self.lan.as_ref() {
-                            host.hub.entity_event(id, 53, at);
+                            host.hub.entity_event(id, 53);
                         }
                     }
                 }
@@ -6306,10 +6451,8 @@ impl Game<'_> {
         let mut orb = self.orbs[index].clone();
         let mut canceled = false;
         // Swapping the guest in costs: only when a mod hears the pickup.
-        let mut listened = false;
-        if self.serving.is_some() || self.options.dedicated.is_some() {
-            self.native_pickup_xp_listened(&mut listened);
-        }
+        let listened = (self.serving.is_some() || self.options.dedicated.is_some())
+            && mod_api::__private::listened(mod_api::HookId::PickupXp);
         if listened {
             let dimension = self.dim.id();
             let called = self.as_guest(conn, |game| {
@@ -7979,5 +8122,76 @@ mod respawn_position_tests {
                 assert_eq!(g.spawn, Some([5.5, 64.0, 5.5]));
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod pickup_xp_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use horizon_client::entities::ExperienceOrb;
+    use horizon_core::geometry::Vec3;
+
+    /// Listens to `pickup_xp`, canceling it when told to.
+    struct Listen(bool);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Listen {
+        fn pickup_xp(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::PickupXpEvent<'_>,
+        ) -> mod_api::Flow {
+            if self.0 {
+                mod_api::Flow::Cancel
+            } else {
+                mod_api::Flow::Continue
+            }
+        }
+    }
+
+    /// A guest takes the orb it stands in: the orb's id left in the level and the
+    /// guest's total experience after.
+    fn take_orb() -> (bool, i32) {
+        let mut out = (false, 0);
+        with_game(|game| {
+            open_to_lan(game);
+            let mut g = guest(1);
+            g.loaded = true;
+            g.position = [0.5, 70.0, 0.5];
+            game.lan.as_mut().unwrap().hub.guests.push(g);
+            let p = Vec3::new(0.5, 70.0, 0.5);
+            game.orbs.push(ExperienceOrb {
+                rotation: [0.0, 0.0],
+                join: Default::default(),
+                id: 40,
+                position: p,
+                previous: p,
+                velocity: Vec3::ZERO,
+                value: 7,
+                age: 0,
+                on_ground: true,
+                count: 1,
+                ticks: 0,
+                health: 5,
+                no_gravity: true,
+            });
+            game.guest_orbs(0);
+            let left = game.orbs.iter().any(|o| o.id == 40);
+            out = (left, game.lan.as_ref().unwrap().hub.guests[0].xp_total);
+        });
+        out
+    }
+
+    /// `PlayerXpEvent.PickupXp` through the shared `listened` probe: a pickup goes the
+    /// same with no listener and with one that changes nothing, and a cancel keeps the orb.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn pickup_xp_is_the_same_with_and_without_a_listener() {
+        let none = take_orb();
+        assert_eq!(none, (false, 7));
+        let mods = vec![mod_api::ModEntry::new("listen", Box::new(Listen(false)))].into();
+        mod_api::testing::with_mods(mods, || assert_eq!(take_orb(), none));
+        let mods = vec![mod_api::ModEntry::new("cancel", Box::new(Listen(true)))].into();
+        mod_api::testing::with_mods(mods, || assert_eq!(take_orb(), (true, 0)));
     }
 }

@@ -1045,6 +1045,18 @@ mod tests {
     }
 
     #[test]
+    fn import_facts_recover_crossable_functions_without_global_name_guesses() {
+        let mut take = internal("horizon_client::b::take", "fn", "fn take(data: Alias)");
+        take.refs
+            .insert("Alias".into(), "horizon_client::a::Data".into());
+        let (_, counts) = table(&[
+            internal("horizon_client::a::Data", "struct", "struct Data { x: u8 }"),
+            take,
+        ]);
+        assert_eq!(counts.thunks, 1);
+    }
+
+    #[test]
     fn unresolved_imports_and_unexpected_generics_do_not_borrow_another_types_layout() {
         let (_, counts) = table(&[
             internal("horizon_client::a::Cell", "struct", "struct Cell { x: u8 }"),

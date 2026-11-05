@@ -2,8 +2,9 @@
 use super::{
     Game,
     commands::Target,
-    minecarts::{CartKind, Minecart},
+    minecarts::{CartKind, Minecart, display_offset},
 };
+use horizon_world::registry::BlockStateId;
 use mod_api::{EntityRef, MinecartRef, NativeMinecartKind};
 
 impl Game<'_> {
@@ -98,6 +99,51 @@ impl Game<'_> {
     /// `VehicleEntity.setHurtTime`: synced to clients.
     pub(super) fn native_minecart_set_hurt_time(&mut self, cart: MinecartRef, ticks: i32) -> bool {
         self.native_minecart_edit(cart, None, |c| c.hurt_time = ticks)
+    }
+
+    /// `AbstractMinecart.customDisplayBlockState`: the block the cart shows in
+    /// place of its kind's default, None (inner) when it has none.
+    pub(super) fn native_minecart_custom_display_block(
+        &self,
+        cart: MinecartRef,
+    ) -> Option<Option<BlockStateId>> {
+        let cart = self.native_minecart(cart)?;
+        Some(
+            cart.custom_display
+                .as_ref()
+                .and_then(|t| self.state_from_nbt(t)),
+        )
+    }
+
+    /// Sets the block the cart shows, or with None its kind's default again:
+    /// saved as `DisplayState` and synced to clients. False for a state the
+    /// registry doesn't know, as the loader drops one that does not decode.
+    pub(super) fn native_minecart_set_custom_display_block(
+        &mut self,
+        cart: MinecartRef,
+        state: Option<BlockStateId>,
+    ) -> bool {
+        if state.is_some_and(|s| self.pack.assets.registry.state(s).is_none()) {
+            return false;
+        }
+        let display = state.map(|s| self.state_to_nbt(s));
+        self.native_minecart_edit(cart, None, |c| c.custom_display = display)
+    }
+
+    /// `AbstractMinecart.getDisplayOffset`, in sixteenths of a block: the set
+    /// offset, else the kind's default.
+    pub(super) fn native_minecart_display_offset(&self, cart: MinecartRef) -> Option<i32> {
+        Some(display_offset(self.native_minecart(cart)?) as i32)
+    }
+
+    /// `AbstractMinecart.setDisplayOffset`, in sixteenths of a block: saved as
+    /// `DisplayOffset` (only off the kind's default) and synced to clients.
+    pub(super) fn native_minecart_set_display_offset(
+        &mut self,
+        cart: MinecartRef,
+        offset: i32,
+    ) -> bool {
+        self.native_minecart_edit(cart, None, |c| c.custom_offset = Some(offset))
     }
 
     /// `MinecartFurnace`'s fuel ticks; None for another kind of cart.
@@ -217,6 +263,49 @@ mod tests {
             assert!(!game.native_minecart_set_push(chest, [0.5, 0.0, 0.0]));
             assert!(!game.native_minecart_set_push(furnace, [f64::NAN, 0.0, 0.0]));
             assert_eq!(game.native_minecart_push(furnace), Some([0.5, 0.0, -0.5]));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_carts_display_block_and_offset_round_trip_through_its_handle() {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let cart = spawn(game, 60, CartKind::Chest);
+            assert_eq!(cart.custom_display_block(game), Some(None));
+            assert_eq!(cart.display_offset(game), Some(8));
+            let lit = game
+                .native_block_state_id("minecraft:furnace[facing=east,lit=true]")
+                .unwrap();
+            assert!(cart.set_custom_display_block(game, Some(lit)));
+            assert!(cart.set_display_offset(game, 3));
+            assert_eq!(cart.custom_display_block(game), Some(Some(lit)));
+            assert_eq!(cart.display_offset(game), Some(3));
+
+            // Saved and loaded back as the same state and offset.
+            let saved = game.carts[0].to_nbt([0; 4], None);
+            let mut loaded = Minecart::from_nbt(&saved, 61, CartKind::Chest).unwrap();
+            super::super::minecarts::forget_unreadable_display(&mut loaded, |t| {
+                game.state_from_nbt(t).is_some()
+            });
+            game.carts.push(loaded);
+            let loaded = game
+                .native_minecart_ref(game.native_entity(61).unwrap())
+                .unwrap();
+            assert_eq!(loaded.custom_display_block(game), Some(Some(lit)));
+            assert_eq!(loaded.display_offset(game), Some(3));
+
+            // A state the registry doesn't know is refused; None clears.
+            assert!(!cart.set_custom_display_block(game, Some(BlockStateId(u32::MAX))));
+            assert_eq!(cart.custom_display_block(game), Some(Some(lit)));
+            assert!(cart.set_custom_display_block(game, None));
+            assert_eq!(cart.custom_display_block(game), Some(None));
+            assert!(
+                game.carts[0]
+                    .to_nbt([0; 4], None)
+                    .get("DisplayState")
+                    .is_none()
+            );
         });
     }
 

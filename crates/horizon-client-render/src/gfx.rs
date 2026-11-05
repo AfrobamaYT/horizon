@@ -203,6 +203,8 @@ pub mod panorama;
 mod readback;
 mod resident;
 mod reuse;
+mod screenshot;
+pub use screenshot::PendingScreenshot;
 mod stars;
 pub mod submit;
 mod sunrise_fan;
@@ -308,6 +310,15 @@ fn world_pass_after_culling<'e>(
         }),
         ..Default::default()
     })
+}
+/// The point a `shaders/` pack's terrain is drawn relative to: the camera with the fraction of
+/// each coordinate rounded to the nearest 1/65536 block. Read back with a probe pack of ours,
+/// Iris 1.11.7's terrain `gl_Vertex` is the block's position minus this, for cameras from 13
+/// to 40000 blocks out (#8464); `cameraPosition` and the matrices keep the exact camera. Off by
+/// up to 2^-17 blocks, a fragment on a texel boundary of the shadow map reads the other texel.
+fn pack_terrain_camera(camera: DVec3) -> DVec3 {
+    let whole = camera.floor();
+    whole + ((camera - whole) * 65536.0).round() / 65536.0
 }
 /// A section's instance: its camera-relative origin and its UV step, negated
 /// past its fade code while it fades in over far terrain (`lod::instance`).
@@ -1431,8 +1442,8 @@ pub struct Renderer {
     started: Instant,
     /// The next frame to write to a PNG path (control socket, F2, world icon).
     pub screenshot: Option<ScreenshotRequest>,
-    /// Outcome of the last screenshot: frame size, or the error.
-    pub screenshot_result: Option<std::result::Result<[u32; 2], String>>,
+    /// Readback outcome: CPU pixels for the game to approve before writing, or an error.
+    pub screenshot_result: Option<std::result::Result<PendingScreenshot, String>>,
     /// Screenshot Quality (Horizon setting): a `scaled` screenshot's frame is this many
     /// times the game's resolution (1, 2, 4 or 8).
     pub screenshot_quality: u32,
@@ -7658,6 +7669,21 @@ impl Renderer {
                 height(b).total_cmp(&height(a))
             });
         }
+        // A `shaders/` pack that draws the terrain, or its shadow, sees it as Iris does.
+        let shaders_pack = !frame.title
+            && self
+                .pack_post
+                .as_ref()
+                .and_then(|p| p.1.as_ref())
+                .is_some_and(|p| p.has_terrain() || p.has_shadow());
+        if shaders_pack {
+            let from = pack_terrain_camera(camera);
+            for v in visible.iter_mut().chain(shadow_visible.iter_mut()) {
+                v.origin = resident::origin(v.key, self.sections.min_y(), from)
+                    .as_vec3()
+                    .to_array();
+            }
+        }
         if self.animated_textures {
             self.active_animated_layers.fill(0);
             for v in &visible {
@@ -10642,18 +10668,8 @@ impl Renderer {
                 self.screenshot = Some(request);
             } else {
                 self.screenshot_halvings = 0;
-                if let Some(hdr_buffer) = hdr_readback {
-                    let hdr_path = hdr_screenshot_path(&request.path);
-                    match self.write_hdr_screenshot(&hdr_path, &hdr_buffer) {
-                        Ok(()) => log::info!("Saved HDR screenshot to {}", hdr_path.display()),
-                        Err(e) => log::warn!(
-                            "Horizon renderer: HDR screenshot {}: {e}",
-                            hdr_path.display()
-                        ),
-                    }
-                }
                 self.screenshot_result = Some(
-                    self.write_screenshot(&request, &buffer)
+                    self.read_screenshot(&request, &buffer, hdr_readback.as_ref())
                         .map_err(|e| e.to_string()),
                 );
             }
@@ -11215,11 +11231,12 @@ impl Renderer {
         buffer.unmap();
         Ok(pixels)
     }
-    fn write_screenshot(
+    fn read_screenshot(
         &self,
         request: &ScreenshotRequest,
         buffer: &wgpu::Buffer,
-    ) -> Result<[u32; 2]> {
+        hdr_buffer: Option<&wgpu::Buffer>,
+    ) -> Result<PendingScreenshot> {
         let bgra = matches!(
             self.config.format.remove_srgb_suffix(),
             wgpu::TextureFormat::Bgra8Unorm
@@ -11239,41 +11256,25 @@ impl Renderer {
             ),
             None => (self.config.width, self.config.height, pixels),
         };
-        let mut encoder = png::Encoder::new(
-            std::io::BufWriter::new(std::fs::File::create(&request.path)?),
-            width,
-            height,
-        );
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header()?.write_image_data(&pixels)?;
-        Ok([width, height])
-    }
-    /// The HDR10 copy (`Hdr::capture`) as a 16-bit PNG tagged BT.2020 with PQ (cICP, PNG's
-    /// third edition), with the peak and paper white as its content light levels (cLLI), and
-    /// an ICC profile for the programs that don't read cICP (`hdr_icc`).
-    fn write_hdr_screenshot(&self, path: &std::path::Path, buffer: &wgpu::Buffer) -> Result<()> {
-        let Some(hdr) = &self.hdr else {
-            return Ok(());
-        };
-        let pixels = hdr10_to_rgb16(&self.read_frame(buffer)?);
-        let mut info = png::Info::with_size(self.config.width, self.config.height);
-        info.color_type = png::ColorType::Rgb;
-        info.bit_depth = png::BitDepth::Sixteen;
-        info.icc_profile = Some(hdr_icc::profile().into());
-        let encoder =
-            png::Encoder::with_info(std::io::BufWriter::new(std::fs::File::create(path)?), info)?;
-        let mut writer = encoder.write_header()?;
-        // BT.2020 primaries, PQ, RGB, full range.
-        writer.write_chunk(png::chunk::cICP, &[9, 16, 0, 1])?;
-        let nits = |n: f32| ((n * 10_000.0) as u32).to_be_bytes();
-        let peak = hdr.peak.max(hdr.paper_white);
-        writer.write_chunk(
-            png::chunk::cLLI,
-            &[nits(peak), nits(hdr.paper_white.min(peak))].concat(),
-        )?;
-        writer.write_image_data(&pixels)?;
-        Ok(())
+        let hdr = hdr_buffer.zip(self.hdr.as_ref()).and_then(|(buffer, hdr)| {
+            match self.read_frame(buffer) {
+                Ok(pixels) => Some(screenshot::HdrScreenshot {
+                    size: [self.config.width, self.config.height],
+                    pixels: hdr10_to_rgb16(&pixels),
+                    peak: hdr.peak,
+                    paper_white: hdr.paper_white,
+                }),
+                Err(e) => {
+                    log::warn!("Horizon renderer: HDR screenshot readback: {e}");
+                    None
+                }
+            }
+        });
+        Ok(PendingScreenshot {
+            path: request.path.clone(),
+            image: mod_api::ScreenshotImage::new(width, height, pixels),
+            hdr,
+        })
     }
 }
 /// `screenshots/2026-10-28_12.00.00.png` -> `screenshots/2026-10-28_12.00.00-hdr.png`.
@@ -12330,6 +12331,33 @@ mod tests {
         assert_eq!(chunk_visibility(750, 750), 1.0);
         assert_eq!(chunk_visibility(0, 0), 1.0, "Off: whole at once");
         assert_eq!(chunk_visibility(u64::MAX, 750), 1.0);
+    }
+    /// Iris 1.11.7's terrain `gl_Vertex`, read back by a probe pack of ours, is each block's
+    /// position minus the camera with its fraction rounded to 1/65536 block: these are the
+    /// fractions (in 65536ths) it implied, for eyes at y 69.62 and 82.92, at x 100.3 and
+    /// 40000.3, at z -13.7 and 20000.7, and off the grid by a fraction of a 65536th.
+    #[test]
+    fn a_shader_pack_s_terrain_is_drawn_from_the_camera_in_65536ths() {
+        let eye = |x: f64, feet: f64, z: f64| glam::DVec3::new(x, feet + f64::from(1.62f32), z);
+        let cases = [
+            (eye(13.5, 68.0, -13.5), [32768.0, 40632.0, 32768.0]),
+            (eye(13.5, 81.3, -13.5), [32768.0, 60293.0, 32768.0]),
+            (eye(100.3, 90.0, -13.7), [19661.0, 40632.0, 19661.0]),
+            (eye(40000.3, 120.0, 20000.7), [19661.0, 40632.0, 45875.0]),
+            (
+                eye(
+                    13.0 + 0.7 / 8192.0,
+                    81.0 + 0.3 / 8192.0,
+                    -13.0 - 0.6 / 8192.0,
+                ),
+                [6.0, 40635.0, 65531.0],
+            ),
+        ];
+        for (camera, sixty_fifths) in cases {
+            let from = super::pack_terrain_camera(camera);
+            let fraction = (from - camera.floor()) * 65536.0;
+            assert_eq!(fraction.to_array(), sixty_fifths, "{camera}");
+        }
     }
     #[test]
     fn section_instance_carries_the_fade_in_the_step() {

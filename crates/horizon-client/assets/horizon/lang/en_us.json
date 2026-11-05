@@ -581,6 +581,12 @@
   "horizon.options.repeat_delay": "Navigation Repeat Delay",
   "horizon.options.repeat_interval": "Navigation Repeat Interval",
   "horizon.options.milliseconds": "%s ms",
+  "horizon.extras.cosmetics_solo": "In single player",
+  "horizon.extras.cosmetics_solo.tooltip": "Show your cosmetics and your name tag's badge in your single-player worlds too (your name tag with Own name tag). Off: only on servers.",
+  "horizon.extras.horizon_marks": "Horizon logos",
+  "horizon.extras.horizon_marks.tooltip": "Show the Horizon logo next to Horizon players: a small logo before the names of other players who use Horizon, above their heads and in the player list. Only Horizon players see it: servers receive nothing.",
+  "horizon.extras.horizon_me": "Show me as Horizon",
+  "horizon.extras.horizon_me.tooltip": "Show me as a Horizon player: other Horizon players see the logo by your name. On, the service answers anyone who asks about you that you played Horizon in the last 3 hours; off, it never reports you.",
   "horizon.pages.pvp": "PvP & HUD",
   "horizon.pages.pvp.tooltip": "Crosshair, HUD and PvP settings, all off by default. Nothing here shows what vanilla doesn't.",
   "horizon.pages.open.pvp": "PvP & HUD...",
@@ -725,5 +731,6 @@
   "horizon.pvp.chat_search": "Chat search",
   "horizon.pvp.chat_search.tooltip": "Ctrl+F in the open chat: what you type shows only the messages holding it. Enter or Ctrl+F again stops.",
   "horizon.pvp.preset": "PvP preset",
-  "horizon.pvp.preset.tooltip": "Turns on the custom crosshair, the armour and effects widgets, toggle sprint and sneak, lower fire, and the FPS counter and keystrokes mods if installed. Your settings for each stay."
+  "horizon.pvp.preset.tooltip": "Turns on the custom crosshair, the armour and effects widgets, toggle sprint and sneak, lower fire, and the FPS counter and keystrokes mods if installed. Your settings for each stay.",
+  "horizon.screenshot.canceled": "Screenshot canceled"
 }

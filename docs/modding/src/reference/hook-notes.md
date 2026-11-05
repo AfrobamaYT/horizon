@@ -279,10 +279,17 @@ requires a farmer at work and `mob_griefing` enabled.
   creative. A mod that cancels it keeps the block: on the server it isn't attacked, dug or broken, and the player's client
   gets it back. The clicking player's own client still predicts the crack until then.
 
-- A player's server tick: `native_player_tick` runs once a tick for every living player in the world, at the
-  end of their `ServerPlayer.tick`, with the helpers reading that player. Players still tick while the game is frozen
-  (`/tick freeze`), as in vanilla. A dead player isn't called, and neither is one killed earlier in the same tick; it
-  runs again once they respawn.
+- A player's tick: `player_tick_pre` and `player_tick_post` match NeoForge 26.3's
+  non-cancellable `PlayerTickEvent.Pre`/`Post` on **both logical sides**, including
+  ordinary single player's client window and server-thread players. Match the typed
+  `HostSide`; the event's `player: PlayerRef` unambiguously names the ticked player
+  (including other client-side players). On the server the helpers read that acting
+  player. Pre precedes sleep/cooldown/body work; Post follows it, including item,
+  arrow and XP pickups. Dead players still receive the pair without enabling dead
+  actions. Players tick under `/tick freeze`, not while paused. With no listeners,
+  the added per-player cost is only the indexed subscriber probe for each endpoint;
+  listeners on the server pay an acting-guest enter/leave at each endpoint, reusing
+  the already resolved guest index (no second connection lookup).
 
 - Shape updates a mod can answer through `native_update_shape`: on an authoritative server, each time a
   block's state is worked out from a neighbour (`BlockBehaviour.updateShape`): neighbour shape updates after a
@@ -362,12 +369,20 @@ requires a farmer at work and `mob_griefing` enabled.
   the Nether and the End open when someone first goes there and close after 300 ticks with nobody in them. Inside a
   restricted level hook, `with_random` on the `LevelRandomHost` draws from the same stream.
 
-- The server starting and stopping, on the single player server thread and on a dedicated server:
-  `native_server_about_to_start(dedicated)` before the worlds load (NeoForge's `ServerAboutToStartEvent`), and
-  `native_server_stopping(dedicated)` when an orderly stop begins, with the players still connected and not yet saved
-  (`ServerStoppingEvent`). Each start is followed by `native_server_started` (NeoForge's `ServerStartedEvent`: every
-  level loaded, no player joined, the first tick not yet run, fired where `WorldOpenReady` used to be; diverges from upstream: new hook) or by
-  `native_world_lifecycle`'s `WorldOpenFailed`, and each stop by `WorldCloseFinal`; a server whose loop fails reports `WorldCloseFailed` instead of stopping.
+- Server lifecycle hooks run once per start, on both the single-player server thread and a dedicated server.
+  `server_about_to_start(dedicated)` runs before worlds load (`ServerAboutToStartEvent`), immediately followed by
+  `server_starting(dedicated)` (`ServerStartingEvent`), before the server accepts play. `server_started(dedicated)`
+  keeps its existing firing point: every level loaded and the first tick not yet run (`ServerStartedEvent`).
+  On every exit after startup began, including a failed open, failed tick, or caught panic,
+  `server_stopping(dedicated)` (`ServerStoppingEvent`) runs before player cleanup and the final world save attempt.
+  `server_stopped(dedicated)` (`ServerStoppedEvent`) runs last, after network teardown, flushing saves and releasing
+  storage, even when the save failed or a shutdown listener panicked. An early callback panic (including
+  `config_unloading`) still reaches the final adopted-world save attempt and full server/network teardown,
+  not just unpublishing or flushing queued writes. The first failure is retained if cleanup also fails.
+  These are server-side, mutable `ServerHost` notifications, not cancellable.
+  A failed open never overwrites a world the server did not successfully adopt: the session lock is taken before the prepared level is installed, and only that installation allows the final save. `WorldOpenFailed` or `WorldCloseFailed`
+  still reports the failure; `WorldCloseFinal` is only emitted after a successful orderly close. No tick-time cost:
+  these hooks dispatch only at server startup and shutdown.
 
 - Mod block entities are sent to clients. Only declared types receive wire IDs after vanilla's, and several valid
   blocks can share a type. Server and client use its declared identity; `native_block_entity` supplies only initial data.
@@ -442,7 +457,9 @@ requires a farmer at work and `mob_griefing` enabled.
   route, with the hit's level host (its blocks, random and own attachments), the hurt entity's id and type
   (`minecraft:player` for a player), the hit's source (`HurtSource`: the damage type, `minecraft:fall`; the causing
   entity, `causing`, vanilla's `DamageSource.getEntity`: a skeleton for its arrow; the direct entity, `direct`,
-  `getDirectEntity`: the arrow, the attacker itself in melee; and `position`, `getSourcePosition`), the `victim`'s
+  `getDirectEntity`: the projectile's entity id when the damage type names one, for hits on players, mobs and
+  the ender dragon, including an ownerless projectile, or the attacker itself in melee; `magic()` and any other
+  source with no direct entity stay 0 even during that projectile's impact; and `position`, `getSourcePosition`), the `victim`'s
   position and view vector, the direct entity's `weapon` (`getWeaponItem`) when Horizon knows it (a player's or mob's
   melee hit inside its attack), and the hit's `DamageContainer` before any reduction. The entity ids are 0 for none,
   and for the sources listed below that Horizon doesn't track yet. A mod may change the container's new damage or the
@@ -456,6 +473,15 @@ requires a farmer at work and `mob_griefing` enabled.
   the world (the server thread), so state a mod shares with its render thread hooks needs synchronising. `/kill` and
   `native_kill_mob` don't reach it yet: they set the health to 0 instead of hurting with `minecraft:generic_kill` as
   vanilla does. NeoForge's reduction modifiers (`addReductionModifier`) aren't there yet.
+
+- `living_damage_post` (NeoForge's `LivingDamageEvent.Post`) observes the hit after it takes health.
+  Its `container.should_cause_side_effects()` is `hurtServer`'s fresh-hit decision
+  (`shouldCauseSideEffects`), recorded before damage is applied: true for a fresh hit, false for a
+  stronger hit inside the invulnerability window, and true for a source that bypasses the cooldown.
+  A weaker or equal hit refused by the cooldown does not fire Post. The flag is not inferred from
+  final damage or invulnerability ticks, so changing those in a damage listener does not change it.
+  It accompanies the container's reductions, inflicted damage and health damage in native and wasm
+  listeners; it describes the decision to cause fresh-hit effects, not whether every effect occurred.
 
 A player's damage type is the source's own. A mob's and the dragon's come from the kind of damage Horizon keeps for
 the hit, which doesn't tell every vanilla type apart yet:
@@ -473,15 +499,16 @@ the hit, which doesn't tell every vanilla type apart yet:
 
 The causing and direct entities are 0 for now in these cases:
 
-- A player's direct entity, always
+- A player's direct entity outside a projectile hit, and `magic()` dealt during one (an ownerless wither
+  skull, instant harm from a tipped arrow): vanilla's source names no entity
 - A player's causing entity, except for a mob that shot the projectile, the mob `/damage` names, an evoker that summoned
   the fangs, a slime or magma cube that touched the player, and a mob that exploded (a sulfur cube's is guessed until
   its blast names its source)
-- A mob's causing and direct entities when a player is behind the hit outside the player's own attack (arrows,
-  tridents, blasts, TNT a player lit)
-- A mob's direct entity when it isn't the causing one (a projectile, a blast, a potion)
+- A mob's causing and direct entities when a player is behind a hit outside a scoped attack (for example TNT
+  a player lit); a projectile's hit does run inside its owner's attack
+- A mob's direct entity when it isn't the causing one outside a projectile hit (for example a TNT blast)
 - A falling block on a mob, whose causing and direct entity is the block in vanilla
-- The dragon's direct entity for a projectile or a blast
+- The dragon's direct entity for a blast
 - The dragon's causing player when it isn't the acting one on a LAN guest's turn
 - `/damage` on a mob `by` an entity with a damage type that isn't melee: the direct entity is 0, not that entity
 
@@ -525,6 +552,22 @@ one, where vanilla gives the `by` one.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
+
+  One tick's streaming step (`update_world`) runs in this order:
+
+  1. The chunks that come and go are worked out. A chunk saved while that is planned is copied for its save there.
+  2. The arriving chunks join the level and the departing ones leave it.
+  3. Each departing chunk that changed since its last save is copied, with its block entities and save data, and the
+     copy is queued to save.
+  4. `native_chunk_load` runs for each arriving chunk (`native_chunks_loaded`).
+  5. `native_chunk_unload` runs for each departing chunk.
+  6. The departing chunks' entities, block entities and block names are dropped.
+
+  So an edit a `native_chunk_load` listener makes to a chunk departing in the same tick (a neighbour's block entity,
+  say) comes after that chunk's save copy (step 3): it is not saved, and step 6 drops it. That is the difference from an
+  ordinary load, where the edit lands in a chunk that stays and is saved with its next save, and it is the same rule as
+  `native_chunk_unload`, whose edits also come after the copy. Change a chunk you may lose from a later tick instead,
+  after checking it is still loaded.
 - Sounds the server plays to its players: `native_play_level_sound_at_position` and `native_play_level_sound_at_entity`
   (NeoForge's `PlayLevelSoundEvent.AtPosition` and `.AtEntity`, in `ServerLevel.playSeededSound`). As in vanilla, a mob's own
   sounds (`Entity.playSound`) are at its position; only `playSound(except, sourceEntity, ...)` sounds are at an entity: vanilla's
@@ -830,6 +873,37 @@ there is no per-particle code hook.
   is behind it. Its fluid layer and block entity are hidden too; light, collision and the server are untouched. It is
   asked once per state when the client joins a world and again when a mod calls `refresh_render_visibility()`, which
   remeshes the loaded terrain. Attach it to vanilla blocks with `block_part_tag`. With no part answering, meshing is unchanged.
+
+### Screenshots
+
+`Hooks::screenshot` is the client-thread counterpart of NeoForge 26.3's
+`ScreenshotEvent`. It runs with a `ClientHost` after F2's GPU readback and before
+any file is written. `event.image` is the in-memory frame (`getImage`): RGBA8,
+top to bottom, `width * height * 4` bytes. Change the pixels, or replace the
+image, and the normal PNG is that image. A buffer whose length is not
+`width * height * 4` writes neither file and shows the translated screenshot
+failure line. The HDR copy is not this image; it stays the read-back frame.
+
+Return `Flow::Cancel` to write neither the normal PNG nor its HDR companion.
+The chat then shows `event.message` when it is set, and otherwise the translated
+cancellation line (`screenshot.failure` with `horizon.screenshot.canceled`).
+
+Change `event.file_name` to a relative path under the player's `screenshots/`
+folder (for example `album/view.png`). Missing parent folders are created.
+Absolute paths, empty, `.` or `..` components, backslashes, drive prefixes, NUL
+and symbolic links, including the HDR destination, are refused with the normal
+translated screenshot failure line. The player may make the screenshots folder
+itself a symlink. As with other local file operations, this does not isolate a
+native mod or defend against a concurrent external filesystem replacement.
+
+`event.message` starts as `None`: after a successful save the game builds the
+normal translated, clickable success line using the final file name. Set it to
+`Some(Text)` to replace that success line. Save errors always show the failure,
+not a listener's success message. A no-op listener preserves ordinary saving.
+With HDR enabled the existing tagged 16-bit copy follows the chosen name as
+`<stem>-hdr.png`; its encoding and best-effort error handling are unchanged.
+The hook does not intercept control-socket captures or automatic world icons.
+It adds no tick work; dispatch runs only when an F2 image has been read back.
 
 ### Server data reload listeners
 
@@ -1138,7 +1212,7 @@ registration path.
 
 - a player changing dimension: `native_player_changed_dimension(player, name, from, to)` is heard once per move of a server's player into another level, when the move has ended (a portal's exit found and the player standing there, a command's teleport landed, a respawn in another level placed for good), with `from` and `to` as dimension ids (`minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`) and the player's state swapped in so that `native_tell` and the other helpers reach them. A move within a level is not heard.
 
-- A mod that hears `native_pickup_xp` sets `listened` in `native_pickup_xp_listened` (a HEAD injection); `native_pickup_xp(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
+- `native_pickup_xp(player, dimension, orb, value, count, canceled)` runs before a server player takes an orb; with no listener the server skips swapping a guest in for it (the shared `listened` probe). Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
 
 - Whom an experience orb follows (`XpOrbTargetingEvent`): `native_xp_orb_targeting(orb, scan_distance, following)`, on a server, for each orb as it ticks. `following` starts as the nearest living player within `scan_distance` (8) blocks who isn't a spectator, or `None`; set another player, or `None` to follow no one. The orb goes only for a living player who isn't a spectator and is in its level, and moves only once they are within 8 blocks. An orb that follows no one gets vanilla's push out of a block it is stuck in. Horizon looks for the nearest player on every orb tick, where vanilla keeps the player it follows while they stay within 8 blocks, so the hook is asked every tick for each orb (NeoForge asks only when the orb has no player in range). Clients still predict the orb's flight towards the nearest player; the server's position wins.
 
@@ -1845,7 +1919,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_entity_break_door(entity, kind, pos)`**: a mob finished breaking a door at `pos`, after the block was removed.
 - **`native_creeper_power(entity, lightning)`**: a lightning strike charged the creeper.
 - **`native_living_visibility(entity, looking, visibility)`**: how visible `entity` is to `looking` (NeoForge's `LivingVisibilityEvent`, last in `LivingEntity.getVisibilityPercent`). `visibility` comes in as vanilla's percent: sneaking 0.8, invisibility scaled by armour cover, and 0.5 for a worn mob head whose default `mob_visibility` names the looking mob's type (a zombie head fools zombies, not husks). Multiply it to scale the range a targeting check sees the entity from. A negative answer counts as 0, and the result is clamped to 10, as vanilla clamps. Horizon computes visibility only for players, so it asks for a player seen by a mob whose targeting check scales by visibility (`TargetingConditions.testInvisible`): hostile targeting, the sensors, the happy ghast's tempt. It asks after the alive, spectator and selector checks, as `TargetingConditions.test` does. With no listener, `MobWorld::mob_hooks` is `None` and nothing is asked.
-- **`native_entity_mob_griefing(entity, can_grief)`**: may `entity` change the world (NeoForge's `EntityMobGriefingEvent`, `EventHooks.canEntityGrief`)? `can_grief` comes in as the `mob_griefing` rule. Horizon asks at each site where NeoForge 26.3 calls `canEntityGrief`, with the same entity: the exploding entity for a mob explosion, the owner for a mob's arrow or small fireball, the wither for its rose, otherwise the mob itself. Where NeoForge keeps the plain rule read (door breaking, the dragon's walls, pitcher crops, weaving, and the explosion's decorations, items and vehicles), the rule decides. The game asks through `Game::can_entity_grief` and the mob AI through `MobWorld::can_grief`. With no listener both read the rule: one `listened` check, no dispatch. A ghast fireball's fire is not placed by Horizon yet, so its `canEntityGrief(owner)` ask is missing with it.
+- **`native_entity_mob_griefing(entity, can_grief)`**: may `entity` change the world (NeoForge's `EntityMobGriefingEvent`, `EventHooks.canEntityGrief`)? `can_grief` comes in as the `mob_griefing` rule. Horizon asks at each site where NeoForge 26.3 calls `canEntityGrief`, with the same entity: the exploding entity for a mob explosion, the owner for a mob's arrow or small fireball, the wither for its rose, otherwise the mob itself. Where NeoForge keeps the plain rule read (door breaking, the dragon's walls, pitcher crops, weaving, and the explosion's decorations, items and vehicles), the rule decides. The game asks through `Game::can_entity_grief` and the mob AI through `MobWorld::can_grief`. With no listener both read the rule: one `listened` check, no dispatch. A large fireball's fire asks for its owner (`LargeFireball.onHit`'s `canEntityGrief(level, getOwner())`): the ghast that shot it, or the player who sent it back. A fireball whose owner is gone reads the rule. The blast's block damage still reads the rule, because Horizon's mob explosion has no source entity yet.
 - **`native_enderman_anger(enderman, player, cancel)`**: `player` stares at `enderman` (NeoForge's `EnderManAngerEvent`, last in `Enderman.isBeingStaredBy`, once the look cone, line of sight and carved pumpkin checks passed). It is asked each time the enderman's goals check the stare: to get angry, to freeze while looked at, and to teleport away up close. Set `cancel` and that stare doesn't count. The mob AI asks through `MobWorld::mob_hooks`, which is set only on the server while a mod listens: with no listener the stare check costs nothing more.
 
   Mob AI asks mods through `MobWorld::mob_hooks`, an `Option<&dyn MobHooks>`: one trait in the client lib, implemented once by the game, whose methods only build the hook's arguments and call its generated `native_*` entry. It is `Some` only on an authoritative server while a mod listens to one of its hooks, and each method is gated by its own hook's `listened`, so adding a method costs nothing to mods that don't listen to it. The hook gets a read `Host` over the game while the mob tick runs: the mobs being ticked and the level's random and attachments are lent to the tick, so through that host every mob's handle reads as gone and level attachments read as none. Use the event's own fields; anything that must write waits for a deferred hook.
@@ -1872,6 +1946,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_brewing_fuel(pos, fuel)`**: a brewing stand at `pos` consumed `fuel` and gained brewing fuel. Server-side.
 - **`native_enchant_item(player, name, pos, item, levels)`**: a player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. Guest state is not swapped in.
 - **`native_prepare_item_enchant(player, name, pos, costs)`**: enchanting offers were calculated at `pos`; change the three offer costs before they are sent to the player's menu. Guest state is not swapped in.
+- **`anvil_update(host, event)`** (`AnvilUpdateEvent`, both logical sides): after `AnvilMenu.createResult`, change `event.update`'s output, XP cost and material cost, or cancel for no output at cost zero. `xp_cost` is signed and preserved exactly, matching `AnvilUpdateEvent.setXpCost(int)`. A Horizon client is shown that same cost, including one outside the vanilla data-slot short, so it does not change sign on the way. Zero and negative costs prevent taking the output, even in creative (`AnvilMenu.mayPickup` requires a positive cost); a negative cost does not refund levels. Negative material costs still clamp to zero, which consumes the entire right stack when a positive-cost output is taken.
 - **`native_anvil_craft_pre(player, name, pos, craft, cancel)`**: a player took an anvil's result at `pos` (NeoForge's `AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` has the left and right inputs and the result as they were before. Set `cancel` to refuse the take and skip `native_anvil_craft_post`: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. Fires on the server only; the window's predicted take does not call it.
 - **`native_anvil_craft_post(player, name, pos, craft)`**: the levels, inputs and anvil wear of that take are done (NeoForge's `AnvilCraftEvent.Post`); a broken anvil is already air. `craft` is the same as in `native_anvil_craft_pre`. Not called when it cancelled.
 - **`native_prepare_smithing(player, name, pos, result)`**: a smithing result was prepared for a player at `pos`; change it before it is sent to their menu. Guest state is not swapped in.
@@ -2354,8 +2429,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `entity.play_sound(host, sound, volume, pitch)` (`Entity.playSound`: at the entity, under its `sound_source`, for the
   players in range; a silent mob plays nothing and a player doesn't hear their own), `game_event(host, event)`
   (`Entity.gameEvent`: the entity is the source of a vibration for sculk sensors, wardens and allays),
-  `broadcast_event(host, id)` (`Level.broadcastEntityEvent`: entity event `id` to the players near it, for
-  `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `SoundSource`) and
+  `broadcast_event(host, id)` (`Level.broadcastEntityEvent`: entity event `id` to the players tracking it and to
+  itself, for `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `SoundSource`) and
   `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
   place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
   client only.
@@ -2967,7 +3042,7 @@ Horizon ticks vanilla's spawners where it always has: the trader, patrol, cat an
 
 ## Block drops
 
-- **`block_drops(level, dimension, pos, state, breaker, tool, drops, experience, cancel)`** (NeoForge's `BlockDropsEvent`): `Block.dropResources` built the item entities for a broken block and nothing has spawned yet. Edit `drops` (`NativeItemDrop`: stack, position, velocity, pickup delay) or `experience`, or set `cancel` for no drops, no experience and no `spawnAfterBreak` effects (an infested block's silverfish; a bee nest's bees are `playerDestroy`'s and still come out). `breaker` is the player's UUID, none for a level-side break; `tool` is their stack. It fires on the player's break and on every level-side `Block.dropResources`. Positions and motions are drawn before the event, in vanilla's order, listener or not, and the list is the one that spawns, so a mod that leaves it alone changes nothing. It runs inside a level write, so it gets the level host: reads and the level's random, no writes. Not fired for explosion drops, mob block breaks, dispensers or other loot-table drops; a level-side break is not asked `loot_drops`. Tick-time effect: none beyond one `listened` branch with no listeners. Beyond NeoForge: level-side breaks fire it too. Diverges from upstream: `block_exp` is removed into `experience` (its catalog row named no NeoForge event).
+- **`block_drops(level, dimension, pos, state, breaker, tool, drops, experience, cancel)`** (NeoForge's `BlockDropsEvent`): `Block.dropResources` built the item entities for a broken block and nothing has spawned yet. Edit `drops` (`NativeItemDrop`: stack, position, velocity, pickup delay) or `experience`, or set `cancel` for no drops, no experience and no `spawnAfterBreak` effects (an infested block's silverfish; a bee nest's bees are `playerDestroy`'s and still come out). `breaker` is the player's UUID, none for a level-side break; `tool` is their stack. It fires on the player's break, mob block breaks that drop loot, explosions and every level-side `Block.dropResources`. Positions and motions are drawn before the event, in vanilla's order, listener or not, and the list is the one that spawns, so a mod that leaves it alone changes nothing. It runs inside a level write, so it gets the level host: reads and the level's random, no writes. Player, mob and explosion block loot still runs `loot_drops` first; a level-side break is not asked `loot_drops`. Not fired for dispensers or other loot-table drops. Explosions start with zero experience, but a listener may award it. Their events run after the blast removes the blocks and merges loot, before items spawn. Each block owns only its contribution to a merged entity, with that entity's prepared position and velocity: cancel removes only that share. Unchanged shares rejoin the original merged entity; edited or added drops spawn exactly as returned. Empty-loot blocks still fire; TNT that primes instead does not. A no-op listener preserves both merging and level-random draws. Tick-time effect: explosions add a `listened` branch per block; contribution tracking allocates only with listeners. Mob breaks use the same item construction and XP sampling as other block breaks. Beyond NeoForge: level-side breaks and explosion loot fire it too. Diverges from upstream: `block_exp` is removed into `experience` (its catalog row named no NeoForge event).
 
 ## Spawn checks
 

@@ -506,12 +506,13 @@ impl Game<'_> {
         site: SpawnSite,
     ) -> Option<u32> {
         // The spawn is not a natural one (no jockeys, the patrol leader roll
-        // stays), but the mob is not persistent.
-        let id = self.spawn_mob(kind, at, true, site)?;
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            m.persistent = false;
-        }
-        Some(id)
+        // stays), but the mob is not persistent: vanilla's SummonCommand
+        // never calls setPersistenceRequired. The flag is false from the
+        // start, before the mob joins the level, so a mod's own write in the
+        // entity_join hook survives it - clearing it after the join would
+        // wipe what the hook set (Mob.setPersistenceRequired from
+        // entity_join_level).
+        self.spawn_mob(kind, at, false, site)
     }
     fn create_mob_reason(
         &mut self,
@@ -3157,28 +3158,6 @@ impl Game<'_> {
                         broke.push(mob);
                     }
                     let old = self.world.block(pos[0], pos[1], pos[2]);
-                    // InfestedBlock.spawnAfterBreak: its silverfish comes out
-                    // when blocks drop.
-                    if drop
-                        && self
-                            .res
-                            .facts()
-                            .get(old)
-                            .name
-                            .starts_with("minecraft:infested_")
-                        && self.ui.rules.bool("block_drops")
-                    {
-                        let at = [
-                            f64::from(pos[0]) + 0.5,
-                            f64::from(pos[1]),
-                            f64::from(pos[2]) + 0.5,
-                        ];
-                        if let Some(id) =
-                            self.spawn_mob("minecraft:silverfish", at, false, SpawnSite::Plain)
-                        {
-                            self.mob_poof(id);
-                        }
-                    }
                     // Block.spawnDestroyParticles: fire breaks leave nothing.
                     if !self.res.facts().get(old).has_class("BaseFireBlock") {
                         self.level_event_at(2001, pos, old.0 as i32);
@@ -3192,8 +3171,39 @@ impl Game<'_> {
                             Some((&mut self.rand_sequences, self.level.seed)),
                         );
                         self.native_block_loot(pos, old, None, None, None, &mut drops);
-                        for d in drops {
-                            self.pop_resource(pos, d);
+                        let dropped = self.with_level(|_, level, _| {
+                            level.block_dropped(
+                                BlockPos::new(pos[0], pos[1], pos[2]),
+                                old,
+                                None,
+                                None,
+                                drops,
+                                None,
+                            )
+                        });
+                        let canceled = dropped.canceled;
+                        self.spawn_block_drops(pos, dropped);
+                        // InfestedBlock.spawnAfterBreak runs after the drops,
+                        // unless BlockDropsEvent canceled it.
+                        if !canceled
+                            && self
+                                .res
+                                .facts()
+                                .get(old)
+                                .name
+                                .starts_with("minecraft:infested_")
+                            && self.ui.rules.bool("block_drops")
+                        {
+                            let at = [
+                                f64::from(pos[0]) + 0.5,
+                                f64::from(pos[1]),
+                                f64::from(pos[2]) + 0.5,
+                            ];
+                            if let Some(id) =
+                                self.spawn_mob("minecraft:silverfish", at, false, SpawnSite::Plain)
+                            {
+                                self.mob_poof(id);
+                            }
                         }
                     }
                     // Level.destroyBlock: setBlock(fluidState.createLegacyBlock(), 3),
@@ -4088,10 +4098,11 @@ impl Game<'_> {
         let owner = self.combat.projectile_owner.take();
         // The mob that caused the hit, else the attack the caller landed it in (a projectile's
         // owner, another player's blow): `combat.attack`, read through `current_attack`.
-        let attack = match attacker.or(owner) {
+        let mut attack = match attacker.or(owner) {
             Some(id) => self.attack_of(id as i32),
             None => self.current_attack(),
         };
+        attack.projectile = self.combat.attack().projectile;
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -4146,7 +4157,7 @@ impl Game<'_> {
                 let source = HurtSource {
                     damage_type,
                     causing,
-                    direct: 0,
+                    direct: attack.projectile_direct(damage_type),
                     position: None,
                 };
                 default_push = Some(([xd, zd], source));
@@ -4194,7 +4205,7 @@ impl Game<'_> {
             let source = HurtSource {
                 damage_type,
                 causing,
-                direct: 0,
+                direct: attack.projectile_direct(damage_type),
                 position: None,
             };
             self.after_block(outcome, (attacker, projectile), source, &attack);
@@ -5011,7 +5022,8 @@ impl Game<'_> {
     }
     /// A projectile's hit, landed in the attack of its owner.
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
-        let attack = self.attack_of_who(p.owner);
+        let mut attack = self.attack_of_who(p.owner);
+        attack.projectile = Some(p.id as i32);
         self.with_attack(attack, |g| g.projectile_hit_landed(p, hit))
     }
     fn projectile_hit_landed(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
@@ -5097,7 +5109,7 @@ impl Game<'_> {
                     amount,
                     by_player,
                     horizon_client::mobs::DamageKind::Arrow,
-                    Some(&p.kind),
+                    Some(p),
                 ) {
                     super::dragon::Hurt::Landed { .. } => EntityHit::Hurt,
                     super::dragon::Hurt::Refused => EntityHit::Refused,
@@ -5123,7 +5135,7 @@ impl Game<'_> {
                 }
                 _ => horizon_client::mobs::DamageKind::Thrown,
             };
-            self.hit_special(id, amount, by_player, kind, Some(&p.kind));
+            self.hit_special(id, amount, by_player, kind, Some(p));
             // ThrowableProjectile.onHit goes on after onHitEntity: a pearl
             // still takes its owner to where it broke (into the crystal's
             // blast), an egg still hatches, a snowball still breaks. A large
@@ -5757,9 +5769,11 @@ impl Game<'_> {
                 // The blast's source names the owner, so a dragon it kills
                 // remembers the player who shot it.
                 self.set_blast_by_player(p.owner == Some(Who::Player));
-                // LargeFireball.onHit: both fire and MOB block destruction
-                // follow mob_griefing; other mob explosions keep their default.
-                let fire = self.ui.rules.bool("mob_griefing");
+                // LargeFireball.onHit: the fire follows
+                // `EventHooks.canEntityGrief(level, getOwner())`, so a mod's
+                // answer for whoever owns the fireball decides: the ghast that
+                // shot it, or the player who sent it back.
+                let fire = self.large_fireball_fire(p.owner, p.guest);
                 let result = self.explode_mob(atp, *power as f32, fire);
                 self.set_blast_by_player(false);
                 self.combat.explosion_owner = None;
@@ -8346,6 +8360,19 @@ impl Game<'_> {
         let rule = self.ui.rules.bool("mob_griefing");
         entity.map_or(rule, |entity| self.entity_grief(entity, rule))
     }
+    /// Whether a large fireball's blast lights fire (`LargeFireball.onHit`):
+    /// [`Self::can_entity_grief`] for its owner, as `getOwner()` gives it. That
+    /// is the mob that shot it, or the player who owns it (the guest on `guest`,
+    /// else the player in place). An owner that is gone, or none, reads the rule.
+    pub(super) fn large_fireball_fire(&self, owner: Option<Who>, guest: Option<u32>) -> bool {
+        self.can_entity_grief(match owner {
+            Some(Who::Mob(id)) => Some(id),
+            Some(Who::Player) => self
+                .player_entity_id_by_connection(guest)
+                .map(|id| id as u32),
+            None => None,
+        })
+    }
     /// Whether a mod may answer `can_entity_grief` differently from the rule:
     /// the sites that skip their whole work while griefing is off skip it only
     /// when no mod listens.
@@ -8370,10 +8397,11 @@ impl Game<'_> {
 #[cfg(test)]
 mod mob_griefing_tests {
     use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
     use std::sync::{Arc, Mutex};
 
-    /// Denies griefing to entity `self.0`, and logs who was asked.
-    struct Deny(u32, Arc<Mutex<Vec<(u32, bool)>>>);
+    /// Denies griefing to the entities in `self.0`, and logs who was asked.
+    struct Deny(Vec<u32>, Arc<Mutex<Vec<(u32, bool)>>>);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Deny {
         fn entity_mob_griefing(
@@ -8385,7 +8413,7 @@ mod mob_griefing_tests {
                 .lock()
                 .unwrap()
                 .push((event.entity.id(), event.can_grief));
-            if event.entity.id() == self.0 {
+            if self.0.contains(&event.entity.id()) {
                 event.can_grief = false;
             }
         }
@@ -8399,14 +8427,16 @@ mod mob_griefing_tests {
     fn a_mod_denies_one_entity_griefing() {
         let heard = Arc::default();
         let (denied, other) = (900, 901);
+        // Guest 5's entity id (`guest` gives `conn + 19`): a player the mod denies.
+        let denied_player = 24;
         let mods = vec![mod_api::ModEntry::new(
             "deny",
-            Box::new(Deny(denied, Arc::clone(&heard))),
+            Box::new(Deny(vec![denied, denied_player], Arc::clone(&heard))),
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
-                game.options.dedicated = Some(Vec::new());
+                open_to_lan(game);
                 assert!(game.ui.rules.bool("mob_griefing"));
                 assert!(!game.can_entity_grief(Some(denied)));
                 assert!(game.can_entity_grief(Some(other)));
@@ -8418,6 +8448,30 @@ mod mob_griefing_tests {
                 assert_eq!(
                     asked,
                     [(denied, true), (other, true), (denied, true), (other, true)]
+                );
+                // A large fireball asks for its owner: the ghast the mod denies
+                // lights no fire and another ghast's does; a fireball sent back
+                // by the guest the mod denies lights none and another guest's
+                // does. A gone owner, or none, reads the rule without asking.
+                use super::Who;
+                let hub = &mut game.lan.as_mut().unwrap().hub;
+                hub.guests.push(guest(5));
+                hub.guests.push(guest(6));
+                heard.lock().unwrap().clear();
+                assert!(!game.large_fireball_fire(Some(Who::Mob(denied)), None));
+                assert!(game.large_fireball_fire(Some(Who::Mob(other)), None));
+                assert!(!game.large_fireball_fire(Some(Who::Player), Some(5)));
+                assert!(game.large_fireball_fire(Some(Who::Player), Some(6)));
+                assert!(game.large_fireball_fire(Some(Who::Player), Some(7)));
+                assert!(game.large_fireball_fire(None, None));
+                assert_eq!(
+                    *heard.lock().unwrap(),
+                    [
+                        (denied, true),
+                        (other, true),
+                        (denied_player, true),
+                        (25, true)
+                    ]
                 );
             });
         });

@@ -603,7 +603,7 @@ impl Game<'_> {
                         "pos": [p.position.x, p.position.y, p.position.z]})
                     ));
                 }
-                for (_, event, _) in self.lan_entity_events.drain(..) {
+                for (_, event) in self.lan_entity_events.drain(..) {
                     lines.push(format!("entity_event {event}"));
                 }
             }

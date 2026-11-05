@@ -152,6 +152,8 @@ pub struct Field<'r> {
 /// The rule over one game's internals.
 pub struct Rule {
     named: HashMap<String, Named>,
+    /// Import facts in each lexical module. Conflicting conditional imports stay unresolved.
+    refs: HashMap<String, BTreeMap<String, Option<String>>>,
     memo: std::cell::RefCell<HashMap<String, Crossing>>,
 }
 
@@ -216,8 +218,40 @@ impl Rule {
                 },
             );
         }
+        let mut refs: HashMap<String, BTreeMap<String, Option<String>>> = HashMap::new();
+        for internal in internals {
+            if !internal.cfg.is_empty()
+                || !matches!(internal.kind, "struct" | "enum" | "fn" | "method")
+            {
+                continue;
+            }
+            let path = bare(&internal.path);
+            let Some((owner, _)) = path.rsplit_once("::") else {
+                continue;
+            };
+            let module = if internal.kind == "method" {
+                let Some((module, _)) = owner.rsplit_once("::") else {
+                    continue;
+                };
+                module
+            } else {
+                owner
+            };
+            let scope = refs.entry(module.to_owned()).or_default();
+            for (written, resolved) in &internal.refs {
+                scope
+                    .entry(written.clone())
+                    .and_modify(|known| {
+                        if known.as_ref() != Some(resolved) {
+                            *known = None;
+                        }
+                    })
+                    .or_insert_with(|| Some(resolved.clone()));
+            }
+        }
         Self {
             named,
+            refs,
             memo: Default::default(),
         }
     }
@@ -251,8 +285,8 @@ impl Rule {
         }
     }
 
-    /// Resolve only explicit paths and declarations in the current module. The manifest has no
-    /// `use` information: a name that happens to be unique elsewhere is not proof of an import.
+    /// Resolve import facts first, then explicit paths and declarations in the current module.
+    /// A name that happens to be unique elsewhere is not proof of an import.
     fn resolve(&self, module: &str, written: &syn::Path) -> Option<String> {
         let spelled = written
             .segments
@@ -260,6 +294,10 @@ impl Rule {
             .map(|s| s.ident.to_string())
             .collect::<Vec<_>>()
             .join("::");
+        if let Some(resolved) = self.refs.get(module).and_then(|scope| scope.get(&spelled)) {
+            let resolved = resolved.as_ref()?;
+            return self.named.contains_key(resolved).then(|| resolved.clone());
+        }
         let mut rest = spelled.as_str();
         let mut scope = module;
         let resolved = if let Some(rest) = rest.strip_prefix("crate::") {
@@ -507,6 +545,8 @@ pub(crate) mod tests {
             cfg: String::new(),
             signature: signature.into(),
             hash: String::new(),
+            shape_only: false,
+            refs: BTreeMap::new(),
         }
     }
 

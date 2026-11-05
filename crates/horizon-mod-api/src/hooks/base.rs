@@ -43,6 +43,16 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_about_to_start();
+    /// Fired once immediately after `server_about_to_start`, before the server
+    /// accepts play, on both integrated and dedicated servers. A failed startup
+    /// still reaches `server_stopped`.
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ServerStartingEvent",
+        cancellable = false
+    )]
+    fn server_starting();
     /// The server has opened its worlds and is about to run its tick loop
     /// (NeoForge's `ServerStartedEvent`): every level is loaded, no player has
     /// joined, and the first tick has not run. Fired where `WorldOpenReady` was,
@@ -56,12 +66,13 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_started();
-    /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
+    /// The server begins teardown (NeoForge's `ServerStoppingEvent`), including
+    /// after startup or the tick loop failed:
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
     /// mod can save its own data or tell them. `native_world_lifecycle`'s
     /// `WorldCloseFinal` follows once the worlds are saved. A server whose loop
-    /// fails stops without this (`WorldCloseFailed` reports it).
+    /// fails still fires this before the final save attempt and `server_stopped`.
     #[hook(
         side = "server",
         contract = "listen",
@@ -70,6 +81,20 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_stopping();
+    /// Fired once at the end of server teardown, after `server_stopping` and
+    /// the final save attempt and storage release. Also fired when startup or
+    /// teardown fails after startup began, including when a shutdown listener
+    /// panics, on integrated and dedicated servers.
+    /// Failed opens save only worlds already adopted by the server (the prepared
+    /// level is installed; the session lock alone is not adoption). A failed
+    /// save still reaches this hook, but does not emit `WorldCloseFinal`.
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ServerStoppedEvent",
+        cancellable = false
+    )]
+    fn server_stopped();
     /// The authoritative server tick's phases: `ServerTickStart` before any
     /// level is ticked (NeoForge's `ServerTickEvent.Pre`), `ServerTickEnd`
     /// after the last (`.Post`). Read blocks with `native_server_block`, by
@@ -670,13 +695,21 @@ pub trait Hooks {
     /// every player of the world (the helpers read the acting one).
     #[hook(side = "server", contract = "cancel", out = "canceled")]
     fn left_click_block();
-    /// A living player's server tick ends (`ServerPlayer.tick`): once a tick
-    /// for every player in the world, after their digging, item use,
-    /// cooldowns, statistics and advancements. The helpers read that player.
-    /// Players still tick under `/tick freeze`; a dead player doesn't, nor
-    /// does one killed earlier in the same tick.
-    #[hook(side = "server", contract = "listen")]
-    fn player_tick();
+    /// Before a player's tick on both logical sides (NeoForge 26.3
+    /// `PlayerTickEvent.Pre`). Non-cancellable, including death-screen ticks.
+    /// `player` identifies the ticked player; on the server their state is
+    /// acting. Fires before sleep, cooldowns and body work. Players still tick
+    /// under `/tick freeze`, but not while the level is paused.
+    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Pre")]
+    fn player_tick_pre(player: PlayerRef);
+    /// After a player's tick on both logical sides (NeoForge 26.3
+    /// `PlayerTickEvent.Post`). Non-cancellable, including death-screen ticks.
+    /// `player` is the same identity as in `player_tick_pre`; on the server
+    /// their state is acting. Runs after body work and server-side item,
+    /// arrow and XP pickups, so reads see the completed tick. Client reads
+    /// see only the state available to that client, not future server updates.
+    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Post")]
+    fn player_tick_post(player: PlayerRef);
     /// An entity joins the server level `dimension` (NeoForge's
     /// `EntityJoinLevelEvent`): vanilla's `PersistentEntitySectionManager.addEntity`.
     /// `loaded_from_disk` is true for an entity coming back with its chunk,
@@ -701,7 +734,9 @@ pub trait Hooks {
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) by `source`: its damage
     /// type (`minecraft:fall`), causing entity (`DamageSource.getEntity`: the shooter of an
-    /// arrow), direct entity (`getDirectEntity`: the arrow), 0 for none or not known, and
+    /// arrow), direct entity (`getDirectEntity`: the projectile's entity id when the
+    /// damage type names one, on a player, mob or ender dragon; 0 for `magic()` and any
+    /// other source with no direct entity, even during that projectile's impact), and
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
     /// `container` holds the damage before any reduction: change its `new_damage`, or the
@@ -802,6 +837,9 @@ pub trait Hooks {
     /// but its saved entities join afterwards and its light may not be ready:
     /// change the world from a later tick. The chunks around the spawn come
     /// before `server_started`. Not told of a chunk a client receives.
+    /// The chunks leaving in the same tick were already copied for their last
+    /// save: an edit made here to one of them (a neighbour's block entity, say)
+    /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
     #[hook(side = "server", contract = "listen")]
     fn chunk_load();
@@ -2888,12 +2926,6 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn exp_bottle();
-    /// Whether a mod hears `native_pickup_xp`: set `listened`
-    /// (a HEAD injection), or the server skips swapping the player in for it,
-    /// and with this empty the pickup costs nothing more without mods.
-    /// Server-side.
-    #[hook(side = "server", contract = "collect", out = "listened")]
-    fn pickup_xp_listened();
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
     /// and `count` take effect only when not canceled; value is clamped to
     /// 1..=i32::MAX and count to at least one.
@@ -4644,6 +4676,19 @@ pub trait Helpers {
     fn block_entity_sync();
     #[helper(side = "client")]
     fn play_local_sound();
+    /// How many particles the client's level has alive (`ParticleEngine.countParticles`): every
+    /// live group, item pickups, firework starters and the elder guardian apparition included.
+    /// Queued particles and emitters are not counted. 0 once `clear_particles` was asked, and on
+    /// a server.
+    #[helper(side = "client")]
+    fn particle_count();
+    /// Removes every particle, queued particle and emitter of the client's level
+    /// (`ParticleEngine.clearParticles`), item pickups, firework starters and the elder guardian
+    /// apparition included. It takes `&self`, so a screen or render hook can ask: the clear
+    /// lands before the next frame is drawn or the next particle tick, whichever comes first,
+    /// paused or not. False on a server.
+    #[helper(side = "client")]
+    fn clear_particles();
     #[helper(side = "client")]
     fn fill();
     #[helper(side = "client")]

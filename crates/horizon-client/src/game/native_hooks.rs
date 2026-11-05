@@ -1018,8 +1018,8 @@ use mod_api::{
     GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
     NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
     NativeProgressType, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
-    RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController,
-    ToolUse, WorldPhase,
+    RecipeBookCategory, ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase,
+    TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
@@ -2801,6 +2801,70 @@ impl Game<'_> {
     ) {
         self.fire_client_chat_received(system, overlay, sender, chat_type, message, cancel);
     }
+    /// An F2 frame is read back; mods may change its image, cancel, rename it or replace its line.
+    pub(super) fn native_screenshot(
+        &mut self,
+        image: &mut ScreenshotImage,
+        file_name: &mut String,
+        message: &mut Option<Text>,
+        cancel: &mut bool,
+    ) {
+        self.fire_screenshot(image, file_name, message, cancel);
+    }
+
+    /// `ToastAddEvent`: admit one client toast before it enters a visible queue.
+    pub(super) fn native_toast_add(
+        &self,
+        kind: mod_api::ToastKind,
+        title: &mut Text,
+        description: &mut Option<Text>,
+        cancel: &mut bool,
+    ) {
+        self.fire_toast_add(kind, title, description, cancel);
+    }
+
+    /// The single admission point for all toast families. Producers decide the
+    /// candidate first; only an accepted candidate is applied to its queue.
+    pub(super) fn add_toast(
+        &self,
+        kind: mod_api::ToastKind,
+        title: &mut Text,
+        description: &mut Option<Text>,
+    ) -> bool {
+        // Shared advancement/recipe producers also run on logical servers;
+        // only their receiving client owns toast presentation and its hook.
+        if self.is_logical_server() {
+            return false;
+        }
+        let mut cancel = false;
+        self.native_toast_add(kind, title, description, &mut cancel);
+        !cancel
+    }
+
+    pub(super) fn add_system_toast(
+        &self,
+        mut toast: horizon_client::toasts::SystemToast,
+    ) -> Option<horizon_client::toasts::SystemToast> {
+        self.add_toast(
+            mod_api::ToastKind::System,
+            &mut toast.title,
+            &mut toast.message,
+        )
+        .then_some(toast)
+    }
+
+    pub(super) fn settle_title_toasts(&mut self) {
+        let pending = self.title.as_mut().and_then(|title| {
+            title.poll_backup();
+            title.take_pending_toast()
+        });
+        if let Some(toast) = pending.and_then(|toast| self.add_system_toast(toast))
+            && let Some(title) = self.title.as_mut()
+        {
+            title.apply_toast(toast);
+        }
+    }
+
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
     pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
         self.fire_client_pause_change_pre(paused, cancel);
@@ -2984,18 +3048,26 @@ impl Game<'_> {
     pub(super) fn native_server_about_to_start(&mut self, dedicated: bool) {
         self.fire_server_about_to_start(dedicated);
     }
+    /// Server startup has begun, before play can be accepted.
+    pub(super) fn native_server_starting(&mut self, dedicated: bool) {
+        self.fire_server_starting(dedicated);
+    }
+    /// Server teardown has finished, including the final save if possible.
+    pub(super) fn native_server_stopped(&mut self, dedicated: bool) {
+        self.fire_server_stopped(dedicated);
+    }
     /// The server opened its worlds and is about to tick (NeoForge's
     /// `ServerStartedEvent`): every level loaded, no player joined. Where
     /// `WorldOpenReady` fired: the end of the open, before the tick loop.
     pub(super) fn native_server_started(&mut self, dedicated: bool) {
         self.fire_server_started(dedicated);
     }
-    /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
+    /// The server begins teardown (NeoForge's `ServerStoppingEvent`):
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
     /// mod can save its own data or tell them. `native_world_lifecycle`'s
     /// `WorldCloseFinal` follows once the worlds are saved. A server whose loop
-    /// fails stops without this (`WorldCloseFailed` reports it).
+    /// fails still fires this before the final save attempt and `native_server_stopped`.
     pub(super) fn native_server_stopping(&mut self, dedicated: bool) {
         self.fire_server_stopping(dedicated);
     }
@@ -3155,13 +3227,13 @@ impl Game<'_> {
     ) {
         self.fire_left_click_block(pos, face, state, canceled);
     }
-    /// A living player's server tick ends (`ServerPlayer.tick`): once a tick
-    /// for every player in the world, after their digging, item use,
-    /// cooldowns, statistics and advancements. The helpers read that player.
-    /// Players still tick under `/tick freeze`; a dead player doesn't, nor
-    /// does one killed earlier in the same tick.
-    pub(super) fn native_player_tick(&mut self) {
-        self.fire_player_tick();
+    /// NeoForge's non-cancellable PlayerTickEvent.Pre on either logical side.
+    pub(super) fn native_player_tick_pre(&mut self, call: mod_api::__private::PlayerTickPreCall) {
+        self.fire_player_tick_pre(call);
+    }
+    /// NeoForge's non-cancellable PlayerTickEvent.Post on either logical side.
+    pub(super) fn native_player_tick_post(&mut self, call: mod_api::__private::PlayerTickPostCall) {
+        self.fire_player_tick_post(call);
     }
     /// The player-health HUD rows, once a frame the HUD draws them
     /// (`HealthHud::layout`, not under F1): `inputs` carries the health,
@@ -6389,9 +6461,10 @@ impl Game<'_> {
     /// `update` holds the inputs (the right one may be empty, for a rename),
     /// the rename text and vanilla's result, and its `output`, `xp_cost`
     /// and `material_cost` start at vanilla's for the mods to change; set
-    /// `cancel` for no result. Negative costs are clamped to zero, unlike
-    /// the NeoForge event. Both sides: the server's menu, and a server's
-    /// client menu with the local player.
+    /// `cancel` for no result. The signed XP cost is preserved; a cost of
+    /// zero or less prevents taking the output, not a level refund. Negative
+    /// material costs are clamped to zero. Both sides: the server's menu,
+    /// and a server's client menu with the local player.
     pub(super) fn native_anvil_update(
         &mut self,
         player: u128,
@@ -8443,13 +8516,6 @@ impl Game<'_> {
     ) {
         self.fire_food_level_changed(player, name, from, to, cancel);
     }
-    /// Whether a mod hears `native_pickup_xp`: set `listened`
-    /// (a HEAD injection), or the server skips swapping the player in for it,
-    /// and with this empty the pickup costs nothing more without mods.
-    /// Server-side.
-    pub(super) fn native_pickup_xp_listened(&mut self, listened: &mut bool) {
-        self.fire_pickup_xp_listened(listened);
-    }
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
     /// and `count` take effect only when not canceled; value is clamped to
     /// 1..=i32::MAX and count to at least one.
@@ -8930,7 +8996,9 @@ impl HitLevel<'_> {
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) by `source`: its damage
     /// type (`minecraft:fall`), causing entity (`DamageSource.getEntity`: the shooter of an
-    /// arrow), direct entity (`getDirectEntity`: the arrow), 0 for none or not known, and
+    /// arrow), direct entity (`getDirectEntity`: the projectile's entity id when the
+    /// damage type names one, on a player, mob or ender dragon; 0 for `magic()` and any
+    /// other source with no direct entity, even during that projectile's impact), and
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
     /// `container` holds the damage before any reduction: change its `new_damage`, or the
@@ -8994,7 +9062,8 @@ impl HitLevel<'_> {
     }
     /// NeoForge's `LivingDamageEvent.Post`: the health of entity `entity` of type `kind` has
     /// just lost the hit `container` describes, with its final values (health damage, the
-    /// reductions, the post-attack invulnerability ticks). It only listens, and fires where
+    /// reductions, the post-attack invulnerability ticks, and `should_cause_side_effects`,
+    /// `hurtServer`'s fresh-hit decision). It only listens, and fires where
     /// `native_living_damage_pre` does once the health took more than 0. It can't write the
     /// entity or the world's blocks: the level host gives the hit's random and level attachments.
     pub(super) fn native_living_damage_post(
@@ -9124,6 +9193,7 @@ impl Game<'_> {
         Attack {
             attacker,
             held,
+            projectile: None,
             player_uuid,
         }
     }
@@ -9259,19 +9329,25 @@ fn hurt_server_args<'a>(hurting: Hurting<'a>, attack: &Attack) -> (i32, &'a str,
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
-/// is a mob, or the player whose attack the level lends, and is the direct one too
-/// when it deals the damage itself.
+/// is a mob, or the player whose attack the level lends. The direct entity is
+/// the attacker in melee, or the projectile when this damage type names one
+/// (`arrow`, `wither_skull`). `magic()` does not, even during the impact.
 fn mob_source(damage: &Damage, attack: &Attack) -> HurtSource<'static> {
     let causing = match damage.attacker {
         Some(Who::Mob(id)) => id as i32,
         Some(Who::Player) => attack.attacker,
         None => 0,
     };
+    let damage_type = super::creatures::source_damage_type(*damage);
     let melee = super::creatures::melee(damage.kind);
     HurtSource {
-        damage_type: super::creatures::source_damage_type(*damage),
+        damage_type,
         causing,
-        direct: if melee { causing } else { 0 },
+        direct: if melee {
+            causing
+        } else {
+            attack.projectile_direct(damage_type)
+        },
         position: damage.from,
     }
 }
@@ -10014,6 +10090,50 @@ impl Game<'_> {
             return false;
         }
         self.mod_sounds.borrow_mut().push((sound.clone(), after));
+        true
+    }
+    /// The particles alive in the client's level (`ParticleEngine.countParticles`): 0 once
+    /// a clear is asked, and on a server.
+    pub(super) fn native_particle_count(&self) -> u32 {
+        if !self.native_window() || self.mod_clear_particles.get() {
+            return 0;
+        }
+        u32::try_from(self.client_particle_count()).unwrap_or(u32::MAX)
+    }
+    /// `ParticleEngine.countParticles`: every live group. Horizon keeps vanilla's groups
+    /// apart: the ordinary particles and firework starters in the engine, ITEM_PICKUP in
+    /// `pickups`, and ELDER_GUARDIANS as the apparition's ticks left (one particle while
+    /// it shows).
+    pub(super) fn client_particle_count(&self) -> usize {
+        self.particles.group_count()
+            + self.pickups.live.len()
+            + usize::from(self.creatures.elder_apparition > 0)
+    }
+    /// `ParticleEngine.clearParticles` over every group Horizon keeps apart: the engine's
+    /// particles, starters, queue and emitters, the item pickups and the elder guardian
+    /// apparition. Leaving a level and switching levels clear through it too.
+    pub(super) fn clear_client_particles(&mut self) {
+        self.particles.clear();
+        self.pickups.clear();
+        self.creatures.elder_apparition = 0;
+    }
+    /// Applies a client mod's `clear_particles` if one is waiting. Called at the start of
+    /// each particle tick, and once a frame right after `RenderFrameEvent.Pre`, before the
+    /// frame is drawn. So a clear also lands while the game is paused or ticks are frozen.
+    pub(super) fn apply_mod_particle_clear(&mut self) {
+        if self.mod_clear_particles.take() {
+            self.clear_client_particles();
+        }
+    }
+    /// `ParticleEngine.clearParticles`: every particle and emitter goes before the next
+    /// frame is drawn or the next particle tick runs, whichever comes first. It takes
+    /// `&self`, so a screen or render hook can ask, as with `native_play_local_sound`.
+    /// False on a server.
+    pub(super) fn native_clear_particles(&self) -> bool {
+        if !self.native_window() {
+            return false;
+        }
+        self.mod_clear_particles.set(true);
         true
     }
     /// Draws one vanilla HUD layer between the mods' hooks: `native_gui_layer_pre`
@@ -13261,6 +13381,7 @@ mod tests {
                 },
                 &Attack {
                     attacker: 7,
+                    projectile: None,
                     player_uuid: None,
                     held: Default::default(),
                 },
@@ -13271,6 +13392,30 @@ mod tests {
         assert_eq!(source(K::MobAttack, zombie), ("minecraft:mob_attack", 3, 3));
         assert_eq!(source(K::Thorns, zombie), ("minecraft:thorns", 3, 3));
         assert_eq!(source(K::Arrow, zombie), ("minecraft:arrow", 3, 0));
+        let during = |kind| {
+            let s = mob_source(
+                &Damage {
+                    kind,
+                    attacker: zombie,
+                    from: None,
+                    attacker_species: None,
+                },
+                &Attack {
+                    attacker: 7,
+                    projectile: Some(912),
+                    player_uuid: None,
+                    held: Default::default(),
+                },
+            );
+            (s.damage_type, s.direct)
+        };
+        // The impact's projectile is the direct entity only when the type names it.
+        assert_eq!(during(K::Arrow), ("minecraft:arrow", 912));
+        assert_eq!(during(K::WitherSkull), ("minecraft:wither_skull", 912));
+        assert_eq!(during(K::IndirectMagic), ("minecraft:indirect_magic", 912));
+        // magic() and a blast do not, even while that projectile's attack is in scope.
+        assert_eq!(during(K::Magic), ("minecraft:magic", 0));
+        assert_eq!(during(K::Explosion), ("minecraft:player_explosion", 0));
         let blast = source(K::Explosion, zombie);
         assert_eq!(blast, ("minecraft:player_explosion", 3, 0));
         // A player behind a mob's hit is the one whose attack the level lends; a fall has no
@@ -14187,5 +14332,105 @@ mod local_sound_tests {
                 assert_eq!(game.audio.heard.get("minecraft:ui.button.click"), Some(&1));
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod particle_count_tests {
+    use super::super::pickups::{Collector, Taken};
+    use horizon_client::entities::ExperienceOrb;
+    use horizon_client::particles::{FireworkExplosion, ParticleOptions, ParticleType};
+    use horizon_core::geometry::Vec3;
+    use mod_api::ClientHost;
+    use std::time::Duration;
+
+    fn orb(at: Vec3) -> ExperienceOrb {
+        ExperienceOrb {
+            rotation: [0.0, 0.0],
+            join: Default::default(),
+            no_gravity: false,
+            id: 1,
+            position: at,
+            previous: at,
+            velocity: Vec3::ZERO,
+            value: 1,
+            age: 0,
+            on_ground: false,
+            count: 1,
+            ticks: 0,
+            health: 5,
+        }
+    }
+
+    /// Fills every particle group Horizon keeps apart: three flames, a multi-burst firework
+    /// starter (`NO_RENDER`), an item pickup (`ITEM_PICKUP`) and the elder guardian
+    /// apparition (`ELDER_GUARDIANS`), each live after one particle tick.
+    fn fill(game: &mut super::Game<'_>) {
+        let at = game.particles.camera;
+        for _ in 0..3 {
+            game.particles
+                .add(&ParticleOptions::simple(ParticleType::Flame), at, [0.0; 3]);
+        }
+        let bursts = vec![FireworkExplosion::default(); 4];
+        game.particles.fireworks(at, [0.0; 3], bursts, at);
+        let v = Vec3::new(at[0], at[1], at[2]);
+        game.add_pickup_toward(Taken::Orb(Box::new(orb(v))), Collector::Player, at);
+        game.tick_particles();
+        game.creatures.elder_apparition = 10;
+    }
+
+    /// `particle_count` and `clear_particles` through the client host. The count covers every
+    /// live group. A clear reads 0 at once and empties every group, its queue and emitters
+    /// before the next frame is drawn, with no tick in between (a paused or frozen game),
+    /// or at the next particle tick. A server answers 0 and refuses the clear.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_counts_and_clears_particles() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 0);
+            fill(game);
+            assert_eq!(game.pickups.live.len(), 1, "the pickup is live");
+            let engine = game.particles.group_count();
+            assert!(engine > 3, "the flames and the starter: {engine}");
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count() as usize, engine + 2);
+            // A clear asked between frames: it reads 0 at once, and the next frame clears
+            // every group without a particle tick.
+            game.particles.tracking_emitter(
+                ParticleOptions::simple(ParticleType::Crit),
+                [0.0; 3],
+                1.0,
+                1.0,
+            );
+            assert!(host_clear(game));
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 0);
+            game.extras_frame(Duration::ZERO);
+            assert_eq!(game.particles.group_count(), 0);
+            assert!(game.pickups.live.is_empty());
+            assert_eq!(game.creatures.elder_apparition, 0);
+            // The emitter and the queue went too: a tick brings nothing back.
+            game.tick_particles();
+            assert_eq!(game.client_particle_count(), 0);
+            // A clear asked before a particle tick lands at that tick.
+            fill(game);
+            assert!(host_clear(game));
+            game.tick_particles();
+            assert_eq!(game.particles.group_count(), 0);
+            assert!(game.pickups.live.is_empty());
+            let host: &dyn ClientHost = game;
+            assert_eq!(host.particle_count(), 0);
+            game.options.execution_role = super::ExecutionRole::IntegratedServer;
+            let host: &dyn ClientHost = game;
+            assert!(!host.clear_particles());
+            assert_eq!(host.particle_count(), 0);
+        });
+    }
+
+    fn host_clear(game: &super::Game<'_>) -> bool {
+        let host: &dyn ClientHost = game;
+        host.clear_particles()
     }
 }

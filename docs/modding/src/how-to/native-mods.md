@@ -40,6 +40,32 @@ instance they are installed in.
 Villager handles preserve the full signed integer level (at least 1), including values above the
 five vanilla trade tiers. Higher levels use the master badge and do not gain further vanilla trades.
 
+## Filtering toast notifications
+
+Implement `Hooks::toast_add` to filter a client notification before it enters its
+queue (NeoForge `ToastAddEvent`). The hook receives a read-only `ClientHost` and
+`ToastAddEvent`: `kind` is a `ToastKind`, and `title` and `description` are mutable
+text components. Return `Flow::Cancel` to discard only that candidate, or
+`Flow::Continue` after optionally replacing either component. No slot, animation
+or toast sound is started for a cancelled candidate.
+
+The families are `Advancement`, `Recipe`, `Tutorial`, `System` and `Other` (including
+now-playing music). Match non-exhaustively. For advancement toasts, the title is
+the task/goal/challenge label and the description is the advancement's name, not
+its advancement-screen description. Recipe notifications keep their rotating
+station/result icons; tutorial hints keep their progress bar. Edits change only
+the displayed text, not these identities or lifetimes. Setting the optional
+description to `None` removes that line.
+
+The hook runs for new additions, not in-place `addOrUpdate` changes to an existing
+recipe or system toast. A cancelled tutorial hint is not retried every frame;
+a later, different hint is a new candidate. Title-screen backup/access failures,
+narrator notices, pack download/failure and chunk IO notices all use the same
+admission point. Client-lib prepares title candidates and Game admits them with
+a host before applying them; candidates produced during the initial resource
+loading screen wait until that handoff. The pause screen's persistent song label
+is HUD content, not a queued toast, and is not filtered by this hook.
+
 ## Native mod source revisions
 
 A native mod targets one exact Horizon source revision: `horizon` in its `horizon-mod.toml` `[native]` section.
@@ -137,6 +163,27 @@ a version. New parameters before the out-parameter, with the old ones kept in na
 binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
+
+### State flags on the living handles
+
+`host.living(entity)` and `host.mob(entity)` make the handles of [#7387](../reference/hook-notes.md)'s handle design, and
+the state flags sit where vanilla keeps them: the ones `LivingEntity` owns read and write through `LivingRef`, the ones
+`Mob` owns through `MobRef`. Reads take the shared host, writes the server one; a stale handle or a kind the game keeps
+no such state for reads `None` and writes `false`, as every handle does.
+
+Through `LivingRef`: the glide (`is_gliding`, `gliding_ticks`, `stop_gliding`), the sleep of the player in place or a
+villager (`is_sleeping`, `sleeping_pos`, `start_sleeping`, `stop_sleeping`, `set_sleeping_pos`, `clear_sleeping_pos`),
+the jump of the player in place (`is_jumping`, `set_is_jumping`), climbing (`is_climbing`, the same `onClimbable`
+movement uses) and the baby read (`baby`). The sleep writes are the local player's own: a guest's client tucks itself
+in, so a guest's window refuses, and on a dedicated server every turn is a guest's. The wake stands the sleeper up
+beside the bed, exactly as the game's own waking does, and `set_sleeping_pos` moves nothing - it names the bed, the
+next entity sync tells the players around.
+
+Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`),
+`set_baby` (`Mob.setBaby`: a full day of growing up, saved as `Age` where the kind saves an age), and the persistence
+pair `persistence_required`/`set_persistence_required` plus `requires_custom_persistence`
+(`Mob.isPersistenceRequired` and kin: vanilla gives the setter no way back). A `/summon` and a spawn egg set their
+flags before the entity-join hook runs, so a mod's own write in that hook is what stays.
 
 ### The build's warnings
 

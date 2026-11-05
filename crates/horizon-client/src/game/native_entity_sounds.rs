@@ -145,8 +145,9 @@ impl Game<'_> {
     }
     /// `Level.broadcastEntityEvent(entity, id)`: sends entity event `id` (the
     /// byte `Entity.handleEntityEvent` reads: `2` is a hurt flash, `3` a
-    /// death, `35` a totem...) to the players near the entity. True means
-    /// queued; false for an entity outside the level in place.
+    /// death, `35` a totem...) to the players tracking the entity and to the
+    /// entity itself. True means queued; false for an entity outside the
+    /// level in place.
     pub(super) fn native_entity_broadcast_event(&mut self, entity: EntityRef, id: u8) -> bool {
         let Some(target) = self.native_entity_target(entity) else {
             return false;
@@ -319,7 +320,7 @@ mod tests {
             );
             game.audio.capture = Some(Vec::new());
             assert!(game.native_entity_broadcast_event(cow, 3));
-            assert_eq!(game.lan_entity_events, [(10, 3, [1.5, 64.0, 2.5])]);
+            assert_eq!(game.lan_entity_events, [(10, 3)]);
             let stale = EntityRef::new(NativeWorldEpoch::new(cow.epoch().get() + 1), 10);
             assert!(!game.native_entity_broadcast_event(stale, 3));
             assert!(!game.native_entity_game_event(stale, "minecraft:step"));
