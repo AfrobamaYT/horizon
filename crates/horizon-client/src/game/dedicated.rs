@@ -50,6 +50,17 @@ struct Watchdog {
     running: AtomicBool,
 }
 
+/// Stop monitoring on every exit from the tick loop, including an error or panic.
+struct StopWatchdog(Option<Arc<Watchdog>>);
+
+impl Drop for StopWatchdog {
+    fn drop(&mut self) {
+        if let Some(watchdog) = &self.0 {
+            watchdog.running.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
 impl Watchdog {
     /// `DedicatedServer.initServer`: a thread that stops a server whose tick
     /// runs `max_tick_time` ms past its due time; none when that is 0 or less.
@@ -1207,6 +1218,7 @@ impl Game<'_> {
         let mut crashed: Option<String> = None;
         self.fns.permission = Some(props.function_permission_level.clamp(0, 4) as u8);
         let watchdog = Watchdog::start(props.max_tick_time);
+        let _stop_watchdog = StopWatchdog(watchdog.clone());
         let mut braked = Instant::now();
         let mut overload_warned: Option<Instant> = None;
         // `/stop`, or a stop signal (the shutdown hook's `halt`): either way the players and levels are
@@ -1321,9 +1333,6 @@ impl Game<'_> {
                     &overload_warning(behind, self.clock.tick_duration()),
                 );
             }
-        }
-        if let Some(watchdog) = &watchdog {
-            watchdog.running.store(false, Ordering::Relaxed);
         }
         match crashed {
             Some(message) => std::panic::resume_unwind(Box::new(message)),
