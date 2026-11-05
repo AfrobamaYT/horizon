@@ -872,7 +872,7 @@ impl Exports {
             })
             .ok_or_else(|| LoadError::MissingExport(named.clone()))?;
         instance
-            .get_typed_func(&mut *store, &found)
+            .get_typed_func(&mut *store, found)
             .map_err(|e| LoadError::ChangedExport(named, e.to_string()))
     }
 
