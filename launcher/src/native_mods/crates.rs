@@ -79,6 +79,13 @@ pub(super) fn wanted(
         }
         for (key, dep) in tables.iter().filter_map(|t| t.as_table()).flatten() {
             let get = |name: &str| dep.get(name).and_then(|v| v.as_str());
+            if get("package").unwrap_or(key) == "horizon-client" {
+                return Err(super::api::ProjectError::GameDependency {
+                    mod_id: mod_id.clone(),
+                    key: key.clone(),
+                }
+                .to_string());
+            }
             if let Some(path) = dep.get("path") {
                 let path = path.as_str().ok_or_else(|| {
                     format!(
@@ -113,10 +120,16 @@ pub(super) fn wanted(
                     None => key,
                 };
                 // The game's own packages, at the path `api::stage` rewrites them to.
-                if super::api::PACKAGES
-                    .iter()
-                    .any(|(game, _)| package == *game && path == format!("../../crates/{game}"))
+                if package == super::internals::package(mod_id)
+                    && path == format!("../../{}", super::internals::relative(mod_id))
                 {
+                    continue;
+                }
+                if super::api::PACKAGES.iter().any(|(game, _)| {
+                    *game != super::api::INTERNALS_PACKAGE
+                        && package == *game
+                        && path == format!("../../crates/{game}")
+                }) {
                     continue;
                 }
                 validate_sibling_path(

@@ -1094,5 +1094,14 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+    "E_GAME_DEPENDENCY: {mod}: Cargo.toml depends on the game ({key}). Declare game internals through horizon-internals instead.": "E_GAME_DEPENDENCY: {mod}: Cargo.toml depends on the game ({key}). Declare game internals through horizon-internals instead.",
+    "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have.": "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have.",
+    "E_INTERNAL_CHANGED: {mod} uses {path}, whose signature is now {signature}; run cargo horizon-mod update to see what changed.": "E_INTERNAL_CHANGED: {mod} uses {path}, whose signature is now {signature}; run cargo horizon-mod update to see what changed.",
+    "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.": "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.",
+    "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.": "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.",
+    "E_INTERNAL_PATH: {path} cannot be re-exported as a declared internal; declare its types or free functions instead.": "E_INTERNAL_PATH: {path} cannot be re-exported as a declared internal; declare its types or free functions instead.",
+    "{mod} uses {count} game internals: {paths}": "{mod} uses {count} game internals: {paths}",
+    "{mod} listens raw at {point}": "{mod} listens raw at {point}",
+    "Compiling {mod}'s declared internals": "Compiling {mod}'s declared internals"
 }
