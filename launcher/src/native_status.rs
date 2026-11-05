@@ -206,22 +206,26 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
 /// The mods installed version `version` was built with, or None when it isn't a native build
 /// (or its `native-mods.json` can't be read: the Mods page then offers Build).
 pub fn built(version: &str) -> Option<Vec<Mod>> {
+    Some(parse_built(&record(version)?))
+}
+
+/// Native build `version`'s `native-mods.json`.
+fn record(version: &str) -> Option<serde_json::Value> {
     if !native_mods::is_native(version) {
         return None;
     }
     let path = backend::version_dir(version).join("native-mods.json");
-    let about: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    Some(parse_built(&about))
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+/// How many seconds build `version` took, when its record says.
+pub fn built_secs(version: &str) -> Option<u64> {
+    record(version)?["secs"].as_u64()
 }
 
 /// The profile native build `version` was built with (`native-mods.json`'s `profile`).
 pub fn built_profile(version: &str) -> Option<native_mods::Profile> {
-    if !native_mods::is_native(version) {
-        return None;
-    }
-    let path = backend::version_dir(version).join("native-mods.json");
-    let about: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    native_mods::Profile::parse(about["profile"].as_str()?)
+    native_mods::Profile::parse(record(version)?["profile"].as_str()?)
 }
 
 /// `state`, once the mode counts: a build made in another mode than `chosen` is not this mode's

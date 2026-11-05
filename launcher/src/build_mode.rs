@@ -90,13 +90,13 @@ fn percent(progress: Option<native_mods::Progress>) -> u32 {
 pub(super) fn mode_note(profile: Profile) -> &'static str {
     match profile {
         Profile::Optimized => tr(
-            "Uses the prebuilt game when your mods allow it, so a build takes seconds. Otherwise it builds the whole game, tuned for the fastest play.",
+            "The fastest game. Uses the prebuilt game, so most mods are ready in seconds.",
         ),
         Profile::Balanced => tr(
-            "Builds the whole game on this computer. Quicker to rebuild than Optimized, a little slower to play.",
+            "Builds the game on this computer. Quicker to rebuild after a change; the game runs about 13% slower.",
         ),
         Profile::Developer => tr(
-            "For writing a mod: the quickest rebuild after an edit, and a game about twice as slow.",
+            "For writing mods: a mod edit rebuilds fastest, and the game runs up to twice as slow.",
         ),
     }
 }
@@ -123,17 +123,11 @@ impl Launcher {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .p(px(16.))
-            .when(t.glass, |d| {
-                d.rounded(px(horizon_theme::glass::radius::LARGE))
-                    .bg(ui::white(0.04))
-            })
-            .when(!t.glass, |d| {
-                d.bg(t.well).border_2().border_color(t.outline)
-            });
+            .child(self.mode_head(state, error, mine, pal, cx))
+            .child(self.mode_cards(self.native_step.is_some(), cx));
         card = match building {
-            Some(step) => card.child(self.building_card(step, pal, cx)),
-            None => card.child(self.mode_card(state, error, mine, pal, cx)),
+            Some(step) => card.child(self.panel().child(self.building_card(step, pal, cx))),
+            None => card.child(self.mode_status(error, mine, pal, cx)),
         };
         if let Some(mods) = &self.native_confirm {
             card = card.child(self.native_warning(mods, cx));
@@ -166,8 +160,25 @@ impl Launcher {
         }
     }
 
-    /// The idle card: "Build mode", the three modes, and what the build needs next.
-    fn mode_card(
+    /// A bordered panel, as the build card and its warning sit on the page.
+    fn panel(&self) -> Div {
+        let t = self.theme;
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .p(px(16.))
+            .when(t.glass, |d| {
+                d.rounded(px(horizon_theme::glass::radius::LARGE))
+                    .bg(ui::white(0.04))
+            })
+            .when(!t.glass, |d| {
+                d.bg(t.well).border_2().border_color(t.outline)
+            })
+    }
+
+    /// "Build mode", and what the build needs next with its Build button.
+    fn mode_head(
         &self,
         state: State,
         error: Option<&String>,
@@ -176,42 +187,23 @@ impl Launcher {
         cx: &mut Context<Self>,
     ) -> Div {
         let t = self.theme;
-        let profile = Profile::chosen(&self.settings);
-        let picker = segments(
-            "native-profile",
-            &[
-                (Profile::Optimized, "Optimized"),
-                (Profile::Balanced, "Balanced"),
-                (Profile::Developer, "Developer"),
-            ],
-            profile,
-            &t,
-            {
-                let this = cx.entity().downgrade();
-                move |choice, _, cx| {
-                    let _ = this.update(cx, |this, cx| {
-                        this.settings.native_profile = Some(choice);
-                        this.native_done = None;
-                        this.save_settings();
-                        cx.notify();
-                    });
-                }
-            },
-        );
         let needs = match state {
             State::NoMods | State::UpToDate => None,
             State::NotBuilt => Some(tr("Not built")),
             State::Outdated => Some(tr("Needs rebuild")),
         };
-        let can_build = self.native_confirm.is_none() && (error.is_some() || needs.is_some());
-        let other = self.native_step.is_some() && !mine;
+        let can_build = self.native_confirm.is_none()
+            && !(self.native_step.is_some() && mine)
+            && (error.is_some() || needs.is_some());
         let mut right = div().flex().items_center().gap(px(8.));
-        if let Some(label) = needs {
-            right = right.child(blocks::badge(label, pal.warn, &t));
-        } else if state == State::UpToDate {
-            right = right.child(blocks::badge(tr("Up to date"), pal.success, &t));
+        if self.native_step.is_none() {
+            if let Some(label) = needs {
+                right = right.child(blocks::badge(label, pal.warn, &t));
+            } else if state == State::UpToDate {
+                right = right.child(blocks::badge(tr("Up to date"), pal.success, &t));
+            }
         }
-        if can_build {
+        if can_build && self.native_step.is_none() {
             right = right.child(button("native-build", "Build", Kind::Primary, &t).on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
@@ -219,7 +211,7 @@ impl Launcher {
                 }),
             ));
         }
-        let head = div()
+        div()
             .flex()
             .items_center()
             .justify_between()
@@ -229,14 +221,109 @@ impl Launcher {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(tr("Build mode")),
             )
-            .child(right);
-        let mut card = div()
+            .child(right)
+    }
+
+    /// The three modes as cards: its name, where it builds and its trade-off. Dimmed and
+    /// unclickable while a build runs, since the mode is the one the build started with.
+    fn mode_cards(&self, locked: bool, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        let pal = Pal::of(&t);
+        let chosen = Profile::chosen(&self.settings);
+        div()
             .flex()
-            .flex_col()
             .gap(px(10.))
-            .child(head)
-            .child(div().flex().child(picker))
-            .child(text_in(13., pal.muted).child(mode_note(profile)));
+            .children(Profile::ALL.map(|profile| {
+                let on = profile == chosen;
+                let kind = match profile {
+                    Profile::Optimized => tr("Prebuilt"),
+                    _ => tr("Built here"),
+                };
+                let card = div()
+                    .id(SharedString::from(format!("mode-{}", profile.name())))
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .flex_1()
+                    .min_w(px(160.))
+                    .p(px(12.))
+                    .rounded(px(horizon_theme::glass::radius::LARGE))
+                    .border_1()
+                    .border_color(if on { pal.accent } else { ui::white(0.08) })
+                    .bg(if on {
+                        pal.accent.opacity(0.14)
+                    } else {
+                        ui::white(0.04)
+                    })
+                    .when(locked, |d| d.opacity(0.5))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(8.))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_none()
+                                            .items_center()
+                                            .justify_center()
+                                            .size(px(14.))
+                                            .rounded_full()
+                                            .border_1()
+                                            .border_color(if on { pal.accent } else { pal.muted })
+                                            .when(on, |d| {
+                                                d.child(
+                                                    div()
+                                                        .size(px(6.))
+                                                        .rounded_full()
+                                                        .bg(pal.accent),
+                                                )
+                                            }),
+                                    )
+                                    .child(
+                                        text_in(14., pal.ink)
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child(mode_name(profile)),
+                                    ),
+                            )
+                            .child(blocks::badge(kind, pal.muted, &t)),
+                    )
+                    .child(text_in(12., pal.muted).child(mode_note(profile)));
+                if locked {
+                    return card;
+                }
+                crate::keyboard(card.cursor_pointer(), &t).on_click(cx.listener(
+                    move |this, _: &ClickEvent, _, cx| {
+                        if this.native_step.is_some() {
+                            return;
+                        }
+                        this.settings.native_profile = Some(profile);
+                        this.native_done = None;
+                        this.save_settings();
+                        cx.notify();
+                    },
+                ))
+            }))
+    }
+
+    /// Under the cards, when no build runs: a failed build's error, how the last one ended, and
+    /// another instance's build holding this one.
+    fn mode_status(
+        &self,
+        error: Option<&String>,
+        mine: bool,
+        pal: Pal,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        let other = self.native_step.is_some() && !mine;
+        let mut card = div().flex().flex_col().gap(px(10.));
         if let Some(e) = error {
             card = card.child(
                 div()
@@ -404,6 +491,16 @@ impl Launcher {
         let routes = self.native_routes();
         let route = routes.iter().find(|(id, _)| id == mod_id).map(|(_, r)| r)?;
         let profile = Profile::chosen(&self.settings);
+        let last = self
+            .version_of(instance)
+            .and_then(|v| native_status::built_secs(v))
+            .map(|secs| {
+                trf(
+                    " The last build took {time}.",
+                    &[("time", &native_mods::duration_label(secs))],
+                )
+            })
+            .unwrap_or_default();
         let (glyph, color, headline, reason) = if building {
             (
                 "refresh",
@@ -433,11 +530,17 @@ impl Launcher {
                     tr("Can use the prebuilt game"),
                     tr("Can use the prebuilt game, in seconds, if one exists for your Horizon and it serves every mod you turned on. Otherwise the whole game builds.").to_string(),
                 ),
-                Route::Game { reason } => (
+                Route::Game { reason } if profile == Profile::Optimized => (
                     "hammer",
                     pal.warn,
-                    tr("Builds the whole game"),
-                    format!("{}: {reason}", mode_name(profile)),
+                    tr("Needs a full game build"),
+                    format!("{reason}{last}"),
+                ),
+                Route::Game { reason } => (
+                    "clock",
+                    pal.muted,
+                    tr("Rebuilds on Play"),
+                    format!("{reason}{last}"),
                 ),
             }
         };

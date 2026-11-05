@@ -1908,6 +1908,7 @@ fn pipeline(
             "profile": profile.name(),
             "route": route,
             "target": target.name(),
+            "secs": started.elapsed().as_secs(),
             "mods": mods.iter().map(|m| serde_json::json!({
                 "id": m.manifest.id,
                 "version": m.manifest.version,
