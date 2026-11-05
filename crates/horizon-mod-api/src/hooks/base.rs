@@ -4656,10 +4656,6 @@ pub trait Helpers {
     fn item();
     #[helper(side = "client")]
     fn screen_title();
-    #[helper(side = "both")]
-    fn block();
-    #[helper(side = "both")]
-    fn block_property();
     #[helper(side = "client")]
     fn cursor();
     #[helper(side = "client")]
