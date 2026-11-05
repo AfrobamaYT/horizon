@@ -2449,9 +2449,6 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player; the player and those around see it. Horizon keeps no
   such count for mobs (None, false). `set_arrow_removal_ticks` and `set_stinger_removal_ticks` set the ticks until the
   next one falls out (`removeArrowTime`, `removeStingerTime`; at 0 or less the timer restarts at `20 * (30 - count)`).
-- `living.left_handed(host)` / `set_left_handed` (`Mob.setLeftHanded`, the mob flags in its entity data) and
-  `can_pick_up_loot` / `set_can_pick_up_loot` (`Mob.setCanPickUpLoot`; an allay and a sulfur cube decide for
-  themselves) work on mobs; players and the other kinds read None and write false.
 - `living.item_use_remaining(host)` / `set_item_use_remaining(host, ticks)` (`useItemRemaining`) read and move the end of
   the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
@@ -2671,6 +2668,37 @@ These methods reuse built-in goal kinds; they do not define arbitrary goal callb
 `Mob.registerGoals` moment. [Custom mob goals at construction](https://github.com/arismoko/horizon/issues/1077)
 tracks a typed goal registrar and callbacks on `MobRef` and Parts, shared by native and wasm mods. NeoForge has
 no bus event at this moment. The upstream raw-`Mob` `register_goals` interface is not part of this fork's API.
+
+### Mob AI controls
+
+`crates/horizon-client/src/game/native_mob_refs.rs` and `native_mob_navigation.rs` (#938's mob AI controls): a `MobRef`
+steers a mob through the engine's own controls, each a momentary wish the mob's own AI may replace next tick, as
+`move_to`'s path is. Reads take the host by `&dyn Host` and writes by `&mut dyn ServerHost`.
+
+- `mob.look_at(host, [x, y, z])` is `LookControl.setLookAt`: the mob's look control rotates its head toward the position
+  over the next ticks. Non-finite coordinates are refused. `mob.jump(host)` is `JumpControl.jump`: the mob jumps on its
+  next own tick by its own jump path — no velocity is written. No species refuses either: vanilla's brains themselves
+  write through these controls (a brain species' `LookAtTargetSink` calls the same `lookAt`), so a mod's wish and the
+  mob's own are one flag, not a brain memory a write could miss (which is why `set_target` refuses brain species). A
+  creaking being looked at, an angry bee and an axolotl playing dead hold their look control, and a held creaking its
+  jump control, as in vanilla: the wish waits until the control runs again.
+- `mob.navigation_speed(host)` / `set_navigation_speed(host, speed)` read and set `PathNavigation.speedModifier`, the
+  multiplier the current path is followed at (1.0 is the mob's normal speed; 0 until a path sets one) — not the mob's
+  movement-speed attribute. `move_to`'s speed argument sets the same modifier, and the mob's own next `moveTo` (a goal's
+  or a brain species') sets its own again, as in vanilla. Non-finite speeds are refused.
+- `mob.restrict_to(host, [x, y, z], radius)` is `Mob.restrictTo(pos, radius)`: the home area the mob keeps to — its own
+  stroll and wander goals pick their positions inside it, as a lead's and a guardian's home do. It is saved with the mob
+  (`home_pos`, `home_radius`). `restrict_center(host)` (`getRestrictCenter`; the last live one after a clear, `[0, 0, 0]`
+  for a mob that never had one), `restrict_radius(host)` (`getRestrictRadius`; `-1` without a restriction),
+  `has_restriction(host)` (`hasRestriction`), `clear_restriction(host)` (`clearRestriction`; the center stays) and
+  `is_within_restriction(host, pos)` (`isWithinRestriction`; true everywhere without a restriction) read and change it.
+  Radius `-1` in `restrict_to` clears the restriction while keeping the position as the center.
+- `mob.left_handed(host)` / `set_left_handed` (`Mob.setLeftHanded`, the mob flags in its entity data, saved as
+  `LeftHanded`) and `can_pick_up_loot` / `set_can_pick_up_loot` (`Mob.setCanPickUpLoot`, saved as `CanPickUpLoot`;
+  an allay and a sulfur cube decide for themselves) moved here from the flat `living_*` helpers of #938's first round:
+  vanilla keeps both on `Mob`, so `MobRef` is their home. The flat helpers are gone, with no aliases.
+- All of these answer `None`/`false` for a stale handle, a client, the dragon (no `Mob` state), and a mob whose copy is
+  held out of the level.
 
 ### Mobs drawn by a mod
 
