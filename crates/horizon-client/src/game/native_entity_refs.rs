@@ -624,9 +624,28 @@ pub(super) mod tests {
         root: std::path::PathBuf,
         test: impl FnOnce(&mut super::Game<'_>),
     ) {
-        use super::super::{
-            Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
-        };
+        with_game_role(
+            root,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
+            test,
+        );
+    }
+
+    pub(in crate::game) fn with_client_game(test: impl FnOnce(&mut super::Game<'_>)) {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        with_game_role(
+            root,
+            super::super::execution_role::ExecutionRole::Client,
+            test,
+        );
+    }
+
+    fn with_game_role(
+        root: std::path::PathBuf,
+        role: super::super::execution_role::ExecutionRole,
+        test: impl FnOnce(&mut super::Game<'_>),
+    ) {
+        use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use mod_api::NativeAuthority;
 
         let settings = Settings::default();
@@ -637,14 +656,14 @@ pub(super) mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            ExecutionRole::IntegratedServer,
+            role,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
         .unwrap();
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
-        options.execution_role = ExecutionRole::IntegratedServer;
+        options.execution_role = role;
         let mut game = Game::new(
             &loaded.resources,
             loaded.pack,

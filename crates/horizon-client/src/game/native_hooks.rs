@@ -10093,25 +10093,23 @@ impl Game<'_> {
         u32::try_from(self.client_particle_count()).unwrap_or(u32::MAX)
     }
     /// `ParticleEngine.countParticles`: every live group. Horizon keeps vanilla's groups
-    /// apart: the ordinary particles and firework starters in the engine, ITEM_PICKUP in
-    /// `pickups`, and ELDER_GUARDIANS as the apparition's ticks left (one particle while
-    /// it shows).
+    /// apart: ordinary particles, firework starters and elder guardians in the engine,
+    /// and ITEM_PICKUP in `pickups`.
     pub(super) fn client_particle_count(&self) -> usize {
-        self.particles.group_count()
-            + self.pickups.live.len()
-            + usize::from(self.creatures.elder_apparition > 0)
+        self.particles.group_count() + self.pickups.live.len()
     }
     /// `ParticleEngine.clearParticles` over every group Horizon keeps apart: the engine's
     /// particles, starters, queue and emitters, the item pickups and the elder guardian
     /// apparition. Leaving a level and switching levels clear through it too.
     pub(super) fn clear_client_particles(&mut self) {
+        self.mod_clear_particles.set(false);
         self.particles.clear();
         self.pickups.clear();
-        self.creatures.elder_apparition = 0;
     }
     /// Applies a client mod's `clear_particles` if one is waiting. Called at the start of
-    /// each particle tick, and once a frame right after `RenderFrameEvent.Pre`, before the
-    /// frame is drawn. So a clear also lands while the game is paused or ticks are frozen.
+    /// each particle tick, after `RenderFrameEvent.Pre`, and at particle extraction, after
+    /// HUD, screen and entity callbacks. Extraction also discards its geometry if a model
+    /// callback asks to clear while it is being built, even while paused or tick-frozen.
     pub(super) fn apply_mod_particle_clear(&mut self) {
         if self.mod_clear_particles.take() {
             self.clear_client_particles();
@@ -14328,7 +14326,7 @@ mod local_sound_tests {
 }
 
 #[cfg(test)]
-mod particle_count_tests {
+pub(super) mod particle_count_tests {
     use super::super::pickups::{Collector, Taken};
     use horizon_client::entities::ExperienceOrb;
     use horizon_client::particles::{FireworkExplosion, ParticleOptions, ParticleType};
@@ -14357,7 +14355,7 @@ mod particle_count_tests {
     /// Fills every particle group Horizon keeps apart: three flames, a multi-burst firework
     /// starter (`NO_RENDER`), an item pickup (`ITEM_PICKUP`) and the elder guardian
     /// apparition (`ELDER_GUARDIANS`), each live after one particle tick.
-    fn fill(game: &mut super::Game<'_>) {
+    pub(in crate::game) fn fill(game: &mut super::Game<'_>) {
         let at = game.particles.camera;
         for _ in 0..3 {
             game.particles
@@ -14367,8 +14365,8 @@ mod particle_count_tests {
         game.particles.fireworks(at, [0.0; 3], bursts, at);
         let v = Vec3::new(at[0], at[1], at[2]);
         game.add_pickup_toward(Taken::Orb(Box::new(orb(v))), Collector::Player, at);
+        game.particles.elder_guardian();
         game.tick_particles();
-        game.creatures.elder_apparition = 10;
     }
 
     /// `particle_count` and `clear_particles` through the client host. The count covers every
@@ -14385,9 +14383,9 @@ mod particle_count_tests {
             fill(game);
             assert_eq!(game.pickups.live.len(), 1, "the pickup is live");
             let engine = game.particles.group_count();
-            assert!(engine > 3, "the flames and the starter: {engine}");
+            assert_eq!(engine, 5, "three flames, one starter and one guardian");
             let host: &dyn ClientHost = game;
-            assert_eq!(host.particle_count() as usize, engine + 2);
+            assert_eq!(host.particle_count() as usize, engine + 1);
             // A clear asked between frames: it reads 0 at once, and the next frame clears
             // every group without a particle tick.
             game.particles.tracking_emitter(
@@ -14402,7 +14400,7 @@ mod particle_count_tests {
             game.extras_frame(Duration::ZERO);
             assert_eq!(game.particles.group_count(), 0);
             assert!(game.pickups.live.is_empty());
-            assert_eq!(game.creatures.elder_apparition, 0);
+            assert!(game.particles.elder_guardians().is_empty());
             // The emitter and the queue went too: a tick brings nothing back.
             game.tick_particles();
             assert_eq!(game.client_particle_count(), 0);
@@ -14418,6 +14416,122 @@ mod particle_count_tests {
             let host: &dyn ClientHost = game;
             assert!(!host.clear_particles());
             assert_eq!(host.particle_count(), 0);
+        });
+    }
+
+    struct ClearInGui;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ClearInGui {
+        fn render_gui_pre(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut mod_api::RenderGuiPreEvent,
+        ) -> mod_api::Flow {
+            assert!(host.clear_particles());
+            mod_api::Flow::Continue
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn late_gui_clear_prevents_same_frame_particle_geometry_without_a_tick() {
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("clear_gui", Box::new(ClearInGui))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                fill(game);
+                game.extras_frame(Duration::ZERO);
+                let camera = glam::DVec3::from_array(game.particles.camera);
+                let mut before = Vec::new();
+                game.client_particle_geometry(camera, 0.0, 70.0, &mut before);
+                assert!(
+                    !before.is_empty(),
+                    "live guardian, pickup and ordinary particles draw"
+                );
+                game.native_render_gui_pre(&mut false);
+                assert_eq!(ClientHost::particle_count(game), 0);
+                let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, Vec::new());
+                game.client_particle_geometry(camera, 0.0, 70.0, &mut after);
+                assert!(
+                    after.is_empty(),
+                    "no stale pickup, guardian or ordinary quads"
+                );
+                assert_eq!(game.client_particle_count(), 0);
+                game.tick_particles();
+                assert_eq!(game.client_particle_count(), 0);
+            });
+        });
+    }
+
+    struct ClearInModel(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ClearInModel {
+        fn item_model_property(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut mod_api::ItemModelPropertyEvent<'_>,
+        ) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            assert!(host.clear_particles());
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_model_callback_clear_discards_particle_geometry_already_extracted() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "clear_model",
+            Box::new(ClearInModel(calls.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                fill(game);
+                let camera = glam::DVec3::from_array(game.particles.camera);
+                let mut out = Vec::new();
+                game.client_particle_geometry(camera, 0.0, 70.0, &mut out);
+                let previous = out.len();
+                assert!(previous > 0);
+                let positions: Vec<_> = out.iter().map(|v| v.pos).collect();
+                let motion = game.entity_motion.borrow().clone();
+                // An actual picked-up item resolves a conditional model while the
+                // preceding ordinary-particle pass has already produced geometry.
+                std::sync::Arc::get_mut(&mut game.pack.item_renderer)
+                    .unwrap()
+                    .models
+                    .definitions
+                    .insert(
+                        "minecraft:stick".into(),
+                        horizon_assets::item_model::ClientItem::from_json(
+                            r#"{"model":{
+                        "type":"minecraft:condition", "property":"test:clear",
+                        "on_true":{"type":"minecraft:model","model":"minecraft:item/stick"},
+                        "on_false":{"type":"minecraft:model","model":"minecraft:item/stick"}
+                    }}"#,
+                        )
+                        .unwrap(),
+                    );
+                let at = game.particles.camera;
+                game.spawn_item(
+                    mod_api::ItemStack::new("minecraft:stick", 1),
+                    at,
+                    [0.0; 3],
+                    0,
+                );
+                let item = game.dropped.pop().unwrap();
+                game.add_pickup_toward(Taken::Item(Box::new(item)), Collector::Player, at);
+                game.tick_particles();
+                game.client_particle_geometry(camera, 0.0, 70.0, &mut out);
+                assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+                assert_eq!(out.iter().map(|v| v.pos).collect::<Vec<_>>(), positions);
+                assert_eq!(&game.entity_motion.borrow()[..motion.len()], &motion);
+                assert_eq!(game.client_particle_count(), 0);
+                game.tick_particles();
+                assert_eq!(game.client_particle_count(), 0);
+            });
         });
     }
 

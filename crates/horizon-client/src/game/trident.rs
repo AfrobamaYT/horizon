@@ -965,28 +965,6 @@ impl Game<'_> {
     }
     /// ThrownTridentRenderer.
     pub(super) fn trident_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
-        let Some(model) = &self.trident_model else {
-            return;
-        };
-        let Some(uv) = self
-            .gui
-            .atlas
-            .sprites
-            .get("entity/trident/trident")
-            .map(|r| [r.u0, r.v0, r.u1, r.v1])
-        else {
-            return;
-        };
-        // The texture's OptiFine emissive overlay, drawn again full bright.
-        let glow = self
-            .res
-            .mob_data()
-            .emissive
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .overlay("entity/trident/trident")
-            .and_then(|e| self.gui.atlas.sprites.get(e))
-            .map(|r| [r.u0, r.v0, r.u1, r.v1]);
         // AbstractArrow.shouldRenderAtSqrDistance: ten times the default.
         let range = 10.0
             * super::entity_culling::default_range(
@@ -1017,13 +995,53 @@ impl Game<'_> {
                 ];
                 (t, at)
             });
+        self.draw_tridents(camera, live, out);
+    }
+
+    pub(super) fn pickup_trident_geometry(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         // ItemPickupParticle: a picked-up trident flying to its collector,
         // drawn with the render state extracted at partial tick 1.
         let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
             super::pickups::Taken::Trident(t) => Some((&**t, super::pickups::position(p, alpha))),
             _ => None,
         });
-        for (t, at) in live.chain(taken) {
+        self.draw_tridents(camera, taken, out);
+    }
+
+    fn draw_tridents<'a>(
+        &self,
+        camera: glam::DVec3,
+        tridents: impl Iterator<Item = (&'a ThrownTrident, [f64; 3])>,
+        out: &mut Vec<Vertex>,
+    ) {
+        let Some(model) = &self.trident_model else {
+            return;
+        };
+        let Some(uv) = self
+            .gui
+            .atlas
+            .sprites
+            .get("entity/trident/trident")
+            .map(|r| [r.u0, r.v0, r.u1, r.v1])
+        else {
+            return;
+        };
+        // The texture's OptiFine emissive overlay, drawn again full bright.
+        let glow = self
+            .res
+            .mob_data()
+            .emissive
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .overlay("entity/trident/trident")
+            .and_then(|e| self.gui.atlas.sprites.get(e))
+            .map(|r| [r.u0, r.v0, r.u1, r.v1]);
+        for (t, at) in tridents {
             let p = glam::DVec3::from_array(at) - camera;
             let base = glam::Mat4::from_translation(p.as_vec3())
                 * glam::Mat4::from_rotation_y((t.yaw - 90.0).to_radians())
