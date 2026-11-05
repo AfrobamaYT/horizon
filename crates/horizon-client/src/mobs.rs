@@ -1604,10 +1604,11 @@ pub enum BreedExperience {
 }
 
 /// Makes the events pushed since `start` (the effects of a break a mod may stop)
-/// conditional on the game having broken one of `mob`'s blocks. Without a mod they
-/// stay plain events: nothing is allocated.
-pub fn after_break(events: &mut Vec<MobEvent>, mob: u32, start: usize) {
-    if crate::native_client_hooks::has_mods() {
+/// conditional on the game having broken one of `mob`'s blocks. Unless a listener
+/// can cancel the break (`MobWorld::asks_living_destroy_block`, passed as `asks`)
+/// they stay plain events: nothing is allocated.
+pub fn after_break(events: &mut Vec<MobEvent>, asks: bool, mob: u32, start: usize) {
+    if asks {
         let effects = events.split_off(start);
         events.push(MobEvent::IfBroke {
             mob,
