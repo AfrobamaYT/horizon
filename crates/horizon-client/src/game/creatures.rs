@@ -7457,7 +7457,7 @@ impl Game<'_> {
             && self.settings.horizon.entity_culling_precheck != 0
             && self.mobs.len() >= self.settings.horizon.entity_culling_precheck as usize
             && !self.pack_shadow_casters.0
-            && horizon_client::mod_api::mods().is_empty()
+            && mod_api::__private::mods().is_empty()
         {
             self.mob_geometry_inner::<true>(camera, alpha, out);
         } else {
@@ -7540,16 +7540,7 @@ impl Game<'_> {
                 && outline.is_none()
                 && !is_player
                 && mob.kind.id.starts_with("minecraft:")
-                && [
-                    &mob.extra.head,
-                    &mob.extra.chest,
-                    &mob.extra.legs,
-                    &mob.extra.feet,
-                    &mob.extra.main_hand,
-                    &mob.extra.off_hand,
-                ]
-                .iter()
-                .all(|item| item.is_none())
+                && (0..6).all(|slot| mob.extra.slot_stack(slot).is_none())
                 && beam.is_none()
             {
                 self.entity_cull_decision(mob, alpha)

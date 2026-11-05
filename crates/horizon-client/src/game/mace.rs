@@ -199,7 +199,7 @@ impl Game<'_> {
     /// `LivingEntity.hurtServer` of the mob at `index` by the player's hit:
     /// the weapon's `armor_effectiveness` enchantments (Breach) thin its armor.
     pub(super) fn hurt_by_player(&mut self, index: usize, amount: f32, source: Damage) -> bool {
-        let attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
+        let attack = self.attack_of_who(Some(horizon_client::mobs::Who::Player));
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();

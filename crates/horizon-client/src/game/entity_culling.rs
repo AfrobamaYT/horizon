@@ -426,7 +426,7 @@ pub(super) fn cull_box(mob: &horizon_client::mobs::Mob, alpha: f64) -> (glam::DV
     let grow = CullGrow::of(
         mob.species(),
         height,
-        mob.extra.head.as_deref() == Some("minecraft:dragon_head"),
+        mob.extra.head_id() == Some("minecraft:dragon_head"),
     );
     let pos = glam::DVec3::new(
         mob.previous.x + (mob.position.x - mob.previous.x) * alpha,

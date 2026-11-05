@@ -1556,15 +1556,6 @@ impl Game<'_> {
             self.save.save_entities_later(chunks)
         }
     }
-    /// The ids of every entity in the level now.
-    fn live_entity_ids(&self) -> HashSet<u32> {
-        use super::entity::{Entity as _, entity_lists_of, for_each_entity};
-        let mut alive: HashSet<u32> = self.entity_ids_off_walk().collect();
-        for_each_entity!(entity_lists_of!(self), entity => {
-            alive.insert(entity.id());
-        });
-        alive
-    }
     /// `ServerLevel.EntityCallbacks.onDestroyed` → `Scoreboard.entityRemoved`
     /// for every kind of entity, not only the mobs `score_entity_removed`
     /// covers as they die: an item picked up or killed, an expired cloud, a

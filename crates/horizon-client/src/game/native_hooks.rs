@@ -9126,7 +9126,11 @@ impl Game<'_> {
     /// the attack the enclosing [`Self::with_attack`] lends.
     pub(super) fn attack_of_who(&self, attacker: Option<Who>) -> Attack {
         match attacker {
-            Some(Who::Player) => self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id)),
+            Some(Who::Player) => {
+                let mut attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
+                attack.player_uuid = self.owner_damage_uuid();
+                attack
+            }
             Some(Who::Mob(id)) => self.attack_of(id as i32),
             None => self.current_attack(),
         }

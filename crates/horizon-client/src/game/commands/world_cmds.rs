@@ -1894,7 +1894,7 @@ fn command_operation(ctx: &Context) -> horizon_world::attributes::Operation {
 
 #[cfg(test)]
 mod allay_owner_damage_tests {
-    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use crate::game::native_entity_refs::tests::with_game_at;
     use horizon_client::mobs::{Damage, Mob};
     use horizon_core::geometry::Vec3;
 
@@ -1907,77 +1907,53 @@ mod allay_owner_damage_tests {
             eprintln!("Prepared resources unavailable; Allay Game damage coverage did not run");
             return;
         }
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        let actual = [101, 102, 103, 104];
-        let other = [10, 20, 30, 40];
-        game.level.player_uuid = Some(actual);
-        game.lan_acting_uuid = Some(horizon_client::lan::playerdata::ints_uuid(actual));
-        assert_eq!(game.owner_damage_uuid(), Some(actual));
-        game.lan_acting_uuid = Some(horizon_client::lan::playerdata::ints_uuid(other));
-        assert_eq!(
-            game.owner_damage_uuid(),
-            None,
-            "a guest is not the owner route"
-        );
-        game.lan_acting_uuid = None;
-        game.level.player_uuid = None;
-        assert_eq!(
-            game.owner_damage_uuid(),
-            None,
-            "no invented UUID for an unknown source"
-        );
-        game.level.player_uuid = Some(actual);
-        game.lan_acting_uuid = Some(horizon_client::lan::playerdata::ints_uuid(actual));
-        let kind = game.res.mob_types().get("minecraft:allay").unwrap().clone();
-        let before = game.world.game_time;
-        for melee in [true, false] {
-            for liked in [Some(actual), None, Some(other)] {
-                game.mobs.clear();
-                let mut mob = Mob::new(1, kind.clone(), Vec3::new(22.5, 101.0, 22.5), 0.0);
-                mob.no_ai = true;
-                mob.extra.tame = liked.is_some();
-                mob.extra.owner = liked;
-                assert_eq!((mob.health, mob.hurt_time), (20.0, 0));
-                game.mobs.push(mob);
-                let source = Damage::player([20.5, 102.0, 20.5]);
-                let accepted = if melee {
-                    game.hurt_by_player(0, 2.0, source)
-                } else {
-                    game.command_damage_mob(1, 2.0, source)
-                };
-                let expected = liked != Some(actual);
-                assert_eq!(accepted, expected, "melee={melee}, liked={liked:?}");
-                assert_eq!(game.mobs[0].health, if expected { 18.0 } else { 20.0 });
-                assert_eq!(game.mobs[0].extra.owner, liked);
-                assert_eq!(game.world.game_time, before);
+        with_game_at(root, |game| {
+            game.build_registries();
+            let actual = [101, 102, 103, 104];
+            let other = [10, 20, 30, 40];
+            game.level.player_uuid = Some(actual);
+            game.lan_acting_uuid = Some(horizon_client::lan::playerdata::ints_uuid(actual));
+            assert_eq!(game.owner_damage_uuid(), Some(actual));
+            game.lan_acting_uuid = Some(horizon_client::lan::playerdata::ints_uuid(other));
+            assert_eq!(
+                game.owner_damage_uuid(),
+                None,
+                "a guest is not the owner route"
+            );
+            game.lan_acting_uuid = None;
+            game.level.player_uuid = None;
+            assert_eq!(
+                game.owner_damage_uuid(),
+                None,
+                "no invented UUID for an unknown source"
+            );
+            game.level.player_uuid = Some(actual);
+            game.lan_acting_uuid = Some(horizon_client::lan::playerdata::ints_uuid(actual));
+            let kind = game.res.mob_types().get("minecraft:allay").unwrap().clone();
+            let before = game.world.game_time;
+            for melee in [true, false] {
+                for liked in [Some(actual), None, Some(other)] {
+                    game.mobs.clear();
+                    let mut mob = Mob::new(1, kind.clone(), Vec3::new(22.5, 101.0, 22.5), 0.0);
+                    mob.no_ai = true;
+                    mob.extra.tame = liked.is_some();
+                    mob.extra.owner = liked;
+                    assert_eq!((mob.health, mob.hurt_time), (20.0, 0));
+                    game.mobs.push(mob);
+                    let source = Damage::player([20.5, 102.0, 20.5]);
+                    let accepted = if melee {
+                        game.hurt_by_player(0, 2.0, source)
+                    } else {
+                        game.command_damage_mob(1, 2.0, source)
+                    };
+                    let expected = liked != Some(actual);
+                    assert_eq!(accepted, expected, "melee={melee}, liked={liked:?}");
+                    assert_eq!(game.mobs[0].health, if expected { 18.0 } else { 20.0 });
+                    assert_eq!(game.mobs[0].extra.owner, liked);
+                    assert_eq!(game.world.game_time, before);
+                }
             }
-        }
+        });
     }
 }
 
