@@ -9238,8 +9238,8 @@ fn hurt_server_args<'a>(hurting: Hurting<'a>, attack: &Attack) -> (i32, &'a str,
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
-/// is a mob, or the player whose attack the level lends, and is the direct one too
-/// when it deals the damage itself.
+/// is a mob, or the player whose attack the level lends. The direct entity is
+/// the attacker in melee, or the projectile delivering the hit.
 fn mob_source(damage: &Damage, attack: &Attack) -> HurtSource<'static> {
     let causing = match damage.attacker {
         Some(Who::Mob(id)) => id as i32,

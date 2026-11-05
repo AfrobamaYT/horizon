@@ -474,8 +474,8 @@ The causing and direct entities are 0 for now in these cases:
 - A player's causing entity, except for a mob that shot the projectile, the mob `/damage` names, an evoker that summoned
   the fangs, a slime or magma cube that touched the player, and a mob that exploded (a sulfur cube's is guessed until
   its blast names its source)
-- A mob's causing and direct entities when a player is behind the hit outside the player's own attack (arrows,
-  tridents, blasts, TNT a player lit)
+- A mob's causing and direct entities when a player is behind a hit outside a scoped attack (for example TNT
+  a player lit); a projectile's hit does run inside its owner's attack
 - A mob's direct entity when it isn't the causing one outside a projectile hit (for example a TNT blast)
 - A falling block on a mob, whose causing and direct entity is the block in vanilla
 - The dragon's direct entity for a blast
