@@ -70,6 +70,7 @@ mod tests {
         let p = Vec3::new(x, y, z);
         ItemEntity {
             fall_distance: 0.0,
+            rotation: [0.0, 0.0],
             join: Default::default(),
             health: 5,
             fire_ticks: 0,

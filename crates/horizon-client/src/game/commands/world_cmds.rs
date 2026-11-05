@@ -222,10 +222,15 @@ impl Game<'_> {
                     Target::Mob(i) => Some(Who::Mob(i)),
                     _ => None,
                 });
+                let attacker_species = match attacker {
+                    Some(Who::Mob(i)) => self.mobs.iter().find(|m| m.id == i).map(|m| m.species()),
+                    _ => None,
+                };
                 let damage = Damage {
                     kind: Self::damage_kind(&ty),
                     attacker,
                     from,
+                    attacker_species,
                 };
                 // DamageSource.getEntity is the causing player, even when
                 // another client issued the command or supplied the direct entity.
@@ -895,8 +900,24 @@ impl Game<'_> {
         let Some(Arg::Resource(attribute)) = ctx.get("attribute").cloned() else {
             return Ok(0);
         };
+        // An unbounded selector reaches every loaded level, so the target may
+        // be in another one than the command's (EntitySelector.findEntities,
+        // AttributeCommand acting on the entity itself).
+        self.in_target_level(target, |g| {
+            g.attribute_in_level(id, ctx, target, &attribute)
+        })
+        .unwrap_or(Ok(0))
+    }
+    /// `/attribute` on a target, with the target's own level in place.
+    fn attribute_in_level(
+        &mut self,
+        id: &str,
+        ctx: &Context,
+        target: Target,
+        attribute: &str,
+    ) -> R<i32> {
         let name = self.target_name(target);
-        let description = Self::attribute_description(&attribute);
+        let description = Self::attribute_description(attribute);
         let short = attribute.trim_start_matches("minecraft:").to_owned();
         let no_attribute = |name: &Text, d: &Text| {
             text_error(
@@ -921,7 +942,7 @@ impl Game<'_> {
                 let Some(player) = self.player.as_mut() else {
                     return Ok(0);
                 };
-                let Some(key) = player.attributes.key(&attribute) else {
+                let Some(key) = player.attributes.key(attribute) else {
                     return Err(no_attribute(&name, &description));
                 };
                 let unavailable = |_| no_attribute(&name, &description);
@@ -1081,7 +1102,7 @@ impl Game<'_> {
                 self.generic_attribute(
                     target,
                     id,
-                    &attribute,
+                    attribute,
                     (&name, &description),
                     (value_arg, scale, &modifier_id, &op),
                 )
@@ -1682,7 +1703,7 @@ impl Game<'_> {
                 }
             }
             if !skip {
-                self.teleport_to(t, to, None);
+                self.teleport_to(t, to, None, false);
             }
             let closest = points
                 .iter()

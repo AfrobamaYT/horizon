@@ -9,12 +9,12 @@ use mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef};
 
 impl Game<'_> {
     fn native_block_entity_target(&self, entity: BlockEntityRef) -> Option<(&World, &BlockEntity)> {
-        let world = self.native_level_world(entity.fields().level)?;
+        let world = self.native_level_read_world(entity.fields().level)?;
         Some((world, loaded_block_entity(world, entity.fields().position)?))
     }
 
-    /// Find a block entity in a loaded chunk of an open server level. A block
-    /// entity temporarily taken out for its tick cannot be read in that tick.
+    /// Find a block entity in a loaded chunk of an open level, or on a client in
+    /// the level it shows. An entity taken out for its tick cannot be read in that tick.
     pub(super) fn native_block_entity_ref(
         &self,
         level: LevelRef,
@@ -90,25 +90,72 @@ impl Game<'_> {
         save_without_metadata(world, (x, y, z), block_entity, block)
     }
 
-    /// The block entity's key and block name when a write may change it: a loaded block
-    /// entity of the level in place.
+    /// A loaded block entity of the server level in place, when a write may change it.
+    fn native_block_entity_write_key(&self, entity: BlockEntityRef) -> Option<(i32, i32, i32)> {
+        if !self.native_level_in_place(entity.fields().level) {
+            return None;
+        }
+        let pos = entity.fields().position;
+        loaded_block_entity(&self.world, pos)?;
+        Some((pos[0], pos[1], pos[2]))
+    }
+
+    /// The block entity's key and block name when a write may change it.
     fn native_block_entity_write_target(
         &self,
         entity: BlockEntityRef,
     ) -> Option<((i32, i32, i32), String)> {
-        if !self.native_level_in_place(entity.fields().level) {
-            return None;
-        }
-        let (world, _) = self.native_block_entity_target(entity)?;
-        let [x, y, z] = entity.fields().position;
+        let key = self.native_block_entity_write_key(entity)?;
         let block = self
             .pack
             .assets
             .registry
-            .state(world.block(x, y, z))?
+            .state(self.world.block(key.0, key.1, key.2))?
             .name
             .clone();
-        Some(((x, y, z), block))
+        Some((key, block))
+    }
+
+    /// A snapshot of a mod block entity's menu data slots, on the server or in the
+    /// client's copy. None for a stale/missing/vanilla entity. Item storage is accessed
+    /// through Parts, not included in this snapshot.
+    pub(super) fn native_block_entity_data_slots(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<Vec<i32>> {
+        let (_, BlockEntity::Mod(block_entity)) = self.native_block_entity_target(entity)? else {
+            return None;
+        };
+        Some(block_entity.data.clone())
+    }
+
+    /// Set a mod block entity's menu data slot in place, joining the current transaction
+    /// and its setChanged notice. False for a stale/client/parked/vanilla entity, an
+    /// invalid slot or no change. Does not resize the mod's declared data slots.
+    pub(super) fn native_block_entity_set_data_slot(
+        &mut self,
+        entity: BlockEntityRef,
+        slot: u32,
+        value: i32,
+    ) -> bool {
+        let Some(key) = self.native_block_entity_write_key(entity) else {
+            return false;
+        };
+        self.journal_block_entity(key);
+        let Some(BlockEntity::Mod(block_entity)) = self.world.block_entities.get_mut(&key) else {
+            return false;
+        };
+        let index = slot as usize;
+        if block_entity
+            .data
+            .get(index)
+            .is_none_or(|current| *current == value)
+        {
+            return false;
+        }
+        block_entity.data[index] = value;
+        self.after_commit(After::Changed(key));
+        true
     }
 
     /// Merges `data` into the block entity's saved data and loads it, as `/data merge block`

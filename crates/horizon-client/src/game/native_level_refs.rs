@@ -55,7 +55,7 @@ impl Game<'_> {
     /// The world a handle names for a read that works on both sides: the
     /// server's level, or on a client the one it shows (`Minecraft.level`, its
     /// copy of the server's). None for a stale handle or another dimension.
-    fn native_level_read_world(&self, level: LevelRef) -> Option<&World> {
+    pub(super) fn native_level_read_world(&self, level: LevelRef) -> Option<&World> {
         if self.is_logical_server() {
             return self.native_level_world(level);
         }
