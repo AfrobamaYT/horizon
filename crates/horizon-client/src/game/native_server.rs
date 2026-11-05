@@ -12,7 +12,7 @@ use mod_api::__private::game::*;
 pub use mod_api::game::NativeExperienceOrb;
 // Their old home, for mixin code that names them here.
 use horizon_client::{
-    command::{ArgType, Dispatcher},
+    command::{Arg, ArgType, Context, Dispatcher},
     lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
     motion::PlayerMotion,
     text::Text,
@@ -1559,14 +1559,19 @@ impl Game<'_> {
         host.native_commands.as_ref()?.levels.get(name).copied()
     }
 
-    /// Parse a registered command using the source's permission before dispatching it.
-    fn native_command_valid(&mut self, line: &str, permission: u8) -> bool {
+    /// Parse once with the source's permission, then resolve its typed arguments.
+    /// A denied or malformed invocation never reaches argument resolution or listeners.
+    fn native_command_input(
+        &mut self,
+        line: &str,
+        permission: u8,
+    ) -> Option<mod_api::CommandInvocation> {
         let Some(commands) = self
             .lan
             .as_ref()
             .and_then(|host| host.native_commands.as_ref())
         else {
-            return false;
+            return None;
         };
         let dispatcher = commands.dispatcher.clone();
         let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
@@ -1574,9 +1579,55 @@ impl Game<'_> {
         self.ui.registries.permission = previous;
         if let Err(error) = parse.executable() {
             self.syntax_failure(&error, line);
-            return false;
+            return None;
         }
-        true
+        match self.resolve_native_command(parse.context) {
+            Ok(command) => Some(command),
+            Err(error) => {
+                self.syntax_failure(&error, line);
+                None
+            }
+        }
+    }
+
+    /// Convert the native tree's validated argument kinds using vanilla's source-aware paths.
+    fn resolve_native_command(
+        &mut self,
+        context: Context,
+    ) -> Result<mod_api::CommandInvocation, horizon_client::command::CommandError> {
+        use super::commands::{Target, err};
+        use mod_api::{CommandArgument, CommandArgumentValue as Value, CommandInvocation};
+        let mut arguments = Vec::with_capacity(context.args.len());
+        for argument in &context.args {
+            let value = match &argument.value {
+                Arg::Str(value) => Value::String(value.clone()),
+                Arg::Int(value) => Value::Integer(*value),
+                Arg::Double(value) => Value::Number(*value),
+                Arg::Bool(value) => Value::Boolean(*value),
+                Arg::Entity(_) => {
+                    let targets = self.entities(&context, &argument.name, true)?;
+                    let [target] = targets.as_slice() else {
+                        return Err(err("argument.entity.toomany", &[]));
+                    };
+                    let player = match target {
+                        Target::Player => self.native_acting_player(),
+                        Target::Guest(conn) => self
+                            .command_guest(*conn)
+                            .and_then(|guest| self.native_player_ref(guest.uuid)),
+                        _ => None,
+                    }
+                    .ok_or_else(|| err("argument.entity.notfound.player", &[]))?;
+                    Value::Player(player)
+                }
+                Arg::Coords(coordinates) => {
+                    Value::BlockPos(self.resolve_coords(coordinates).map(|v| v.floor() as i32))
+                }
+                Arg::Item(input) => Value::Item(self.command_item_stack(input, 1)?),
+                _ => unreachable!("the native tree contains only registered native argument kinds"),
+            };
+            arguments.push(CommandArgument::new(argument.name.clone(), value));
+        }
+        Ok(CommandInvocation::new(context.literals, arguments))
     }
 
     /// A guest's command for the mods, inside their swap
@@ -1604,11 +1655,11 @@ impl Game<'_> {
             entity_id: g.entity_id,
             address: g.address.ip().to_string(),
         });
-        if !self.native_command_valid(line, permission) {
+        let Some(command) = self.native_command_input(line, permission) else {
             return true;
-        }
+        };
         let mut ran = false;
-        self.native_perform_command(&player, line, &mut ran);
+        self.native_perform_command(&player, &command, &mut ran);
         if !ran {
             // Registered, but no mod took it: vanilla's unknown command.
             self.native_feedback(
@@ -1632,17 +1683,20 @@ impl Game<'_> {
         if Self::native_command_level(host, line).is_none() {
             return false;
         }
-        if !self.native_command_valid(line, 4) {
-            return true;
-        }
-        let mut ran = false;
-        self.native_perform_console_command(line, &mut ran);
-        if !ran {
-            self.native_feedback(
-                Text::translate("command.unknown.command", &[])
-                    .with_color(horizon_client::text::RED),
-            );
-        }
+        self.as_console_in_overworld(|game| {
+            let previous = game.command_source.replace(game.server_source());
+            if let Some(command) = game.native_command_input(line, 4) {
+                let mut ran = false;
+                game.native_perform_console_command(&command, &mut ran);
+                if !ran {
+                    game.native_feedback(
+                        Text::translate("command.unknown.command", &[])
+                            .with_color(horizon_client::text::RED),
+                    );
+                }
+            }
+            game.command_source = previous;
+        });
         true
     }
 }
@@ -2151,6 +2205,149 @@ mod tests {
                 .parse("toggle maybe", &registries)
                 .executable()
                 .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn native_typed_commands_reach_listeners_after_parse_and_source_resolution() {
+        use mod_api::{CommandArgumentValue as Value, CommandInvocation};
+        struct Commands(Arc<Mutex<Vec<(bool, CommandInvocation)>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Commands {
+            fn register_commands(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RegisterCommandsEvent<'_>,
+            ) {
+                event.commands.extend([
+                    NativeCommand::new("typed give <who:player> <amount:integer> [message:text]"),
+                    NativeCommand::new("typed data <word:word> <number:number> <enabled:boolean> <item:item> <pos:block_pos>"),
+                    NativeCommand::new("typed opt [value:integer]"),
+                    NativeCommand::op("protected <who:player>", 4),
+                ]);
+            }
+            fn perform_command(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::PerformCommandEvent<'_>,
+            ) -> mod_api::Flow {
+                self.0.lock().unwrap().push((false, event.command.clone()));
+                mod_api::Flow::Cancel
+            }
+            fn perform_console_command(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::PerformConsoleCommandEvent<'_>,
+            ) -> mod_api::Flow {
+                self.0.lock().unwrap().push((true, event.command.clone()));
+                mod_api::Flow::Cancel
+            }
+        }
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "typed_commands",
+                Box::new(Commands(heard.clone())),
+            )]
+            .into(),
+            || {
+                super::super::native_guest_turn_tests::with_guests(|game| {
+                    game.register_native_commands();
+                    let other = game.native_player_ref(13).unwrap();
+                    let acting = game.native_player_ref(12).unwrap();
+                    game.as_guest(12, |game| {
+                    for line in [
+                        "typed give guest13 nope",
+                        "typed give guest13",
+                        "typed give missing 7",
+                        "typed give @a 7",
+                        "typed data word 1 maybe stone ~ ~ ~",
+                        "typed data word NaN true stone ~ ~ ~",
+                        "typed data word 1 true does_not_exist ~ ~ ~",
+                        "typed opt 1 extra",
+                    ] {
+                        assert!(game.perform_native_command(12, 4, line), "{line}");
+                    }
+                    assert!(!game.perform_native_command(12, 0, "protected @r"));
+                    assert!(heard.lock().unwrap().is_empty(), "failed input must not reach listeners");
+                    for line in [
+                        "typed give guest13 37 hello typed world",
+                        "typed give @s -4",
+                        "typed opt",
+                        "typed opt 9",
+                        "typed data word -1.25 true stone[minecraft:custom_name='\"Rock\"'] ~1 ~2 ~-3",
+                        "typed data word 2 false dirt ^0 ^0 ^0",
+                    ] {
+                        assert!(game.perform_native_command(12, 4, line), "{line}");
+                    }
+                }).unwrap();
+                    game.spawn = Some(horizon_core::geometry::Vec3::new(10.5, 70.0, -2.5));
+                    game.yaw = 45.0;
+                    game.pitch = 30.0;
+                    assert!(game.perform_native_console_command("typed give @s 1"));
+                    assert_eq!(
+                        heard.lock().unwrap().len(),
+                        6,
+                        "console has no source player"
+                    );
+                    assert!(game.perform_native_console_command("typed give guest13 11"));
+                    assert!(
+                        game.perform_native_console_command(
+                            "typed data console 3 true dirt ~1 ~2 ~3"
+                        )
+                    );
+                    assert!(
+                        game.perform_native_console_command(
+                            "typed data console 3 true dirt ^0 ^0 ^1"
+                        )
+                    );
+                    assert!(game.command_source.is_none(), "console source restored");
+                    let heard = heard.lock().unwrap();
+                    assert_eq!(heard.len(), 9);
+                    let first = &heard[0].1;
+                    assert_eq!(first.literals, ["typed", "give"]);
+                    assert_eq!(first.argument("who"), Some(&Value::Player(other)));
+                    assert_eq!(first.argument("amount"), Some(&Value::Integer(37)));
+                    assert_eq!(
+                        first.argument("message"),
+                        Some(&Value::String("hello typed world".into()))
+                    );
+                    assert_eq!(heard[1].1.argument("who"), Some(&Value::Player(acting)));
+                    assert_eq!(heard[1].1.argument("amount"), Some(&Value::Integer(-4)));
+                    assert!(heard[1].1.argument("message").is_none());
+                    assert!(heard[2].1.arguments.is_empty());
+                    assert_eq!(heard[3].1.argument("value"), Some(&Value::Integer(9)));
+                    let data = &heard[4].1;
+                    assert_eq!(data.argument("word"), Some(&Value::String("word".into())));
+                    assert_eq!(data.argument("number"), Some(&Value::Number(-1.25)));
+                    assert_eq!(data.argument("enabled"), Some(&Value::Boolean(true)));
+                    assert_eq!(data.argument("pos"), Some(&Value::BlockPos([4, 66, 2])));
+                    let Some(Value::Item(item)) = data.argument("item") else {
+                        panic!("typed item")
+                    };
+                    assert_eq!(&*item.item, "minecraft:stone");
+                    assert_eq!(item.count, 1);
+                    assert!(item.extra.is_some(), "command components retained");
+                    assert_eq!(heard[5].1.argument("enabled"), Some(&Value::Boolean(false)));
+                    assert_eq!(
+                        heard[5].1.argument("pos"),
+                        Some(&Value::BlockPos([3, 64, 5]))
+                    );
+                    assert!(heard[..6].iter().all(|(console, _)| !console));
+                    assert!(heard[6..].iter().all(|(console, _)| *console));
+                    assert_eq!(heard[6].1.argument("who"), Some(&Value::Player(other)));
+                    assert_eq!(heard[6].1.argument("amount"), Some(&Value::Integer(11)));
+                    assert_eq!(
+                        heard[7].1.argument("pos"),
+                        Some(&Value::BlockPos([11, 72, 0]))
+                    );
+                    assert_eq!(
+                        heard[8].1.argument("pos"),
+                        Some(&Value::BlockPos([10, 70, -2]))
+                    );
+                });
+            },
         );
     }
 

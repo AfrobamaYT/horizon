@@ -1590,7 +1590,7 @@ impl Game<'_> {
     /// bound to the overworld, whichever level the last server tick left in
     /// place (the last one ticked, often the nether). Its commands run there
     /// and the level in place is put back afterwards.
-    fn as_console_in_overworld<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+    pub(super) fn as_console_in_overworld<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
         let back = console_level(self.dim).and_then(|dim| self.enter_command_level(dim));
         let out = self.as_console(f);
         if let Some(back) = back {
