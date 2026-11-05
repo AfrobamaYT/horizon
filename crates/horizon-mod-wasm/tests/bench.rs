@@ -80,23 +80,23 @@ fn per_call(hooks: &dyn Hooks, work: &str, calls: u32) -> Duration {
 
 /// The median time of one `call`, over 9 batches of `calls` after one warm-up batch.
 fn timed(calls: u32, mut call: impl FnMut()) -> Duration {
-    let mut batches: Vec<Duration> = (0..10)
+    let mut batches: Vec<f64> = (0..10)
         .map(|_| {
             let started = Instant::now();
             for _ in 0..calls {
                 call();
             }
-            started.elapsed() / calls
+            started.elapsed().as_secs_f64() / f64::from(calls)
         })
         .skip(1)
         .collect();
-    batches.sort();
-    batches[batches.len() / 2]
+    batches.sort_by(f64::total_cmp);
+    Duration::from_secs_f64(batches[batches.len() / 2])
 }
 
 fn shown(time: Duration) -> String {
     match time.as_nanos() {
-        n if n < 10 => format!("{:.2} ns", time.as_secs_f64() * 1e9),
+        0 => "under 1 ns".to_owned(),
         n if n < 10_000 => format!("{n} ns"),
         n if n < 10_000_000 => format!("{:.1} µs", n as f64 / 1e3),
         n => format!("{:.1} ms", n as f64 / 1e6),
