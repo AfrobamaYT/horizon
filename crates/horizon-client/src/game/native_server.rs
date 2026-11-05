@@ -1573,9 +1573,8 @@ impl Game<'_> {
         else {
             return None;
         };
-        let dispatcher = commands.dispatcher.clone();
         let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
-        let parse = dispatcher.parse(line, &self.ui.registries);
+        let parse = commands.dispatcher.parse(line, &self.ui.registries);
         self.ui.registries.permission = previous;
         if let Err(error) = parse.executable() {
             self.syntax_failure(&error, line);
@@ -1598,14 +1597,14 @@ impl Game<'_> {
         use super::commands::{Target, err};
         use mod_api::{CommandArgument, CommandArgumentValue as Value, CommandInvocation};
         let mut arguments = Vec::with_capacity(context.args.len());
-        for argument in &context.args {
-            let value = match &argument.value {
-                Arg::Str(value) => Value::String(value.clone()),
-                Arg::Int(value) => Value::Integer(*value),
-                Arg::Double(value) => Value::Number(*value),
-                Arg::Bool(value) => Value::Boolean(*value),
+        for argument in context.args {
+            let value = match argument.value {
+                Arg::Str(value) => Value::String(value),
+                Arg::Int(value) => Value::Integer(value),
+                Arg::Double(value) => Value::Number(value),
+                Arg::Bool(value) => Value::Boolean(value),
                 Arg::Entity(selector) => {
-                    let targets = self.resolve_entity_argument(selector, true)?;
+                    let targets = self.resolve_entity_argument(&selector, true)?;
                     let [target] = targets.as_slice() else {
                         return Err(err("argument.entity.toomany", &[]));
                     };
@@ -1620,12 +1619,12 @@ impl Game<'_> {
                     Value::Player(player)
                 }
                 Arg::Coords(coordinates) => {
-                    Value::BlockPos(self.resolve_coords(coordinates).map(|v| v.floor() as i32))
+                    Value::BlockPos(self.resolve_coords(&coordinates).map(|v| v.floor() as i32))
                 }
-                Arg::Item(input) => Value::Item(self.command_item_stack(input, 1)?),
+                Arg::Item(input) => Value::Item(self.command_item_stack(&input, 1)?),
                 _ => unreachable!("the native tree contains only registered native argument kinds"),
             };
-            arguments.push(CommandArgument::new(argument.name.clone(), value));
+            arguments.push(CommandArgument::new(argument.name, value));
         }
         Ok(CommandInvocation::new(context.literals, arguments))
     }
