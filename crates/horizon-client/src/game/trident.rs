@@ -631,6 +631,17 @@ impl Game<'_> {
             }
             // ThrownTrident.tick: Loyalty needs its owner, who is in this level.
             let owner_eye = catchers.iter().find(|c| c.guest == t.guest).map(|c| c.eye);
+            // `isAcceptibleReturnOwner` fails for a dead or spectating owner: the
+            // trident drops as an item when it can be picked up, then goes.
+            if t.loyalty > 0
+                && (t.dealt_damage || t.no_physics)
+                && catchers.iter().any(|c| c.guest == t.guest && !c.touches)
+            {
+                if !t.creative_only {
+                    self.spawn_at_location(t.position, f64::from(0.1f32), t.stack.clone());
+                }
+                continue;
+            }
             if t.loyalty > 0
                 && (t.dealt_damage || t.no_physics)
                 && let Some(owner_eye) = owner_eye
@@ -827,8 +838,8 @@ impl Game<'_> {
                             self.thrower_hit(t.guest, &victim, direct, damage);
                         }
                         // Projectile.onHit: the landing is heard, at the hit.
-                        self.projectile_event(
-                            "minecraft:projectile_land",
+                        self.projectile_landed_event(
+                            t.id,
                             Some(Who::Player),
                             [t.position.x, t.position.y, t.position.z],
                         );
@@ -877,8 +888,8 @@ impl Game<'_> {
                     } else if let Some((stop, block, _)) = clip {
                         // Projectile.onHit on a block: PROJECTILE_LAND at the
                         // block's centre.
-                        self.projectile_event(
-                            "minecraft:projectile_land",
+                        self.projectile_landed_event(
+                            t.id,
                             Some(Who::Player),
                             [
                                 f64::from(block.x) + 0.5,

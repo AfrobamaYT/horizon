@@ -645,7 +645,7 @@
 //!
 //! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`).
 //!
-//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather and height now through `LevelRef`, with `native_day_time`, `native_max_stack_size`).
+//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather, time of day and height now through `LevelRef`, with `native_max_stack_size`).
 //!
 //! API 96 adds reading redstone from a server mod's block (`native_neighbor_signal`).
 //!
@@ -1023,9 +1023,9 @@ use mod_api::{
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
-    LogicalSide, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, TooltipPlace,
-    UsePhase,
+    LogicalSide, NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags,
+    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
+    TooltipElement, TooltipPlace, UsePhase,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
@@ -3048,18 +3048,26 @@ impl Game<'_> {
     pub(super) fn native_server_about_to_start(&mut self, dedicated: bool) {
         self.fire_server_about_to_start(dedicated);
     }
+    /// Server startup has begun, before play can be accepted.
+    pub(super) fn native_server_starting(&mut self, dedicated: bool) {
+        self.fire_server_starting(dedicated);
+    }
+    /// Server teardown has finished, including the final save if possible.
+    pub(super) fn native_server_stopped(&mut self, dedicated: bool) {
+        self.fire_server_stopped(dedicated);
+    }
     /// The server opened its worlds and is about to tick (NeoForge's
     /// `ServerStartedEvent`): every level loaded, no player joined. Where
     /// `WorldOpenReady` fired: the end of the open, before the tick loop.
     pub(super) fn native_server_started(&mut self, dedicated: bool) {
         self.fire_server_started(dedicated);
     }
-    /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
+    /// The server begins teardown (NeoForge's `ServerStoppingEvent`):
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
     /// mod can save its own data or tell them. `native_world_lifecycle`'s
     /// `WorldCloseFinal` follows once the worlds are saved. A server whose loop
-    /// fails stops without this (`WorldCloseFailed` reports it).
+    /// fails still fires this before the final save attempt and `native_server_stopped`.
     pub(super) fn native_server_stopping(&mut self, dedicated: bool) {
         self.fire_server_stopping(dedicated);
     }
@@ -3136,7 +3144,7 @@ impl Game<'_> {
     /// is in GUI pixels. `native_camera` is this frame's world camera (None on
     /// the panorama). `gui_hidden` is the F1 setting; `focused` is window focus.
     /// A mod decides whether its foreground indicator respects those flags.
-    /// Client only; the host is read-only. API @API:gui_render_post@.
+    /// Client only; the host is read-only.
     pub(super) fn native_gui_render_post(
         &self,
         batch: &mut HudBatch,
@@ -3234,6 +3242,18 @@ impl Game<'_> {
     /// hearts, food, air and the heights (`left_height`/`right_height`)
     /// above the hotbar are the answer's to give; `bubble_pop_sound` too.
     /// Nothing set draws Horizon's own.
+    /// The in-game chat is about to be drawn (`CustomizeGuiOverlayEvent.Chat`): `x`, `y` are its
+    /// bottom-left corner in GUI pixels, which a mod may move.
+    pub(super) fn native_customize_chat_overlay(
+        &mut self,
+        gui_width: i32,
+        gui_height: i32,
+        focused: bool,
+        x: &mut i32,
+        y: &mut i32,
+    ) {
+        self.fire_customize_chat_overlay(gui_width, gui_height, focused, x, y);
+    }
     pub(super) fn native_health_hud(
         &mut self,
         inputs: &mod_api::hud_layout::HealthInputs,
@@ -3981,6 +4001,22 @@ impl Game<'_> {
             horizontal_offset,
             canceled,
         );
+    }
+    /// `GatherEffectScreenTooltipsEvent`: the tooltip of the effect panel the
+    /// cursor is over beside the survival or creative inventory. `tooltip`
+    /// starts empty when the panel's information is fully visible, or holds
+    /// the full name then duration when compact or clipped. Each line has a
+    /// colour as `rgba` packs it (`u32::MAX` keeps the text's own); add, change,
+    /// reorder or remove lines, and an empty list draws nothing. `effect` is
+    /// the effect the panel shows, `screen` the inventory. Asked each frame
+    /// a rendered panel is hovered, only while a mod listens. Client-side.
+    pub(super) fn native_gather_effect_screen_tooltips(
+        &self,
+        screen: &NativeScreenView<'_>,
+        effect: &NativeActiveEffect,
+        tooltip: &mut Vec<(Text, u32)>,
+    ) {
+        self.fire_gather_effect_screen_tooltips(screen, effect, tooltip);
     }
     /// Before a screen's preedit handler (`ScreenEvent.Preedit.Pre`, vanilla's
     /// `GuiEventListener.preeditUpdated`): the input method is composing
@@ -5375,9 +5411,8 @@ impl Game<'_> {
         self.fire_player_advancement_done(player, name, advancement);
     }
     /// A criterion of a server player's advancement was granted or revoked, after its progress changed
-    /// and before any completion rewards, except the `minecraft:tick` criteria granted on a network
-    /// player's first tick or a reload, which are heard after that tick's rewards and packets (tracked
-    /// on #29). A grant or revoke that changes nothing is not heard. The full advancement progress is
+    /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
+    /// The full advancement progress is
     /// not yet exposed (tracked on #29).
     pub(super) fn native_player_advancement_progress(
         &mut self,
@@ -6733,8 +6768,8 @@ impl Game<'_> {
     /// `value` (`GameRuleChangedEvent`, from `GameRules.set` with a server:
     /// `/gamerule`, the game rules screen, the management protocol, a test
     /// environment, `server.properties`). `actor` is present when a player
-    /// caused the change. The server and complete game rules are not exposed
-    /// by this event (tracked on #29). Server-side.
+    /// caused the change. `level.game_rules(host)` of any of the server's
+    /// levels reads every rule, the new value included. Server-side.
     pub(super) fn native_game_rule_changed(
         &mut self,
         rule: &str,
@@ -9864,12 +9899,6 @@ impl Game<'_> {
             self.with_level(|_, level, ticks| level.native_set_block(ticks, pos, state, flags));
         let _ = self.process_level_events();
         changed
-    }
-    /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
-    /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
-    /// take it modulo 24000 for the hour.
-    pub(super) fn native_day_time(&self) -> i64 {
-        self.world.day_time
     }
     /// The most of the item `item` one slot holds (`Item.getDefaultMaxStackSize`),
     /// or `None` for an unknown item: for a mod's container that fills or
@@ -14424,5 +14453,87 @@ mod particle_count_tests {
     fn host_clear(game: &super::Game<'_>) -> bool {
         let host: &dyn ClientHost = game;
         host.clear_particles()
+    }
+}
+
+#[cfg(test)]
+mod customize_chat_overlay_tests {
+    use horizon_client::hud::HudBatch;
+    use horizon_client::text::Text;
+    use mod_api::{ClientHost, CustomizeChatOverlayEvent, Hooks, ModEntry, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    type Seen = Arc<Mutex<Vec<(i32, i32, bool, i32, i32)>>>;
+
+    /// Lifts the chat 100 GUI pixels, logging what it was told.
+    struct Lift(Seen);
+    #[mod_api::__subscriptions]
+    impl Hooks for Lift {
+        fn customize_chat_overlay(
+            &self,
+            _: &mut dyn ClientHost,
+            event: &mut CustomizeChatOverlayEvent,
+        ) {
+            let e = &*event;
+            self.0
+                .lock()
+                .unwrap()
+                .push((e.gui_width, e.gui_height, e.focused, e.x, e.y));
+            event.y -= 100;
+        }
+    }
+
+    /// The top of what the chat draws, in GUI pixels, and the batch's GUI scale.
+    fn chat_top(game: &mut super::Game<'_>) -> (Option<f32>, f32) {
+        let mut batch = HudBatch::new([1280, 720]);
+        game.draw_chat(&mut batch);
+        let top = batch.vertices.iter().map(|v| v.pos[1]).reduce(f32::min);
+        (top, batch.scale)
+    }
+
+    /// `CustomizeGuiOverlayEvent.Chat`: the mod gets vanilla's place (0, GUI height - 40) and the
+    /// GUI size, focused or not, and the chat is drawn where it moved it. With the chat hidden
+    /// (F1, chat closed) nothing is asked.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_moves_the_chat() {
+        let message = Text::literal("hello from the chat test");
+        let mut plain = None;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            game.system_message(message.clone());
+            plain = chat_top(game).0;
+        });
+        let plain = plain.expect("the message is drawn");
+        let seen = Seen::default();
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("lift", Box::new(Lift(Arc::clone(&seen))))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                game.system_message(message.clone());
+                let (moved, scale) = chat_top(game);
+                let moved = moved.expect("the message is drawn");
+                assert!(
+                    (plain - moved - 100.0).abs() < 0.5,
+                    "lifted by 100 GUI pixels: {plain} -> {moved} at scale {scale}"
+                );
+                let (w, h) = {
+                    let b = HudBatch::new([1280, 720]);
+                    (b.width as i32, b.height as i32)
+                };
+                assert_eq!(*seen.lock().unwrap(), [(w, h, false, 0, h - 40)]);
+                // Hidden: F1 with the chat closed asks nothing.
+                game.ui.hide_gui = true;
+                chat_top(game);
+                assert_eq!(seen.lock().unwrap().len(), 1);
+                // Focused, the chat shows under F1 and is asked again.
+                game.screen = super::Screen::Chat;
+                chat_top(game);
+                let seen = seen.lock().unwrap();
+                assert_eq!(seen.len(), 2);
+                assert!(seen[1].2, "focused");
+            });
+        });
     }
 }

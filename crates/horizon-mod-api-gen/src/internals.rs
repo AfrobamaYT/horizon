@@ -546,13 +546,21 @@ impl Pass {
 
 /// Widen game internals and the declared lower-crate items in a staged source copy.
 /// Fails before writing anything if a declaration in `internals.txt` cannot be resolved.
+/// A listed lower-crate point is an internal too: its raw listener names the function's types.
 pub fn widen(root: &Path) -> Result<Widened, String> {
-    let list = root.join("crates/horizon-mod-api-gen/internals.txt");
-    let text = fs::read_to_string(&list).map_err(|e| format!("{}: {e}", list.display()))?;
-    widen_with(root, &text)
+    let mut lists = Vec::new();
+    for name in ["internals.txt", "points.txt"] {
+        let path = root.join("crates/horizon-mod-api-gen").join(name);
+        lists.push((
+            name,
+            fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
+        ));
+    }
+    widen_with(root, &lists)
 }
 
-fn widen_with(root: &Path, list: &str) -> Result<Widened, String> {
+/// [`widen`] with each list's file name and text, so an error names the file and line it came from.
+fn widen_with(root: &Path, lists: &[(&str, String)]) -> Result<Widened, String> {
     let mut pass = Pass::default();
     let src = root.join("crates/horizon-client/src");
     for source in crate::points::game_files(&src, false)?
@@ -572,11 +580,13 @@ fn widen_with(root: &Path, list: &str) -> Result<Widened, String> {
         );
     }
     pass.cfg.clear();
-    for (line, declaration) in list.lines().enumerate() {
-        let path = declaration.split('#').next().unwrap_or_default().trim();
-        if !path.is_empty() {
-            pass.lower(root, path)
-                .map_err(|e| format!("internals.txt:{}: {path}: {e}", line + 1))?;
+    for (name, list) in lists {
+        for (line, declaration) in list.lines().enumerate() {
+            let path = declaration.split('#').next().unwrap_or_default().trim();
+            if !path.is_empty() {
+                pass.lower(root, path)
+                    .map_err(|e| format!("{name}:{}: {path}: {e}", line + 1))?;
+            }
         }
     }
     pass.finish()
@@ -657,7 +667,7 @@ mod inline { struct Inner; }
 const LABEL: &str = "é"; struct AfterUnicode;
 "#,
         );
-        let result = widen_with(&fixture.0, "").unwrap();
+        let result = widen_with(&fixture.0, &[]).unwrap();
         let source = fixture.game();
         for expected in [
             "pub struct Game",
@@ -717,7 +727,14 @@ const LABEL: &str = "é"; struct AfterUnicode;
     fn selected_lower_method_and_its_modules_and_receiver_become_reachable() {
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
-        let result = widen_with(&fixture.0, "# list\nlower::hidden::inner::Thing::run\n").unwrap();
+        let result = widen_with(
+            &fixture.0,
+            &[(
+                "internals.txt",
+                "# list\nlower::hidden::inner::Thing::run\n".into(),
+            )],
+        )
+        .unwrap();
         let read = |path| fs::read_to_string(fixture.0.join(path)).unwrap();
         assert_eq!(read("crates/lower/src/lib.rs"), "pub mod hidden;\n");
         assert_eq!(
@@ -746,13 +763,20 @@ const LABEL: &str = "é"; struct AfterUnicode;
     fn unresolved_line_is_an_error_and_does_not_write_sources() {
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
+        // The error names the list and line it came from, past the lists before it.
         let error = widen_with(
             &fixture.0,
-            "# comment\nlower::hidden::inner::Thing::missing\n",
+            &[
+                ("internals.txt", "# one\n# two\n".into()),
+                (
+                    "points.txt",
+                    "# comment\nlower::hidden::inner::Thing::missing\n".into(),
+                ),
+            ],
         )
         .unwrap_err();
         assert!(
-            error.contains("internals.txt:2: lower::hidden::inner::Thing::missing"),
+            error.contains("points.txt:2: lower::hidden::inner::Thing::missing"),
             "{error}"
         );
         assert_eq!(fixture.game(), "struct Game;\n");
@@ -766,8 +790,8 @@ const LABEL: &str = "é"; struct AfterUnicode;
         let two = Fixture::new(
             "/// two\nstruct Game<T> where T: Clone { value: T }\nfn work() -> u32 { 2 }\n",
         );
-        let first = widen_with(&one.0, "").unwrap();
-        let second = widen_with(&two.0, "").unwrap();
+        let first = widen_with(&one.0, &[]).unwrap();
+        let second = widen_with(&two.0, &[]).unwrap();
         let lookup = |entries: Vec<Internal>| {
             entries
                 .into_iter()
@@ -790,8 +814,8 @@ const LABEL: &str = "é"; struct AfterUnicode;
         let game = "pub struct Game;\nimpl Game { pub fn z(&self) {} fn a(&self) {} }\n";
         let one = Fixture::new(game);
         let two = Fixture::new(game);
-        let first = widen_with(&one.0, "").unwrap();
-        let second = widen_with(&two.0, "").unwrap();
+        let first = widen_with(&one.0, &[]).unwrap();
+        let second = widen_with(&two.0, &[]).unwrap();
         assert_eq!(
             serde_json::to_string(&first.entries).unwrap(),
             serde_json::to_string(&second.entries).unwrap()
@@ -802,7 +826,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
                 .windows(2)
                 .all(|pair| pair[0].path < pair[1].path)
         );
-        let again = widen_with(&one.0, "").unwrap();
+        let again = widen_with(&one.0, &[]).unwrap();
         assert_eq!(first.entries, again.entries);
         assert!(again.changed.is_empty());
     }
@@ -819,7 +843,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
         let fixture = Fixture::new(
             "struct Round { listening: bool }\nimpl Round { fn listening(&self) -> bool { self.listening } }\n",
         );
-        let entries = by_key(&widen_with(&fixture.0, "").unwrap().entries);
+        let entries = by_key(&widen_with(&fixture.0, &[]).unwrap().entries);
         let path = "horizon_client::game::Round::listening".to_owned();
         assert!(entries.contains_key(&(path.clone(), "field", String::new())));
         assert!(entries.contains_key(&(path, "method", String::new())));
@@ -827,7 +851,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
 
     #[test]
     fn a_method_fingerprint_follows_its_impl_bounds_but_not_trait_docs() {
-        let hashes = |game: &str| by_key(&widen_with(&Fixture::new(game).0, "").unwrap().entries);
+        let hashes = |game: &str| by_key(&widen_with(&Fixture::new(game).0, &[]).unwrap().entries);
         let key = |path: &str, kind| (format!("horizon_client::game::{path}"), kind, String::new());
         let loose = hashes(
             "struct Slots<K>(K);\nimpl<K: PartialEq> Slots<K> { fn new(k: K) -> Self { Self(k) } }\ntrait Ctl {\n    /// One.\n    fn go(&self);\n}\n",
@@ -854,7 +878,7 @@ const LABEL: &str = "é"; struct AfterUnicode;
             "crates/horizon-client/src/game/pad/nested/leaf.rs",
             "struct Leaf;\n",
         );
-        let entries = widen_with(&fixture.0, "").unwrap().entries;
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
         let pad: Vec<_> = entries
             .iter()
             .filter(|e| e.path == "horizon_client::game::pad::hardware::PadId")

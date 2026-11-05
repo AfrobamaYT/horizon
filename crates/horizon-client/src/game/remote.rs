@@ -1317,6 +1317,7 @@ impl Game<'_> {
             Some(reason) => horizon_client::multiplayer::Screen::Disconnected {
                 reason,
                 retry: None,
+                lines: std::cell::Cell::new(1),
             },
             None => horizon_client::multiplayer::Screen::list(&saves),
         });
@@ -1384,7 +1385,10 @@ impl Game<'_> {
         let list = &mut self.potions.effects.list;
         match list.iter_mut().find(|x| x.id == id) {
             // forceAddEffect's copyBlendState: an updated effect keeps its fade.
-            Some(existing) => *existing = e,
+            Some(existing) => {
+                e.client_blend = existing.client_blend;
+                *existing = e;
+            }
             None => {
                 // ClientboundUpdateMobEffectPacket.shouldBlend (flag 8).
                 let blend = p.flags & 8 != 0;
@@ -1394,6 +1398,9 @@ impl Game<'_> {
                     let (o_nausea, nausea) = screen_effects::nausea_blend_added(&e, blend);
                     self.screen_fx.o_nausea = o_nausea;
                     self.screen_fx.nausea = nausea;
+                } else if !blend {
+                    let has_effect = !e.ends_within(0);
+                    e.client_blend = (has_effect, has_effect);
                 }
                 list.push(e);
             }
@@ -9346,7 +9353,7 @@ impl Game<'_> {
                     self.mobs[i].kind.id.trim_start_matches("minecraft:")
                 );
                 self.remote_sweep_event(&kind, true);
-                self.pvp_attacked(self.mobs[i].id as i32);
+                self.pvp_attacked(self.mobs[i].id as i32, distance);
                 self.remote_player_attack(i);
                 self.reset_attack_strength();
             }
@@ -11334,6 +11341,9 @@ mod interaction_event_tests;
 mod native_entity_tests;
 
 #[cfg(test)]
+mod effect_blend_tests;
+
+#[cfg(test)]
 mod tests {
     /// `ClientChatReceivedEvent`: a mod's replacement is the line the chat
     /// shows, a cancelled system line never shows, and a cancelled message
@@ -11956,8 +11966,8 @@ mod tests {
     }
 
     /// The `both` handle reads answer on a client from its own copy: the local
-    /// player's health, effects, equipment and last death, the blocks of the
-    /// level it shows and the entities it tracks.
+    /// player's health, effects, equipment and last death, the blocks and time
+    /// of day of the level it shows and the entities it tracks.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_handle_reads_answer_from_the_clients_copy() {
@@ -12080,6 +12090,20 @@ mod tests {
             assert_eq!(level.block_property(game, [160, 64, 0], "facing"), None);
             assert_eq!(game.world.chunks.len(), chunks);
 
+            // The time of day, as the server's clock last set it.
+            game.remote.as_mut().unwrap().clock = Some(0);
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 100,
+                clocks: vec![play::ClockState {
+                    clock: 0,
+                    total_ticks: 30_000,
+                    partial_tick: 0.0,
+                    rate: 1.0,
+                }],
+            }))
+            .unwrap();
+            assert_eq!(level.day_time(game), Some(30_000));
+
             // An entity the server told the client of; others read None.
             let pig = game
                 .remote
@@ -12120,6 +12144,7 @@ mod tests {
             assert_eq!(living.health(game), None);
             assert_eq!(level.block(game, at), None);
             assert!(!level.is_loaded(game, at));
+            assert_eq!(level.day_time(game), None);
             assert_eq!(player.last_death_location(game), None);
 
             // The server's role keeps its own reads: a client handle names nothing there.

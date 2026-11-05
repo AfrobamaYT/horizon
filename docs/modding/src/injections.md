@@ -226,18 +226,33 @@ Modules are **native-only** and last-resort support code for helpers, outside th
 line: a mod's behaviour still goes through hooks, handles and Parts. Any capability a module needs
 that the API lacks is a hook request in #44's row form, not a reason to grow the module.
 
-## Which methods are points
+## Which functions are points
 
-Every inherent `Game` method of the game module is a point, named after the method, except:
+Every function of the game module is a point: `Game` methods, methods of its other types (`GameLevel`,
+`Levels`…), associated functions and free functions. A crate below the game adds the functions
+`crates/horizon-mod-api-gen/points.txt` lists, one path per line (`horizon_client_render::chunk::Chunk::get`);
+each one there is measured first, since a slot on a hot function costs on every call. Left out:
 
 - the hook functions themselves (`native_*`), which are hooks;
-- a method compiled only under a `cfg`, and one in a `cfg`-gated module;
-- `const`, `async` and `unsafe` functions, and methods without a `&self` or `&mut self` receiver;
+- a function compiled only under a `cfg`, and one in a `cfg`-gated module;
+- `const`, `async` and `unsafe` functions, and methods that take `self` by value;
 - `impl Trait` or `!` in the signature, `#[inline(always)]`, and a parameter named `cancel` or `result`.
+
+A `Game` method that takes `self` has a point named after the method (`tick`). Any other is named by its full path, snake-cased
+without `horizon_client::`: `game_levels_levels_parked_dims` for `Levels::parked_dims`, and for a lower
+crate without `horizon_`: `client_render_chunk_chunk_get`, and `Game::new` is `game_game_new`. `Game` methods'
+points get a host; the others have none.
 
 A method whose return value borrows the game (`-> &T`, `-> Option<&mut T>`) has a head and no return; a
 `'static` return (`-> Option<&'static str>`) borrows nothing and has both. A `usize` or `isize` crosses
 the record as `u64` or `i64`, one width for native and wasm listeners.
+
+**The raw form.** A point whose signature has no type or const generics and no `impl Trait` also has a raw
+form: a native listener that gets the real receiver and a `&mut` to every argument in its own type,
+internal types included, with `cancel` or `result` to stop the body. Its return listener gets the value
+returned, a borrowed one included (`&mut &mut T`), where the API form has no return. The launcher's
+generated `main` registers raw listeners by type; declaring them in `horizon-mod.toml` comes with the
+per-mod internals list.
 `points.json`, beside the prebuilt game, lists them all; the rustdoc of `horizon-mod-points` documents
 each with the function it listens at.
 

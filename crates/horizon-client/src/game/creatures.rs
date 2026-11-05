@@ -505,13 +505,18 @@ impl Game<'_> {
         at: [f64; 3],
         site: SpawnSite,
     ) -> Option<u32> {
-        // The spawn is not a natural one (no jockeys, the patrol leader roll
-        // stays), but the mob is not persistent.
-        let id = self.spawn_mob(kind, at, true, site)?;
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            m.persistent = false;
+        // Dragons have a separate entity implementation, but eggs use the same spawn path.
+        if matches!(kind, "ender_dragon" | "minecraft:ender_dragon") {
+            return self.spawn_dragon_spawned(at, site);
         }
-        Some(id)
+        // The spawn is not a natural one (no jockeys, the patrol leader roll
+        // stays), but the mob is not persistent: vanilla's SummonCommand
+        // never calls setPersistenceRequired. The flag is false from the
+        // start, before the mob joins the level, so a mod's own write in the
+        // entity_join hook survives it - clearing it after the join would
+        // wipe what the hook set (Mob.setPersistenceRequired from
+        // entity_join_level).
+        self.spawn_mob(kind, at, false, site)
     }
     fn create_mob_reason(
         &mut self,
@@ -1041,14 +1046,29 @@ impl Game<'_> {
         reason: SpawnReason,
         spawner: Option<mod_api::NativeSpawner>,
     ) -> (Finalized, spawning::LocalDifficulty) {
-        let at = [mob.position.x, mob.position.y, mob.position.z];
+        self.finalize_spawn_at(
+            &mob.kind.id,
+            [mob.position.x, mob.position.y, mob.position.z],
+            reason,
+            spawner,
+        )
+    }
+    /// The shared finalization decision for a mob type, including the separately
+    /// stored dragon, before the entity joins the level.
+    pub(super) fn finalize_spawn_at(
+        &self,
+        kind: &str,
+        at: [f64; 3],
+        reason: SpawnReason,
+        spawner: Option<mod_api::NativeSpawner>,
+    ) -> (Finalized, spawning::LocalDifficulty) {
         let mut difficulty = self.local_difficulty(at);
         if mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
             let mut heard = mod_api::NativeDifficulty::from(difficulty);
             let (mut spawn_cancelled, mut skip) = (false, false);
             self.native_finalize_spawn(mod_api::__private::FinalizeSpawnCall {
                 dimension: self.dim.id(),
-                kind: &mob.kind.id,
+                kind,
                 reason,
                 pos: at,
                 spawner,
@@ -2480,10 +2500,22 @@ impl Game<'_> {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
                     self.post_game_event(event, at, ctx);
                 }
-                // Armadillo.rollUp/rollOut: `gameEvent(ENTITY_ACTION)`.
+                // A mob's own `gameEvent(..)` calls: Armadillo.rollUp/rollOut's
+                // ENTITY_ACTION, Creeper.tick's PRIME_FUSE, Mob.ate's EAT, the
+                // shulker's lid (Shulker.setRawPeekAmount), an evoker's vexes
+                // (ENTITY_PLACE).
                 MobEvent::GameEvent {
                     event, at, source, ..
-                } if event == "minecraft:entity_action" => {
+                } if matches!(
+                    event,
+                    "minecraft:entity_action"
+                        | "minecraft:prime_fuse"
+                        | "minecraft:eat"
+                        | "minecraft:container_open"
+                        | "minecraft:container_close"
+                        | "minecraft:entity_place"
+                ) =>
+                {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
                     self.post_game_event(event, at, ctx);
                 }
@@ -3392,9 +3424,12 @@ impl Game<'_> {
                         horizon_client::mobs::happy_ghast::notify_leash_holder(m);
                     }
                 }
-                MobEvent::Vibration { from, to, ticks } => {
-                    self.mob_vibration_particle(from, to, ticks)
-                }
+                MobEvent::Vibration {
+                    from,
+                    to,
+                    ticks,
+                    source,
+                } => self.mob_vibration_particle(source, from, to, ticks),
                 MobEvent::DigParticles { at } => self.warden_dig_particles(at),
                 MobEvent::BlockBreakEffect { pos, block } => {
                     // Turtle.aiStep broadcasts LevelEvent 2001, not the
@@ -5184,7 +5219,7 @@ impl Game<'_> {
         }
         let atp = [at.x, at.y, at.z];
         // Projectile.onHit: the landing is heard.
-        self.projectile_event("minecraft:projectile_land", p.owner, atp);
+        self.projectile_landed_event(p.id, p.owner, atp);
         let source_kind = match p.kind {
             ProjectileKind::Arrow { .. } | ProjectileKind::Trident => DamageKind::Arrow,
             ProjectileKind::SmallFireball | ProjectileKind::LargeFireball { .. } => {
