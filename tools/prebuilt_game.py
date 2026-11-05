@@ -38,6 +38,8 @@ NATIVE = "native"
 NATIVE_SUFFIXES = (".a", ".lib")
 # The game's injection points, listed by the staging pass: the launcher routes mods' point injections by it.
 POINTS = "points.json"
+# The staged internals signatures, checked against a mod's declared access list.
+INTERNALS = "internals.json"
 
 
 def run(command: list[str], **kwargs) -> str:
@@ -60,7 +62,7 @@ def rustc_host() -> str:
 
 def stage(target_dir: Path) -> Path:
     """A copy of the tracked source with the staging pass run over it (#589): every point method gets its
-    `#[point]`, and the copy's `points.json` lists them. The working tree is never rewritten."""
+    `#[point]`, internals become public, and both manifests are written. The working tree is never rewritten."""
     staged = target_dir / "stage"
     if staged.exists():
         shutil.rmtree(staged)
@@ -71,7 +73,7 @@ def stage(target_dir: Path) -> Path:
             (staged / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, staged / name)
     print(run(["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage",
-               "--", str(staged), str(staged / POINTS)],
+               "--", str(staged), str(staged / POINTS), str(staged / INTERNALS)],
               cwd=staged, env={**os.environ, "CARGO_TARGET_DIR": str(target_dir / "tools")}), end="")
     return staged
 
@@ -120,7 +122,8 @@ def build(out: Path, server: bool) -> None:
         if source is not None:
             shutil.copy2(source, out / name)
     game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
-    shutil.copy2(staged / POINTS, out / POINTS)
+    for manifest in (POINTS, INTERNALS):
+        shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
     link_args = [line[len(LINK_ARG):] for line in output.read_text().splitlines() if line.startswith(LINK_ARG)]
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
@@ -148,7 +151,7 @@ def check(out: Path) -> None:
     """Only compiler outputs: a stray asset, vanilla file or anything else fails the build."""
     stray = [
         path for path in out.rglob("*")
-        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name == POINTS))
+        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS)))
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
         and not (path.parent == out / NATIVE and path.name.endswith(NATIVE_SUFFIXES))
     ]

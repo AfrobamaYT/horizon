@@ -1713,6 +1713,7 @@ fn pipeline(
         ])
         .arg(&fresh)
         .arg(&listed)
+        .arg(real.join("internals.json"))
         .env("CARGO_TARGET_DIR", real.join("target"));
         run(pass, "Marking the game's injection points", |_| {})?;
         inject::check(&point_injections, &inject::listed(&listed)?).map_err(|e| e.to_string())?;
