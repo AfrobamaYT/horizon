@@ -1001,7 +1001,7 @@ impl Game<'_> {
                         Ok((v * scale) as i32)
                     }
                     "attribute.base.set" => {
-                        self.write_attribute(target, &attribute, AttributeWrite::Base(value_arg))
+                        self.write_attribute(target, attribute, AttributeWrite::Base(value_arg))
                             .ok_or_else(|| no_attribute(&name, &description))?;
                         // onAttributeUpdated: a lowered max_health clamps health.
                         if attribute == "minecraft:max_health"
@@ -1016,7 +1016,7 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.base.reset" => {
-                        self.write_attribute(target, &attribute, AttributeWrite::ResetBase)
+                        self.write_attribute(target, attribute, AttributeWrite::ResetBase)
                             .ok_or_else(|| no_attribute(&name, &description))?;
                         let v = self
                             .player
@@ -1043,7 +1043,7 @@ impl Game<'_> {
                             true,
                             false,
                         )
-                        .and_then(|write| self.write_attribute(target, &attribute, write))
+                        .and_then(|write| self.write_attribute(target, attribute, write))
                         .ok_or_else(|| no_attribute(&name, &description))?;
                         if !added {
                             return Err(text_error(
@@ -1064,7 +1064,7 @@ impl Game<'_> {
                     "attribute.modifier.remove" => {
                         let removed = self.write_attribute(
                             target,
-                            &attribute,
+                            attribute,
                             AttributeWrite::Remove(modifier_id.clone()),
                         );
                         if removed != Some(true) {
@@ -1179,7 +1179,7 @@ impl Game<'_> {
                     "attribute.base.set" => {
                         // AttributeInstance keeps the raw base and clamps only the
                         // effective value.
-                        self.write_attribute(target, &attribute, AttributeWrite::Base(value_arg));
+                        self.write_attribute(target, attribute, AttributeWrite::Base(value_arg));
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
                             &[description, name, java_double_text(value_arg)],
@@ -1187,7 +1187,7 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.base.reset" => {
-                        self.write_attribute(target, &attribute, AttributeWrite::ResetBase);
+                        self.write_attribute(target, attribute, AttributeWrite::ResetBase);
                         let v = self
                             .mobs
                             .iter()
@@ -1207,7 +1207,7 @@ impl Game<'_> {
                             true,
                             false,
                         )
-                        .and_then(|write| self.write_attribute(target, &attribute, write));
+                        .and_then(|write| self.write_attribute(target, attribute, write));
                         if added != Some(true) {
                             return Err(text_error(
                                 "commands.attribute.failed.modifier_already_present",
@@ -1223,7 +1223,7 @@ impl Game<'_> {
                     "attribute.modifier.remove" => {
                         let removed = self.write_attribute(
                             target,
-                            &attribute,
+                            attribute,
                             AttributeWrite::Remove(modifier_id.clone()),
                         );
                         if removed != Some(true) {
