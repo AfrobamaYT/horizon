@@ -671,10 +671,13 @@ pub(super) fn mob_meta(
             serializer::OPTIONAL_COMPONENT,
             Value::OptText(Some(horizon_protocol::text::literal(name))),
         ));
-        if m.name_visible {
-            meta.push((3, serializer::BOOLEAN, Value::Bool(true)));
-        }
     }
+    if m.name_visible {
+        meta.push((3, serializer::BOOLEAN, Value::Bool(true)));
+    }
+    // A name taken away or hidden again is sent as none / false.
+    defaults.push((2, serializer::OPTIONAL_COMPONENT, Value::OptText(None)));
+    defaults.push((3, serializer::BOOLEAN, Value::Bool(false)));
     // LivingEntity.DATA_LIVING_ENTITY_FLAGS: using an item 1, in the off
     // hand 2 (a skeleton draws its bow, a witch raises her potion).
     let using = i8::from(m.extra.using_item > 0) | i8::from(m.extra.using_off_hand) << 1;
@@ -4166,6 +4169,50 @@ mod tests {
             meta.contains(&(16, serializer::BOOLEAN, Value::Bool(true))),
             "{meta:?}"
         );
+    }
+
+    /// A mod's custom name and its visibility reach the tracking players
+    /// (`Entity.DATA_CUSTOM_NAME`, `DATA_CUSTOM_NAME_VISIBLE`), and taking
+    /// them away is sent as none / false.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mods_custom_name_and_its_visibility_are_sent() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let at = horizon_core::geometry::Vec3::new(0.5, 70.0, 0.5);
+            game.mobs.push(Mob::new(12, kind, at, 0.0));
+            let mob = game.native_entity(12).unwrap();
+            let hub = meta_hub("CustomNameMetaTest");
+            let meta_of = |game: &super::super::Game<'_>| {
+                let m = game.mobs.iter().find(|m| m.id == 12).unwrap();
+                let (mut meta, mut defaults) = (Vec::new(), Vec::new());
+                super::mob_meta(m, &hub, None, 0, &mut meta, &mut defaults);
+                (meta, defaults)
+            };
+            assert!(
+                mob.set_custom_name(game, Some(horizon_client::text::Text::literal("Grumbles")))
+            );
+            assert!(mob.set_custom_name_visible(game, true));
+            let (meta, _) = meta_of(game);
+            let sent = horizon_protocol::text::literal("Grumbles");
+            assert!(meta.contains(&(
+                2,
+                serializer::OPTIONAL_COMPONENT,
+                Value::OptText(Some(sent))
+            )));
+            assert!(meta.contains(&(3, serializer::BOOLEAN, Value::Bool(true))));
+            assert!(mob.set_custom_name(game, None));
+            assert!(mob.set_custom_name_visible(game, false));
+            let (meta, defaults) = meta_of(game);
+            assert!(meta.iter().all(|e| e.0 != 2 && e.0 != 3), "{meta:?}");
+            assert!(defaults.contains(&(2, serializer::OPTIONAL_COMPONENT, Value::OptText(None))));
+            assert!(defaults.contains(&(3, serializer::BOOLEAN, Value::Bool(false))));
+        });
     }
 
     /// A content mod's living type sends the entity data of its template's

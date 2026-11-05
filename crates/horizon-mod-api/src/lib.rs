@@ -2630,6 +2630,30 @@ pub enum NativeRemovalReason {
     Discarded,
 }
 
+/// The category of an entity's type (`MobCategory`, `EntityType.getCategory`):
+/// what natural spawning counts it as. Every kind that isn't a mob is `Misc`,
+/// except the ender dragon, a `Monster`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MobCategory {
+    /// `MONSTER`.
+    Monster,
+    /// `CREATURE`.
+    Creature,
+    /// `AMBIENT`.
+    Ambient,
+    /// `AXOLOTLS`.
+    Axolotls,
+    /// `UNDERGROUND_WATER_CREATURE`.
+    UndergroundWaterCreature,
+    /// `WATER_CREATURE`.
+    WaterCreature,
+    /// `WATER_AMBIENT`.
+    WaterAmbient,
+    /// `MISC`.
+    Misc,
+}
+
 /// Why a mob spawns (`EntitySpawnReason`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

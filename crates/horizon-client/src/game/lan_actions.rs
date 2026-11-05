@@ -130,7 +130,7 @@ pub(super) struct GuestPlay {
     pub(super) won_game: bool,
     pub(super) respawn_requested: bool,
     /// `Player.takeXpDelay`: ticks until the next orb can be taken.
-    xp_delay: u32,
+    pub(super) xp_delay: u32,
     /// This player entity's age and level-up sound cooldown.
     level_up_sound: horizon_client::entities::LevelUpSound,
     /// What last killed the guest outright (`/kill`): the death message's key.
@@ -215,6 +215,8 @@ pub(super) struct GuestSwap {
     pub(super) shield_cooldown: u32,
     /// The guest's item cooldowns (`Game::cooldowns` for its turn).
     cooldowns: horizon_client::cooldowns::Cooldowns,
+    /// The guest's `takeXpDelay` (`Game::xp_delay` for its turn).
+    xp_delay: u32,
     attack_ticks: u32,
     attack_item: Option<std::sync::Arc<str>>,
     swing: horizon_client::first_person::SwingState,
@@ -406,7 +408,7 @@ impl Game<'_> {
     }
 
     /// Where guest `conn` is in the hub's list.
-    fn guest_index(&self, conn: u32) -> Option<usize> {
+    pub(super) fn guest_index(&self, conn: u32) -> Option<usize> {
         self.lan
             .as_ref()?
             .hub
@@ -651,6 +653,7 @@ impl Game<'_> {
         let use_delay = std::mem::replace(&mut self.use_delay, play.use_delay);
         let shield_cooldown = std::mem::replace(&mut self.shield_cooldown, play.shield_cooldown);
         let cooldowns = std::mem::replace(&mut self.cooldowns, std::mem::take(&mut play.cooldowns));
+        let xp_delay = std::mem::replace(&mut self.xp_delay, play.xp_delay);
         let attack_ticks = std::mem::replace(&mut self.attack_ticks, play.attack_ticks);
         let attack_item = std::mem::replace(&mut self.attack_item, play.attack_item.take());
         let swing = std::mem::replace(&mut self.swing, play.swing);
@@ -794,6 +797,7 @@ impl Game<'_> {
             use_delay,
             shield_cooldown,
             cooldowns,
+            xp_delay,
             attack_ticks,
             attack_item,
             swing,
@@ -910,6 +914,7 @@ impl Game<'_> {
             use_delay,
             shield_cooldown,
             cooldowns,
+            xp_delay,
             attack_ticks,
             attack_item,
             swing,
@@ -1080,6 +1085,7 @@ impl Game<'_> {
         play.use_delay = std::mem::replace(&mut self.use_delay, use_delay);
         play.shield_cooldown = std::mem::replace(&mut self.shield_cooldown, shield_cooldown);
         play.cooldowns = std::mem::replace(&mut self.cooldowns, cooldowns);
+        play.xp_delay = std::mem::replace(&mut self.xp_delay, xp_delay);
         play.attack_ticks = std::mem::replace(&mut self.attack_ticks, attack_ticks);
         play.attack_item = std::mem::replace(&mut self.attack_item, attack_item);
         play.swing = std::mem::replace(&mut self.swing, swing);
@@ -1214,6 +1220,10 @@ impl Game<'_> {
                 g.sprinting = false;
             }
             m.sprinting = false;
+            // The acting body's glide flag is authoritative for this turn.
+            // In a nested turn this is the inner guest, never the suspended
+            // outer actor whose body the swap restores above.
+            g.fall_flying = m.fall_flying;
             // ServerPlayer.indicateDamage: the hit's direction to the player.
             if let Some(yaw) = m.health.indicated_dir.take() {
                 g.send(&C::HurtAnimation(play::HurtAnimation {
@@ -1252,21 +1262,6 @@ impl Game<'_> {
             }
         }
         let g = &mut host.hub.guests[i];
-        if let Some(head) = g.bed.filter(|_| fell_asleep) {
-            // LivingEntity.startSleeping: in the bed, still.
-            let at = [
-                f64::from(head[0]) + 0.5,
-                // setPosToBed: the bed's top (getSleepHeight) and 0.125 above it.
-                f64::from(head[1]) + 0.5625 + 0.125,
-                f64::from(head[2]) + 0.5,
-            ];
-            g.position = at;
-            g.previous_position = at;
-            if let Some(m) = g.motion.as_mut() {
-                m.position = Vec3::new(at[0], at[1], at[2]);
-                m.velocity = Vec3::ZERO;
-            }
-        }
         if new_mode != g.game_mode {
             let conn = g.conn;
             host.hub
@@ -1449,10 +1444,32 @@ impl Game<'_> {
         if pos.1 == super::minecarts::CART_KEY_Y {
             return self.lan_open_vehicle_container(conn, pos);
         }
-        !matches!(self.open_block_menu(conn, pos), MenuOpen::Refused)
+        let opened = self.open_block_menu_with_opener(conn, pos, true);
+        if opened == MenuOpen::Cancelled
+            && self
+                .lan
+                .as_ref()
+                .and_then(|host| host.hub.guest(conn))
+                .is_some_and(|guest| !guest.spectator())
+        {
+            // The click is spent, but no menu took ownership of the use's opener.
+            self.container_openers_changed(pos, false);
+        }
+        !matches!(opened, MenuOpen::Refused)
     }
 
     pub(super) fn open_block_menu(&mut self, conn: u32, pos: (i32, i32, i32)) -> MenuOpen {
+        self.open_block_menu_with_opener(conn, pos, false)
+    }
+
+    /// A use handed over from `open_menu` already started its opener; a direct
+    /// `BlockEntityRef::open_menu` must start it after its checks succeed.
+    fn open_block_menu_with_opener(
+        &mut self,
+        conn: u32,
+        pos: (i32, i32, i32),
+        opener_started: bool,
+    ) -> MenuOpen {
         let name = &self
             .res
             .facts()
@@ -1611,9 +1628,10 @@ impl Game<'_> {
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(conn);
-        // A block's or a double chest's menu counts among the openers of its
-        // lid (a vehicle keeps its own `Container`, an ender chest has none).
-        let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
+        // A hand-off from `open_menu` must not count one player twice. A direct
+        // handle open has no earlier `startOpen`; only it starts the block's lid.
+        let counts_openers =
+            !opener_started && matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
         // A mod menu type's block tells the client where it is, with what its
         // mod writes (`openMenu` with an extra-data writer); a stock menu
@@ -1643,16 +1661,9 @@ impl Game<'_> {
         if !hidden.is_empty() {
             host.hub.hide_menu_slots(conn, hidden);
         }
-        // `ContainerOpenersCounter.incrementOpeners` (`ChestBlockEntity.startOpen`,
-        // `ShulkerBoxBlockEntity.startOpen`): the lid opens for the guest, and
-        // when this is the first opener the open sound plays for everyone
-        // around, the opener included (`playSound(null, …)`, which the capture
-        // relay sends on to the guests). Without it the host's copy never
-        // learned of the open, so a guest's box opened silently.
-        // A spectator never joins the openers (`startOpen` returns on
-        // `player.isSpectator()`): its menu opens but the lid stays shut, no
-        // sound plays, and `stopOpen` has nothing to decrement, which is why
-        // the count must not be raised here either (#8517).
+        // `ContainerOpenersCounter.incrementOpeners`: a direct handle open
+        // starts the lid once, sounding on its first opener. A spectator's
+        // `startOpen` does nothing, so its close must have nothing to decrement.
         if counts_openers && !spectator && self.container_openers_changed(pos, true) {
             self.container_edge_sound(pos, true);
         }
@@ -1935,7 +1946,7 @@ impl Game<'_> {
                 .and_then(|host| host.hub.guest(conn))
                 .is_some_and(|g| g.spectator());
             let ctx = horizon_client::sculk::Context {
-                source: Some(horizon_client::mobs::Who::Player),
+                source: Some(horizon_client::mobs::Who::Player.into()),
                 spectator: spect,
                 targetable: !spect,
                 living: true,
@@ -6919,6 +6930,99 @@ fn copied_respawn_point(has_config: bool, spawn: Option<[f64; 3]>) -> Option<Opt
 mod tests {
     use super::{copied_respawn_point, eye_columns};
     use horizon_client::pose::Pose;
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn block_menu_handle_and_use_each_count_the_guest_once() {
+        use horizon_client::chunk::Chunk;
+        use mod_api::NativeBlockUpdateFlags;
+        use std::sync::Arc;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            let pos = (0, 64, 0);
+            assert!(game.native_level_set_block(
+                level,
+                [pos.0, pos.1, pos.2],
+                chest,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            // A handle starts here, without an earlier use's `open_menu`.
+            assert_eq!(game.open_block_menu(12, pos), super::MenuOpen::Opened);
+            assert_eq!(game.lid_openers.get(&pos), Some(&1));
+            game.guest_close_all(12);
+            assert!(!game.lid_openers.contains_key(&pos));
+            // A block use starts before leaving the guest turn; its hand-off
+            // must not start the same opener a second time.
+            assert!(
+                game.as_guest(12, |game| game.open_menu([pos.0, pos.1, pos.2]))
+                    .is_some()
+            );
+            assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
+            assert_eq!(game.lid_openers.get(&pos), Some(&1));
+            game.guest_close_all(12);
+            assert!(!game.lid_openers.contains_key(&pos));
+            struct StopMenu;
+            #[mod_api::__subscriptions]
+            impl mod_api::Hooks for StopMenu {
+                fn container_opened(
+                    &self,
+                    _: &mut dyn mod_api::ServerHost,
+                    _: &mut mod_api::ContainerOpenedEvent<'_>,
+                ) -> mod_api::Flow {
+                    mod_api::Flow::Cancel
+                }
+            }
+            mod_api::testing::with_mods(
+                vec![mod_api::ModEntry::new("stop_menu", Box::new(StopMenu))].into(),
+                || {
+                    assert!(
+                        game.as_guest(12, |game| game.open_menu([pos.0, pos.1, pos.2]))
+                            .is_some()
+                    );
+                    assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
+                    assert!(!game.lid_openers.contains_key(&pos));
+                },
+            );
+            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 3;
+            assert_eq!(game.open_block_menu(12, pos), super::MenuOpen::Opened);
+            assert!(!game.lid_openers.contains_key(&pos));
+            game.guest_close_all(12);
+            assert!(!game.lid_openers.contains_key(&pos));
+            // The incoming double-count bug kept a shulker open after its last close.
+            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 0;
+            let shulker = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:shulker_box")
+                .unwrap();
+            let at = [pos.0, pos.1, pos.2];
+            assert!(game.native_level_set_block(
+                level,
+                at,
+                shulker,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            assert!(game.as_guest(12, |game| game.open_menu(at)).is_some());
+            assert_eq!(game.be_anims.shulkers[&at].open_count, 1);
+            game.guest_close_all(12);
+            assert_eq!(game.be_anims.shulkers[&at].open_count, 0);
+            assert_eq!(game.open_block_menu(12, pos), super::MenuOpen::Opened);
+            assert_eq!(game.be_anims.shulkers[&at].open_count, 1);
+            game.guest_close_all(12);
+            assert_eq!(game.be_anims.shulkers[&at].open_count, 0);
+        });
+    }
 
     #[test]
     #[ignore = "requires prepared game resources"]

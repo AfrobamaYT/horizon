@@ -19,7 +19,7 @@ Level: preview ([API stability](../../../api/stability.md)). Schema 1.
   "projects": [{
     "id": "coords_hud", "kind": "mod", "name": "Coordinates HUD", "summary": "One line.",
     "description": "Markdown.", "authors": ["Horizon"], "owners": ["ludovic111"],
-    "license": "MIT", "source": "https://github.com/...", "icon": "https://...png", "key": "RWT...", "downloads": 1234,
+    "license": "MIT", "source": "https://github.com/...", "icon": "https://...png", "key": "RWT...", "downloads": 1234, "stars": 56,
     "categories": ["utility"], "tags": ["hud"], "screenshots": ["https://...png"],
     "versions": [{
       "version": "0.1.0", "published": "2026-10-24", "changelog": "",
@@ -47,6 +47,7 @@ Level: preview ([API stability](../../../api/stability.md)). Schema 1.
 | `key` | The author's [minisign](https://jedisct1.github.io/minisign/) public key. When set, every version must be signed with it; an update signed with another key is refused. Absent: the project is unsigned and the launcher says so. |
 | `versions` | Newest first, at least one. |
 | `downloads` | How many times its files were downloaded, every version together: GitHub's count of each release asset, summed by the publish job, which runs every hour. Absent until a file is downloaded. Read-only: never in an entry. |
+| `stars` | GitHub stars of the project's source repository, refreshed by the publish job every hour. Absent when zero or the source is not on GitHub. Read-only: never in an entry. The launcher shows the count and a button that opens the repository. |
 | `api` | A mod's API line (its manifest's `api`); a native mod's pinned revisions (`native-1/<horizon>/<mixins>`); a modpack's manifest format (`1`). |
 | `side`, `capabilities` | A mod's, read from its manifest by CI, never typed by hand. |
 | `game` | The Minecraft version it is for. |
@@ -183,6 +184,8 @@ Unknown keys in an entry are refused. Its CI runs `cargo-horizon-mod` (`crates/c
 
 | Command | What it does |
 | --- | --- |
+| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to `[native].internals` in the current mod's `horizon-mod.toml`. Reads the pinned prebuilt game's `internals.json`; unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
+| `cargo horizon-mod update [--horizon <commit>]` | Moves the native game's pin and its mod API and internals dependencies' `rev` to the newest prebuilt release (or the exact commit given). For every declared internal, prints `missing`, `changed` (old signature → new signature), or `unchanged`, then refreshes the hashes still available. Missing or now-gated declarations keep their old hash and must be removed or replaced before building. |
 | `cargo horizon-mod check <file> [--json]` | A submission's checks: its kind's (above) and its signature with `--key` and `--signature`. It runs no mod's code: a native mod's source is read by the reviewers when it is listed. |
 | `cargo horizon-mod registry check <base> <head> --files <dir>` | `check` on each hosted file `head` lists and `base` doesn't: a pull request's new files. |
 | `cargo horizon-mod registry list <checkout>` | `<sha256> <id> <version> <file>` per hosted version: the files to download. |
@@ -190,6 +193,22 @@ Unknown keys in an entry are refused. Its CI runs `cargo-horizon-mod` (`crates/c
 | `cargo horizon-mod registry release <checkout> <id> <file> --tag T --published D [--notes F] [--signature F] [--game G]` | The checks of a submission, then the version a release of the project's repository is, as the index lists it (JSON). |
 | `cargo horizon-mod registry page <checkout> <id> <horizon-registry.toml>` | The repository's page file, checked against its entry (JSON). |
 | `cargo horizon-mod registry review <base> <head> --author <login>` | A pull request's changes: a published file never changes and is never removed (take it down in `revoked.toml`), a kind never changes; changes by a non-owner and to owners, keys or the repository are pointed out for the reviewers. |
+
+The two native-mod commands run in the mod's project folder and preserve the manifest's comments and
+layout. They download the same prebuilt archive layout as the launcher, check its `SHA256SUMS`, and
+read only `internals.json`; no game or mod code is run. Catalogs are kept by commit in
+`target/horizon-mod/prebuilt/`, so `update` can still show the old signatures after that release expires.
+If a needed catalog is neither cached nor downloadable, the command fails without changing the pin
+or declarations. A mod with no declared internals needs no catalogs to update. Quote paths containing
+Rust lifetimes or other shell metacharacters, for example:
+
+```sh
+cargo horizon-mod internals add 'horizon_client::game::Game' "horizon_client::game::maps::Game<'_>::dimension_id"
+cargo horizon-mod update
+```
+
+[Declared internals and raw listeners](../injections.md#raw-listeners-and-declared-internals)
+explain when to use this escape hatch instead of the typed mod API.
 
 How the repository runs (its workflows are in `.github/workflows/`):
 
@@ -213,6 +232,7 @@ API line are its facts. A new kind gets its own check before it opens.
 
 ## Changelog
 
+- 2026-11-05: `projects[].stars` adds the GitHub source repository's star count without changing schema 1.
 - 2026-11-05: every listed project needs a description of 50 characters or more, 1 to 3 categories and an icon kept in the registry (`icons/<id>.png`); screenshots are kept in the registry too (`registry build` refuses https:// images in entries).
 - 2026-10-30: an entry names its GitHub repository (`repo`) and its versions are the repository's releases, read by the registry's CI; `file.url` may be a release asset of that repository. The index's schema is unchanged.
 - 2026-10-26: `projects[].downloads`, GitHub's download counts of a project's files, refreshed every hour.

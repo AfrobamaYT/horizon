@@ -270,6 +270,17 @@ requires a farmer at work and `mob_griefing` enabled.
   draws replaces all the rows — armour, hearts, food, air and the heights above the hotbar — for that
   frame. Nothing answered draws Horizon's own.
 
+- Which hearts the player's health bar draws through `native_player_heart_type` (NeoForge's `PlayerHeartTypeEvent`):
+  each frame the HUD draws the hearts, `kind` comes in as vanilla's pick (poisoned, withered, frozen or normal) and a mod
+  may set another. It runs before `native_health_hud`, whose `inputs.kind` carries the answer; only the heart sprites
+  change.
+
+- Where the in-game chat is drawn through `native_customize_chat_overlay` (NeoForge's `CustomizeGuiOverlayEvent.Chat`):
+  each frame the chat layer draws, `x` and `y` come in as the chat's bottom-left corner (0 and the GUI height minus 40)
+  with the GUI size and whether the chat screen is open, and the chat is drawn shifted to where a mod moved them. Not
+  asked while the chat is hidden (F1 with the chat closed). Only the drawing moves; the input box and clicks on
+  messages stay in vanilla's place, as with NeoForge.
+
 - Right-clicking an entity, on the server for every player: `native_entity_interact` hears a right click on
   an entity (its id and type, and the stack in the hand) where `Player.interactOn` starts, once per hand. A mod that claims
   it swings the hand instead of the entity's and the item's own interaction.
@@ -790,7 +801,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - Redstone signals as a block reads them, on a level handle (`LevelRef`) on a server, through the game's own `SignalGetter`, mods' `block_signal` and `should_check_weak_power` parts included: `level.signal(host, pos, direction)` (`getSignal`, how strongly the block at `pos` powers its neighbour on the `direction` side, conducted power included), `level.direct_signal(host, pos, direction)` (`getDirectSignal`, the strong power alone), `level.direct_signal_to(host, pos)` (`getDirectSignalTo`), `level.best_neighbor_signal(host, pos)` (`getBestNeighborSignal`, the strongest power reaching `pos`, as a dispenser or a piston reads it) and `level.has_neighbor_signal(host, pos)` (`hasNeighborSignal`, stopping at the first powered side). Each costs what the game's own call does. They take `&mut dyn ServerHost`, not `&dyn Host`: the signal path asks mods' parts, which get the level as their host, and only a write borrow of the game builds it. They read the level in place: None (or false) for another level, a stale handle or a client.
 
-- `level.weather(host)` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `level.height(host)` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light and `level.is_raining_at(host, pos)` for rain at a position: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
+- `level.weather(host)` (rain and thunder levels, 0 in the Nether and the End), `level.day_time(host)` (the time of day), `level.height(host)` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light and `level.is_raining_at(host, pos)` for rain at a position: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
 
 - Giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
   the player's [`ENTITY_ITEMS`](../concepts/trait-mods.md#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
@@ -1120,7 +1131,7 @@ registration path.
 
 - The preedit hooks (`native_screen_preedit_pre`, `native_screen_preedit_post`) are NeoForge's `ScreenEvent.Preedit.Pre` and `.Post`, fired from the window's input method preedit event while a screen is open. Pre cancel bypasses the screen's handler and Post. Horizon's handler is the focused text field taking the composition, and its real result is what gates Post: Post fires only when no text field took the preedit (no constant). An empty `full_text` is a composition that ended. Nothing fires with no subscriber.
 - `native_screen_render_inventory_mob_effects` is `ScreenEvent.RenderInventoryMobEffects`: once a frame in the survival and creative inventories' effect panels, after vanilla's early-outs (no effects, or under 32 GUI pixels free), with `available_space`, `compact` (vanilla's default is under 120) and `horizontal_offset` to change, and cancel to draw nothing. The exclusion areas (`native_screen_exclusion_areas`) follow the layout the last frame drew, so they lag a frame behind a change; no subscriber leaves vanilla's layout.
-- `native_gather_effect_screen_tooltips` is `GatherEffectScreenTooltipsEvent`: the tooltip of the effect panel under the cursor beside the survival and creative inventories, only where vanilla shows one (a compact panel, or a name cut short). `tooltip` starts as the full name then the duration; add, change, reorder or remove lines, and an empty list draws nothing. `effect` is the panel's effect (a `NativeActiveEffect`). It is separate from `native_screen_render_inventory_mob_effects`, which picks the layout. Nothing is built with no subscriber.
+- `native_gather_effect_screen_tooltips` is `GatherEffectScreenTooltipsEvent`: fires for every hovered rendered effect panel beside the survival and creative inventories. `tooltip` starts empty when the panel's information is fully visible, or as the full name then duration for a compact panel or a name cut short. A listener can add a tooltip where vanilla has none, or change, reorder or remove lines; an empty list draws nothing. `effect` is the panel's effect (a `NativeActiveEffect`). It is separate from `native_screen_render_inventory_mob_effects`, which picks the layout; hidden panels never dispatch. Screen and effect metadata are built only with a subscriber.
 
 - `native_mod_container_viewers(dimension, pos, viewers, previous)` is heard once each time the number of players with the mod container at `pos` open changes (vanilla's `ContainerOpenersCounter`, as a barrel keeps it): `previous` 0 is `onOpen`, `viewers` 0 is `onClose`, so a block can show itself open while `viewers` is not 0. It is counted every tick from the players' open menus, so a player who leaves without closing (a lost connection, death, another dimension, out of reach, the block gone) is heard too. On a server, with no player's state swapped in.
 
@@ -2267,6 +2278,9 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `entity.name(host)`: the synced custom name or type name, and a player's profile name, from either side's host.
 - `level.block_state(host, pos)`, `block`, `block_property` and `is_loaded`: blocks of the chunks the client holds.
   A chunk it doesn't hold reads as unloaded; no read loads one.
+- `level.day_time(host)`: the synchronized Overworld clock in ticks (counting past 24000), advanced at the
+  server-supplied rate while the client level runs. This remains the Overworld clock in the End, even though
+  the sky uses the End's own default clock. Only a handle for the level the client shows can read it.
 - `living.equipment(host, slot)`, `hand_item`, `effect`, `effects`, `health` and `max_health`, for the local player.
   Another entity's equipment, effects and health stay server reads, and so does every write.
 - `player.last_death_location(host)`, for the local player: the position the login and respawn packets carried.
@@ -2312,7 +2326,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
   weather. A server can read any open level, including parked levels; a client reads only its current synchronized
   level after login. Stale handles and unavailable levels return `None`; the read never loads a level.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
-  `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `is_raining` and `is_thundering` read its server settings.
+  `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `game_rules` (every rule as a `minecraft:` id and its
+  value), `is_raining` and `is_thundering` read its server settings.
   `level.is_raining_at(host, pos)` (`Level.isRainingAt`) asks about one position of any open level: it rains there, the
   position has full sky light with nothing motion-blocking or fluid above it, and its biome's precipitation at that
   height is rain (not snow or none). It is `None` where the block read is, an unloaded chunk or a `y` outside the
@@ -2404,8 +2419,10 @@ handle, an entity the client doesn't track and a level it doesn't show:
   limitation of the hooks themselves, unchanged here. Armor stands and the dragon keep no effects, as `/effect` skips them:
   `effects` and `effect` read `None` for them and their writes return false. On a client,
   `living.effect_blend_factor(host, key, partial)` (`getEffectBlendFactor`) reads how far the local player's effect has
-  faded in, from 0 to 1 at the partial tick: darkness fades over 22 ticks, nausea in over 150 and out over 20, any other
-  effect reads 1 while it lasts and a missing one 0. The client keeps no other entity's effects, so they read `None`.
+  faded in at the partial tick: darkness fades over 22 ticks and nausea in over 150 and out over 20. Other effects start
+  at 0 after a blended addition and interpolate to their post-countdown target each client tick (1 while active, 0 once
+  expired). An unblended addition starts at its target immediately; a replacement packet preserves the old blend.
+  Partial ticks are not clamped. A missing effect reads 0. The client keeps no other entity's effects, so they read `None`.
 - `host.projectile(entity)` gives a `ProjectileRef` for a projectile in the level's projectile list (arrows, a mob's
   trident, thrown items, fireballs, wind charges, skulls, shulker bullets, mods' thrown types), a trident a player
   threw or a firework rocket; `projectile.entity()` goes back. A player's trident and a rocket have an owner and a
@@ -2431,6 +2448,13 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
   do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
   `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
+  `set_custom_name(host, Some(text))` names it and `None` takes the name away (`Entity.setCustomName`);
+  `custom_name_visible` and `set_custom_name_visible` read and change whether the name shows at any distance. Both
+  writes are saved and reach the players tracking a mob or an armor stand; they return false for a player and for the
+  kinds whose name Horizon keeps nowhere yet (projectiles, primed TNT, falling blocks, experience orbs, ominous item
+  spawners, the dragon and crystals).
+  `classification` is the type's `MobCategory`, and `added_to_level` is true from when `entity_join_level` let the
+  entity in until it leaves or is removed.
 - `entity.play_sound(host, sound, volume, pitch)` (`Entity.playSound`: at the entity, under its `sound_source`, for the
   players in range; a silent mob plays nothing and a player doesn't hear their own), `game_event(host, event)`
   (`Entity.gameEvent`: the entity is the source of a vibration for sculk sensors, wardens and allays),
