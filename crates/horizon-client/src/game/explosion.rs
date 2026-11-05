@@ -1187,13 +1187,13 @@ impl Game<'_> {
         let mut merged: Vec<Option<NativeItemDrop>> = vec![None; items.len()];
         let mut edited = Vec::new();
         for block in drops.blocks {
-            let originals: Vec<_> = block
+            let mut originals: Vec<_> = block
                 .pieces
-                .iter()
+                .into_iter()
                 .map(|piece| {
                     let mut item = items[piece.group].clone();
                     item.stack.count = piece.count;
-                    item
+                    (piece, item)
                 })
                 .collect();
             let dropped = self.with_level(|_, level, _| {
@@ -1203,13 +1203,12 @@ impl Game<'_> {
                     None,
                     None,
                     super::spill::BlockDrops {
-                        items: originals.clone(),
+                        items: originals.iter().map(|(_, item)| item.clone()).collect(),
                         experience: 0,
                         canceled: false,
                     },
                 )
             });
-            let mut originals: Vec<_> = block.pieces.into_iter().zip(originals).collect();
             for item in dropped.items {
                 if let Some(index) = originals.iter().position(|(_, original)| *original == item) {
                     let (piece, _) = originals.swap_remove(index);
