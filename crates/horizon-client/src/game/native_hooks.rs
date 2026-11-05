@@ -2801,6 +2801,54 @@ impl Game<'_> {
     ) {
         self.fire_client_chat_received(system, overlay, sender, chat_type, message, cancel);
     }
+    /// `ToastAddEvent`: admit one client toast before it enters a visible queue.
+    pub(super) fn native_toast_add(
+        &self,
+        kind: mod_api::ToastKind,
+        title: &mut Text,
+        description: &mut Option<Text>,
+        cancel: &mut bool,
+    ) {
+        self.fire_toast_add(kind, title, description, cancel);
+    }
+
+    /// The single admission point for all toast families. Producers decide the
+    /// candidate first; only an accepted candidate is applied to its queue.
+    pub(super) fn add_toast(
+        &self,
+        kind: mod_api::ToastKind,
+        title: &mut Text,
+        description: &mut Option<Text>,
+    ) -> bool {
+        let mut cancel = false;
+        self.native_toast_add(kind, title, description, &mut cancel);
+        !cancel
+    }
+
+    pub(super) fn add_system_toast(
+        &self,
+        mut toast: horizon_client::toasts::SystemToast,
+    ) -> Option<horizon_client::toasts::SystemToast> {
+        self.add_toast(
+            mod_api::ToastKind::System,
+            &mut toast.title,
+            &mut toast.message,
+        )
+        .then_some(toast)
+    }
+
+    pub(super) fn settle_title_toasts(&mut self) {
+        let pending = self.title.as_mut().and_then(|title| {
+            title.poll_backup();
+            title.take_pending_toast()
+        });
+        if let Some(toast) = pending.and_then(|toast| self.add_system_toast(toast))
+            && let Some(title) = self.title.as_mut()
+        {
+            title.apply_toast(toast);
+        }
+    }
+
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
     pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
         self.fire_client_pause_change_pre(paused, cancel);

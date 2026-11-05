@@ -279,6 +279,7 @@ mod spread_players_teleport;
 mod sweep_attack;
 mod tag_fluid_reads;
 mod teleport_command;
+mod toast_add;
 mod tooltip_color;
 mod transactions;
 mod translate;

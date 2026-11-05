@@ -189,6 +189,22 @@ pub use horizon_core::random::LegacyRandom;
 pub use horizon_core::{
     arm_pose::ArmPose, geometry::Direction, position::BlockPos, random::RandomSource,
 };
+/// The family of a client notification entering the toast queue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ToastKind {
+    /// An advancement completed by the local player.
+    Advancement,
+    /// Newly unlocked recipe displays.
+    Recipe,
+    /// A tutorial hint, including its progress indicator.
+    Tutorial,
+    /// A system notice, such as narrator status, backups or pack downloads.
+    System,
+    /// A toast without one of the above families, including now-playing music.
+    Other,
+}
+
 /// The registry facts a recipe viewer needs for an enchantment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
