@@ -15,6 +15,7 @@ pub enum Resolved {
     Type(u32),
     Thunk(u32),
     Place(usize),
+    Member { owner: u32, field: u32 },
 }
 
 /// Resolves only fingerprinted items; wrappers are reached from checked named types.
@@ -26,44 +27,80 @@ pub fn resolve(
     if declared.is_empty() {
         return Ok(Vec::new());
     }
-    if table.types.is_empty() && table.thunks.is_empty() && table.places.is_empty() {
+    if table.types.is_empty()
+        && table.thunks.is_empty()
+        && table.places.is_empty()
+        && table.members.is_empty()
+    {
         return Err(crate::Refusal::NoInternalsTable);
     }
     declared
         .iter()
         .map(|&(path, hash)| {
-            let found = table
+            let candidates = table
                 .types
                 .iter()
                 .enumerate()
-                .find(|(_, ty)| ty.path == path && !ty.hash.is_empty())
+                .filter(|(_, ty)| ty.path == path && !ty.hash.is_empty())
                 .map(|(i, ty)| (Resolved::Type(i as u32), ty.hash))
-                .or_else(|| {
+                .chain(
                     table
                         .thunks
                         .iter()
                         .enumerate()
-                        .find(|(_, thunk)| thunk.path == path && !thunk.hash.is_empty())
-                        .map(|(i, thunk)| (Resolved::Thunk(i as u32), thunk.hash))
-                })
-                .or_else(|| {
+                        .filter(|(_, thunk)| thunk.path == path && !thunk.hash.is_empty())
+                        .map(|(i, thunk)| (Resolved::Thunk(i as u32), thunk.hash)),
+                )
+                .chain(
+                    table
+                        .members
+                        .iter()
+                        .filter(|member| member.path == path && !member.hash.is_empty())
+                        .map(|member| {
+                            (
+                                Resolved::Member {
+                                    owner: member.owner,
+                                    field: member.field,
+                                },
+                                member.hash,
+                            )
+                        }),
+                )
+                .chain(
                     table
                         .places
                         .iter()
                         .enumerate()
-                        .find(|(_, place)| place.target == path && !place.hash.is_empty())
-                        .map(|(i, place)| (Resolved::Place(i), place.hash))
-                });
-            match found {
-                None => Err(crate::Refusal::MissingInternal {
+                        .filter(|(_, place)| place.target == path && !place.hash.is_empty())
+                        .map(|(i, place)| (Resolved::Place(i), place.hash)),
+                );
+            let mut present = false;
+            for (resolved, found) in candidates {
+                present = true;
+                if found != hash {
+                    continue;
+                }
+                if let Resolved::Member { owner, .. } = resolved {
+                    let owner = table
+                        .types
+                        .get(owner as usize)
+                        .ok_or_else(|| crate::Refusal::ChangedInternal { path: path.into() })?;
+                    if !declared.contains(&(owner.path, owner.hash)) {
+                        return Err(crate::Refusal::ChangedInternal {
+                            path: owner.path.into(),
+                        });
+                    }
+                }
+                return Ok(resolved);
+            }
+            Err(if present {
+                crate::Refusal::ChangedInternal { path: path.into() }
+            } else {
+                crate::Refusal::MissingInternal {
                     path: path.into(),
                     file: format!("crates/horizon-mod-api-gen/wasm-internals/{mod_id}.txt"),
-                }),
-                Some((_, found)) if found != hash => {
-                    Err(crate::Refusal::ChangedInternal { path: path.into() })
                 }
-                Some((resolved, _)) => Ok(resolved),
-            }
+            })
         })
         .collect()
 }
@@ -102,7 +139,7 @@ impl Active<'_> {
 
     fn keep(&mut self, node: Node) -> Result<Resource<wire::Node>, wire::Refusal> {
         let rep = NEXT_NODE
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
             .map_err(|_| gone("node resource ids exhausted"))?;
         self.nodes.insert(rep, node);
         Ok(Resource::new_own(rep))
@@ -402,6 +439,7 @@ mod tests {
                 call: reenter,
             }],
             places: &[],
+            members: &[],
         };
         // SAFETY: the test has no game roots; its thunk only checks the import's refusal.
         let frame = unsafe { Frame::new(&TABLE, vec![]) };
@@ -418,6 +456,34 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn a_declared_field_checks_its_owner_and_disambiguates_a_method_path() {
+        assert_eq!(
+            resolve(&TABLE, "test", &[("Game::flag", "flag-hash")]),
+            Err(crate::Refusal::ChangedInternal {
+                path: "Game".into()
+            })
+        );
+        assert_eq!(
+            resolve(
+                &TABLE,
+                "test",
+                &[
+                    ("Game", "game-hash"),
+                    ("Game::flag", "flag-hash"),
+                    ("Game::kick", "field-kick-hash"),
+                    ("Game::kick", "kick-hash")
+                ]
+            ),
+            Ok(vec![
+                Resolved::Type(0),
+                Resolved::Member { owner: 0, field: 1 },
+                Resolved::Member { owner: 0, field: 0 },
+                Resolved::Thunk(0)
+            ])
+        );
     }
 
     #[test]

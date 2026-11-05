@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 pub mod frame;
 pub mod journal;
 mod points;
+mod raw;
 pub mod view;
 
 pub use points::Listening;

@@ -50,11 +50,12 @@ refuse the manifest. Code adds `[native]`:
 | `game` | string | not empty, the Minecraft version (`"26.3"`) |
 | `horizon` | string | the exact Horizon commit, 40 lowercase hex characters |
 | `mixins` | string | the exact horizon-mixins commit, 40 lowercase hex characters |
-| `injection` | array of tables | optional raw injections, written as `[[native.injection]]` |
+| `internals` | array of tables | optional declared game internals: `path`, `hash`, and `kind` when a path names several member kinds |
+| `injection` | array of tables | optional injections, written as `[[native.injection]]` |
 | `module` | array of tables | optional support modules, written as `[[native.module]]` |
 
 An injection has a unique, nonempty `id` and a `kind`; it selects exactly one of `hook` or `target`, and
-exactly one of `helper` or `trait_method`. A helper is a selected `.rs` file under `src/`, or `build.rs`.
+exactly one of `helper`, `trait_method` or `raw`. A helper is a selected `.rs` file under `src/`, or `build.rs`.
 A `trait_method` listens at a point's `HEAD` or `RETURN`, takes `target`, and has no helper fields.
 See [Injections](../injections.md) for the fields, bindings and point injections, and
 [Native mods](../how-to/native-mods.md#named-hook-points) for the named hook contracts.
@@ -77,6 +78,14 @@ A wasm mod adds `[wasm]` instead, written by `cargo horizon-mod build --wasm`
 
 At load `mod.wasm` must start with `\0asm`, be at most 64 MiB and match `sha512`; each failure refuses the
 package with its reason.
+
+Beside `[wasm]`, `[native]` may contain `internals` and `injection`, but no `game`, `horizon`,
+`mixins` or `module`: a wasm package contains no native code. A `raw` injection requires at least
+one declared internal. The compiled view must include every manifest internal at the same hash,
+plus the named types it walks; the game resolves all of them before registering any listener.
+Missing internals name the prebuilt game's opt-in file to update; changed hashes and a game built
+without an internals table refuse the mod. A raw listener receives no Host: its access is through
+the call-scoped internals view ([Injections](../injections.md#raw-listeners-and-declared-internals)).
 
 Top-level `[dependencies]` declares other mods by id: a semver requirement string, or
 `{ version = "^1", optional = true }`. These versions refer to `horizon-mod.toml`, not Cargo metadata.

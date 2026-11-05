@@ -337,6 +337,24 @@ Both routes check the actual game's metadata before compiling mods:
 The build log lists each mod's internals and raw places. The same information is recorded in
 `native-mods.json` beside the built game.
 
+### Wasm raw listeners
+
+A wasm mod uses the same `[native] internals` declarations and `raw` injections beside `[wasm]`,
+but omits all three native pins and carries no helper or support-module source. Its generated view
+imports `horizon:mod-internals/view`: roots, path nodes, plain values and declared function calls.
+The compiled declaration includes each manifest internal and every named type whose layout it walks.
+All paths and hashes are checked at load, before any listener registers. A field also requires its
+owner's matching type hash. A missing opt-in entry names
+`crates/horizon-mod-api-gen/wasm-internals/<mod_id>.txt`; a game built without a table refuses declaring mods.
+
+The slot runs API listeners first, then raw listeners in the native/wasm registration order. A raw
+listener has no Host; its only game access is through the view. Nodes last for one listener call:
+keeping one into the next call refuses `gone`. Writes are journaled and reads see those writes.
+Calling a declared game function applies the journal first and invalidates cached paths. A normal
+listener return applies its remaining writes; a trap discards them and stops the group. Writes that
+no longer resolve are dropped and logged. A trap after a game function call does not undo that call
+or the writes already applied before it.
+
 ## Reference
 
 - A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after

@@ -70,19 +70,9 @@ impl Forward for Listeners {
 /// `kind` says, whose `Points` method its `trait_method` must be (`<point>` at the head,
 /// `<point>_return` at the return).
 fn declared_place(target: &str, method: &str, kind: InjectionKind) -> Result<usize, Refusal> {
+    let place = target_place(target, kind)?;
     let missing = || Refusal::NoSuchPoint {
         point: format!("{target} ({method})"),
-    };
-    // A point's head comes first among its places, its return right after.
-    let head = TARGETS
-        .iter()
-        .position(|t| *t == target)
-        .ok_or_else(missing)?;
-    let place = match kind {
-        InjectionKind::Return => Some(head + 1)
-            .filter(|&back| TARGETS.get(back) == Some(&target))
-            .ok_or_else(missing)?,
-        _ => head,
     };
     if NAMES[place] != method {
         return Err(missing());
@@ -90,25 +80,49 @@ fn declared_place(target: &str, method: &str, kind: InjectionKind) -> Result<usi
     Ok(place)
 }
 
+/// The point at a target's head or return, shared by API and raw listener validation.
+pub(crate) fn target_place(target: &str, kind: InjectionKind) -> Result<usize, Refusal> {
+    let missing = || Refusal::NoSuchPoint {
+        point: target.into(),
+    };
+    let head = TARGETS
+        .iter()
+        .position(|t| *t == target)
+        .ok_or_else(missing)?;
+    match kind {
+        InjectionKind::Return => Some(head + 1)
+            .filter(|&back| TARGETS.get(back) == Some(&target))
+            .ok_or_else(missing),
+        _ => Ok(head),
+    }
+}
+
 /// A wasm mod's checked listeners, registered once every native mod's are, in the installed order.
 /// It owns them until then: one dropped unregistered (its mod refused after the check) lets its
 /// group go.
 pub struct Listening {
     exports: Exports,
-    fire: Fire,
+    fire: Option<Fire>,
     places: Vec<Option<PointId>>,
+    raw: Option<crate::raw::Listeners>,
 }
 
 impl Listening {
     /// Registers the listeners in the points crate's one list, which keeps them for good.
     pub fn register(self) -> Result<(), mod_points::RegisterError> {
         let id = self.exports.id();
-        let listeners = Listeners {
-            exports: self.exports,
-            fire: self.fire,
-            places: Box::leak(self.places.into_boxed_slice()),
-        };
-        mod_points::register(id, Box::leak(Box::new(Forwarded(Box::new(listeners)))))
+        if let Some(fire) = self.fire {
+            let listeners = Listeners {
+                exports: self.exports,
+                fire,
+                places: Box::leak(self.places.into_boxed_slice()),
+            };
+            mod_points::register(id, Box::leak(Box::new(Forwarded(Box::new(listeners)))))?;
+        }
+        if let Some(raw) = self.raw {
+            raw.register()?;
+        }
+        Ok(())
     }
 }
 
@@ -118,12 +132,22 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
     let Some(wasm) = &manifest.wasm else {
         return Ok(None);
     };
-    if wasm.points().is_empty() {
-        return Ok(None);
+    let raw = crate::raw::listen(manifest, exports)?;
+    if !wasm
+        .points()
+        .iter()
+        .any(|injection| injection.trait_method.is_some())
+    {
+        return Ok(raw.map(|raw| Listening {
+            exports: exports.clone(),
+            fire: None,
+            places: vec![],
+            raw: Some(raw),
+        }));
     }
     let mut declared = BTreeSet::new();
     for injection in wasm.points() {
-        // The manifest admits only `trait_method` injections with a `target` beside `[wasm]`.
+        // Raw subscriptions were checked above; only API-typed points enter this list.
         let (Some(target), Some(method)) = (&injection.target, &injection.trait_method) else {
             continue;
         };
@@ -170,8 +194,9 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
     }
     Ok(Some(Listening {
         exports: exports.clone(),
-        fire,
+        fire: Some(fire),
         places,
+        raw,
     }))
 }
 
