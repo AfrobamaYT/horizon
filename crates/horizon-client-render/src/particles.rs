@@ -5580,6 +5580,33 @@ mod tests {
         );
     }
     #[test]
+    fn entity_vibration_options_draw_toward_the_resolved_point() {
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let options = ParticleOptions::vibration(
+            mod_api::particles::PositionSource::Entity {
+                id: 42,
+                y_offset: 1.15,
+            },
+            [-2.25, 65.75, 4.5],
+            7,
+        );
+        // The renderer consumes the resolved point, not the entity id or offset.
+        // Options remain reusable; making a signal does not consume its source.
+        for _ in 0..2 {
+            engine.add_with(&options, [0.5, 1.5, 0.5], [0.0; 3], false, false);
+        }
+        assert_eq!(engine.made().get("vibration"), Some(&2));
+        assert_eq!(engine.pending.len(), 2);
+        for q in &engine.pending {
+            assert_eq!(q.ty, ParticleType::Vibration);
+            assert_eq!(q.lifetime, 7);
+            assert!(matches!(
+                &q.behaviour,
+                Behaviour::Vibration { dest, .. } if *dest == [-2.25, 65.75, 4.5]
+            ));
+        }
+    }
+    #[test]
     fn particle_names_round_trip() {
         for &ty in ParticleType::ALL {
             assert_eq!(

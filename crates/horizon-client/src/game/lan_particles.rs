@@ -11,11 +11,13 @@ use horizon_core::{
     random::RandomSource,
 };
 use horizon_protocol::{
-    entity_data::{MOD_PARTICLE_ID, Particle, ParticleData, PositionSource},
+    entity_data::{
+        MOD_PARTICLE_ID, Particle, ParticleData, PositionSource as NetworkPositionSource,
+    },
     packets::play::{self, Clientbound as C},
 };
 use horizon_world::registry::BlockStateId;
-use mod_api::SoundSource;
+use mod_api::{SoundSource, particles::PositionSource};
 
 /// A particle request awaiting delivery to players in its level.
 pub(super) struct QueuedParticle {
@@ -89,6 +91,17 @@ fn spread(
     } else {
         let at = [0, 1, 2].map(|k| pos[k] + r.next_gaussian() * dist[k]);
         (at, [0, 1, 2].map(|k| r.next_gaussian() * speed[k]))
+    }
+}
+
+/// A protocol or mob-event listener as the API's plain particle data.
+pub(super) fn particle_position_source(source: &NetworkPositionSource) -> PositionSource {
+    match source {
+        NetworkPositionSource::Block(pos) => PositionSource::Block(*pos),
+        NetworkPositionSource::Entity { id, y_offset } => PositionSource::Entity {
+            id: *id,
+            y_offset: *y_offset,
+        },
     }
 }
 
@@ -422,8 +435,19 @@ impl Game<'_> {
                 Some(ParticleData::GeyserBase(water_blocks, burst_impulse_base))
             }
             T::Vibration => {
-                let (source, _, ticks) = options.vibration.clone()?;
-                Some(ParticleData::Vibration { source, ticks })
+                let (source, _, ticks) = options.vibration.as_ref()?;
+                let source = match source {
+                    PositionSource::Block(pos) => NetworkPositionSource::Block(*pos),
+                    PositionSource::Entity { id, y_offset } => NetworkPositionSource::Entity {
+                        id: *id,
+                        y_offset: *y_offset,
+                    },
+                    _ => return None,
+                };
+                Some(ParticleData::Vibration {
+                    source,
+                    ticks: *ticks,
+                })
             }
             T::Item | T::Trail => return None,
             _ => None,
@@ -487,7 +511,7 @@ impl Game<'_> {
                 ParticleOptions::trail(*target, *color as u32 & 0xFF_FFFF, *duration)
             }
             Some(ParticleData::Vibration { source, ticks }) => ParticleOptions::vibration(
-                source.clone(),
+                particle_position_source(source),
                 self.vibration_destination(source)?,
                 *ticks,
             ),
@@ -499,14 +523,14 @@ impl Game<'_> {
     /// raised by the option's offset. An entity this client does not have is
     /// no destination at all: vanilla makes the particle and removes it on its
     /// first tick, so nothing of it is ever drawn.
-    fn vibration_destination(&self, source: &PositionSource) -> Option<[f64; 3]> {
+    fn vibration_destination(&self, source: &NetworkPositionSource) -> Option<[f64; 3]> {
         match source {
-            PositionSource::Block([x, y, z]) => Some([
+            NetworkPositionSource::Block([x, y, z]) => Some([
                 f64::from(*x) + 0.5,
                 f64::from(*y) + 0.5,
                 f64::from(*z) + 0.5,
             ]),
-            PositionSource::Entity { id, y_offset } => {
+            NetworkPositionSource::Entity { id, y_offset } => {
                 let id = u32::try_from(*id).ok()?;
                 self.mobs
                     .iter()
@@ -1076,7 +1100,7 @@ mod tests {
 
         let source = PositionSource::Block([3, 64, -7]);
         let at = [1.25, 64.0, 3.75];
-        let options = ParticleOptions::vibration(source.clone(), [3.5, 64.5, -6.5], 14);
+        let options = ParticleOptions::vibration(source, [3.5, 64.5, -6.5], 14);
         send_hub_level_particles(&hub, &options, at, [0.0; 3], 0.0, 1, None);
 
         assert!(rx_far.try_recv().is_err(), "only players within 32 blocks");
@@ -1089,7 +1113,10 @@ mod tests {
         assert_eq!(p.particle.id, 58);
         assert_eq!(
             p.particle.data,
-            Some(ParticleData::Vibration { source, ticks: 14 })
+            Some(ParticleData::Vibration {
+                source: NetworkPositionSource::Block([3, 64, -7]),
+                ticks: 14,
+            })
         );
 
         // A listener entity travels as `EntityPositionSource`: its id and the
@@ -1098,11 +1125,64 @@ mod tests {
             id: 42,
             y_offset: 1.15,
         };
-        let options = ParticleOptions::vibration(source.clone(), [0.5, 65.0, 0.5], 7);
-        let particle = Game::hub_particle(&hub, &options, None).expect("a vibration particle");
+        // The render destination is not the transmitted identity of the listener.
+        let options = ParticleOptions::vibration(source, [0.5, 65.0, 0.5], 7);
+        send_hub_level_particles(&hub, &options, at, [0.0; 3], 0.0, 1, None);
+        assert!(rx_far.try_recv().is_err(), "only players within 32 blocks");
+        let p = level_particles(&rx_near);
+        assert_eq!(p.count, 1);
+        assert_eq!(p.dist, [0.0; 3]);
+        assert_eq!(p.max_speed, [0.0; 3]);
+        assert_eq!(p.randomization, 0);
+        assert_eq!(p.pos, at);
+        assert_eq!(p.particle.id, 58);
         assert_eq!(
-            particle.data,
-            Some(ParticleData::Vibration { source, ticks: 7 })
+            p.particle.data,
+            Some(ParticleData::Vibration {
+                source: NetworkPositionSource::Entity {
+                    id: 42,
+                    y_offset: 1.15,
+                },
+                ticks: 7,
+            })
+        );
+        assert!(
+            Game::hub_particle(
+                &hub,
+                &ParticleOptions::simple(ParticleType::Vibration),
+                None,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn received_vibration_sources_preserve_block_coordinates_and_entity_offsets() {
+        assert_eq!(
+            particle_position_source(&NetworkPositionSource::Block([-12, 64, 300])),
+            PositionSource::Block([-12, 64, 300]),
+        );
+        assert_eq!(
+            particle_position_source(&NetworkPositionSource::Entity {
+                id: 42,
+                y_offset: 1.15,
+            }),
+            PositionSource::Entity {
+                id: 42,
+                y_offset: 1.15,
+            },
+        );
+        // Identity conversion does not turn an invalid destination id into a
+        // different entity; the destination lookup decides whether it exists.
+        assert_eq!(
+            particle_position_source(&NetworkPositionSource::Entity {
+                id: -1,
+                y_offset: -0.25,
+            }),
+            PositionSource::Entity {
+                id: -1,
+                y_offset: -0.25,
+            },
         );
     }
 }
