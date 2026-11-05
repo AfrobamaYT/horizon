@@ -65,8 +65,6 @@ pub struct Shape {
     pub side: Side,
     /// The function takes `&mut self`: its listeners get the side's writing host.
     pub mutable: bool,
-    /// Its listeners run per block, per entity or per frame: the docs and build log say so.
-    pub hot: bool,
     /// The parameters with API types, in order. The others aren't passed: an internal type
     /// would become API.
     pub args: Vec<Arg>,
@@ -126,13 +124,11 @@ fn borrows(ty: &Type) -> bool {
     find.0
 }
 
-/// The point of the function `sig`, from `#[point(side = "…", name = "…", hot)]`'s arguments.
+/// The point of the function `sig`, from `#[point(side = "…", name = "…")]`'s arguments.
 pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape> {
-    let (mut name, mut side, mut hot) = (sig.ident.to_string(), None, false);
+    let (mut name, mut side) = (sig.ident.to_string(), None);
     let parser = syn::meta::parser(|meta| {
-        if meta.path.is_ident("hot") {
-            hot = true;
-        } else if meta.path.is_ident("name") {
+        if meta.path.is_ident("name") {
             name = meta.value()?.parse::<syn::LitStr>()?.value();
         } else if meta.path.is_ident("side") {
             let value = meta.value()?.parse::<syn::LitStr>()?;
@@ -148,7 +144,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
                 }
             });
         } else {
-            return Err(meta.error("a point takes side = \"…\", name = \"…\" and hot"));
+            return Err(meta.error("a point takes side = \"…\" and name = \"…\""));
         }
         Ok(())
     });
@@ -208,7 +204,6 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         name,
         side,
         mutable,
-        hot,
         args,
         returns,
         borrowed_return,

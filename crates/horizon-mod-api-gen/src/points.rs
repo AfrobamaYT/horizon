@@ -23,8 +23,7 @@ pub struct GamePoint {
     pub side: &'static str,
     /// The listener's host: `host` (`&self`), or the side's writing host (`&mut self`).
     pub host: &'static str,
-    pub hot: bool,
-    /// The record its listeners get, in `mod_api::points`.
+    /// The record its listeners get, in `mod_points`.
     pub record: String,
     /// The parameters passed, with their types, in order.
     pub args: Vec<(String, String)>,
@@ -184,7 +183,6 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
                     (false, _) => "host",
                     (true, side) => side.name(),
                 },
-                hot: shape.hot,
                 args: shape
                     .args
                     .iter()
