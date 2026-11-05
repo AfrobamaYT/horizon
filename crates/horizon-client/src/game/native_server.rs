@@ -2213,6 +2213,21 @@ mod tests {
     fn native_typed_commands_reach_listeners_after_parse_and_source_resolution() {
         use mod_api::{CommandArgumentValue as Value, CommandInvocation};
         struct Commands(Arc<Mutex<Vec<(bool, CommandInvocation)>>>);
+        impl Commands {
+            fn record(&self, console: bool, command: &CommandInvocation) {
+                if command.literals == ["typed", "give"] {
+                    let Some(Value::Integer(amount)) = command.argument("amount") else {
+                        panic!("listener must receive an integer")
+                    };
+                    let Some(Value::Player(player)) = command.argument("who") else {
+                        panic!("listener must receive a resolved player")
+                    };
+                    assert_ne!(*amount, 0);
+                    assert_ne!(player.uuid(), 0);
+                }
+                self.0.lock().unwrap().push((console, command.clone()));
+            }
+        }
         #[mod_api::__subscriptions]
         impl mod_api::Hooks for Commands {
             fn register_commands(
@@ -2232,7 +2247,7 @@ mod tests {
                 _: &mut dyn mod_api::ServerHost,
                 event: &mut mod_api::PerformCommandEvent<'_>,
             ) -> mod_api::Flow {
-                self.0.lock().unwrap().push((false, event.command.clone()));
+                self.record(false, event.command);
                 mod_api::Flow::Cancel
             }
             fn perform_console_command(
@@ -2240,7 +2255,7 @@ mod tests {
                 _: &mut dyn mod_api::ServerHost,
                 event: &mut mod_api::PerformConsoleCommandEvent<'_>,
             ) -> mod_api::Flow {
-                self.0.lock().unwrap().push((true, event.command.clone()));
+                self.record(true, event.command);
                 mod_api::Flow::Cancel
             }
         }
@@ -2253,35 +2268,38 @@ mod tests {
             .into(),
             || {
                 super::super::native_guest_turn_tests::with_guests(|game| {
+                    game.build_registries();
                     game.register_native_commands();
                     let other = game.native_player_ref(13).unwrap();
                     let acting = game.native_player_ref(12).unwrap();
                     game.as_guest(12, |game| {
-                    for line in [
-                        "typed give guest13 nope",
-                        "typed give guest13",
-                        "typed give missing 7",
-                        "typed give @a 7",
-                        "typed data word 1 maybe stone ~ ~ ~",
-                        "typed data word NaN true stone ~ ~ ~",
-                        "typed data word 1 true does_not_exist ~ ~ ~",
-                        "typed opt 1 extra",
-                    ] {
-                        assert!(game.perform_native_command(12, 4, line), "{line}");
-                    }
-                    assert!(!game.perform_native_command(12, 0, "protected @r"));
-                    assert!(heard.lock().unwrap().is_empty(), "failed input must not reach listeners");
-                    for line in [
-                        "typed give guest13 37 hello typed world",
-                        "typed give @s -4",
-                        "typed opt",
-                        "typed opt 9",
-                        "typed data word -1.25 true stone[minecraft:custom_name='\"Rock\"'] ~1 ~2 ~-3",
-                        "typed data word 2 false dirt ^0 ^0 ^0",
-                    ] {
-                        assert!(game.perform_native_command(12, 4, line), "{line}");
-                    }
-                }).unwrap();
+                        for line in [
+                            "typed give guest13 nope",
+                            "typed give guest13",
+                            "typed give missing 7",
+                            "typed give @a 7",
+                            "typed data word 1 maybe stone ~ ~ ~",
+                            "typed data word NaN true stone ~ ~ ~",
+                            "typed data word 1 true does_not_exist ~ ~ ~",
+                            "typed opt 1 extra",
+                        ] {
+                            assert!(game.perform_native_command(12, 4, line), "{line}");
+                        }
+                        let random = game.world.random.state();
+                        assert!(!game.perform_native_command(12, 0, "protected @r"));
+                        assert_eq!(game.world.random.state(), random, "denied selectors must not resolve");
+                        assert!(heard.lock().unwrap().is_empty(), "failed input must not reach listeners");
+                        for line in [
+                            "typed give guest13 37 hello typed world",
+                            "typed give @s -4",
+                            "typed opt",
+                            "typed opt 9",
+                            "typed data word -1.25 true stone[minecraft:custom_name='\"Rock\"'] ~1 ~2 ~-3",
+                            "typed data word 2 false dirt ^0 ^0 ^0",
+                        ] {
+                            assert!(game.perform_native_command(12, 4, line), "{line}");
+                        }
+                    }).unwrap();
                     game.spawn = Some(horizon_core::geometry::Vec3::new(10.5, 70.0, -2.5));
                     game.yaw = 45.0;
                     game.pitch = 30.0;
