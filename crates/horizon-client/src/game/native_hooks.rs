@@ -645,7 +645,7 @@
 //!
 //! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`).
 //!
-//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather and height now through `LevelRef`, with `native_day_time`, `native_max_stack_size`).
+//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather, time of day and height now through `LevelRef`, with `native_max_stack_size`).
 //!
 //! API 96 adds reading redstone from a server mod's block (`native_neighbor_signal`).
 //!
@@ -3242,6 +3242,18 @@ impl Game<'_> {
     /// hearts, food, air and the heights (`left_height`/`right_height`)
     /// above the hotbar are the answer's to give; `bubble_pop_sound` too.
     /// Nothing set draws Horizon's own.
+    /// The in-game chat is about to be drawn (`CustomizeGuiOverlayEvent.Chat`): `x`, `y` are its
+    /// bottom-left corner in GUI pixels, which a mod may move.
+    pub(super) fn native_customize_chat_overlay(
+        &mut self,
+        gui_width: i32,
+        gui_height: i32,
+        focused: bool,
+        x: &mut i32,
+        y: &mut i32,
+    ) {
+        self.fire_customize_chat_overlay(gui_width, gui_height, focused, x, y);
+    }
     pub(super) fn native_health_hud(
         &mut self,
         inputs: &mod_api::hud_layout::HealthInputs,
@@ -3991,13 +4003,13 @@ impl Game<'_> {
         );
     }
     /// `GatherEffectScreenTooltipsEvent`: the tooltip of the effect panel the
-    /// cursor is over beside the survival or creative inventory, shown when
-    /// the panel is compact or its name is cut short. `tooltip` holds the
-    /// effect's full name then its duration, each with a colour as `rgba`
-    /// packs it (`u32::MAX` keeps the text's own); add, change, reorder or
-    /// remove lines, and an empty list draws nothing. `effect` is the effect
-    /// the panel shows, `screen` the inventory. Asked each frame the tooltip
-    /// shows, only while a mod listens. Client-side.
+    /// cursor is over beside the survival or creative inventory. `tooltip`
+    /// starts empty when the panel's information is fully visible, or holds
+    /// the full name then duration when compact or clipped. Each line has a
+    /// colour as `rgba` packs it (`u32::MAX` keeps the text's own); add, change,
+    /// reorder or remove lines, and an empty list draws nothing. `effect` is
+    /// the effect the panel shows, `screen` the inventory. Asked each frame
+    /// a rendered panel is hovered, only while a mod listens. Client-side.
     pub(super) fn native_gather_effect_screen_tooltips(
         &self,
         screen: &NativeScreenView<'_>,
@@ -6756,8 +6768,8 @@ impl Game<'_> {
     /// `value` (`GameRuleChangedEvent`, from `GameRules.set` with a server:
     /// `/gamerule`, the game rules screen, the management protocol, a test
     /// environment, `server.properties`). `actor` is present when a player
-    /// caused the change. The server and complete game rules are not exposed
-    /// by this event (tracked on #29). Server-side.
+    /// caused the change. `level.game_rules(host)` of any of the server's
+    /// levels reads every rule, the new value included. Server-side.
     pub(super) fn native_game_rule_changed(
         &mut self,
         rule: &str,
@@ -9888,12 +9900,6 @@ impl Game<'_> {
         let _ = self.process_level_events();
         changed
     }
-    /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
-    /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
-    /// take it modulo 24000 for the hour.
-    pub(super) fn native_day_time(&self) -> i64 {
-        self.world.day_time
-    }
     /// The most of the item `item` one slot holds (`Item.getDefaultMaxStackSize`),
     /// or `None` for an unknown item: for a mod's container that fills or
     /// merges stacks itself.
@@ -10116,25 +10122,23 @@ impl Game<'_> {
         u32::try_from(self.client_particle_count()).unwrap_or(u32::MAX)
     }
     /// `ParticleEngine.countParticles`: every live group. Horizon keeps vanilla's groups
-    /// apart: the ordinary particles and firework starters in the engine, ITEM_PICKUP in
-    /// `pickups`, and ELDER_GUARDIANS as the apparition's ticks left (one particle while
-    /// it shows).
+    /// apart: ordinary particles, firework starters and elder guardians in the engine,
+    /// and ITEM_PICKUP in `pickups`.
     pub(super) fn client_particle_count(&self) -> usize {
-        self.particles.group_count()
-            + self.pickups.live.len()
-            + usize::from(self.creatures.elder_apparition > 0)
+        self.particles.group_count() + self.pickups.live.len()
     }
     /// `ParticleEngine.clearParticles` over every group Horizon keeps apart: the engine's
     /// particles, starters, queue and emitters, the item pickups and the elder guardian
     /// apparition. Leaving a level and switching levels clear through it too.
     pub(super) fn clear_client_particles(&mut self) {
+        self.mod_clear_particles.set(false);
         self.particles.clear();
         self.pickups.clear();
-        self.creatures.elder_apparition = 0;
     }
     /// Applies a client mod's `clear_particles` if one is waiting. Called at the start of
-    /// each particle tick, and once a frame right after `RenderFrameEvent.Pre`, before the
-    /// frame is drawn. So a clear also lands while the game is paused or ticks are frozen.
+    /// each particle tick, after `RenderFrameEvent.Pre`, and at particle extraction, after
+    /// HUD, screen and entity callbacks. Extraction also discards its geometry if a model
+    /// callback asks to clear while it is being built, even while paused or tick-frozen.
     pub(super) fn apply_mod_particle_clear(&mut self) {
         if self.mod_clear_particles.take() {
             self.clear_client_particles();
@@ -10993,7 +10997,7 @@ impl Game<'_> {
         )
     }
     /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
-    /// cancels `entity_place`; a refused enderman keeps carrying it.
+    /// cancels `entity_place`. Enderman attempts use `enderman_place_block`.
     pub(super) fn mob_place_block(
         &mut self,
         mob: u32,
@@ -11008,11 +11012,6 @@ impl Game<'_> {
             .find(|m| m.id == mob)
             .map(|m| m.kind.id.clone());
         if self.place_canceled(mob, at, state, against, None) {
-            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob)
-                && &*m.kind.id == "minecraft:enderman"
-            {
-                m.extra.carried = Some(state);
-            }
             return Ok(());
         }
         let facts = self.res.facts();
@@ -14351,7 +14350,7 @@ mod local_sound_tests {
 }
 
 #[cfg(test)]
-mod particle_count_tests {
+pub(super) mod particle_count_tests {
     use super::super::pickups::{Collector, Taken};
     use horizon_client::entities::ExperienceOrb;
     use horizon_client::particles::{FireworkExplosion, ParticleOptions, ParticleType};
@@ -14380,7 +14379,7 @@ mod particle_count_tests {
     /// Fills every particle group Horizon keeps apart: three flames, a multi-burst firework
     /// starter (`NO_RENDER`), an item pickup (`ITEM_PICKUP`) and the elder guardian
     /// apparition (`ELDER_GUARDIANS`), each live after one particle tick.
-    fn fill(game: &mut super::Game<'_>) {
+    pub(in crate::game) fn fill(game: &mut super::Game<'_>) {
         let at = game.particles.camera;
         for _ in 0..3 {
             game.particles
@@ -14390,8 +14389,8 @@ mod particle_count_tests {
         game.particles.fireworks(at, [0.0; 3], bursts, at);
         let v = Vec3::new(at[0], at[1], at[2]);
         game.add_pickup_toward(Taken::Orb(Box::new(orb(v))), Collector::Player, at);
+        game.particles.elder_guardian();
         game.tick_particles();
-        game.creatures.elder_apparition = 10;
     }
 
     /// `particle_count` and `clear_particles` through the client host. The count covers every
@@ -14408,9 +14407,9 @@ mod particle_count_tests {
             fill(game);
             assert_eq!(game.pickups.live.len(), 1, "the pickup is live");
             let engine = game.particles.group_count();
-            assert!(engine > 3, "the flames and the starter: {engine}");
+            assert_eq!(engine, 5, "three flames, one starter and one guardian");
             let host: &dyn ClientHost = game;
-            assert_eq!(host.particle_count() as usize, engine + 2);
+            assert_eq!(host.particle_count() as usize, engine + 1);
             // A clear asked between frames: it reads 0 at once, and the next frame clears
             // every group without a particle tick.
             game.particles.tracking_emitter(
@@ -14425,7 +14424,7 @@ mod particle_count_tests {
             game.extras_frame(Duration::ZERO);
             assert_eq!(game.particles.group_count(), 0);
             assert!(game.pickups.live.is_empty());
-            assert_eq!(game.creatures.elder_apparition, 0);
+            assert!(game.particles.elder_guardians().is_empty());
             // The emitter and the queue went too: a tick brings nothing back.
             game.tick_particles();
             assert_eq!(game.client_particle_count(), 0);
@@ -14444,8 +14443,561 @@ mod particle_count_tests {
         });
     }
 
+    struct ClearInGui;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ClearInGui {
+        fn render_gui_pre(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut mod_api::RenderGuiPreEvent,
+        ) -> mod_api::Flow {
+            assert!(host.clear_particles());
+            mod_api::Flow::Continue
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn late_gui_clear_prevents_same_frame_particle_geometry_without_a_tick() {
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("clear_gui", Box::new(ClearInGui))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                fill(game);
+                game.extras_frame(Duration::ZERO);
+                let camera = glam::DVec3::from_array(game.particles.camera);
+                let mut before = Vec::new();
+                game.client_particle_geometry(camera, 0.0, 70.0, &mut before);
+                assert!(
+                    !before.is_empty(),
+                    "live guardian, pickup and ordinary particles draw"
+                );
+                game.native_render_gui_pre(&mut false);
+                assert_eq!(ClientHost::particle_count(game), 0);
+                let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, Vec::new());
+                game.client_particle_geometry(camera, 0.0, 70.0, &mut after);
+                assert!(
+                    after.is_empty(),
+                    "no stale pickup, guardian or ordinary quads"
+                );
+                assert_eq!(game.client_particle_count(), 0);
+                game.tick_particles();
+                assert_eq!(game.client_particle_count(), 0);
+            });
+        });
+    }
+
+    struct ClearInModel(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ClearInModel {
+        fn item_model_property(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut mod_api::ItemModelPropertyEvent<'_>,
+        ) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            assert!(host.clear_particles());
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_model_callback_clear_discards_particle_geometry_already_extracted() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "clear_model",
+            Box::new(ClearInModel(calls.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                fill(game);
+                let camera = glam::DVec3::from_array(game.particles.camera);
+                let mut out = Vec::new();
+                game.client_particle_geometry(camera, 0.0, 70.0, &mut out);
+                let previous = out.len();
+                assert!(previous > 0);
+                let positions: Vec<_> = out.iter().map(|v| v.pos).collect();
+                let motion = game.entity_motion.borrow().clone();
+                // An actual picked-up item resolves a conditional model while the
+                // preceding ordinary-particle pass has already produced geometry.
+                std::sync::Arc::get_mut(&mut game.pack.item_renderer)
+                    .unwrap()
+                    .models
+                    .definitions
+                    .insert(
+                        "minecraft:stick".into(),
+                        horizon_assets::item_model::ClientItem::from_json(
+                            r#"{"model":{
+                        "type":"minecraft:condition", "property":"test:clear",
+                        "on_true":{"type":"minecraft:model","model":"minecraft:item/stick"},
+                        "on_false":{"type":"minecraft:model","model":"minecraft:item/stick"}
+                    }}"#,
+                        )
+                        .unwrap(),
+                    );
+                let at = game.particles.camera;
+                game.spawn_item(
+                    mod_api::ItemStack::new("minecraft:stick", 1),
+                    at,
+                    [0.0; 3],
+                    0,
+                );
+                let item = game.dropped.pop().unwrap();
+                game.add_pickup_toward(Taken::Item(Box::new(item)), Collector::Player, at);
+                game.tick_particles();
+                game.client_particle_geometry(camera, 0.0, 70.0, &mut out);
+                assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+                assert_eq!(out.iter().map(|v| v.pos).collect::<Vec<_>>(), positions);
+                assert_eq!(&game.entity_motion.borrow()[..motion.len()], &motion);
+                assert_eq!(game.client_particle_count(), 0);
+                game.tick_particles();
+                assert_eq!(game.client_particle_count(), 0);
+            });
+        });
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum ClearAt {
+        Never,
+        Gui,
+        Model,
+        FogColor,
+        Fog,
+    }
+
+    struct FrameMod {
+        at: std::sync::Arc<std::sync::Mutex<ClearAt>>,
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl FrameMod {
+        fn clear(&self, at: ClearAt, host: &dyn ClientHost) {
+            if *self.at.lock().unwrap() == at {
+                assert!(host.clear_particles());
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for FrameMod {
+        fn visuals(&self, _: &dyn ClientHost, event: &mut mod_api::VisualsEvent<'_>) {
+            event.lights.push(mod_api::NativeColoredLight::new(
+                [0.5, 65.5, 5.5],
+                0x0000ff,
+                4.0,
+                1.0,
+            ));
+        }
+        fn render_gui_pre(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut mod_api::RenderGuiPreEvent,
+        ) -> mod_api::Flow {
+            self.clear(ClearAt::Gui, host);
+            mod_api::Flow::Continue
+        }
+        fn item_model_property(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut mod_api::ItemModelPropertyEvent<'_>,
+        ) {
+            self.clear(ClearAt::Model, host);
+        }
+        fn compute_fog_color(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut mod_api::ComputeFogColorEvent<'_>,
+        ) {
+            self.clear(ClearAt::FogColor, host);
+        }
+        fn render_fog(&self, host: &dyn ClientHost, _: &mut mod_api::RenderFogEvent<'_>) {
+            self.clear(ClearAt::Fog, host);
+        }
+    }
+
+    // A real renderer supplies the native pack's rules and the GPU skinning path.
+    // The test consumer inspects the exact Frame passed to Renderer::render, without
+    // comparing pixels or bypassing any GUI, model, hand, fog or extraction callbacks.
+    fn with_frame_scene(
+        test: impl FnOnce(
+            &mut super::Game<'_>,
+            &std::sync::Mutex<ClearAt>,
+            &std::sync::atomic::AtomicUsize,
+        ),
+    ) {
+        let at = std::sync::Arc::new(std::sync::Mutex::new(ClearAt::Never));
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "frame_clear",
+            Box::new(FrameMod {
+                at: at.clone(),
+                calls: calls.clone(),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let mut builder = winit::event_loop::EventLoop::builder();
+                #[cfg(target_os = "linux")]
+                {
+                    use winit::platform::x11::EventLoopBuilderExtX11;
+                    builder.with_x11().with_any_thread(true);
+                }
+                let event_loop = builder.build().unwrap();
+                #[allow(deprecated)]
+                let window = std::sync::Arc::new(
+                    event_loop
+                        .create_window(
+                            winit::window::Window::default_attributes()
+                                .with_visible(false)
+                                .with_inner_size(winit::dpi::PhysicalSize::new(320, 240)),
+                        )
+                        .unwrap(),
+                );
+                game.options.offscreen = true;
+                game.renderer = Some(game.new_renderer(window).unwrap());
+                game.title = None;
+                game.settings.extras.dynamic_lights = true;
+                game.settings.horizon.particle_culling =
+                    horizon_client::graphics::ParticleCullingMode::Off;
+                let mut chunk = horizon_client::chunk::Chunk::empty(0, 0);
+                chunk.lit = true;
+                game.world.chunks.insert((0, 0), std::sync::Arc::new(chunk));
+                let mut player =
+                    horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+                player.position = Vec3::new(0.5, 64.0, 0.5);
+                game.previous_position = player.position;
+                game.player = Some(player);
+                game.particles.camera = [0.5, 65.5, 1.5];
+                // Ordinary (non-particle) entity geometry and an unrelated item light.
+                game.spawn_item(
+                    mod_api::ItemStack::new("minecraft:torch", 1),
+                    [0.5, 65.0, 4.5],
+                    [0.0; 3],
+                    0,
+                );
+                // Only the picked-up stick resolves this custom property. The torch's
+                // ordinary model must survive the clear unchanged.
+                std::sync::Arc::get_mut(&mut game.pack.item_renderer)
+                    .unwrap()
+                    .models
+                    .definitions
+                    .insert(
+                        "minecraft:stick".into(),
+                        horizon_assets::item_model::ClientItem::from_json(
+                            r#"{"model":{
+                        "type":"minecraft:condition", "property":"test:clear",
+                        "on_true":{"type":"minecraft:model","model":"minecraft:item/stick"},
+                        "on_false":{"type":"minecraft:model","model":"minecraft:item/stick"}
+                    }}"#,
+                        )
+                        .unwrap(),
+                    );
+                test(game, &at, &calls);
+            });
+        });
+    }
+
+    fn add_frame_particles(game: &mut super::Game<'_>) {
+        fill(game);
+        for _ in 0..20 {
+            game.particles.add(
+                &ParticleOptions::simple(ParticleType::Flame),
+                game.particles.camera,
+                [0.0; 3],
+            );
+        }
+        game.spawn_item(
+            mod_api::ItemStack::new("minecraft:stick", 1),
+            game.particles.camera,
+            [0.0; 3],
+            0,
+        );
+        let item = game.dropped.pop().unwrap();
+        game.add_pickup_toward(
+            Taken::Item(Box::new(item)),
+            Collector::Player,
+            game.particles.camera,
+        );
+        game.tick_particles();
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct FrameGeometry {
+        entities: Vec<u8>,
+        glowing: Vec<u8>,
+        gpu: (usize, usize, u32),
+        motion: Vec<(u32, u64)>,
+        spans: Vec<mod_api::render::EntitySpan>,
+        gpu_spans: Vec<mod_api::render::EntitySpan>,
+        outlines: (usize, u32),
+    }
+    fn frame_geometry(frame: &super::super::Frame<'_>) -> FrameGeometry {
+        FrameGeometry {
+            entities: bytemuck::cast_slice(frame.entities).to_vec(),
+            glowing: bytemuck::cast_slice(frame.glowing).to_vec(),
+            gpu: frame.skin.map_or((0, 0, 0), |skin| skin.mark()),
+            motion: frame.entity_motion.to_vec(),
+            spans: frame.entity_spans.to_vec(),
+            gpu_spans: frame.skin.map_or_else(Vec::new, |skin| skin.spans.clone()),
+            outlines: frame.skin.map_or((0, 0), |skin| {
+                (skin.outline_jobs.len(), skin.outline_vertices)
+            }),
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a display"]
+    fn fog_clear_reaches_the_complete_frame_consumer() {
+        let name = "game::native_hooks::particle_count_tests::fog_clear_reaches_the_complete_frame_consumer";
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            name,
+            "HORIZON_PARTICLE_FOG_CHILD",
+            &["color", "fog"],
+        ) {
+            return;
+        }
+        let clear_at = if std::env::var("HORIZON_PARTICLE_FOG_CHILD").unwrap() == "color" {
+            ClearAt::FogColor
+        } else {
+            ClearAt::Fog
+        };
+        with_frame_scene(|game, at, calls| {
+            let mut baseline = None;
+            game.render_with(|_, frame| {
+                baseline = Some(frame_geometry(frame));
+                Ok(true)
+            })
+            .unwrap();
+            let baseline = baseline.unwrap();
+            assert!(
+                !baseline.entities.is_empty() || baseline.gpu.2 > 0,
+                "ordinary entity must actually draw"
+            );
+            add_frame_particles(game);
+            let mut consumed = false;
+            game.render_with(|_, frame| {
+                consumed = true;
+                assert_ne!(
+                    frame_geometry(frame),
+                    baseline,
+                    "live particles reach the consumer"
+                );
+                Ok(true)
+            })
+            .unwrap();
+            assert!(consumed);
+            *at.lock().unwrap() = clear_at;
+            game.render_with(|_, frame| {
+                assert_eq!(
+                    calls.load(std::sync::atomic::Ordering::Relaxed),
+                    1,
+                    "fog hook ran in this frame"
+                );
+                assert_eq!(
+                    frame_geometry(frame),
+                    baseline,
+                    "no stale particles, ordinary entities retained"
+                );
+                Ok(true)
+            })
+            .unwrap();
+            assert_eq!(game.client_particle_count(), 0);
+            game.tick_particles();
+            assert_eq!(game.client_particle_count(), 0);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a display"]
+    fn late_clear_removes_native_particle_lights_at_the_frame_consumer() {
+        let name = "game::native_hooks::particle_count_tests::late_clear_removes_native_particle_lights_at_the_frame_consumer";
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            name,
+            "HORIZON_PARTICLE_LIGHT_CHILD",
+            &["gui", "model"],
+        ) {
+            return;
+        }
+        let clear_at = if std::env::var("HORIZON_PARTICLE_LIGHT_CHILD").unwrap() == "gui" {
+            ClearAt::Gui
+        } else {
+            ClearAt::Model
+        };
+        with_frame_scene(|game, at, calls| {
+            let manifest = br#"schema = 1
+id = "particle_frame"
+name = "Particle Frame"
+version = "1.0.0"
+api = "0.1"
+[material]
+file = "material.wgsl"
+[[particle_lights]]
+particles = ["flame"]
+color = [1.0, 0.0, 0.0]
+reach = 4.0
+[[lights]]
+blocks = ["minecraft:torch"]
+color = [0.0, 1.0, 0.0]
+"#;
+            let pack = horizon_shader_api::Pack::from_files(std::collections::BTreeMap::from([
+                (horizon_shader_api::MANIFEST.into(), manifest.to_vec()),
+                ("material.wgsl".into(), b"fn material(input: MaterialInput) -> Surface { return Surface(input.albedo); }".to_vec()),
+            ])).unwrap();
+            let report = horizon_shader_api::check(&pack).unwrap();
+            game.renderer
+                .as_mut()
+                .unwrap()
+                .set_native_shader_pack(Some((
+                    report,
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Default::default(),
+                )))
+                .unwrap();
+            let mut baseline = None;
+            game.render_with(|_, frame| {
+                assert_eq!(frame.colored_lights.len(), 2, "item and mod light");
+                assert!(
+                    frame
+                        .colored_lights
+                        .iter()
+                        .any(|l| l[1] == [0.0, 1.0, 0.0, 1.0])
+                );
+                assert!(
+                    frame
+                        .colored_lights
+                        .iter()
+                        .any(|l| l[1] == [0.0, 0.0, 1.0, 1.0])
+                );
+                baseline = Some((frame_geometry(frame), frame.colored_lights.to_vec()));
+                Ok(true)
+            })
+            .unwrap();
+            let baseline = baseline.unwrap();
+            add_frame_particles(game);
+            game.render_with(|_, frame| {
+                assert_eq!(
+                    frame.colored_lights.len(),
+                    horizon_client::dynamic_light::MAX
+                );
+                assert!(
+                    frame
+                        .colored_lights
+                        .iter()
+                        .all(|l| l[1] == [1.0, 0.0, 0.0, 1.0]),
+                    "nearby flames displace unrelated lights before clearing"
+                );
+                Ok(true)
+            })
+            .unwrap();
+            *at.lock().unwrap() = clear_at;
+            game.render_with(|_, frame| {
+                assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+                assert_eq!(
+                    frame.colored_lights, baseline.1,
+                    "cleared flames contribute no light; item/mod lights restored"
+                );
+                assert_eq!(
+                    frame_geometry(frame),
+                    baseline.0,
+                    "particle tail rolls back, ordinary torch stays"
+                );
+                Ok(true)
+            })
+            .unwrap();
+            assert_eq!(game.client_particle_count(), 0);
+        });
+    }
+
     fn host_clear(game: &super::Game<'_>) -> bool {
         let host: &dyn ClientHost = game;
         host.clear_particles()
+    }
+}
+
+#[cfg(test)]
+mod customize_chat_overlay_tests {
+    use horizon_client::hud::HudBatch;
+    use horizon_client::text::Text;
+    use mod_api::{ClientHost, CustomizeChatOverlayEvent, Hooks, ModEntry, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    type Seen = Arc<Mutex<Vec<(i32, i32, bool, i32, i32)>>>;
+
+    /// Lifts the chat 100 GUI pixels, logging what it was told.
+    struct Lift(Seen);
+    #[mod_api::__subscriptions]
+    impl Hooks for Lift {
+        fn customize_chat_overlay(
+            &self,
+            _: &mut dyn ClientHost,
+            event: &mut CustomizeChatOverlayEvent,
+        ) {
+            let e = &*event;
+            self.0
+                .lock()
+                .unwrap()
+                .push((e.gui_width, e.gui_height, e.focused, e.x, e.y));
+            event.y -= 100;
+        }
+    }
+
+    /// The top of what the chat draws, in GUI pixels, and the batch's GUI scale.
+    fn chat_top(game: &mut super::Game<'_>) -> (Option<f32>, f32) {
+        let mut batch = HudBatch::new([1280, 720]);
+        game.draw_chat(&mut batch);
+        let top = batch.vertices.iter().map(|v| v.pos[1]).reduce(f32::min);
+        (top, batch.scale)
+    }
+
+    /// `CustomizeGuiOverlayEvent.Chat`: the mod gets vanilla's place (0, GUI height - 40) and the
+    /// GUI size, focused or not, and the chat is drawn where it moved it. With the chat hidden
+    /// (F1, chat closed) nothing is asked.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_moves_the_chat() {
+        let message = Text::literal("hello from the chat test");
+        let mut plain = None;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            game.system_message(message.clone());
+            plain = chat_top(game).0;
+        });
+        let plain = plain.expect("the message is drawn");
+        let seen = Seen::default();
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("lift", Box::new(Lift(Arc::clone(&seen))))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                game.system_message(message.clone());
+                let (moved, scale) = chat_top(game);
+                let moved = moved.expect("the message is drawn");
+                assert!(
+                    (plain - moved - 100.0).abs() < 0.5,
+                    "lifted by 100 GUI pixels: {plain} -> {moved} at scale {scale}"
+                );
+                let (w, h) = {
+                    let b = HudBatch::new([1280, 720]);
+                    (b.width as i32, b.height as i32)
+                };
+                assert_eq!(*seen.lock().unwrap(), [(w, h, false, 0, h - 40)]);
+                // Hidden: F1 with the chat closed asks nothing.
+                game.ui.hide_gui = true;
+                chat_top(game);
+                assert_eq!(seen.lock().unwrap().len(), 1);
+                // Focused, the chat shows under F1 and is asked again.
+                game.screen = super::Screen::Chat;
+                chat_top(game);
+                let seen = seen.lock().unwrap();
+                assert_eq!(seen.len(), 2);
+                assert!(seen[1].2, "focused");
+            });
+        });
     }
 }

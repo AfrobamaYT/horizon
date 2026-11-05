@@ -221,6 +221,17 @@ pair `persistence_required`/`set_persistence_required` plus `requires_custom_per
 (`Mob.isPersistenceRequired` and kin: vanilla gives the setter no way back). A `/summon` and a spawn egg set their
 flags before the entity-join hook runs, so a mod's own write in that hook is what stays.
 
+### Client effect interpolation
+
+`LivingRef::effect_blend_factor(host, effect, partial)` reads the local player's client effect blend.
+A newly blended ordinary effect reads 0 before its first effect tick, then interpolates to its
+post-countdown target each client tick: 1 while active, 0 once expired. A finite effect that expires
+on its first tick never rises; an infinite effect still has the initial interpolation.
+An unblended addition starts at its target immediately; replacing an existing effect keeps its blend.
+Darkness and nausea use their existing longer fades. Pass the render partial tick unchanged: the read
+does not clamp it. A missing effect reads `Some(0.0)`; an unknown effect, stale handle or entity other
+than the local player reads `None`. Other visible entities' effect blends are not yet supported.
+
 ### The build's warnings
 
 Before it builds, the launcher reads the mods' injections and writes warnings to `native/build.log`; none stops the
@@ -528,6 +539,11 @@ trusting native code is the player's decision, never an agent's.
    `/etc/os-release` (Debian, Ubuntu and Mint:
    `sudo apt install build-essential pkg-config libasound2-dev libudev-dev`). SteamOS has GCC without the C
    library's headers, and a read-only system: native builds don't work there yet.
+   On Windows, Smart App Control can block newly compiled build scripts or toolchain programs with
+   `os error 4551`. The launcher adds advice when it sees that error; it does not check the setting
+   before a build. To build after a block, Windows Security > App & browser control > Smart App Control
+   settings offers an off switch. On some Windows versions, turning it back on requires reinstalling
+   Windows. Content mods need no build and work with Smart App Control on.
    `horizon-launcher rust status|install|remove`.
 2. **horizon-mixins**, at the exact commit the mods name (`[native] mixins` in `horizon-mod.toml`),
    built once with that cargo (`cargo install --locked --git … --rev …`) into `native/tools/<commit>/`.

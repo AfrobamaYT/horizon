@@ -461,9 +461,9 @@ def scenario_setup():
     print('setup: preview, Revert, Apply, Done, and solo return while the page stays open')
     g = Game(2, saved_split=True)
     def labels():
-        return [w['label'] for w in g.ctl(1, 'ui')['widgets']]
+        return [w.get('label', '') for w in g.ctl(1, 'ui')['widgets']]
     def enabled(label):
-        return next(w['enabled'] for w in g.ctl(1, 'ui')['widgets'] if w['label'] == label)
+        return next(w['enabled'] for w in g.ctl(1, 'ui')['widgets'] if w.get('label') == label)
     def page():
         g.ctl(1, 'options', 'horizon')
         g.press(1, 'Splitscreen...')

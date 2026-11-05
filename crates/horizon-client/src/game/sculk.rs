@@ -12,12 +12,14 @@ use horizon_client::{
     particles::{ParticleOptions, ParticleType},
     sculk::{self, Context, Info, SculkEntity, SculkKind, WardenSpawnTracker},
 };
+use horizon_client_core::who::EventSource;
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3},
     position::BlockPos,
     random::RandomSource,
 };
 use horizon_world::registry::BlockStateId;
+use mod_api::particles::PositionSource;
 use std::collections::HashSet;
 use winit::keyboard::KeyCode;
 
@@ -537,7 +539,7 @@ impl Game<'_> {
             .as_ref()
             .map_or((true, true), |p| (p.health.dead_or_dying(), self.creative));
         Context {
-            source: Some(Who::Player),
+            source: Some(Who::Player.into()),
             owner: None,
             affected_state: state,
             dampening_state: self.state_dampens(state),
@@ -555,7 +557,7 @@ impl Game<'_> {
     }
     fn context_of_mob(&self, mob: Option<&Mob>, id: u32, state: Option<BlockStateId>) -> Context {
         Context {
-            source: Some(Who::Mob(id)),
+            source: Some(Who::Mob(id).into()),
             owner: None,
             affected_state: state,
             dampening_state: self.state_dampens(state),
@@ -576,6 +578,38 @@ impl Game<'_> {
                 dampening_state: self.state_dampens(state),
                 ..Context::default()
             },
+        }
+    }
+
+    /// `GameEvent.Context.of(entity, state)` for a non-living entity.
+    pub(super) fn entity_event_context(&self, id: u32, state: Option<BlockStateId>) -> Context {
+        let dampens = self
+            .dropped
+            .iter()
+            .find(|item| item.id == id)
+            .is_some_and(|item| {
+                world_items!(self)
+                    .item_tags
+                    .get("minecraft:dampens_vibrations")
+                    .is_some_and(|tag| tag.contains(item.stack.item.as_ref()))
+            });
+        Context {
+            source: Some(EventSource::Entity(id)),
+            affected_state: state,
+            dampening_state: self.state_dampens(state),
+            dampens,
+            ..Context::default()
+        }
+    }
+
+    fn event_source_context(
+        &self,
+        source: Option<EventSource>,
+        state: Option<BlockStateId>,
+    ) -> Context {
+        match source {
+            Some(EventSource::Entity(id)) => self.entity_event_context(id, state),
+            _ => self.who_context(source.and_then(EventSource::actor), state),
         }
     }
 
@@ -718,7 +752,7 @@ impl Game<'_> {
         // a shrieker cannot trigger it).
         if listens
             && matches!(kind, SculkKind::Sensor | SculkKind::Calibrated)
-            && ctx.source == Some(Who::Player)
+            && ctx.source == Some(Who::Player.into())
             && !ctx.spectator
             && ctx.stepping_carefully
             && sculk::ignored_when_sneaking(event)
@@ -916,7 +950,8 @@ impl Game<'_> {
                     .vibration
                     .tick(time, adjacent, true, |d| d.floor() as i32);
                 if let Some((info, travel)) = tick.started {
-                    self.vibration_particle(info.pos, center(key), travel);
+                    let source = PositionSource::Block([key.0, key.1, key.2]);
+                    self.vibration_particle(source, info.pos, center(key), travel);
                 }
                 if let Some(info) = tick.received {
                     self.sculk_receive(key, info)?;
@@ -966,7 +1001,7 @@ impl Game<'_> {
                 }
             }
             SculkKind::Shrieker => {
-                let by_player = info.owner.or(info.source);
+                let by_player = info.owner.or(info.source.and_then(EventSource::actor));
                 self.try_shriek(
                     key,
                     by_player == Some(Who::Player) || self.rides_player(by_player),
@@ -983,7 +1018,7 @@ impl Game<'_> {
     fn activate_sensor(
         &mut self,
         key: (i32, i32, i32),
-        source: Option<Who>,
+        source: Option<EventSource>,
         power: i32,
         frequency: i32,
     ) -> Result<()> {
@@ -997,7 +1032,7 @@ impl Game<'_> {
                 let relative = (key.0 + n[0], key.1 + n[1], key.2 + n[2]);
                 let state = self.world.block(relative.0, relative.1, relative.2);
                 if self.state_is(&self.sculk.tables.resonator, state) {
-                    let ctx = self.who_context(source, Some(state));
+                    let ctx = self.event_source_context(source, Some(state));
                     self.post_game_event(
                         sculk::RESONANCE[frequency as usize - 1],
                         center(relative),
@@ -1012,7 +1047,7 @@ impl Game<'_> {
                 }
             }
         }
-        let ctx = self.who_context(source, None);
+        let ctx = self.event_source_context(source, None);
         self.post_game_event(sculk::TENDRILS_CLICKING, center(key), ctx);
         self.with_level(|b, level, ticks| b.sculk_sensor_click(level, ticks, pos));
         self.process_level_events()
@@ -1075,7 +1110,7 @@ impl Game<'_> {
                                 event: "minecraft:step",
                                 distance,
                                 pos: at,
-                                source: Some(who),
+                                source: Some(who.into()),
                                 owner: None,
                             },
                             time,
@@ -1579,12 +1614,42 @@ impl Game<'_> {
         }
     }
 
-    fn vibration_particle(&mut self, from: [f64; 3], to: [f64; 3], ticks: i32) {
-        self.particles.vibration(from, to, ticks);
+    /// `ServerLevel.sendParticles(new VibrationParticleOption(...), origin,
+    /// 1, 0, 0, 0, 0)` from `VibrationSystem.Ticker.trySelectAndScheduleVibration`:
+    /// the window draws it when it is a client, and every player within 32
+    /// blocks is sent it.
+    fn vibration_particle(
+        &mut self,
+        source: PositionSource,
+        from: [f64; 3],
+        to: [f64; 3],
+        ticks: i32,
+    ) {
+        let options = ParticleOptions::vibration(source, to, ticks);
+        if self.options.execution_role.is_client() {
+            self.particles.vibration(from, to, ticks);
+        }
+        self.lan_send_particles(super::lan_particles::QueuedParticle {
+            dimension: self.dim.id(),
+            options,
+            state: None,
+            at: from,
+            spread: [0.0; 3],
+            speed: [0.0; 3],
+            count: 1,
+            randomization: 0,
+        });
     }
-    /// A vibration travelling to a warden (`MobEvent::Vibration`).
-    pub(super) fn mob_vibration_particle(&mut self, from: [f64; 3], to: [f64; 3], ticks: i32) {
-        self.vibration_particle(from, to, ticks);
+    /// A vibration travelling to a warden or allay (`MobEvent::Vibration`).
+    pub(super) fn mob_vibration_particle(
+        &mut self,
+        source: horizon_protocol::entity_data::PositionSource,
+        from: [f64; 3],
+        to: [f64; 3],
+        ticks: i32,
+    ) {
+        let source = super::lan_particles::particle_position_source(&source);
+        self.vibration_particle(source, from, to, ticks);
     }
     /// `Warden.clientDiggingParticles`: thirty crumbs of the block underfoot.
     pub(super) fn warden_dig_particles(&mut self, at: [f64; 3]) {
@@ -1630,6 +1695,17 @@ impl Game<'_> {
             ctx.player = owner == Some(Who::Player) || self.rides_player(owner);
         }
         self.post_game_event(event, at, ctx);
+    }
+    /// Retain the projectile as the landing event source and the
+    /// shooter as its owner, even when the projectile is held out for ticking.
+    pub(super) fn projectile_landed_event(&mut self, id: u32, owner: Option<Who>, at: [f64; 3]) {
+        let ctx = Context {
+            source: (id != 0).then_some(EventSource::Entity(id)),
+            owner,
+            player: owner == Some(Who::Player) || self.rides_player(owner),
+            ..Context::default()
+        };
+        self.post_game_event("minecraft:projectile_land", at, ctx);
     }
     /// The player shot or threw something.
     pub(super) fn player_projectile_shot(&mut self) {
@@ -2171,10 +2247,10 @@ fn flaps(species: Species, resting: bool, on_ground: bool, age: u32) -> bool {
     }
 }
 
-fn event_cause(source: Option<Who>, acting_player: Option<u32>) -> Option<u32> {
+fn event_cause(source: Option<EventSource>, acting_player: Option<u32>) -> Option<u32> {
     match source {
-        Some(Who::Player) => acting_player,
-        Some(Who::Mob(id)) => Some(id),
+        Some(EventSource::Player) => acting_player,
+        Some(EventSource::Mob(id) | EventSource::Entity(id)) => Some(id),
         None => None,
     }
 }
@@ -2185,10 +2261,80 @@ mod tests {
 
     #[test]
     fn game_event_cause_uses_acting_guest() {
-        assert_eq!(event_cause(Some(Who::Player), Some(42)), Some(42));
-        assert_eq!(event_cause(Some(Who::Player), None), None);
-        assert_eq!(event_cause(Some(Who::Mob(7)), Some(42)), Some(7));
+        assert_eq!(event_cause(Some(Who::Player.into()), Some(42)), Some(42));
+        assert_eq!(event_cause(Some(Who::Player.into()), None), None);
+        assert_eq!(event_cause(Some(Who::Mob(7).into()), Some(42)), Some(7));
+        assert_eq!(
+            event_cause(Some(EventSource::Entity(99)), Some(42)),
+            Some(99)
+        );
         assert_eq!(event_cause(None, Some(42)), None);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn dropped_wool_dampens_its_own_vibrations() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use horizon_client::{chunk::Chunk, items::ItemStack};
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.sculk_prepare();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let sensor = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:sculk_sensor")
+                .unwrap();
+            game.world.set(1, 64, 1, sensor).unwrap();
+            game.sculk_sync_index();
+            game.spawn_item(
+                ItemStack::new("minecraft:white_wool", 1),
+                [3.5, 64.0, 1.5],
+                [0.0; 3],
+                0,
+            );
+            let id = game.dropped[0].id;
+            let entity = game.native_entity(id).unwrap();
+            assert!(game.native_entity_game_event(entity, "minecraft:step"));
+            assert!(
+                game.sculk_entity((1, 64, 1))
+                    .unwrap()
+                    .vibration
+                    .selector
+                    .current
+                    .is_none()
+            );
+            game.dropped[0].stack = ItemStack::new("minecraft:stone", 1);
+            assert!(game.native_entity_game_event(entity, "minecraft:step"));
+            let (info, _) = game
+                .sculk_entity((1, 64, 1))
+                .unwrap()
+                .vibration
+                .selector
+                .current
+                .unwrap();
+            assert_eq!(info.source, Some(EventSource::Entity(id)));
+            game.sculk_entity((1, 64, 1))
+                .unwrap()
+                .vibration
+                .selector
+                .current = None;
+            game.projectile_landed_event(123, Some(Who::Player), [3.5, 64.0, 1.5]);
+            let (info, _) = game
+                .sculk_entity((1, 64, 1))
+                .unwrap()
+                .vibration
+                .selector
+                .current
+                .unwrap();
+            assert_eq!(info.source, Some(EventSource::Entity(123)));
+            assert_eq!(info.owner, Some(Who::Player));
+        });
     }
 
     /// `vanilla_game_event` hears `GameEvent.Context.affectedState`: the state a context
