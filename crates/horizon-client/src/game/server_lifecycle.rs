@@ -75,11 +75,16 @@ impl Game<'_> {
             }
             Err(payload) => {
                 let message = shutdown_panic(payload.as_ref());
-                self.release_server_storage();
+                remember_shutdown(&mut failure, message.clone());
                 let _ = catch_unwind(AssertUnwindSafe(|| {
                     self.native_lifecycle_close_failed(&message);
                 }));
-                remember_shutdown(&mut failure, message);
+                // A config/player callback may unwind before the stop path
+                // reaches its final save. Complete that same tail, not just
+                // the writes already queued, while retaining the first error.
+                if let Err(error) = self.finish_server_save(crashed) {
+                    remember_shutdown(&mut failure, error.to_string());
+                }
             }
         }
         if let Err(payload) =
@@ -91,19 +96,6 @@ impl Game<'_> {
             Some(message) => Err(message.into()),
             None => Ok(()),
         }
-    }
-
-    /// Lock, flush and close when `stopServer` unwound before it released storage.
-    fn release_server_storage(&mut self) {
-        if self.session_lock.is_none() && !self.world_adopted {
-            return;
-        }
-        let _ = catch_unwind(AssertUnwindSafe(|| self.lan_close(false)));
-        let _ = catch_unwind(AssertUnwindSafe(|| {
-            let _ = self.save.flush();
-        }));
-        self.session_lock = None;
-        self.world_adopted = false;
     }
 
     /// A panic can interrupt `as_guest` with the player's current state swapped
@@ -132,28 +124,43 @@ impl Game<'_> {
     /// The session lock is not that marker: it is installed before the prepared
     /// level, so tag reads work, and a save in that gap would write the placeholder.
     pub(super) fn finish_server_save(&mut self, crashed: bool) -> Result<()> {
-        let saved = catch_unwind(AssertUnwindSafe(|| {
-            let beds = if crashed {
+        // IntegratedServer.teardownPublishedState must happen even if an
+        // earlier callback panicked; otherwise lan_close only unpublishes a
+        // still-serving server instead of disconnecting and dropping its hub.
+        self.stop_serving();
+        let mut result = match catch_unwind(AssertUnwindSafe(|| {
+            if crashed {
                 Ok(())
             } else {
                 self.free_player_beds()
-            };
-            let saved = if self.world_adopted && self.session_lock.is_some() {
-                self.save_game()
-            } else {
-                Ok(())
-            };
-            beds.and(saved)
-        }));
-        let mut result = match saved {
+            }
+        })) {
             Ok(result) => result,
             Err(payload) => Err(shutdown_panic(payload.as_ref()).into()),
         };
+        let saved = match catch_unwind(AssertUnwindSafe(|| {
+            if self.world_adopted && self.session_lock.is_some() {
+                self.save_game()
+            } else {
+                Ok(())
+            }
+        })) {
+            Ok(result) => result,
+            Err(payload) => Err(shutdown_panic(payload.as_ref()).into()),
+        };
+        result = result.and(saved);
         if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.lan_close(false))) {
             let message = shutdown_panic(payload.as_ref());
             if result.is_ok() {
                 result = Err(message.into());
             }
+        }
+        // A player callback/save in lan_close can also unwind before taking
+        // the host. Reuse its transport teardown independently of callbacks.
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.lan_disconnect(false)))
+            && result.is_ok()
+        {
+            result = Err(shutdown_panic(payload.as_ref()).into());
         }
         match catch_unwind(AssertUnwindSafe(|| self.save.flush())) {
             Ok(Ok(())) => {}

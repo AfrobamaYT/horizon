@@ -827,9 +827,7 @@ impl Game<'_> {
         self.native_configs_server_stop();
         self.native_players_leaving();
         // IntegratedServer.stopServer: teardownPublishedState.
-        if let Some(s) = self.serving.take() {
-            s.flags.published.store(0, Ordering::Relaxed);
-        }
+        self.stop_serving();
         self.flush_native_net();
         // PlayerList.removeAll: the owner and every guest leave the game.
         if !crashed {
@@ -870,6 +868,14 @@ pub(super) struct ServerOptions {
 
 /// The server thread's side.
 impl Game<'_> {
+    /// IntegratedServer.teardownPublishedState, also reached when a shutdown
+    /// callback unwinds before the normal stop path can retire the server.
+    pub(super) fn stop_serving(&mut self) {
+        if let Some(s) = self.serving.take() {
+            s.flags.published.store(0, Ordering::Relaxed);
+        }
+    }
+
     /// Whether this game is an integrated server's.
     pub(super) fn serving(&self) -> bool {
         self.serving.is_some()
@@ -1246,8 +1252,30 @@ fn refused(owner: bool, published: bool, split_seat: bool, memory: bool) -> bool
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
+
+    /// Observe both teardownPublishedState and the dropped server task queue.
+    pub(in crate::game) fn install_serving(
+        game: &mut Game<'_>,
+        published: bool,
+    ) -> impl Fn() -> bool + Send + Sync + 'static {
+        let flags = Arc::new(Flags::default());
+        flags
+            .published
+            .store(u16::from(published), Ordering::Relaxed);
+        let (tasks, receiver) = channel();
+        game.serving = Some(Serving {
+            flags: flags.clone(),
+            tasks: receiver,
+            owner: 0,
+            pending: None,
+            load: LoadPhase::default(),
+        });
+        move || {
+            flags.published.load(Ordering::Relaxed) == 0 && tasks.send(Box::new(|_| {})).is_err()
+        }
+    }
 
     #[test]
     fn the_owner_and_splitscreen_seats_are_let_in_only_through_memory() {

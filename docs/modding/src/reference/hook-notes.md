@@ -369,7 +369,10 @@ requires a farmer at work and `mob_griefing` enabled.
   On every exit after startup began, including a failed open, failed tick, or caught panic,
   `server_stopping(dedicated)` (`ServerStoppingEvent`) runs before player cleanup and the final world save attempt.
   `server_stopped(dedicated)` (`ServerStoppedEvent`) runs last, after network teardown, flushing saves and releasing
-  storage, even when the save failed or a shutdown listener panicked. These are server-side, mutable `ServerHost` notifications, not cancellable.
+  storage, even when the save failed or a shutdown listener panicked. An early callback panic (including
+  `config_unloading`) still reaches the final adopted-world save attempt and full server/network teardown,
+  not just unpublishing or flushing queued writes. The first failure is retained if cleanup also fails.
+  These are server-side, mutable `ServerHost` notifications, not cancellable.
   A failed open never overwrites a world the server did not successfully adopt: the session lock is taken before the prepared level is installed, and only that installation allows the final save. `WorldOpenFailed` or `WorldCloseFailed`
   still reports the failure; `WorldCloseFinal` is only emitted after a successful orderly close. No tick-time cost:
   these hooks dispatch only at server startup and shutdown.
