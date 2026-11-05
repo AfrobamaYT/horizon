@@ -296,6 +296,12 @@ modules re-export declared types and free functions: the declaration above makes
 a type necessarily brings all its public fields and inherent methods. Undeclared types have no
 name in the facade and do not compile.
 
+The facade is generated when the game builds the mod, and it re-exports items the prebuilt
+game makes public; the game's source keeps them private. So a plain `cargo check` of the
+mod resolves `horizon-internals` to an empty crate and can't see `internals::…`. Compile
+a mod that declares internals with `horizon-launcher native-build <mod folder>`, which stages it
+against the pinned game the same way the launcher does on install, and report its errors.
+
 A raw injection also exposes the point's listener and raw record in `internals::raw`, for
 example `__TickListener` and `__TickRaw`. Implement `pub fn count` with the exact listener type
 from `points.json` (including the receiver and argument-record lifetime). The facade's safe,
