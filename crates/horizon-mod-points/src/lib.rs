@@ -27,15 +27,19 @@ pub use registry::{RegisterError, register, stop};
 // hidden: the game's side of the points, not part of the API a mod is written against
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::registry::{listened_at, listeners, seal};
+    pub use crate::registry::{listened_at, seal};
     #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
     pub use crate::wire;
+    use crate::{PointId, Points};
 
-    /// Runs a point's listeners, out of the pointed function's own code.
+    /// Runs the listeners at `place` (the `Points` method `name`), each through `call`: one copy of
+    /// the loop for every point, out of the pointed functions' own code.
     #[cold]
     #[inline(never)]
-    pub fn fire(listeners: impl FnOnce()) {
-        listeners();
+    pub fn fire(place: PointId, name: &'static str, call: &mut dyn FnMut(&'static dyn Points)) {
+        for points in crate::registry::listeners(place, name) {
+            call(points);
+        }
     }
 
     /// Whether `list` holds `name`, at compile time: the launcher's generated `main` checks each

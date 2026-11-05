@@ -104,9 +104,9 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     let mut server = Server::default();
     for _ in 0..400 {
         let mut args = mod_points::TickArgs::__new();
-        for listener in mod_points::__private::listeners(mod_points::PointId::Tick, "tick") {
-            listener.tick(mod_api::HostSide::Server(&mut server), &mut args);
-        }
+        mod_points::__private::fire(mod_points::PointId::Tick, "tick", &mut |listener| {
+            listener.tick(mod_api::HostSide::Server(&mut server), &mut args)
+        });
         assert!(!args.cancel, "the sample lets the tick run");
     }
     assert_eq!(

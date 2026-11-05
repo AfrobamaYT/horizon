@@ -292,12 +292,10 @@ fn a_wasm_mod_against_the_same_mod_native() {
     }
 }
 
-/// A server's tick for a point's listeners.
-fn tick_at_point(listeners: impl Iterator<Item = &'static dyn mod_points::Points>) -> bool {
+/// A server's tick for one listener at the tick point.
+fn tick_at_point(listener: &dyn mod_points::Points) -> bool {
     let mut args = mod_points::TickArgs::__new();
-    for listener in listeners {
-        listener.tick(mod_api::HostSide::Server(&mut World), &mut args);
-    }
+    listener.tick(mod_api::HostSide::Server(&mut World), &mut args);
     args.cancel
 }
 
@@ -341,13 +339,12 @@ fn a_point_filled_by_a_wasm_mod() {
     });
     let native: &'static dyn mod_points::Points = Box::leak(Box::new(bench_mod::Mod));
     let native_time = timed(20_000, || {
-        std::hint::black_box(tick_at_point(std::iter::once(native)));
+        std::hint::black_box(tick_at_point(native));
     });
     let wasm_time = timed(20_000, || {
-        std::hint::black_box(tick_at_point(mod_points::__private::listeners(
-            mod_points::PointId::Tick,
-            "tick",
-        )));
+        mod_points::__private::fire(mod_points::PointId::Tick, "tick", &mut |listener| {
+            std::hint::black_box(tick_at_point(listener));
+        });
     });
     let table = format!(
         "### A point filled by a mod\n\n| Slot | Per tick |\n| --- | --- |\n\
