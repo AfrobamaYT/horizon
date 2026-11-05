@@ -253,7 +253,6 @@
   "horizon.extras.sort_key.tooltip": "커서가 위치한 부분을 정렬합니다. 클릭 후 키를 누르세요. Esc로 바인딩을 해제할 수 있습니다.",
   "horizon.extras.no_ai.tooltip": "에이전트 제어, horizon-ctl, MCP 서버 등 모든 AI 기능을 숨기고 끕니다. 런처의 스위치도 포함됩니다.",
   "horizon.extras.agent_control.tooltip": "이 컴퓨터에서만 horizon-ctl 또는 MCP 클라이언트를 통해 자체 AI 에이전트가 이 게임을 플레이할 수 있습니다.",
-  "horizon.extras.discord_presence.tooltip": "Discord가 실행되는 동안 Discord 프로필에 'Horizon 플레이 중'을 표시합니다: 메뉴, 싱글 플레이어 또는 멀티플레이어, 차원 및 플레이 시간. 월드 이름이나 서버 주소는 절대 표시되지 않습니다.",
   "Calibrate...": "보정...",
   "Calibrate Anyway...": "그래도 보정...",
   "Use Automatic Setup": "자동 설정 사용",

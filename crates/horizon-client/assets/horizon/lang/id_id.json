@@ -245,7 +245,6 @@
   "horizon.extras.sort_key.tooltip": "Mengurutkan bagian di bawah kursor. Klik, lalu tekan tombol; Escape untuk melepasnya.",
   "horizon.extras.no_ai.tooltip": "Menyembunyikan dan menonaktifkan setiap fitur AI: kontrol agen, horizon-ctl, dan server MCP. Termasuk tombol pada peluncur.",
   "horizon.extras.agent_control.tooltip": "Agen AI Anda sendiri dapat memainkan game ini melalui horizon-ctl atau klien MCP, khusus di komputer ini.",
-  "horizon.extras.discord_presence.tooltip": "Menampilkan 'Playing Horizon' di profil Discord Anda saat Discord berjalan: menu, pemain tunggal atau multiplayer, dimensi, dan durasi bermain. Tidak pernah menampilkan nama dunia atau alamat server.",
   "Calibrate...": "Kalibrasi...",
   "Calibrate Anyway...": "Tetap Kalibrasi...",
   "Use Automatic Setup": "Gunakan Pengaturan Otomatis",
