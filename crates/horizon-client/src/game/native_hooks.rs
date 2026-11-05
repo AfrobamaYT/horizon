@@ -3179,6 +3179,10 @@ impl Game<'_> {
     ) {
         self.fire_mouse_button_pre(button, pressed, modifiers, canceled);
     }
+    /// The physical window size changed.
+    pub(super) fn native_window_resize(&mut self, width: u32, height: u32) {
+        self.fire_window_resize(width, height);
+    }
     /// An accepted raw button event finished dispatch, including a screen handler's early return.
     pub(super) fn native_mouse_button_post(&mut self, button: i32, pressed: bool, modifiers: u32) {
         self.fire_mouse_button_post(button, pressed, modifiers);

@@ -2891,6 +2891,7 @@ struct Game<'a> {
     /// The layout the last frame drew the inventory's effect panels with.
     effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
+    last_window_size: Option<winit::dpi::PhysicalSize<u32>>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
     last_device_recovery: Option<Instant>,
@@ -18238,6 +18239,7 @@ impl ApplicationHandler for Game<'_> {
                 return;
             }
         }
+        self.last_window_size = Some(window.inner_size());
         self.window = Some(window);
         self.ime_allowed = false;
         self.ime_area = None;
@@ -18396,7 +18398,19 @@ impl Game<'_> {
                 return;
             }
         }
+        let resized = if let WindowEvent::Resized(size) = &event {
+            if self.last_window_size.replace(*size) != Some(*size) {
+                Some(*size)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         self.handle_window_event_inner(event_loop, event);
+        if let Some(size) = resized {
+            self.native_window_resize(size.width, size.height);
+        }
         // A title screen the event asked for opens before the next event.
         self.settle_title_mode();
         if let Some((button, pressed, modifiers)) = mouse {
@@ -20139,6 +20153,7 @@ impl<'a> Game<'a> {
             observed_screen: None,
             effects_layout: std::cell::Cell::new(None),
             window: None,
+            last_window_size: None,
             renderer: None,
             last_device_recovery: None,
             entity_vertices: Vec::new(),
@@ -22730,6 +22745,7 @@ impl Loading {
         };
         drop(game_step);
         let game_ms = game_at.elapsed().as_millis();
+        game.last_window_size = Some(window.inner_size());
         game.window = Some(window);
         game.renderer = Some(renderer);
         game.world_renderer_ready = true;
