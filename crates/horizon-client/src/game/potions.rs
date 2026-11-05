@@ -1186,13 +1186,23 @@ impl Game<'_> {
         kind: &str,
         effect: &str,
     ) -> bool {
+        let key = brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index));
+        self.can_be_affected_resolved(entity, kind, effect, key)
+    }
+
+    /// The validated registry path, also used by native operations without parsing a name again.
+    pub(super) fn can_be_affected_resolved(
+        &mut self,
+        entity: Option<i32>,
+        kind: &str,
+        effect: &str,
+        key: Option<mod_api::EffectKey>,
+    ) -> bool {
         let mut answered = None;
-        if let Some(living) = self.effect_living_ref(entity) {
-            if let Some(key) =
-                brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index))
-            {
-                self.native_mob_effect_applicable(living, key, &mut answered);
-            }
+        if let Some(living) = self.effect_living_ref(entity)
+            && let Some(key) = key
+        {
+            self.native_mob_effect_applicable(living, key, &mut answered);
         }
         match answered {
             Some(EffectApplicable::Allow) => true,
@@ -1206,7 +1216,10 @@ impl Game<'_> {
         // `LivingEntity.addEffect` refuses what cannot affect the entity;
         // players pass the tag check, but the `mob_effect_applicable` hook
         // is asked for every add.
-        if !self.can_be_affected(None, "minecraft:player", effect.id) {
+        let key = effect
+            .registry_index
+            .and_then(mod_api::__private::effect_key);
+        if !self.can_be_affected_resolved(None, "minecraft:player", effect.id, key) {
             return false;
         }
         let id = effect.id;
@@ -1221,17 +1234,19 @@ impl Game<'_> {
             let current = p.health.absorption();
             let _ = p.set_health(current.max(target), true);
         }
-        self.mod_effect_added(id, None, amp, new);
+        if let Some(key) = key {
+            self.mod_effect_added_resolved(key, None, amp, new);
+        }
         changed
     }
     /// Removes one effect, or all effects, and refreshes the player's derived state.
-    pub(super) fn remove_player_effects(&mut self, effect: Option<&str>) -> bool {
+    pub(super) fn remove_player_effects(&mut self, effect: Option<usize>) -> bool {
         let before = self.potions.effects.list.len();
         let mut index = 0;
         while index < self.potions.effects.list.len() {
             let current = &self.potions.effects.list[index];
             // The one being removed, or all of them when `effect` is None.
-            if effect.is_some_and(|id| current.id != id) {
+            if effect.is_some_and(|index| current.registry_index != Some(index)) {
                 index += 1;
                 continue;
             }
@@ -1274,12 +1289,24 @@ impl Game<'_> {
         amplifier: i32,
         new: bool,
     ) {
-        if self.remote.is_none() && brewing::is_mod_effect(effect) {
-            let Some(effect) =
-                brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index))
-            else {
-                return;
-            };
+        if let Some(effect) =
+            brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index))
+        {
+            self.mod_effect_added_resolved(effect, entity, amplifier, new);
+        }
+    }
+    /// Dispatch an already resolved effect's added notices, without a registry name lookup.
+    pub(super) fn mod_effect_added_resolved(
+        &mut self,
+        effect: mod_api::EffectKey,
+        entity: Option<i32>,
+        amplifier: i32,
+        new: bool,
+    ) {
+        if self.remote.is_none()
+            && mod_api::__private::resolved_effect(effect)
+                .is_some_and(|def| def.index >= brewing::EFFECTS.len())
+        {
             if new {
                 self.native_on_effect_added(effect, entity, amplifier);
             }

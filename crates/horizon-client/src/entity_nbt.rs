@@ -5351,7 +5351,10 @@ mod sheep_nbt_tests {
         };
         assert_eq!(text(saved[0].get("id")).as_deref(), Some("testfx:glow"));
         let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
-        assert_eq!(back.extra.effects, [("testfx:glow", 200, 2)]);
+        assert_eq!(
+            back.extra.effects,
+            [crate::mobs::StoredEffect::new("testfx:glow", 200, 2)]
+        );
     }
 
     #[test]
@@ -5388,8 +5391,8 @@ mod sheep_nbt_tests {
         assert!(saved[0].get("amplifier").is_none());
         assert!(saved[1].get("amplifier").is_some());
         let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
-        assert_eq!(back.extra.effects[0].2, 0);
-        assert_eq!(back.extra.effects[1].2, 3);
+        assert_eq!(back.extra.effects[0].amplifier, 0);
+        assert_eq!(back.extra.effects[1].amplifier, 3);
         assert_eq!(back.extra.effect_chains[0].amplifier, 2);
         assert_eq!(back.extra.effect_chains[0].duration, 200);
     }

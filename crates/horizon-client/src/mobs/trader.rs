@@ -367,7 +367,9 @@ mod tests {
                 decide(&end_dark, &mut m, &mut potion, &mut milk),
                 (false, false)
             );
-            m.extra.effects.push((INVISIBILITY, 3600, 0));
+            m.extra
+                .effects
+                .push(crate::mobs::StoredEffect::new(INVISIBILITY, 3600, 0));
             let mut day = w.clone();
             day.daylight = true;
             day.end = false;

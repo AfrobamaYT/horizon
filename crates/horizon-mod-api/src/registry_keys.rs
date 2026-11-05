@@ -79,6 +79,7 @@ impl Names {
 
 /// A block slot's mappings in one game's current tables.
 #[derive(Clone, Copy, Debug)]
+// exhaustive: the game builds this mapping at load; mods receive only BlockKey
 pub struct ResolvedBlock {
     /// The block's default state.
     pub default: BlockStateId,

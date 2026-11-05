@@ -14,7 +14,7 @@ use horizon_client::effects::{EffectInstance, PlayerEffects};
 use horizon_client::mobs::Mob;
 use mod_api::{EffectKey, ItemStack, LivingRef, NativeActiveEffect};
 
-/// A player's effect as the API's: the id namespaced as the registry has it.
+/// A player's effect as the API's load-owned key and instance data.
 pub(super) fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
     NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
         id: mod_api::__private::effect_key(e.registry_index.expect("active effect registry index"))
@@ -26,8 +26,7 @@ pub(super) fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
     })
 }
 
-/// A mob's effect as the API's: mobs keep the effect itself as
-/// (id, ticks, amplifier), the ambient and particle flags in their own lists.
+/// A mob's stored effect as the API's: ambient and particle flags remain in their own lists.
 fn mob_effect(m: &Mob, e: &horizon_client::mobs::StoredEffect) -> NativeActiveEffect {
     NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
         id: mod_api::__private::effect_key(e.registry_index.expect("active effect registry index"))
@@ -101,14 +100,13 @@ impl Game<'_> {
             return false;
         }
         let amplifier = effect.amplifier.clamp(0, 255);
+        let mut instance = EffectInstance::from_def(def, effect.duration, amplifier);
+        instance.ambient = effect.ambient;
+        instance.visible = effect.visible;
         match self.native_living_target(living) {
-            Some(t @ (Target::Player | Target::Guest(_))) => {
-                let mut instance = EffectInstance::new(def.id, effect.duration, amplifier);
-                instance.ambient = effect.ambient;
-                instance.visible = effect.visible;
-                self.for_player(t, |g| g.add_player_effect(instance))
-                    .unwrap_or(false)
-            }
+            Some(t @ (Target::Player | Target::Guest(_))) => self
+                .for_player(t, |g| g.add_player_effect(instance))
+                .unwrap_or(false),
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter().find(|m| m.id == id && !m.removed) else {
                     return false;
@@ -116,23 +114,21 @@ impl Game<'_> {
                 let kind = m.kind.id.clone();
                 let name =
                     mod_api::__private::effect_key_id(effect.id).expect("resolved effect name");
-                let new = !m.has_effect(name);
+                let new = !m
+                    .extra
+                    .effects
+                    .iter()
+                    .any(|e| e.registry_index == Some(def.index));
                 // `LivingEntity.addEffect` refuses what the mob cannot be
                 // affected by, the `mob_effect_applicable` hook asked first.
-                if !self.can_be_affected(Some(id as i32), &kind, name) {
+                if !self.can_be_affected_resolved(Some(id as i32), &kind, name, Some(effect.id)) {
                     return false;
                 }
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
                     return false;
                 };
-                let changed = m.add_effect_with(
-                    name,
-                    effect.duration,
-                    amplifier,
-                    effect.ambient,
-                    effect.visible,
-                );
-                self.mod_effect_added(name, Some(id as i32), amplifier, new);
+                let changed = m.add_effect_instance(name, instance);
+                self.mod_effect_added_resolved(effect.id, Some(id as i32), amplifier, new);
                 changed
             }
             _ => false,
@@ -141,7 +137,7 @@ impl Game<'_> {
 
     /// The entity's instance of `effect` (`LivingEntity.getEffect`): its id
     /// namespaced as the registry has it, the ticks left (-1 infinite), the
-    /// amplifier and the flags. A bare vanilla id reads as `minecraft:`'s.
+    /// amplifier and the flags. The effect is a registration-slot key resolved at load.
     /// None when it has the effect not, or for an unknown id, an armor
     /// stand, the dragon, a stale handle or a client.
     pub(super) fn native_living_effect(
@@ -153,12 +149,15 @@ impl Game<'_> {
         match self.native_living_read_target(living)? {
             t @ (Target::Player | Target::Guest(_)) => self
                 .native_living_player_effects(t)?
-                .get(def.id)
+                .get_registered(def.index)
                 .map(active_effect),
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
-                let name = mod_api::__private::effect_key_id(effect).expect("resolved effect name");
-                let e = m.extra.effects.iter().find(|e| e.id == name)?;
+                let e = m
+                    .extra
+                    .effects
+                    .iter()
+                    .find(|e| e.registry_index == Some(def.index))?;
                 Some(mob_effect(m, e))
             }
             _ => None,
@@ -185,8 +184,8 @@ impl Game<'_> {
         }
     }
 
-    /// Whether the entity has `effect` (`LivingEntity.hasEffect`). A bare vanilla id reads as
-    /// `minecraft:`'s. False for an unknown id, an armor stand, the dragon,
+    /// Whether the entity has `effect` (`LivingEntity.hasEffect`), using its resolved key.
+    /// False for an invalid slot, an armor stand, the dragon,
     /// a stale handle or a client.
     pub(super) fn native_living_potion_affected(
         &self,
@@ -199,15 +198,16 @@ impl Game<'_> {
         match self.native_living_target(living) {
             Some(t @ (Target::Player | Target::Guest(_))) => self
                 .native_living_player_effects(t)
-                .is_some_and(|effects| effects.get(def.id).is_some()),
+                .is_some_and(|effects| effects.get_registered(def.index).is_some()),
             Some(Target::Mob(id)) => self
                 .mobs
                 .iter()
                 .find(|m| m.id == id && !m.removed)
                 .is_some_and(|m| {
-                    m.has_effect(
-                        mod_api::__private::effect_key_id(effect).expect("resolved effect name"),
-                    )
+                    m.extra
+                        .effects
+                        .iter()
+                        .any(|e| e.registry_index == Some(def.index))
                 }),
             _ => false,
         }
@@ -219,7 +219,7 @@ impl Game<'_> {
     /// nausea in over 150 and out over 20 (`MobEffect.setBlendDuration`), the
     /// fades the fog, lightmap and screen spin draw; any other effect has no
     /// fade and reads 1 while it lasts (vanilla's reaches 1 over the first
-    /// tick after a blended add). A bare vanilla id reads as `minecraft:`'s.
+    /// tick after a blended add). The effect is a registration-slot key resolved at load.
     /// 0 when the entity lacks the effect. None for an unknown id, a stale
     /// handle, or an entity other than the local player: the client keeps no
     /// other entity's effects.
@@ -233,7 +233,7 @@ impl Game<'_> {
         let Target::Player = self.native_living_read_target(living)? else {
             return None;
         };
-        let Some(e) = self.potions.effects.get(def.id) else {
+        let Some(e) = self.potions.effects.get_registered(def.index) else {
             return Some(0.0);
         };
         Some(match def.id {
@@ -263,10 +263,10 @@ impl Game<'_> {
         };
         match self.native_living_target(living) {
             Some(t @ (Target::Player | Target::Guest(_))) => self
-                .for_player(t, |g| g.remove_player_effects(Some(def.id)))
+                .for_player(t, |g| g.remove_player_effects(Some(def.index)))
                 .unwrap_or(false),
             Some(Target::Mob(id)) => {
-                let Some(name_amp) = self
+                let Some(amplifier) = self
                     .mobs
                     .iter()
                     .find(|m| m.id == id && !m.removed)
@@ -274,26 +274,22 @@ impl Game<'_> {
                         m.extra
                             .effects
                             .iter()
-                            .find(|e| {
-                                e.id == mod_api::__private::effect_key_id(effect)
-                                    .expect("resolved effect name")
-                            })
-                            .map(|e| (e.id, e.amplifier))
+                            .find(|e| e.registry_index == Some(def.index))
+                            .map(|e| e.amplifier)
                     })
                 else {
                     return false;
                 };
-                let name = name_amp.0;
                 // `MobEffectEvent.Remove`: refusing the removal keeps it.
                 let mut cancel = false;
-                self.native_mob_effect_remove(living, effect, name_amp.1, &mut cancel);
+                self.native_mob_effect_remove(living, effect, amplifier, &mut cancel);
                 if cancel {
                     return false;
                 }
                 self.mobs
                     .iter_mut()
                     .find(|m| m.id == id)
-                    .is_some_and(|m| m.retain_effects(|e| e.id != name))
+                    .is_some_and(|m| m.retain_effects(|e| e.registry_index != Some(def.index)))
             }
             _ => false,
         }

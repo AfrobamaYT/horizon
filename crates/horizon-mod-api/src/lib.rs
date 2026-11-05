@@ -1621,7 +1621,7 @@ impl ItemEnchantments {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeActiveEffect {
-    /// The effect's namespaced id.
+    /// The effect's load-owned registry key; `id.id(host)` reads its canonical name.
     pub id: EffectKey,
     /// The ticks left; -1 is infinite.
     pub duration: i32,

@@ -2946,8 +2946,7 @@ pub(crate) fn tick_effects(
                 if effect == "minecraft:absorption" {
                     m.absorption = m.absorption.min(4.0 * (hidden.amplifier + 1) as f32);
                 }
-                m.extra.effects[i] =
-                    super::StoredEffect::new(effect, hidden.duration, hidden.amplifier);
+                m.extra.effects[i] = super::StoredEffect::from_instance(effect, &hidden);
                 m.extra.ambient_effects.retain(|e| *e != effect);
                 if hidden.ambient {
                     m.extra.ambient_effects.push(effect);
@@ -3253,7 +3252,7 @@ mod poison_effect_tests {
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.add_effect("poison", 100, 0);
-        assert_eq!(pig.extra.effects[0].0, "minecraft:poison");
+        assert_eq!(pig.extra.effects[0].id, "minecraft:poison");
         let initial_pig_health = pig.health;
         tick_effects(
             &mut pig,
@@ -3437,7 +3436,7 @@ mod poison_effect_tests {
             level,
             None,
         );
-        assert_eq!(pig.extra.effects[0].1, 600);
+        assert_eq!(pig.extra.effects[0].duration, 600);
         assert!(
             !pig.is_invisible(),
             "LivingEntity's periodic effect update clears the manual flag at duration 600"
@@ -3460,8 +3459,14 @@ mod poison_effect_tests {
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind.clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.health = 20.0;
-        pig.extra.effects.push(("minecraft:poison", 25, 0));
-        pig.extra.effects.push(("minecraft:resistance", -1, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:poison", 25, 0));
+        pig.extra.effects.push(crate::mobs::StoredEffect::new(
+            "minecraft:resistance",
+            -1,
+            0,
+        ));
         tick_effects(
             &mut pig,
             crate::test_resources::server_loop_context(),
@@ -3472,8 +3477,12 @@ mod poison_effect_tests {
         // `onMobHurt` finds Infested in the same in-place list: the hurt mob
         // leaves a silverfish call in the outbox.
         let mut pig = Mob::new(2, pig_kind.clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
-        pig.extra.effects.push(("minecraft:poison", 25, 0));
-        pig.extra.effects.push(("minecraft:infested", -1, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:poison", 25, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:infested", -1, 0));
         tick_effects(
             &mut pig,
             crate::test_resources::server_loop_context(),
@@ -3503,7 +3512,9 @@ mod poison_effect_tests {
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.health = 20.0;
-        pig.extra.effects.push(("minecraft:poison", 0, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:poison", 0, 0));
         let mut test_level = crate::health::TestLevel::new(0);
         tick_effects(
             &mut pig,
@@ -3533,7 +3544,11 @@ mod poison_effect_tests {
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.extra
             .set_main_hand(Some("minecraft:totem_of_undying".into()));
-        pig.extra.effects.push(("minecraft:instant_damage", 5, 4));
+        pig.extra.effects.push(crate::mobs::StoredEffect::new(
+            "minecraft:instant_damage",
+            5,
+            4,
+        ));
         tick_effects(
             &mut pig,
             crate::test_resources::server_loop_context(),
@@ -3547,7 +3562,10 @@ mod poison_effect_tests {
             "minecraft:fire_resistance",
         ] {
             assert!(
-                pig.extra.effects.iter().any(|e| e.0 == effect && e.1 > 0),
+                pig.extra
+                    .effects
+                    .iter()
+                    .any(|e| e.id == effect && e.duration > 0),
                 "{effect} kept after the totem fired"
             );
         }
@@ -3568,7 +3586,9 @@ mod poison_effect_tests {
         let data = MobTypes::load(&root).unwrap();
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
-        pig.extra.effects.push(("minecraft:wither", 40, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:wither", 40, 0));
         tick_effects(
             &mut pig,
             crate::test_resources::server_loop_context(),

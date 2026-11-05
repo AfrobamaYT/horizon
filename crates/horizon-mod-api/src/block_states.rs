@@ -44,7 +44,7 @@ impl BlockStates<'_> {
         self.backend?.block_state_has_block_entity(state)
     }
     /// The states of `block` (`minecraft:oak_stairs`), `StateDefinition.getPossibleStates`.
-    /// None for an unknown block, or a host without a game.
+    /// None before the mapping is loaded, or for a host without a game.
     pub fn states_of(&self, block: crate::BlockKey) -> Option<BlockStateRange> {
         self.backend?.block_states_of(block)
     }

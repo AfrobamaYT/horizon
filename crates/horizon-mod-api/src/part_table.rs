@@ -1774,6 +1774,15 @@ pub mod tests {
         assert_eq!(later.id, "key_test:later");
         assert_eq!(later.color, 0x123456);
         assert_eq!(crate::registry_keys::effect_key(later.index), Some(keys[1]));
+        for def in horizon_client_core::potions::all_effects() {
+            let key = crate::registry_keys::effect_key(def.index).unwrap();
+            assert_eq!(crate::registry_keys::effect(key).unwrap().id, def.id);
+            assert_eq!(
+                crate::registry_keys::effect_id(key),
+                Some(horizon_client_core::potions::namespaced(def.id))
+            );
+        }
+
         assert!(crate::registry_keys::effect(EffectKey(u32::MAX)).is_none());
         struct Table;
         impl Backend for Table {
@@ -5686,15 +5695,14 @@ pub mod tests {
         (&mut r as &mut dyn Registrar).block_part(block_key, Other);
         let block_key = (&mut r as &mut dyn Registrar).block_key("test:gauge");
         (&mut r as &mut dyn Registrar).block_part(block_key, Gauge);
-        let block_key = (&mut r as &mut dyn Registrar).block_key("gauge");
-        (&mut r as &mut dyn Registrar).block_part(block_key, Other);
+        (&mut r as &mut dyn Registrar).block_key("test:bad name");
         (&mut r as &mut dyn Registrar).block_part_tag("#test:gauged", Other);
         assert_eq!(r.parts.blocks["test:gauge"].len(), 2);
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
         assert!(
             r.refused[0].contains("Gauge is attached to test:gauge twice, by first and second")
         );
-        assert!(r.refused[1].contains("not a namespaced id"));
+        assert!(r.refused[1].contains("mod second: invalid registry key"));
         assert!(r.refused[2].contains("write it without #"));
     }
 }

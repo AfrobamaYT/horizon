@@ -5963,15 +5963,15 @@ impl Game<'_> {
     ) {
         self.fire_player_bucket_entity(player, name, entity_id, entity);
     }
-    /// A server player changed a beacon's selected effects, after they were stored. Empty effect ids
-    /// mean no effect. Server-side.
+    /// A server player changed a beacon's selected effects, after they were stored. Each selected
+    /// effect is its load-owned key; None means no effect. Server-side.
     pub(super) fn native_player_change_beacon_effect(
         &mut self,
         player: u128,
         name: &str,
         pos: [i32; 3],
-        primary: &str,
-        secondary: &str,
+        primary: Option<EffectKey>,
+        secondary: Option<EffectKey>,
     ) {
         self.fire_player_change_beacon_effect(player, name, pos, primary, secondary);
     }

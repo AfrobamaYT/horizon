@@ -8027,8 +8027,8 @@ impl Game<'_> {
                         Some(living) => horizon_client::brewing::effect(effect)
                             .and_then(|def| mod_api::__private::effect_key(def.index))
                             .is_some_and(|key| self.native_living_remove_effect(living, key)),
-                        None => self
-                            .remove_player_effects(Some(effect.trim_start_matches("minecraft:"))),
+                        None => horizon_client::brewing::effect(effect)
+                            .is_some_and(|def| self.remove_player_effects(Some(def.index))),
                     };
                 }
                 changed

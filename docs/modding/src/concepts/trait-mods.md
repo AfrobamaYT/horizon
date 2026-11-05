@@ -218,7 +218,10 @@ until restart, matching the engine's effect registry.
 `block_state_id`, tag names and fluid ids are separate domains and remain strings.
 `NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
 application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
-uses a key requested through `r.effect_key("minecraft:speed")`.
+uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks
+carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment effect-component
+names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
+and remain strings, as do labels and tags.
 
 A hook whose catalog entry has a `scope` (`block`, `block_entity`, `item`, `menu`) and a `key`, the argument
 naming the thing it is about, is a method on that scope's trait only: `BlockPart`, `BlockEntityPart` (a
@@ -227,7 +230,8 @@ no `Hooks` method: a thing without parts is never asked, and the game asks the p
 order, through the hook's contract, so a `Cancel` or a replacement skips the parts after it. Where NeoForge fires
 a bus event at that moment, the event is a hook of its own on `Hooks`, asked first for every thing, and its cancel
 skips the parts: a mod reacting to its own blocks uses a part, one reacting to every block the event. A part's kind is its type: the same kind twice on one
-thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
+thing, an invalid key declaration, or an unnamespaced id in the other Part registrations stops
+the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
 
 `BlockPart::clone_item_stack` answers on the server when a player picks the block. It receives the
@@ -810,7 +814,7 @@ receiver and documentation; a helper without `self` (`config_files`) takes
 For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one
 plain remainder stack, or `None` when there is none or the item is unknown. Horizon
 currently stores only the remainder item id, not a template's count or components.
-`host.block_item(stone)` returns its item registry name; an unknown block
+`host.block_item(stone)` returns its item registry name; an unavailable block mapping
 returns `None`, while a known block with no item returns `Some("minecraft:air")`.
 Both reads are available on either side.
 A helper's `receiver` also exposes it on that handle. Receivers come from public

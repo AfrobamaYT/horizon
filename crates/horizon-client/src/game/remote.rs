@@ -1365,9 +1365,15 @@ impl Game<'_> {
     }
     /// A mob effect's network id as the effect (`brewing::EFFECTS` id).
     pub(super) fn remote_effect_id(&self, effect: i32) -> Option<&'static str> {
+        self.remote_effect_def(effect).map(|def| def.id)
+    }
+    fn remote_effect_def(
+        &self,
+        effect: i32,
+    ) -> Option<&'static horizon_client::brewing::EffectDef> {
         let r = self.remote.as_ref()?;
         let name = r.builtin.get("minecraft:mob_effect")?.name(effect)?;
-        horizon_client::brewing::effect(name).map(|d| d.id)
+        horizon_client::brewing::effect(name)
     }
     /// ClientPacketListener.handleUpdateMobEffect for the player itself
     /// (`LivingEntity.forceAddEffect`): the effect replaces any of its kind.
@@ -1376,10 +1382,11 @@ impl Game<'_> {
         if self.remote.as_ref().is_none_or(|r| r.entity_id != p.id) {
             return;
         }
-        let Some(id) = self.remote_effect_id(p.effect) else {
+        let Some(def) = self.remote_effect_def(p.effect) else {
             return;
         };
-        let mut e = horizon_client::effects::EffectInstance::new(id, p.duration, p.amplifier);
+        let id = def.id;
+        let mut e = horizon_client::effects::EffectInstance::from_def(def, p.duration, p.amplifier);
         e.ambient = p.flags & 1 != 0;
         e.visible = p.flags & 2 != 0;
         let list = &mut self.potions.effects.list;

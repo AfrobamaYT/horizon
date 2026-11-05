@@ -108,7 +108,7 @@ pub mod dragon_contacts;
 pub mod zombie_villager;
 
 /// A mob's stored active effect with its registry index resolved once at creation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StoredEffect {
     pub id: &'static str,
     pub duration: i32,
@@ -122,6 +122,15 @@ impl StoredEffect {
             duration,
             amplifier,
             registry_index: horizon_client_core::potions::effect(id).map(|def| def.index),
+        }
+    }
+    /// Copy a registered instance after an update or hidden-effect promotion, without resolving again.
+    pub fn from_instance(id: &'static str, instance: &crate::effects::EffectInstance) -> Self {
+        Self {
+            id,
+            duration: instance.duration,
+            amplifier: instance.amplifier,
+            registry_index: instance.registry_index,
         }
     }
 }
@@ -4120,14 +4129,28 @@ impl Mob {
         let mut incoming = crate::effects::EffectInstance::new(effect, ticks, amplifier);
         incoming.ambient = ambient;
         incoming.visible = visible;
+        self.add_effect_instance(effect, incoming)
+    }
+
+    /// Apply an already resolved effect instance through the same update path as content input.
+    pub fn add_effect_instance(
+        &mut self,
+        effect: &'static str,
+        incoming: crate::effects::EffectInstance,
+    ) -> bool {
         let index = self.extra.effects.iter().position(|e| e.id == effect);
         let old_amp = index.map(|i| self.extra.effects[i].amplifier);
         let mut active = if let Some(i) = index {
-            let (duration, amp) = (
-                self.extra.effects[i].duration,
-                self.extra.effects[i].amplifier,
-            );
-            let mut active = crate::effects::EffectInstance::new(effect, duration, amp);
+            let stored = &self.extra.effects[i];
+            let mut active = crate::effects::EffectInstance {
+                id: stored.id,
+                registry_index: stored.registry_index,
+                duration: stored.duration,
+                amplifier: stored.amplifier,
+                ambient: false,
+                visible: true,
+                hidden: None,
+            };
             active.ambient = self.extra.ambient_effects.contains(&effect);
             active.visible = !self.extra.hidden_effects.contains(&effect);
             if let Some(i) = self.extra.effect_chains.iter().position(|e| e.id == effect) {
@@ -4142,11 +4165,11 @@ impl Mob {
             self.extra.effect_chains.push(*hidden);
         }
         if let Some(i) = index {
-            self.extra.effects[i] = StoredEffect::new(effect, active.duration, active.amplifier);
+            self.extra.effects[i] = StoredEffect::from_instance(effect, &active);
         } else {
             self.extra
                 .effects
-                .push(StoredEffect::new(effect, active.duration, active.amplifier));
+                .push(StoredEffect::from_instance(effect, &active));
         }
         self.extra.ambient_effects.retain(|h| *h != effect);
         if active.ambient {
@@ -5374,7 +5397,10 @@ mod magic_absorb_tests {
         // The same effect, no stronger and no longer, ambient again and visible: ambient stays
         // (nothing changed), the visibility follows.
         assert!(m.add_effect_with("speed", 100, 0, true, true));
-        assert_eq!(m.extra.effects, vec![(speed, 600, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new(speed, 600, 0)]
+        );
         assert!(
             m.extra.ambient_effects.contains(&speed) && !m.extra.hidden_effects.contains(&speed)
         );
@@ -5386,7 +5412,10 @@ mod magic_absorb_tests {
         assert!(!m.extra.ambient_effects.contains(&speed));
         assert!(m.add_effect_with("speed", 900, 0, true, true));
         assert!(m.extra.ambient_effects.contains(&speed));
-        assert_eq!(m.extra.effects, vec![(speed, 900, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new(speed, 900, 0)]
+        );
     }
 
     #[test]
@@ -5406,7 +5435,14 @@ mod magic_absorb_tests {
                 None,
             );
         }
-        assert_eq!(m.extra.effects, vec![("minecraft:absorption", 110, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new(
+                "minecraft:absorption",
+                110,
+                0
+            )]
+        );
         assert_eq!(m.absorption, 2.0);
     }
 
@@ -5449,7 +5485,10 @@ mod magic_absorb_tests {
                 None,
             );
         }
-        assert_eq!(m.extra.effects, vec![("minecraft:speed", 110, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new("minecraft:speed", 110, 0)]
+        );
     }
 
     #[test]
@@ -5465,7 +5504,10 @@ mod magic_absorb_tests {
                 None,
             );
         }
-        assert_eq!(m.extra.effects, vec![("minecraft:speed", 3, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new("minecraft:speed", 3, 0)]
+        );
         assert!(m.extra.ambient_effects.contains(&"minecraft:speed"));
         assert!(m.extra.hidden_effects.contains(&"minecraft:speed"));
         m.add_effect("speed", 1, 2);
@@ -5862,9 +5904,9 @@ mod totem_tests {
         assert_eq!(
             m.extra.effects,
             vec![
-                ("minecraft:regeneration", 900, 1),
-                ("minecraft:absorption", 100, 1),
-                ("minecraft:fire_resistance", 800, 0),
+                crate::mobs::StoredEffect::new("minecraft:regeneration", 900, 1),
+                crate::mobs::StoredEffect::new("minecraft:absorption", 100, 1),
+                crate::mobs::StoredEffect::new("minecraft:fire_resistance", 800, 0),
             ]
         );
         assert!(

@@ -325,7 +325,11 @@ mod tests {
                 })
             );
             assert!(!m.has_effect("minecraft:weakness"));
-            assert!(m.extra.effects.contains(&("minecraft:strength", 4000, 0)));
+            assert!(m.extra.effects.contains(&crate::mobs::StoredEffect::new(
+                "minecraft:strength",
+                4000,
+                0
+            )));
             assert_eq!(events.len(), 1);
             let MobEvent::EntityEvent { mob, event, at } = events[0] else {
                 panic!("Starting a cure must broadcast an entity event");
