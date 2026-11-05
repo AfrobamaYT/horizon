@@ -13650,8 +13650,9 @@ mod player_tick_tests {
                 // LocalPlayer.tick waits for the client load and its chunk: only
                 // the other player's pair runs, and the level pass still ticks.
                 game.tick_remote().unwrap();
-                assert_eq!(game.cooldowns.remaining().next().unwrap().1, 2);
-                assert_eq!(game.sleep_timer, 5);
+                // Player.tick owns both counters, so they wait with it.
+                assert_eq!(game.cooldowns.remaining().next().unwrap().1, 3);
+                assert_eq!(game.sleep_timer, 4);
                 let phases = || {
                     std::mem::take(&mut *heard.lock().unwrap())
                         .iter()
@@ -13664,6 +13665,8 @@ mod player_tick_tests {
                     .insert_remote(&mut game.world, horizon_client::chunk::Chunk::empty(0, 0));
                 // The other player's tick ends before the local player's starts.
                 game.tick_remote().unwrap();
+                assert_eq!(game.cooldowns.remaining().next().unwrap().1, 2);
+                assert_eq!(game.sleep_timer, 5);
                 game.screen = super::super::Screen::Dead;
                 game.player
                     .as_mut()
