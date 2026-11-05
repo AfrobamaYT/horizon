@@ -208,9 +208,11 @@ impl Game<'_> {
     /// how far the effect has faded in, from 0 to 1, between the last tick
     /// and the next at `partial`. Darkness fades in and out over 22 ticks and
     /// nausea in over 150 and out over 20 (`MobEffect.setBlendDuration`), the
-    /// fades the fog, lightmap and screen spin draw; any other effect has no
-    /// fade and reads 1 while it lasts (vanilla's reaches 1 over the first
-    /// tick after a blended add). A bare vanilla id reads as `minecraft:`'s.
+    /// fades the fog, lightmap and screen spin draw. Other effects start at
+    /// 0 after a blended add and interpolate to their post-countdown target
+    /// during each client tick: 1 while active, 0 once expired. An unblended
+    /// add starts at its target immediately; an update preserves the old blend.
+    /// `partial` is not clamped. A bare vanilla id reads as `minecraft:`'s.
     /// 0 when the entity lacks the effect. None for an unknown id, a stale
     /// handle, or an entity other than the local player: the client keeps no
     /// other entity's effects.
@@ -230,9 +232,12 @@ impl Game<'_> {
         Some(match def.id {
             "darkness" => self.darkness_blend(partial),
             "nausea" => self.nausea_blend(partial),
-            // `BlendState.tick` with no blend duration: on until its last tick.
-            _ if e.ends_within(0) => 0.0,
-            _ => 1.0,
+            _ => {
+                let (previous, current) = e.client_blend;
+                let previous = u8::from(previous) as f32;
+                let current = u8::from(current) as f32;
+                previous + partial * (current - previous)
+            }
         })
     }
 
