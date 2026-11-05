@@ -361,7 +361,8 @@ requires a farmer at work and `mob_griefing` enabled.
   that call, so its part isn't asked: its attachments go with it, and only its container slots come back out.
 
 - `native_visuals`: a world-frame hook that appends block-rim and
-  colored-light requests. Rims trace the client's existing block outline edges,
+  colored-light requests (`NativeBlockRim::new(pos, argb, width)`,
+  `NativeColoredLight::new(at, rgb, radius, intensity)`). Rims trace the client's existing block outline edges,
   depth-tested against terrain. Lights add camera-local RGB illumination to the
   normal terrain/entity shaders, not gameplay light. Only the first eight rims
   and eight lights are examined; positions must be within 32 blocks of the player,
@@ -582,7 +583,7 @@ or transactions. Declarations still go on each event or registrar.
   its chunk faded in), with the copy the server sent (`native_block_entity_update_tag`). It draws into the entity batch
   under `draw`'s pose stack (`push`, `pop`, `translate`, `rotate_about`, `scale`, in blocks from the block's corner, as
   vanilla's `PoseStack`): `native_draw_quad` (four corners and a sprite's UVs), `native_draw_cube` (a model element's box,
-  its faces baked as a model's are; `CubeFace` is in `super::native_block_entity_draw`), `native_draw_block` (a block
+  its faces baked as a model's are, each a `CubeFace::new(sprite)`, `.with_uv(uv)` for UVs of its own), `native_draw_block` (a block
   state's model, as `submitBlockModel`: a moving part is often a block of the mod's own) and `native_draw_text`
   (`BlockEntityDrawContext::text(text, at, rgb)`: a line of the game's font, as a sign's, in font pixels with y down as
   `Font.drawInBatch` lays it out under the pose, opaque `0xRRGGBB`, in the frame's light; `set_light` to full bright for
