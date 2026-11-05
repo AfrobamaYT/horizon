@@ -23,23 +23,7 @@ const MAX_TARGET_PARAMETERS: usize = 7;
 /// The hooks whose flat targets already take more than [`MAX_TARGET_PARAMETERS`]. This list only
 /// shrinks and takes no new entries: convert a hook to a carrier and delete its line. A PR that
 /// adds a hook never edits it, so no two PRs collide on it.
-const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
-    "use_on",
-    "piston_pre",
-    "projectile_impact",
-    "entity_mount",
-    "sign_changed",
-    "cauldron_level_changed",
-    "ender_pearl_teleport",
-    "block_drops",
-    "bonemeal",
-    "finalize_spawn",
-    "item_tooltip",
-    "living_drops",
-    "get_equipment_drop_chance",
-    "note_block_play",
-    "player_set_spawn",
-];
+const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[];
 
 /// Refuses a flat target of a new hook that takes more than [`MAX_TARGET_PARAMETERS`].
 fn target_parameters(name: &str, native: &str, count: usize, carrier: &str) -> Result<(), String> {
@@ -669,6 +653,5 @@ mod tests {
         assert!(target_parameters("new_hook", "native_new_hook", 7, "NewHookCall").is_ok());
         let refused = target_parameters("new_hook", "native_new_hook", 8, "NewHookCall");
         assert!(refused.unwrap_err().contains("one NewHookCall"));
-        assert!(target_parameters("use_on", "native_use_on", 9, "UseOnCall").is_ok());
     }
 }

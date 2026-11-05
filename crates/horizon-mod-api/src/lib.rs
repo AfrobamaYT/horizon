@@ -692,6 +692,10 @@ pub enum SoundSource {
 }
 
 impl SoundSource {
+    /// Its position in vanilla's `SoundSource` order, as the network sends it.
+    pub fn index(self) -> usize {
+        self as usize
+    }
     /// Every source, in vanilla's order (`SoundSource.values()`).
     pub const ALL: [SoundSource; 11] = [
         Self::Master,
@@ -2401,43 +2405,6 @@ pub enum NativeExplosionInteraction {
     Block,
     /// Blocks break and drop by the `tnt_explosion_drop_decay` rule (`TNT`).
     Tnt,
-}
-
-/// Which volume slider a sound is played under (`SoundSource`). A sound source
-/// is the group a client's sound options control: an entity's is
-/// `Entity.getSoundSource`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NativeSoundSource {
-    /// The master volume category.
-    Master,
-    /// Music.
-    Music,
-    /// Jukeboxes and note blocks (`RECORDS`).
-    Records,
-    /// Rain and thunder.
-    Weather,
-    /// Blocks (`BLOCKS`).
-    Blocks,
-    /// Hostile mobs.
-    Hostile,
-    /// Friendly and neutral mobs.
-    Neutral,
-    /// Players (`PLAYERS`).
-    Players,
-    /// Ambient and block sounds.
-    Ambient,
-    /// Voice.
-    Voice,
-    /// Interface sounds.
-    Ui,
-}
-
-impl NativeSoundSource {
-    /// Its position in vanilla's `SoundSource` order, as the network sends it.
-    pub fn index(self) -> usize {
-        self as usize
-    }
 }
 
 /// The empty-context block shape requested from a level.
@@ -4777,14 +4744,16 @@ mod tests {
             let hit = top_hit();
             dispatch_use_on(
                 &mut host,
-                &stack,
-                pos,
-                face,
-                Hand::Main,
-                hit,
-                7,
-                41,
-                &mut claimed,
+                calls::UseOnCall {
+                    stack: &stack,
+                    pos,
+                    face,
+                    hand: Hand::Main,
+                    hit,
+                    player: 7,
+                    player_entity_id: 41,
+                    claimed: &mut claimed,
+                },
             );
             assert_eq!(claimed, expected, "{block}");
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
@@ -4858,14 +4827,16 @@ mod tests {
         let (pos, face) = ([0; 3], [0, 1, 0]);
         dispatch_use_on(
             &mut host,
-            &stick(),
-            pos,
-            face,
-            Hand::Main,
-            top_hit(),
-            7,
-            41,
-            &mut claimed,
+            calls::UseOnCall {
+                stack: &stick(),
+                pos,
+                face,
+                hand: Hand::Main,
+                hit: top_hit(),
+                player: 7,
+                player_entity_id: 41,
+                claimed: &mut claimed,
+            },
         );
     }
 
@@ -4935,14 +4906,16 @@ mod tests {
         let mut claimed = false;
         dispatch_use_on(
             &mut host,
-            &stick(),
-            [0; 3],
-            [0, 1, 0],
-            Hand::Off,
-            top_hit(),
-            7,
-            41,
-            &mut claimed,
+            calls::UseOnCall {
+                stack: &stick(),
+                pos: [0; 3],
+                face: [0, 1, 0],
+                hand: Hand::Off,
+                hit: top_hit(),
+                player: 7,
+                player_entity_id: 41,
+                claimed: &mut claimed,
+            },
         );
         assert!(!claimed);
         assert!(HEARD_STICK.load(std::sync::atomic::Ordering::SeqCst));
