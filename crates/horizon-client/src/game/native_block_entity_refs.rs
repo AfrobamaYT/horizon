@@ -456,12 +456,14 @@ mod tests {
             assert!(!player.open_menu(game, chest));
             assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Refused);
             game.lan = host;
-            game.lan.as_mut().unwrap().hub.guests[0].kind =
-                horizon_client::lan::guest::GuestKind::Fake;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = horizon_client::lan::guest::GuestKind::Fake;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Cancelled);
             assert!(!player.open_menu(game, chest));
-            game.lan.as_mut().unwrap().hub.guests[0].kind =
-                horizon_client::lan::guest::GuestKind::Network;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = horizon_client::lan::guest::GuestKind::Network;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(player.open_menu(game, chest));
             assert!(player.open_menu(game, furnace));
             game.world.block_entities.remove(&(2, 64, 0));
