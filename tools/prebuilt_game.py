@@ -218,8 +218,12 @@ def exports(out: Path) -> None:
             names = int.from_bytes(data[directory + 24:directory + 28], "little")
             print(f"{game.name}: {names} exported names (Windows' limit is 65,535)")
             if names >= EXPORT_WARNING:
-                print(f"::warning::{game.name} exports {names:,} names, {65_535 - names:,} short of Windows' 65,535: "
-                      "cut exported names before adding points or internals (#589)")
+                warning = (f"{game.name} exports {names:,} names, {65_535 - names:,} short of Windows' 65,535: "
+                           "cut exported names before adding points or internals (#589)")
+                print(f"::warning::{warning}")
+                if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+                    with open(summary, "a", encoding="utf-8") as file:
+                        file.write(f"- {warning}\n")
             return
     sys.exit(f"{game.name} has no export directory")
 
