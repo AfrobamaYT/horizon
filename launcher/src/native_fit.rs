@@ -4,6 +4,7 @@
 use crate::i18n::{tr, trf};
 use crate::instances::Instance;
 use crate::{backend, native_mods};
+use horizon_mods::index::BrokenOn;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
@@ -25,11 +26,27 @@ pub enum Fit {
     Clashes { pin: String, with: Vec<String> },
     /// It pins another commit: the player must choose matching mods or a matching game.
     OtherRevision { pin: String },
+    /// The registry found it does not build on its pinned Horizon revision.
+    Broken { code: String },
 }
 
 /// How mod `id`, which pins commit `pin`, fits the Horizon played. `pins` are the mods turned
 /// on that pin a commit (id, commit); the mod's own older version is replaced by this one.
-pub fn fit(id: &str, pin: &str, plays: &Plays, pins: &[(String, String)]) -> Fit {
+pub fn fit(
+    id: &str,
+    pin: &str,
+    plays: &Plays,
+    pins: &[(String, String)],
+    broken_on: &[BrokenOn],
+) -> Fit {
+    if let Some(broken) = broken_on
+        .iter()
+        .find(|b| pin == plays.revision && b.horizon == plays.revision)
+    {
+        return Fit::Broken {
+            code: broken.code.clone(),
+        };
+    }
     if pin == plays.revision {
         return Fit::Fits;
     }
@@ -54,6 +71,10 @@ fn short(revision: &str) -> &str {
 /// What the player reads about `fit`.
 pub fn describe(fit: &Fit, plays: &Plays) -> String {
     match fit {
+        Fit::Broken { code } => trf(
+            "Doesn't build on the Horizon you play ({code}): a build leaves it out until its author updates it",
+            &[("code", code)],
+        ),
         Fit::Fits => tr("Builds on the Horizon you play").to_owned(),
         Fit::Clashes { pin, with } => trf(
             "Made for Horizon {pin}, but {mods} pin another commit: the build requires all native mods to match the game revision",
@@ -123,10 +144,10 @@ pub fn pins(home: &Path) -> Vec<(String, String)> {
 /// The line the registry browser shows for a native mod's version pinning `pin`, in `instance`;
 /// None when the game's revision can't be told. This only describes fit: it never builds or
 /// changes the instance or a package pin.
-pub fn line(instance: &Instance, id: &str, pin: &str) -> Option<String> {
+pub fn line(instance: &Instance, id: &str, pin: &str, broken_on: &[BrokenOn]) -> Option<String> {
     let plays = plays(instance)?;
     Some(describe(
-        &fit(id, pin, &plays, &pins(&instance.home)),
+        &fit(id, pin, &plays, &pins(&instance.home), broken_on),
         &plays,
     ))
 }
@@ -164,11 +185,39 @@ mod tests {
     }
 
     #[test]
+    fn a_mod_the_registry_found_broken_on_its_pinned_horizon_says_so() {
+        let broken = [BrokenOn {
+            horizon: YOURS.into(),
+            code: "E_TARGET_NOT_FOUND".into(),
+        }];
+        let found = fit("eatinganimation", YOURS, &plays(), &[], &broken);
+        assert_eq!(
+            found,
+            Fit::Broken {
+                code: "E_TARGET_NOT_FOUND".into()
+            }
+        );
+        assert_eq!(describe(&found, &plays()), "Doesn't build on the Horizon you play (E_TARGET_NOT_FOUND): a build leaves it out until its author updates it");
+        let elsewhere = [BrokenOn {
+            horizon: THIRD.into(),
+            code: "E_TARGET_NOT_FOUND".into(),
+        }];
+        assert_eq!(
+            fit("eatinganimation", YOURS, &plays(), &[], &elsewhere),
+            Fit::Fits
+        );
+        assert_eq!(
+            fit("jei", OTHER, &plays(), &[], &broken),
+            Fit::OtherRevision { pin: OTHER.into() }
+        );
+    }
+
+    #[test]
     fn a_pinned_mod_fits_only_its_commit() {
         let p = plays();
-        assert_eq!(fit("jei", YOURS, &p, &[]), Fit::Fits);
+        assert_eq!(fit("jei", YOURS, &p, &[], &[]), Fit::Fits);
         assert_eq!(
-            fit("jei", OTHER, &p, &[]),
+            fit("jei", OTHER, &p, &[], &[]),
             Fit::OtherRevision { pin: OTHER.into() }
         );
     }
@@ -182,7 +231,7 @@ mod tests {
         ];
         // `chop` agrees with the pin and `jei` is the mod being replaced: only veinminer clashes.
         assert_eq!(
-            fit("jei", OTHER, &plays(), &pins),
+            fit("jei", OTHER, &plays(), &pins, &[]),
             Fit::Clashes {
                 pin: OTHER.into(),
                 with: vec!["veinminer".into()],
@@ -190,7 +239,7 @@ mod tests {
         );
         let agreeing = [pin("chop", OTHER)];
         assert_eq!(
-            fit("jei", OTHER, &plays(), &agreeing),
+            fit("jei", OTHER, &plays(), &agreeing, &[]),
             Fit::OtherRevision { pin: OTHER.into() }
         );
     }
