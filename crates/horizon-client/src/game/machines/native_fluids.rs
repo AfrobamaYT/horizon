@@ -800,8 +800,10 @@ mod tests {
                 assert_eq!(source.owner(), "the game");
                 assert!(source.is_valid(game, 0, &chocolate));
                 assert_eq!(
-                    game.transaction(|host, tx| source.insert(host, tx, 0, &chocolate, 1000)),
-                    1000
+                    game.transaction(|host, tx| Ok::<_, ()>(
+                        source.insert(host, tx, 0, &chocolate, 1000)
+                    )),
+                    Ok(1000)
                 );
                 assert_eq!(source.resource(game, 0), Some(chocolate.clone()));
                 assert_eq!(source.amount(game, 0), 1000);
@@ -813,7 +815,12 @@ mod tests {
                 for index in 0..2 {
                     assert_eq!(target.capacity(game, index, &chocolate), 4000);
                     assert!(!target.is_valid(game, index, &chocolate));
-                    assert_eq!(game.transaction(|host, tx| target.insert(host, tx, index, &chocolate, 500)), 0);
+                    assert_eq!(
+                        game.transaction(|host, tx| Ok::<_, ()>(
+                            target.insert(host, tx, index, &chocolate, 500)
+                        )),
+                        Ok(0)
+                    );
                 }
                 assert_eq!(target.amount(game, 0), 1000);
                 assert_eq!(target.resource(game, 0), Some(chocolate.clone()));
@@ -837,13 +844,17 @@ mod tests {
                 // Water is valid but cannot replace another fluid; it can fill the empty tank.
                 assert!(target.is_valid(game, 0, &water));
                 assert_eq!(
-                    game.transaction(|host, tx| target.insert(host, tx, 0, &water, 500)),
-                    0
+                    game.transaction(|host, tx| Ok::<_, ()>(
+                        target.insert(host, tx, 0, &water, 500)
+                    )),
+                    Ok(0)
                 );
                 assert!(target.is_valid(game, 1, &water));
                 assert_eq!(
-                    game.transaction(|host, tx| target.insert(host, tx, 1, &water, 500)),
-                    500
+                    game.transaction(|host, tx| Ok::<_, ()>(
+                        target.insert(host, tx, 1, &water, 500)
+                    )),
+                    Ok(500)
                 );
                 assert_eq!(target.resource(game, 1), Some(water.clone()));
                 assert_eq!(target.amount(game, 1), 500);
@@ -854,13 +865,17 @@ mod tests {
                 assert_eq!(sided.amount(game, 0), 500);
                 // A drain does not consult acceptance, so an old refused fluid is recoverable.
                 assert_eq!(
-                    game.transaction(|host, tx| target.extract(host, tx, 0, &chocolate, 100)),
-                    100
+                    game.transaction(|host, tx| Ok::<_, ()>(
+                        target.extract(host, tx, 0, &chocolate, 100)
+                    )),
+                    Ok(100)
                 );
                 assert_eq!(target.amount(game, 0), 900);
                 assert_eq!(
-                    game.transaction(|host, tx| source.insert(host, tx, 1, &water, 1000)),
-                    1000
+                    game.transaction(|host, tx| Ok::<_, ()>(
+                        source.insert(host, tx, 1, &water, 1000)
+                    )),
+                    Ok(1000)
                 );
                 assert_eq!(
                     game.transaction(|host, tx| move_resources(
