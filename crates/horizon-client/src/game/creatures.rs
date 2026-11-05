@@ -3177,6 +3177,7 @@ impl Game<'_> {
                                 None,
                                 None,
                                 drops,
+                                None,
                             )
                         });
                         let canceled = dropped.canceled;
