@@ -1,7 +1,7 @@
 //! Injection points (#589): every `Game` method [`point_shape::eligible`] admits is a point. The
 //! staging pass ([`stage`]) puts `#[point]` on each in a staged copy of the game's source, the copy
 //! the prebuilt game and the launcher's source builds compile; the generator lists the same points
-//! from any copy, staged or not, as `mod_api::points` (each point's record, the `Points` trait,
+//! from any copy, staged or not, as `mod_points` (each point's record, the `Points` trait,
 //! `PointId`) and as `points.json`, the list the launcher routes injections by. All of them are
 //! build outputs, never committed.
 #[path = "../../horizon-mod-api-macros/src/point_shape.rs"]
@@ -284,7 +284,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
     Ok(staged)
 }
 
-/// `mod_api::points`: each point's record, the type its listeners take, and the `Points` trait a
+/// `mod_points`: each point's record, the type its listeners take, and the `Points` trait a
 /// mod implements to listen, with its `PointId`s and subscription consts.
 pub(crate) fn records(points: &[GamePoint]) -> String {
     let parse = |code: &str| {

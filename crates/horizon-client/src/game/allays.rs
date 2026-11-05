@@ -5,6 +5,7 @@ use super::Game;
 use super::level_sounds::LevelSound;
 use horizon_client::{
     containers::BlockEntity,
+    first_person::Hand,
     items::ItemStack,
     mobs::{Species, allay},
 };
@@ -20,6 +21,44 @@ impl Game<'_> {
         let sound = LevelSound::new(sound, at, 2.0, 1.0).in_source(SoundSource::Neutral);
         self.play_bound_sound(sound, allay, None);
     }
+    /// The client's `Allay.mobInteract` runs before the server's response.
+    pub(super) fn predict_allay_interaction(
+        &mut self,
+        index: usize,
+        hand: Hand,
+        offered: Option<ItemStack>,
+    ) -> bool {
+        use allay::interaction::{Interaction, predict};
+        let duplicates = offered.as_ref().is_some_and(|s| {
+            self.items()
+                .item_tags
+                .get("minecraft:duplicates_allays")
+                .is_some_and(|tag| tag.contains(&*s.item))
+        });
+        let actor = self.acting_uuid();
+        let Some(result) = predict(
+            &mut self.mobs[index],
+            offered.as_ref(),
+            hand == Hand::Main,
+            duplicates,
+            actor,
+        ) else {
+            return false;
+        };
+        self.play_mob_bound_sound(index, result.sound(), 6, 2.0, 1.0, false);
+        match result {
+            Interaction::Duplicate | Interaction::Give => {
+                self.with_hand(hand, Self::consume_held);
+            }
+            Interaction::Take(stack) => {
+                // Player.addItem returns leftovers on the client without
+                // spawning an item entity; the server owns any dropped stack.
+                let _ = self.give(stack);
+            }
+        }
+        true
+    }
+
     pub(super) fn tick_allays(&mut self) {
         let griefing = self.ui.rules.bool("mob_griefing");
         // The playing jukeboxes, found at the first allay: no allay starts
@@ -260,8 +299,14 @@ impl Game<'_> {
                 3.0, 3.75, 4.0,
             ];
             let pitch = PITCHES[self.world.random.next_int_bound(16).unwrap_or(4) as usize];
-            self.audio
-                .play("minecraft:entity.allay.item_thrown", Some(from), 1.0, pitch);
+            self.play_mob_bound_sound(
+                i,
+                "minecraft:entity.allay.item_thrown",
+                6,
+                1.0,
+                pitch,
+                false,
+            );
         }
     }
     /// `Allay.mobInteract`: duplicate when dancing with an amethyst shard,
@@ -272,7 +317,12 @@ impl Game<'_> {
             return false;
         }
         let at = [m.position.x, m.position.y, m.position.z];
-        let shard = item.is_some_and(|s| &*s.item == "minecraft:amethyst_shard");
+        let shard = item.is_some_and(|s| {
+            self.items()
+                .item_tags
+                .get("minecraft:duplicates_allays")
+                .is_some_and(|tag| tag.contains(&*s.item))
+        });
         if m.extra.flag && shard && m.extra.egg_time == 0 {
             let pos = at;
             self.mobs[index].extra.egg_time = 6000;
@@ -307,7 +357,8 @@ impl Game<'_> {
             self.consume_held();
             return true;
         }
-        if holds && item.is_none() {
+        // Allay.mobInteract takes the item back only through an empty main hand.
+        if holds && item.is_none() && self.hand == Hand::Main {
             let m = &mut self.mobs[index];
             // The hand's stack keeps the components (a potion) the items came with.
             let held = m
@@ -321,6 +372,8 @@ impl Game<'_> {
             m.extra.owner = None;
             let id = m.id;
             self.play_allay_sound("minecraft:entity.allay.item_taken", at, id);
+            // Allay.mobInteract ends with swing(MAIN_HAND, ...).
+            self.mobs[index].swing();
             if let Some(stack) = carried {
                 self.spawn_item(stack, at, [0.0, 0.2, 0.0], 40);
             }

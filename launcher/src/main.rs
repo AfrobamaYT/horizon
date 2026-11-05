@@ -44,6 +44,7 @@ mod jar_launch;
 mod language_page;
 mod launch_page;
 mod line_edit;
+mod location_page;
 mod markdown;
 mod mcp;
 mod microsoft;
@@ -77,7 +78,6 @@ mod switch_page;
 mod theme;
 mod themes_page;
 mod titlebar;
-mod wardrobe_page;
 mod while_playing;
 mod worlds_page;
 
@@ -110,8 +110,6 @@ enum Page {
     /// Mods, resource packs and modpacks (imported ones and the browser's).
     Mods,
     Servers,
-    /// What the player wears (`wardrobe_page.rs`), with the cosmetics flag on.
-    Wardrobe,
     Notes,
     Settings,
 }
@@ -123,37 +121,38 @@ impl Page {
     /// made-up code, `owner_page::sign_in_preview`; `new-instance`: Home with the New instance
     /// dialog open on Modded; `edit-instance`: the selected one's Edit dialog; `worlds`, `packs`...: Home on that tab, `HomeTab::from_env`).
     fn from_env() -> Page {
-        match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
+        let page = match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
             Ok("mods" | "modpacks" | "resourcepacks" | "shaders" | "datapacks") => Page::Mods,
             Ok("servers") => Page::Servers,
-            Ok("wardrobe") if horizon_cosmetics::forced() => Page::Wardrobe,
             Ok("versions") => Page::Versions,
             Ok("notes") => Page::Notes,
             Ok("settings") => Page::Settings,
             _ => Page::Play,
-        }
+        };
+        // The data folder did not open: start on Settings, where the message and the two
+        // recoveries are (an explicit HORIZON_LAUNCHER_PAGE still wins, for screenshots).
+        page_after_startup(
+            page,
+            horizon_launcher::data_location::startup_error().is_some(),
+        )
     }
 
     /// Every page, with its name and icon: the top bar shows all but Settings, which has its
     /// own button.
-    const ALL: [(Page, &'static str, &'static str); 7] = [
+    const ALL: [(Page, &'static str, &'static str); 6] = [
         (Page::Play, "Home", "home"),
         (Page::Mods, "Mods", "package"),
         (Page::Servers, "Servers", "server"),
-        (Page::Wardrobe, "Wardrobe", "user"),
         (Page::Versions, "Versions", "archive"),
         (Page::Notes, "Patch notes", "notes"),
         (Page::Settings, "Settings", "sliders"),
     ];
 
-    /// The pages the top bar shows: all but Settings, and the Wardrobe only when `wardrobe`
-    /// (`Launcher::wardrobe_shown`).
-    fn in_top_bar(wardrobe: bool) -> impl Iterator<Item = (Page, &'static str, &'static str)> {
-        Self::ALL.into_iter().filter(move |(page, ..)| match page {
-            Page::Settings => false,
-            Page::Wardrobe => wardrobe,
-            _ => true,
-        })
+    /// The pages the top bar shows: all but Settings.
+    fn in_top_bar() -> impl Iterator<Item = (Page, &'static str, &'static str)> {
+        Self::ALL
+            .into_iter()
+            .filter(|(page, ..)| *page != Page::Settings)
     }
 }
 
@@ -162,7 +161,13 @@ impl Page {
 enum SelfUpdate {
     Idle,
     Downloading(String, f32),
+    /// Downloaded and checked: "A new version is available" and Update, which hands it to the
+    /// installer (`update_handoff`). Closing the window hands it over too.
     Ready(String),
+    /// A newer launcher can't go in here: this copy can't replace itself
+    /// (`backend::cannot_replace_itself`), or the installer said why (the error). The player
+    /// downloads the launcher again once.
+    Stuck(Option<String>),
     Failed(String),
 }
 
@@ -288,20 +293,14 @@ struct Launcher {
     menu_closed_at: Option<Point<Pixels>>,
     /// Settings > Account's skin panel for an offline name (`skin_page.rs`).
     skin: Option<skin_page::SkinPanel>,
-    /// The Wardrobe page's account and outfit (`wardrobe_page.rs`).
-    wardrobe: Option<wardrobe_page::Wardrobe>,
-    /// Ask the service again on the next draw of the Wardrobe (set by each visit).
-    wardrobe_reload: bool,
-    /// The cosmetics service's last word on the founder set's window (`GET /v1/shop`): whether
-    /// the top bar has the Wardrobe page with cosmetics off (`wardrobe_shown`).
-    shop_status: Option<horizon_launcher::wardrobe::Claim>,
-    /// The selected account's own answer on it from its last Wardrobe visit, kept on disk (a
-    /// preview the service grants it, its claim).
-    shop_kept: Option<horizon_launcher::wardrobe::Claim>,
     /// Work the look out again on the next frame (a launcher theme put on or taken off).
     restyle: bool,
     /// Why the last picture for Home's background was refused.
     background_error: Option<String>,
+    /// Settings' data relocation confirmation and the worker's last result.
+    location_target: Option<std::path::PathBuf>,
+    location_error: Option<String>,
+    location_note: Option<String>,
     settings: Settings,
     /// The last failed settings write, kept across page changes until a save succeeds.
     settings_save_error: Option<String>,
@@ -560,7 +559,9 @@ impl Launcher {
             updates: Updates::default(),
             checked: None,
             update_error: None,
-            self_update: SelfUpdate::Idle,
+            // The installer the last Update started could not put the new launcher in place.
+            self_update: horizon_launcher::update_handoff::take_failure()
+                .map_or(SelfUpdate::Idle, |e| SelfUpdate::Stuck(Some(e))),
             update_install: None,
             instance_install: None,
             install_next: None,
@@ -594,13 +595,12 @@ impl Launcher {
             look: horizon_theme::glass::Glass::default_look(),
             menu_closed_at: None,
             skin: None,
-            wardrobe: None,
-            wardrobe_reload: false,
-            shop_status: None,
-            shop_kept: None,
             // The first draw takes the launcher theme from Settings.
             restyle: true,
             background_error: None,
+            location_target: None,
+            location_error: location_page::startup_error(),
+            location_note: location_page::startup_note(),
             args_input: line_edit::LineEdit::new(settings.game_args.clone(), 1024, 38),
             args_focused: false,
             args_focus: cx.focus_handle(),
@@ -704,6 +704,9 @@ impl Launcher {
             sky_wake: None,
             scale: window.scale_factor(),
         };
+        if this.location_error.is_some() || this.location_note.is_some() {
+            this.page = Page::Settings;
+        }
         this.reload_instances();
         if this.bench.is_some() {
             this.perf.keep_local_log(false);
@@ -727,7 +730,6 @@ impl Launcher {
         this.load_auth_statuses(true);
         this.fetch_startup_releases();
         this.fetch_links();
-        this.watch_shop(cx);
         if home::getting_ready_preview() {
             this.preparing = true;
             this.play_when_prepared = this.selected().cloned();
@@ -746,11 +748,6 @@ impl Launcher {
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
-        }
-        if cfg!(debug_assertions)
-            && std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("wardrobe")
-        {
-            this.wardrobe_preview();
         }
         this
     }
@@ -817,7 +814,6 @@ impl Launcher {
             self.load_auth_statuses(false);
         }
         self.load_profile_heads();
-        self.wardrobe_reload |= page == Page::Wardrobe;
         if page != self.page {
             self.page = page;
             self.switches += 1;
@@ -846,9 +842,13 @@ impl Launcher {
         if !backend::self_update_allowed()
             || matches!(
                 self.self_update,
-                SelfUpdate::Downloading(..) | SelfUpdate::Ready(_)
+                SelfUpdate::Downloading(..) | SelfUpdate::Ready(_) | SelfUpdate::Stuck(_)
             )
         {
+            return;
+        }
+        if backend::cannot_replace_itself() {
+            self.self_update = SelfUpdate::Stuck(None);
             return;
         }
         let version = backend::launcher_version(&release.tag)
@@ -860,10 +860,23 @@ impl Launcher {
             let progress = |p| {
                 let _ = tx.send(Msg::LauncherProgress(p));
             };
-            let _ = tx.send(Msg::LauncherUpdated(backend::self_update(
+            let _ = tx.send(Msg::LauncherUpdated(backend::stage_update(
                 &release, progress,
             )));
         });
+    }
+
+    /// Update: the window closes, the installer puts the new launcher in place and starts it.
+    /// When another launcher already put it there, this one only restarts.
+    fn apply_launcher_update(&mut self, cx: &mut App) {
+        match horizon_launcher::update_handoff::start_now() {
+            Ok(true) => {
+                servers_page::keep_running_through_update();
+                shut_down(cx)
+            }
+            Ok(false) => self.self_update = SelfUpdate::Failed(backend::restart()),
+            Err(e) => self.self_update = SelfUpdate::Failed(e),
+        }
     }
 
     /// Installs the Horizon version the last check found, keeping the player's choice of
@@ -977,9 +990,7 @@ impl Launcher {
         self.perf.tick();
         match self.bench.as_mut().map(|b| b.tick(&self.perf)) {
             Some(perf::Step::Go(page)) => {
-                let pages: Vec<Page> = (Page::ALL.iter().map(|p| p.0))
-                    .filter(|p| *p != Page::Wardrobe || self.wardrobe_shown())
-                    .collect();
+                let pages: Vec<Page> = (Page::ALL.iter().map(|p| p.0)).collect();
                 self.go(pages[page % pages.len()]);
                 changed = true;
             }
@@ -1075,8 +1086,10 @@ impl Launcher {
                             if e == account::NoOwner.to_string() {
                                 self.owner = Some(false);
                                 self.owner_screen_open = true;
+                                self.client_error = Some(account::NoOwner::in_window());
+                            } else {
+                                self.client_error = Some(e);
                             }
-                            self.client_error = Some(e);
                         }
                     }
                 }
@@ -1089,7 +1102,7 @@ impl Launcher {
                             Err(account::NoOwner) => {
                                 self.owner = Some(false);
                                 self.owner_screen_open = true;
-                                self.client_error = Some(format!("{}.", tr(account::NEEDS_OWNER)));
+                                self.client_error = Some(account::NoOwner::in_window());
                                 self.starting_pack = None;
                                 self.joining = None;
                                 self.quick_play = None;
@@ -1157,7 +1170,6 @@ impl Launcher {
                             .unwrap_or_default();
                         cmd.envs(self.client_vars.iter().map(|(k, v)| (k, v)));
                         let launch = instance.map(|i| i.launch).unwrap_or_default();
-                        horizon_launcher::launch::limit_memory(&mut cmd, &launch);
                         self.starting_client = Some(tag);
                         jar_launch::client(cmd, launch, run, self.tx.clone());
                     }
@@ -1174,7 +1186,10 @@ impl Launcher {
                                     self.client_run = run.map(|id| (id, Instant::now()));
                                     self.step_aside(cx);
                                 }
-                                Err(e) => self.client_error = Some(e),
+                                Err(e) => {
+                                    self.client_error = Some(e);
+                                    account::discard_unread_sessions();
+                                }
                             }
                         }
                         // A start that does not happen leaves no session file behind.
@@ -1292,7 +1307,10 @@ impl Launcher {
                         _ => String::new(),
                     };
                     self.self_update = match result {
-                        Ok(()) => SelfUpdate::Ready(version),
+                        Ok(staged) => {
+                            horizon_launcher::update_handoff::set_pending(staged);
+                            SelfUpdate::Ready(version)
+                        }
                         Err(e) => SelfUpdate::Failed(e),
                     };
                 }
@@ -1540,8 +1558,7 @@ impl Launcher {
     /// Asks for a game program (or a zip holding one) and installs it as its own version on a
     /// thread: a version is thousands of files. `Msg::Imported` ends it.
     fn import_build(&mut self, cx: &mut Context<Self>) {
-        // A removal still running could take the folder of the same program imported again.
-        if self.importing_build || !self.removing.is_empty() {
+        if !self.can_import_build() {
             return;
         }
         let paths = cx.prompt_for_paths(PathPromptOptions {
@@ -1559,19 +1576,31 @@ impl Launcher {
             };
             let _ = this.update(cx, |this, cx| {
                 // Another picker's import, or a removal, may have started meanwhile.
-                if this.importing_build || !this.removing.is_empty() {
-                    return;
-                }
-                this.importing_build = true;
-                this.import_error = None;
-                let tx = this.tx.clone();
-                std::thread::spawn(move || {
-                    let _ = tx.send(Msg::Imported(build_import::import(&path, None)));
-                });
-                cx.notify();
+                this.start_build_import(path, cx);
             });
         })
         .detach();
+    }
+    /// Whether a build may be imported now. A removal still running could take
+    /// the folder of the same program imported again.
+    fn can_import_build(&self) -> bool {
+        !self.importing_build && self.removing.is_empty()
+    }
+    /// Starts importing the build at `path` on a thread, as the picker does.
+    /// Separate from [`Self::import_build`] so a file dropped on the window can
+    /// start the same import (`import_dropped`) without a picker. Does nothing
+    /// when one is already running. `Msg::Imported` ends it.
+    fn start_build_import(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        if !self.can_import_build() {
+            return;
+        }
+        self.importing_build = true;
+        self.import_error = None;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Imported(build_import::import(&path, None)));
+        });
+        cx.notify();
     }
 
     /// Prepares the selected version, its Minecraft files from the player's install or, for an
@@ -2376,6 +2405,15 @@ fn selection_after_removal(installed: &[String], saved: Option<String>) -> Optio
         .or_else(|| installed.first().cloned())
 }
 
+/// The row menu a press on a sidebar row leaves open: that row's, or none when it was already
+/// that row's (the ⋮ and a right click on the row toggle the same way).
+fn row_menu_after_press(open: Option<(String, bool)>, id: &str) -> Option<(String, bool)> {
+    if open.as_ref().is_some_and(|(current, _)| current == id) {
+        return None;
+    }
+    Some((id.to_owned(), false))
+}
+
 fn disabled(b: Stateful<Div>) -> Stateful<Div> {
     b.opacity(theme::DISABLED).cursor_default().tab_stop(false)
 }
@@ -2600,7 +2638,7 @@ impl Launcher {
             .flex_wrap()
             .items_center()
             .gap(px(4.));
-        for (page, label, _) in Page::in_top_bar(self.wardrobe_shown()) {
+        for (page, label, _) in Page::in_top_bar() {
             nav = nav.child(
                 shell::tab(format!("nav-{label}"), tr(label), self.page == page, &t).on_click(
                     cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -2839,18 +2877,41 @@ impl Launcher {
             }
             SelfUpdate::Ready(version) => {
                 foot = foot.child(
-                    update(trf(
-                        "Launcher updated to {version}",
-                        &[("version", version)],
-                    ))
-                    .child(div().relative().flex().child(
-                        button("restart", "Restart", Kind::Primary, &t).on_click(cx.listener(
-                            |this, _: &ClickEvent, _, cx| {
-                                this.self_update = SelfUpdate::Failed(backend::restart());
-                                cx.notify();
-                            },
+                    update(tr("A new version is available").to_string())
+                        .child(
+                            shell::text(theme::night::UI, shell::c(n.ink_soft))
+                                .relative()
+                                .child(trf("Launcher {version}", &[("version", version)])),
+                        )
+                        .child(div().relative().flex().child(
+                            button("update-launcher", "Update", Kind::Primary, &t).on_click(
+                                cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.apply_launcher_update(cx);
+                                    cx.notify();
+                                }),
+                            ),
                         )),
-                    )),
+                )
+            }
+            SelfUpdate::Stuck(error) => {
+                let why = match error {
+                    Some(e) => trf("the update failed: {error}", &[("error", e)]),
+                    None => tr("This copy of the launcher can't replace itself. Download it again once; it updates itself after that.").to_string(),
+                };
+                let url = backend::download_page(&self.links.website);
+                foot = foot.child(
+                    update(tr("A new version is available").to_string())
+                        .child(
+                            shell::text(theme::night::UI, shell::c(n.ink_soft))
+                                .relative()
+                                .child(why),
+                        )
+                        .child(
+                            div().relative().flex().child(
+                                button("download-launcher", "Download again", Kind::Primary, &t)
+                                    .on_click(move |_, _, cx| cx.open_url(&url)),
+                            ),
+                        ),
                 )
             }
             _ => {}
@@ -3612,9 +3673,20 @@ impl Launcher {
                 );
                 format!("{}  ·  {said}", backend::VERSION)
             }
-            SelfUpdate::Ready(v) => trf(
-                "Updated to {version}. Restart the launcher to use it.",
-                &[("version", v)],
+            SelfUpdate::Ready(v) => format!(
+                "{}  ·  {}",
+                backend::VERSION,
+                trf("{version} available", &[("version", v)])
+            ),
+            SelfUpdate::Stuck(Some(e)) => format!(
+                "{}  ·  {}",
+                backend::VERSION,
+                trf("the update failed: {error}", &[("error", e)])
+            ),
+            SelfUpdate::Stuck(None) => format!(
+                "{}  ·  {}",
+                backend::VERSION,
+                tr("This copy of the launcher can't replace itself. Download it again once; it updates itself after that.")
             ),
             SelfUpdate::Failed(e) => format!(
                 "{}  ·  {}",
@@ -3641,13 +3713,21 @@ impl Launcher {
         };
         let launcher_action = match &self.self_update {
             SelfUpdate::Ready(_) => Some(
-                button("restart-settings", "Restart", Kind::Secondary, &t)
+                button("update-settings", "Update", Kind::Secondary, &t)
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.self_update = SelfUpdate::Failed(backend::restart());
+                        this.apply_launcher_update(cx);
                         cx.notify();
                     }))
                     .into_any_element(),
             ),
+            SelfUpdate::Stuck(_) => {
+                let url = backend::download_page(&self.links.website);
+                Some(
+                    button("download-settings", "Download again", Kind::Secondary, &t)
+                        .on_click(move |_, _, cx| cx.open_url(&url))
+                        .into_any_element(),
+                )
+            }
             SelfUpdate::Downloading(..) => None,
             _ => Some(
                 // The glass look's About tile has the mockup's filled button.
@@ -3775,7 +3855,8 @@ impl Launcher {
                     .child(group("Network", "globe"))
                     .child(self.proxy_row(n + 4, cx))
                     .child(group("Game", "gamepad"))
-                    .child(self.game_args_row(n + 5, cx))
+                    .child(self.game_architecture_row(n + 5, cx))
+                    .child(self.game_args_row(n + 6, cx))
                     .child(group("AI", "terminal"))
                     .child(self.no_ai_row(n + 6, cx))
                     .child(group("About", "info-box"))
@@ -3787,13 +3868,7 @@ impl Launcher {
                         launcher_action,
                         &t,
                     ))
-                    .child(index_row(
-                        n + 9,
-                        tr("Data folder"),
-                        Some(mono(short(&backend::data_dir()))),
-                        None,
-                        &t,
-                    ))
+                    .child(self.location_row(n + 9, cx))
                     .child(index_row(
                         n + 10,
                         tr("Logs"),
@@ -3885,6 +3960,53 @@ impl Launcher {
 
     /// Settings' Game arguments row: the extra arguments the game starts with, kept in
     /// `settings.json` and appended to the launcher's own (quotes group a word with spaces).
+    fn game_architecture_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
+        if !backend::can_choose_game_architecture() {
+            return div();
+        }
+        let t = self.theme;
+        let picker = segments(
+            "game-architecture",
+            &[
+                (backend::GameArchitecture::Auto, "Automatic"),
+                (backend::GameArchitecture::X64, "x64"),
+                (backend::GameArchitecture::Arm64, "ARM64"),
+            ],
+            self.settings.game_architecture,
+            &t,
+            {
+                let this = cx.entity().downgrade();
+                move |choice, _, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.settings.game_architecture == choice {
+                            return;
+                        }
+                        this.settings.game_architecture = choice;
+                        this.save_settings();
+                        // The release and update lists contain the selected game's assets.
+                        this.releases = Load::Loading;
+                        this.updates = backend::Updates::default();
+                        this.fetch_startup_releases();
+                        cx.notify();
+                    });
+                }
+            },
+        );
+        index_row(
+            n,
+            tr("Game architecture"),
+            Some(
+                div()
+                    .child(tr(
+                        "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+                    ))
+                    .into_any_element(),
+            ),
+            Some(picker.into_any_element()),
+            &t,
+        )
+    }
+
     fn game_args_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let focused = self.args_focused;
@@ -4656,6 +4778,22 @@ impl Launcher {
                         .child(progress_bar(None, &t))
                         .child(text(theme::MICRO).text_color(t.muted).child("Removing…"))
                         .into_any_element()
+                } else if installed && backend::needs_game_architecture_install(&tag, &release) {
+                    let mut b = button(
+                        format!("install-selected-architecture-{tag}"),
+                        tr("Install selected build"),
+                        Kind::Secondary,
+                        &t,
+                    );
+                    if self.installing.is_some() {
+                        b = disabled(b);
+                    } else {
+                        b = b.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.install(&release);
+                            cx.notify();
+                        }));
+                    }
+                    b.into_any_element()
                 } else if installed {
                     self.version_actions(&tag, selected, cx).into_any_element()
                 } else if release.asset.is_none() {
@@ -4696,7 +4834,6 @@ impl Launcher {
                     .gap(px(10.))
                     .py(px(14.))
                     .px(px(16.))
-                    .mb(px(8.))
                     .bg(t.panel)
                     .border_2()
                     .border_color(t.outline)
@@ -4832,7 +4969,6 @@ impl Launcher {
                     .relative()
                     .gap(px(16.))
                     .p(px(20.))
-                    .mb(px(10.))
                     .bg(t.panel)
                     .border_2()
                     .border_color(t.outline)
@@ -4946,6 +5082,12 @@ impl Render for Launcher {
         let tint = (self.theme.dark && self.look.accent != horizon_theme::glass::ACCENT)
             .then(|| horizon_theme::glass::mix_oklab(self.look.accent, 0x767676, 0.58));
         let blur = self.look.blur;
+        let performance = self.settings.performance();
+        // Performance mode's plates are solid: no glass, no blur, nothing sampled from the scene.
+        glass::set_plain(performance);
+        self.scene
+            .update(cx, |scene, cx| scene.set_performance(performance, cx));
+        let blur = if performance { 0. } else { blur };
         self.scene
             .update(cx, |scene, cx| scene.set_look(tint, blur, cx));
         self.scale = window.scale_factor();
@@ -4966,7 +5108,6 @@ impl Render for Launcher {
             Page::Versions => self.versions_page(cx),
             Page::Mods => self.mods_page(cx),
             Page::Servers => self.servers_page(cx),
-            Page::Wardrobe => self.wardrobe_page(cx),
             Page::Notes => self.notes_page(cx),
             Page::Settings => self.settings_page(cx),
         };
@@ -5304,6 +5445,8 @@ actions!(horizon_launcher, [Quit, CloseWindow]);
 /// What closing the last window does: stop the servers this launcher started, exit. A game that is running keeps running. Cmd+Q goes through here too.
 fn shut_down(cx: &mut App) {
     servers_page::stop_on_quit();
+    // A staged launcher update goes in once this process has exited.
+    horizon_launcher::update_handoff::on_quit();
     cx.quit()
 }
 
@@ -5319,6 +5462,16 @@ fn key_bindings() -> Vec<KeyBinding> {
 #[cfg(not(target_os = "macos"))]
 fn key_bindings() -> Vec<KeyBinding> {
     Vec::new()
+}
+
+/// A data folder that did not open starts on Settings, where the message, Retry and
+/// "Use the default folder" are; an explicit page still wins.
+fn page_after_startup(page: Page, data_folder_failed: bool) -> Page {
+    if page == Page::Play && data_folder_failed {
+        Page::Settings
+    } else {
+        page
+    }
 }
 
 /// The menu bar on macOS, where "Quit" belongs to the app menu.
@@ -5348,8 +5501,19 @@ fn main() {
     if let Some(code) = horizon_launcher::installer::run_quiet() {
         std::process::exit(code);
     }
+    if let Some(code) = horizon_launcher::relocation::run_worker() {
+        std::process::exit(code);
+    }
+    // A broken location must still open a window: startup() falls back to the default
+    // folders and records the error, which Settings shows with Retry and Use the default folder.
+    // It keeps the migration lease for the life of the process.
+    let _location_error = horizon_launcher::data_location::startup();
     perf::process_started();
     backend::exe_path();
+    // The launcher's own installer (`update_handoff`): no window, no CLI parser.
+    if let Some(code) = horizon_launcher::update_handoff::run() {
+        std::process::exit(code);
+    }
     #[cfg(windows)]
     backend::remove_replaced_binaries();
     backend::cleanup_launcher_updates();
@@ -5431,6 +5595,17 @@ fn closed_by_press(closed_at: Option<Point<Pixels>>, event: &ClickEvent) -> bool
 #[cfg(test)]
 mod tests {
     #[test]
+    fn an_unopenable_data_folder_starts_on_settings_instead_of_exiting() {
+        use super::{page_after_startup, Page};
+        assert!(matches!(
+            page_after_startup(Page::Play, true),
+            Page::Settings
+        ));
+        assert!(matches!(page_after_startup(Page::Play, false), Page::Play));
+        assert!(matches!(page_after_startup(Page::Mods, true), Page::Mods));
+    }
+
+    #[test]
     fn a_menu_button_stays_closed_after_the_press_that_closed_its_menu() {
         use super::closed_by_press;
         use gpui::{point, px, ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent};
@@ -5479,6 +5654,28 @@ mod tests {
             "v0.2.76"
         ));
         assert!(!super::removable(&installed, None, &[], "v0.2.85"));
+    }
+
+    #[test]
+    fn a_press_on_a_sidebar_row_opens_its_menu_or_closes_it() {
+        let open = |id: &str| Some((id.to_string(), false));
+        assert_eq!(
+            super::row_menu_after_press(None, "Horizon"),
+            open("Horizon")
+        );
+        assert_eq!(
+            super::row_menu_after_press(open("Other"), "Horizon"),
+            open("Horizon")
+        );
+        assert_eq!(
+            super::row_menu_after_press(open("Horizon"), "Horizon"),
+            None
+        );
+        // A Delete… already pressed on another row does not carry over.
+        assert_eq!(
+            super::row_menu_after_press(Some(("Other".into(), true)), "Horizon"),
+            open("Horizon")
+        );
     }
 
     #[test]

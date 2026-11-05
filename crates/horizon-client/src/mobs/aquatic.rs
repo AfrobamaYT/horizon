@@ -65,16 +65,18 @@ pub fn spawn_ink(m: &mut Mob) {
         let dir = rotate(Vec3::new(x, -1.0, z));
         let d = dir.scale(f64::from(offset_scale + m.random.next_float() * 2.0));
         // ServerLevel.sendParticles with a count of 0 and speed 0.1: one
-        // particle moving at the float offset times the float speed.
-        let speed = f64::from(0.1f32);
-        m.outbox.push(MobEvent::ParticleAt {
+        // particle moving at the float offset times the float speed, sent to
+        // the players within 32 blocks.
+        m.outbox.push(MobEvent::LevelParticles {
             kind,
             at: [pos.x, pos.y + 0.5, pos.z],
-            velocity: [
-                speed * f64::from(d.x as f32),
-                speed * f64::from(d.y as f32),
-                speed * f64::from(d.z as f32),
+            spread: [
+                f64::from(d.x as f32),
+                f64::from(d.y as f32),
+                f64::from(d.z as f32),
             ],
+            speed: f64::from(0.1f32),
+            count: 0,
         });
     }
 }
@@ -321,7 +323,8 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &
                 m.sound(flop, events);
             }
             if m.species() == S::Pufferfish && m.alive() && m.extra.size > 0 {
-                // Pufferfish.playerTouch / touch: sting with poison.
+                // Preserve the existing AI-side audio path. Player damage
+                // and poison are dispatched by the player tick, not fish AI.
                 if let Some(p) = &w.player
                     && p.alive
                     && !p.creative
@@ -330,15 +333,6 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &
                         .intersects(p.bounds)
                     && m.ai.no_action_time % 10 == 0
                 {
-                    let amount = 1.0 + m.extra.size as f32;
-                    // Only when the sting hurt the player.
-                    events.push(MobEvent::AttackPlayerWithEffect {
-                        amount,
-                        from: [m.position.x, m.position.y, m.position.z],
-                        effect: "minecraft:poison",
-                        ticks: 60 * m.extra.size,
-                        amplifier: 0,
-                    });
                     m.sound("entity.puffer_fish.sting", events);
                 }
             }
@@ -406,7 +400,7 @@ pub fn not_scary_for_pufferfish(s: Species) -> bool {
 /// not tested), and each one takes `Pufferfish.touch`: `doTeamsAllowDamage`,
 /// then a `mobAttack` hit for `getPuffState() + 1`. The poison and the sting
 /// sound follow a hit that landed, which only the game layer knows.
-fn sting_touching_mobs(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+pub(super) fn sting_touching_mobs(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if !m.alive() || m.extra.size <= 0 {
         return;
     }
@@ -1165,6 +1159,43 @@ mod school_tests {
         Arc::make_mut(&mut k).species = Species::Salmon;
         assert_eq!(Mob::new(2, k, Vec3::ZERO, 0.0).dims(), (w, h, e));
     }
+    /// `Squid.spawnInk`: 30 `sendParticles` calls with a count of 0 and a
+    /// speed of 0.1, so the server sends them (the clients scale the offset
+    /// by the speed). A client-only `ParticleAt` would never leave the server.
+    #[test]
+    fn a_squid_sends_its_ink_as_server_particles() {
+        let mut k = kind();
+        let k2 = Arc::make_mut(&mut k);
+        k2.id = "minecraft:squid".into();
+        k2.species = Species::Squid;
+        let mut m = Mob::new(1, k, Vec3::new(0.0, 60.0, 0.0), 0.0);
+        m.silent = true;
+        spawn_ink(&mut m);
+        let ink: Vec<_> = m
+            .outbox
+            .iter()
+            .filter_map(|e| match e {
+                MobEvent::LevelParticles {
+                    kind: "squid_ink",
+                    spread,
+                    speed,
+                    count: 0,
+                    ..
+                } => Some((*spread, *speed)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ink.len(), 30);
+        assert!(ink.iter().all(|(_, speed)| *speed == f64::from(0.1f32)));
+        // The offset is the unscaled direction: `0.3 + nextFloat * 2` long
+        // for an adult, mostly downward, never already multiplied by 0.1.
+        assert!(ink.iter().any(|(d, _)| d[1] < -0.3));
+        assert!(
+            !m.outbox
+                .iter()
+                .any(|e| matches!(e, MobEvent::ParticleAt { .. }))
+        );
+    }
     #[test]
     fn school_sizes() {
         assert_eq!(max_school_size(Species::Cod), 8);
@@ -1204,6 +1235,59 @@ mod pufferfish_sting_tests {
     use super::*;
     use crate::mobs::world::with_test_world;
     use std::sync::Arc;
+
+    #[test]
+    fn mob_tick_dispatches_puffed_contacts_with_or_without_ai() {
+        with_test_world(&[], |w, types| {
+            let target = Mob::new(
+                2,
+                Arc::new(types.types["minecraft:pig"].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            let others = [target.seen(None)];
+            let world = MobWorld {
+                others: &others,
+                ..w.clone()
+            };
+            for no_ai in [true, false] {
+                for puff in [0, 2] {
+                    let mut fish = Mob::new(
+                        1,
+                        Arc::new(types.types["minecraft:pufferfish"].clone()),
+                        Vec3::new(0.5, 64.0, 0.5),
+                        0.0,
+                    );
+                    fish.no_ai = no_ai;
+                    fish.no_gravity = true;
+                    fish.persistent = true;
+                    fish.extra.size = puff;
+                    let mut events = Vec::new();
+                    let mut test_level = crate::health::TestLevel::new(0);
+                    assert!(fish.tick(&world, &mut test_level.level(), &mut events));
+                    let stings: Vec<_> = events
+                        .iter()
+                        .filter_map(|event| match event {
+                            MobEvent::PufferfishSting {
+                                target,
+                                amount,
+                                source,
+                                poison_ticks,
+                                ..
+                            } => Some((*target, *amount, *poison_ticks, source.attacker)),
+                            _ => None,
+                        })
+                        .collect();
+                    let expected = if puff == 2 {
+                        vec![(2, 3.0, 120, Some(Who::Mob(1)))]
+                    } else {
+                        Vec::new()
+                    };
+                    assert_eq!(stings, expected, "NoAI={no_ai}, puff={puff}");
+                }
+            }
+        });
+    }
 
     /// What a pufferfish puffed to `puff` stings in one `ai_step`, as
     /// `(target, damage)`, with `others` standing `x` blocks east of it.

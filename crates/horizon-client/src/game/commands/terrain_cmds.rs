@@ -551,7 +551,9 @@ impl Game<'_> {
                     return Ok(0);
                 };
                 let ty = self.target_type(t);
-                let table = format!("minecraft:entities/{}", ty.trim_start_matches("minecraft:"));
+                // `EntityType.getDefaultLootTable`, in the type's namespace.
+                let (namespace, path) = ty.split_once(':').unwrap_or(("minecraft", ty.as_str()));
+                let table = format!("{namespace}:entities/{path}");
                 if t == Target::Player || !world_items!(self).has_loot_table(&table) {
                     return Err(err(
                         "commands.drop.no_loot_table.entity",
@@ -653,6 +655,9 @@ impl Game<'_> {
                 let mut left = d.clone();
                 let mut placed = false;
                 for s in &slots {
+                    if !self.slot_accepts(s, Some(&left)) {
+                        continue;
+                    }
                     match self.slot_get(s) {
                         None => {
                             self.slot_set(s, Some(left.clone()));

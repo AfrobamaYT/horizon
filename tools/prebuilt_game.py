@@ -193,6 +193,10 @@ def smoke(out: Path) -> None:
     print(f"smoke: the starter mod and the game executable built against {out} alone")
 
 
+# Fails the prebuilt build here, ahead of Windows' hard 65,535, so a growing export list is seen before it breaks.
+EXPORT_WARNING = 60_000
+
+
 def exports(out: Path) -> None:
     """The game dylib's exported names, as Windows counts them toward its 65,535 limit (#589): read from the
     PE export directory, so it runs on any OS. Prints nothing for a game that isn't a DLL."""
@@ -212,6 +216,9 @@ def exports(out: Path) -> None:
             directory = raw + export_rva - address
             names = int.from_bytes(data[directory + 24:directory + 28], "little")
             print(f"{game.name}: {names} exported names (Windows' limit is 65,535)")
+            if names > EXPORT_WARNING:
+                sys.exit(f"{game.name} exports {names} names, past {EXPORT_WARNING:,}: Windows refuses to link a DLL "
+                         "past 65,535, so cut the exported names before adding points or internals (#589)")
             return
     sys.exit(f"{game.name} has no export directory")
 

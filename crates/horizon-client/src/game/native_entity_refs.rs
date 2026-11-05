@@ -16,11 +16,20 @@ use super::{
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 use mod_api::{
-    EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
+    EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
     NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType, NeighbourUpdate,
 };
 
 impl Game<'_> {
+    /// An entity tracked by the remote client but absent from local entity lists.
+    fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
+        let remote = self.remote.as_ref()?;
+        if !remote.logged_in || self.native_lifecycle.epoch() != Some(entity.epoch()) {
+            return None;
+        }
+        remote.tracked_entity(i32::try_from(entity.id()).ok()?)
+    }
+
     /// Keep a held-out entity inaccessible until its copy has been stored back.
     pub(super) fn with_entity_held_out<R>(
         &mut self,
@@ -99,12 +108,15 @@ impl Game<'_> {
         }
     }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
-    /// methods: None on a client, with no world open, or for no such entity
-    /// in the level in place or among the server's players. API
-    /// 373.
+    /// methods: None with no world open, or for no such entity in the level
+    /// in place or among the server's players. On a client (API
+    /// @API:client_entity_refs@), any entity the server shows this window,
+    /// this window's own player included. API 373.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
-        self.native_entity_read_target(entity).map(|_| entity)
+        (self.native_entity_read_target(entity).is_some()
+            || self.native_client_tracked(entity).is_some())
+        .then_some(entity)
     }
     /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
     /// client, with no world open, or for a dimension the server hasn't
@@ -266,24 +278,49 @@ impl Game<'_> {
         let _ = self.process_level_events();
         true
     }
-    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
-    /// dropping its resources. Parked levels and invalid positions return false.
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally dropping
+    /// resources with `tool` (None is an empty hand). With `collect`, return the dropped
+    /// stacks without spawning their item entities; otherwise return an empty list after
+    /// spawning them. The one level drop path runs loot, block-drop hooks and experience
+    /// once, in vanilla's random order. `drop` false suppresses resources entirely.
+    /// None means nothing broke: air, a refused write, a stale handle, a client, an
+    /// unloaded/out-of-height position, or a parked level.
     pub(super) fn native_level_destroy_block(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
         drop: bool,
-    ) -> bool {
-        if !self.native_level_write_allowed(level, pos)
-            || !self.is_logical_server()
-            || self.dim.id() != level.dimension()
-        {
-            return false;
+        tool: Option<&ItemStack>,
+        collect: bool,
+    ) -> Option<Vec<ItemStack>> {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return None;
         }
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
-        let changed = self.with_level(|b, level, ticks| b.destroy_block(level, ticks, at, drop));
+        let (changed, drops) = self.with_level(|b, level, ticks| {
+            level.drop_tool = tool.cloned();
+            level.drop_into = collect.then(Vec::new);
+            let changed = b.destroy_block(level, ticks, at, drop);
+            (changed, level.drop_into.take().unwrap_or_default())
+        });
         let _ = self.process_level_events();
-        changed
+        changed.then_some(drops)
+    }
+
+    /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
+    /// any other stage removes it. A machine uses a stable negative breaker id.
+    pub(super) fn native_level_set_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return false;
+        }
+        self.server_destroy_block_progress(breaker, pos, progress);
+        true
     }
     fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.is_logical_server()
@@ -434,7 +471,12 @@ impl Game<'_> {
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        self.target_position(self.native_entity_read_target(entity)?)
+        match self.native_entity_read_target(entity) {
+            Some(target) => self.target_position(target),
+            None => self
+                .native_client_tracked(entity)
+                .map(|(_, position)| position),
+        }
     }
     /// The block the entity's position is in (`Entity.blockPosition`). API
     /// 373.
@@ -450,12 +492,35 @@ impl Game<'_> {
     /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
     /// 373.
     pub(super) fn native_entity_kind(&self, entity: EntityRef) -> Option<String> {
-        Some(self.target_type(self.native_entity_target(entity)?))
+        match self.native_entity_read_target(entity) {
+            Some(t) => Some(self.target_type(t)),
+            None => self
+                .native_client_tracked(entity)
+                .map(|(kind, _)| kind.to_owned()),
+        }
     }
     /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
     /// entity that has none yet gets it now, as a new vanilla entity does.
-    /// API 373.
+    /// On a client, the one the server added it with (a player's is its
+    /// profile's). API 373.
     pub(super) fn native_entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        if let Some(r) = &self.remote {
+            let id = i32::try_from(entity.id()).ok()?;
+            if self.native_entity_read_target(entity).is_none()
+                && self.native_client_tracked(entity).is_none()
+            {
+                return None;
+            }
+            if let Some((uuid, _)) = r.level_player(id) {
+                return Some(uuid);
+            }
+            return self
+                .persist
+                .uuids
+                .get(&entity.id())
+                .copied()
+                .map(uuid_from_words);
+        }
         let words = match self.native_entity_target(entity)? {
             Target::Player => return self.lan_acting_uuid,
             Target::Guest(conn) => return self.command_guest(conn).map(|g| g.uuid),
@@ -463,9 +528,13 @@ impl Game<'_> {
         };
         Some(uuid_from_words(words))
     }
-    /// The level the entity is in (`Entity.level`). API 373.
+    /// The level the entity is in (`Entity.level`): on a client, the
+    /// client's level. API 373.
     pub(super) fn native_entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
-        let dim: Dim = self.target_level(self.native_entity_target(entity)?);
+        let dim: Dim = match self.native_entity_read_target(entity) {
+            Some(t) => self.target_level(t),
+            None => self.native_client_tracked(entity).map(|_| self.dim)?,
+        };
         Some(LevelRef::new(entity.epoch(), dim.id()))
     }
 }
@@ -1195,7 +1264,10 @@ pub(super) mod tests {
                 stone,
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
-            assert!(!game.native_level_destroy_block(level, [0, 128, 0], false));
+            assert!(
+                game.native_level_destroy_block(level, [0, 128, 0], false, None, false)
+                    .is_none()
+            );
         });
     }
 
@@ -1361,6 +1433,7 @@ pub(super) mod tests {
                         sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
                         latency: Arc::new(AtomicI32::new(0)),
                         address: "127.0.0.1:1".parse().unwrap(),
+                        expected: false,
                     },
                     id as i32,
                     [3.0, 64.0, 5.0],
@@ -1750,6 +1823,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 1).into(),
+                    expected: false,
                 },
                 1,
                 [0.0; 3],
@@ -2185,6 +2259,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx2, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 3).into(),
+                    expected: false,
                 },
                 3,
                 [0.0; 3],
@@ -2259,6 +2334,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 1).into(),
+                    expected: false,
                 })))
                 .unwrap();
             use mod_api;
@@ -2895,7 +2971,10 @@ pub(super) mod tests {
             level.dimension(),
         );
         assert!(!game.native_level_set_block(stale, [0, 64, 0], stone, flags));
-        assert!(!game.native_level_destroy_block(stale, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(stale, [0, 64, 0], true, None, false)
+                .is_none()
+        );
         let fill_chest = |game: &mut Game<'_>| {
             let Some(super::super::BlockEntity::Chest(items)) =
                 game.world.block_entities.get_mut(&(0, 64, 0))
@@ -2932,17 +3011,26 @@ pub(super) mod tests {
         assert!(!game.world.block_entities.contains_key(&(0, 64, 0)));
         assert!(game.dropped.is_empty());
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(game.native_level_destroy_block(level, [0, 64, 0], false));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], false, None, false)
+                .is_some()
+        );
         assert!(game.dropped.is_empty());
         assert_eq!(game.world.block(0, 64, 0), air);
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_some()
+        );
         assert!(
             game.dropped
                 .iter()
                 .any(|item| item.stack.item.as_ref() == "minecraft:cobblestone")
         );
-        assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_none()
+        );
         game.dropped.clear();
         let copper = game
             .pack
@@ -2987,6 +3075,9 @@ pub(super) mod tests {
                 .is_some()
         );
         assert!(!game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_none()
+        );
     }
 }
