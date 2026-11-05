@@ -16,7 +16,7 @@ use super::{
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 use mod_api::{
-    EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
+    EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
     NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType, NeighbourUpdate,
 };
 
@@ -266,24 +266,49 @@ impl Game<'_> {
         let _ = self.process_level_events();
         true
     }
-    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
-    /// dropping its resources. Parked levels and invalid positions return false.
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally dropping
+    /// resources with `tool` (None is an empty hand). With `collect`, return the dropped
+    /// stacks without spawning their item entities; otherwise return an empty list after
+    /// spawning them. The one level drop path runs loot, block-drop hooks and experience
+    /// once, in vanilla's random order. `drop` false suppresses resources entirely.
+    /// None means nothing broke: air, a refused write, a stale handle, a client, an
+    /// unloaded/out-of-height position, or a parked level.
     pub(super) fn native_level_destroy_block(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
         drop: bool,
-    ) -> bool {
-        if !self.native_level_write_allowed(level, pos)
-            || !self.is_logical_server()
-            || self.dim.id() != level.dimension()
-        {
-            return false;
+        tool: Option<&ItemStack>,
+        collect: bool,
+    ) -> Option<Vec<ItemStack>> {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return None;
         }
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
-        let changed = self.with_level(|b, level, ticks| b.destroy_block(level, ticks, at, drop));
+        let (changed, drops) = self.with_level(|b, level, ticks| {
+            level.drop_tool = tool.cloned();
+            level.drop_into = collect.then(Vec::new);
+            let changed = b.destroy_block(level, ticks, at, drop);
+            (changed, level.drop_into.take().unwrap_or_default())
+        });
         let _ = self.process_level_events();
-        changed
+        changed.then_some(drops)
+    }
+
+    /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
+    /// any other stage removes it. A machine uses a stable negative breaker id.
+    pub(super) fn native_level_set_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return false;
+        }
+        self.server_destroy_block_progress(breaker, pos, progress);
+        true
     }
     fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.is_logical_server()
@@ -1195,7 +1220,10 @@ pub(super) mod tests {
                 stone,
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
-            assert!(!game.native_level_destroy_block(level, [0, 128, 0], false));
+            assert!(
+                game.native_level_destroy_block(level, [0, 128, 0], false, None, false)
+                    .is_none()
+            );
         });
     }
 
@@ -2895,7 +2923,10 @@ pub(super) mod tests {
             level.dimension(),
         );
         assert!(!game.native_level_set_block(stale, [0, 64, 0], stone, flags));
-        assert!(!game.native_level_destroy_block(stale, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(stale, [0, 64, 0], true, None, false)
+                .is_none()
+        );
         let fill_chest = |game: &mut Game<'_>| {
             let Some(super::super::BlockEntity::Chest(items)) =
                 game.world.block_entities.get_mut(&(0, 64, 0))
@@ -2932,17 +2963,26 @@ pub(super) mod tests {
         assert!(!game.world.block_entities.contains_key(&(0, 64, 0)));
         assert!(game.dropped.is_empty());
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(game.native_level_destroy_block(level, [0, 64, 0], false));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], false, None, false)
+                .is_some()
+        );
         assert!(game.dropped.is_empty());
         assert_eq!(game.world.block(0, 64, 0), air);
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_some()
+        );
         assert!(
             game.dropped
                 .iter()
                 .any(|item| item.stack.item.as_ref() == "minecraft:cobblestone")
         );
-        assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_none()
+        );
         game.dropped.clear();
         let copper = game
             .pack
@@ -2987,6 +3027,9 @@ pub(super) mod tests {
                 .is_some()
         );
         assert!(!game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_none()
+        );
     }
 }

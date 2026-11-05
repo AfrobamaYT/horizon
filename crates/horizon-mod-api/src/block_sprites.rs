@@ -45,3 +45,23 @@ pub struct BlockSprites {
     /// The model is a plain cube: one whole face on each side, at its plane.
     pub cube: bool,
 }
+
+/// A model face's texture name and tint selector, as block drawing helpers accept them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BlockFaceTexture {
+    /// Texture name, for example `block/oak_planks` or a mod's namespaced texture.
+    pub texture: String,
+    /// Model tint index; -1 means no tint.
+    pub tint_index: i32,
+}
+
+impl BlockFaceTexture {
+    /// Describe a face texture without exposing the renderer's atlas or model types.
+    pub fn new(texture: String, tint_index: i32) -> Self {
+        Self {
+            texture,
+            tint_index,
+        }
+    }
+}

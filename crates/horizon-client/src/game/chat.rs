@@ -39,6 +39,7 @@ use winit::{
 /// literal that takes the rest of the line as it was typed, run by
 /// `native_command` (`Dispatcher::with_mod_commands`), so the chat box colours
 /// and completes them as it does the game's own.
+#[cfg(test)]
 pub(super) fn with_native_commands(
     base: &horizon_client::command::Dispatcher,
     names: &[&str],
@@ -77,14 +78,12 @@ impl Game<'_> {
             }
             keep
         });
-        let (tree, _, problems) = super::native_server::command_tree(&commands, |name| {
-            base.find(name).is_some() || name == horizon_client::ram_limit::COMMAND
-        });
+        let (tree, _, problems) =
+            super::native_server::command_tree(&commands, |name| base.find(name).is_some());
         for problem in problems {
             log::warn!("Horizon: a client command was left out: {problem}");
         }
-        // The window answers `ram_limit` itself, as it does a client mod's.
-        let mut tree_with_mods = with_native_commands(base, &[horizon_client::ram_limit::COMMAND]);
+        let mut tree_with_mods = base.clone();
         super::native_server::register_dispatcher(
             &mut tree_with_mods,
             &tree,
@@ -789,6 +788,16 @@ impl Game<'_> {
     /// sent); blank text discards the draft. A draft still shown unchanged
     /// stays as it is.
     fn keep_chat_draft(&mut self, text: &str, reason: ChatExit) {
+        // During PvP & HUD's chat search the box holds the query: the draft is the text the
+        // search put aside, whichever way the chat closed.
+        let aside;
+        let text = if self.pvp.chat_search {
+            self.pvp.chat_search = false;
+            aside = std::mem::take(&mut self.pvp.chat_search_aside);
+            aside.as_str()
+        } else {
+            text
+        };
         let unchanged =
             self.ui.chat_draft_shown && self.ui.chat_draft.as_ref().is_some_and(|d| d.text == text);
         if should_discard_draft(reason, self.settings.file.bool("saveChatDrafts"))
@@ -920,6 +929,17 @@ impl Game<'_> {
         // while a screen is open.
         let ctrl = self.has_control_down_with_quirk();
         let shift = self.has_shift_down();
+        // PvP & HUD's chat search: Ctrl+F starts and stops it, Enter stops it (sends nothing).
+        if self.settings.extras.pvp.chat.search
+            && match key {
+                KeyCode::KeyF => ctrl,
+                KeyCode::Enter | KeyCode::NumpadEnter => self.pvp.chat_search,
+                _ => false,
+            }
+        {
+            self.toggle_chat_search();
+            return;
+        }
         match key {
             // ChatScreen.keyPressed: the chat scrolls a page.
             KeyCode::PageUp | KeyCode::PageDown
@@ -947,7 +967,8 @@ impl Game<'_> {
         };
         match screen.key(&m, &c, &self.ui.chat.recent, key, shift, ctrl) {
             ChatAction::Close => {
-                // Escape: the box still holds its text, which close_chat keeps as the draft.
+                // Escape: the box still holds its text, which close_chat keeps as the draft
+                // (a search's query gives way to the text it put aside: keep_chat_draft).
                 self.ui.chat_screen = Some(screen);
                 self.close_chat(ChatExit::Intentional);
             }
@@ -1094,12 +1115,29 @@ impl Game<'_> {
         } else {
             return;
         }
-        let Some(style) = self.ui.chat.style_at(
+        let style = self.ui.chat.style_at(
             &self.gui.atlas.font,
             height as i32,
             cursor.0 as f64,
             cursor.1 as f64,
-        ) else {
+        );
+        // PvP & HUD's copy on click: a message where the click has nothing else to do.
+        if self.settings.extras.pvp.chat.copy
+            && !self.has_shift_down()
+            && style.as_ref().is_none_or(|s| s.click.is_none())
+            && let Some(message) =
+                self.ui
+                    .chat
+                    .message_at(height as i32, cursor.0 as f64, cursor.1 as f64)
+        {
+            use horizon_client::clipboard::Clipboard;
+            self.clipboard.set(message);
+            let copied =
+                Text::translate_with_fallback("horizon.chat.copied", "Message copied", &[]);
+            self.titles.set_overlay(copied, false);
+            return;
+        }
+        let Some(style) = style else {
             return;
         };
         // ChatScreen.handleComponentClicked: with Shift held only an
@@ -1237,9 +1275,47 @@ impl Game<'_> {
             self.run_command(command);
         }
     }
+    /// PvP & HUD's chat search on or off. The box holds the query: what was typed is put aside
+    /// when the search starts and comes back when it stops.
+    fn toggle_chat_search(&mut self) {
+        let typed = self.ui.chat_screen.as_ref().map(|s| s.value().to_owned());
+        let next = if self.pvp.chat_search {
+            std::mem::take(&mut self.pvp.chat_search_aside)
+        } else {
+            self.pvp.chat_search_aside = typed.unwrap_or_default();
+            String::new()
+        };
+        self.pvp.chat_search = !self.pvp.chat_search;
+        let m = Measure(&self.gui.atlas.font);
+        let c = Commands {
+            dispatcher: chat_tree(&self.remote),
+            registries: &self.ui.registries,
+        };
+        if let Some(screen) = self.ui.chat_screen.as_mut() {
+            screen.suggest_command(&m, &c, &next);
+        }
+    }
     /// Chat lines over the HUD (focused while the chat screen is open).
     pub(super) fn draw_chat(&mut self, batch: &mut HudBatch) {
         let focused = self.screen == Screen::Chat;
+        let options = self.settings.extras.pvp.chat;
+        self.ui.chat.set_qol(&self.gui.atlas, options.qol());
+        // A search ends with its option; a chat closed some other way ends it in keep_chat_draft.
+        if self.pvp.chat_search && self.ui.chat_screen.is_none() {
+            // The chat went without closing (leaving the world): nothing to give back.
+            self.pvp.chat_search = false;
+            self.pvp.chat_search_aside.clear();
+        } else if self.pvp.chat_search && !options.search {
+            self.toggle_chat_search();
+        }
+        let query = self
+            .ui
+            .chat_screen
+            .as_ref()
+            .filter(|_| focused && self.pvp.chat_search)
+            .map(|s| s.value());
+        self.ui.chat.set_search(&self.gui.atlas, query);
+        self.ui.chat.search_prompt = focused && self.pvp.chat_search;
         if self.ui.hide_gui && !focused {
             return;
         }
@@ -1800,17 +1876,6 @@ mod tests {
         assert_eq!(once.effects, ["b"]);
         assert!(!Arc::ptr_eq(&once, &command_export(&other, false).unwrap()));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_ram_limit_command_is_known_to_the_chat_box() {
-        let reg = Registries::default();
-        let vanilla = horizon_client::command::vanilla::game_dispatcher();
-        assert!(vanilla.find(horizon_client::ram_limit::COMMAND).is_none());
-        let tree = with_native_commands(vanilla, &[horizon_client::ram_limit::COMMAND]);
-        for typed in ["ramlimit", "ramlimit 2048", "ramlimit off"] {
-            assert!(tree.parse(typed, &reg).executable().is_ok(), "{typed}");
-        }
     }
 
     /// A client command's usage becomes real nodes in the chat tree: its
