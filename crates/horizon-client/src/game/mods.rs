@@ -580,6 +580,7 @@ impl Game<'_> {
             .collect();
         // A mod with a native version built in says so instead.
         self.list_native_mods();
+        self.sync_native_switches();
         let built = self.mods.native.built();
         let built_mods = native_mods_detail(built);
         if let Some(list) = built_mods {
@@ -590,6 +591,13 @@ impl Game<'_> {
         let unbuilt = not_built(&native_dir, built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
         self.mods.report_refusals(&mut self.settings.mods.installed);
+    }
+
+    /// Apply the player's switches at the canonical native and wasm dispatch boundary.
+    pub(super) fn sync_native_switches(&self) {
+        for id in mod_api::__private::loaded_mods().ids() {
+            mod_api::__private::set_mod_enabled(id, !self.settings.mods.disabled.contains(id));
+        }
     }
 }
 

@@ -429,11 +429,13 @@ impl Game<'_> {
                 }
                 Event::BrowseMods => {
                     let ui = &mut self.ui.options.mod_browser;
-                    self.mods.jobs.browse(ui, Self::game_dir());
+                    self.mod_jobs.browse(ui, Self::game_dir());
                 }
                 Event::InstallMod(id) => {
-                    let ui = &mut self.ui.options.mod_browser;
-                    self.mods.jobs.install(ui, Self::game_dir(), id);
+                    if self.player.is_none() {
+                        let ui = &mut self.ui.options.mod_browser;
+                        self.mod_jobs.install(ui, Self::game_dir(), id);
+                    }
                 }
                 // The website, through ConfirmLinkScreen as other links.
                 Event::OpenModPage(url) => self.confirm_trusted_link(&url, Screen::Options),
