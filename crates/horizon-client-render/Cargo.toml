@@ -9,7 +9,6 @@ description = "The client's world data, rendering and screens: chunks, meshing, 
 [dependencies]
 horizon-mod-api = { path = "../horizon-mod-api" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
-horizon-cosmetics = { path = "../horizon-cosmetics" }
 # The GUI atlas's pixels, kept compressed once uploaded (hud.rs `pack_pixels`).
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
 horizon-assets = { path = "../horizon-assets" }
@@ -29,7 +28,7 @@ horizon-optifine = { path = "../horizon-optifine" }
 horizon-protocol = { path = "../horizon-protocol" }
 horizon-shader-api = { path = "../horizon-shader-api" }
 horizon-shaders = { path = "../horizon-shaders" }
-horizon-telemetry = { path = "../horizon-telemetry", default-features = false, features = ["live"] }
+horizon-system = { path = "../horizon-system" }
 horizon-theme = { path = "../horizon-theme" }
 horizon-threads = { path = "../horizon-threads" }
 horizon-world = { path = "../horizon-world" }

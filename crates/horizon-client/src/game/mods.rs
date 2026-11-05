@@ -370,19 +370,17 @@ fn announced_entry(
 }
 
 /// The mods' mob effects join vanilla's (`brewing::effect`), once the root
-/// holding their network ids is built. The startup root's effects, none
-/// included, stay until restart: a pack reload after a Mods switch builds a
-/// root with others.
+/// holding their network ids is built. The first root that declares effects
+/// sets them, until restart: a pack reload after a Mods switch builds a root
+/// with others. A root declaring none freezes nothing, and a game without
+/// mob effects reads the same empty list either way.
 fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
     use horizon_client::brewing::{self, Category};
     use horizon_mods::content::EffectCategory;
-    // No content mods: there is nothing to freeze the registry with. The
-    // first root that carries mods sets it, and a game without mods reads the
-    // same empty list either way.
-    if mods.is_empty() {
+    let effects = horizon_client::mod_content::mob_effects(mods);
+    if effects.is_empty() {
         return;
     }
-    let effects = horizon_client::mod_content::mob_effects(mods);
     let ids: Vec<String> = effects.iter().map(|e| e.id.clone()).collect();
     let set = brewing::register_mod_effects(effects.into_iter().map(|e| {
         let category = match e.category {
@@ -403,14 +401,16 @@ fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
 }
 
 /// the mods' thrown entity types, as their mob effects: set once, from the
-/// startup root.
+/// startup root. Living types are mobs, loaded with vanilla's from the
+/// content root's `entity-types.json`.
 fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
     use horizon_client::projectiles;
-    let types = horizon_client::mod_content::entity_types(mods);
+    let mut types = horizon_client::mod_content::entity_types(mods);
+    types.retain(|t| t.item.is_some());
     let set = projectiles::register_thrown_types(
         types
             .iter()
-            .map(|t| (t.id.clone(), t.item.clone(), t.damage)),
+            .filter_map(|t| Some((t.id.clone(), t.item.clone()?, t.damage))),
     );
     if !set
         && projectiles::thrown_types()
@@ -558,6 +558,47 @@ impl Game<'_> {
     }
 }
 
+/// Mob types loaded from a scratch root whose `entity-types.json` has a
+/// zombie, a villager, and the rows a content root writes for a mod's types
+/// (`mod_content`): `ruby:ghoul` (a zombie with 40 health), `ruby:settler` (a
+/// villager as it is) and `ruby:bolt` (a thrown snowball, not a mob).
+#[cfg(test)]
+pub(super) fn living_mod_types()
+-> std::collections::HashMap<String, std::sync::Arc<horizon_client::mobs::MobType>> {
+    let zombie =
+        r#""width":0.6,"height":1.95,"eye_height":1.74,"category":"monster","fire_immune":false"#;
+    let villager =
+        r#""width":0.6,"height":1.95,"eye_height":1.62,"category":"misc","fire_immune":false"#;
+    let trader =
+        r#""width":0.6,"height":1.95,"eye_height":1.62,"category":"creature","fire_immune":false"#;
+    let table = format!(
+        r#"{{"minecraft:zombie":{{{zombie},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.23000000417232513}}}},
+        "minecraft:villager":{{{villager},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.5}}}},
+        "minecraft:wandering_trader":{{{trader},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.7}}}},
+        "minecraft:snowball":{{"width":0.25,"height":0.25,"eye_height":0.0,"category":"misc","fire_immune":false}},
+        "ruby:ghoul":{{{zombie},"attributes":{{"minecraft:max_health":40.0,"minecraft:movement_speed":0.23000000417232513}},"template":"minecraft:zombie"}},
+        "ruby:settler":{{{villager},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.5}},"template":"minecraft:villager"}},
+        "ruby:merchant":{{{trader},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.7}},"template":"minecraft:wandering_trader"}},
+        "ruby:bolt":{{"width":0.25,"height":0.25,"eye_height":0.0,"category":"misc","fire_immune":false,"template":"minecraft:snowball"}}}}"#
+    );
+    // A folder per call: tests run in parallel in one process, and each removes its own.
+    static CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "horizon-living-mod-types-{}-{call}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("entity-types.json"), table).unwrap();
+    let types = horizon_client::mobs::MobTypes::load_for_server(&root).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    types
+        .types
+        .into_iter()
+        .map(|(id, t)| (id, std::sync::Arc::new(t)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -592,6 +633,105 @@ mod tests {
         fn drop(&mut self) {
             std::fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    /// A content mod's living type is a mob of its template's species under
+    /// its own id, with its own attributes: it saves its id with every field
+    /// its template's class saves, loads back as itself, and rolls its own
+    /// loot table. A thrown type stays a projectile.
+    #[test]
+    fn a_mod_living_type_is_its_templates_mob_with_its_own_attributes() {
+        use horizon_client::mobs::{Mob, Species, drops::death_loot_table};
+        use horizon_core::geometry::Vec3;
+        let types = living_mod_types();
+        let (zombie, ghoul) = (&types["minecraft:zombie"], &types["ruby:ghoul"]);
+        assert_eq!(ghoul.species, Species::Zombie);
+        assert_eq!(ghoul.class_id(), "minecraft:zombie");
+        assert_eq!(types["ruby:settler"].species, Species::Villager);
+        assert!(!types.contains_key("ruby:bolt"), "a thrown type is no mob");
+        assert_eq!((zombie.max_health, ghoul.max_health), (20.0, 40.0));
+        assert_eq!(ghoul.speed.to_bits(), zombie.speed.to_bits());
+        assert_eq!(
+            (ghoul.sounds, ghoul.texture.as_str()),
+            (zombie.sounds, zombie.texture.as_str())
+        );
+
+        let at = Vec3::new(0.5, 64.0, 0.5);
+        let (zombie, ghoul) = (
+            Mob::new(1, zombie.clone(), at, 0.0),
+            Mob::new(2, ghoul.clone(), at, 0.0),
+        );
+        assert_eq!(ghoul.health, 40.0);
+        let saved = |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None);
+        let keys = |tag: &horizon_world::nbt::Tag| -> Vec<String> {
+            let horizon_world::nbt::Tag::Compound(map) = tag else {
+                panic!("a mob saves a compound");
+            };
+            map.keys().map(|k| k.to_string_lossy()).collect()
+        };
+        let (zombie_tag, ghoul_tag) = (saved(&zombie), saved(&ghoul));
+        let Some(horizon_world::nbt::Tag::String(id)) = ghoul_tag.get("id") else {
+            panic!("a saved mob has its id");
+        };
+        assert_eq!(id.to_string_lossy(), "ruby:ghoul");
+        assert_eq!(
+            keys(&ghoul_tag),
+            keys(&zombie_tag),
+            "it saves what a zombie saves"
+        );
+        for key in ["IsBaby", "CanBreakDoors", "DrownedConversionTime"] {
+            assert!(keys(&ghoul_tag).iter().any(|k| k == key), "{key}");
+        }
+        let loaded = horizon_client::entity_nbt::mob_from_nbt(&ghoul_tag, &types, 3, None)
+            .expect("it loads back");
+        assert_eq!(
+            (loaded.kind.id.as_str(), loaded.health),
+            ("ruby:ghoul", 40.0)
+        );
+        assert_eq!(
+            death_loot_table(&ghoul, true).as_deref(),
+            Some("ruby:entities/ghoul")
+        );
+        assert_eq!(
+            death_loot_table(&zombie, true).as_deref(),
+            Some("minecraft:entities/zombie")
+        );
+    }
+
+    /// A content mod's type from the wandering trader, the neutral template
+    /// whose behaviour is all goals: a trader under its own id, with a
+    /// trader's goals, that saves what a trader saves and loads back.
+    #[test]
+    fn a_mod_trader_type_is_a_wandering_trader_under_its_own_id() {
+        use horizon_client::mobs::{Mob, Species};
+        use horizon_world::nbt::Tag;
+        let types = living_mod_types();
+        let merchant = &types["ruby:merchant"];
+        assert_eq!(merchant.species, Species::WanderingTrader);
+        assert_eq!(merchant.class_id(), "minecraft:wandering_trader");
+        let at = horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5);
+        let trader = Mob::new(1, types["minecraft:wandering_trader"].clone(), at, 0.0);
+        let merchant = Mob::new(2, merchant.clone(), at, 0.0);
+        assert!(merchant.ai.goals.has("Float") && trader.ai.goals.has("Float"));
+        let saved = |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None);
+        let keys = |tag: &Tag| -> Vec<String> {
+            let Tag::Compound(map) = tag else {
+                panic!("a mob saves a compound");
+            };
+            map.keys().map(|k| k.to_string_lossy()).collect()
+        };
+        let tag = saved(&merchant);
+        assert_eq!(
+            keys(&tag),
+            keys(&saved(&trader)),
+            "it saves what a trader saves"
+        );
+        let loaded =
+            horizon_client::entity_nbt::mob_from_nbt(&tag, &types, 3, None).expect("it loads back");
+        assert_eq!(
+            (loaded.kind.id.as_str(), loaded.species()),
+            ("ruby:merchant", Species::WanderingTrader)
+        );
     }
 
     #[test]
@@ -861,5 +1001,35 @@ mod tests {
         let ids: Vec<_> = rows.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, ["veinminer", "zoom"]);
         assert!(not_built(&f.0.join("missing"), &[], &[]).is_empty());
+    }
+
+    /// A root with mods that declare no mob effects leaves the registry open for the first one
+    /// that does.
+    #[test]
+    fn a_root_without_mob_effects_does_not_freeze_the_registry() {
+        use horizon_client::{brewing, mod_content::ContentMod};
+        // Another test may have set the process-wide list already.
+        if !brewing::mod_effects().is_empty() {
+            return;
+        }
+        let f = Fixture::new("no-effects");
+        std::fs::write(
+            f.0.join("horizon-mod.toml"),
+            "id = 'plain'\nname = 'plain'\nversion = '1.0'\napi = '0.2'\ncapabilities = ['registries']\n",
+        )
+        .unwrap();
+        let package = horizon_mods::Package::read(&f.0).unwrap();
+        let plain = ContentMod {
+            id: "plain".into(),
+            content: horizon_mods::content::Content::read(&f.0, &package.manifest).unwrap(),
+            jars: Vec::new(),
+        };
+        register_mob_effects(&[plain]);
+        // The list `potions::tests` registers, so it holds whichever test runs first.
+        assert!(brewing::register_mod_effects([(
+            "test:effect".to_owned(),
+            0,
+            brewing::Category::Neutral
+        )]));
     }
 }

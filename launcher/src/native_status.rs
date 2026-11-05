@@ -66,14 +66,31 @@ pub fn state(enabled: &[Mod], built: Option<&[Mod]>) -> State {
 pub struct Build {
     /// The release or Nightly it was built on (`native_mods::About::base`).
     pub base: String,
+    /// The Horizon commit it compiled.
+    pub horizon: String,
+    /// The mods whose pin made it compile `horizon` rather than `base`'s own commit.
+    pub pinned_by: Vec<String>,
+    /// It compiled another commit than its Nightly's, with no record of why: built before the
+    /// launcher kept which mods pinned it ([`pinning`] reads them from the instance's mods).
+    pub pinned_unknown: bool,
 }
 
 impl Build {
     /// Installed native build `version`'s, from its `native-mods.json`; None for another version.
     pub fn read(version: &str) -> Option<Build> {
-        Some(Build {
-            base: native_mods::about(version)?.base,
-        })
+        Some(Build::of(native_mods::about(version)?))
+    }
+
+    /// What build record `about` says.
+    fn of(about: native_mods::About) -> Build {
+        // The fork's manifest pins the exact Horizon commit, so a build is never on a commit
+        // its mods did not name: nothing is unknown and no pin list is recorded.
+        Build {
+            pinned_unknown: false,
+            base: about.base,
+            horizon: about.horizon,
+            pinned_by: Vec::new(),
+        }
     }
 
     /// The Horizon it was built on, as a player reads it (`horizon_label`).
@@ -85,7 +102,7 @@ impl Build {
     pub fn horizon_short(&self) -> String {
         match crate::nightly::date_of(&self.base) {
             Some(date) => format!("Nightly {}", &date[5..]),
-            None => self.base.clone(),
+            None => crate::nightly::short_commit(&self.base),
         }
     }
 }
@@ -95,7 +112,7 @@ impl Build {
 pub fn horizon_label(version: &str) -> String {
     match crate::nightly::date_of(version) {
         Some(date) => format!("Nightly {date}"),
-        None => version.to_owned(),
+        None => crate::nightly::short_commit(version),
     }
 }
 
@@ -118,6 +135,32 @@ pub fn enabled(home: &Path) -> Vec<Mod> {
         }
     }
     out
+}
+
+fn hnmods(home: &Path) -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = fs::read_dir(home.join(native_mods::INSTALLED))
+        .map(|dir| dir.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
+    paths.sort();
+    paths
+}
+
+/// The native mods turned on in game folder `home` that pin Horizon commit `revision` (those naming
+/// a hook points' version follow the others, so they pin nothing).
+pub fn pinning(home: &Path, revision: &str) -> Vec<String> {
+    hnmods(home)
+        .into_iter()
+        .filter_map(|path| horizon_mods::index::native::Bundle::read(&path).ok())
+        .filter(|b| {
+            b.manifest
+                .native
+                .as_ref()
+                .is_some_and(|n| n.horizon == revision)
+        })
+        .filter(|b| java::is_enabled(home, &b.manifest.id))
+        .map(|b| b.manifest.id)
+        .collect()
 }
 
 /// A native file not tracked by the registry/browser, including GitHub installs.
@@ -163,12 +206,40 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
 /// The mods installed version `version` was built with, or None when it isn't a native build
 /// (or its `native-mods.json` can't be read: the Mods page then offers Build).
 pub fn built(version: &str) -> Option<Vec<Mod>> {
+    Some(parse_built(&record(version)?))
+}
+
+/// Native build `version`'s `native-mods.json`.
+fn record(version: &str) -> Option<serde_json::Value> {
     if !native_mods::is_native(version) {
         return None;
     }
     let path = backend::version_dir(version).join("native-mods.json");
-    let about: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    Some(parse_built(&about))
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+/// How many seconds build `version` took, when its record says.
+pub fn built_secs(version: &str) -> Option<u64> {
+    record(version)?["secs"].as_u64()
+}
+
+/// The profile native build `version` was built with (`native-mods.json`'s `profile`).
+pub fn built_profile(version: &str) -> Option<native_mods::Profile> {
+    native_mods::Profile::parse(record(version)?["profile"].as_str()?)
+}
+
+/// `state`, once the mode counts: a build made in another mode than `chosen` is not this mode's
+/// build, so it needs its own.
+pub fn in_mode(
+    state: State,
+    built: Option<native_mods::Profile>,
+    chosen: native_mods::Profile,
+) -> State {
+    if state == State::UpToDate && built != Some(chosen) {
+        State::Outdated
+    } else {
+        state
+    }
 }
 
 fn parse_built(about: &serde_json::Value) -> Vec<Mod> {
@@ -246,7 +317,9 @@ mod tests {
                 .join(native_mods::INSTALLED)
                 .join(format!("{file}.hmod"));
             let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
-            let manifest = format!("id = '{id}'\nname = '{id}'\nversion = '1.2'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n");
+            let manifest = format!(
+                "id = '{id}'\nname = '{id}'\nversion = '1.2'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n"
+            );
             for (name, bytes) in [
                 ("horizon-mod.toml", manifest.as_str()),
                 (
@@ -339,6 +412,21 @@ mod tests {
     }
 
     #[test]
+    fn a_build_made_in_another_mode_needs_a_build() {
+        use native_mods::Profile::{Developer, Optimized};
+        assert_eq!(
+            in_mode(State::UpToDate, Some(Developer), Optimized),
+            State::Outdated
+        );
+        assert_eq!(in_mode(State::UpToDate, None, Optimized), State::Outdated);
+        assert_eq!(
+            in_mode(State::UpToDate, Some(Optimized), Optimized),
+            State::UpToDate
+        );
+        assert_eq!(in_mode(State::NoMods, None, Optimized), State::NoMods);
+    }
+
+    #[test]
     fn a_build_is_needed_until_the_version_holds_the_mods_turned_on() {
         let on = [m("veinminer", "1.0"), m("zoom", "2.1")];
         assert_eq!(state(&[], None), State::NoMods);
@@ -404,16 +492,19 @@ mod tests {
         assert_eq!(horizon_label("nightly-2026-10-29"), "Nightly 2026-10-29");
         let build = Build {
             base: "nightly-2026-10-28-0c02067".into(),
+            ..Build::default()
         };
         assert_eq!(build.horizon(), "Nightly 2026-10-28");
         assert_eq!(build.horizon_short(), "Nightly 10-28");
         let release = Build {
             base: "v0.2.93".into(),
+            ..Build::default()
         };
         assert_eq!(release.horizon_short(), "v0.2.93");
         assert_eq!(Build::read("v0.1.0"), None, "not a native build");
     }
 
+    /// A build from before pins were recorded that compiled another commit than its Nightly's
     #[test]
     fn only_hmods_in_the_native_folder_are_native() {
         assert!(is_native_file("horizon-native-mods/veinminer.hmod"));

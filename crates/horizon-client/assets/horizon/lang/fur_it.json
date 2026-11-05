@@ -11,12 +11,9 @@
   "horizon.options.move_deadzone": "Zone muarte dal moviment",
   "horizon.options.look_deadzone": "Zone muarte dal sguard",
   "horizon.options.button_glyphs": "Glifs dai botôns",
-  "horizon.options.menu_navigation": "Navigazion dal menût",
   "horizon.options.on_screen_keyboard": "Tastier sul schermi",
   "horizon.options.chat_delay": "Ritart de conversazion",
   "horizon.options.lightbar.health": "Salût",
-  "horizon.options.menu_focus": "Concentrâsi",
-  "horizon.options.menu_pointer": "Puntôr",
   "horizon.options.unavailable": "Cheste funzion no je ancjemò disponibile in Horizon.",
   "horizon.options.search": "Impostazions di ricercje...",
   "horizon.pages.shader_packs": "Pachetis ombrenadôrs",
@@ -464,14 +461,5 @@
   "horizon.pack.filters": "Filtris",
   "horizon.pack.filter.simplistic": "Sempliç",
   "horizon.pack.filter.vanillaLike": "Al somee ae vanilie",
-  "horizon.pack.addFailed": "Il pachetin nol è stât zontât: %s",
-  "horizon.extras.cosmetics_mine": "I miei cosmetics",
-  "horizon.extras.cosmetics_mine.tooltip": "Scuindût: ogni zuiadôr Horizon al viôt cence il to cosmetic, tu ancje. Il stes interrutôr dal Armadi dal lançadôr.",
-  "horizon.extras.cosmetics_others": "I cosmetics dai altris zuiadôrs",
-  "horizon.extras.cosmetics_others.tooltip": "Ce che a metin sù altris zuiadôrs Horizon: dut, dome i lôr stîi di etichetis, o nuie. Scuindût, il zûc nol domande mai ce che a metin sù.",
-  "horizon.extras.cosmetics_auras": "Auris e sentiers di altris",
-  "horizon.extras.cosmetics_auras.tooltip": "Auris e pistis che a metin sù altris zuiadôrs. Disactivât par automatic.",
-  "horizon.extras.cosmetics.shown": "Mostrât",
-  "horizon.extras.cosmetics.hidden": "Scuindût",
-  "horizon.extras.cosmetics.name_tags": "Dome lis etichetis dai nons"
+  "horizon.pack.addFailed": "Il pachetin nol è stât zontât: %s"
 }

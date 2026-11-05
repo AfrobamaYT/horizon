@@ -99,6 +99,16 @@ Run a dedicated server here; type commands into its console.
 
 MCP: `server`, `server_command`, `server_log`, `server_stop`.
 
+## `horizon-launcher native-cache`
+
+Show the native compilation cache's size and limit as JSON. Installed games and saves are never removed; builds must be idle.
+
+    horizon-launcher native-cache
+
+- `--clear`: Clear only fast/release compiler outputs. The next changed build recompiles
+
+MCP: `native_cache`.
+
 ## `horizon-launcher native-build`
 
 Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod projects against the instance's exact Horizon source revision with the launcher's own Rust, as the version the instance then plays. Not sandboxed: the mods' code runs with your rights.
@@ -111,7 +121,7 @@ Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod proj
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
 - `--trust-native-code`: You read the mods' source and trust it with full access to this computer
-- `--profile` (performance, dev, release): The build profile: performance (the default: incremental, quick to rebuild), dev (quickest to rebuild a mod, slow game) or release (thin LTO: slowest to build, slightly faster game). Default: the native-profile setting
+- `--profile` (optimized, balanced, developer): The build mode: optimized (the default: the prebuilt game when the mods allow it, else the game built with the release profile), balanced (built here, quicker to rebuild) or developer (quickest to rebuild a mod, slow game). Default: the native-profile setting
 
 MCP: none: the player's switch.
 
@@ -127,7 +137,7 @@ MCP: `notes`.
 
 ## `horizon-launcher links`
 
-Show the Discord, sponsor and website links.
+Show the website, roadmap and documentation links.
 
     horizon-launcher links
 
@@ -228,11 +238,11 @@ MCP: `account_skin`.
 
 ## `horizon-launcher settings`
 
-Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), native-profile performance|dev|release (the profile native mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game, release is slowest to build and slightly faster to play).
+Show the launcher's settings, or set one (the Settings page): selected-version TAG, game-architecture auto|x64|arm64, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit in GiB, default 30; 0 disables automatic cleanup), native-profile optimized|balanced|developer (the build mode native mods use: optimized uses the prebuilt game when it can, balanced builds here and rebuilds quicker, developer rebuilds a mod quickest for a slow game).
 
     horizon-launcher settings [KEY] [VALUE]
 
-- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, proxy, while-playing, language, accent, background, native-profile)
+- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, game-architecture, proxy, while-playing, language, accent, background, native-profile, native-cache-gib)
 - `VALUE`: The new value (with KEY)
 
 MCP: `settings`.
@@ -298,80 +308,16 @@ Linux: put Horizon in the applications menu (an entry and the icon, under $XDG_D
 
 MCP: `desktop_entry`.
 
-## `horizon-launcher data status`
+## `horizon-launcher bug-report`
 
-What is allowed, the install ID and how many items wait (the default).
+Write a bug report to a file you attach to the issue by hand; nothing is sent (docs/telemetry.md).
 
-    horizon-launcher data status
-
-MCP: `data_status`.
-
-## `horizon-launcher data allow`
-
-Turn kinds on: performance, crashes, bugs, benchmarks, or all.
-
-    horizon-launcher data allow <KINDS>...
-
-- `KINDS`
-
-MCP: `data_allow`, only when the player asks.
-
-## `horizon-launcher data deny`
-
-Turn kinds off: performance, crashes, bugs, benchmarks, or all.
-
-    horizon-launcher data deny <KINDS>...
-
-- `KINDS`
-
-MCP: `data_deny`.
-
-## `horizon-launcher data show`
-
-Print exactly what would be sent.
-
-    horizon-launcher data show
-
-MCP: `data_show`.
-
-## `horizon-launcher data delete`
-
-Delete everything sent from here, and what waits, and take a new install ID.
-
-    horizon-launcher data delete
-
-MCP: `data_delete`, needs `confirm: true`.
-
-## `horizon-launcher data send`
-
-Send what is waiting now.
-
-    horizon-launcher data send
-
-MCP: `data_send`, only when the player asks.
-
-## `horizon-launcher data bug`
-
-Send a bug report you write; it is printed first, as it would leave.
-
-    horizon-launcher data bug <TEXT>
+    horizon-launcher bug-report <TEXT>
 
 - `TEXT`
-- `--log`: Add the end of the game's log (scrubbed, without chat)
-- `--yes`: Send without asking
+- `--log`: Add the end of the game's log (names and worlds hidden, without chat)
 
-MCP: `data_bug`, only when the player asks.
-
-## `horizon-launcher data benchmark`
-
-Upload a benchmark report (docs/benchmark-report.md); it is printed first.
-
-    horizon-launcher data benchmark <FILE>
-
-- `FILE`
-- `--yes`
-
-MCP: `data_benchmark`, only when the player asks.
+MCP: `bug_report`.
 
 ## `horizon-launcher instance list`
 
@@ -545,6 +491,7 @@ Import what a file is, as dropping it on the window does: a shared instance (a .
 
 - `FILE`
 - `--instance`: The instance a pack goes into
+- `--java`: A .mrpack becomes a Minecraft: Java Edition instance with its Minecraft version, mod loader, mods and overrides, instead of a Horizon instance or a Modpacks import
 
 MCP: `instance_import`.
 

@@ -19,6 +19,19 @@ The opening, then Play ([clip](docs/opening.webm)):
   built on your fork's Actions, or the zip holding it) and installs it as `imported-<date>-<sha>`:
   a copy of the selected release or Nightly's folder, game files included, with that program as the
   game. Imported builds are listed apart as unsigned, and no update replaces them.
+- **Move data to another drive**: Settings → Data folder → Move… copies the launcher's
+  installations, downloads and account files, the game's worlds and instances, and managed native
+  build data to an empty folder. Close games and servers and wait for active jobs first. The launcher
+  exits while the copy is verified, switches its location only after success, then reopens. Old folders
+  remain as recovery copies and still use disk space; verify your worlds and instances before removing
+  them yourself. External Minecraft/server folders and paths embedded in custom launch commands stay
+  unchanged. Links/junctions and overlapping roots are refused; Windows build destinations need ASCII
+  characters without spaces. Copy or commit failure leaves the original location selected.
+  The location pointer is independent of the moved folders, at the platform config directory's
+  `horizon-launcher-location/location.json`. `HORIZON_LAUNCHER_LOCATION_FILE` selects an alternative
+  absolute pointer file for portable installations. Nonempty `HORIZON_LAUNCHER_HOME` and `HORIZON_HOME`
+  still override their respective roots; remove these overrides before using Move. A missing destination
+  fails explicitly instead of silently creating empty data in the default location.
 - **Play**: prepares resources as `PLAY.txt` describes (your launcher's 26.3 install, the
   26.3 server jar from that version's own json, and Java 25) and copies its sounds from your
   launcher's asset store (`horizon-prepare sounds`; a launcher install without them only
@@ -42,9 +55,10 @@ The opening, then Play ([clip](docs/opening.webm)):
   starts the game. With no install on the computer the Play page offers the download alone and the
   Minecraft folder row says none is needed. Without an owner,
   the Play page asks to sign in first. `horizon-launcher prepare --download`.
-- **Mods**: tabs for Mods, Modpacks, Resource packs, Shader packs and Data packs. Mods, Modpacks
-  and Resource packs search Horizon's own registry or Modrinth (CurseForge support is coming soon);
-  Shader packs search the registry, Data packs Modrinth (into the world picked there). A Java
+- **Mods**: tabs for Mods, Modpacks, Resource packs, Shader packs and Data packs. Mods, Modpacks,
+  Resource packs and Data packs (into the world picked there) search Horizon's own registry, with
+  its categories as filters, or Modrinth (CurseForge support is coming soon); Shader packs search
+  the registry. A Java
   instance's files come from Modrinth for its version and loader; on a Horizon instance, Modrinth's
   Java mods are listed too, each marked Works, Partly or Doesn't run in Horizon. Install puts a file in
   the game folder only after its SHA-512 matches, and a
@@ -120,9 +134,9 @@ The opening, then Play ([clip](docs/opening.webm)):
   pack into the selected instance. A data pack is pointed at the world rows, and the Packs section
   and the world rows keep taking their own drops. A note in the corner says what happened.
   `horizon-launcher instance import <file>`.
-- **Maximum memory**: a row on Home, per instance: a slider and a box that takes `4096`, `4gb`, or nothing
-  for no limit (the default), saved at once. For Horizon it goes to the game as
-  `HORIZON_MEMORY_LIMIT_MB` ([what it does](../docs/native-client.md#ram-limit)); a Java instance's sets `-Xmx`.
+- **Maximum memory** (Java instances): set the Java heap limit (`-Xmx`) with the slider or
+  a value such as `4096` or `4gb`. Leave the box empty to restore the default (4096 MB).
+  Find it on Home in the classic layout, or in the instance’s Edit dialog in the glass layout.
 - **Launch options**: Home's Instance row has **Launch…**: per instance, a shell command run in its
   folder before the game (the game starts only if it succeeds), a wrapper the game runs through
   (`nice -n 5`), and environment variables (`NAME=value OTHER="two words"`), kept in
@@ -220,7 +234,7 @@ The opening, then Play ([clip](docs/opening.webm)):
   keeping every field the launcher doesn't show and the servers joined with Direct Connection. The
   same from the command line: `horizon-launcher multiplayer [list|add|remove] [--instance <name>]`
   and `horizon-launcher play --server <address or name>`.
-- **Patch notes**: each release's notes, newest first, with a link to GitHub Sponsors. Quiet "Sponsor", "Discord" and "Website" links sit in the sidebar footer.
+- **Patch notes**: each release's notes, newest first, with no ads. Quiet "Roadmap", "Documentation" and "Website" links sit in the sidebar footer.
 
 Data lives in the platform's data directory (`~/.local/share/horizon-launcher` on Linux,
 `~/Library/Application Support/horizon-launcher` on macOS, `%APPDATA%\horizon-launcher` on
@@ -233,7 +247,12 @@ page `servers.json` (the list), `servers/<name>/` (the servers created there) an
   what the window does while you play (stays by default; Minimise, or Hide on macOS, puts it away
   when the game starts and brings it back to the front when the game closes; `settings
   while-playing stay|minimize|hide`), the game's extra command-line arguments, an HTTP proxy for
-  downloads, and the launcher's own version and update state.
+  downloads, and the launcher's own version and update state. On Windows ARM, **Game
+  architecture** chooses Automatic, x64 or ARM64 independently from the launcher; automatic
+  preserves the launcher's architecture, and a release without ARM64 uses the signed x64 build.
+  A changed choice reinstalls the selected version when automatic updates are on, and the game
+  won't launch an installed build that conflicts with a manual choice. `horizon-launcher settings
+  game-architecture auto|x64|arm64`.
 - **Updates**: Horizon ships only the Nightly (since 2026-10-28, docs/release-flow.md). The
   launcher installs the current one (the `nightly` pre-release, checksums signed for the Nightly
   channel) as `nightly-<date>-<commit>` and selects it when the player was on a Nightly, on the
@@ -259,8 +278,8 @@ page `servers.json` (the list), `servers/<name>/` (the servers created there) an
   Without one, `HTTPS_PROXY` and `HTTP_PROXY` are used when the launcher is started with them, and
   `NO_PROXY` names the hosts to reach directly, a modpack import's jars included. A server on this
   computer never goes through it.
-- **Links**: the Discord invite, the Sponsors page and the website come from `launcher/links.json` on main
-  (`{"discord": "...", "sponsor": "...", "website": "..."}`), so they change without a launcher release. Offline,
+- **Links**: the website, the roadmap and the documentation come from `launcher/links.json` on this fork's main
+  (`{"website": "...", "roadmap": "...", "docs": "..."}`), so they change without a launcher release. Offline,
   the launcher uses the same values built in; an empty address hides its button.
 
 Long pages, dialogs, the server console and data previews have a visible scrollbar when
@@ -286,8 +305,18 @@ themselves come from their download links, which that limit doesn't cover.
 
 It also updates itself from GitHub releases tagged `launcher@X.Y.Z` (the game's are `nightly`, and
 `vX.Y.Z` before 2026-10-28; neither is ever taken for the other). Before 0.2 they were `launcher-vX.Y.Z` and `vYYYY.MM.DD`:
-every 0.2 tag counts as newer than all of those (docs/versioning.md). It downloads the new build, replaces its
-own binary, and offers "Restart" in the footer. Development builds and
+every 0.2 tag counts as newer than all of those (docs/versioning.md). It downloads the new build, checks it
+against the release's signed `SHA256SUMS`, and says "A new version is available" in the sidebar with
+**Update**: the window closes, the launcher's own file runs again as the installer (`apply-update`,
+`src/update_handoff.rs`), which waits for the window's process to exit, puts the new launcher in place (the
+binary, the `.app` bundle or the AppImage) and starts it. Closing the window with an update downloaded installs
+it the same way, so the next start is the new launcher. When the installer can't put it in place, the old
+launcher starts again and says why. Each process stages in its own folder, and the installer checks the signed
+SHA-256 again before anything goes in; when the launcher in place is already that version or newer, it changes
+nothing. Servers keep running through **Update**. A copy that can't replace itself says so at once and offers
+**Download again** (the website's install page): one in a read-only folder (the disk image, or the read-only copy
+macOS runs a downloaded app from until it is moved to Applications), or on Windows one running from the temporary
+folder, as a program opened inside a `.zip` does. `horizon-launcher update` replaces it at once. Development builds and
 `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` never replace themselves.
 
 On Linux the release also comes as an AppImage, `horizon-launcher-linux-x86_64.AppImage`: one file
@@ -310,14 +339,16 @@ Menu entries the launcher writes then start that wrapper, which can
 set `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` to keep launcher updates with the package manager.
 
 Launcher releases are automatic (docs/release-flow.md in the repository): when main changes the
-launcher, `horizon-prepare` or `horizon-theme`, the `launcher` workflow builds Linux, macOS and
-Windows and publishes `launcher-vX.Y.Z` (the next patch, or the next minor after a pull request
+launcher, `horizon-prepare` or `horizon-theme`, the `launcher` workflow builds Linux, macOS, Windows x64 and
+Windows ARM64 and publishes `launcher-vX.Y.Z` (the next patch, or the next minor after a pull request
 labelled `feature`) with `horizon-launcher-linux-x86_64.tar.gz`,
 `horizon-launcher-linux-x86_64.AppImage`, `horizon-launcher-macos-arm64.zip`,
-`horizon-launcher-macos-x64.zip` (Intel Macs) and `horizon-launcher-windows-x64.zip`, never marked latest. The version is built in from the tag
+`horizon-launcher-macos-x64.zip` (Intel Macs), `horizon-launcher-windows-x64.zip` and
+`horizon-launcher-windows-arm64.zip`, never marked latest. The version is built in from the tag
 (`HORIZON_LAUNCHER_VERSION`); `Cargo.toml`'s version is only what local builds report.
 
-Windows also publishes `horizon-launcher-setup.exe`: the launcher's own binary under another name, which opens
+Windows also publishes `horizon-launcher-setup.exe` (x64) and `horizon-launcher-setup-arm64.exe`: the launcher's own
+binary under another name, which opens
 a per-user setup instead of the window (no administrator). It copies itself to
 `%LOCALAPPDATA%\Programs\Horizon Launcher\horizon-launcher.exe`, makes the Start menu shortcut (and the
 desktop one if asked) and an entry in *Apps & features*, then starts the copy. `horizon-launcher-setup.exe
@@ -357,7 +388,7 @@ and don't set `%ERRORLEVEL%` / `$LASTEXITCODE`. Scripts that need the exit code 
     horizon-launcher play [--version <tag>] [--instance <name>] [--arg <ARG>]...   start the client; --arg passes an extra argument through (repeatable)
     horizon-launcher server [--dir <dir>] [--version <tag>] [--accept-eula]
     horizon-launcher notes [<tag>]                  patch notes as plain text
-    horizon-launcher links                          the Discord, sponsor and website links
+    horizon-launcher links                          the website, roadmap and documentation links
     horizon-launcher game-args [<line>]             show or set the extra arguments the game starts with
     horizon-launcher update [--check]               Horizon and the launcher
     horizon-launcher logs [--lines N] [--crash]     the end of the game's log, or its newest crash report
@@ -401,12 +432,7 @@ and don't set `%ERRORLEVEL%` / `$LASTEXITCODE`. Scripts that need the exit code 
     horizon-launcher servers run <server> -- <horizon-server command>   for example: servers run "My server" -- start
     horizon-launcher servers forget <server>        take it off the list (its folder stays)
     horizon-launcher benchmark [--repeats N]        measure the launcher (see Performance log)
-    horizon-launcher data [status]                  what data collection is allowed, the install ID, what waits
-    horizon-launcher data allow|deny <kinds|all>    performance, crashes, bugs, benchmarks
-    horizon-launcher data show                      exactly what would be sent
-    horizon-launcher data delete                    delete what was sent and what waits; new install ID
-    horizon-launcher data bug "<text>" [--log]      a bug report, printed for you to confirm first
-    horizon-launcher data benchmark <report.json>   upload a benchmark report, printed first
+    horizon-launcher bug-report "<text>" [--log]    write a bug report file to attach by hand (nothing is sent)
 
 `--json` prints JSON where there is something to report (`versions`, `install`, `notes`,
 `next`, `links`, `game-args`, `update --check`, `logs`, `account`, `benchmark`, `data`, `modpack`). Errors go to stderr with exit code 1. `server` runs in the terminal,
@@ -427,7 +453,7 @@ command that adds it; for Claude Code:
 (with the full path to the binary if it is not on your `PATH`). Every CLI command is a tool of the
 same name and arguments, generated from the CLI's definition (`src/cli_tools.rs`): `versions`,
 `install`, `remove`, `prepare`, `settings`, `mods_search`, `mods_install`, `modpack_import`,
-`servers_create`, `data_status`... A call runs that command with `--json` and returns its
+`servers_create`, `bug_report`... A call runs that command with `--json` and returns its
 output. Tools that delete something (`remove`, `mods_remove`, `modpack_remove`,
 `servers_forget`, `account_sign_out`, `data_delete`) need `confirm: true`. The session runs a few
 itself, under the CLI's names: `play`, `server` with `server_command`, `server_log` and
@@ -480,19 +506,14 @@ The game writes its log to `logs/latest.log` in the game folder (`HORIZON_HOME`,
 archives the previous one at start as `logs/<date>-<n>.log.gz`, as Minecraft does. When it
 crashes it writes `crash-reports/crash-<date>_<time>-client.txt` beside them. When a game the
 launcher started crashes, the Play page says so, with buttons to open or copy the report, open the
-logs folder and report it on Discord; Settings has the logs folder too. A crash report leaves the
+logs folder and report it on GitHub; Settings has the logs folder too. A crash report leaves the
 machine only if you turn on crash reports (below).
 
 ## Data collection
 
-The first time it opens, the launcher asks whether you want to send performance statistics,
-crash reports, bug reports and benchmark uploads, each on its own switch and all off until you
-turn one on ("Send nothing" is one click). Settings → Data collection changes them any time, shows
-exactly what would be sent (the JSON), and deletes everything sent from your install. It asks
-again only when what is collected changes. The game obeys the same answer, kept in
-`telemetry/consent.json` in the game folder. What waits is sent when the launcher starts and
-closes. Every field, the caps and the format: [docs/telemetry.md](../docs/telemetry.md).
-
+None. The launcher and the game send nothing about you or your machine (see
+[docs/telemetry.md](../docs/telemetry.md)). `horizon-launcher bug-report "text" [--log]` writes a bug report
+to a file you attach to your issue by hand.
 
 ## Performance log
 
@@ -504,9 +525,8 @@ and OS (read on a thread after the first frame: on Windows those queries take se
 to an issue about the launcher being slow. `horizon-launcher benchmark` measures on purpose: it starts the launcher `--repeats` times (5; the first start is the cold one, as far
 as the OS's file cache allows), switches pages for a few seconds in each, rests 3 seconds to
 measure idle CPU, fetches the release list 3 times, and writes one report there with means and
-95% confidence intervals. Its window has to be on a screen that is awake. Session logs stay on
-your machine; a `benchmark` report is uploaded, dated to the day, only if you allowed benchmark
-uploads ([data collection](../docs/telemetry.md)).
+95% confidence intervals. Its window has to be on a screen that is awake. Session logs and benchmark reports stay on
+your machine ([data collection](../docs/telemetry.md)).
 
 Long lists on Mods (results, installed entries, coverage reports and project versions), Versions
 and Patch notes build only nearby rows, including on their first frame. Variable row heights

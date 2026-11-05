@@ -209,7 +209,7 @@ impl Game<'_> {
                 v
             } else {
                 let profession = PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()];
-                let level = i32::from(m.extra.variant3.max(1));
+                let level = m.extra.villager_level.max(1);
                 let set = merchant::Trades::set_for(profession, level);
                 if self.stations().trades.sets.contains_key(&set) {
                     self.offers_from_set(&set, &variant, origin)
@@ -270,7 +270,7 @@ impl Game<'_> {
             "wandering_trader"
         };
         let level = if villager {
-            i32::from(m.extra.variant3.max(1))
+            m.extra.villager_level.max(1)
         } else {
             1
         };
@@ -327,7 +327,7 @@ impl Game<'_> {
             return;
         };
         if session.villager {
-            m.extra.variant3 = session.level.clamp(1, i32::from(u8::MAX)) as u8;
+            m.extra.villager_level = session.level.max(1);
         }
         m.extra.flag2 = false;
         m.random = session.random.clone();
@@ -407,20 +407,19 @@ impl Game<'_> {
             .as_ref()
             .and_then(|s| s.merchant.as_ref())
             .and_then(|m| m.mob);
-        let (session, traded) = self.merchant_apply(session, mob);
-        self.merchant_traded(mob, &traded);
+        let (mut session, traded) = self.merchant_apply(session, mob);
+        self.merchant_traded(mob, &mut session.offers, &traded);
         if let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) {
             m.session = session;
         }
     }
     /// What a menu click's session did, applied to the world and its mob;
-    /// with the offer of each trade made (as it is after the trade), for
-    /// `merchant_traded`.
+    /// with the index of the offer of each trade made, for `merchant_traded`.
     pub(super) fn merchant_apply(
         &mut self,
         session: Box<merchant::Session>,
         mob: Option<u32>,
-    ) -> (Box<merchant::Session>, Vec<MerchantOffer>) {
+    ) -> (Box<merchant::Session>, Vec<usize>) {
         let mut session = session;
         let events = std::mem::take(&mut session.events);
         let mut traded = Vec::new();
@@ -429,7 +428,7 @@ impl Game<'_> {
             m.random = session.random.clone();
             m.ambient_timer = session.ambient_sound_time;
             if villager {
-                m.extra.variant3 = session.level.clamp(1, i32::from(u8::MAX)) as u8;
+                m.extra.villager_level = session.level.max(1);
             }
         }
         for e in events {
@@ -451,7 +450,9 @@ impl Game<'_> {
                     };
                     self.audio.play(sound, Some(origin), 1.0, pitch);
                 }
-                merchant::Event::Traded(_, offer) => traded.push(*offer),
+                merchant::Event::Traded(index, _offer) => {
+                    traded.push(index);
+                }
                 merchant::Event::TradeSound => {
                     let sound = if villager {
                         "minecraft:entity.villager.yes"
@@ -464,12 +465,21 @@ impl Game<'_> {
         }
         (session, traded)
     }
-    /// `MerchantResultSlot.onTake` for each trade made (`offers`, as each
-    /// was right after its trade): the statistic, `AbstractVillager.notifyTrade`'s
+    /// `MerchantResultSlot.onTake` for each trade made (`traded` indices into
+    /// the session's live `offers`): the statistic, `AbstractVillager.notifyTrade`'s
     /// `villager_trade` trigger, then the mods' `native_trade_with_villager`
-    /// for a server's player (when the trader is still in the level).
-    pub(super) fn merchant_traded(&mut self, mob: Option<u32>, offers: &[MerchantOffer]) {
-        for offer in offers {
+    /// for a server's player (when the trader is still in the level), which
+    /// may change the live offer (Bukkit's `PlayerTradeEvent#getTrade`).
+    pub(super) fn merchant_traded(
+        &mut self,
+        mob: Option<u32>,
+        offers: &mut [MerchantOffer],
+        traded: &[usize],
+    ) {
+        for index in traded {
+            let Some(offer) = offers.get_mut(*index) else {
+                continue;
+            };
             self.award_custom_stat("traded_with_villager", 1);
             let merchant = mob.and_then(|id| self.mobs.iter().find(|m| m.id == id));
             let kind = merchant.map(super::native_hooks::mob_kind);

@@ -12,7 +12,7 @@ use super::{
     native_hooks::{mod_sound_ok, sound_id},
 };
 use horizon_core::random::RandomSource;
-use mod_api::{EntityRef, NativeSoundSource, PlayerRef};
+use mod_api::{EntityRef, PlayerRef, SoundSource};
 
 impl Game<'_> {
     /// Where `player` is reached now: the window's own player or a guest.
@@ -42,7 +42,7 @@ impl Game<'_> {
         &mut self,
         player: PlayerRef,
         sound: Option<&str>,
-        source: Option<NativeSoundSource>,
+        source: Option<SoundSource>,
     ) -> bool {
         let Some(target) = self.native_player_sound_target(player) else {
             return false;
@@ -50,7 +50,7 @@ impl Game<'_> {
         if sound.is_some_and(|s| !sound_id(s)) {
             return false;
         }
-        self.stop_sound_for(&[target], sound, source.map(NativeSoundSource::index));
+        self.stop_sound_for(&[target], sound, source.map(SoundSource::index));
         true
     }
     /// `PlaySoundCommand` for one player: plays sound event `sound` at the
@@ -61,7 +61,7 @@ impl Game<'_> {
         &mut self,
         player: PlayerRef,
         sound: &str,
-        source: NativeSoundSource,
+        source: SoundSource,
         volume: f32,
         pitch: f32,
     ) -> bool {
@@ -89,7 +89,7 @@ impl Game<'_> {
         &mut self,
         entity: EntityRef,
         sound: &str,
-        source: NativeSoundSource,
+        source: SoundSource,
         volume: f32,
         pitch: f32,
     ) -> bool {
@@ -118,7 +118,7 @@ pub(super) mod tests {
     use horizon_core::geometry::Vec3;
     use horizon_protocol::packets::{configuration::ClientInformation, play::Clientbound};
     use mod_api::__private::game::*;
-    use mod_api::{NativeSoundSource, NativeWorldEpoch};
+    use mod_api::{NativeWorldEpoch, SoundSource};
     use std::sync::{
         Arc,
         atomic::{AtomicI32, AtomicUsize},
@@ -138,6 +138,7 @@ pub(super) mod tests {
                 sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
+                expected: false,
             },
             conn as i32,
             at,
@@ -198,11 +199,7 @@ pub(super) mod tests {
             let sound = "minecraft:entity.player.burp";
 
             // stop_sound: only the named player's connection.
-            assert!(game.native_player_stop_sound(
-                pa,
-                Some(sound),
-                Some(NativeSoundSource::Players)
-            ));
+            assert!(game.native_player_stop_sound(pa, Some(sound), Some(SoundSource::Players)));
             assert!(game.native_player_stop_sound(pa, None, None));
             assert!(!game.native_player_stop_sound(pa, Some("bad id"), None));
             let got = packets(&rx_a);
@@ -211,10 +208,7 @@ pub(super) mod tests {
                 panic!("expected stop sound")
             };
             assert_eq!(first.sound.as_deref(), Some(sound));
-            assert_eq!(
-                first.source,
-                Some(NativeSoundSource::Players.index() as i32)
-            );
+            assert_eq!(first.source, Some(SoundSource::Players.index() as i32));
             let Clientbound::StopSound(second) = &got[1] else {
                 panic!("expected stop sound")
             };
@@ -222,18 +216,12 @@ pub(super) mod tests {
             assert!(packets(&rx_b).is_empty());
 
             // play_sound: one packet for one player, at their position.
-            assert!(game.native_player_play_sound(pb, sound, NativeSoundSource::Neutral, 0.5, 1.5));
-            assert!(!game.native_player_play_sound(
-                pb,
-                sound,
-                NativeSoundSource::Neutral,
-                1.0,
-                f32::NAN
-            ));
+            assert!(game.native_player_play_sound(pb, sound, SoundSource::Neutral, 0.5, 1.5));
+            assert!(!game.native_player_play_sound(pb, sound, SoundSource::Neutral, 1.0, f32::NAN));
             assert!(!game.native_player_play_sound(
                 pb,
                 "minecraft:no.such.sound",
-                NativeSoundSource::Neutral,
+                SoundSource::Neutral,
                 1.0,
                 1.0
             ));
@@ -245,7 +233,7 @@ pub(super) mod tests {
             };
             assert_eq!((p.x, p.y, p.z), (24, 512, 16));
             assert_eq!((p.volume, p.pitch), (0.5, 1.5));
-            assert_eq!(p.source, NativeSoundSource::Neutral.index() as i32);
+            assert_eq!(p.source, SoundSource::Neutral.index() as i32);
 
             // A stale handle and an offline player fail.
             let stale = mod_api::__private::game::player_ref(
@@ -256,13 +244,7 @@ pub(super) mod tests {
                 pa.fields().uuid,
             );
             assert!(!game.native_player_stop_sound(stale, None, None));
-            assert!(!game.native_player_play_sound(
-                stale,
-                sound,
-                NativeSoundSource::Players,
-                1.0,
-                1.0
-            ));
+            assert!(!game.native_player_play_sound(stale, sound, SoundSource::Players, 1.0, 1.0));
             assert!(game.native_player_ref(99).is_none());
 
             // play_bound_sound: players in range get a SoundEntity packet.
@@ -273,14 +255,14 @@ pub(super) mod tests {
             assert!(game.native_entity_play_bound_sound(
                 cow,
                 sound,
-                NativeSoundSource::Neutral,
+                SoundSource::Neutral,
                 1.0,
                 1.0
             ));
             assert!(!game.native_entity_play_bound_sound(
                 cow,
                 sound,
-                NativeSoundSource::Neutral,
+                SoundSource::Neutral,
                 -1.0,
                 1.0
             ));
@@ -292,7 +274,7 @@ pub(super) mod tests {
                     panic!("expected sound entity")
                 };
                 assert_eq!(p.id, 40);
-                assert_eq!(p.source, NativeSoundSource::Neutral.index() as i32);
+                assert_eq!(p.source, SoundSource::Neutral.index() as i32);
             }
             assert!(packets(&rx_far).is_empty());
         });
@@ -350,7 +332,7 @@ pub(super) mod tests {
                         level,
                         sound,
                         [0.5, 64.0, 0.0],
-                        NativeSoundSource::Neutral,
+                        SoundSource::Neutral,
                         1.0,
                         1.0,
                         None,

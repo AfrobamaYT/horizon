@@ -46,6 +46,14 @@ fn player_slot(
     }
 }
 
+/// The equipment slot of a hand (`LivingEntity.getItemInHand`/`setItemInHand`).
+fn hand_slot(hand: Hand) -> EquipmentSlot {
+    match hand {
+        Hand::Main => EquipmentSlot::MainHand,
+        Hand::Off => EquipmentSlot::OffHand,
+    }
+}
+
 /// The `/item` slot name of an equipment slot.
 fn slot_name(slot: EquipmentSlot) -> &'static str {
     match slot {
@@ -101,7 +109,7 @@ impl Game<'_> {
     /// stale handle.
     ///
     /// On a client, only the local player is one: the client keeps the others'
-    /// equipment, effects and health only as far as it draws them.
+    /// equipment, effects and health only as far as it draws them. API 382.
     pub(super) fn native_living(&self, entity: EntityRef) -> Option<LivingRef> {
         let living = LivingRef::new(entity);
         self.native_living_read_target(living).map(|_| living)
@@ -482,6 +490,9 @@ impl Game<'_> {
     /// mobs, armor stands and the dragon store all eight slots. An armor
     /// stand's body and saddle are storage only: vanilla's `canUseSlot`
     /// refuses them for interaction. None means empty, unsupported or stale.
+    /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
+    /// None when it is empty, the entity has no such slot (a player has no
+    /// body or saddle slot), or the handle is stale. API 382.
     pub(super) fn native_living_equipment(
         &self,
         living: LivingRef,
@@ -626,17 +637,25 @@ impl Game<'_> {
         broken
     }
 
-    /// The stack in hand `hand` (`LivingEntity.getItemInHand`).
+    /// The stack in hand `hand` (`LivingEntity.getItemInHand`). API 382.
     pub(super) fn native_living_hand_item(
         &self,
         living: LivingRef,
         hand: Hand,
     ) -> Option<ItemStack> {
-        let slot = match hand {
-            Hand::Main => EquipmentSlot::MainHand,
-            Hand::Off => EquipmentSlot::OffHand,
-        };
-        self.native_living_equipment(living, slot)
+        self.native_living_equipment(living, hand_slot(hand))
+    }
+    /// Puts `stack` in hand `hand` (`LivingEntity.setItemInHand`): the main
+    /// hand's slot or the off hand's, written as `set_equipment`
+    /// writes them, with its equip events and sound. None, air or a zero count
+    /// empties the hand. False means unsupported or stale.
+    pub(super) fn native_living_set_hand_item(
+        &mut self,
+        living: LivingRef,
+        hand: Hand,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        self.native_living_set_equipment(living, hand_slot(hand), stack)
     }
     /// Puts `stack` in `slot` (`LivingEntity.setItemSlot`); None, air or a
     /// zero count empties it. Players, guests, mobs, armor stands and the
@@ -646,13 +665,17 @@ impl Game<'_> {
     /// unsupported or stale.
     /// This is a direct write: it takes effect and is final immediately, even
     /// inside `host.transaction`. A mob's write makes any equip/unequip event
-    /// and equip sound immediately; a stand's or the dragon's makes neither.
+    /// and equip sound immediately; a stand's or the dragon's makes neither. API 382.
     pub(super) fn native_living_set_equipment(
         &mut self,
         living: LivingRef,
         slot: EquipmentSlot,
         stack: Option<ItemStack>,
     ) -> bool {
+        // A client's copy changes only when the server says so.
+        if self.remote.is_some() {
+            return false;
+        }
         let Some(t) = self.native_living_target(living) else {
             return false;
         };
@@ -1052,13 +1075,7 @@ mod tests {
                 let expected_random = game.world.random.next_float();
                 assert_eq!(broken.len(), 2);
                 if guest {
-                    assert_eq!(
-                        expected_events
-                            .iter()
-                            .map(|event| event.0)
-                            .collect::<Vec<_>>(),
-                        [49, 50]
-                    );
+                    assert_eq!(expected_events, [49, 50]);
                 } else {
                     assert_eq!(expected_sounds.get("minecraft:entity.item.break"), Some(&1));
                     assert_eq!(expected_sounds.get("minecraft:block.anvil.break"), Some(&1));
@@ -1437,6 +1454,52 @@ mod tests {
             assert_eq!(player_living.health(game), Some(0.0));
             assert!(player_living.set_health(game, 10.0));
             assert_eq!(player_living.health(game), Some(10.0));
+        });
+    }
+
+    /// `set_hand_item` writes the hand's equipment slot, as vanilla's
+    /// `setItemInHand` does: a player's selected slot or off hand, a mob's
+    /// main or off hand; a stale handle writes nothing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn set_hand_item_writes_the_hands_slot() {
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use mod_api::ServerHost;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            game.selected = 3;
+            let player = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let sword = ItemStack::new("minecraft:iron_sword", 1);
+            let shield = ItemStack::new("minecraft:shield", 1);
+            let host: &mut dyn ServerHost = game;
+            assert!(player.set_hand_item(host, Hand::Main, Some(sword.clone())));
+            assert!(player.set_hand_item(host, Hand::Off, Some(shield.clone())));
+            assert_eq!(game.inventory[3], Some(sword.clone()));
+            assert_eq!(game.offhand, Some(shield.clone()));
+            assert_eq!(player.hand_item(game, Hand::Main), Some(sword.clone()));
+            assert_eq!(player.hand_item(game, Hand::Off), Some(shield));
+            assert!(player.set_hand_item(game, Hand::Off, None));
+            assert_eq!(game.offhand, None);
+            assert_eq!(game.inventory[3], Some(sword.clone()));
+
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let zombie = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            assert!(zombie.set_hand_item(game, Hand::Off, Some(sword.clone())));
+            let stacks = game.mobs[0].equipment_stacks();
+            assert_eq!(stacks[EquipmentSlot::OffHand as usize], Some(sword.clone()));
+            assert_eq!(stacks[EquipmentSlot::MainHand as usize], None);
+
+            game.mobs.clear();
+            assert!(!zombie.set_hand_item(game, Hand::Main, Some(sword)));
         });
     }
 

@@ -7,7 +7,7 @@
 use super::{Game, commands::Target};
 use horizon_client::mobs::Species;
 use horizon_client::sculk::Context;
-use mod_api::{EntityRef, NativeSoundSource};
+use mod_api::{EntityRef, SoundSource};
 
 /// `Monster`'s sound source is hostile, and so are a few mobs that are not
 /// `Monster`s: `Hoglin`, `Ghast`, `Phantom`, `Shulker` and the slimes
@@ -36,28 +36,25 @@ impl Game<'_> {
     /// Players are `Players`; `Monster`s, the dragon, hoglins, ghasts,
     /// phantoms, shulkers, slimes and a killer bunny are `Hostile`; dropped
     /// items and experience orbs `Ambient`; every other entity `Neutral`.
-    pub(super) fn native_entity_sound_source(
-        &self,
-        entity: EntityRef,
-    ) -> Option<NativeSoundSource> {
+    pub(super) fn native_entity_sound_source(&self, entity: EntityRef) -> Option<SoundSource> {
         Some(match self.native_entity_target(entity)? {
-            Target::Player | Target::Guest(_) => NativeSoundSource::Players,
+            Target::Player | Target::Guest(_) => SoundSource::Players,
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id)?;
                 let evil = m.species() == Species::Rabbit
                     && m.extra.variant == horizon_client::mobs::rabbit::EVIL;
                 if evil || hostile_species(m.species()) {
-                    NativeSoundSource::Hostile
+                    SoundSource::Hostile
                 } else {
-                    NativeSoundSource::Neutral
+                    SoundSource::Neutral
                 }
             }
-            Target::Item(_) | Target::Orb(_) => NativeSoundSource::Ambient,
-            Target::Dragon(_) => NativeSoundSource::Hostile,
+            Target::Item(_) | Target::Orb(_) => SoundSource::Ambient,
+            Target::Dragon(_) => SoundSource::Hostile,
             t => match self.target_type(t).as_str() {
-                "minecraft:shulker_bullet" => NativeSoundSource::Hostile,
-                "minecraft:lightning_bolt" => NativeSoundSource::Weather,
-                _ => NativeSoundSource::Neutral,
+                "minecraft:shulker_bullet" => SoundSource::Hostile,
+                "minecraft:lightning_bolt" => SoundSource::Weather,
+                _ => SoundSource::Neutral,
             },
         })
     }
@@ -148,8 +145,9 @@ impl Game<'_> {
     }
     /// `Level.broadcastEntityEvent(entity, id)`: sends entity event `id` (the
     /// byte `Entity.handleEntityEvent` reads: `2` is a hurt flash, `3` a
-    /// death, `35` a totem...) to the players near the entity. True means
-    /// queued; false for an entity outside the level in place.
+    /// death, `35` a totem...) to the players tracking the entity and to the
+    /// entity itself. True means queued; false for an entity outside the
+    /// level in place.
     pub(super) fn native_entity_broadcast_event(&mut self, entity: EntityRef, id: u8) -> bool {
         let Some(target) = self.native_entity_target(entity) else {
             return false;
@@ -187,7 +185,7 @@ mod tests {
     use horizon_client::mobs::Mob;
     use horizon_client::motion::PlayerMotion;
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, NativeSoundSource, NativeWorldEpoch};
+    use mod_api::{EntityRef, NativeWorldEpoch, SoundSource};
 
     fn spawn(game: &mut super::Game<'_>, id: u32, kind: &str) -> EntityRef {
         let kind = game.res.mob_types().get(kind).unwrap().clone();
@@ -213,22 +211,22 @@ mod tests {
             let sulfur = spawn(game, 14, "minecraft:sulfur_cube");
             let bunny = spawn(game, 15, "minecraft:rabbit");
             let source = |game: &super::Game<'_>, e| game.native_entity_sound_source(e);
-            assert_eq!(source(game, cow), Some(NativeSoundSource::Neutral));
-            assert_eq!(source(game, zombie), Some(NativeSoundSource::Hostile));
-            assert_eq!(source(game, ghast), Some(NativeSoundSource::Hostile));
-            assert_eq!(source(game, slime), Some(NativeSoundSource::Hostile));
-            assert_eq!(source(game, sulfur), Some(NativeSoundSource::Neutral));
-            assert_eq!(source(game, bunny), Some(NativeSoundSource::Neutral));
+            assert_eq!(source(game, cow), Some(SoundSource::Neutral));
+            assert_eq!(source(game, zombie), Some(SoundSource::Hostile));
+            assert_eq!(source(game, ghast), Some(SoundSource::Hostile));
+            assert_eq!(source(game, slime), Some(SoundSource::Hostile));
+            assert_eq!(source(game, sulfur), Some(SoundSource::Neutral));
+            assert_eq!(source(game, bunny), Some(SoundSource::Neutral));
             game.mobs
                 .iter_mut()
                 .find(|m| m.id == 15)
                 .unwrap()
                 .extra
                 .variant = horizon_client::mobs::rabbit::EVIL;
-            assert_eq!(source(game, bunny), Some(NativeSoundSource::Hostile));
+            assert_eq!(source(game, bunny), Some(SoundSource::Hostile));
             acting_player(game);
             let player = game.native_entity(7).unwrap();
-            assert_eq!(source(game, player), Some(NativeSoundSource::Players));
+            assert_eq!(source(game, player), Some(SoundSource::Players));
             let stale = EntityRef::new(NativeWorldEpoch::new(cow.epoch().get() + 1), 10);
             assert_eq!(source(game, stale), None);
         });
@@ -271,7 +269,7 @@ mod tests {
             let sound = &game.creatures.lan_sounds[0];
             assert_eq!(sound.sound, "minecraft:entity.cow.ambient");
             assert_eq!(sound.at, [1.5, 64.0, 2.5]);
-            assert_eq!(sound.source as usize, NativeSoundSource::Neutral.index());
+            assert_eq!(sound.source as usize, SoundSource::Neutral.index());
             assert_eq!((sound.volume, sound.pitch, sound.except), (0.5, 1.5, None));
             // A silent mob plays nothing; a bad pitch is refused.
             game.mobs[0].silent = true;
@@ -295,7 +293,7 @@ mod tests {
                 1.0
             ));
             let sound = &game.creatures.lan_sounds[1];
-            assert_eq!(sound.source as usize, NativeSoundSource::Players.index());
+            assert_eq!(sound.source as usize, SoundSource::Players.index());
             assert_eq!(sound.except, Some(3));
             let stale = EntityRef::new(NativeWorldEpoch::new(cow.epoch().get() + 1), 10);
             assert!(!game.native_entity_play_sound(
@@ -322,7 +320,7 @@ mod tests {
             );
             game.audio.capture = Some(Vec::new());
             assert!(game.native_entity_broadcast_event(cow, 3));
-            assert_eq!(game.lan_entity_events, [(10, 3, [1.5, 64.0, 2.5])]);
+            assert_eq!(game.lan_entity_events, [(10, 3)]);
             let stale = EntityRef::new(NativeWorldEpoch::new(cow.epoch().get() + 1), 10);
             assert!(!game.native_entity_broadcast_event(stale, 3));
             assert!(!game.native_entity_game_event(stale, "minecraft:step"));

@@ -78,7 +78,7 @@ pub(super) struct Parked {
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_events: Vec<super::QueuedLevelEvent>,
     lan_block_events: Vec<([i32; 3], i32, i32, u32)>,
-    lan_entity_events: Vec<(i32, i8, [f64; 3])>,
+    lan_entity_events: Vec<(i32, i8)>,
     lan_critical_hits: Vec<(Option<u32>, i32, bool)>,
     /// The hub's tracked entities of this level (`LanHost::states`), as its last tick described
     /// them: what its players' moves are checked against before this tick describes them again.
@@ -129,6 +129,12 @@ pub(super) struct Levels {
 }
 
 impl Levels {
+    /// Clear every parked level and dimensions recorded as heard open.
+    pub(super) fn clear(&mut self) {
+        self.parked.clear();
+        self.heard_open.clear();
+    }
+
     /// A parked level, without opening or loading it.
     pub(super) fn parked_world(&self, dim: Dim) -> Option<&World> {
         self.parked.get(&dim).map(|level| &level.world)
@@ -180,6 +186,27 @@ impl Levels {
     /// The level not in place, in `dim`.
     pub(super) fn parked_mut(&mut self, dim: Dim) -> Option<&mut Parked> {
         self.parked.get_mut(&dim)
+    }
+
+    /// The entities of a parked level, counted as `Game::entity_count` counts the one in place.
+    pub(super) fn parked_entity_count(&self, dim: Dim) -> Option<usize> {
+        let l = self.parked.get(&dim)?;
+        Some(
+            l.mobs.iter().filter(|m| !m.removed).count()
+                + l.dropped.len()
+                + l.orbs.len()
+                + l.projectiles.len()
+                + l.carts.len()
+                + l.boats.len()
+                + l.falling.len()
+                + l.paintings.len()
+                + l.item_frames.len()
+                + l.armor_stands.len()
+                + l.cushions.len()
+                + l.tridents.len()
+                + l.rockets.len()
+                + l.tnts.len(),
+        )
     }
 
     /// The mobs of a parked level.
@@ -336,8 +363,7 @@ impl Game<'_> {
         self.creaking.swap_level(&mut p.creaking);
         swap(&mut self.spawn_scratch, &mut p.spawn_scratch);
         // What only the client draws starts over.
-        self.particles.clear();
-        self.pickups.clear();
+        self.clear_client_particles();
     }
 
     /// Put `target`'s level in place, opening it first if it is not loaded.
@@ -489,9 +515,8 @@ impl Game<'_> {
                         self.tick()
                     } else {
                         let running = running.unwrap_or_else(|| self.clock.world_runs());
-                        if running {
-                            self.tick_weather_effects();
-                        }
+                        // ClientLevel.tick: the sky flash fades in a frozen level too.
+                        self.tick_weather_effects();
                         self.tick_world(running)
                     }
                 },
@@ -628,13 +653,15 @@ impl Game<'_> {
         let mut dims: Vec<Dim> = [Dim::Overworld, Dim::Nether, Dim::End]
             .into_iter()
             .filter(|d| {
+                // `/forceload`ed chunks, or a native mod's tickets.
+                let held = |s: &Streaming| !s.forced.is_empty();
                 let forced = if *d == self.dim {
-                    !self.streaming.forced.is_empty()
+                    held(&self.streaming)
                 } else {
                     self.levels
                         .parked
                         .get(d)
-                        .is_some_and(|p| !p.streaming.forced.is_empty())
+                        .is_some_and(|p| held(&p.streaming))
                 };
                 guests.iter().any(|g| g.dimension == d.id() && g.participates_in_player_simulation())
                     // A viewer count not yet told to 0 (`tick_mod_container_viewers`).
@@ -775,4 +802,19 @@ fn slowest_steps(notes: &[(f32, String)]) -> String {
         .map(|(ms, what)| format!("{what} {ms:.1}"))
         .collect();
     format!("; slowest: {}", list.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn levels_clear_empties_parked_and_heard_open() {
+        let mut levels = Levels::default();
+        levels.heard_open.push(Dim::Nether);
+        assert!(!levels.heard_open.is_empty());
+        levels.clear();
+        assert!(levels.heard_open.is_empty());
+        assert!(levels.parked.is_empty());
+    }
 }

@@ -4,6 +4,7 @@
 //! listed in docs/rust-parity.md; the rest of vanilla remains unimplemented.
 #![forbid(unsafe_code)]
 
+pub mod arm_pose;
 pub mod biome;
 pub mod carving;
 pub mod density;

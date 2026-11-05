@@ -37,6 +37,8 @@ mod tests {
         pub(super) struct NeighbourUpdate;
         #[derive(Clone, Copy)]
         pub(super) struct PathComputationType;
+        #[derive(Clone, Copy)]
+        pub(super) struct ConnectionKind;
         pub(super) struct GlobalPos;
         pub(super) struct AttributeModifier;
         #[derive(Clone, Copy)]
@@ -94,10 +96,14 @@ mod tests {
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }
+        pub(super) struct ClientPacket;
         pub(super) struct Corners;
         pub(super) struct Suggestion;
-        pub(super) struct HudBatch;
+        #[derive(Default)]
+        pub(super) struct HudBatch(pub Vec<u32>);
         pub(super) struct TooltipElement;
+        #[derive(Clone, Copy)]
+        pub(super) struct TooltipPlace;
         pub(super) struct BiomeColors;
         pub(super) struct SpawnEntry;
         pub(super) struct UseAnimation;
@@ -190,6 +196,7 @@ mod tests {
         pub(super) struct NativeDataMapType;
         pub(super) struct NativeConfig;
         pub(super) struct NativeConfigFile;
+        pub(super) struct NativeReloadListener;
         pub(super) struct RecipeBookCategory;
         pub(super) struct RecipePropertyAddition;
         pub(super) struct NativeMapDecoration;
@@ -268,7 +275,14 @@ mod tests {
     trait Host {}
     trait ServerHost: Host {}
     trait ClientHost: Host {}
-    trait DrawContext {}
+    trait DrawContext {
+        fn mark(&mut self, value: u32);
+    }
+    impl DrawContext for HudBatch {
+        fn mark(&mut self, value: u32) {
+            self.0.push(value);
+        }
+    }
     /// Records which part drew, in order.
     trait BlockEntityDrawContext {
         fn mark(&mut self, part: u32);
@@ -330,12 +344,18 @@ mod tests {
                 pub struct FovPlayer;
             }
             pub struct NativeClientInfo;
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub enum ToastKind {
+                Advancement,
+            }
             pub struct CustomSpawners;
             #[derive(Clone)]
             pub struct SpawnerKey;
             #[derive(Clone, Copy)]
             pub enum KeyAction {}
             pub struct NativeArmorHurt;
+            #[derive(Clone, Copy)]
+            pub struct ArmPose;
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum EffectApplicable {
                 Allow,
@@ -661,6 +681,52 @@ mod tests {
     }
 
     #[test]
+    fn toast_add_passes_kind_and_text_edits_and_stops_on_cancel() {
+        struct Filter(bool);
+        #[mod_api::__subscriptions]
+        impl Hooks for Filter {
+            fn toast_add(&self, _: &dyn ClientHost, event: &mut ToastAddEvent<'_>) -> Flow {
+                assert_eq!(event.kind, generated::mod_api::ToastKind::Advancement);
+                if self.0 {
+                    assert!(event.description.is_some());
+                    *event.description = None;
+                    Flow::Cancel
+                } else {
+                    assert!(event.description.is_none());
+                    *event.description = Some(Text);
+                    Flow::Continue
+                }
+            }
+        }
+        install(
+            vec![
+                ModEntry::new("editor", Box::new(Filter(false))),
+                ModEntry::new("cancel", Box::new(Filter(true))),
+                ModEntry::new("late", Box::new(Filter(false))),
+            ]
+            .into(),
+        );
+        ENTERED.with(|entered| entered.borrow_mut().clear());
+        let mut description = None;
+        let mut cancel = false;
+        dispatch_toast_add(
+            &TestHost,
+            generated::mod_api::ToastKind::Advancement,
+            &mut Text,
+            &mut description,
+            &mut cancel,
+        );
+        assert!(cancel);
+        assert!(description.is_none());
+        ENTERED.with(|entered| {
+            assert_eq!(
+                entered.borrow().as_slice(),
+                [(0, "toast_add"), (1, "toast_add")]
+            );
+        });
+    }
+
+    #[test]
     fn advancement_progress_reports_grant_and_revoke_identity() {
         struct Observer(Arc<Mutex<Vec<NativeProgressType>>>);
         #[mod_api::__subscriptions]
@@ -873,6 +939,40 @@ mod tests {
             &mut draw,
         );
         assert_eq!(draw.0, [1, 2]);
+    }
+
+    #[test]
+    fn foreground_gui_preserves_draws_and_dispatches_with_visibility_flags() {
+        struct Indicator(u32);
+        #[mod_api::__subscriptions]
+        impl Hooks for Indicator {
+            fn gui_render_post(&self, _: &dyn ClientHost, event: &mut GuiRenderPostEvent<'_>) {
+                // A persistent indicator opts into F1 and hides on focus loss.
+                if event.focused {
+                    event.batch.mark(self.0 + u32::from(event.gui_hidden) * 10);
+                }
+            }
+        }
+        install(
+            vec![
+                ModEntry::new("first", Box::new(Indicator(1))),
+                ModEntry::new("second", Box::new(Indicator(2))),
+            ]
+            .into(),
+        );
+        for (hidden, focused, expected) in [
+            (false, true, vec![99, 1, 2]),
+            (true, true, vec![99, 11, 12]),
+            (true, false, vec![99]),
+        ] {
+            let mut batch = HudBatch(vec![99]);
+            dispatch_gui_render_post(&TestHost, &mut batch, hidden, focused);
+            assert_eq!(batch.0, expected);
+        }
+        let mut batch = HudBatch(vec![99]);
+        install(Vec::<ModEntry>::new().into());
+        dispatch_gui_render_post(&TestHost, &mut batch, true, true);
+        assert_eq!(batch.0, [99]);
     }
 
     #[test]
@@ -1105,13 +1205,15 @@ mod tests {
             let (mut container, mut canceled) = (DamageContainer(4.0), false);
             dispatch_living_incoming_damage(
                 &mut TestLevel,
-                1,
-                "minecraft:zombie",
-                &source,
-                &victim,
-                weapon,
-                &mut container,
-                &mut canceled,
+                calls::LivingIncomingDamageCall {
+                    entity: 1,
+                    kind: "minecraft:zombie",
+                    source: &source,
+                    victim: &victim,
+                    weapon,
+                    container: &mut container,
+                    canceled: &mut canceled,
+                },
             );
             assert_eq!((container.0, canceled), (expected, false));
         }
@@ -1191,16 +1293,18 @@ mod tests {
         };
         dispatch_living_knockback(
             &mut TestLevel,
-            12,
-            "minecraft:armor_stand",
-            &source,
-            7,
-            None,
-            None,
-            &mut strength,
-            &mut x,
-            &mut z,
-            &mut canceled,
+            calls::LivingKnockbackCall {
+                entity: 12,
+                kind: "minecraft:armor_stand",
+                source: &source,
+                attacker: 7,
+                attacker_main: None,
+                attacker_off: None,
+                strength: &mut strength,
+                x: &mut x,
+                z: &mut z,
+                canceled: &mut canceled,
+            },
         );
         assert_eq!((strength, x, z), (0.8, -1.0, 0.0));
         assert!(canceled);
@@ -1259,13 +1363,15 @@ mod tests {
         let mut canceled = false;
         dispatch_living_incoming_damage(
             &mut TestLevel,
-            0,
-            "kind",
-            &source,
-            &victim,
-            None,
-            &mut container,
-            &mut canceled,
+            calls::LivingIncomingDamageCall {
+                entity: 0,
+                kind: "kind",
+                source: &source,
+                victim: &victim,
+                weapon: None,
+                container: &mut container,
+                canceled: &mut canceled,
+            },
         );
         // Each mod sees the one before: (1 × 2 + 1) × 2 + 2, kept though mod 2 cancels.
         assert_eq!(container.0, 8.0);
@@ -1287,13 +1393,15 @@ mod tests {
         let mut canceled = false;
         dispatch_living_incoming_damage(
             &mut TestLevel,
-            0,
-            "kind",
-            &source,
-            &victim,
-            None,
-            &mut container,
-            &mut canceled,
+            calls::LivingIncomingDamageCall {
+                entity: 0,
+                kind: "kind",
+                source: &source,
+                victim: &victim,
+                weapon: None,
+                container: &mut container,
+                canceled: &mut canceled,
+            },
         );
         assert_eq!(container.0, 9.0);
         assert!(!canceled);
@@ -1302,28 +1410,32 @@ mod tests {
         let mut claimed = false;
         dispatch_use_on(
             &mut host,
-            &ItemStack::default(),
-            [0; 3],
-            [0; 3],
-            Hand,
-            BlockHit,
-            0,
-            0,
-            &mut claimed,
+            calls::UseOnCall {
+                stack: &ItemStack::default(),
+                pos: [0; 3],
+                face: [0; 3],
+                hand: Hand,
+                hit: BlockHit,
+                player: 0,
+                player_entity_id: 0,
+                claimed: &mut claimed,
+            },
         );
         assert!(claimed);
         assert_eq!(*calls.lock().unwrap(), [1]);
         calls.lock().unwrap().clear();
         dispatch_use_on(
             &mut host,
-            &ItemStack::default(),
-            [0; 3],
-            [0; 3],
-            Hand,
-            BlockHit,
-            0,
-            0,
-            &mut claimed,
+            calls::UseOnCall {
+                stack: &ItemStack::default(),
+                pos: [0; 3],
+                face: [0; 3],
+                hand: Hand,
+                hit: BlockHit,
+                player: 0,
+                player_entity_id: 0,
+                claimed: &mut claimed,
+            },
         );
         assert!(calls.lock().unwrap().is_empty());
     }

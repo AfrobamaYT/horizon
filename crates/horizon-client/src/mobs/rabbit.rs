@@ -410,24 +410,15 @@ fn jump_scale(m: &Mob) -> f32 {
 
 /// Rabbit.jumpFromGround: ordinary small hops, larger hops toward raised terrain.
 pub fn jump(m: &mut Mob, w: &MobWorld) {
-    let power = jump_power(m, w.loop_context, block_jump_factor(m, w));
+    let power = m.jump_power_with(w, jump_scale(m));
     apply_jump(m, power);
 }
-fn jump_power(
-    m: &Mob,
-    context: &horizon_world::native_load_context::LoopContext,
-    block_factor: f32,
-) -> f32 {
-    let boost = m
-        .extra
-        .effects
-        .iter()
-        .find(|e| e.0 == "minecraft:jump_boost")
-        .map_or(0.0, |e| 0.1 * (e.2 + 1) as f32);
-    let mut power = m.attrs.jump_strength as f32 * jump_scale(m) * block_factor + boost;
-    crate::motion::native_living_jump_power(context, m.id, &m.kind.id, &mut power);
-    power
+
+#[cfg(test)]
+fn jump_power(m: &Mob, block_factor: f32) -> f32 {
+    m.attrs.jump_strength as f32 * jump_scale(m) * block_factor + m.jump_boost_power()
 }
+
 fn apply_jump(m: &mut Mob, power: f32) {
     if power > 1.0e-5 {
         m.velocity.y = f64::from(power).max(m.velocity.y);
@@ -451,11 +442,6 @@ fn apply_jump(m: &mut Mob, power: f32) {
 pub fn hop_event(m: &mut Mob) {
     m.extra.ints[CLIENT_JUMP_DURATION] = 15;
     m.extra.ints[CLIENT_JUMP_TICKS] = 0;
-}
-
-fn block_jump_factor(m: &Mob, w: &MobWorld) -> f32 {
-    // shortcut: mobs track no supporting block yet, so the block below is the one under the feet.
-    crate::motion::block_jump_factor_at(w.world, w.movement, w.loop_context, m.position, None)
 }
 
 #[cfg(test)]
@@ -494,6 +480,7 @@ mod tests {
             knockback_resistance: 0.0,
             jump_strength: 0.42,
             attributes: Arc::default(),
+            item_stack_limits: Default::default(),
             gravity: 0.08,
             safe_fall_distance: 3.0,
             fall_damage_multiplier: 1.0,
@@ -715,42 +702,14 @@ mod tests {
     fn jump_impulse_scales_strength_terrain_boost_and_baby_kick() {
         let mut m = rabbit();
         m.ai.mov.speed_modifier = 0.6;
-        near(
-            f64::from(jump_power(
-                &m,
-                crate::test_resources::server_loop_context(),
-                1.0,
-            )),
-            0.2,
-        );
+        near(f64::from(jump_power(&m, 1.0)), 0.2);
         m.ai.mov.speed_modifier = 2.2;
-        near(
-            f64::from(jump_power(
-                &m,
-                crate::test_resources::server_loop_context(),
-                1.0,
-            )),
-            0.3,
-        );
+        near(f64::from(jump_power(&m, 1.0)), 0.3);
         m.horizontal_collision = true;
-        near(
-            f64::from(jump_power(
-                &m,
-                crate::test_resources::server_loop_context(),
-                1.0,
-            )),
-            0.5,
-        );
+        near(f64::from(jump_power(&m, 1.0)), 0.5);
         m.attrs.jump_strength = 0.84;
         m.extra.effects.push(("minecraft:jump_boost", 100, 1));
-        near(
-            f64::from(jump_power(
-                &m,
-                crate::test_resources::server_loop_context(),
-                0.5,
-            )),
-            0.7,
-        );
+        near(f64::from(jump_power(&m, 0.5)), 0.7);
         apply_jump(&mut m, 0.2);
         near(m.velocity.z, 0.1 / 3.25_f64.sqrt());
         near(m.velocity.y, 0.2 + 0.15 / 3.25_f64.sqrt());

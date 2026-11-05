@@ -10,7 +10,6 @@
   "horizon.options.move_deadzone": "المنطقة الميتة للحركة",
   "horizon.options.look_deadzone": "المنطقة الميتة للنظر",
   "horizon.options.button_glyphs": "الحروف الرسومية للأزرار",
-  "horizon.options.menu_navigation": "التنقل في القائمة",
   "horizon.options.on_screen_keyboard": "لوحة المفاتيح على الشاشة",
   "horizon.options.chat_delay": "تأخير الدردشة",
   "horizon.options.lightbar.health": "الصحة",
@@ -19,8 +18,6 @@
   "horizon.options.glyphs.xbox": "اكس بوكس",
   "horizon.options.glyphs.playstation": "بلاي ستيشن",
   "horizon.options.glyphs.nintendo": "نينتندو",
-  "horizon.options.menu_focus": "التركيز",
-  "horizon.options.menu_pointer": "المؤشر",
   "horizon.options.keyboard.auto": "تلقائي",
   "horizon.options.keyboard.steam": "البخار",
   "horizon.options.unavailable": "هذه الميزة غير متوفرة بعد في Horizon.",
@@ -487,15 +484,5 @@
   "horizon.pack.filter.realistic": "واقعية",
   "horizon.pack.filter.simplistic": "تبسيط",
   "horizon.pack.filter.vanillaLike": "تشبه الفانيليا",
-  "horizon.pack.addFailed": "لا يمكن إضافة الحزمة: %s",
-  "horizon.extras.header.cosmetics": "مستحضرات التجميل",
-  "horizon.extras.cosmetics_mine": "مستحضرات التجميل الخاصة بي",
-  "horizon.extras.cosmetics_mine.tooltip": "مخفي: يراك كل لاعب في Horizon بدون مستحضرات التجميل الخاصة بك، بما في ذلك أنت. نفس مفتاح خزانة المشغل.",
-  "horizon.extras.cosmetics_others": "مستحضرات التجميل للاعبين الآخرين",
-  "horizon.extras.cosmetics_others.tooltip": "ما يرتديه لاعبو Horizon الآخرون: كل شيء، فقط أنماط بطاقة الاسم الخاصة بهم، أو لا شيء. مخفيًا، اللعبة لا تسأل أبدًا عما يرتدونه.",
-  "horizon.extras.cosmetics_auras": "هالات ومسارات الآخرين",
-  "horizon.extras.cosmetics_auras.tooltip": "الهالات والمسارات التي يرتديها اللاعبون الآخرون. إيقاف بشكل افتراضي.",
-  "horizon.extras.cosmetics.shown": "معروض",
-  "horizon.extras.cosmetics.hidden": "مخفي",
-  "horizon.extras.cosmetics.name_tags": "علامات الاسم فقط"
+  "horizon.pack.addFailed": "لا يمكن إضافة الحزمة: %s"
 }

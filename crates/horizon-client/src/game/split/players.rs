@@ -122,7 +122,14 @@ impl Split<'_> {
         // Until it has a profile, a scratch options file: never P1's.
         let options = Self::folder()?.join(".joining/options.txt");
         OPTIONS.set(Some(options.clone()));
-        let game = self.start_guest(seat, &options, self.host.settings.clone());
+        let mut settings = self.host.settings.clone();
+        if pad.is_some() {
+            // The Controller setting is P1's own: a player who pressed a pad to join plays
+            // with it even when P1 turned controllers off, or its pad would be dead on the
+            // profile screen it joins into.
+            settings.controller.enabled = true;
+        }
+        let game = self.start_guest(seat, &options, settings);
         OPTIONS.set(None);
         let mut game = game?;
         if let Some(pad) = pad {
@@ -479,6 +486,10 @@ impl Split<'_> {
             host.settings.horizon.wide_frame(),
             // The pack its own game loads, from its profile.
             crate::game::shader_packs::picked_pack_draws_flat(&guest.settings),
+            (
+                guest.settings.file.int("textureFiltering"),
+                guest.settings.file.int("maxAnisotropyBit"),
+            ),
         )?);
         guest.window = Some(window);
         guest.world_renderer_ready = true;

@@ -318,6 +318,19 @@ pub struct CubeFace<'a> {
     pub sprite: &'a str,
     pub uv: Option<[f32; 4]>,
 }
+impl<'a> CubeFace<'a> {
+    /// A face of `sprite` with the box's own UVs.
+    pub const fn new(sprite: &'a str) -> Self {
+        Self { sprite, uv: None }
+    }
+    /// The same face with UVs `uv`, `[u0, v0, u1, v1]` in texels of 16 per side.
+    pub const fn with_uv(self, uv: [f32; 4]) -> Self {
+        Self {
+            uv: Some(uv),
+            ..self
+        }
+    }
+}
 
 #[doc(hidden)]
 pub(crate) mod built {

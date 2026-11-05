@@ -63,6 +63,30 @@ pub trait Helpers {
     #[helper(
         side = "server",
         receiver = "minecart",
+        target = "horizon_client::game::native_minecart_refs::Game<'_>::native_minecart_custom_display_block"
+    )]
+    fn minecart_custom_display_block();
+    #[helper(
+        side = "server",
+        receiver = "minecart",
+        target = "horizon_client::game::native_minecart_refs::Game<'_>::native_minecart_set_custom_display_block"
+    )]
+    fn minecart_set_custom_display_block();
+    #[helper(
+        side = "server",
+        receiver = "minecart",
+        target = "horizon_client::game::native_minecart_refs::Game<'_>::native_minecart_display_offset"
+    )]
+    fn minecart_display_offset();
+    #[helper(
+        side = "server",
+        receiver = "minecart",
+        target = "horizon_client::game::native_minecart_refs::Game<'_>::native_minecart_set_display_offset"
+    )]
+    fn minecart_set_display_offset();
+    #[helper(
+        side = "server",
+        receiver = "minecart",
         target = "horizon_client::game::native_minecart_refs::Game<'_>::native_minecart_fuel"
     )]
     fn minecart_fuel();

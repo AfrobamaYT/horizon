@@ -44,7 +44,6 @@ fn player_home(home: &Path) {
     put(&home.join("resourcepacks/faithful.zip"), "pack");
     put(&home.join("logs/latest.log"), "log");
     put(&home.join("sessions/a.json"), "token");
-    put(&home.join("telemetry/consent.json"), "{}");
     let pack = horizon_port_pack::import::Pack {
         name: "Small Pack".into(),
         ..Default::default()
@@ -161,7 +160,14 @@ fn names_stay_unique_and_packs_are_not_copied() {
     let (home, data) = (root.join("horizon"), root.join("launcher"));
     player_home(&home);
     create_in(&home, &data, "Survival", None, None).unwrap();
-    assert!(create_in(&home, &data, "survival", None, None).is_err());
+    assert_eq!(
+        create_in(&home, &data, "survival", None, None).unwrap_err(),
+        "There is already an instance called survival. Choose another name."
+    );
+    assert_eq!(
+        name_taken_with_flag("survival"),
+        "There is already an instance called survival. Choose another name. (`--as NAME`)"
+    );
     assert!(create_in(&home, &data, "  ", None, None).is_err());
     // Another name with the same folder name gets the next free folder.
     let second = create_in(&home, &data, "Survival!", None, None).unwrap();
@@ -197,7 +203,6 @@ fn an_instance_follows_the_players_answers() {
     let (main, own) = (root.join("main"), root.join("own"));
     put(&main.join("options.txt"), "fov:90\n");
     put(&main.join("horizon-player.txt"), "name:Player123\n");
-    put(&main.join("telemetry/consent.json"), r#"{"version":1}"#);
     horizon_core::no_ai::set(&main, true).unwrap();
     put(&own.join("options.txt"), "fov:70\n");
     follow_player(&main, &own);
@@ -208,10 +213,6 @@ fn an_instance_follows_the_players_answers() {
     assert_eq!(
         fs::read_to_string(own.join("horizon-player.txt")).unwrap(),
         "name:Player123\n"
-    );
-    assert_eq!(
-        fs::read_to_string(own.join("telemetry/consent.json")).unwrap(),
-        r#"{"version":1}"#
     );
     assert!(horizon_core::no_ai::is_on(&own));
     horizon_core::no_ai::set(&main, false).unwrap();

@@ -53,6 +53,7 @@ pub(in crate::game) fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
                     sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
                     latency: Arc::new(AtomicI32::new(0)),
                     address: "127.0.0.1:1".parse().unwrap(),
+                    expected: false,
                 },
                 id as i32,
                 [3.0, 64.0, 5.0],
@@ -219,6 +220,17 @@ fn another_guests_services_work_during_a_turn() {
         native_inventories::NativeInventoryKind::{Ender, Player},
     };
     use horizon_client::{advancements as adv, command::args::Selector, items::ItemStack};
+    use mod_api::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
+
+    struct Accept;
+    impl CriterionTest for Accept {
+        fn test(&self, criterion: &dyn CriterionContext) -> Result<bool, CriterionTestError> {
+            assert_eq!(criterion.conditions_json(), "null");
+            Ok(true)
+        }
+    }
+    let trigger = mod_api::Identifier::parse("turns:probe").unwrap();
+    let vanilla_trigger = mod_api::Identifier::parse("minecraft:tick").unwrap();
 
     with_guests(|game| {
         game.build_registries();
@@ -251,6 +263,7 @@ fn another_guests_services_work_during_a_turn() {
             .unwrap()
             .inventory[0] = Some(stone.clone());
         let a = game.native_player_ref(12).unwrap();
+        let b = game.native_player_ref(13).unwrap();
         game.as_guest(12, |game| {
             assert_eq!(game.native_entity_target(a.entity()), Some(Target::Player));
             assert_eq!(
@@ -272,8 +285,18 @@ fn another_guests_services_work_during_a_turn() {
                 game.native_inventory(13, Ender).unwrap().slots[0],
                 Some(stone.clone())
             );
-            assert!(game.native_trigger_criterion(13, "turns:probe", |_| true));
-            assert!(game.native_trigger_criterion(12, "turns:probe", |_| true));
+            assert_eq!(
+                a.trigger_criterion(game, &vanilla_trigger, Arc::new(Accept)),
+                Err(TriggerCriterionError::InvalidTrigger)
+            );
+            assert_eq!(
+                b.trigger_criterion(game, &trigger, Arc::new(Accept)),
+                Ok(())
+            );
+            assert_eq!(
+                a.trigger_criterion(game, &trigger, Arc::new(Accept)),
+                Ok(())
+            );
             assert!(game.native_run_command("give guest13 minecraft:diamond 2"));
             assert!(game.native_run_command("give @a[name=guest13] minecraft:diamond 1"));
             assert!(game.native_run_command(
@@ -287,7 +310,10 @@ fn another_guests_services_work_during_a_turn() {
             game.as_guest(13, |game| {
                 assert!(game.native_inventory(12, Player).is_err());
                 assert!(game.native_inventory(13, Player).is_err());
-                assert!(!game.native_trigger_criterion(12, "turns:probe", |_| true));
+                assert_eq!(
+                    a.trigger_criterion(game, &trigger, Arc::new(Accept)),
+                    Err(TriggerCriterionError::PlayerUnavailable)
+                );
                 assert!(!game.native_run_command("give guest12 minecraft:dirt 1"));
                 assert!(!game.native_run_command("give @a[name=guest12] minecraft:dirt 1"));
                 let inventory = game.inventory.clone();
@@ -431,9 +457,9 @@ fn another_guests_live_merchant_session_is_visible_during_a_turn() {
     });
 }
 
-/// Requires the passenger walk (horizon-rust/horizon#8383) as well as #228's host visibility.
+/// The passenger walk (horizon-rust/horizon#8383) keeps #228's host visibility.
 #[test]
-#[ignore = "needs the passenger walk: horizon-rust/horizon#8383"]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
     with_guests(|game| {
         game.lan
@@ -446,8 +472,8 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
         let horse = game.res.mob_types().get("minecraft:horse").unwrap().clone();
         game.mobs
             .push(Mob::new(42, horse, Vec3::new(3.0, 64.0, 5.0), 0.0));
-        // Put B in the horse's seat using the same placement as a normal turn.
-        game.as_guest(13, |game| game.position_rider()).unwrap();
+        // Boarding publishes the seat back to the hub after positioning the body.
+        game.guest_boarded(13, None);
         let vehicle = game.native_entity(42).unwrap();
         let rider = game.native_entity(13).unwrap();
         let before = [3.0, 64.0 + (1.44375 - 0.6), 5.0];
@@ -463,5 +489,79 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
             );
         })
         .unwrap();
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_mounted_guests_turn_publishes_its_teleport_without_dismounting() {
+    use super::native_sound_refs::tests::packets;
+    use horizon_protocol::packets::play::{Clientbound as C, relative};
+
+    with_guests(|game| {
+        let horse = game.res.mob_types().get("minecraft:horse").unwrap().clone();
+        game.mobs
+            .push(Mob::new(42, horse, Vec3::new(3.0, 64.0, 5.0), 0.0));
+        // Ordinary seating sends no teleport. A passenger transition does,
+        // even to the same position; an unmounted command keeps its relative axes.
+        for (vehicle, teleported, destination) in [
+            (Some(42), false, [10.0, 70.0, -4.0]),
+            (Some(42), true, [10.0, 70.0, -4.0]),
+            (Some(42), true, [3.0, 64.84375, 5.0]),
+            (None, true, [10.0, 70.0, -4.0]),
+        ] {
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest_mut(13)
+                .unwrap()
+                .vehicle = vehicle;
+            if vehicle.is_some() {
+                game.guest_boarded(13, None);
+            }
+            let (tx, rx) = std::sync::mpsc::channel();
+            game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap().sender =
+                PlayerSender::new(tx, Arc::default());
+            game.as_guest(13, |game| {
+                // The body left by a passenger transition, before the guest
+                // turn publishes it back to the hub and the connection.
+                let body = game.player.as_mut().unwrap();
+                body.position = Vec3::new(destination[0], destination[1], destination[2]);
+                body.teleported = teleported;
+                body.teleported_delta = [true, false, true];
+                game.yaw = 120.0;
+                game.pitch = -15.0;
+            })
+            .unwrap();
+            let guest = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
+            assert_eq!(guest.vehicle, vehicle);
+            let mut positions = Vec::new();
+            for packet in packets(&rx) {
+                match packet {
+                    C::PlayerPosition(packet) => positions.push(packet),
+                    C::SetPassengers(_) => panic!("a passenger transition must not dismount"),
+                    _ => {}
+                }
+            }
+            assert_eq!(positions.len(), usize::from(teleported), "{vehicle:?}");
+            if teleported {
+                let packet = &positions[0];
+                assert_eq!(packet.position, destination);
+                assert_eq!(packet.delta, [0.0; 3]);
+                assert_eq!([packet.yaw, packet.pitch], [120.0, -15.0]);
+                let expected = if vehicle.is_some() {
+                    relative::DELTA_X | relative::DELTA_Y | relative::DELTA_Z
+                } else {
+                    relative::DELTA_X | relative::DELTA_Z
+                };
+                assert_eq!(packet.relatives, expected);
+                assert_eq!(guest.position, destination);
+                assert_eq!(
+                    guest.awaiting_teleport,
+                    Some((packet.teleport, destination))
+                );
+            }
+        }
     });
 }

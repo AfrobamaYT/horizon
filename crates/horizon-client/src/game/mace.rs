@@ -179,10 +179,27 @@ impl Game<'_> {
             }
         }
     }
+    /// Only the connected owner's acting context supplies a verified identity.
+    /// Guests and unresolved sources retain the existing damage API behavior.
+    pub(super) fn owner_damage_uuid(&self) -> Option<[i32; 4]> {
+        if self.lan_acting.is_some() && self.lan_acting_uuid.is_none() {
+            return None;
+        }
+        let actual = self
+            .lan_acting_uuid
+            .map(horizon_client::lan::playerdata::uuid_ints)
+            .or(self.level.player_uuid)?;
+        let owner = self
+            .serving
+            .as_ref()
+            .map(|s| horizon_client::lan::playerdata::uuid_ints(s.owner))
+            .or(self.level.player_uuid)?;
+        (actual == owner).then_some(actual)
+    }
     /// `LivingEntity.hurtServer` of the mob at `index` by the player's hit:
     /// the weapon's `armor_effectiveness` enchantments (Breach) thin its armor.
     pub(super) fn hurt_by_player(&mut self, index: usize, amount: f32, source: Damage) -> bool {
-        let attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
+        let attack = self.attack_of_who(Some(horizon_client::mobs::Who::Player));
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
@@ -214,6 +231,7 @@ impl Game<'_> {
         // The causing entity's aim, for what turns a blow by where it points
         // (`SulfurCube.knockback`).
         self.mobs[index].attacker_aim = aim;
+        self.mobs[index].dealt_absorbed = 0;
         let hurt = self.mobs[index].damage_with(
             crate::game::entity::damage_level_of!(self, &attack),
             amount,
@@ -221,6 +239,13 @@ impl Game<'_> {
             Some(&mut breach),
         );
         self.mobs[index].attacker_aim = None;
+        // LivingEntity.actuallyHurt: Stats.DAMAGE_DEALT_ABSORBED for the attacking player,
+        // awarded here, during that player's own attack (a server's guest has its own
+        // statistics only inside `as_guest`).
+        let absorbed = std::mem::take(&mut self.mobs[index].dealt_absorbed);
+        if absorbed > 0 {
+            self.award_custom_stat("damage_dealt_absorbed", absorbed);
+        }
         if hurt && self.mobs[index].health != old_health {
             self.mob_damage_event(self.mobs[index].id);
         }

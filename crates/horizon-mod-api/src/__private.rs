@@ -3,6 +3,20 @@
 //! (`game`). None of it is part of the API a mod is written against.
 use crate::*;
 
+/// The installed mod `id`'s hooks, for the game to hand its other faces (its `impl Points`) on.
+pub fn hooks_of(id: &str) -> Option<&'static dyn Hooks> {
+    crate::mods()
+        .iter()
+        .find(|entry| entry.id == id)
+        .map(|entry| &*entry.hooks)
+}
+
+/// Marks the thread as inside mod `id`'s `call` until the guard drops, as a hook's dispatch does,
+/// so a panic in it names both.
+pub fn enter(id: &'static str, call: &'static str) -> crate::crash::NativeModGuard {
+    crate::mark_mod(id, call)
+}
+
 /// Install the process-wide ordered list of mods.
 pub fn install(mods: Mods) {
     crate::install(mods);
@@ -23,11 +37,17 @@ pub use crate::phase::install_packages;
 /// The game's side of wasm mods, for `horizon-mod-wasm`.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub mod wasm_host {
-    pub use crate::wasm_host::{Budgets, CallRefused, EPOCH, Fuel, LoadError, Member, instantiate};
+    pub use crate::wasm_host::{
+        Budgets, CallHost, CallRefused, EPOCH, Exports, Fuel, Instantiated, LoadError, Member,
+        State, instantiate, live_groups,
+    };
 }
 /// The registered structure types, for the executable to hand to the engine's
 /// `StructureRegistry` before any world opens.
 pub use crate::structure_type::installed_structure_types;
+/// The mod's side of the exports other crates add to its world (the points crate's listeners).
+#[cfg(target_arch = "wasm32")]
+pub use crate::wasm::exported as wasm_guest;
 #[cfg(any(test, feature = "testing"))]
 pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 
@@ -346,6 +366,15 @@ pub mod game {
     impl<'a> BackendMutRefOf<'a> for BackendMutRef<'a> {
         fn of(inner: &'a mut dyn BackendMut) -> Self {
             BackendMutRef::of(inner)
+        }
+    }
+
+    pub trait ClientBackendMutRefOf<'a> {
+        fn of(inner: &'a mut dyn ClientBackendMut) -> Self;
+    }
+    impl<'a> ClientBackendMutRefOf<'a> for ClientBackendMutRef<'a> {
+        fn of(inner: &'a mut dyn ClientBackendMut) -> Self {
+            ClientBackendMutRef::of(inner)
         }
     }
 

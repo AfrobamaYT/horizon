@@ -456,15 +456,15 @@ impl Game<'_> {
             let mut lines = p.lines.to_vec();
             let mut cancel = false;
             self.as_guest_messaged(conn, |game| {
-                game.native_sign_changed(
-                    uuid,
-                    &name,
-                    &dimension,
-                    p.pos,
-                    p.front,
-                    &mut lines,
-                    &mut cancel,
-                );
+                game.native_sign_changed(mod_api::__private::SignChangedCall {
+                    player: uuid,
+                    name: &name,
+                    dimension: &dimension,
+                    pos: p.pos,
+                    front: p.front,
+                    lines: &mut lines,
+                    cancel: &mut cancel,
+                });
             });
             if cancel {
                 // The sign keeps its text: the editor closes, and the player's
@@ -855,6 +855,11 @@ impl Game<'_> {
             horizon_client::preedit::report_caret(caret_x, ly, line_height);
         }
         let (bx, by) = done_button(w, h);
+        horizon_client::widgets::declare_action(
+            horizon_client::widgets::Action::Done,
+            [bx, by, 200.0, 20.0],
+            true,
+        );
         horizon_client::widgets::narratable(|| {
             horizon_client::widgets::Narratable::button(done_label(), [bx, by, 200.0, 20.0], true)
         });

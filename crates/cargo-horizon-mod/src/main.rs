@@ -2,7 +2,9 @@
 //! items, data and assets, no code. Code mods are native (docs/modding/src/how-to/native-mods.md).
 //!
 //! - `new <path> [--name "Name"]`: a content mod from the template; with
-//!   `--template native [--horizon <commit>]`, a native trait mod's bundle.
+//!   `--template native [--horizon <commit>]`, a native trait mod's bundle, pinned to the
+//!   newest prebuilt game unless `--horizon` names a commit.
+//! - `update [--horizon <commit>]`: repin this native mod, to the newest prebuilt game by default.
 //! - `build`: the `.hmod` in `target/horizon-mod/`, with the mod's `assets/`
 //!   and `data/`; with `--wasm`, a Rust mod built to `mod.wasm` first (`wasm.rs`).
 //! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
@@ -12,7 +14,7 @@
 //!   (`.hmod`, `.hpack`, resource pack `.zip`, `.hshader`).
 //! - `registry build|review|check|list`: the registry repository's CI.
 //! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
-use horizon_mods::{Content, Manifest, Package, manifest::MANIFEST};
+use horizon_mods::{Content, Manifest, Package, index::native, manifest::MANIFEST};
 mod check;
 mod jar;
 mod registry;
@@ -52,7 +54,8 @@ fn main() -> ExitCode {
         Some("check") => check(&args[1..]),
         Some("registry") => registry::main(&args[1..]),
         Some("use-jar") => jar::run(&args[1..]),
-        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
+        Some("update") => update(Path::new("."), flag(&args[1..], "--horizon")),
+        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | update [--horizon <commit>] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -157,6 +160,78 @@ fn new(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// The Horizon commit a native mod pins: `--horizon`'s, or the newest prebuilt game's, so the
+/// launcher downloads the game instead of building it.
+fn pin(horizon: Option<&str>) -> Result<String, String> {
+    let Some(horizon) = horizon else {
+        let api = format!(
+            "https://api.github.com/repos/{}/releases?per_page=100",
+            native::PREBUILT_REPO
+        );
+        let releases = ureq::get(&api)
+            .call()
+            .map_err(|e| format!("{api}: {e}"))?
+            .into_string()
+            .map_err(|e| e.to_string())?;
+        return newest_prebuilt(&serde_json::from_str(&releases).map_err(|e| e.to_string())?)
+            .ok_or_else(|| {
+                format!(
+                    "no prebuilt game on {}'s releases: pass --horizon <commit>",
+                    native::PREBUILT_REPO
+                )
+            });
+    };
+    if !horizon_mods::manifest::revision(horizon) {
+        return Err("--horizon: a Horizon commit is 40 lowercase hex digits".into());
+    }
+    Ok(horizon.into())
+}
+
+/// The commit of the newest release (GitHub lists them newest first) carrying prebuilt archives
+/// the launcher reads.
+fn newest_prebuilt(releases: &serde_json::Value) -> Option<String> {
+    releases.as_array()?.iter().find_map(|release| {
+        let commit = release["tag_name"]
+            .as_str()?
+            .strip_prefix(native::PREBUILT_TAG)?;
+        let readable = release["assets"].as_array()?.iter().any(|asset| {
+            asset["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with(native::PREBUILT_ARCHIVE))
+        });
+        (readable && horizon_mods::manifest::revision(commit)).then(|| commit.to_string())
+    })
+}
+
+/// Repins the native mod in `dir`: its `[native] horizon` and its mod API dependency's `rev`.
+fn update(dir: &Path, horizon: Option<&str>) -> Result<(), String> {
+    let horizon = pin(horizon)?;
+    let edit = |file: &str, at: &[&str]| -> Result<(), String> {
+        let path = dir.join(file);
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut doc: toml_edit::DocumentMut = text
+            .parse()
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let (last, tables) = at.split_last().expect("a key");
+        let mut item = doc.as_item_mut();
+        for key in tables {
+            item = item
+                .get_mut(key)
+                .ok_or_else(|| format!("{}: no {}", path.display(), at.join(".")))?;
+        }
+        let value = item
+            .get_mut(last)
+            .ok_or_else(|| format!("{}: no {}", path.display(), at.join(".")))?;
+        *value = toml_edit::value(horizon.as_str());
+        std::fs::write(&path, doc.to_string()).map_err(|e| format!("{}: {e}", path.display()))
+    };
+    edit(MANIFEST, &["native", "horizon"])?;
+    edit("Cargo.toml", &["dependencies", "horizon-mod-api", "rev"])?;
+    println!("Pinned to Horizon {horizon}");
+    Ok(())
+}
+
 /// A flat native trait mod project, pinned to the Horizon commit it is made for.
 fn new_native(
     dir: &Path,
@@ -167,15 +242,13 @@ fn new_native(
     if id.len() > 64 {
         return Err(format!("mod id {id}: 64 characters at most"));
     }
-    let horizon = horizon.ok_or("native projects require --horizon <40 hex digits>")?;
-    if !horizon_mods::manifest::revision(horizon) {
-        return Err("--horizon: a Horizon commit is 40 lowercase hex digits".into());
-    }
+    let horizon = pin(horizon)?;
+    let horizon = horizon.as_str();
     let rev = format!(", rev = \"{horizon}\"");
     let manifest = format!(
         "{}\n[native]\ngame = \"26.3\"\nhorizon = \"{horizon}\"\nmixins = \"{}\"\n",
         include_str!("../template/content/horizon-mod.toml"),
-        horizon_mods::index::native::MIXINS_REV,
+        native::MIXINS_REV,
     );
     let files = [
         ("Cargo.toml", include_str!("../template/native/api.toml")),
@@ -456,15 +529,32 @@ mod tests {
             .unwrap_err()
             .contains("40 lowercase hex")
         );
-        assert!(
-            new(&[
-                dir.join("free").display().to_string(),
-                "--template".into(),
-                "native".into(),
-            ])
-            .unwrap_err()
-            .contains("--horizon")
-        );
+        let newer = "89abcdef0123456789abcdef0123456789abcdef";
+        update(&path, Some(newer)).unwrap();
+        let manifest =
+            Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
+        assert_eq!(manifest.native.unwrap().horizon, newer);
+        let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
+        assert!(api.contains(&format!("rev = \"{newer}\" }}")), "{api}");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_pin_is_the_newest_release_the_launcher_can_download() {
+        let (old, new) = (
+            "0123456789abcdef0123456789abcdef01234567",
+            "89abcdef0123456789abcdef0123456789abcdef",
+        );
+        let releases = serde_json::json!([
+            {"tag_name": "v1.2.0", "assets": [{"name": "horizon-launcher.zip"}]},
+            // An archive layout this launcher doesn't read.
+            {"tag_name": format!("prebuilt-{new}"),
+             "assets": [{"name": "horizon-prebuilt-x86_64-unknown-linux-gnu.tar.gz"}]},
+            {"tag_name": format!("prebuilt-{old}"),
+             "assets": [{"name": "SHA256SUMS"},
+                        {"name": native::prebuilt_archive("aarch64-apple-darwin", false)}]},
+        ]);
+        assert_eq!(newest_prebuilt(&releases).as_deref(), Some(old));
+        assert_eq!(newest_prebuilt(&serde_json::json!([])), None);
     }
 }

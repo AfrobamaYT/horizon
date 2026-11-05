@@ -3,6 +3,12 @@
 pub trait Helpers {
     #[helper(
         side = "client",
+        receiver = "menu",
+        target = "horizon_client::game::native_menu_refs::Game<'_>::native_menu_click"
+    )]
+    fn menu_click();
+    #[helper(
+        side = "client",
         target = "horizon_client::game::native_menu_refs::Game<'_>::native_local_player"
     )]
     fn local_player();

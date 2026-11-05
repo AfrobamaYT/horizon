@@ -14,9 +14,10 @@ cargo horizon-mod build             # only build: target/horizon-mod/my_mod.hmod
 cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks; --json for JSON
 ```
 
-- `new <path> [--name "Name"]` writes the content template. `--template native --horizon <commit>` writes
-  a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to that exact commit, root `Cargo.toml`
-  and `src/lib.rs`, and empty `assets/` and `data/` directories. Its root `impl Hooks` uses
+- `new <path> [--name "Name"]` writes the content template. `--template native` writes
+  a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to the newest prebuilt game's commit (or
+  `--horizon <commit>`'s) so the launcher downloads the game instead of building it, root `Cargo.toml`
+  and `src/lib.rs`, and empty `assets/` and `data/` directories. `update` repins it the same way. Its root `impl Hooks` uses
   `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
   ([trait mods](../concepts/trait-mods.md#trait-mods-draft)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
@@ -117,6 +118,19 @@ A block names its template and what differs from it:
   "properties": { "hardness": 4.0, "light": 3, "sounds": "minecraft:amethyst_block" },
   "item": true }
 ```
+
+A fence gate needs no kind of its own: a block whose template is a vanilla `minecraft:*_fence_gate` is a
+`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` (sound event ids,
+such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`) replace them, as a gate built with its
+own `WoodType` has, and they are what opening by hand, a redstone signal and a wind-charge or other explosion toggle all
+play. Either key needs a `*_fence_gate` template and a `namespace:path` id, or the load fails naming the file; leaving
+both out keeps the wood's sounds.
+
+A block gets a block item of its own id by default. `"item": false` gives it none: pick-block takes nothing and
+`Block.asItem` is air (what a block drops comes from its loot table). `"block_item": "<item id>"` (with `"item": false`) makes the block
+that other item instead, an item of the mod or a vanilla one, such as `"minecraft:diamond"`: pick-block and
+`Block.asItem` both read it, and the load fails naming the block when no such item exists. `"none"` is not an item id;
+write `"item": false`. A sign's wall form takes its sign's item through `wall_block`, not `block_item`.
 
 `push_reaction` sets vanilla's `BlockBehaviour.Properties.pushReaction` to `"PUSH_PULL"`, `"PUSH"`, `"POPPED"`, `"IMMOVEABLE"`, or `"IGNORE_ENTITY"`.
 
@@ -257,6 +271,18 @@ A held item's third-person arm pose follows its use animation, as vanilla's `Ava
 item with `"minecraft:consumable": { "animation": "toot_horn", "consume_seconds": 7 }` raises its arm like a goat horn
 while it is used, for players and in other players' views.
 
+`arm_pose` names the pose a humanoid's arm takes holding the item, in place of what vanilla gives it, for as long as
+the item is in that hand (a used item's animation included): one of vanilla's `HumanoidModel.ArmPose` names, `empty`,
+`item`, `block`, `bow_and_arrow`, `crossbow_hold`, `crossbow_charge`, `throw_trident`, `toot_horn`, `spyglass`, `spear`
+or `brush`. A name that is no pose fails the mod's load, and an item without the key poses as before. It applies to
+player models, in the first person's own third-person view and in other players'; `spear` poses an arm only for an item
+with a kinetic weapon. A code mod that must decide by stack, hand or entity answers the `get_arm_pose` hook instead,
+which wins over the declared key.
+
+```json
+{ "template": "minecraft:stick", "arm_pose": "toot_horn" }
+```
+
 An item can place a block by naming it with `block`, whether it is a vanilla block or a declared mod block:
 
 ```json
@@ -347,10 +373,10 @@ as vanilla's; without one it draws as the missing texture). It does nothing on i
 attribute modifiers. A world opened without the mod drops the effect from its players and mobs. Clients join a server
 only with the same mods' effects, as with its blocks.
 
-A mod entity type is declared in `data/<id>/horizon/entity_type/<name>.json`. It copies a vanilla type: for now only
-`minecraft:snowball`, a thrown item projectile. `item` is one of the mod's own items (one type per item), and `damage`
-(0 by default) is what a hit deals to anything it hits, as `thrown` damage from the thrower (the snowball's 3 to blazes
-is not copied):
+A mod entity type is declared in `data/<id>/horizon/entity_type/<name>.json`. It copies a vanilla type:
+`minecraft:snowball`, a thrown item projectile, or a living mob (below). A thrown type's `item` is one of the mod's own
+items (one type per item), and `damage` (0 by default) is what a hit deals to anything it hits, as `thrown` damage from
+the thrower (the snowball's 3 to blazes is not copied):
 
 ```json
 { "template": "minecraft:snowball", "item": "ruby:ember", "damage": 2.0 }
@@ -361,9 +387,28 @@ thrown: same speed, spread, sound and cooldown, and one item used outside creati
 what it hits with its item's crumbs, and is drawn as its item's model (`ThrownItemRenderer`). Its name is the translation
 `entity.<id>.<name>`. It works in single player and on LAN with the same mods. Dedicated servers share that code,
 untested so far. Clients join a server only with the same mods' entity types, as with its blocks. It is saved with its
-chunk, `/summon <id>:<name>` makes one, and it has its template's row in `entity-types.json`. A world opened without the
+chunk, `/summon <id>:<name>` makes one, and it has its template's row in `entity-types.json`, with `template` naming
+it. A world opened without the
 mod keeps the saved ones as they are, frozen in place. Not yet: a dispenser doesn't throw it, and a vanilla client on a
 server with it may be disconnected when one spawns.
+
+A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
+`EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`
+sets default attribute values that differ from its template's (`EntityAttributeCreationEvent`), by attribute id, and
+only for attributes the template has; one it lacks stops the content root's build:
+
+```json
+{ "template": "minecraft:zombie", "attributes": { "minecraft:max_health": 40.0, "minecraft:movement_speed": 0.3 } }
+```
+
+It is a mob of its template's class under its own id, `<id>:<name>`: the template's size, model, texture, sounds and
+behaviour, with its own attributes. It saves what its template's class saves under its own id (a zombie's `IsBaby`,
+`CanBreakDoors` and conversion times) and loads back as itself. Its entity data is its template's class's. Its loot
+table is its own, `<id>:entities/<name>` (vanilla's `EntityType.getDefaultLootTable`). It is not in vanilla's entity type
+tags (`#minecraft:undead`, `#minecraft:zombies`...) unless the mod adds it. Its row in `entity-types.json` is its
+template's, with `template` added and its attributes in place of the template's. Unit tests check all this; it has
+not yet been tried in a running game. Not yet: its own model or texture (a native mod draws one with
+`mob_submit`), and its own goals.
 
 #### Menu types
 

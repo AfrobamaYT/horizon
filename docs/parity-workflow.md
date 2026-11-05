@@ -4,6 +4,13 @@ How parity work is run, checked and merged. The harnesses themselves are describ
 
 ## Running the vanilla harnesses
 
+Same-machine fixtures created with `lab.game_env` use `HORIZON_TEST_LOOPBACK=1`: Horizon
+listens on loopback and does not scan or announce LAN worlds. This avoids Windows Firewall
+permission prompts for newly compiled fixture executables. Set `HORIZON_TEST_LOOPBACK=0`
+explicitly when testing real network interfaces or multicast discovery. Local vanilla server
+fixtures also set `server-ip=127.0.0.1`; use one installed JDK via `JAVA_HOME` and its `bin`
+on `PATH`, rather than copying Java to each fixture directory. Keep the firewall enabled.
+
 `tools/parity.py` runs the `tools/test_*_parity.py` harnesses in parallel and reruns only what a change can affect:
 
 ```sh
@@ -132,7 +139,7 @@ the same path as normal single player. `python3 tools/test_friends.py --client
 target/fast/horizon-client --relay target/fast/horizon-relay --baseline` covers
 plain LAN, direct invitations, a local relay and ended invitations in that mode.
 Run Linux games under `xvfb-run -a` when no display is available. Each
-process gets scratch game, launcher, XDG data and config homes; telemetry, audio
+process gets scratch game, launcher, XDG data and config homes; audio
 and launcher self-update are disabled.
 
 `lan_integration` and `friends_integration` register these suites with `parity.py`.

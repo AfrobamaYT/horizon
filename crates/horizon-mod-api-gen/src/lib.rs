@@ -42,18 +42,28 @@ fn game_methods(
         if path.is_dir() {
             game_methods(&path, &inner, methods)?;
         } else if path.extension().is_some_and(|ext| ext == "rs") {
-            let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
-            for item in file.items {
-                if let Item::Impl(item) = item
-                    && item.trait_.is_none()
-                    && let Type::Path(ty) = &*item.self_ty
-                    && ty.path.segments.len() == 1
-                    && ty.path.segments[0].ident == "Game"
-                {
-                    methods.extend(impl_functions(item).map(|method| (inner.clone(), method)));
-                }
-            }
+            file_game_methods(&path, &inner, methods)?;
+        }
+    }
+    Ok(())
+}
+
+/// The inherent `Game` methods of the file `path`, the module `module`.
+fn file_game_methods(
+    path: &Path,
+    module: &str,
+    methods: &mut Vec<(String, syn::ItemFn)>,
+) -> Result<(), String> {
+    let source = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+    for item in file.items {
+        if let Item::Impl(item) = item
+            && item.trait_.is_none()
+            && let Type::Path(ty) = &*item.self_ty
+            && ty.path.segments.len() == 1
+            && ty.path.segments[0].ident == "Game"
+        {
+            methods.extend(impl_functions(item).map(|method| (module.to_owned(), method)));
         }
     }
     Ok(())
@@ -399,22 +409,18 @@ fn handle_method<'a>(
     let mutable = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
     if mutable {
         match side {
-            Side::Server => {}
+            Side::Server | Side::Client => {}
             Side::Both => {
                 return Err(format!("{name}: a both-side handle write is not allowed"));
-            }
-            Side::Client => {
-                return Err(format!(
-                    "{name}: client handle writes need a client backend accessor; add it with the first one"
-                ));
             }
         }
     }
     let mut inputs = sig.inputs.iter();
     let host: FnArg = match inputs.next() {
-        Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
-            syn::parse_quote!(host: &mut dyn ServerHost)
-        }
+        Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => match side {
+            Side::Client => syn::parse_quote!(host: &mut dyn ClientHost),
+            Side::Server | Side::Both => syn::parse_quote!(host: &mut dyn ServerHost),
+        },
         Some(FnArg::Receiver(r)) if r.reference.is_some() => match side {
             Side::Client => syn::parse_quote!(host: &dyn ClientHost),
             Side::Server | Side::Both => syn::parse_quote!(host: &dyn Host),
@@ -447,7 +453,11 @@ fn handle_method<'a>(
     sig.inputs = rest.into_iter().collect();
     let docs = doc_comments(&method.attrs, name, true)?;
     let backend = if mutable {
-        "backend_mut_of"
+        if side == Side::Client {
+            "client_backend_mut_of"
+        } else {
+            "backend_mut_of"
+        }
     } else {
         "backend_of"
     };
@@ -481,6 +491,12 @@ fn has_call(block: &syn::Block, expected: &str) -> bool {
         found: bool,
     }
     impl<'ast> Visit<'ast> for Calls<'_> {
+        fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+            if call.method == self.expected {
+                self.found = true;
+            }
+            syn::visit::visit_expr_method_call(self, call);
+        }
         fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
             if let syn::Expr::Path(path) = &*call.func
                 && path
@@ -528,8 +544,7 @@ fn fresh_name(base: &str, used: &mut HashSet<String>) -> String {
 /// itself, written back after every mod has run; any other `&mut` stays a reference to the caller's
 /// value. Either way one event goes through every mod, so each sees the changes before it. Every
 /// elided reference lifetime becomes the event's `'a`, or `'b` inside a `&mut`, which can't shorten
-/// it. The launcher keeps a copy for trait injections (`launcher/src/native_mods/inject.rs`); both
-/// test the same types.
+/// it.
 #[derive(Default)]
 struct EventLifetimes {
     a: bool,
@@ -714,7 +729,11 @@ fn free_function_source(target: &str) -> Option<(&'static str, String)> {
 /// only the placeholder a new hook starts with, `let _ = (every, parameter);`
 /// (`let _ = parameter;` for one). Any other body is an error, left alone.
 fn needs_fill(method: &syn::ItemFn, call: &str, in_game: bool) -> Result<bool, String> {
-    if has_call(&method.block, call) {
+    if has_call(&method.block, call)
+        || call
+            .strip_prefix("dispatch_")
+            .is_some_and(|name| has_call(&method.block, &format!("fire_{name}")))
+    {
         return Ok(false);
     }
     let params: Vec<String> = method
@@ -836,6 +855,7 @@ struct Sources {
     host: String,
     implementation: String,
     render: String,
+    fire: String,
 }
 
 /// Parse and validate the catalog and hook/helper signatures.
@@ -857,6 +877,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         render_dispatch,
         part_traits,
         fills,
+        fire,
         hook_ids,
         hook_constants,
         hook_count,
@@ -918,6 +939,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         host,
         implementation,
         render: render_code,
+        fire,
     })
 }
 
@@ -931,14 +953,11 @@ enum FillMode {
 mod build;
 mod dispatch;
 mod host_param;
+pub mod internals;
+pub mod points;
 mod wasm;
-pub use build::{generate, inject};
+pub use build::{generate, generate_points};
 pub use wasm::{Wasm, generate as generate_wasm};
-mod injection;
-pub use injection::{TraitContract, TraitInjection};
-
-#[cfg(test)]
-mod injection_tests;
 
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.
 #[doc(hidden)]
@@ -1132,22 +1151,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(handle, "LevelRef");
-        for (side, error) in [
-            (
+        assert_eq!(
+            super::handle_method(
+                &write,
+                "level_set",
+                "level",
                 super::Side::Both,
-                "level_set: a both-side handle write is not allowed",
-            ),
-            (
-                super::Side::Client,
-                "level_set: client handle writes need a client backend accessor; add it with the first one",
-            ),
-        ] {
-            assert_eq!(
-                super::handle_method(&write, "level_set", "level", side, &types.handles)
-                    .unwrap_err(),
-                error
-            );
-        }
+                &types.handles
+            )
+            .unwrap_err(),
+            "level_set: a both-side handle write is not allowed"
+        );
+        let (_, client_write) = super::handle_method(
+            &write,
+            "level_set",
+            "level",
+            super::Side::Client,
+            &types.handles,
+        )
+        .unwrap();
+        assert!(client_write.contains("host : & mut dyn ClientHost"));
+        assert!(client_write.contains("client_backend_mut_of(host)"));
+        assert!(!client_write.contains("dyn ServerHost"));
         assert!(code.contains("host : & mut dyn ServerHost"));
         assert!(code.contains(
             "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"
@@ -1569,7 +1594,7 @@ mod tests {
         std::fs::write(&first, original).unwrap();
         let hooks = root.join("crates/horizon-client/src/game/native_hooks.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
-        let call = "mod_api::dispatch_item_damaged(self, player, name, item, amount, cancel);";
+        let call = "self.fire_item_damaged(player, name, item, amount, cancel);";
         assert_eq!(shipped.matches(call).count(), 1);
         let unfinished = shipped.replace(call, "let _ = (player, name, item, amount);");
         std::fs::write(&hooks, &unfinished).unwrap();
@@ -1713,5 +1738,12 @@ mod tests {
             syn::parse_quote! { fn native_zoom(&self) { mod_api::dispatch_zoom(); } };
         assert!(!super::has_call(&missing.block, "dispatch_zoom"));
         assert!(super::has_call(&present.block, "dispatch_zoom"));
+        let generated: syn::ItemFn = syn::parse_quote! {
+            fn native_zoom(&self) { self.fire_zoom(); }
+        };
+        assert_eq!(
+            super::needs_fill(&generated, "dispatch_zoom", true),
+            Ok(false)
+        );
     }
 }

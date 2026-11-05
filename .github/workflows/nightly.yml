@@ -23,10 +23,6 @@ permissions:
 concurrency:
   group: nightly-audit
   cancel-in-progress: false
-env:
-  # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
-  HORIZON_TELEMETRY_URL: "off"
-
 jobs:
   audit:
     # The Mac mini's runners only: the audit compares with the previous one, so it stays on one platform.
@@ -48,7 +44,7 @@ jobs:
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.when.outputs.run == 'true'
         with:
           fetch-depth: 0
@@ -82,7 +78,7 @@ jobs:
         run: python3 tools/ci/parity_issues.py --since "${{ steps.audit.outputs.since }}" ${{ inputs.dry_run && '--dry-run' || '' }} | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Logs of the failed harnesses
         if: steps.when.outputs.run == 'true' && steps.audit.outputs.exit != '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nightly-parity-logs
           path: .local/parity-runner/logs/

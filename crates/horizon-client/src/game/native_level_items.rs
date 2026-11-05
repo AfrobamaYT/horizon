@@ -11,7 +11,7 @@ use mod_api::{EntityRef, ItemStack, LevelRef};
 impl Game<'_> {
     /// Whether vanilla could make an item entity of `stack`: not empty
     /// (`ItemStack.isEmpty`) and of an item the registry has.
-    fn stack_spawns(&self, stack: &ItemStack) -> bool {
+    pub(super) fn stack_spawns(&self, stack: &ItemStack) -> bool {
         stack.count > 0
             && &*stack.item != "minecraft:air"
             && self.res.items().get(&stack.item).is_some()
@@ -326,6 +326,7 @@ mod tests {
                 let orb = |id, x, value, ticks| {
                     let p = Vec3::new(x, 70.0, 0.5);
                     ExperienceOrb {
+                        rotation: [0.0, 0.0],
                         join: Default::default(),
                         id,
                         position: p,

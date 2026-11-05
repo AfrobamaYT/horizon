@@ -288,7 +288,7 @@ fn villager_flag(m: &mut Mob, flag: &str) {
                 .expect("profession");
             villager::set_profession(m, p as u8);
         }
-        "level" => m.extra.variant3 = v.parse().unwrap(),
+        "level" => m.extra.villager_level = v.parse().unwrap(),
         "xp" => {
             m.extra.trade.get_or_insert_with(Default::default).xp = v.parse().unwrap();
         }
@@ -841,7 +841,7 @@ fn villager(m: &Mob) -> String {
     let mut s = format!(
         "prof {} lvl {} xp {} food {} age {} inv {} gossip {} rep {} sleep {}",
         horizon_client::mobs::render::PROFESSIONS[m.extra.variant2 as usize % 15],
-        m.extra.variant3.max(1),
+        m.extra.villager_level.max(1),
         villager::xp(m),
         e.map_or(0, |e| e.food_level),
         m.extra.age,
@@ -899,7 +899,9 @@ pub fn main() -> horizon_client::Result<()> {
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::load(root, registry, &facts, &PackOverlay::NONE, &defaults)?;
     let tables = LightTables::load(root, registry, &facts)?;
-    let collision = collisions::load(root, registry)?;
+    let collision = std::sync::Arc::new(collisions::load(root, registry)?);
+    let suffocation =
+        horizon_client::mobs::suffocation::bind(collision.clone(), &motion.causes_suffocation)?;
     let air = registry.default_state("minecraft:air").ok_or("no air")?;
     let layers = [
         state(registry, "minecraft:bedrock"),
@@ -1129,6 +1131,9 @@ pub fn main() -> horizon_client::Result<()> {
                 main_hand: s.hand.as_deref().map(Into::into),
                 off_hand: None,
                 head: None,
+                chest: None,
+                legs: None,
+                feet: None,
                 armor_cover: 0.0,
                 invisible: false,
                 spectator: false,
@@ -1176,6 +1181,7 @@ pub fn main() -> horizon_client::Result<()> {
                     fluid_tables: &motion.fluids,
                     movement: &motion.blocks,
                     collision: &collision,
+                    suffocation: &suffocation,
                     data: &data,
                     player: player.clone(),
                     controlling_player_movement: None,
@@ -1374,7 +1380,12 @@ pub fn main() -> horizon_client::Result<()> {
                         dropped_leads += 1;
                     }
                 }
-                horizon_client::mobs::apply_brain_events(&mut mobs, &mut events, from);
+                horizon_client::mobs::apply_brain_events(
+                    &mut mobs,
+                    &mut test_level.level(),
+                    &mut events,
+                    from,
+                );
                 villager_events(
                     &mut mobs,
                     &mut events,

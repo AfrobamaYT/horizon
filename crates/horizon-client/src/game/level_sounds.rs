@@ -41,13 +41,6 @@ impl<'a> LevelSound<'a> {
     pub fn in_source(self, source: SoundSource) -> Self {
         Self { source, ..self }
     }
-
-    pub fn bound_to(self, emitter: u32) -> Self {
-        Self {
-            emitter: Some(emitter),
-            ..self
-        }
-    }
 }
 
 /// A sound bound to an entity (`level.playSound(except, entity, ...)`),
@@ -228,7 +221,7 @@ mod tests {
     use horizon_client::mobs::{Mob, MobEvent};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::packets::play::Clientbound;
-    use mod_api::{NativeSoundSource, ServerHost, SoundSource};
+    use mod_api::{ServerHost, SoundSource};
     use std::sync::{Arc, Mutex};
 
     /// Quietens and moves the locked chest, cancels the pig, and turns a
@@ -426,10 +419,23 @@ mod tests {
                 let at = [2.0, 64.0, 2.0];
 
                 // The tick's sounds, at their positions.
-                game.audio.capture = Some(vec![
-                    ("minecraft:block.chest.locked".into(), at, 1.0, 1.0),
-                    ("minecraft:entity.pig.ambient".into(), at, 1.0, 1.0),
-                ]);
+                game.audio.capture = Some(
+                    [
+                        "minecraft:block.chest.locked",
+                        "minecraft:entity.pig.ambient",
+                    ]
+                    .into_iter()
+                    .map(|event| horizon_client::audio::CapturedSound {
+                        event: event.into(),
+                        position: at,
+                        volume: 1.0,
+                        pitch: 1.0,
+                        source: SoundSource::Blocks as usize,
+                        entity: None,
+                        except_entity: None,
+                    })
+                    .collect(),
+                );
                 game.lan_broadcast_effects();
                 let got = packets(&rx);
                 assert_eq!(got.len(), 1, "the pig is cancelled");
@@ -447,7 +453,7 @@ mod tests {
                 assert!(game.native_entity_play_bound_sound(
                     cow,
                     "minecraft:entity.player.burp",
-                    NativeSoundSource::Neutral,
+                    SoundSource::Neutral,
                     1.0,
                     1.0
                 ));

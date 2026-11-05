@@ -603,7 +603,7 @@ impl Game<'_> {
                         "pos": [p.position.x, p.position.y, p.position.z]})
                     ));
                 }
-                for (_, event, _) in self.lan_entity_events.drain(..) {
+                for (_, event) in self.lan_entity_events.drain(..) {
                     lines.push(format!("entity_event {event}"));
                 }
             }
@@ -626,6 +626,7 @@ impl Game<'_> {
                 .replace(Vec::new())
                 .unwrap_or_default()
                 .into_iter()
+                .map(|s| (s.event, s.position, s.volume, s.pitch))
                 .chain(bound)
             {
                 if CLIENT_SOUNDS.contains(&sound.as_str()) {

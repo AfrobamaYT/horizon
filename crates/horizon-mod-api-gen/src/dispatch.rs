@@ -7,6 +7,7 @@ pub(super) struct HookSources {
     pub render_dispatch: String,
     pub part_traits: BTreeMap<&'static str, String>,
     pub fills: Vec<Fill>,
+    pub fire: String,
     pub hook_ids: String,
     pub hook_constants: String,
     pub hook_count: usize,
@@ -19,36 +20,9 @@ pub(super) struct HookSources {
 /// with more declares its parameters in `hooks/*.rs` and its target takes one `<Name>Call`.
 const MAX_TARGET_PARAMETERS: usize = 7;
 
-/// The hooks whose flat targets already take more than [`MAX_TARGET_PARAMETERS`]. This list only
-/// shrinks and takes no new entries: convert a hook to a carrier and delete its line. A PR that
-/// adds a hook never edits it, so no two PRs collide on it.
-const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
-    "use_on",
-    "piston_pre",
-    "living_incoming_damage",
-    "apply_effect_tick",
-    "living_knockback",
-    "projectile_impact",
-    "entity_mount",
-    "sign_changed",
-    "cauldron_level_changed",
-    "ender_pearl_teleport",
-    "block_drops",
-    "fall_on",
-    "bounce_on",
-    "bonemeal",
-    "fence_connects_to",
-    "finalize_spawn",
-    "item_tooltip",
-    "living_drops",
-    "get_equipment_drop_chance",
-    "note_block_play",
-    "player_set_spawn",
-];
-
-/// Refuses a flat target of a new hook that takes more than [`MAX_TARGET_PARAMETERS`].
+/// Refuses a flat target that takes more than [`MAX_TARGET_PARAMETERS`].
 fn target_parameters(name: &str, native: &str, count: usize, carrier: &str) -> Result<(), String> {
-    if count > MAX_TARGET_PARAMETERS && !FLAT_TARGETS_OVER_THE_LIMIT.contains(&name) {
+    if count > MAX_TARGET_PARAMETERS {
         return Err(format!(
             "{name}: {native} takes {count} parameters, more than {MAX_TARGET_PARAMETERS}: declare them on the hook in hooks/*.rs so it takes one {carrier}"
         ));
@@ -74,6 +48,7 @@ pub(super) fn emit(
     let mut render_dispatch = String::new();
     let mut part_traits: BTreeMap<&str, String> = BTreeMap::new();
     let mut fills = Vec::new();
+    let mut fire = String::new();
     let mut calls = String::new();
     for hook in hooks {
         let name = hook.name.as_str();
@@ -410,24 +385,54 @@ pub(super) fn emit(
             Contract::Replace => "None",
             _ => "",
         };
-        if fill {
-            // The dispatch's parameters in order: the host, the arguments,
-            // and the output last.
-            let host = host.as_ref().map(|(_, param)| param.call.to_owned());
+        // Reuse the exact host and drawing conversions for generated game-side calls.
+        if in_game {
             let passed = host
+                .as_ref()
+                .map(|(_, param)| {
+                    if param.call == "&*self" && receiver_mut == Some(false) {
+                        "self".to_owned()
+                    } else {
+                        param.call.to_owned()
+                    }
+                })
                 .into_iter()
-                .chain(args.iter().chain(output.as_ref()).map(|(n, _)| {
-                    surface_calls
-                        .get(n.as_str())
-                        .cloned()
-                        .unwrap_or_else(|| n.clone())
-                }))
+                .chain(if declared.is_empty() {
+                    args.iter()
+                        .chain(output.as_ref())
+                        .map(|(n, _)| {
+                            surface_calls
+                                .get(n.as_str())
+                                .cloned()
+                                .unwrap_or_else(|| n.clone())
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    vec!["call".to_owned()]
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
-            fills.push(Fill {
-                native: native.clone(),
-                call: format!("mod_api::{call}({passed});"),
-            });
+            let mut signature = sig.clone();
+            signature.ident = syn::Ident::new(&format!("fire_{name}"), signature.ident.span());
+            let target_path: syn::Path = syn::parse_str(target)
+                .map_err(|error| format!("invalid target for {name}: {error}"))?;
+            let receiver = &target_path.segments[target_path.segments.len() - 2].ident;
+            fire.push_str(&format!("impl {receiver}<'_> {{ #[inline] pub(super) {signature} {{ mod_api::{call}({passed}); }} }}\n", signature = signature.to_token_stream()));
+            if fill {
+                let passed = sig
+                    .inputs
+                    .iter()
+                    .filter_map(|arg| match arg {
+                        FnArg::Typed(arg) => Some(arg.pat.to_token_stream().to_string()),
+                        FnArg::Receiver(_) => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                fills.push(Fill {
+                    native: native.clone(),
+                    call: format!("self.fire_{name}({passed});"),
+                });
+            }
         }
         let invoke = call_args.join(", ");
         let trait_params = trait_params.join(", ");
@@ -572,6 +577,7 @@ pub(super) fn emit(
         render_dispatch,
         part_traits,
         fills,
+        fire,
         hook_ids,
         hook_constants,
         hook_count,
@@ -642,6 +648,5 @@ mod tests {
         assert!(target_parameters("new_hook", "native_new_hook", 7, "NewHookCall").is_ok());
         let refused = target_parameters("new_hook", "native_new_hook", 8, "NewHookCall");
         assert!(refused.unwrap_err().contains("one NewHookCall"));
-        assert!(target_parameters("use_on", "native_use_on", 9, "UseOnCall").is_ok());
     }
 }

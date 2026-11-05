@@ -3,7 +3,7 @@
 use super::{
     Game,
     commands::{
-        R, err,
+        R, Target, err,
         execute::{ExecState, Source},
     },
 };
@@ -112,7 +112,7 @@ pub(super) fn overlay_files(
     for (path, bytes) in contributed {
         // One bad file would fail its whole table and drop the world's pack
         // content with it, so it is skipped alone: every kind is JSON.
-        if let Err(e) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        if let Err(e) = serde_json::from_slice::<Box<serde_json::value::RawValue>>(&bytes) {
             log::warn!("Horizon: a native mod's data pack file {path} is not JSON, skipped: {e}");
             continue;
         }
@@ -151,6 +151,13 @@ impl Game<'_> {
 
     fn datapack_settings_path(&self) -> std::path::PathBuf {
         self.world_root.join("datapacks.json")
+    }
+    /// Discover and load the data packs of the world (once, or on `/reload`).
+    pub(super) fn ensure_datapacks(&mut self) {
+        if self.fns.loaded || self.world_root.as_os_str().is_empty() {
+            return;
+        }
+        let _ = self.reload_datapacks(false, &self.level.enabled_features.clone());
     }
     pub(super) fn reload_datapacks(
         &mut self,
@@ -377,6 +384,41 @@ impl Game<'_> {
         }
     }
 
+    /// The function branch of advancement rewards: resolve the optional function
+    /// and execute it as the rewarded player, with suppressed output and GAMEMASTER permission.
+    pub(super) fn run_advancement_reward_function(&mut self, id: &str) {
+        self.ensure_datapacks();
+        let Some(function) = self.fns.store.functions.get(id).cloned() else {
+            return;
+        };
+        let Some(pos) = self.target_position(Target::Player) else {
+            return;
+        };
+        // createCommandSourceStack belongs to the player, not an enclosing
+        // execute's position, rotation, output sink or store callback.
+        let source = Source {
+            pos,
+            rot: self.target_rotation(Target::Player),
+            silent: true,
+            ..self.player_source()
+        };
+        // The existing runner applies this level to nested function calls too.
+        let permission = self
+            .fns
+            .permission
+            .replace(horizon_client::command::vanilla::GAMEMASTERS);
+        let callback = self.exec.callback.take();
+        let result = self.run_function(&function, None, source);
+        self.exec.callback = callback;
+        self.fns.permission = permission;
+        if let Err(error) = result {
+            log::warn!(
+                "Horizon: failed to run advancement reward function {id}: {}",
+                error.message.plain()
+            );
+        }
+    }
+
     // ---- running -----------------------------------------------------------------
 
     /// Run one function with `source`: its commands in order, until a `return`.
@@ -470,6 +512,7 @@ impl Game<'_> {
 
     // ---- commands ------------------------------------------------------------------
 
+    /// `FunctionCommand.decorateOutputIfNeeded`: report returned values even for failure.
     pub(super) fn cmd_function(&mut self, ctx: &Context) -> R<i32> {
         let Some(Arg::Resource(name)) = ctx.get("name").cloned() else {
             return Ok(0);
@@ -542,6 +585,10 @@ impl Game<'_> {
                 Outcome::Fail => {
                     any = true;
                     failed = true;
+                    self.feedback(Text::translate(
+                        "commands.function.result",
+                        &[Text::literal(f.id.clone()), Text::literal("0")],
+                    ));
                 }
             }
         }
@@ -945,13 +992,26 @@ impl Game<'_> {
 
     // ---- predicates -------------------------------------------------------------------
 
-    /// `if predicate`: a datapack predicate tested for the source entity.
+    /// `ResourceOrIdArgument.getLootPredicate`: accept the inline or named
+    /// predicate, then test it with the existing source entity and origin.
     pub(in crate::game) fn check_predicate(&mut self, id: &str) -> R<bool> {
-        let Some(json) = self.fns.store.predicates.get(id).cloned() else {
-            return Err(err("argument.predicate.unknown", &[&id]));
+        self.ensure_datapacks();
+        // ResourceOrIdArgument retains either an inline value or a named id.
+        // Both use the same evaluator and command-source context below.
+        let json = if id.starts_with('{') {
+            let (tag, _) = horizon_world::nbt::parse_snbt(id)
+                .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
+            horizon_client::scoreboard::tag_to_json(&tag)
+        } else {
+            self.fns
+                .store
+                .predicates
+                .get(id)
+                .cloned()
+                .ok_or_else(|| err("argument.predicate.unknown", &[&id]))?
         };
         let source = self.command_source.unwrap_or_else(|| self.player_source());
-        let view = source.entity.map(|t| self.entity_view_of(t));
+        let view = source.entity.map(|t| self.entity_view_asked(t, &json));
         Ok(self.conditions_hold(&json, view.as_ref(), source.pos))
     }
 }
@@ -1079,7 +1139,8 @@ mod tests {
                     .tags
                     .contains(&"test:feature_marker".to_owned())
             );
-            game.world_tables = game.build_world_tables(&stack);
+            (game.world_tables, game.health_resources) =
+                game.build_world_tables(&stack, false).unwrap();
             assert!(game.items().item_tags["test:sample"].contains("minecraft:diamond"));
         });
         std::fs::remove_dir_all(root).unwrap();

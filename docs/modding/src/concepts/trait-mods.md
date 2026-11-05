@@ -2,8 +2,8 @@
 
 ## Trait mods (draft)
 
-`cargo horizon-mod new <path> --template native --horizon <commit>` requires an exact Horizon commit and
-writes a flat project: `horizon-mod.toml` with `[native]`, `Cargo.toml`, `src/lib.rs`, and empty `assets/`
+`cargo horizon-mod new <path> --template native` pins an exact Horizon commit (the newest prebuilt game's,
+or `--horizon <commit>`'s; `cargo horizon-mod update` repins) and writes a flat project: `horizon-mod.toml` with `[native]`, `Cargo.toml`, `src/lib.rs`, and empty `assets/`
 and `data/` directories. The template greets each player who joins. Build it with
 `horizon-launcher native-build <path> --trust-native-code`; `cargo horizon-mod build` packages the same
 project into a `.hmod` without compiling it ([the manifest](../reference/manifest.md)).
@@ -77,18 +77,14 @@ and in the server thread's log line, with the `horizon-mod.toml` id. Each entry 
 `entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
 The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
 Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
-id for startup errors and hook panics. The game stops. A trait injection's panic names its mod and
-the generated method (`inject_<mod>_<method>`); render hooks are not named yet.
+id for startup errors and hook panics. The game stops. A point listener's panic names its mod and
+method; render hooks are not named yet.
 
-A code mod may declare its own injection in the trait as a rare escape hatch; the form, its generated method and its
-limits are in [Injections](../injections.md).
+A code mod may listen at the game's injection points as a rare escape hatch, through `impl mod_points::Points`
+(the `horizon-mod-points` crate) on the same type as its `Hooks`; the form
+and its limits are in [Injections](../injections.md).
 
-The launcher and catalog build scripts share `horizon-mod-api-gen` for trait, event and helper generation.
-The launcher stages declarations in `.horizon-mod-api-injections.json`; Cargo consumes them through
-`HORIZON_MOD_API_INJECTIONS`. The declarations stay with cached mixin output, and generated Rust lives
-only in Cargo's `OUT_DIR`. A player build does not edit generated Rust in the source tree or run rustfmt.
-
-A linked trait mod implements `mod_api::Hooks`. Mixin injections run first.
+A linked trait mod implements `mod_api::Hooks`. Helper injections run first.
 An injection that returns early skips trait mods. A claimed cancellation also skips trait mods.
 Otherwise, trait mods run in their supplied order. The first `Cancel` stops dispatch.
 For replacement hooks, the first `Some` wins. Collection hooks call every mod. Receiverless hooks have no `Host`.
@@ -161,7 +157,7 @@ The renderer module re-exports the game's wgpu types.
 
 ### The typed API from mixin code
 
-A helper or trait injection can use the typed API: bind the game or the `Host` and call attachments and handles. The
+A helper injection can use the typed API: bind the game or the `Host` and call attachments and handles. The
 worked examples, and which shape to choose, are in [Injections](../injections.md#make-your-injection-convertible).
 
 A catalog hook's trait method, event and return make up its `hook_version` contract
@@ -407,6 +403,28 @@ unavailable and `Some(None)` for an empty slot. Each read checks the world epoch
 so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
 change slots.
 
+Mutable client hooks can submit a vanilla click with
+`menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])`. The slot is the same menu-order
+index used by `slot`, not a hotbar index or a GUI slot id. For example:
+
+```rust,ignore
+{{#include ../../examples/src/lib.rs:menu_quick_move}}
+```
+
+The typed actions are `Pickup` (with `MouseButton::Left` or `Right`), `QuickMove`,
+`Swap` (with `SwapWith::Hotbar(0..=8)` or `Offhand`), `Clone`, `Throw`,
+`Drag` and `PickupAll`. `Pickup` accepts `None` for outside, dropping the carried stack.
+A `Drag { kind, slots }` owns its menu-order slot list and always submits a complete gesture;
+`DragKind::Split` divides evenly, `One` places one per slot and `Clone` fills slots in creative mode.
+Every action in a batch is validated before any prediction or sending; out-of-range slots/hotbar
+indices, creative-only actions in survival and empty batches refuse without effects.
+Stale/replaced/respawned menus, spectators, non-client hosts and the creative inventory screen refuse with `false`.
+`true` means submitted, not server acceptance: prediction uses the normal menu engine and sends
+`ContainerClick` with its state id, changed slots and carried item. Server corrections still win.
+Inventory reads and direct server-side item transactions keep their existing contracts; a click does
+not expose direct client inventory writes or enforce a mod's locked-slot policy. Call from an explicit
+input action rather than submitting every render/tick. Diverges from upstream: new helper.
+
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
@@ -570,6 +588,9 @@ that player's packet would run it:
   `useOn`, which is how a block item is placed;
 - `PlayerAction::UseItem { hand }` is a use in the air (`ServerPlayerGameMode.useItem`), by the item's own ray from
   the player's eyes and look: a bucket clicked on a block passes, as vanilla's does, and empties when used.
+- `PlayerAction::InteractOn { hand, target, location }` interacts with that entity (`Player.interactOn`),
+  after the border and interaction-range checks, with the hit relative to its origin. A passed click does not
+  fall back to using the item in the air. The fake keeps its own supplied look, rather than aiming a new ray;
 - `PlayerAction::Attack { target }` is a hit with the main hand (`handleInteract`'s ATTACK, then `Player.attack`):
   the border and the attack range, the native mods' `attack_entity`, then the blow on a player, a mob or another
   entity, or a fireball, wind charge or shulker bullet turned back. The blow is scaled by the attack strength, as a
@@ -588,10 +609,30 @@ read what is left after. The answer says what happened:
 | `Ok(ActionOutcome::Consumed)` | Vanilla's `InteractionResult` consumed (a success or a consume), the blow landed, or the block broke |
 | `Ok(ActionOutcome::Passed)` | Nothing used the click, a mod or the game stopped the blow, or the block stayed |
 | `Ok(ActionOutcome::EffectBlocked(effect))` | The click ran, but what it would start was stopped: a menu or screen, sleeping, riding, or going to another dimension (`FakeEffect`). The click's own side effects have still happened then: the swing seen by others, the hooks that run before the use, vanilla's `Success` |
-| `Err(ActionRefused::…)` | Nothing ran: `NotFake` (a real player's handle), `Stale`, `Busy` (another player's turn, an open transaction, or a hook inside another `perform_action`), `OutOfReach`, `Protected`, or `InvalidTarget` (an attack on the fake itself or an entity not in its level) |
+| `Err(ActionRefused::…)` | Nothing ran: `NotFake` (a real player's handle), `Stale`, `Busy` (another player's turn, an open transaction, or a hook inside another `perform_action`), `OutOfReach`, `Protected`, `InvalidSetup` (non-finite scoped viewpoint or entity hit), or `InvalidTarget` (an interaction or attack on the fake itself or an entity not in its level) |
 
-What a machine does beyond a player's action stays in the mod: a deployer's reach and eye height, its own mining
-progress, catching its drops.
+For a machine using an isolated stack, `player.perform_action_scoped(host, action, setup)` composes that same
+persistent player's action with temporary state. Build `PlayerActionSetup::new(stack, eye, yaw, pitch,
+secondary_use)`: the fake acts in survival with a fresh standing body (eye height 1.62), that stack in its main
+hand, and no other inventory or equipment. Its supplied rotation is used for item rays. Secondary use holds
+semantic sneak without changing that standing eye height. No second player is created.
+
+The `ScopedActionResult` contains `outcome` (the same `ActionOutcome`), `held` (the nonempty main-hand remainder)
+and `other` (other nonempty inventory stacks, then offhand, carried stack and armor). These stacks are returned
+to the caller, not kept by the fake. The fake's persistent body, inventory, game mode, look, secondary-use state
+and action timers are restored even on refusal; world changes and the usual interaction/Parts hooks remain.
+The ordinary fake safety rules still apply: no screens, sleep, rides, dimension travel, online participation,
+statistics, advancement credit or network connection. Neither action method can run inside another player turn
+or an open transaction; the action's own ordinary write paths still run transactionally.
+
+On either side, `player.entity().is_shift_key_down(host)` reads semantic secondary use rather than a physical
+key mapping or a crouching pose. On the client obtain the reachable local handle with `host.local_player()`
+(or `host.entity(id)`); it reads live secondary use even before the next movement tick updates the body's
+shift flag. On the server the existing entity flag is read, including a scoped fake's setup. Stale handles and
+clients without a joined local player return `None`.
+
+What a machine does beyond a player's action stays in the mod: its own mining progress and catching world drops.
+Scoped actions retain player reach, protection and border checks; eye placement is supplied by the mod.
 
 ### Testing a trait mod
 
@@ -759,8 +800,13 @@ The following documented `Game` helpers are not in the trait yet:
   `item_entities`, `player`, `panel_recipes`, `recipes`, `component`,
   `set_component`, `remove_component`, `spawn_falling_block`, `explode`,
   `container_slots` uses gameplay-private types.
-- `with_mod_block_entity` and `trigger_criterion` are generic or take
-  `impl Trait`, so their signatures cannot be called through `dyn Host`.
+- `with_mod_block_entity` is generic, so its signature cannot be called through `dyn Host`.
+
+Advancement triggers instead live on `PlayerRef::trigger_criterion`, with a mod-owned
+`CriterionTest` and the game's scoped `CriterionContext` resource. The context keeps real
+world-aware item predicates; it is not a conditions-only snapshot. See
+[advancement triggers](../reference/hook-notes.md#advancement-triggers) for the contract and
+the wasm runtime's current same-group callback limitation.
 
 The following catalog hooks are not in the trait:
 
@@ -786,6 +832,15 @@ editor or book, so keys and zoom apply. `ClientHost::mapping(name)` reads a vani
 `key.left`, `key.back`, `key.right`, `key.jump`, `key.sneak`, `key.sprint`, `key.attack`, `key.use`) as a
 `NativeKeyMapping`: whether it is held (`KeyMapping.isDown`) and the `label` of the key it is bound to, as Controls
 shows it. It is `None` for any other name. Both read without `&mut`, so the HUD and screen hooks can ask them.
+
+`ClientHost::clipboard_text()` reads the system clipboard (`KeyboardHandler.getClipboard`, empty text when it
+holds none) and `ClientHost::set_clipboard_text(text)` writes it (`setClipboard`; empty text copies nothing). Both
+work only while the game handles a key, mouse or typed-text event, from the window or from the control socket
+(`horizon-ctl key`, `mouse`, `type` and its clicks): a key, mouse or screen hook that fires inside one, such as
+Ctrl+V into a mod's own field. At any other moment (a tick, a frame, a packet) the read is `None` and the write
+is `false` with nothing copied, so no mod reaches the clipboard without the player doing something. Both are
+`None` and `false` on a server, and take `&self`, so a screen hook can call them. Vanilla's `KeyboardHandler`
+has no such rule: Horizon adds it.
 
 The `native_camera()` helper returns the most recently extracted world frame's camera, or none before one exists. Its position, interpolated eye height, partial tick, angles, final FOV, near/far planes and dimension accompany column-major view and projection matrices. The view is camera-relative and includes bob and spin; projection uses reversed Z. Earlier callbacks in a frame can see the previous frame. `native_block_collision(pos)` returns block-local `[min_x, min_y, min_z, max_x, max_y, max_z]` boxes with an empty collision context; unloaded blocks and collision errors give no boxes.
 

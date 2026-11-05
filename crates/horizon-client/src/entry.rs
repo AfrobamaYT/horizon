@@ -1,16 +1,29 @@
 //! Startup shared by the gameplay library and its executable.
-use crate::{crash, game, logging, ram_limit};
+use crate::{crash, game, logging};
 use horizon_mods::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
-    main_with(Vec::new(), &[]);
+    main_with(Vec::new(), &[], &[]);
 }
 
 /// Start the game with named trait mods in dispatch order.
+/// Whether a mod's `__HORIZON_POINTS` names a method, at compile time: the launcher's generated
+/// `main` checks each point injection with it.
+#[doc(hidden)]
+pub use mod_points::__private::lists as point_listed;
+
+/// A native mod that listens at injection points: its id, and the generated export that sees its
+/// installed `Hooks` as its `impl Points` (#589).
+pub type NativePoints = (
+    &'static str,
+    fn(&'static dyn mod_api::Hooks) -> &'static dyn mod_points::Points,
+);
+
 pub fn main_with(
     mut mods: Vec<mod_api::ModEntry>,
+    points: &[NativePoints],
     built: &'static [horizon_mods::runtime::BuiltMod],
 ) {
     let exe = std::env::current_exe();
@@ -27,7 +40,6 @@ pub fn main_with(
     };
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     horizon_threads::configure_allocator();
-    horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
     let launch: crate::Result<_> = std::env::current_dir().map_err(Into::into).and_then(|cwd| {
         Ok(LaunchArguments::parse(
@@ -47,6 +59,7 @@ pub fn main_with(
     // Wasm mods join the native ones after them, in dependency order, from the same selection
     // as content mods. Then the mods are installed, before anything below (logging, the crash
     // handler) that a trait injection may call into.
+    let mut wasm_listening = Vec::new();
     if let Ok(exe) = &exe {
         let switch = |name: &str| {
             launch
@@ -64,14 +77,28 @@ pub fn main_with(
             budgets,
         };
         let game_dir = &launch.context.game_dir;
-        mods.extend(horizon_mod_wasm::load_installed(
-            exe,
-            game_dir,
-            &launch.context.dev_mods,
-            &config,
-        ));
+        let (wasm, listening) =
+            horizon_mod_wasm::load_installed(exe, game_dir, &launch.context.dev_mods, &config);
+        mods.extend(wasm);
+        wasm_listening = listening;
     }
     mod_api::__private::install(mods.into());
+    for (id, listeners) in points {
+        let hooks = mod_api::__private::hooks_of(id)
+            .expect("a native mod listening at points is installed");
+        if let Err(error) = mod_points::register(id, listeners(hooks)) {
+            eprintln!("Horizon: {id}: {error}");
+            std::process::exit(game::exit_code::ERROR);
+        }
+    }
+    // Wasm mods' listeners after the native ones', as their hooks are.
+    for listening in wasm_listening {
+        if let Err(error) = listening.register() {
+            eprintln!("Horizon: {error}");
+            std::process::exit(game::exit_code::ERROR);
+        }
+    }
+    crate::game::points::attach_installed();
     let help = launch.is_information_request();
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
@@ -82,7 +109,7 @@ pub fn main_with(
     {
         (launch.context.game_dir.clone(), "server", "Server thread")
     } else {
-        // A player's own log stays separate; crash telemetry follows the shared home.
+        // A player's own log stays separate; crash reports follow the shared home.
         if let Some(dir) = launch.rest.iter().find_map(|arg| match arg {
             Argument::Value(name, value) if name == "--player-dir" => Some(value),
             _ => None,
@@ -99,7 +126,6 @@ pub fn main_with(
         // The log's first line names the build, so a bug report that carries the log says which one it was.
         log::info!("Horizon {}", crash::version());
         crash::install(home.clone(), side);
-        ram_limit::start(&home, side);
     }
     let renderers = mod_api::__private::mods()
         .iter()

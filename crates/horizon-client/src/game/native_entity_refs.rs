@@ -16,11 +16,20 @@ use super::{
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 use mod_api::{
-    EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
+    EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
     NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType, NeighbourUpdate,
 };
 
 impl Game<'_> {
+    /// An entity tracked by the remote client but absent from local entity lists.
+    fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
+        let remote = self.remote.as_ref()?;
+        if !remote.logged_in || self.native_lifecycle.epoch() != Some(entity.epoch()) {
+            return None;
+        }
+        remote.tracked_entity(i32::try_from(entity.id()).ok()?)
+    }
+
     /// Keep a held-out entity inaccessible until its copy has been stored back.
     pub(super) fn with_entity_held_out<R>(
         &mut self,
@@ -100,16 +109,18 @@ impl Game<'_> {
     }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
     /// methods: None with no world open, or for no such entity in the level
-    /// in place or among the server's players. During a nested player swap,
-    /// an outer player's displaced record is unavailable. On a client, the
-    /// entity is the local player or one the client tracks.
+    /// in place or among the server's players. On a client (API
+    /// @API:client_entity_refs@), any entity the server shows this window,
+    /// this window's own player included. API 373.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
-        self.native_entity_read_target(entity).map(|_| entity)
+        (self.native_entity_read_target(entity).is_some()
+            || self.native_client_tracked(entity).is_some())
+        .then_some(entity)
     }
-    /// The level `dimension` (`minecraft:the_nether`) as a handle: None with
-    /// no world open, or for a dimension the server hasn't loaded. On a
-    /// client, only the level it shows (`Minecraft.level`) has one.
+    /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
+    /// client, with no world open, or for a dimension the server hasn't
+    /// loaded. API 373.
     pub(super) fn native_level(&self, dimension: &str) -> Option<LevelRef> {
         if !self.is_logical_server() {
             let epoch = self.native_lifecycle.epoch()?;
@@ -267,24 +278,49 @@ impl Game<'_> {
         let _ = self.process_level_events();
         true
     }
-    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
-    /// dropping its resources. Parked levels and invalid positions return false.
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally dropping
+    /// resources with `tool` (None is an empty hand). With `collect`, return the dropped
+    /// stacks without spawning their item entities; otherwise return an empty list after
+    /// spawning them. The one level drop path runs loot, block-drop hooks and experience
+    /// once, in vanilla's random order. `drop` false suppresses resources entirely.
+    /// None means nothing broke: air, a refused write, a stale handle, a client, an
+    /// unloaded/out-of-height position, or a parked level.
     pub(super) fn native_level_destroy_block(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
         drop: bool,
-    ) -> bool {
-        if !self.native_level_write_allowed(level, pos)
-            || !self.is_logical_server()
-            || self.dim.id() != level.dimension()
-        {
-            return false;
+        tool: Option<&ItemStack>,
+        collect: bool,
+    ) -> Option<Vec<ItemStack>> {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return None;
         }
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
-        let changed = self.with_level(|b, level, ticks| b.destroy_block(level, ticks, at, drop));
+        let (changed, drops) = self.with_level(|b, level, ticks| {
+            level.drop_tool = tool.cloned();
+            level.drop_into = collect.then(Vec::new);
+            let changed = b.destroy_block(level, ticks, at, drop);
+            (changed, level.drop_into.take().unwrap_or_default())
+        });
         let _ = self.process_level_events();
-        changed
+        changed.then_some(drops)
+    }
+
+    /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
+    /// any other stage removes it. A machine uses a stable negative breaker id.
+    pub(super) fn native_level_set_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return false;
+        }
+        self.server_destroy_block_progress(breaker, pos, progress);
+        true
     }
     fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.is_logical_server()
@@ -435,25 +471,56 @@ impl Game<'_> {
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        self.target_position(self.native_entity_read_target(entity)?)
+        match self.native_entity_read_target(entity) {
+            Some(target) => self.target_position(target),
+            None => self
+                .native_client_tracked(entity)
+                .map(|(_, position)| position),
+        }
     }
-    /// The block the entity's position is in (`Entity.blockPosition`).
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// 373.
     pub(super) fn native_entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
         self.native_entity_position(entity)
             .map(|p| p.map(|v| v.floor() as i32))
     }
     /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
-    /// for the kinds that don't turn.
+    /// for the kinds that don't turn. API 373.
     pub(super) fn native_entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
         Some(self.target_rotation(self.native_entity_read_target(entity)?))
     }
-    /// The entity's type (`Entity.getType`): `minecraft:zombie`.
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// 373.
     pub(super) fn native_entity_kind(&self, entity: EntityRef) -> Option<String> {
-        Some(self.target_type(self.native_entity_target(entity)?))
+        match self.native_entity_read_target(entity) {
+            Some(t) => Some(self.target_type(t)),
+            None => self
+                .native_client_tracked(entity)
+                .map(|(kind, _)| kind.to_owned()),
+        }
     }
     /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
     /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// On a client, the one the server added it with (a player's is its
+    /// profile's). API 373.
     pub(super) fn native_entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        if let Some(r) = &self.remote {
+            let id = i32::try_from(entity.id()).ok()?;
+            if self.native_entity_read_target(entity).is_none()
+                && self.native_client_tracked(entity).is_none()
+            {
+                return None;
+            }
+            if let Some((uuid, _)) = r.level_player(id) {
+                return Some(uuid);
+            }
+            return self
+                .persist
+                .uuids
+                .get(&entity.id())
+                .copied()
+                .map(uuid_from_words);
+        }
         let words = match self.native_entity_target(entity)? {
             Target::Player => return self.lan_acting_uuid,
             Target::Guest(conn) => return self.command_guest(conn).map(|g| g.uuid),
@@ -461,9 +528,13 @@ impl Game<'_> {
         };
         Some(uuid_from_words(words))
     }
-    /// The level the entity is in (`Entity.level`).
+    /// The level the entity is in (`Entity.level`): on a client, the
+    /// client's level. API 373.
     pub(super) fn native_entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
-        let dim: Dim = self.target_level(self.native_entity_target(entity)?);
+        let dim: Dim = match self.native_entity_read_target(entity) {
+            Some(t) => self.target_level(t),
+            None => self.native_client_tracked(entity).map(|_| self.dim)?,
+        };
         Some(LevelRef::new(entity.epoch(), dim.id()))
     }
 }
@@ -1034,38 +1105,47 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn block_part_flips_fence_connections_in_a_real_game_level() {
+    fn block_part_flips_fence_wall_and_pane_connections_in_a_real_game_level() {
         use horizon_client::chunk::Chunk;
         use horizon_core::{geometry::Direction, position::BlockPos};
         use std::sync::Arc;
 
-        mod_api::__private::part_tests::fence_game_thread();
+        mod_api::__private::part_tests::connection_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
-            let oak = registry.default_state("minecraft:oak_fence").unwrap();
-            let spruce = registry.default_state("minecraft:spruce_fence").unwrap();
-            let stone = registry.default_state("minecraft:stone").unwrap();
-            let torch = registry.default_state("minecraft:torch").unwrap();
+            let state = |name: &str| registry.default_state(name).unwrap();
+            let stone = state("minecraft:stone");
+            let torch = state("minecraft:torch");
             let pos = BlockPos::new(5, 64, 5);
             let neighbour = BlockPos::new(6, 64, 5);
-            let arm = |game: &mut crate::game::Game<'_>, fence, beside| {
+            let side = |game: &mut crate::game::Game<'_>, block, beside| {
                 game.world.set(6, 64, 5, beside).unwrap();
                 let shaped = game.with_level(|b, level, ticks| {
-                    b.update_shape(level, ticks, fence, pos, Direction::East, neighbour, beside)
+                    b.update_shape(level, ticks, block, pos, Direction::East, neighbour, beside)
                 });
                 registry.state(shaped).unwrap().properties["east"].clone()
             };
             game.world.set(5, 63, 5, stone).unwrap();
-            // Vanilla joins a fence to a sturdy face and not to a torch; the oak
-            // fence's part flips both answers, the spruce fence has no part.
-            assert_eq!(arm(game, oak, stone), "false");
-            assert_eq!(arm(game, oak, torch), "true");
-            assert_eq!(arm(game, spruce, stone), "true");
-            assert_eq!(arm(game, spruce, torch), "false");
+            // Vanilla joins each to a sturdy face and not to a torch. The part on
+            // the oak fence, cobblestone wall and glass pane flips both answers;
+            // the spruce fence, brick wall and iron bars have none.
+            for (block, with_part, yes, no) in [
+                ("oak_fence", true, "true", "false"),
+                ("spruce_fence", false, "true", "false"),
+                ("cobblestone_wall", true, "low", "none"),
+                ("brick_wall", false, "low", "none"),
+                ("glass_pane", true, "true", "false"),
+                ("iron_bars", false, "true", "false"),
+            ] {
+                let block_state = state(&format!("minecraft:{block}"));
+                let (sturdy, not) = if with_part { (no, yes) } else { (yes, no) };
+                assert_eq!(side(game, block_state, stone), sturdy, "{block} by stone");
+                assert_eq!(side(game, block_state, torch), not, "{block} by a torch");
+            }
         });
     }
 
@@ -1184,7 +1264,10 @@ pub(super) mod tests {
                 stone,
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
-            assert!(!game.native_level_destroy_block(level, [0, 128, 0], false));
+            assert!(
+                game.native_level_destroy_block(level, [0, 128, 0], false, None, false)
+                    .is_none()
+            );
         });
     }
 
@@ -1350,6 +1433,7 @@ pub(super) mod tests {
                         sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
                         latency: Arc::new(AtomicI32::new(0)),
                         address: "127.0.0.1:1".parse().unwrap(),
+                        expected: false,
                     },
                     id as i32,
                     [3.0, 64.0, 5.0],
@@ -1424,11 +1508,19 @@ pub(super) mod tests {
                 game.native_living_equipment(living, EquipmentSlot::Saddle),
                 None
             );
+            // The host's own previous mode, which no guest's change may touch.
+            game.previous_mode = Some(horizon_client::command::args::GameMode::Adventure);
+            assert_eq!(game.native_player_previous_game_mode(player), Some(None));
             assert!(!game.native_player_set_game_mode(player, GameMode::Survival));
+            assert_eq!(game.native_player_previous_game_mode(player), Some(None));
             assert!(game.native_player_set_game_mode(player, GameMode::Creative));
             assert_eq!(
                 game.native_player_game_mode(player),
                 Some(GameMode::Creative)
+            );
+            assert_eq!(
+                game.native_player_previous_game_mode(player),
+                Some(Some(GameMode::Survival))
             );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(abilities.invulnerable && abilities.may_fly && abilities.instabuild);
@@ -1509,7 +1601,26 @@ pub(super) mod tests {
             // A mode change in a turn, then a write in the same turn: the write wins.
             game.as_guest(12, |game| {
                 let player = game.native_player_ref(12).unwrap();
+                // The guest's own previous mode is swapped in for the turn.
+                assert_eq!(
+                    game.native_player_previous_game_mode(player),
+                    Some(Some(GameMode::Creative))
+                );
+                assert_eq!(
+                    game.native_player_is_secondary_use_active(player),
+                    Some(false)
+                );
+                game.player.as_mut().unwrap().shift_key_down = true;
+                assert_eq!(
+                    game.native_player_is_secondary_use_active(player),
+                    Some(true)
+                );
+                game.player.as_mut().unwrap().shift_key_down = false;
                 assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+                assert_eq!(
+                    game.native_player_previous_game_mode(player),
+                    Some(Some(GameMode::Survival))
+                );
                 let mut a = game.native_player_abilities(player).unwrap();
                 assert!(a.instabuild && a.may_fly);
                 a.fly_speed = 0.4;
@@ -1519,6 +1630,11 @@ pub(super) mod tests {
             .unwrap();
             let kept = game.lan.as_ref().unwrap().hub.guest(12).unwrap();
             assert_eq!(kept.game_mode, 1);
+            assert_eq!(kept.previous_game_mode, Some(0));
+            assert_eq!(
+                game.previous_mode,
+                Some(horizon_client::command::args::GameMode::Adventure)
+            );
             assert!(kept.abilities.instabuild);
             assert_eq!(kept.abilities.flying_speed, 0.4);
             assert_eq!(kept.abilities.walking_speed, 0.3);
@@ -1739,6 +1855,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 1).into(),
+                    expected: false,
                 },
                 1,
                 [0.0; 3],
@@ -2174,6 +2291,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx2, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 3).into(),
+                    expected: false,
                 },
                 3,
                 [0.0; 3],
@@ -2248,6 +2366,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 1).into(),
+                    expected: false,
                 })))
                 .unwrap();
             use mod_api;
@@ -2884,7 +3003,10 @@ pub(super) mod tests {
             level.dimension(),
         );
         assert!(!game.native_level_set_block(stale, [0, 64, 0], stone, flags));
-        assert!(!game.native_level_destroy_block(stale, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(stale, [0, 64, 0], true, None, false)
+                .is_none()
+        );
         let fill_chest = |game: &mut Game<'_>| {
             let Some(super::super::BlockEntity::Chest(items)) =
                 game.world.block_entities.get_mut(&(0, 64, 0))
@@ -2921,17 +3043,26 @@ pub(super) mod tests {
         assert!(!game.world.block_entities.contains_key(&(0, 64, 0)));
         assert!(game.dropped.is_empty());
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(game.native_level_destroy_block(level, [0, 64, 0], false));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], false, None, false)
+                .is_some()
+        );
         assert!(game.dropped.is_empty());
         assert_eq!(game.world.block(0, 64, 0), air);
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_some()
+        );
         assert!(
             game.dropped
                 .iter()
                 .any(|item| item.stack.item.as_ref() == "minecraft:cobblestone")
         );
-        assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_none()
+        );
         game.dropped.clear();
         let copper = game
             .pack
@@ -2976,6 +3107,9 @@ pub(super) mod tests {
                 .is_some()
         );
         assert!(!game.native_level_set_block(level, [0, 64, 0], stone, flags));
-        assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.native_level_destroy_block(level, [0, 64, 0], true, None, false)
+                .is_none()
+        );
     }
 }

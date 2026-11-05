@@ -10,7 +10,9 @@ use horizon_protocol::{
         configuration::CustomPayload,
         play::{Clientbound as C, Serverbound as S},
     },
+    quiet,
 };
+use mod_api::{SendPacketError, ServerboundPlayPacket};
 use std::collections::HashMap;
 
 /// Messages a tick at most: from one player, to one player, and from the
@@ -168,9 +170,11 @@ impl Game<'_> {
     }
 
     /// A mod's chat line or command (`/` first), sent as `send_chat` sends
-    /// it: no `client_chat` event (vanilla's `ClientChatEvent` comes only
-    /// from ChatScreen) and no chat history. An error when the player isn't
-    /// in a server's play state or the Chat option blocks the message.
+    /// it (ClientPacketListener.sendChat / sendCommand), to any server: no
+    /// chat history, and no client chat event (vanilla's `ClientChatEvent`
+    /// comes only from ChatScreen). An error when the player isn't in a
+    /// server's play state or the Chat option blocks the message. API
+    /// 404.
     pub(super) fn native_send_chat(&mut self, message: &str) -> Result<(), String> {
         let Some(remote) = self.remote.as_ref() else {
             return Err("not connected to a server".into());
@@ -188,5 +192,132 @@ impl Game<'_> {
         }
         self.send_chat(message);
         Ok(())
+    }
+
+    /// Sends `packet` to the server as it is, to any server, a vanilla one
+    /// included: a plugin channel's payload (`ServerboundCustomPayloadPacket`)
+    /// or any other play packet. Nothing counts it, and the game doesn't apply
+    /// it on its side: a packet that needs a sequence number, a signature or
+    /// the client's own state is the mod's to get right. An error when the
+    /// player isn't in a server's play state, and for a custom payload past
+    /// `ServerboundCustomPayloadPacket.MAX_PAYLOAD_SIZE`, which a server
+    /// disconnects for. API 409.
+    pub(super) fn native_send_packet(
+        &mut self,
+        packet: ServerboundPlayPacket,
+    ) -> Result<(), SendPacketError> {
+        let remote = self.remote.as_ref().ok_or(SendPacketError::NotConnected)?;
+        if !remote.joined || remote.reconfiguring.is_some() {
+            return Err(SendPacketError::NotInPlay);
+        }
+        let id = match packet.id.namespace() {
+            "minecraft" => horizon_protocol::ids::play::serverbound::NAMES
+                .iter()
+                .position(|name| *name == packet.id.path()),
+            _ => None,
+        }
+        .ok_or(SendPacketError::UnknownPacket { id: packet.id })?;
+        let packet =
+            S::decode(id as i32, &packet.body).map_err(|_| SendPacketError::InvalidBody)?;
+        if let S::CustomPayload(payload) = &packet
+            && payload.data.len() > quiet::MAX_PAYLOAD
+        {
+            return Err(SendPacketError::PayloadTooLarge {
+                size: payload.data.len() as u64,
+                limit: quiet::MAX_PAYLOAD as u64,
+            });
+        }
+        self.send(packet);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{
+        Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
+    };
+    use super::{SendPacketError, ServerboundPlayPacket, quiet};
+    use horizon_protocol::{buf::Writer, connection::Pipe};
+    use mod_api::Identifier;
+
+    /// A mod's packet goes out only from a joined player, and a custom
+    /// payload only within vanilla's size limit.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_packets_need_a_joined_player_and_a_payload_within_the_limit() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES")
+                .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            ExecutionRole::Client,
+            &Progress::new(),
+            &mut |_, _| unreachable!("no menu handoff"),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = ExecutionRole::Client;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        let payload = |len| {
+            let mut body = Writer::new();
+            body.string("voicechat:request_secret");
+            body.bytes(&vec![0; len]);
+            ServerboundPlayPacket::new(
+                Identifier::parse("minecraft:custom_payload").unwrap(),
+                body.data,
+            )
+        };
+
+        assert!(game.native_send_packet(payload(4)).is_err());
+        let (client, _server) = Pipe::pair();
+        game.connect_local(client, "PacketTest").unwrap();
+        assert!(game.native_send_packet(payload(4)).is_err());
+        game.remote.as_mut().unwrap().joined = true;
+        assert!(game.native_send_packet(payload(4)).is_ok());
+        assert!(game.native_send_packet(payload(quiet::MAX_PAYLOAD)).is_ok());
+        assert!(
+            game.native_send_packet(payload(quiet::MAX_PAYLOAD + 1))
+                .is_err()
+        );
+        let mut pong = Writer::new();
+        pong.i32(7);
+        assert_eq!(
+            game.native_send_packet(ServerboundPlayPacket::new(
+                Identifier::parse("minecraft:pong").unwrap(),
+                pong.data.clone(),
+            )),
+            Ok(())
+        );
+        pong.bytes(&[0]);
+        assert_eq!(
+            game.native_send_packet(ServerboundPlayPacket::new(
+                Identifier::parse("minecraft:pong").unwrap(),
+                pong.data,
+            )),
+            Err(SendPacketError::InvalidBody)
+        );
+        let unknown = Identifier::parse("test:unknown_packet").unwrap();
+        assert_eq!(
+            game.native_send_packet(ServerboundPlayPacket::new(unknown.clone(), Vec::new())),
+            Err(SendPacketError::UnknownPacket { id: unknown })
+        );
     }
 }

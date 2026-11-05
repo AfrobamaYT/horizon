@@ -97,8 +97,7 @@ run at once there, and each must finish within 10 seconds however slowly its byt
 - **A relay** (only if one is configured) sees the IP addresses of the host and the guests, the short
   code's first half, when sessions start and end and the size of encrypted frames. It can't see the
   secret, the key or the game (names, chat, the world). It logs counts every five minutes, nothing else.
-- **Horizon** runs no service for it. The game's anonymous "I'm playing" ping says only whether a
-  LAN or friends world is open, never its address, code or name ([telemetry.md](telemetry.md)).
+- **Horizon** runs no service for it, and the game sends nothing about it ([telemetry.md](telemetry.md)).
 
 ## Identity
 
@@ -161,6 +160,7 @@ Settings, all optional:
 | `PORT` | 7000 | the TCP port (also answers `GET /health` and `GET /whoami`) |
 | `RELAY_BIND` | all addresses | listen on one address only (e.g. a tailnet address) |
 | `RELAY_MAX_HOSTS` | 1000 | short codes at once |
+| `RELAY_MAX_HOSTS_PER_ADDRESS` | 4 | short codes one client address holds at once (IPv6 by /64; a /48 holds 4 times as many); with `RELAY_PER_ADDRESS_LIMITS` |
 | `RELAY_MAX_BRIDGES` | 200 | relayed streams at once |
 | `RELAY_MAX_PENDING_PER_HOST` | 8 | guests joining one host at the same time |
 | `RELAY_MAX_CONNECTIONS` | 4096 | connections open at once, of every kind (more are closed unanswered) |
@@ -169,11 +169,16 @@ Settings, all optional:
 | `RELAY_GLOBAL_UNKNOWN_PER_MIN` | 120 | unknown short codes a minute, all clients together |
 | `RELAY_PER_ADDRESS_LIMITS` | 1 | per-address rate limits (see below) |
 | `RELAY_PROXY_PROTOCOL` | 0 | read the client address from a PROXY protocol v1 line |
+| `RELAY_PROXY_FROM` | none | with `RELAY_PROXY_PROTOCOL=1`, required: the load balancers' addresses or CIDR ranges (`10.0.0.0/8,fd00::/8`). Connections from anywhere else are closed unanswered; the relay refuses to start with the protocol on and this empty |
 
 Fixed limits: per client address (IPv6 by /64), 6 host registrations a minute (burst 3), 12 joins a
 minute (burst 6), 5 unknown short codes in 10 minutes block joins for 10 minutes; a relayed stream idle
 for 120 s is closed (the game's keep-alive sends every 15 s); the first line must be complete within 10 s;
-hosts answer pings within 60 s; five wrong secrets on a short code and the host retires it for a new one.
+hosts answer pings within 60 s; five wrong secrets on a short code and the host retires it for a new one,
+waiting 1 s before registering again, then twice as long for each code it retires (at most 5 minutes);
+after 50 wrong secrets in one sharing session it leaves the relay (the full code still works directly).
+A relayed key exchange that ends without the guest's confirmation counts as a wrong secret, and only as
+many run at once as wrong secrets are left, so a relay gets at most 50 guesses at 20-bit secrets.
 
 ### The relay protocol
 

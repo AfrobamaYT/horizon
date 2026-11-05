@@ -10,6 +10,7 @@
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
 use crate::manifest::Manifest;
+pub use horizon_core::arm_pose::ArmPose;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -313,6 +314,11 @@ struct BlockFile {
     #[serde(default = "yes")]
     item: bool,
     #[serde(default)]
+    open_sound: Option<String>,
+    #[serde(default)]
+    close_sound: Option<String>,
+    block_item: Option<String>,
+    #[serde(default)]
     components: BTreeMap<String, serde_json::Value>,
 }
 fn yes() -> bool {
@@ -338,6 +344,15 @@ pub struct Block {
     pub default_state: BTreeMap<String, String>,
     /// Also add a block item with the same id.
     pub item: bool,
+    /// The sound event a fence gate plays opening, instead of its wood's
+    /// (`WoodType.fenceGateOpen`); needs a `*_fence_gate` template.
+    pub open_sound: Option<String>,
+    /// The sound event a fence gate plays closing (`WoodType.fenceGateClose`).
+    pub close_sound: Option<String>,
+    /// The item this block is, for pick-block and `Block.asItem`, when
+    /// it is not a block item of its own: an item of this mod or a vanilla
+    /// one, checked to exist when the content loads. Needs `item` false.
+    pub block_item: Option<String>,
     /// Its item's component patch, as an [`Item`]'s.
     pub components: BTreeMap<String, serde_json::Value>,
     /// A connecting block (template `minecraft:chorus_plant`, a `PipeBlock`
@@ -424,6 +439,7 @@ struct ItemFile {
     components: BTreeMap<String, serde_json::Value>,
     crafting_remainder: Option<String>,
     block: Option<String>,
+    arm_pose: Option<ArmPose>,
 }
 
 /// An item the mod adds: a vanilla template item's components under a new
@@ -443,6 +459,8 @@ pub struct Item {
     pub crafting_remainder: Option<String>,
     /// The block placed by this item, if any.
     pub block: Option<String>,
+    /// The arm pose a humanoid takes holding it, in place of vanilla's (`ArmPose`).
+    pub arm_pose: Option<ArmPose>,
 }
 
 /// `MobEffectCategory`.
@@ -487,11 +505,30 @@ pub const DYE_COLORS: [&str; 16] = [
 ];
 
 /// the vanilla entity types a mod's type may copy: thrown item
-/// projectiles (`ThrowableItemProjectile`).
-pub const ENTITY_TEMPLATES: [&str; 1] = ["minecraft:snowball"];
+/// projectiles (`ThrowableItemProjectile`), then living mobs
+/// ([`LIVING_TEMPLATES`]).
+pub const ENTITY_TEMPLATES: [&str; 4] = [
+    "minecraft:snowball",
+    "minecraft:villager",
+    "minecraft:wandering_trader",
+    "minecraft:zombie",
+];
 
-/// an entity type the mod adds: a copy of a vanilla template's, thrown
-/// from `item` and drawn as it.
+/// the [`ENTITY_TEMPLATES`] that are living mobs: a type copying one is a mob
+/// of its template's class (NeoForge's `EntityType.Builder.of(Zombie::new,
+/// ...)`), with its own default attributes (`EntityAttributeCreationEvent`).
+/// The wandering trader is the neutral one whose behaviour is all goals,
+/// which a native mod can replace (`register_goals`); a villager's is its
+/// brain.
+pub const LIVING_TEMPLATES: [&str; 3] = [
+    "minecraft:villager",
+    "minecraft:wandering_trader",
+    "minecraft:zombie",
+];
+
+/// an entity type the mod adds: a copy of a vanilla template's. A thrown one
+/// is thrown from `item` and drawn as it; a living one is its template's mob
+/// with other `attributes`.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct EntityType {
@@ -500,11 +537,26 @@ pub struct EntityType {
     pub id: String,
     /// one of [`ENTITY_TEMPLATES`].
     pub template: String,
-    /// one of the mod's own items, which throws it.
-    pub item: String,
-    /// what a hit deals to an entity, as `thrown` damage.
+    /// a thrown type's: one of the mod's own items, which throws it. A
+    /// living type has none.
+    #[serde(default)]
+    pub item: Option<String>,
+    /// a thrown type's: what a hit deals to an entity, as `thrown` damage.
     #[serde(default)]
     pub damage: f32,
+    /// a living type's default attribute values that differ from its
+    /// template's, by attribute id (`minecraft:max_health`): the template's
+    /// own attributes only, checked against its row in `entity-types.json`
+    /// when the content root builds.
+    #[serde(default)]
+    pub attributes: BTreeMap<String, f64>,
+}
+
+impl EntityType {
+    /// whether the type copies a living mob ([`LIVING_TEMPLATES`]).
+    pub fn is_living(&self) -> bool {
+        LIVING_TEMPLATES.contains(&self.template.as_str())
+    }
 }
 
 /// A block entity type declared in code, with the blocks it supports.
@@ -539,7 +591,7 @@ pub struct MenuType {
 /// container (`native_block_entity_container`) may.
 pub const MAX_MENU_SLOTS: u16 = 256;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Source {
     Dir(PathBuf),
     Zip(PathBuf),
@@ -777,11 +829,7 @@ impl Content {
     /// A reader of its content files. A packaged mod's archive is opened
     /// once for all of them (opening it reads its whole index).
     pub fn reader(&self) -> Result<FileReader<'_>, String> {
-        Ok(match &self.source {
-            Source::Dir(root) => FileReader::Dir(root),
-            Source::Zip(path) => FileReader::Zip(Box::new(open_zip(path)?)),
-            Source::Code => FileReader::Dir(Path::new("")),
-        })
+        reader_of(&self.source)
     }
 
     /// Where content may go, and the declarations.
@@ -836,10 +884,14 @@ impl Content {
                 ));
             }
         }
+        // One reader for every declaration: opening a packaged mod reads its
+        // whole index, so a reader per file made loading a big mod quadratic.
+        let source = self.source.clone();
+        let mut reader = reader_of(&source)?;
         let mut ids = BTreeSet::new();
         for (block, name) in blocks {
             let file: BlockFile =
-                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+                serde_json::from_slice(&reader.read(&name)?).map_err(|e| format!("{name}: {e}"))?;
             if file
                 .connects_to
                 .as_ref()
@@ -858,6 +910,9 @@ impl Content {
                 state_properties: file.state_properties,
                 default_state: file.default_state,
                 item: file.item,
+                open_sound: file.open_sound,
+                close_sound: file.close_sound,
+                block_item: file.block_item,
                 components: file.components,
                 connects_to: file
                     .connects_to
@@ -880,7 +935,7 @@ impl Content {
         let mut remainders = Vec::new();
         for (item, name) in items {
             let file: ItemFile =
-                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+                serde_json::from_slice(&reader.read(&name)?).map_err(|e| format!("{name}: {e}"))?;
             let item = Item {
                 id: item,
                 template: file.template,
@@ -889,6 +944,7 @@ impl Content {
                 components: file.components,
                 crafting_remainder: file.crafting_remainder,
                 block: file.block,
+                arm_pose: file.arm_pose,
             };
             check_item(&item).map_err(|e| format!("{name}: {e}"))?;
             if !ids.insert(item.id.clone()) {
@@ -901,7 +957,7 @@ impl Content {
         }
         for (effect, name) in effects {
             let file: MobEffect =
-                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+                serde_json::from_slice(&reader.read(&name)?).map_err(|e| format!("{name}: {e}"))?;
             if file.color > 0xFF_FFFF {
                 return Err(format!("{name}: color is RGB, 0 to 16777215 (0xFFFFFF)"));
             }
@@ -922,7 +978,7 @@ impl Content {
         }
         for (tab, name) in tabs {
             let file: CreativeTabFile =
-                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+                serde_json::from_slice(&reader.read(&name)?).map_err(|e| format!("{name}: {e}"))?;
             let id_like = |s: &str| {
                 s.split_once(':')
                     .is_some_and(|(n, p)| !n.is_empty() && !p.is_empty())
@@ -955,24 +1011,62 @@ impl Content {
         }
         for (kind, name) in types {
             let file: EntityType =
-                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+                serde_json::from_slice(&reader.read(&name)?).map_err(|e| format!("{name}: {e}"))?;
             if !ENTITY_TEMPLATES.contains(&file.template.as_str()) {
                 return Err(format!(
                     "{name}: template {:?} is not one of {ENTITY_TEMPLATES:?}",
                     file.template
                 ));
             }
-            // its own item, so no vanilla item loses its use to it.
-            if !ids.contains(&file.item) {
+            if file.is_living() {
+                // a mob is spawned, not thrown: nothing throws it, and its
+                // attack is its `minecraft:attack_damage`.
+                if file.item.is_some() || file.damage != 0.0 {
+                    return Err(format!(
+                        "{name}: a living type has no item or damage (its template is {})",
+                        file.template
+                    ));
+                }
+                for (attribute, value) in &file.attributes {
+                    let id_like = attribute
+                        .split_once(':')
+                        .is_some_and(|(n, p)| !n.is_empty() && !p.is_empty());
+                    if !id_like {
+                        return Err(format!(
+                            "{name}: attribute {attribute:?} is an attribute id (namespace:path)"
+                        ));
+                    }
+                    if !value.is_finite() {
+                        return Err(format!("{name}: attribute {attribute} is a finite number"));
+                    }
+                }
+                self.entity_types.push(EntityType { id: kind, ..file });
+                continue;
+            }
+            if !file.attributes.is_empty() {
                 return Err(format!(
-                    "{name}: item {:?} is not one of this mod's items",
-                    file.item
+                    "{name}: only a living type has attributes (its template is {})",
+                    file.template
                 ));
             }
-            if self.entity_types.iter().any(|t| t.item == file.item) {
+            let Some(item) = &file.item else {
                 return Err(format!(
-                    "{name}: item {:?} already throws another entity type",
-                    file.item
+                    "{name}: a thrown type names the item that throws it"
+                ));
+            };
+            // its own item, so no vanilla item loses its use to it.
+            if !ids.contains(item) {
+                return Err(format!(
+                    "{name}: item {item:?} is not one of this mod's items"
+                ));
+            }
+            if self
+                .entity_types
+                .iter()
+                .any(|t| t.item.as_ref() == Some(item))
+            {
+                return Err(format!(
+                    "{name}: item {item:?} already throws another entity type"
                 ));
             }
             if !(file.damage.is_finite() && file.damage >= 0.0) {
@@ -982,7 +1076,7 @@ impl Content {
         }
         for (menu, name) in menus {
             let file: MenuType =
-                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+                serde_json::from_slice(&reader.read(&name)?).map_err(|e| format!("{name}: {e}"))?;
             if !(1..=MAX_MENU_SLOTS).contains(&file.slots) || file.data_slots > MAX_MENU_SLOTS {
                 return Err(format!(
                     "{name}: slots is 1 to {MAX_MENU_SLOTS}, data_slots 0 to {MAX_MENU_SLOTS}"
@@ -1201,6 +1295,37 @@ fn check_block(file: &Block) -> Result<(), String> {
     if file.sign_text_glow.is_some() && !sign {
         return Err("sign_text_glow needs a vanilla sign template".into());
     }
+    for (key, sound) in [
+        ("open_sound", &file.open_sound),
+        ("close_sound", &file.close_sound),
+    ] {
+        let Some(sound) = sound else { continue };
+        if !file.template.ends_with("_fence_gate") {
+            return Err(format!(
+                "{key} needs a fence gate template (minecraft:*_fence_gate), not {}",
+                file.template
+            ));
+        }
+        if !namespaced_id(sound) {
+            return Err(format!(
+                "{key} {sound:?} is a sound event id, namespace:path"
+            ));
+        }
+    }
+    if let Some(item) = &file.block_item {
+        if item == "none" {
+            return Err("block_item is an item id; a block with no item is \"item\": false".into());
+        }
+        if file.item {
+            return Err(
+                "block_item is the item this block yields instead of its own, and item is true"
+                    .into(),
+            );
+        }
+        if !namespaced_id(item) {
+            return Err("block_item is an item id, namespace:path".into());
+        }
+    }
     if let Some(wall) = &file.wall_block {
         if !sign || file.template.contains("_wall_") {
             return Err("wall_block needs a standing or ceiling sign template".into());
@@ -1240,6 +1365,11 @@ fn check_sign_walls(blocks: &[&Block]) -> Result<(), String> {
                 "{id}: wall_block {wall} needs a template ending in {form}"
             ));
         }
+        if block.block_item.is_some() {
+            return Err(format!(
+                "{id}: wall_block {wall} has this sign's item, so it declares no block_item"
+            ));
+        }
         if block.item {
             return Err(format!(
                 "{id}: wall_block {wall} has this sign's item, so its own \"item\" is false"
@@ -1263,6 +1393,14 @@ fn check_sign_walls(blocks: &[&Block]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn reader_of(source: &Source) -> Result<FileReader<'_>, String> {
+    Ok(match source {
+        Source::Dir(root) => FileReader::Dir(root),
+        Source::Zip(path) => FileReader::Zip(Box::new(open_zip(path)?)),
+        Source::Code => FileReader::Dir(Path::new("")),
+    })
 }
 
 fn open_zip(path: &Path) -> Result<zip::ZipArchive<std::fs::File>, String> {
@@ -1507,6 +1645,9 @@ capabilities = ["registries"]
                     ..BlockProperties::default()
                 },
                 item: true,
+                open_sound: None,
+                close_sound: None,
+                block_item: None,
                 components: BTreeMap::new(),
                 connects_to: None,
                 thickness: None,
@@ -1571,6 +1712,27 @@ capabilities = ["registries"]
             .map(|i| i.crafting_remainder.as_deref())
             .collect();
         assert_eq!(rests, [Some("minecraft:bowl"), Some("ruby:c_flask"), None]);
+    }
+
+    #[test]
+    fn items_name_an_arm_pose() {
+        let item = |pose: &str| {
+            let text = format!(r#"{{"template": "minecraft:stick", "arm_pose": "{pose}"}}"#);
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/item/a.json", text.as_bytes())];
+            hmod("arm-pose", MANIFEST_TEXT, files)
+        };
+        assert_eq!(
+            item("toot_horn").unwrap().items[0].arm_pose,
+            Some(ArmPose::TootHorn)
+        );
+        let refused = item("bow").unwrap_err();
+        assert!(
+            refused.contains("a.json") && refused.contains("bow"),
+            "{refused}"
+        );
+        let files: &[(&str, &[u8])] = &[("data/ruby/horizon/item/a.json", ITEM)];
+        let plain = hmod("arm-pose", MANIFEST_TEXT, files).unwrap();
+        assert_eq!(plain.items[0].arm_pose, None);
     }
 
     #[test]
@@ -1737,13 +1899,13 @@ capabilities = ["registries"]
         let types: Vec<_> = content
             .entity_types
             .iter()
-            .map(|t| (t.id.as_str(), t.item.as_str(), t.damage))
+            .map(|t| (t.id.as_str(), t.item.as_deref(), t.damage))
             .collect();
         assert_eq!(
             types,
             [
-                ("ruby:bolt", "ruby:gem", 2.5),
-                ("ruby:puff", "ruby:dust", 0.0)
+                ("ruby:bolt", Some("ruby:gem"), 2.5),
+                ("ruby:puff", Some("ruby:dust"), 0.0)
             ]
         );
         let snowball = |rest: &str| format!(r#"{{"template": "minecraft:snowball"{rest}}}"#);
@@ -1773,6 +1935,16 @@ capabilities = ["registries"]
                 snowball(r#", "item": "ruby:gem", "size": 1"#),
                 "unknown field",
             ),
+            (
+                "type-no-item",
+                snowball(""),
+                "names the item that throws it",
+            ),
+            (
+                "type-thrown-attributes",
+                snowball(r#", "item": "ruby:gem", "attributes": {"minecraft:max_health": 4}"#),
+                "only a living type has attributes",
+            ),
         ] {
             let files: &[(&str, &[u8])] = &[
                 ("data/ruby/horizon/item/gem.json", ITEM),
@@ -1789,6 +1961,86 @@ capabilities = ["registries"]
         ];
         let e = hmod("type-shared", MANIFEST_TEXT, files).unwrap_err();
         assert!(e.contains("already throws another entity type"), "{e}");
+    }
+
+    #[test]
+    fn living_entity_types_copy_a_mob_with_their_own_attributes() {
+        let files: &[(&str, &[u8])] = &[
+            (
+                "data/ruby/horizon/entity_type/ghoul.json",
+                br#"{"template": "minecraft:zombie",
+                     "attributes": {"minecraft:max_health": 40, "minecraft:movement_speed": 0.3}}"#,
+            ),
+            (
+                "data/ruby/horizon/entity_type/settler.json",
+                br#"{"template": "minecraft:villager"}"#,
+            ),
+            (
+                "data/ruby/horizon/entity_type/merchant.json",
+                br#"{"template": "minecraft:wandering_trader"}"#,
+            ),
+        ];
+        let content = hmod("living", MANIFEST_TEXT, files).unwrap();
+        let types: Vec<_> = content
+            .entity_types
+            .iter()
+            .map(|t| {
+                let attributes: Vec<_> =
+                    t.attributes.iter().map(|(a, v)| (a.as_str(), *v)).collect();
+                (
+                    t.id.as_str(),
+                    t.template.as_str(),
+                    t.is_living(),
+                    attributes,
+                )
+            })
+            .collect();
+        assert_eq!(
+            types,
+            [
+                (
+                    "ruby:ghoul",
+                    "minecraft:zombie",
+                    true,
+                    vec![
+                        ("minecraft:max_health", 40.0),
+                        ("minecraft:movement_speed", 0.3)
+                    ]
+                ),
+                ("ruby:merchant", "minecraft:wandering_trader", true, vec![]),
+                ("ruby:settler", "minecraft:villager", true, vec![]),
+            ]
+        );
+        let zombie = |rest: &str| format!(r#"{{"template": "minecraft:zombie"{rest}}}"#);
+        for (case, file, why) in [
+            (
+                "living-item",
+                zombie(r#", "item": "ruby:gem""#),
+                "a living type has no item or damage",
+            ),
+            (
+                "living-damage",
+                zombie(r#", "damage": 2"#),
+                "a living type has no item or damage",
+            ),
+            (
+                "living-attribute-id",
+                zombie(r#", "attributes": {"max_health": 40}"#),
+                "is an attribute id",
+            ),
+            (
+                "living-attribute-value",
+                zombie(r#", "attributes": {"minecraft:max_health": "40"}"#),
+                "invalid type",
+            ),
+        ] {
+            let files: &[(&str, &[u8])] = &[
+                ("data/ruby/horizon/item/gem.json", ITEM),
+                ("data/ruby/horizon/entity_type/a.json", file.as_bytes()),
+            ];
+            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            assert!(e.contains(why), "{case}: {e}");
+        }
     }
 
     #[test]
@@ -1940,6 +2192,87 @@ capabilities = ["registries"]
                 format!(r#"{{"template": "minecraft:chorus_plant", "connects_to": "{tag}"}}"#);
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
+        }
+    }
+
+    #[test]
+    fn gate_sounds_need_a_fence_gate_and_sound_ids() {
+        let block = |json: &str| {
+            hmod(
+                "gate",
+                MANIFEST_TEXT,
+                &[("data/ruby/horizon/block/gate.json", json.as_bytes())],
+            )
+        };
+        let parsed = block(
+            r#"{"template": "minecraft:oak_fence_gate", "open_sound": "ruby:gate.open", "close_sound": "minecraft:block.chain.break"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.blocks[0].open_sound.as_deref(),
+            Some("ruby:gate.open")
+        );
+        assert_eq!(
+            parsed.blocks[0].close_sound.as_deref(),
+            Some("minecraft:block.chain.break")
+        );
+        let plain = block(r#"{"template": "minecraft:oak_fence_gate"}"#).unwrap();
+        assert_eq!(
+            (&plain.blocks[0].open_sound, &plain.blocks[0].close_sound),
+            (&None, &None)
+        );
+        for (bad, word) in [
+            (
+                r#"{"template": "minecraft:oak_fence", "open_sound": "ruby:gate.open"}"#,
+                "minecraft:oak_fence",
+            ),
+            (
+                r#"{"template": "minecraft:oak_fence_gate", "close_sound": "gate"}"#,
+                "namespace:path",
+            ),
+        ] {
+            let e = block(bad).unwrap_err();
+            assert!(e.contains(word), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn block_item_names_an_item_and_needs_item_false() {
+        let block = |json: &str| {
+            hmod(
+                "blockitem",
+                MANIFEST_TEXT,
+                &[("data/ruby/horizon/block/slab.json", json.as_bytes())],
+            )
+        };
+        let parsed = block(
+            r#"{"template": "minecraft:stone", "item": false, "block_item": "ruby:slab_item"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.blocks[0].block_item.as_deref(),
+            Some("ruby:slab_item")
+        );
+        assert_eq!(
+            block(r#"{"template": "minecraft:stone"}"#).unwrap().blocks[0].block_item,
+            None
+        );
+        for (bad, word) in [
+            (
+                r#"{"template": "minecraft:stone", "block_item": "ruby:slab_item"}"#,
+                "item is true",
+            ),
+            (
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "none"}"#,
+                "\"item\": false",
+            ),
+            (
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "slab"}"#,
+                "namespace:path",
+            ),
+        ] {
+            let e = block(bad).unwrap_err();
+            assert!(e.contains(word), "{bad}: {e}");
         }
     }
 

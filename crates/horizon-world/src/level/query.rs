@@ -170,6 +170,27 @@ impl crate::block_collision::DynamicCollisionWorld for NoBlockEntities {
     }
 }
 
+/// Block-entity lookups for dynamic shapes, read from the level itself: a
+/// shulker box's lid state decides whether its support shape is the open plate
+/// or the closed full cube (`ShulkerBoxBlock.getBlockSupportShape`).
+struct LevelBlockEntities<'a, L: LevelAccess + ?Sized>(&'a L);
+impl<L: LevelAccess + ?Sized> crate::dynamic_support::DynamicSupportWorld
+    for LevelBlockEntities<'_, L>
+{
+    type Error = std::convert::Infallible;
+    fn shulker_is_closed(&mut self, position: [i32; 3]) -> Result<Option<bool>, Self::Error> {
+        Ok(self
+            .0
+            .shulker_is_closed(BlockPos::new(position[0], position[1], position[2])))
+    }
+    fn moving_piston_shape(
+        &mut self,
+        _position: [i32; 3],
+    ) -> Result<Option<VoxelShape>, Self::Error> {
+        Ok(None)
+    }
+}
+
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// Shape queries over `getCollisionShape(level, pos)`, including the
     /// position-dependent shapes (bamboo, speleothems, shulker boxes).
@@ -192,38 +213,26 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `Block.canSupportRigidBlock(level, below)`.
     pub fn can_support_rigid_block(&self, pos: BlockPos) -> bool {
-        if let Some(rigid) = self.moving_block_supports(pos, Direction::Up, SupportType::Rigid) {
-            return rigid;
-        }
-        self.b
-            .is_face_sturdy_rigid(self.support_state(pos), Direction::Up)
+        self.signals().can_support_rigid_block(pos)
     }
     /// `Block.canSupportCenter(level, pos, direction)`.
     pub fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
-        let state = self.support_state(pos);
-        if direction == Direction::Down && self.b.in_set(state, &self.b.tags.unstable_bottom_center)
-        {
-            return false;
-        }
-        if let Some(center) = self.moving_block_supports(pos, direction, SupportType::Center) {
-            return center;
-        }
-        self.b.is_face_sturdy_center(state, direction)
+        self.signals().can_support_center(pos, direction)
     }
     pub fn is_empty_block(&self, pos: BlockPos) -> bool {
-        self.b.is_air(self.state(pos))
+        self.signals().is_empty_block(pos)
     }
     /// `LevelReader.isWaterAt`: the fluid at `pos` is in the water tag.
     pub fn is_water_at(&self, pos: BlockPos) -> bool {
-        self.b.is_water_fluid(self.fluid_at(pos).kind())
+        self.signals().is_water_at(pos)
     }
     /// `Level.getRawBrightness(pos, darken)`.
     pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
-        super::raw_brightness(self.level, pos, darken)
+        self.signals().raw_brightness(pos, darken)
     }
     /// `LevelReader.getMaxLocalRawBrightness(pos)`.
     pub fn max_local_raw_brightness(&self, pos: BlockPos) -> i32 {
-        self.raw_brightness(pos, self.level.sky_darken())
+        self.signals().max_local_raw_brightness(pos)
     }
     pub(crate) fn below_state(&self, pos: BlockPos) -> BlockStateId {
         self.state(below(pos))
@@ -258,6 +267,15 @@ impl<L: LevelAccess + ?Sized> Signals<'_, L> {
                         .b
                         .table
                         .set_bool(piston.moved_state, self.b.props.extended, true);
+                }
+                // The same method for any other moving block: its collision shape
+                // is `movedState.getCollisionShape(..).move(dir * extendedProgress)`,
+                // and `getExtendedProgress` is 0 once progress reaches 1.0, so a
+                // finished-but-not-yet-placed block supports like itself (a wall
+                // coral fan keeps its slime block while the column lands). At 0 or
+                // 0.5 progress the shape is shifted off the cell, a face never full.
+                if !piston.source && piston.progress >= 1.0 {
+                    return piston.moved_state;
                 }
             }
         }
@@ -296,11 +314,81 @@ impl<L: LevelAccess + ?Sized> Signals<'_, L> {
         let shape = self.moving_block_shape(pos)?;
         Some(support.is_supporting(&shape, direction).unwrap_or(false))
     }
+    /// `ShulkerBoxBlock.getBlockSupportShape` at `pos`: vanilla asks the block
+    /// entity because a shulker box's shape is dynamic, so an open box gives
+    /// support only through its one-pixel plate opposite `facing`, where the
+    /// exported facts see a closed full cube. None for every other block.
+    fn shulker_support(
+        &self,
+        pos: BlockPos,
+        direction: Direction,
+        support: SupportType,
+    ) -> Option<bool> {
+        let state = self.state(pos);
+        if !self
+            .b
+            .tags
+            .shulker_boxes
+            .contains(self.b.table.block(state))
+        {
+            return None;
+        }
+        let mut world = LevelBlockEntities(self.level);
+        self.b
+            .dynamic
+            .get(&state)?
+            .is_face_sturdy(&mut world, [pos.x, pos.y, pos.z], direction, support)
+            .ok()
+    }
     pub fn sturdy(&self, pos: BlockPos, direction: Direction) -> bool {
         if let Some(sturdy) = self.moving_block_supports(pos, direction, SupportType::Full) {
             return sturdy;
         }
+        if let Some(sturdy) = self.shulker_support(pos, direction, SupportType::Full) {
+            return sturdy;
+        }
         self.b.is_face_sturdy(self.support_state(pos), direction)
+    }
+    /// `Block.canSupportRigidBlock(level, below)`.
+    pub fn can_support_rigid_block(&self, pos: BlockPos) -> bool {
+        if let Some(rigid) = self.moving_block_supports(pos, Direction::Up, SupportType::Rigid) {
+            return rigid;
+        }
+        if let Some(rigid) = self.shulker_support(pos, Direction::Up, SupportType::Rigid) {
+            return rigid;
+        }
+        self.b
+            .is_face_sturdy_rigid(self.support_state(pos), Direction::Up)
+    }
+    /// `Block.canSupportCenter(level, pos, direction)`.
+    pub fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
+        let state = self.support_state(pos);
+        if direction == Direction::Down && self.b.in_set(state, &self.b.tags.unstable_bottom_center)
+        {
+            return false;
+        }
+        if let Some(center) = self.moving_block_supports(pos, direction, SupportType::Center) {
+            return center;
+        }
+        if let Some(center) = self.shulker_support(pos, direction, SupportType::Center) {
+            return center;
+        }
+        self.b.is_face_sturdy_center(state, direction)
+    }
+    pub fn is_empty_block(&self, pos: BlockPos) -> bool {
+        self.b.is_air(self.state(pos))
+    }
+    /// `LevelReader.isWaterAt`: the fluid at `pos` is in the water tag.
+    pub fn is_water_at(&self, pos: BlockPos) -> bool {
+        self.b.is_water_fluid(self.b.fluid(self.state(pos)).kind())
+    }
+    /// `Level.getRawBrightness(pos, darken)`.
+    pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
+        super::raw_brightness(self.level, pos, darken)
+    }
+    /// `LevelReader.getMaxLocalRawBrightness(pos)`.
+    pub fn max_local_raw_brightness(&self, pos: BlockPos) -> i32 {
+        self.raw_brightness(pos, self.level.sky_darken())
     }
     pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
         self.b.has_flag(state, state_flags::CONDUCTOR)
@@ -312,18 +400,6 @@ impl<L: LevelAccess + ?Sized> Signals<'_, L> {
 
 /// `Sim` reads these through its [`Signals`], so there is one implementation of each.
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
-    pub(super) fn support_state(&self, pos: BlockPos) -> BlockStateId {
-        self.signals().support_state(pos)
-    }
-    fn moving_block_supports(
-        &self,
-        pos: BlockPos,
-        direction: Direction,
-        support: SupportType,
-    ) -> Option<bool> {
-        self.signals()
-            .moving_block_supports(pos, direction, support)
-    }
     pub fn sturdy(&self, pos: BlockPos, direction: Direction) -> bool {
         self.signals().sturdy(pos, direction)
     }

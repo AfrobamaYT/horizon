@@ -1,10 +1,9 @@
 # The registry index and `.hpack`
 
 Horizon's registry lists what is made for Horizon and reviewed: content mods (`.hmod`), native mods (`.hmod`,
-[native mods](../how-to/native-mods.md)), modpacks (`.hpack`), resource packs and Horizon shader packs (`.hshader`,
+[native mods](../how-to/native-mods.md)), modpacks (`.hpack`), resource packs, data packs, shaders-folder packs and Horizon shader packs (`.hshader`,
 [shaders.md](../../../shaders.md)). A project is listed by a reviewed pull request in
-[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) that links its GitHub repository; its versions are
-the repository's GitHub releases, read and checked by the registry's CI with no pull request and no review per version. The launcher and the
+[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods); new versions are submitted as files and pinned by SHA-256. Legacy entries may still follow their repositories. The launcher and the
 website read one file, `index.json`, which that repository's CI builds. The Rust types and every check below are
 `horizon_mods::index` and `horizon_mods::modpack` (feature `index`); the sample is
 `crates/horizon-mods/tests/index/index-v1.json`, read by the tests with the files it lists.
@@ -21,6 +20,7 @@ Level: preview ([API stability](../../../api/stability.md)). Schema 1.
     "id": "coords_hud", "kind": "mod", "name": "Coordinates HUD", "summary": "One line.",
     "description": "Markdown.", "authors": ["Horizon"], "owners": ["ludovic111"],
     "license": "MIT", "source": "https://github.com/...", "icon": "https://...png", "key": "RWT...", "downloads": 1234,
+    "categories": ["utility"], "tags": ["hud"], "screenshots": ["https://...png"],
     "versions": [{
       "version": "0.1.0", "published": "2026-10-24", "changelog": "",
       "api": "0.2", "side": "client", "capabilities": ["registries"], "game": "26.3",
@@ -36,11 +36,14 @@ Level: preview ([API stability](../../../api/stability.md)). Schema 1.
 | --- | --- |
 | `schema` | 1. A reader refuses a higher number with "update Horizon" rather than misread it. |
 | `projects[].id` | `[a-z0-9_]{1,64}`, unique; a mod's is its manifest's `id`. |
-| `kind` | `mod` (content), `native-mod`, `modpack`, `resourcepack`, `shader` (Horizon's own shader packs, not Iris or OptiFine packs). Other kinds (data packs, worlds, themes) may come without a new schema: a reader keeps a kind it doesn't know and doesn't offer it. |
+| `kind` | `mod` (content), `native-mod`, `modpack`, `resourcepack`, `shader` (Horizon `.hshader`), `shaderpack` (a `shaders/`-folder zip), `datapack` (a data-pack zip). Other kinds (worlds, themes) may come without a new schema: a reader keeps a kind it doesn't know and doesn't offer it. |
 | `summary`, `description` | One line for lists; Markdown for the project's page. |
 | `owners` | GitHub logins allowed to publish updates. |
 | `license`, `source` | An SPDX expression and an `https://` address of the source code: both required. |
 | `icon` | `https://`, optional. |
+| `categories` | Up to 3 from the kind’s category list. |
+| `tags` | Up to 10 lowercase tags. |
+| `screenshots` | Up to 8 HTTPS PNG or JPEG addresses. |
 | `key` | The author's [minisign](https://jedisct1.github.io/minisign/) public key. When set, every version must be signed with it; an update signed with another key is refused. Absent: the project is unsigned and the launcher says so. |
 | `versions` | Newest first, at least one. |
 | `downloads` | How many times its files were downloaded, every version together: GitHub's count of each release asset, summed by the publish job, which runs every hour. Absent until a file is downloaded. Read-only: never in an entry. |
@@ -96,18 +99,21 @@ them into the profile's game folder.
 ## The registry repository
 
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) holds one `mods/<id>.toml` per project and
-`revoked.toml`. An entry is **a link and a page**: the project's GitHub repository and what the listing says about it.
-Its versions are the repository's GitHub releases. What an entry can't vouch for is read from the file by the kind's own
+`revoked.toml`. An entry is **a page and its pinned versions**: new versions are submitted as files and checked. Legacy entries may name a repository whose releases are read as below; new repository-following entries are refused. What an entry can't vouch for is read from the file by the kind's own
 check (`index::inspect`): a mod's API, side and capabilities, a modpack's mods, the size. Types and rules:
 `horizon_mods::index::registry`.
 
 ```toml
 id = "coords_hud"                # the file's name, and the manifest's id
-kind = "mod"                     # mod | native-mod | modpack | resourcepack | shader
+kind = "mod"                     # mod | native-mod | modpack | resourcepack | shader | shaderpack | datapack
 repo = "horizon-rust/coords-hud" # GitHub owner/name: its releases are its versions
 owners = ["ludovic111"]          # GitHub logins responsible for the project
+owner_ids = [12345678]           # their numeric GitHub IDs: these decide who an owner is (a login can change hands)
 key = "RWT..."                   # optional: the minisign public key every version is signed with
-icon = "icons/coords_hud.png"    # optional: a PNG of at most 256 KiB in the repository, or https://
+icon = "icons/coords_hud.png"    # optional: square PNG, 64–1024 pixels, at most 256 KiB, or https://
+categories = ["utility"]         # up to 3 from the kind’s list
+tags = ["hud", "coordinates"]    # up to 10 lowercase tags
+screenshots = ["screenshots/coords_hud/1.png"] # up to 8 PNG/JPEG files, or https://
 # The page. Each field may instead come from horizon-registry.toml in the repo (below); these win.
 name = "Coordinates HUD"
 summary = "One line, at most 160 characters."
@@ -117,7 +123,7 @@ license = "MIT"
 # source defaults to https://github.com/<repo>
 ```
 
-**Versions come from the releases.** For each entry with a `repo`, the registry's CI lists its GitHub releases (drafts
+**Legacy: versions from releases.** For each entry with a `repo`, the registry's CI lists its GitHub releases (drafts
 and pre-releases are skipped) and, for each release it has not read yet, downloads the asset with the kind's extension
 (and its `<name>.minisig` when the project has a key), runs the checks of a submission (below), and if they pass
 adds the version. The version, the game and the pins are the file's own manifest (`horizon-mod.toml`
@@ -134,8 +140,7 @@ does: a release deleted or an asset replaced later does not change the index (th
 `description`, `authors` and `license` (unknown keys, and anything about owners, key, kind or icon, are refused): they fill the
 page fields the entry leaves out. A listing that is incomplete without it is refused until it is.
 
-**`[[versions]]` in an entry are optional** and kept for projects listed before releases were read, and for Horizon's own
-mods built in the registry (`native/<name>/`):
+**`[[versions]]`** hold submitted versions, including Horizon's own mods built in the registry (`native/<name>/`):
 
 ```toml
 [[versions]]                     # newest first
@@ -159,17 +164,14 @@ reason = "Sent chat messages it didn't declare."
 date = "2026-10-24"
 ```
 
-Who reviews what: **a project is reviewed when it is listed** (the pull request that adds its entry: the
-repository, its source, the page, the owners), and again if its `repo`, owners or key change. **Later releases are
-checked automatically, not reviewed by a person**; `revoked.toml` takes a bad one down. A signing `key` makes a stolen
-repository or account useless for publishing an update.
+A project is reviewed when it is listed. New versions are checked and reviewed, except an unchanged page's qualifying owner update as described below. Legacy repository-following entries keep their existing release process. `revoked.toml` takes a bad version down.
 
-The submission form's service (`crates/horizon-mod-registry`) lists a new project: it signs the creator in with GitHub,
-reads the repository's address and the page, and opens the pull request. It no longer takes updates for a project listed
-with a `repo`: "publish a GitHub release in <repo>". Projects without a `repo` can still be updated through the form
+The submission form's service (`crates/horizon-mod-registry`) signs the creator in with GitHub, accepts the page and version file, and opens a pull request. It does not take updates for a legacy project listed with a `repo`: "publish a GitHub release in <repo>". Projects without a `repo` can be updated through the form
 (it uploads the file to the repository's `staging` release as `<sha256>.<extension>` and opens a pull request; an
-owner's update with nothing else changed is merged by `owner-update` once the checks pass). A project's kind never
-changes. A submission that GitHub broke off after
+owner's update with nothing else changed is merged by `owner-update` once the checks pass; only an owner whose numeric
+GitHub ID is in `owner_ids` gets that, and an entry without `owner_ids` matches its owners by login and always waits for
+a reviewer). The registry's deployment contract is [owner-update-v2.md](https://github.com/arismoko/horizon/blob/main/docs/api/owner-update-v2.md).
+A project's kind never changes. A submission that GitHub broke off after
 making its `submit/<id>-<version>` branch can be sent again: the same account's retry starts that branch again from
 `main` while it has no open pull request; anyone else's is refused.
 
@@ -200,11 +202,10 @@ How the repository runs (its workflows are in `.github/workflows/`):
 - **Taking a file down** is a pull request adding it to `revoked.toml`. Removing an entry outright (a test, a project
   nobody installed) fails `registry review` on purpose and needs an administrator's merge.
 
-Kinds open to submissions: `mod` (content only), `native-mod`, `modpack`, `resourcepack`, `shader`. A shader pack (`.hshader`) passes
+Kinds open to submissions: `mod` (content only), `native-mod`, `modpack`, `resourcepack`, `shader`, `shaderpack`, `datapack`. A data pack contains `pack.mcmeta` and `data/`; a shaderpack contains `shaders/` and requires redistribution permission. A Horizon shader pack (`.hshader`) passes
 `horizon_shader_api::check`, the check the game runs before it loads one (`horizon-shader check`, [shaders.md](../../../shaders.md)):
 every stage validated by naga and translated for Vulkan, Metal and DirectX 12; its manifest's id, version and shader
-API line are its facts. Iris and OptiFine packs are for the Modrinth browser. A new kind gets its own check before it
-opens.
+API line are its facts. A new kind gets its own check before it opens.
 
 ## Changelog
 

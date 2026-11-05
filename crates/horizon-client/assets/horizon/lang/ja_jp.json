@@ -10,7 +10,6 @@
   "horizon.options.move_deadzone": "移動のデッドゾーン",
   "horizon.options.look_deadzone": "視点のデッドゾーン",
   "horizon.options.button_glyphs": "ボタンのグリフ",
-  "horizon.options.menu_navigation": "メニューナビゲーション",
   "horizon.options.on_screen_keyboard": "オンスクリーンキーボード",
   "horizon.options.chat_delay": "チャットの遅延",
   "horizon.options.lightbar.health": "健康",
@@ -18,8 +17,6 @@
   "horizon.options.glyphs.auto": "自動",
   "horizon.options.glyphs.playstation": "プレイステーション",
   "horizon.options.glyphs.nintendo": "任天堂",
-  "horizon.options.menu_focus": "フォーカス",
-  "horizon.options.menu_pointer": "ポインタ",
   "horizon.options.keyboard.auto": "自動",
   "horizon.options.keyboard.steam": "蒸気",
   "horizon.options.unavailable": "この機能は Horizon ではまだ利用できません。",
@@ -483,15 +480,5 @@
   "horizon.pack.filter.x16": "16倍",
   "horizon.pack.filter.x32": "32倍",
   "horizon.pack.filter.x64": "64倍",
-  "horizon.pack.addFailed": "パックを追加できませんでした: %s",
-  "horizon.extras.header.cosmetics": "化粧品",
-  "horizon.extras.cosmetics_mine": "私の化粧品",
-  "horizon.extras.cosmetics_mine.tooltip": "非表示: すべての Horizon プレイヤーは、あなたも含め、化粧品を着用していないあなたを見ます。ランチャーのワードローブと同じスイッチ。",
-  "horizon.extras.cosmetics_others": "他のプレイヤーの化粧品",
-  "horizon.extras.cosmetics_others.tooltip": "他の Horizon プレイヤーが着ているもの: すべて、名札のスタイルのみ、または何も着ていません。隠されていますが、ゲームでは彼らが何を着ているかは尋ねられません。",
-  "horizon.extras.cosmetics_auras": "他人のオーラと軌跡",
-  "horizon.extras.cosmetics_auras.tooltip": "他のプレイヤーが身に着けているオーラと軌跡。デフォルトではオフです。",
-  "horizon.extras.cosmetics.shown": "示されている",
-  "horizon.extras.cosmetics.hidden": "隠された",
-  "horizon.extras.cosmetics.name_tags": "ネームタグのみ"
+  "horizon.pack.addFailed": "パックを追加できませんでした: %s"
 }

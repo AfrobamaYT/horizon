@@ -179,6 +179,8 @@ pub struct ItemInfo {
     pub modifiers: Vec<crate::item_data::ModifierRow>,
     /// `blocks_attacks` (shields).
     pub blocks_attacks: Option<BlocksAttacks>,
+    /// The arm pose a mod item declares for a humanoid holding it (`arm_pose`).
+    pub arm_pose: Option<horizon_core::arm_pose::ArmPose>,
     /// `weapon.disable_blocking_for_seconds` (axes).
     pub disable_blocking_seconds: f32,
     /// `weapon.item_damage_per_attack`, when the item is a weapon.
@@ -233,6 +235,8 @@ pub const CRAFT_REMAINDERS: [(&str, &str); 5] = [
 /// In a root built by `mod_content::build`: the content mods' items' crafting
 /// remainders, by item. Other roots have none.
 pub const MOD_CRAFT_REMAINDERS: &str = "horizon-mod-craft-remainders.json";
+/// The mod items' declared arm poses (`arm_pose`): item id to the pose's name.
+pub const MOD_ITEM_ARM_POSES: &str = "horizon-mod-item-arm-poses.json";
 /// Explicit item-to-block mappings from content mods (not block drops).
 pub const MOD_ITEM_BLOCKS: &str = "horizon-mod-item-blocks.json";
 /// A reduction of `blocks_attacks.damage_reductions`.
@@ -367,6 +371,9 @@ thread_local! {
 #[derive(Clone)]
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
+    /// Default `minecraft:mob_visibility` by item id, with the `equippable`
+    /// slot it applies in (`LivingEntity.getVisibilityPercent`).
+    mob_visibility: HashMap<Arc<str>, (String, MobVisibility)>,
     pub order: Vec<Arc<str>>,
     /// The same items in item registry (network id) order, as vanilla lists
     /// them; sorted by name when the registry export is missing.
@@ -613,6 +620,56 @@ fn entity_spec(tags: &HashMap<String, HashSet<String>>, spec: &str) -> HashSet<S
         None => HashSet::from([spec.to_owned()]),
     }
 }
+/// `MobVisibility`: entity types a worn item hides its wearer from, and the
+/// factor `LivingEntity.getVisibilityPercent` multiplies by.
+#[derive(Clone, Debug)]
+pub struct MobVisibility {
+    pub targeting: HashSet<String>,
+    pub visibility: f32,
+}
+/// `minecraft:mob_visibility` (`targeting_entity_types` is one id, a `#tag`,
+/// or a list) when the object is present and names at least one type.
+fn parse_mob_visibility(
+    v: &Value,
+    tags: &HashMap<String, HashSet<String>>,
+) -> Option<MobVisibility> {
+    if !v.is_object() {
+        return None;
+    }
+    let visibility = v.get("visibility")?.as_f64()? as f32;
+    let targeting = match v.get("targeting_entity_types")? {
+        Value::String(spec) => entity_spec(tags, spec),
+        Value::Array(list) => list
+            .iter()
+            .filter_map(Value::as_str)
+            .flat_map(|spec| entity_spec(tags, spec))
+            .collect(),
+        _ => return None,
+    };
+    if targeting.is_empty() {
+        return None;
+    }
+    Some(MobVisibility {
+        targeting,
+        visibility,
+    })
+}
+/// The item's `equippable.slot` and `mob_visibility`, when both are set.
+/// `getVisibilityPercent` multiplies only when the stack is in that slot.
+fn worn_mob_visibility(
+    components: &Value,
+    tags: &HashMap<String, HashSet<String>>,
+) -> Option<(String, MobVisibility)> {
+    let slot = components
+        .get("minecraft:equippable")?
+        .get("slot")?
+        .as_str()?
+        .to_owned();
+    Some((
+        slot,
+        parse_mob_visibility(components.get("minecraft:mob_visibility")?, tags)?,
+    ))
+}
 /// Every item of the last item registry loaded with its `villager_food`
 /// nutrition (0 without the component): what the mobs' villagers read, since
 /// a mob does not hold the registry (`None` until one is loaded).
@@ -747,8 +804,17 @@ impl Items {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
             Err(e) => return Err(format!("{}: {e}", path.display()).into()),
         };
+        let path = root.join(MOD_ITEM_ARM_POSES);
+        let mod_arm_poses: HashMap<String, horizon_core::arm_pose::ArmPose> =
+            match fs::read(&path) {
+                Ok(bytes) => serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("{}: {e}", path.display()))?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+                Err(e) => return Err(format!("{}: {e}", path.display()).into()),
+            };
         let mut items = HashMap::new();
         let mut order = Vec::new();
+        let mut mob_visibility = HashMap::new();
         for (name, c) in defaults.entries() {
             let id: Arc<str> = Arc::from(name.as_str());
             let tool = c["minecraft:tool"]["rules"]
@@ -910,6 +976,7 @@ impl Items {
                         .as_bool()
                         .unwrap_or(true),
                     blocks_attacks: BlocksAttacks::parse(&c["minecraft:blocks_attacks"]),
+                    arm_pose: mod_arm_poses.get(name).copied(),
                     disable_blocking_seconds: c["minecraft:weapon"]["disable_blocking_for_seconds"]
                         .as_f64()
                         .unwrap_or(0.0) as f32,
@@ -954,6 +1021,9 @@ impl Items {
                     attack_speed: modifier("minecraft:attack_speed"),
                 },
             );
+            if let Some(parsed) = worn_mob_visibility(c, &entity_tags) {
+                mob_visibility.insert(id.clone(), parsed);
+            }
             order.push(id);
         }
         // Every loot table, keyed by its id (blocks/stone, entities/sheep/white,
@@ -965,6 +1035,7 @@ impl Items {
         set_villager_food(&items);
         Ok(Self {
             items,
+            mob_visibility,
             order,
             registry_order,
             block_tags: load_tags(root, "block", overlay)?,
@@ -989,6 +1060,25 @@ impl Items {
     pub fn get(&self, id: &str) -> Option<&ItemInfo> {
         self.items.get(id)
     }
+    /// `ItemStack.get(DataComponents.MOB_VISIBILITY).visibility()` when the
+    /// prototype's equippable slot is `slot` and `targeting` is in
+    /// `targetingEntityTypes`. None otherwise (`getVisibilityPercent` skips it).
+    pub fn worn_visibility(&self, item: &str, slot: &str, targeting: &str) -> Option<f32> {
+        let (equip, vis) = self.mob_visibility.get(item)?;
+        if equip == slot && vis.targeting.contains(targeting) {
+            Some(vis.visibility)
+        } else {
+            None
+        }
+    }
+    /// Record one prototype's `equippable` and `mob_visibility` the way `load`
+    /// reads them from the default-component report.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn insert_mob_visibility_component(&mut self, id: &str, components: &Value) {
+        if let Some(parsed) = worn_mob_visibility(components, &HashMap::new()) {
+            self.mob_visibility.insert(Arc::from(id), parsed);
+        }
+    }
     /// The instrument a goat horn plays: its `instrument` component's
     /// registry entry or inline instrument.
     pub fn instrument(&self, stack: &ItemStack) -> Option<Instrument> {
@@ -1005,6 +1095,7 @@ impl Items {
     pub fn tags_only(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
         Ok(Self {
             items: HashMap::new(),
+            mob_visibility: HashMap::new(),
             order: Vec::new(),
             registry_order: Vec::new(),
             block_tags: load_tags(root, "block", overlay)?,
@@ -1026,6 +1117,7 @@ impl Items {
     pub fn for_tests(item_tags: HashMap<String, HashSet<String>>) -> Self {
         Self {
             items: HashMap::new(),
+            mob_visibility: HashMap::new(),
             order: Vec::new(),
             registry_order: Vec::new(),
             block_tags: HashMap::new(),

@@ -95,6 +95,7 @@ impl Game<'_> {
             self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
         }
         if !lit {
+            self.sleep_idle_campfire(pos, false);
             return Ok(());
         }
         let Some(BlockEntity::Campfire(c)) = self.world.block_entities.get_mut(&pos) else {
@@ -102,9 +103,8 @@ impl Game<'_> {
         };
         let done = c.cook_tick();
         for (_, item) in done {
-            let result = self
-                .res
-                .recipes()
+            // The world's table, as placing the item (`self.recipes()`) asked.
+            let result = world_recipes!(self)
                 .cook(&self.loop_context, KIND, &item)
                 .map_or_else(|| item.clone(), |r| r.result.clone());
             self.native_block_cook([pos.0, pos.1, pos.2], &item.item, &result.item);
@@ -117,7 +117,15 @@ impl Game<'_> {
                 Some(state),
             );
         }
+        self.sleep_idle_campfire(pos, true);
         Ok(())
+    }
+
+    fn sleep_idle_campfire(&mut self, pos: Pos, lit: bool) {
+        if matches!(self.world.block_entities.get(&pos), Some(BlockEntity::Campfire(c)) if c.idle(lit))
+        {
+            self.world.block_entities.sleep(pos);
+        }
     }
 
     /// `CampfireRenderer`: each cooking item lies on the fire, slot `i`

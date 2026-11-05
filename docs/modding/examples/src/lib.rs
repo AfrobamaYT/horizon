@@ -34,3 +34,43 @@ fn count(host: &mut dyn ServerHost) -> Result<(), AttachmentError> {
     COUNTER.set(host, Holder::Level, old + 1)
 }
 // ANCHOR_END: count
+
+// ANCHOR: menu_quick_move
+/// Shift-click a slot in the local player's current menu.
+pub fn quick_move(host: &mut dyn mod_api::ClientHost, slot: usize) -> bool {
+    let Some(menu) = host
+        .local_player()
+        .and_then(|player| player.container_menu(host))
+    else {
+        return false;
+    };
+    menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])
+}
+// ANCHOR_END: menu_quick_move
+
+/// The same counter as a point injection: `trait_method = "tick"` at the head of
+/// `Game::tick`, listened to by the mod's `impl Points` (from `horizon-mod-points`).
+pub mod at_a_point {
+    use super::count;
+    use mod_api::{Hooks, HostSide};
+    use mod_points::{Points, TickArgs};
+
+    #[derive(Default)]
+    struct Mod;
+
+    // ANCHOR: points
+    #[mod_api::horizon_mod]
+    impl Points for Mod {
+        fn tick(&self, host: HostSide<'_>, _: &mut TickArgs) {
+            // `tick` is a point on both sides; the counter lives on the server's level.
+            if let HostSide::Server(host) = host {
+                let _ = count(host);
+            }
+        }
+    }
+
+    // The same type is the mod's `Hooks`: the game finds its listeners through it.
+    #[mod_api::horizon_mod]
+    impl Hooks for Mod {}
+    // ANCHOR_END: points
+}

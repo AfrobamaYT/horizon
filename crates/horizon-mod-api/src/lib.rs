@@ -97,13 +97,20 @@ pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, OwningLoad, OwningLoop,
     PackageInfo, PackageKind, RegistrationContext,
 };
+mod criteria;
+pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
+mod packets;
+pub use packets::{SendPacketError, ServerboundPlayPacket};
+mod scene;
+pub use block_sprites::BlockFaceTexture;
+pub use scene::{NativeSceneBlock, NativeSceneView, SceneBlockEntity};
 mod config_files;
 pub use config_files::{
     CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
     ConfigPath, ConfigStat,
 };
 mod tooltip_element;
-pub use tooltip_element::{TooltipElement, TooltipImage};
+pub use tooltip_element::{TooltipElement, TooltipImage, TooltipPlace};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
@@ -149,7 +156,7 @@ pub use crate::health::DamageContainer;
 pub use crate::health::{HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
-pub use crate::menu::{LogicalSide, StackedOnOther};
+pub use crate::menu::{DragKind, LogicalSide, MenuClick, MouseButton, StackedOnOther, SwapWith};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::mobs::PathComputationType;
@@ -171,7 +178,25 @@ pub use horizon_client_core::suggestion::Suggestion;
 pub use horizon_client_core::text::Text;
 #[horizon_mod_api_macros::wasm(via = (u64, Option<f64>))]
 pub use horizon_core::random::LegacyRandom;
-pub use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
+pub use horizon_core::{
+    arm_pose::ArmPose, geometry::Direction, position::BlockPos, random::RandomSource,
+};
+/// The family of a client notification entering the toast queue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ToastKind {
+    /// An advancement completed by the local player.
+    Advancement,
+    /// Newly unlocked recipe displays.
+    Recipe,
+    /// A tutorial hint, including its progress indicator.
+    Tutorial,
+    /// A system notice, such as narrator status, backups or pack downloads.
+    System,
+    /// A toast without one of the above families, including now-playing music.
+    Other,
+}
+
 /// The registry facts a recipe viewer needs for an enchantment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -213,7 +238,8 @@ pub use horizon_world::{
         AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
     level::{
-        BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
+        BlockId, ConnectionKind, Dimension as LevelDimension, LandingWrite, NeighbourUpdate,
+        PlacementContext,
     },
     loot::{LootStack, NativeLootContext},
     registry::BlockStateId,
@@ -307,6 +333,44 @@ pub struct NativeKeyMapping {
     pub down: bool,
     /// The name of the key it is bound to, as Controls shows it (`KeyMapping.getTranslatedKeyMessage`).
     pub label: Text,
+}
+
+/// The metadata of a server play packet observed by `Hooks::client_packet`.
+///
+/// Fields beyond the type id are exposed only for custom payloads. This is
+/// plain mod API data, not the game's decoded protocol enum.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ClientPacket {
+    /// The protocol type, such as `minecraft:ping` or `minecraft:custom_payload`.
+    /// An id outside the protocol's packet table is reported as `horizon:unknown`.
+    pub id: Identifier,
+    /// The channel and bytes of a custom payload; `None` for other packet types.
+    pub custom_payload: Option<ClientPayload>,
+}
+
+impl ClientPacket {
+    /// Construct packet metadata with an optional custom payload.
+    pub fn new(id: Identifier, custom_payload: Option<ClientPayload>) -> Self {
+        Self { id, custom_payload }
+    }
+}
+
+/// The channel and uninterpreted bytes of a server custom payload.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ClientPayload {
+    /// The namespaced plugin channel, exactly as received.
+    pub channel: String,
+    /// The payload bytes, without the packet id or channel prefix.
+    pub data: Vec<u8>,
+}
+
+impl ClientPayload {
+    /// Construct a custom payload without interpreting its bytes.
+    pub fn new(channel: String, data: Vec<u8>) -> Self {
+        Self { channel, data }
+    }
 }
 
 /// Camera values from the most recently extracted world frame.
@@ -645,6 +709,10 @@ pub enum SoundSource {
 }
 
 impl SoundSource {
+    /// Its position in vanilla's `SoundSource` order, as the network sends it.
+    pub fn index(self) -> usize {
+        self as usize
+    }
     /// Every source, in vanilla's order (`SoundSource.values()`).
     pub const ALL: [SoundSource; 11] = [
         Self::Master,
@@ -689,12 +757,61 @@ pub struct SoundPlay {
     pub position: [f64; 3],
     /// It restarts when it ends.
     pub looping: bool,
-    /// Ticks to wait before it starts.
+    /// Ticks between a looping sound's repeats (`SoundInstance.getDelay`): 0 loops it
+    /// seamlessly, more plays it again that many ticks after it ends.
     pub delay: i32,
     /// How it fades with distance.
     pub attenuation: SoundAttenuation,
     /// It plays at the listener, wherever they move.
     pub relative: bool,
+}
+impl SoundPlay {
+    /// Sound event `identifier` at the listener, not fading with distance, on the interface
+    /// source at volume and pitch 1 (`SimpleSoundInstance.forUI`).
+    pub fn ui(identifier: &str) -> Self {
+        Self {
+            identifier: identifier.to_owned(),
+            source: SoundSource::Ui,
+            volume: 1.0,
+            pitch: 1.0,
+            position: [0.0; 3],
+            looping: false,
+            delay: 0,
+            attenuation: SoundAttenuation::None,
+            relative: true,
+        }
+    }
+    /// Sound event `identifier` at `position` on `source`, fading with distance, at volume
+    /// and pitch 1 (`SimpleSoundInstance`'s positioned constructor).
+    pub fn at(identifier: &str, source: SoundSource, position: [f64; 3]) -> Self {
+        Self {
+            identifier: identifier.to_owned(),
+            source,
+            volume: 1.0,
+            pitch: 1.0,
+            position,
+            looping: false,
+            delay: 0,
+            attenuation: SoundAttenuation::Linear,
+            relative: false,
+        }
+    }
+    /// The same sound at `volume`.
+    pub fn with_volume(self, volume: f32) -> Self {
+        Self { volume, ..self }
+    }
+    /// The same sound at `pitch`.
+    pub fn with_pitch(self, pitch: f32) -> Self {
+        Self { pitch, ..self }
+    }
+    /// The same sound looping, `delay` ticks between its repeats.
+    pub fn looping(self, delay: i32) -> Self {
+        Self {
+            looping: true,
+            delay,
+            ..self
+        }
+    }
 }
 
 /// A playing sound's channel, for `play_sound_source` and
@@ -845,6 +962,12 @@ pub struct NativeBlockRim {
     /// The line width in pixels.
     pub width: f32,
 }
+impl NativeBlockRim {
+    /// An outline of the block at `pos` in `argb`, `width` pixels wide.
+    pub const fn new(pos: [i32; 3], argb: u32, width: f32) -> Self {
+        Self { pos, argb, width }
+    }
+}
 
 /// A camera-local visual light, with no gameplay light or shadow writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -858,6 +981,17 @@ pub struct NativeColoredLight {
     pub radius: f32,
     /// The light's strength.
     pub intensity: f32,
+}
+impl NativeColoredLight {
+    /// A light at `at` in `rgb`, reaching `radius` blocks at strength `intensity`.
+    pub const fn new(at: [f64; 3], rgb: u32, radius: f32, intensity: f32) -> Self {
+        Self {
+            at,
+            rgb,
+            radius,
+            intensity,
+        }
+    }
 }
 
 /// The minimap a native mod shows (`native_minimap`), drawn by Horizon's
@@ -1019,6 +1153,10 @@ pub struct NativeServerPlayer {
     /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
     /// API @API:server_player_entity_id@.
     pub entity_id: i32,
+    /// The IP address the player connects from, without the port (behind
+    /// a Velocity proxy, the address the proxy forwards; empty when not
+    /// known).
+    pub address: String,
 }
 
 /// A command a native mod adds, as one usage: words, then arguments
@@ -2335,43 +2473,6 @@ pub enum NativeExplosionInteraction {
     Tnt,
 }
 
-/// Which volume slider a sound is played under (`SoundSource`). A sound source
-/// is the group a client's sound options control: an entity's is
-/// `Entity.getSoundSource`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NativeSoundSource {
-    /// The master volume category.
-    Master,
-    /// Music.
-    Music,
-    /// Jukeboxes and note blocks (`RECORDS`).
-    Records,
-    /// Rain and thunder.
-    Weather,
-    /// Blocks (`BLOCKS`).
-    Blocks,
-    /// Hostile mobs.
-    Hostile,
-    /// Friendly and neutral mobs.
-    Neutral,
-    /// Players (`PLAYERS`).
-    Players,
-    /// Ambient and block sounds.
-    Ambient,
-    /// Voice.
-    Voice,
-    /// Interface sounds.
-    Ui,
-}
-
-impl NativeSoundSource {
-    /// Its position in vanilla's `SoundSource` order, as the network sends it.
-    pub fn index(self) -> usize {
-        self as usize
-    }
-}
-
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -2868,6 +2969,20 @@ impl BossBarOverlay {
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
+///
+/// Clicks require a mutable client host, not a server or a read-only hook:
+/// ```compile_fail
+/// use mod_api::{MenuRef, ServerHost};
+/// fn wrong(menu: MenuRef, host: &mut dyn ServerHost) {
+///     menu.click(host, &[]);
+/// }
+/// ```
+/// ```compile_fail
+/// use mod_api::{MenuRef, ClientHost};
+/// fn wrong(menu: MenuRef, host: &dyn ClientHost) {
+///     menu.click(host, &[]);
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
@@ -3002,8 +3117,6 @@ impl NativeTickId {
 #[allow(clippy::enum_variant_names)]
 #[non_exhaustive]
 pub enum WorldPhase {
-    /// World open ready.
-    WorldOpenReady,
     /// The open failed; `error_text` is the engine's own error text.
     WorldOpenFailed,
     /// World close final.
@@ -3280,7 +3393,7 @@ fn entered_with_id(
     })
 }
 
-fn mark_mod(id: &'static str, hook: &'static str) -> crate::crash::NativeModGuard {
+pub(crate) fn mark_mod(id: &'static str, hook: &'static str) -> crate::crash::NativeModGuard {
     crate::crash::enter_native_mod(crate::crash::NativeModCall {
         id,
         hook,
@@ -3415,6 +3528,16 @@ pub enum PlayerAction {
         /// The hand whose item is used.
         hand: Hand,
     },
+    /// Interact with `target` using one hand (`Player.interactOn`), without falling back to
+    /// using the item in the air when the entity passes the click.
+    InteractOn {
+        /// The hand whose item is used.
+        hand: Hand,
+        /// The entity clicked, in the fake's level.
+        target: EntityRef,
+        /// The hit relative to the entity's origin, as in an entity interaction packet.
+        location: [f64; 3],
+    },
     /// Attack `target` with the main hand (`ServerGamePacketListenerImpl.handleInteract`'s
     /// ATTACK, then `Player.attack`): a player, a mob or another entity, or a fireball, a wind
     /// charge or a shulker bullet turned back. Mobs don't take the fake as the player to answer.
@@ -3430,6 +3553,59 @@ pub enum PlayerAction {
         /// The block broken.
         pos: [i32; 3],
     },
+}
+
+/// Temporary state for [`PlayerRef::perform_action_scoped`]. The existing fake acts in
+/// survival with a fresh standing body, holding only `stack` in its main hand; its persistent
+/// body, items, look, secondary-use state and action timers are restored afterwards.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct PlayerActionSetup {
+    /// The main-hand stack. A zero-count stack means an empty hand.
+    pub stack: ItemStack,
+    /// Eye position in world coordinates, using the standing eye height (1.62).
+    pub eye: [f64; 3],
+    /// Vanilla yaw in degrees.
+    pub yaw: f32,
+    /// Vanilla pitch in degrees.
+    pub pitch: f32,
+    /// Secondary use, as when holding sneak; this does not change the standing eye height.
+    pub secondary_use: bool,
+}
+impl PlayerActionSetup {
+    /// A scoped survival setup with the supplied main-hand stack and viewpoint.
+    pub fn new(stack: ItemStack, eye: [f64; 3], yaw: f32, pitch: f32, secondary_use: bool) -> Self {
+        Self {
+            stack,
+            eye,
+            yaw,
+            pitch,
+            secondary_use,
+        }
+    }
+}
+
+/// A scoped action's result. The returned stacks belong to the caller, not to the fake's
+/// restored inventory. World changes and normal action hooks have already run.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ScopedActionResult {
+    /// What the existing player action path did, including a stopped fake-player effect.
+    pub outcome: ActionOutcome,
+    /// The remaining main-hand stack, if nonempty.
+    pub held: Option<ItemStack>,
+    /// Other nonempty inventory stacks, then offhand, carried stack and armor, in that order.
+    pub other: Vec<ItemStack>,
+}
+impl ScopedActionResult {
+    /// The outcome and inventory returned by a scoped action.
+    pub fn new(outcome: ActionOutcome, held: Option<ItemStack>, other: Vec<ItemStack>) -> Self {
+        Self {
+            outcome,
+            held,
+            other,
+        }
+    }
 }
 
 /// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
@@ -3450,7 +3626,9 @@ pub enum ActionRefused {
     /// The block or entity is above or below the world, under spawn protection or outside the
     /// world border (`ServerLevel.mayInteract`): nothing is done there.
     Protected,
-    /// The attack's target isn't an entity in the fake's level, or is the fake itself
+    /// The scoped setup's eye position, rotation or entity hit is not finite.
+    InvalidSetup,
+    /// The action's target isn't an entity in the fake's level, or is the fake itself
     /// (`handleInteract`'s "Attempting to attack an invalid entity").
     InvalidTarget,
 }
@@ -3475,7 +3653,7 @@ pub enum ActionOutcome {
     /// Vanilla's `InteractionResult` consumed (a success or a consume), and no effect was
     /// blocked.
     Consumed,
-    /// Vanilla's result passed: nothing used the click.
+    /// Nothing consumed the click: vanilla passed or failed, or a mod stopped the action.
     Passed,
     /// The click ran (the swing, the hooks before the use, vanilla's `Success`), but the effect
     /// it would start was stopped, as a fake can't take part in it.
@@ -3593,6 +3771,26 @@ pub struct BackendMutRef<'a> {
     inner: &'a mut dyn BackendMut,
 }
 
+/// The opaque client-write backend, with no access to server writes.
+///
+/// Only the API can construct or open this value.
+// hidden: a game-side type, not part of the mod surface
+#[doc(hidden)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ClientBackendMutRef<'a> {
+    inner: &'a mut dyn ClientBackendMut,
+}
+
+impl<'a> ClientBackendMutRef<'a> {
+    pub(crate) fn of(inner: &'a mut dyn ClientBackendMut) -> Self {
+        Self { inner }
+    }
+
+    fn open(self) -> &'a mut dyn ClientBackendMut {
+        self.inner
+    }
+}
+
 impl<'a> BackendRef<'a> {
     /// Wraps a read backend; only the generated game impl and this module's
     /// test doubles build a wrapper, always around themselves.
@@ -3697,6 +3895,12 @@ impl LevelSide<'_> {
 /// caller answers its typed refusal instead of running on.
 pub(crate) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
     host.backend_mut().map(|wrapper| wrapper.open())
+}
+
+pub(crate) fn client_backend_mut_of(
+    host: &mut dyn ClientHost,
+) -> Option<&mut dyn ClientBackendMut> {
+    host.client_backend_mut().map(|wrapper| wrapper.open())
 }
 
 /// What used bone meal on a block (`BonemealSource`), for `bonemeal`.
@@ -3866,7 +4070,7 @@ mod generated_host {
 }
 // hidden: a game-side re-export, not part of the mod surface
 #[doc(hidden)]
-pub use generated_host::{Backend, BackendMut};
+pub use generated_host::{Backend, BackendMut, ClientBackendMut};
 pub use generated_host::{
     BlockEntityDrawContext, ClientHost, DrawContext, Host, HostSide, LevelSide, ServerHost,
 };
@@ -4188,6 +4392,10 @@ mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
+mod structure_template;
+pub use structure_template::{
+    StructureMirror, StructureRotation, StructureTemplateBlock, StructureTemplateSnapshot,
+};
 mod structure_type;
 /// The structure box a piece's `bounding_box` answers, in world blocks.
 pub use horizon_world::worldgen::structure::BoundingBox;
@@ -4273,6 +4481,22 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
+    fn client_menu_click_refuses_a_host_without_its_backend() {
+        struct Empty;
+        impl Host for Empty {}
+        impl ClientHost for Empty {}
+        let player = __private::game::player_ref(EntityRef::new(NativeWorldEpoch::new(1), 7), 42);
+        let menu = __private::game::menu_ref(player, 0, 1);
+        assert!(!menu.click(
+            &mut Empty,
+            &[MenuClick::Pickup {
+                slot: Some(0),
+                button: MouseButton::Left,
+            }]
+        ));
+    }
+
+    #[test]
     fn level_family_accepts_empty_doubles() {
         struct Empty;
         impl LevelHost for Empty {}
@@ -4355,6 +4579,7 @@ mod tests {
                 yaw: 0.0,
                 pitch: 0.0,
                 entity_id: 0,
+                address: String::new(),
             })
         }
         fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {
@@ -4654,14 +4879,16 @@ mod tests {
             let hit = top_hit();
             dispatch_use_on(
                 &mut host,
-                &stack,
-                pos,
-                face,
-                Hand::Main,
-                hit,
-                7,
-                41,
-                &mut claimed,
+                calls::UseOnCall {
+                    stack: &stack,
+                    pos,
+                    face,
+                    hand: Hand::Main,
+                    hit,
+                    player: 7,
+                    player_entity_id: 41,
+                    claimed: &mut claimed,
+                },
             );
             assert_eq!(claimed, expected, "{block}");
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
@@ -4735,14 +4962,16 @@ mod tests {
         let (pos, face) = ([0; 3], [0, 1, 0]);
         dispatch_use_on(
             &mut host,
-            &stick(),
-            pos,
-            face,
-            Hand::Main,
-            top_hit(),
-            7,
-            41,
-            &mut claimed,
+            calls::UseOnCall {
+                stack: &stick(),
+                pos,
+                face,
+                hand: Hand::Main,
+                hit: top_hit(),
+                player: 7,
+                player_entity_id: 41,
+                claimed: &mut claimed,
+            },
         );
     }
 
@@ -4812,14 +5041,16 @@ mod tests {
         let mut claimed = false;
         dispatch_use_on(
             &mut host,
-            &stick(),
-            [0; 3],
-            [0, 1, 0],
-            Hand::Off,
-            top_hit(),
-            7,
-            41,
-            &mut claimed,
+            calls::UseOnCall {
+                stack: &stick(),
+                pos: [0; 3],
+                face: [0, 1, 0],
+                hand: Hand::Off,
+                hit: top_hit(),
+                player: 7,
+                player_entity_id: 41,
+                claimed: &mut claimed,
+            },
         );
         assert!(!claimed);
         assert!(HEARD_STICK.load(std::sync::atomic::Ordering::SeqCst));
@@ -5447,6 +5678,7 @@ pub(crate) mod built {
         pub yaw: f32,
         pub pitch: f32,
         pub entity_id: i32,
+        pub address: String,
     }
     impl From<NativeServerPlayer> for super::NativeServerPlayer {
         fn from(v: NativeServerPlayer) -> Self {
@@ -5461,6 +5693,7 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+                address,
             } = v;
             Self {
                 uuid,
@@ -5473,6 +5706,7 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+                address,
             }
         }
     }

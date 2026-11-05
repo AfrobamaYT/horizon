@@ -4,6 +4,23 @@ use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const MIXINS_REV: &str = "e8cd0aa38cffef49cb2e088ef716baa107148c02";
 
+/// Where the prebuilt game (#589) is released: one `prebuilt-<commit>` prerelease per daily build
+/// of this fork's main (Diverges from upstream: horizon-rust/horizon has none).
+pub const PREBUILT_REPO: &str = "arismoko/horizon";
+/// The release tag before a prebuilt game's Horizon commit.
+pub const PREBUILT_TAG: &str = "prebuilt-";
+
+/// Every prebuilt archive's name starts with this, as `prebuilt-game.yml` names it. The `v3` is the
+/// archive's layout, the one the launcher reads: a release made before it has no archive by this
+/// name, so its commit builds from source. Bump it with the workflow when the layout changes.
+pub const PREBUILT_ARCHIVE: &str = "horizon-prebuilt-v3-";
+
+/// The prebuilt game's archive for a rustc host target.
+pub fn prebuilt_archive(host: &str, server: bool) -> String {
+    let side = if server { "-server" } else { "" };
+    format!("{PREBUILT_ARCHIVE}{host}{side}.tar.gz")
+}
+
 /// Whether a valid package is native, irrespective of its install folder.
 pub fn holds(path: &Path) -> bool {
     crate::Package::read(path).is_ok_and(|package| package.is_native())

@@ -7,6 +7,7 @@ use horizon_launcher::heads;
 use horizon_launcher::servers::{
     self, Applied, Backup, Entry, Fix, NewServer, Problem, Status, World,
 };
+use horizon_theme::glass::radius;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -173,6 +174,17 @@ pub(super) struct Create {
 /// What the sidebar shows of the Servers page: its list once the page has read it, and whether
 /// a server answers.
 impl Servers {
+    pub(super) fn location_busy(&self) -> bool {
+        self.busy.is_some()
+            || self.creating
+            || self.applying
+            || !self.queued.is_empty()
+            || self
+                .statuses
+                .values()
+                .any(|s| matches!(s.phase.as_str(), "running" | "starting" | "stopping"))
+    }
+
     /// A stopped server's line in the list: "Survival · stopped", as the mockup's. The open
     /// server's mode is the one its settings show now, once read; the others' (and the open one's
     /// until then) come from their files.
@@ -312,6 +324,15 @@ impl Servers {
         self.texts.get(&f).map_or("", LineEdit::text)
     }
 
+    /// Mark a field invalid without an explanatory message, or clear its previous error.
+    pub(super) fn set_field_invalid(&mut self, field: Field, invalid: bool) {
+        if invalid {
+            self.invalid = Some((field, ""));
+        } else if self.invalid.is_some_and(|(current, _)| current == field) {
+            self.invalid = None;
+        }
+    }
+
     /// Whether this field has the keyboard, as of this frame.
     pub(super) fn has_focus(&self, f: Field) -> bool {
         self.focused == Some(f)
@@ -369,6 +390,13 @@ pub(super) fn stop_on_quit() {
             let _ = api.call("POST", "/api/v1/stop", None);
         }
     }
+}
+
+/// Update closes the window to open the new launcher at once: a server is its own process and the
+/// new window finds it running, so an update doesn't end anyone's game. It stays up when that new
+/// window closes too, until it is stopped on the Servers page.
+pub(super) fn keep_running_through_update() {
+    STARTED_HERE.lock().unwrap().clear();
 }
 
 /// The player's own name, to let them in on a friends-only server: the Microsoft account that plays,
@@ -989,8 +1017,17 @@ impl Launcher {
             // tall as they are.
             crate::glass_ui::field(focused, invalid)
                 .when(
-                    matches!(f, Field::InstanceModsFilter | Field::ConsoleSearch),
-                    |d| d.h(px(36.)).px(px(12.)).rounded(px(10.)),
+                    matches!(
+                        f,
+                        Field::InstanceModsFilter
+                            | Field::ConsoleSearch
+                            | Field::Motd
+                            | Field::Port
+                            | Field::Token
+                            | Field::AddPlayer
+                            | Field::DeleteServer
+                    ),
+                    |d| d.h(px(36.)).px(px(12.)).rounded(px(radius::CONTROL)),
                 )
                 // The instance dialog's are the large `FIELD_LG`: 48 px, 15 px text, white at 6 %,
                 // 10 % while typed in.
@@ -1014,7 +1051,7 @@ impl Launcher {
                 .when(f == Field::AccentHex, |d| {
                     d.h(px(36.))
                         .px(px(12.))
-                        .rounded(px(10.))
+                        .rounded(px(radius::CONTROL))
                         .text_size(px(13.))
                         .font_weight(FontWeight::MEDIUM)
                 })
@@ -1040,9 +1077,20 @@ impl Launcher {
                     |d| {
                         let small = matches!(
                             f,
-                            Field::InstanceModsFilter | Field::ConsoleSearch | Field::AccentHex
+                            Field::InstanceModsFilter
+                                | Field::ConsoleSearch
+                                | Field::AccentHex
+                                | Field::Motd
+                                | Field::Port
+                                | Field::Token
+                                | Field::AddPlayer
+                                | Field::DeleteServer
                         );
-                        d.child(crate::glass_ui::focus_ring(if small { 10. } else { 12. }))
+                        d.child(crate::glass_ui::focus_ring(if small {
+                            radius::CONTROL
+                        } else {
+                            radius::ROW
+                        }))
                     },
                 )
         } else {
@@ -1326,34 +1374,12 @@ impl Launcher {
         {
             page = page.child(self.problem_notice(p, cx));
         }
-        // The banner, with a "Hide" once it has been on screen a while: hiding it hides the
-        // sidebar's card too, for good. Nothing at all once hidden.
-        let partner = (!self.settings.partner_hidden).then(|| {
-            let mut slot = div().relative().w(px(600.)).child(super::partner::banner(
-                "partner-servers",
-                600.,
-                &t,
-            ));
-            if self.settings.partner_seen_secs >= super::partner::SEEN_BEFORE_HIDE {
-                slot = slot.child(
-                    super::partner::hide_button("partner-servers-hide", &t).on_click(cx.listener(
-                        |this, _: &ClickEvent, _, cx| {
-                            this.settings.partner_hidden = true;
-                            this.save_settings();
-                            cx.notify();
-                        },
-                    )),
-                );
-            }
-            slot
-        });
         if self.servers.list.is_empty() {
             return page
                 .child(centered(
                     tr("No server yet. Create one: it takes a few seconds, and with the defaults (tick the EULA, press Create) you get a friends-only survival world."),
                     &t,
-                ))
-                .children(partner);
+                ));
         }
         let mut list = div().flex().flex_col().border_t_1().border_color(t.rule);
         for (i, e) in self.servers.list.clone().into_iter().enumerate() {
@@ -1399,7 +1425,7 @@ impl Launcher {
                 &t,
             ));
         }
-        page.child(list).children(partner)
+        page.child(list)
     }
 
     fn add_server_folder(&mut self, cx: &mut Context<Self>) {
@@ -2382,12 +2408,14 @@ impl Launcher {
         };
         let motd = div()
             .flex()
+            .items_center()
             .gap(px(8.))
             .child(self.field(Field::Motd, tr("A Minecraft Server"), 260., cx))
             .child(save("motd-save", Field::Motd, cx))
             .into_any_element();
         let port = div()
             .flex()
+            .items_center()
             .gap(px(8.))
             .child(self.field(Field::Port, "25565", 100., cx))
             .child(save("port-save", Field::Port, cx))

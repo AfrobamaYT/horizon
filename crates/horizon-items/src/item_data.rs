@@ -790,9 +790,20 @@ pub fn parse_stack(snbt: &str) -> Result<Option<ItemStack>, String> {
     let (tag, _) = horizon_world::nbt::parse_snbt(snbt)?;
     Ok(crate::item_nbt::item_from_nbt(&tag))
 }
-/// The `components` compound for a stack, or None when every component is default.
+/// The saved `DataComponentPatch.CODEC` compound, or None when default.
+/// A filled map's empty decorations equal its prototype (`Items.mapProperties`).
 pub fn encode_components(stack: &ItemStack) -> Option<Tag> {
-    components_tag(stack.damage, stack.data())
+    let mut components = components_tag(stack.damage, stack.data())?;
+    if &*stack.item == "minecraft:filled_map"
+        && matches!(components.get("minecraft:map_decorations"), Some(Tag::Compound(entries)) if entries.is_empty())
+        && let Tag::Compound(entries) = &mut components
+    {
+        entries.remove(&JavaString::from("minecraft:map_decorations"));
+        if entries.is_empty() {
+            return None;
+        }
+    }
+    Some(components)
 }
 /// `encode_components` from the damage value and extra components.
 pub fn components_tag(damage: u32, data: Option<&StackData>) -> Option<Tag> {
@@ -945,7 +956,7 @@ pub fn components_tag(damage: u32, data: Option<&StackData>) -> Option<Tag> {
         if !d.charged.is_empty() {
             entries.push((
                 "minecraft:charged_projectiles",
-                Tag::List(d.charged.iter().map(crate::item_nbt::item_to_nbt).collect()),
+                Tag::List(d.charged.iter().map(template_tag).collect()),
             ));
         }
         if d.ominous_banner {
@@ -1262,6 +1273,76 @@ mod tests {
         assert!(one.matches(&ItemStack::new("minecraft:diamond_sword", 1)));
         assert!(!one.matches(&ItemStack::new("minecraft:diamond_sword", 2)));
         assert!(!one.matches(&stack));
+    }
+
+    #[test]
+    fn empty_map_decoration_patch_uses_filled_map_prototype() {
+        let parse = |text| horizon_world::nbt::parse_snbt(text).unwrap().0;
+        let empty = parse(r#"{"minecraft:map_decorations":{}}"#);
+        assert!(decode_components(None).1.is_none());
+        assert!(encode_components(&ItemStack::new("minecraft:filled_map", 1)).is_none());
+        let mut fresh = ItemStack::new("minecraft:filled_map", 1);
+        fresh
+            .data_mut()
+            .other
+            .push(("minecraft:map_decorations".into(), parse("{}")));
+        // The value codec has no item prototype; only the saved patch elides it.
+        assert_eq!(components_tag(0, fresh.data()), Some(empty.clone()));
+        assert!(encode_components(&fresh).is_none());
+        let (damage, extra) = decode_components(Some(&empty));
+        let loaded = ItemStack {
+            damage,
+            extra,
+            ..ItemStack::new("minecraft:filled_map", 1)
+        };
+        let saved = crate::item_nbt::item_to_nbt(&loaded);
+        assert_eq!(saved, parse(r#"{id:"minecraft:filled_map",count:1}"#));
+        let back = crate::item_nbt::item_from_nbt(&saved).unwrap();
+        assert!(encode_components(&back).is_none());
+        let keep = parse(r#"{"minecraft:map_decorations":{},"minecraft:custom_data":{keep:7}}"#);
+        let (damage, extra) = decode_components(Some(&keep));
+        let stack = ItemStack {
+            damage,
+            extra,
+            ..ItemStack::new("minecraft:filled_map", 1)
+        };
+        assert_eq!(
+            encode_components(&stack),
+            Some(parse(r#"{"minecraft:custom_data":{keep:7}}"#))
+        );
+    }
+
+    #[test]
+    fn nondefault_map_decoration_patches_round_trip() {
+        let parse = |text| horizon_world::nbt::parse_snbt(text).unwrap().0;
+        let nonempty = parse(
+            r#"{"minecraft:map_decorations":{"a+b":{type:"minecraft:red_x",x:-1.25d,z:2.75d,rotation:-45.5f}},"minecraft:custom_data":{keep:7}}"#,
+        );
+        let removed =
+            parse(r#"{"!minecraft:map_decorations":{},"minecraft:custom_data":{keep:7}}"#);
+        let empty = parse(r#"{"minecraft:map_decorations":{}}"#);
+        for (item, components) in [
+            ("minecraft:filled_map", &nonempty),
+            ("minecraft:stone", &nonempty),
+            ("minecraft:filled_map", &removed),
+            ("minecraft:stone", &empty),
+            ("minecraft:map", &empty),
+        ] {
+            let (damage, extra) = decode_components(Some(components));
+            let stack = ItemStack {
+                damage,
+                extra,
+                ..ItemStack::new(item, 1)
+            };
+            assert_eq!(
+                encode_components(&stack),
+                Some(components.clone()),
+                "{item}"
+            );
+            let back =
+                crate::item_nbt::item_from_nbt(&crate::item_nbt::item_to_nbt(&stack)).unwrap();
+            assert_eq!(encode_components(&back), Some(components.clone()), "{item}");
+        }
     }
 
     #[test]
@@ -1591,5 +1672,63 @@ mod tests {
             Some("axis")
         );
         assert_eq!(data.debug_stick_property("minecraft:dirt"), None);
+    }
+}
+
+#[cfg(test)]
+mod charged_projectile_template_tests {
+    use super::*;
+
+    #[test]
+    fn charged_templates_omit_default_count_and_keep_components() {
+        for count in [1, 2] {
+            let mut projectile = ItemStack::new("minecraft:arrow", count);
+            let marker = Tag::compound([("audit", Tag::Int(7))]);
+            projectile
+                .data_mut()
+                .other
+                .push(("minecraft:custom_data".into(), marker.clone()));
+            let mut outer = ItemStack::new("minecraft:crossbow", 1);
+            outer.data_mut().charged.push(projectile.clone());
+            outer.data_mut().other.push((
+                "minecraft:custom_data".into(),
+                Tag::compound([("audit", Tag::Int(9))]),
+            ));
+            let encoded = encode_components(&outer).unwrap();
+            let Tag::List(list) = encoded.get("minecraft:charged_projectiles").unwrap() else {
+                panic!("projectile list")
+            };
+            assert_eq!(list.len(), 1);
+            assert_eq!(
+                list[0].get("count"),
+                (count != 1).then_some(Tag::Int(count as i32)).as_ref()
+            );
+            assert_eq!(
+                list[0]
+                    .get("components")
+                    .unwrap()
+                    .get("minecraft:custom_data"),
+                Some(&marker)
+            );
+            assert_eq!(
+                encoded.get("minecraft:custom_data"),
+                Some(&Tag::compound([("audit", Tag::Int(9))]))
+            );
+            // Generic ItemStack/inventory encoding retains its required count.
+            assert_eq!(
+                crate::item_nbt::item_to_nbt(&projectile).get("count"),
+                Some(&Tag::Int(count as i32))
+            );
+            let (_, decoded) = decode_components(Some(&encoded));
+            let restored = decoded.unwrap();
+            assert_eq!(restored.charged[0].count, count);
+            assert_eq!(
+                restored.charged[0]
+                    .data()
+                    .unwrap()
+                    .other("minecraft:custom_data"),
+                Some(&marker)
+            );
+        }
     }
 }

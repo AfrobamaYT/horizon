@@ -72,6 +72,10 @@ impl<T> Slot<T> {
     pub fn present(&self) -> bool {
         self.v.is_some()
     }
+    /// `MemorySlot.timeToLive`: `i64::MAX` denotes a permanent memory.
+    pub fn ttl(&self) -> i64 {
+        self.ttl
+    }
 }
 impl<T: Clone> Slot<T> {
     pub fn value(&self) -> Option<T> {
@@ -1605,7 +1609,7 @@ impl B {
                     cx.events.push(MobEvent::Breed {
                         parent: m.id,
                         partner: id,
-                        llama: None,
+                        equine: None,
                         parent_variant: None,
                         experience: super::BreedExperience::Deferred,
                     });

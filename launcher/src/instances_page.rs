@@ -75,6 +75,12 @@ pub(super) struct Instances {
     pub(super) versions: new_instance::VersionList,
 }
 
+impl Instances {
+    pub(super) fn location_busy(&self) -> bool {
+        self.dialog.as_ref().is_some_and(|d| d.busy)
+    }
+}
+
 impl Launcher {
     pub(super) fn reload_instances(&mut self) {
         self.instances.list = instances::list();
@@ -117,7 +123,6 @@ impl Launcher {
     pub(super) fn select_instance(&mut self, instance: &Instance) {
         // A native build's warning names the mods of the instance it was opened for.
         self.native_confirm = None;
-        self.native_update = None;
         self.settings.instance =
             (instance.kind != InstanceKind::Default).then(|| instance.id.clone());
         self.save_settings();

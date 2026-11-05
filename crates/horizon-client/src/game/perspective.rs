@@ -208,6 +208,7 @@ fn load_player_type(root: &Path) -> Option<Arc<MobType>> {
             knockback_resistance: 0.0,
             jump_strength: 0.42,
             attributes: Default::default(),
+            item_stack_limits: Default::default(),
             gravity: 0.08,
             safe_fall_distance: 3.0,
             fall_damage_multiplier: 1.0,
@@ -456,6 +457,10 @@ impl Game<'_> {
                 Default::default,
                 horizon_client::first_person::item_use_animation,
             );
+        let held_arm_pose = self.held_arm_poses(
+            self.own_entity_id() as u32,
+            [self.selected, super::shield::OFFHAND_SLOT].map(|slot| self.stack_in(slot)),
+        );
         let charged = self.inventory[self.selected]
             .as_ref()
             .is_some_and(|s| s.data().is_some_and(|d| !d.charged.is_empty()));
@@ -530,7 +535,10 @@ impl Game<'_> {
         m.previous_limb_speed = m.limb_speed;
         m.limb_speed += ((walked * 4.0).min(1.0) - m.limb_speed) * 0.4;
         m.limb_position += m.limb_speed;
-        m.age = m.age.wrapping_add(1);
+        // Its idle swing holds with the world under `HORIZON_STILL`.
+        if self.clock.runs_normally() || !self.clock.still() {
+            m.age = m.age.wrapping_add(1);
+        }
         m.anim.attack_anim_o = attack.0;
         m.anim.attack_anim = attack.1;
         m.extra.set_main_hand_stack(main);
@@ -567,6 +575,7 @@ impl Game<'_> {
         m.extra.using_item = using;
         m.extra.using_off_hand = using_off_hand;
         m.extra.use_animation = use_animation;
+        m.extra.held_arm_pose = held_arm_pose;
         m.extra.charged = charged;
         m.extra.ints[5] = charge_duration;
         m.extra.elytra.tick(fall_flying, crouching, velocity);
@@ -718,10 +727,6 @@ impl Game<'_> {
                 packed,
                 out,
             );
-            if horizon_cosmetics::enabled() {
-                let base = horizon_client::mobs::render::base_transform(m, alpha as f32, camera);
-                self.cosmetics_geometry(m, true, base, alpha as f32, packed, false, out);
-            }
             self.player_elytra_geometry(m, chest, camera, alpha as f32, packed, out);
             self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
             self.shoulder_parrots_geometry(m, camera, alpha as f32, packed, out);
@@ -733,8 +738,13 @@ impl Game<'_> {
             self.mod_mob_layer_geometry(m, Some(who), alpha as f32, camera, packed, out);
         }
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
-        if self.potions.effects.get("glowing").is_some() {
-            let color = super::glowing::team_color(self.own_team());
+        let vanilla = self
+            .potions
+            .effects
+            .get("glowing")
+            .map(|_| super::glowing::team_color(self.own_team()));
+        let id = u32::try_from(self.own_entity_id()).unwrap_or(0);
+        if let Some(color) = self.entity_outline(id, "minecraft:player", vanilla) {
             // LivingEntityRenderer.getRenderType: an invisible glowing body
             // still draws its outline.
             if !body {
@@ -830,10 +840,6 @@ impl Game<'_> {
             240 | 240 << 8,
             &mut verts,
         );
-        if horizon_cosmetics::enabled() {
-            let base = horizon_client::mobs::render::base_transform(&m, 1.0, camera);
-            self.cosmetics_geometry(&m, true, base, 1.0, 240 | 240 << 8, false, &mut verts);
-        }
         // `WingsLayer` draws through `RenderTypes.armorCutoutNoCull`: the
         // wings' faces show from both sides (the elytra texture is empty on
         // the face that looks at the body).
@@ -1090,6 +1096,30 @@ impl Game<'_> {
             self.res.mob_data(),
             out,
         );
+    }
+    /// `IClientItemExtensions.getArmPose` for each hand's stack, else the item's declared
+    /// `arm_pose`: the pose that replaces the one `AvatarRenderer.getArmPose` derives. An
+    /// empty hand keeps vanilla's.
+    pub(super) fn held_arm_poses(
+        &self,
+        entity_id: u32,
+        stacks: [Option<&horizon_client::items::ItemStack>; 2],
+    ) -> [Option<horizon_core::arm_pose::ArmPose>; 2] {
+        let mut poses = [None; 2];
+        for ((pose, stack), hand) in poses
+            .iter_mut()
+            .zip(stacks)
+            .zip(mod_api::first_person::Hand::BOTH)
+        {
+            let Some(stack) = stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air") else {
+                continue;
+            };
+            self.native_get_arm_pose(entity_id, hand, stack, pose);
+            if pose.is_none() {
+                *pose = self.items().get(&stack.item).and_then(|info| info.arm_pose);
+            }
+        }
+        poses
     }
     /// The entity id the local player has on its server: the one it was
     /// given at login on a client, else the acting player's own.

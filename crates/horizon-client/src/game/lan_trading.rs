@@ -309,8 +309,7 @@ impl Game<'_> {
             g.carried = menu.carried.take();
         }
         self.register_exploration_maps(made);
-        let (session, traded) = self.merchant_apply(session, gm.merchant.mob);
-        gm.merchant.session = session;
+        let (mut session, traded) = self.merchant_apply(session, gm.merchant.mob);
         if !traded.is_empty() {
             // The guest's own statistic and advancements.
             if let Some((uuid, name)) = self
@@ -322,8 +321,12 @@ impl Game<'_> {
             {
                 self.native_player_trade(uuid, &name, entity_id);
             }
-            self.as_guest(conn, |g| g.merchant_traded(gm.merchant.mob, &traded));
+            let mob = gm.merchant.mob;
+            self.as_guest(conn, |g| {
+                g.merchant_traded(mob, &mut session.offers, &traded)
+            });
         }
+        gm.merchant.session = session;
         self.drop_guest_items(gi, dropped);
         self.lan_send_offers(conn, &mut gm, false);
         self.lan_send_merchant_content(conn, &mut gm);
@@ -669,6 +672,7 @@ mod tests {
                 sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
+                expected: false,
             },
             12,
             [3.0, 64.0, 5.0],
@@ -797,7 +801,7 @@ mod tests {
             game.merchant_closed(&mut gm.merchant);
             let trade = game.mobs[0].extra.trade.as_ref().unwrap();
             assert_eq!((trade.offers.clone(), trade.xp), (vec![changed], 40));
-            assert_eq!(game.mobs[0].extra.variant3, 3);
+            assert_eq!(game.mobs[0].extra.villager_level, 3);
             assert_eq!(villager.trading_player(game), None);
         });
     }
@@ -845,6 +849,9 @@ mod tests {
             // Level 7: nothing more to lend, and no further level-up.
             assert!(villager.set_level(game, 7));
             assert_eq!(villager.level(game), Some(7));
+            assert!(game.lan_trade_session(12).unwrap().sequences.is_empty());
+            assert!(villager.set_level(game, i32::MAX));
+            assert_eq!(villager.level(game), Some(i32::MAX));
             assert!(game.lan_trade_session(12).unwrap().sequences.is_empty());
         });
     }

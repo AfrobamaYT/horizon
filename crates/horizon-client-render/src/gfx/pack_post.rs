@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use glam::{DMat4, DVec3};
-use horizon_shaders::{Format, Group, Kind, Post, SHADOW_COLORS, Val};
+use horizon_shaders::{Format, Group, Kind, Post, SHADOW_COLORS};
 
 use super::pack_draw::DrawUniforms;
 use super::pack_entities::{PROGRAMS, PackEntities};
@@ -29,6 +29,8 @@ use super::pack_uniforms::{self, FrameUniforms, PackInputs};
 
 const BUFFERS: usize = horizon_shaders::BUFFERS;
 
+mod packed;
+
 #[cfg(test)]
 mod world_target_tests;
 
@@ -36,7 +38,22 @@ mod world_target_tests;
 mod higher_shadowcolor_tests;
 
 #[cfg(test)]
+mod single_side_tests;
+
+#[cfg(test)]
+mod shadow_faces_tests;
+
+#[cfg(test)]
 mod forced_flip_tests;
+
+#[cfg(test)]
+mod weather_depth_tests;
+
+#[cfg(test)]
+mod custom_type_tests;
+
+#[cfg(test)]
+mod sky_depth_tests;
 
 /// The texture behind a pack sampler name.
 #[derive(Clone, Copy, PartialEq)]
@@ -436,6 +453,9 @@ struct Targets {
 pub(super) struct World<'a> {
     /// The block atlas and its size.
     pub atlas: Option<(wgpu::TextureView, [u32; 2])>,
+    /// Of a stitched block atlas, each sprite layer's place (`PackAtlas::rects_table`); empty
+    /// for a grid.
+    pub sprite_rects: &'a [u32],
     pub material_maps: Option<[wgpu::TextureView; 2]>,
     pub lightmap: wgpu::TextureView,
     /// Terrain's geometry, when the pack draws it.
@@ -508,8 +528,14 @@ pub struct PackPost {
     passes: Vec<Pass>,
     /// Shadow cache for temporal reprojection.
     shadow_cache: ShadowCache,
-    /// What draws terrain (`gbuffers_terrain` or its fallback), between `prepare` and `deferred`.
+    /// What draws terrain (`gbuffers_terrain` or its fallback), between `prepare` and `deferred`;
+    /// when the pack draws terrain in two parts, solid terrain only (`gbuffers_terrain_solid` or
+    /// its fallback).
     terrain: Option<Pass>,
+    /// What draws cutout terrain (`gbuffers_terrain_cutout` or its fallback), after `terrain`,
+    /// when the pack draws terrain in two parts. A pack with no program for one part has only
+    /// the other.
+    terrain_cutout: Option<Pass>,
     /// What draws translucent terrain (`gbuffers_water` or its fallback), after `deferred`.
     water: Option<Pass>,
     /// What draws the sky (`gbuffers_skybasic` or its fallback), before terrain, and its vertices.
@@ -562,9 +588,9 @@ pub struct PackPost {
     down: HashMap<wgpu::TextureFormat, (wgpu::RenderPipeline, wgpu::BindGroupLayout)>,
     /// The per-draw uniforms of gbuffers programs.
     draws: DrawUniforms,
-    /// Set 3 of flat terrain (`mc_Entity`'s table) and its bind group for each arena page,
-    /// with the page buffer it was made for.
-    block_ids: Option<(wgpu::BindGroupLayout, wgpu::Buffer)>,
+    /// Set 3 of flat terrain (`mc_Entity`'s table, then the sprites' places) and its bind group
+    /// for each arena page, with the page buffer it was made for.
+    block_ids: Option<(wgpu::BindGroupLayout, wgpu::Buffer, wgpu::Buffer)>,
     page_groups: HashMap<u32, (wgpu::Buffer, wgpu::BindGroup)>,
     gui_size: [u32; 2],
     /// GPU time of each pass, while the renderer asks for it (`pack_timing.rs`).
@@ -585,6 +611,8 @@ pub struct PackPost {
     rgb: u16,
     rgb_unset: bool,
     used: u16,
+    /// Buffers some pass draws into the "alt" side of or flips; the others' B is their A.
+    doubled: u16,
     /// `size.buffer.*`.
     sizes: [Option<horizon_shaders::BufferSize>; BUFFERS],
     /// Buffers bound as images, and those also copied for a pass that samples them.
@@ -668,6 +696,43 @@ fn texture_format(f: Format, features: wgpu::Features) -> wgpu::TextureFormat {
         // Snorm, 16-bit norm without the feature, RGB9_E5: half floats hold them.
         _ => half,
     }
+}
+
+/// `format` where `renders` says it can be a colour target, else the nearest float format that can:
+/// the same channels at 16 bits, then `Rgba8Unorm`. On OpenGL the 32-bit and 16-bit float formats
+/// render only with `GL_EXT_color_buffer_float`/`half_float`, and wgpu aborts on creating a target
+/// without. Other formats pass through. Float colour buffers are only sampled (never blended), so
+/// RENDER_ATTACHMENT is the only usage that decides.
+fn renderable_float(
+    format: wgpu::TextureFormat,
+    renders: impl Fn(wgpu::TextureFormat) -> bool,
+) -> wgpu::TextureFormat {
+    use wgpu::TextureFormat as T;
+    let half = match format {
+        T::R32Float | T::R16Float => T::R16Float,
+        T::Rg32Float | T::Rg16Float => T::Rg16Float,
+        T::Rgba32Float | T::Rgba16Float => T::Rgba16Float,
+        _ => return format,
+    };
+    if renders(format) {
+        format
+    } else if renders(half) {
+        half
+    } else {
+        T::Rgba8Unorm
+    }
+}
+
+/// [`texture_format`] made renderable on this adapter (see [`renderable_float`]).
+fn target_format(
+    f: Format,
+    features: wgpu::Features,
+    adapter: &wgpu::Adapter,
+) -> wgpu::TextureFormat {
+    renderable_float(texture_format(f, features), |format| {
+        (adapter.get_texture_format_features(format).allowed_usages)
+            .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+    })
 }
 
 /// The SNORM wgpu format of SNORM pack format `f`, where this adapter can render to it. Iris
@@ -1030,22 +1095,41 @@ pub(super) struct ShadowView {
     /// Draw everything, every face, within this many blocks (`shadow.culling=false|reversed`):
     /// packs that voxelize the world in their shadow pass need all of it.
     pub unculled: Option<f32>,
+    /// Every face of the drawn sections, not only those that can face the light. Iris 1.11.7's
+    /// shadow map holds the faces turned away from the light too (#9033): under a hill at low sun
+    /// a cave's ceiling, which faces away, is often all that shadows the cave.
+    pub every_face: bool,
+    /// Only the sections whose shadow can fall into the camera's view: those the camera's
+    /// frustum, stretched toward the light, takes in (`shadow_casters`). Our probes' Iris 1.11.7
+    /// maps fit keeping only those with `shadow.culling` unset (#8464): under a noon sun, only
+    /// the terrain above the ground the camera sees; with a low sun ahead, none behind the camera.
+    pub view_casters: bool,
 }
 
 /// Set 3 of flat terrain, read by the vertex stage: the sprite layers' table (`mc_Entity`'s id
-/// and fluid, `at_midBlock.w`; -1, -1, 0 when empty) and, per arena page, the page's vertices
-/// (a vertex reads its quad's corners for its normal).
-fn block_ids(device: &wgpu::Device, table: &[i32]) -> (wgpu::BindGroupLayout, wgpu::Buffer) {
+/// and fluid, `at_midBlock.w`; -1, -1, 0 when empty), per arena page, the page's vertices
+/// (a vertex reads its quad's corners for its normal), and each sprite's place in a stitched
+/// atlas (`rects`; zeros for a grid, which doesn't read them).
+fn block_ids(
+    device: &wgpu::Device,
+    table: &[i32],
+    rects: &[u32],
+) -> (wgpu::BindGroupLayout, wgpu::Buffer, wgpu::Buffer) {
     let empty = [-1, -1, 0];
     let table = if table.is_empty() { &empty[..] } else { table };
-    let buffer = wgpu::util::DeviceExt::create_buffer_init(
-        device,
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Shader pack block ids"),
-            contents: bytemuck::cast_slice(table),
-            usage: wgpu::BufferUsages::STORAGE,
-        },
-    );
+    let buffer = |label, contents: &[u8]| {
+        wgpu::util::DeviceExt::create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )
+    };
+    let rects = if rects.is_empty() { &[0, 0][..] } else { rects };
+    let ids = buffer("Shader pack block ids", bytemuck::cast_slice(table));
+    let rects = buffer("Shader pack sprite rects", bytemuck::cast_slice(rects));
     let storage = |binding| wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::VERTEX,
@@ -1058,9 +1142,9 @@ fn block_ids(device: &wgpu::Device, table: &[i32]) -> (wgpu::BindGroupLayout, wg
     };
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Shader pack terrain"),
-        entries: &[storage(0), storage(1)],
+        entries: &[storage(0), storage(1), storage(2)],
     });
-    (layout, buffer)
+    (layout, ids, rects)
 }
 
 /// The game's geometry a gbuffers program draws: its vertex buffers and, for flat draws
@@ -1094,6 +1178,8 @@ struct Resources<'a> {
     storable: u16,
     /// The buffers of a three-channel format (`rgb`): they have no alpha to write, and read 1.
     rgb: u16,
+    /// The bits per channel a buffer of a small packed format keeps ([`packed::bits`]).
+    packed: [Option<[u8; 4]>; BUFFERS],
     /// The stage (`texture.<stage>`) of the programs built so far, and the buffers one of them
     /// flipped: a `texture.<stage>.colortexN` no longer stands in for buffer N in the stage's
     /// later programs, which read what was written, as in Iris. `final` continues
@@ -1178,9 +1264,18 @@ fn bindings(
         let released = pack.released.get();
         let custom = pack_textures::find(textures, group, &s.ty, &s.name).filter(|&i| {
             let t = &textures[i];
-            t.stage != pack_textures::stage(group)
-                || released.0 != t.stage
-                || horizon_shaders::buffer_index(&t.name).is_none_or(|b| released.1 & 1 << b == 0)
+            // A PNG under `texture.<stage>.<name>` whose name is no sampler of the game's
+            // isn't bound: the sampler reads as if it had no texture. Iris 1.11.7 with a probe
+            // pack of ours (#9064) bound it over `gaux2` and `noisetex` but not over names of its
+            // own, where a raw texture was bound; this rule is a fit to those cases.
+            let unbound = t.png
+                && t.stage != horizon_shaders::EVERY_STAGE
+                && source(&s.name, false, true, false) == Source::Dummy;
+            !unbound
+                && (t.stage != pack_textures::stage(group)
+                    || released.0 != t.stage
+                    || horizon_shaders::buffer_index(&t.name)
+                        .is_none_or(|b| released.1 & 1 << b == 0))
         });
         let image = pack
             .images
@@ -1213,6 +1308,36 @@ fn bindings(
             }
             None => {
                 let mut src = source(&s.name, group.shadow(), shadow.is_some(), watershadow);
+                // A sampler the game gives no texture reads texture unit 0, as do the atlas's
+                // names: the atlas in gbuffers programs, `colortex0` in deferred, composite and
+                // final (OptiFine's shaders.txt). Iris 1.11.7 read the atlas through a name of
+                // ours in gbuffers_terrain, and the scene in `colortex0` through such a name and
+                // through `gtexture`, `tex` and `texture` in those three, with or without
+                // `colortex0` declared (probe packs of ours, #9307). Translucent programs and
+                // the other groups weren't measured and keep the stand-in.
+                let unit_0 = match group {
+                    Group::Gbuffers => Some(Source::Atlas),
+                    Group::Deferred | Group::Composite | Group::Final => Some(Source::Color(0)),
+                    _ => None,
+                };
+                // A name of the game's that has no texture here (a shadow sampler with no
+                // shadow pass) stays blank; so does a sampler that isn't 2D, and one under a
+                // `texture.<stage>.<name>` left unbound (#9064's probe read a 16-texel-wide
+                // texture there in final, undiagnosed).
+                let unknown = src == Source::Dummy
+                    && source(&s.name, false, true, false) == Source::Dummy
+                    && s.ty == "sampler2D"
+                    && !textures.iter().any(|t| t.name == s.name);
+                // colortex0 to colortex3 (gcolor, gdepth, gnormal, composite) are no gbuffers
+                // samplers in shaders.txt's table: Iris 1.11.7 read the atlas through each of
+                // colortex0-3 and gnormal in gbuffers_terrain (our probe, #9307).
+                let not_gbuffers =
+                    group == Group::Gbuffers && matches!(src, Source::Color(n) if n < 4);
+                if let Some(unit_0) = unit_0
+                    && (src == Source::Atlas || unknown || not_gbuffers)
+                {
+                    src = unit_0;
+                }
                 let blank = match src {
                     // The shadow pass writes the shadow map.
                     Source::ShadowDepth(..) => group == Group::Shadow,
@@ -1433,6 +1558,22 @@ fn image_format(qualifier: &str) -> Option<wgpu::TextureFormat> {
     })
 }
 
+/// The value slot of the pack's custom uniform `name` for a program declaring it as GLSL type
+/// `ty`: after the frame's uniforms, in the order of `custom` (each with the type
+/// `shaders.properties` gives it). A `float`, `int`, `vec2`, `vec3` or `vec4` custom uniform
+/// declared as another of these types gets none, and reads 0: Iris 1.11.7 logs "Wrong uniform
+/// type ... Disabling that uniform" and our probes read 0 there (float as int, int as float,
+/// vec3 as vec2, vec2 as vec3; the vec4 cases were not probed). Other pairs (a `bool` on either
+/// side) keep the conversion `Value::write` makes: our probe read a float of 2.5 declared
+/// `bool` as true in both games.
+fn custom_index(custom: &[(String, String)], name: &str, ty: &str) -> Option<usize> {
+    const STRICT: [&str; 5] = ["float", "int", "vec2", "vec3", "vec4"];
+    let k = custom.iter().position(|(c, _)| c == name)?;
+    let declared = custom[k].1.as_str();
+    let disabled = declared != ty && STRICT.contains(&declared) && STRICT.contains(&ty);
+    (!disabled).then_some(pack_uniforms::NAMES.len() + k)
+}
+
 /// The pass of program `p`: a quad, or `geometry` drawn by the game. `None` (with a note) when
 /// wgpu refuses it or it writes nothing. `formats` are its buffers' (for a program of the shadow
 /// buffers, buffer n is shadowcolor n); `shadow` the shadowcolor formats when the shadow pass
@@ -1446,17 +1587,14 @@ fn build_pass(
     screen: wgpu::TextureFormat,
     notes: &mut Vec<String>,
     geometry: Option<&Geometry<'_>>,
-    custom: &[String],
+    custom: &[(String, String)],
     draws: &wgpu::BindGroupLayout,
     pack: &Resources<'_>,
 ) -> Option<Pass> {
     let features = device.features();
     // The frame's uniforms, then the pack's custom ones.
-    let index = |name: &str| {
-        pack_uniforms::index_in(name, geometry.is_some()).or_else(|| {
-            let k = custom.iter().position(|c| c == name)?;
-            Some(pack_uniforms::NAMES.len() + k)
-        })
+    let index = |name: &str, ty: &str| {
+        pack_uniforms::index_in(name, geometry.is_some()).or_else(|| custom_index(custom, name, ty))
     };
     let mask = |flips: &[(u32, bool)]| flips.iter().filter(|f| f.1).fold(0u16, |m, f| m | 1 << f.0);
     let mut p = p;
@@ -1490,6 +1628,8 @@ fn build_pass(
     let final_pass = p.group == Group::Final;
     let mut targets = Vec::new();
     let mut writes = Vec::new();
+    // Outputs into a buffer of a small packed format, and the bits it keeps.
+    let mut packed_outputs = Vec::new();
     for &location in &interface.outputs {
         let l = location as usize;
         if targets.len() <= l {
@@ -1520,6 +1660,11 @@ fn build_pass(
                 .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
             {
                 t.blend = Some(blend_state(b));
+            }
+            if !p.group.shadow()
+                && let Some(bits) = pack.packed[buffer as usize]
+            {
+                packed_outputs.push((location, bits));
             }
             targets[l] = state;
             writes.push((location, buffer as usize));
@@ -1580,7 +1725,9 @@ fn build_pass(
                 source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(m)),
             })
         };
-        let (vs, fs) = (module(program.vertex), module(program.fragment));
+        let mut fragment = program.fragment;
+        packed::quantise_outputs(&mut fragment, &packed_outputs);
+        let (vs, fs) = (module(program.vertex), module(fragment));
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(&p.name),
             layout: Some(&pipeline_layout),
@@ -1639,7 +1786,7 @@ fn build_pass(
     let missing: Vec<&str> = interface
         .uniforms
         .iter()
-        .filter(|u| !u.name.starts_with("hz_") && index(&u.name).is_none())
+        .filter(|u| !u.name.starts_with("hz_") && index(&u.name, &u.ty).is_none())
         .map(|u| u.name.as_str())
         .collect();
     if !missing.is_empty() {
@@ -1661,7 +1808,7 @@ fn build_pass(
         uniforms: interface
             .uniforms
             .iter()
-            .map(|u| (index(&u.name), u.ty.clone(), u.offset))
+            .map(|u| (index(&u.name, &u.ty), u.ty.clone(), u.offset))
             .collect(),
         name: p.name,
         group: p.group,
@@ -1714,14 +1861,11 @@ fn build_compute(
     formats: &[wgpu::TextureFormat; BUFFERS],
     shadow: Option<&[wgpu::TextureFormat; SHADOW_COLORS]>,
     notes: &mut Vec<String>,
-    custom: &[String],
+    custom: &[(String, String)],
     pack: &Resources<'_>,
 ) -> Option<Pass> {
-    let index = |name: &str| {
-        pack_uniforms::index(name).or_else(|| {
-            let k = custom.iter().position(|c| c == name)?;
-            Some(pack_uniforms::NAMES.len() + k)
-        })
+    let index = |name: &str, ty: &str| {
+        pack_uniforms::index(name).or_else(|| custom_index(custom, name, ty))
     };
     let interface = &c.interface;
     let (entries, samplers, slots, reads, shadow_reads, images) = bindings(
@@ -1790,7 +1934,7 @@ fn build_compute(
         uniforms: interface
             .uniforms
             .iter()
-            .map(|u| (index(&u.name), u.ty.clone(), u.offset))
+            .map(|u| (index(&u.name, &u.ty), u.ty.clone(), u.offset))
             .collect(),
         name,
         group,
@@ -1826,8 +1970,16 @@ fn build_compute(
     })
 }
 
+/// Why a pack can't run, and the notes of loading it until then (why programs were skipped).
+#[derive(Debug)]
+pub struct Refused {
+    pub reason: String,
+    pub notes: Vec<String>,
+}
+
 impl PackPost {
-    /// Builds the pipelines of `post` for a screen of `screen` format.
+    /// Builds the pipelines of `post` for a screen of `screen` format. An error when the pack
+    /// can't show anything on the screen: the game turns it off, as a pack that fails to load.
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -1835,13 +1987,14 @@ impl PackPost {
         mut post: Post,
         screen: wgpu::TextureFormat,
         world: World<'_>,
-    ) -> Self {
+    ) -> Result<Self, Refused> {
         // What the pack's shaders need of its storage buffers, before its parts move out.
         let minimums = post.buffer_minimums();
         let features = device.features();
         let formats: [wgpu::TextureFormat; BUFFERS] = std::array::from_fn(|i| {
             let f = post.config.buffers[i].format;
-            snorm_format(f, features, adapter).unwrap_or_else(|| texture_format(f, features))
+            snorm_format(f, features, adapter)
+                .unwrap_or_else(|| target_format(f, features, adapter))
         });
         let sky_clear = Some(&post.config.buffers[0])
             .filter(|b| b.clear)
@@ -1851,6 +2004,10 @@ impl PackPost {
         let rgb = (0..BUFFERS)
             .filter(|&i| post.config.buffers[i].format.channels == 3)
             .fold(0u16, |m, i| m | 1 << i);
+        // A small packed format's buffer reads back fewer bits, as in Iris: its clears and
+        // what its passes write keep only those.
+        let packed: [Option<[u8; 4]>; BUFFERS] =
+            std::array::from_fn(|i| packed::bits(post.config.buffers[i].format));
         let clears = std::array::from_fn(|i| {
             let b = &post.config.buffers[i];
             b.clear.then(|| {
@@ -1858,7 +2015,7 @@ impl PackPost {
                 if rgb & 1 << i != 0 {
                     c[3] = 1.0;
                 }
-                c
+                packed[i].map_or(c, |bits| packed::quantise(c, bits))
             })
         });
         let mut notes = post.notes;
@@ -1873,9 +2030,11 @@ impl PackPost {
         // shadowcolor2 to 7 only for a pack that names `HIGHER_SHADOWCOLOR`.
         let shadow_colors = (1u16 << post.shadow_colors) - 1;
         let mut custom = post.custom;
-        let custom_names: Vec<String> = custom.uniforms().map(|u| u.0.to_owned()).collect();
+        let custom_names: Vec<(String, String)> = (custom.uniforms())
+            .map(|(name, ty)| (name.to_owned(), ty.to_owned()))
+            .collect();
         // A first run finds the names neither the frame nor the pack defines.
-        custom.eval(0.0, &|n| pack_uniforms::index(n).map(|_| Val::scalar(0.0)));
+        custom.eval(0.0, &pack_uniforms::zero);
         // Its zeros are no start for `smooth`: the first frame's values are, as in Iris.
         custom.restart_smoothing();
         if !custom.notes.is_empty() {
@@ -1885,12 +2044,17 @@ impl PackPost {
         let mask =
             |flips: &[(u32, bool)]| flips.iter().filter(|f| f.1).fold(0u16, |m, f| m | 1 << f.0);
         let mut used = 1u16;
+        // Buffers some pass draws into the "alt" side of, or flips: only these get a B texture.
+        let mut doubled = mask(&post.deferred_pre) | mask(&post.composite_pre);
+        let mut shadow_doubled = 0u16;
         let draws = DrawUniforms::new(device);
         // The shadow buffers' formats when the shadow pass runs; their programs see them as
         // buffers 0 to 7.
         let shadow_formats: Option<[wgpu::TextureFormat; SHADOW_COLORS]> =
             post.shadow_pass.then(|| {
-                std::array::from_fn(|n| texture_format(shadow_config.colors[n].format, features))
+                std::array::from_fn(|n| {
+                    target_format(shadow_config.colors[n].format, features, adapter)
+                })
             });
         let shadow_space: [wgpu::TextureFormat; BUFFERS] = std::array::from_fn(|i| {
             shadow_formats
@@ -1963,6 +2127,7 @@ impl PackPost {
             gpu,
             storable,
             rgb,
+            packed,
             released: std::cell::Cell::new(("", 0)),
             stand_ins: &stand_ins,
             shadow_linear: if features.contains(wgpu::Features::FLOAT32_FILTERABLE) {
@@ -2040,11 +2205,29 @@ impl PackPost {
                 ));
                 return None;
             }
+            // Composite-style programs draw into the "alt" side of what they write; gbuffers,
+            // shadow and `final` programs write in place, compute programs through images.
+            let alt = if geometry.is_none()
+                && group != Group::Final
+                && matches!(pass.pipeline, Pipeline::Render(_))
+            {
+                pass.written
+            } else {
+                0
+            };
+            if in_shadow {
+                shadow_doubled |= alt;
+            } else {
+                doubled |= alt;
+            }
             for p in std::iter::once(&pass).chain(&pass.compute) {
                 let (stage, flipped) = pack.released.get();
                 pack.released.set((stage, flipped | p.flip));
-                if !in_shadow {
+                if in_shadow {
+                    shadow_doubled |= p.flip;
+                } else {
                     used |= p.reads | p.written | p.flip;
+                    doubled |= p.flip;
                 }
                 storage |= image_buffers(&p.images);
                 image_copied |= p.image_copies;
@@ -2058,7 +2241,7 @@ impl PackPost {
             .terrain
             .as_ref()
             .filter(|g| g.table.is_some())
-            .map(|_| block_ids(device, world.block_ids));
+            .map(|_| block_ids(device, world.block_ids, world.sprite_rects));
         let terrain_geometry = world.terrain.as_ref().map(|g| Geometry {
             buffers: g.buffers,
             table: g.table,
@@ -2068,21 +2251,37 @@ impl PackPost {
             ids: block_ids.as_ref().map(|i| &i.0),
             cull: g.cull,
         });
-        let terrain = post
+        let split = post.terrain.is_some() && post.terrain_cutout.is_some();
+        let mut terrain = post
             .terrain
+            .zip(terrain_geometry.as_ref())
+            .and_then(|(p, g)| build(p, Some(g)));
+        let mut terrain_cutout = post
+            .terrain_cutout
             .zip(terrain_geometry.as_ref())
             .and_then(|(p, g)| build(p, Some(g)));
         let water = post
             .water
             .zip(terrain_geometry.as_ref())
             .and_then(|(p, g)| build(p, Some(g)));
+        // The shadow pass draws terrain faces from both sides, as Iris 1.11.7 does (#9033): a
+        // cave ceiling faces away from the sun, and is often all that shadows the cave.
+        let shadow_geometry = terrain_geometry.as_ref().map(|g| Geometry {
+            buffers: g.buffers,
+            table: g.table,
+            depth_write: g.depth_write,
+            atlas: g.atlas.clone(),
+            material_maps: g.material_maps,
+            ids: g.ids,
+            cull: false,
+        });
         let shadow_terrain = post
             .shadow
-            .zip(terrain_geometry.as_ref())
+            .zip(shadow_geometry.as_ref())
             .and_then(|(p, g)| build(p, Some(g)));
         let shadow_water = post
             .shadow_water
-            .zip(terrain_geometry.as_ref())
+            .zip(shadow_geometry.as_ref())
             .and_then(|(p, g)| build(p, Some(g)));
         let (hides_sky, hides_celestial) = (post.sky.is_some(), post.sky_textured.is_some());
         let sky = (post.sky.is_some() || post.sky_textured.is_some()).then(|| {
@@ -2189,7 +2388,7 @@ impl PackPost {
         let weather_geometry = world.weather.then(|| Geometry {
             buffers: &entity_buffers,
             table: None,
-            depth_write: true,
+            depth_write: post.rain_depth,
             atlas: None,
             material_maps: false,
             ids: None,
@@ -2242,6 +2441,22 @@ impl PackPost {
             .filter(|p| !skip.split(',').any(|s| s == p.name))
             .filter_map(|p| build(p, None))
             .collect();
+        // The screen gets colortex0 through `final`, or else through Horizon's copy, which reads
+        // floats: an integer colortex0 (`RGBA32UI`...) with no `final` left to draw can't reach
+        // it (#9165).
+        let shows = passes
+            .iter()
+            .any(|p| p.group == Group::Final && matches!(p.pipeline, Pipeline::Render(_)));
+        if !shows && !holds_floats(formats[0]) {
+            return Err(Refused {
+                reason: format!(
+                    "colortex0 has an integer format ({:?}) and no `final` program draws it to \
+                     the screen",
+                    formats[0]
+                ),
+                notes,
+            });
+        }
         let shadow_comp: Vec<Pass> = post
             .shadow_comp
             .into_iter()
@@ -2249,8 +2464,31 @@ impl PackPost {
             .filter_map(|p| build(p, None))
             .collect();
         let stand_ins = pack_images::stand_ins(device, stand_ins.take());
-        if let Some(t) = &terrain {
-            notes.push(format!("terrain draws with {}", t.name));
+        // Terrain in two parts draws both or neither: one alone would leave the other part's
+        // terrain undrawn. Without either, the game draws all terrain, as when the terrain
+        // program of a pack that doesn't split can't draw.
+        if split
+            && terrain.is_some() != terrain_cutout.is_some()
+            && let Some(p) = terrain.take().or(terrain_cutout.take())
+        {
+            notes.push(format!(
+                "{}: the other part of terrain can't draw; the game draws all terrain",
+                p.name
+            ));
+        }
+        match (&terrain, &mut terrain_cutout) {
+            (Some(t), None) => notes.push(format!("terrain draws with {}", t.name)),
+            (t, Some(c)) => {
+                if let Some(t) = t {
+                    notes.push(format!("solid terrain draws with {}", t.name));
+                }
+                notes.push(format!("cutout terrain draws with {}", c.name));
+                // Timed (and labelled) apart from the solid part when it runs the same program.
+                if t.as_ref().is_some_and(|t| t.name == c.name) {
+                    c.name.push_str(" (cutout)");
+                }
+            }
+            (None, None) => {}
         }
         for (part, pass) in [
             ("terrain", &shadow_terrain),
@@ -2334,6 +2572,7 @@ impl PackPost {
                 .iter()
                 .chain(&shadow_comp)
                 .chain(&terrain)
+                .chain(&terrain_cutout)
                 .chain(&water))
             .chain(shadow_terrain.iter().chain(&shadow_water))
             .chain(sky.iter().flat_map(|s| s.basic.iter().chain(&s.textured)))
@@ -2368,18 +2607,24 @@ impl PackPost {
                 &shadow_config,
                 f,
                 colors,
+                shadow_doubled & colors,
                 depth1,
                 linear,
             );
             notes.push(format!(
-                "shadow map {0}x{0} over {2} blocks, sunPathRotation {3}, shadowcolor buffers {colors:#b}{1}",
+                "shadow map {0}x{0} over {2} blocks, sunPathRotation {3}, shadowcolor buffers {colors:#b} (two textures: {4:#b}){1}",
                 t.size,
                 if depth1 { ", shadowtex1" } else { "" },
                 shadow_config.distance,
                 shadow_config.sun_path_rotation,
+                shadow_doubled & colors,
             ));
             t
         });
+        log::info!(
+            "shader pack: colortex buffers {used:#b}, with two textures {:#b}",
+            doubled & used
+        );
         // Any program can leave pixels untouched. Composite-style passes also write the
         // alternate image, so their first write does not replace the main image's clear.
         let mut cleared = Vec::new();
@@ -2391,6 +2636,7 @@ impl PackPost {
                 .iter()
                 .flat_map(|s| s.basic.iter().chain(&s.textured))
                 .chain(&terrain)
+                .chain(&terrain_cutout)
                 .chain(entities.iter().flat_map(|e| e.passes.iter().flatten()))
                 .chain(&clouds)
                 .chain(&lines)
@@ -2406,6 +2652,7 @@ impl PackPost {
         }
         // Terrain tests against the world's depth (entities...), so the blit copies it then.
         let blit_depth = terrain.is_some()
+            || terrain_cutout.is_some()
             || water.is_some()
             || sky.is_some()
             || entities.as_ref().is_some_and(Entities::drawn)
@@ -2538,11 +2785,12 @@ impl PackPost {
         let white = [255u8; 4];
         let black = [0u8; 4];
         let flat_normal = [128u8, 128, 255, 255];
-        Self {
+        Ok(Self {
             notes,
             setup_pending: true,
             passes,
             terrain,
+            terrain_cutout,
             water,
             sky,
             entities,
@@ -2586,6 +2834,7 @@ impl PackPost {
             rgb,
             rgb_unset: true,
             used,
+            doubled: doubled & used,
             storage,
             copied,
             sizes,
@@ -2701,7 +2950,7 @@ impl PackPost {
                 u
             },
             shadow_cache: Default::default(),
-        }
+        })
     }
 
     /// Writes `pass`'s uniforms for a target of `out` pixels; its bind group for the buffers'
@@ -3031,7 +3280,8 @@ impl PackPost {
     }
 
     /// Terrain (or, `translucent`, translucent terrain) with the pack's program; `draw` issues
-    /// the game's draws.
+    /// the game's draws. Solid terrain in two parts has its cutout part drawn second, from the
+    /// same draws.
     fn draw_terrain(
         &mut self,
         device: &wgpu::Device,
@@ -3041,13 +3291,35 @@ impl PackPost {
         list: TerrainList,
         draw: &mut TerrainDraw<'_>,
     ) {
-        let slot = match list {
+        self.draw_terrain_part(device, queue, encoder, size, list, false, draw);
+        if list == TerrainList::Solid {
+            self.draw_terrain_part(device, queue, encoder, size, list, true, draw);
+        }
+    }
+
+    /// The pass that draws `list`, or the cutout part of the solid list.
+    fn terrain_slot(&mut self, list: TerrainList, cutout: bool) -> &mut Option<Pass> {
+        match list {
+            TerrainList::Solid if cutout => &mut self.terrain_cutout,
             TerrainList::Solid => &mut self.terrain,
             TerrainList::Translucent => &mut self.water,
             TerrainList::ShadowSolid => &mut self.shadow_terrain,
             TerrainList::ShadowTranslucent => &mut self.shadow_water,
-        };
-        let Some(mut pass) = slot.take() else {
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_terrain_part(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        size: [u32; 2],
+        list: TerrainList,
+        cutout: bool,
+        draw: &mut TerrainDraw<'_>,
+    ) {
+        let Some(mut pass) = self.terrain_slot(list, cutout).take() else {
             return;
         };
         let translucent = list.translucent();
@@ -3085,12 +3357,7 @@ impl PackPost {
         if !pass.group.shadow() {
             self.mips_valid &= !pass.written;
         }
-        *match list {
-            TerrainList::Solid => &mut self.terrain,
-            TerrainList::Translucent => &mut self.water,
-            TerrainList::ShadowSolid => &mut self.shadow_terrain,
-            TerrainList::ShadowTranslucent => &mut self.shadow_water,
-        } = Some(pass);
+        *self.terrain_slot(list, cutout) = Some(pass);
     }
 
     /// The sky's parts in vanilla's order, each with the program that draws it; one render pass
@@ -3723,12 +3990,14 @@ impl PackPost {
                 horizon_shaders::ShadowCulling::Off => Some(f32::INFINITY),
                 horizon_shaders::ShadowCulling::Reversed => Some(shadow.voxel_distance),
             },
+            every_face: true,
+            view_casters: true,
         })
     }
 
     /// Whether the pack draws terrain itself.
     pub fn has_terrain(&self) -> bool {
-        self.terrain.is_some()
+        self.terrain.is_some() || self.terrain_cutout.is_some()
     }
 
     /// Whether the pack's shadow pass draws terrain (`shadow_view`).
@@ -3779,6 +4048,7 @@ impl PackPost {
             .passes
             .iter_mut()
             .chain(&mut self.terrain)
+            .chain(&mut self.terrain_cutout)
             .chain(&mut self.water)
             .chain(sky)
             .chain(entities)
@@ -3860,8 +4130,16 @@ impl PackPost {
                 if i != 0 && self.clears[i].is_none() {
                     attachment |= wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST;
                 }
-                let sides = [0, 1]
-                    .map(|_| texture_sized(&label, self.formats[i], attachment, levels, sizes[i]));
+                let side = || texture_sized(&label, self.formats[i], attachment, levels, sizes[i]);
+                let a = side();
+                let sides = [
+                    a.clone(),
+                    if self.doubled & 1 << i != 0 {
+                        side()
+                    } else {
+                        a
+                    },
+                ];
                 if mipped && let Some((_, layout)) = self.down.get(&self.formats[i]) {
                     mips[i] = Some(sides.each_ref().map(|t| {
                         Mips {
@@ -4106,8 +4384,8 @@ impl PackPost {
         shadow.interval.to_bits().hash(&mut hasher);
         shadow.sun_path_rotation.to_bits().hash(&mut hasher);
         shadow.fov.map(|f| f.to_bits()).hash(&mut hasher);
-        shadow.near.to_bits().hash(&mut hasher);
-        shadow.far.to_bits().hash(&mut hasher);
+        shadow.near.map(f32::to_bits).hash(&mut hasher);
+        shadow.far.map(f32::to_bits).hash(&mut hasher);
         for hf in &shadow.hardware_filtering {
             hf.hash(&mut hasher);
         }
@@ -4195,7 +4473,7 @@ impl PackPost {
         terrain: &mut TerrainDraw<'_>,
     ) {
         self.resize(device, size);
-        if let Some((layout, ids)) = &self.block_ids {
+        if let Some((layout, ids, rects)) = &self.block_ids {
             // A page that grew has a new buffer.
             self.page_groups
                 .retain(|p, (b, _)| pages.iter().any(|(q, c)| q == p && c == b));
@@ -4212,6 +4490,10 @@ impl PackPost {
                             wgpu::BindGroupEntry {
                                 binding: 1,
                                 resource: buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: rects.as_entire_binding(),
                             },
                         ],
                     });
@@ -4293,7 +4575,10 @@ impl PackPost {
                 store: wgpu::StoreOp::Store,
             };
             for b in (0..BUFFERS).filter(|&b| self.rgb & 1 << b != 0) {
-                for alt in [false, true] {
+                for alt in [false, true]
+                    .into_iter()
+                    .take(1 + usize::from(self.doubled & 1 << b != 0))
+                {
                     if let Some(v) = view(self.main, b, alt) {
                         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: Some("Shader pack three-channel start"),
@@ -4326,7 +4611,8 @@ impl PackPost {
         let max_attachments = (limits.max_color_attachments as usize).min(8);
         // The buffers the blit doesn't clear, and the other texture of every cleared buffer.
         let alt_clears = (0..BUFFERS)
-            .filter(|&b| self.clears[b].is_some() && view(self.main, b, true).is_some())
+            .filter(|&b| self.clears[b].is_some() && self.doubled & 1 << b != 0)
+            .filter(|&b| view(self.main, b, true).is_some())
             .map(|b| (b, true));
         let mut by_size: Vec<([u32; 2], Vec<(usize, bool)>)> = Vec::new();
         for (b, alt) in self
@@ -4434,6 +4720,7 @@ impl PackPost {
         let mut shown = false;
         // A water-only pack still needs the opaque phase to populate requested snapshots.
         let mut terrain_drawn = self.terrain.is_none()
+            && self.terrain_cutout.is_none()
             && self.sky.is_none()
             && !self.entities.as_ref().is_some_and(Entities::drawn)
             && self.clouds.is_none()
@@ -4571,14 +4858,8 @@ impl PackPost {
                 .as_ref()
                 .map(|t| &t[main(m, i) ^ usize::from(alt)])
         };
-        // An integer colortex0 has no colour to show: the screen is only cleared.
-        if !shown && !holds_floats(self.formats[0]) {
-            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Shader pack colortex0"),
-                color_attachments: &[attach(screen, overwrite)],
-                ..Default::default()
-            });
-        } else if !shown {
+        // Without `final`, colortex0 holds floats (`new` refuses an integer one).
+        if !shown {
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Shader pack colortex0"),
                 layout: &self.copy.1,
@@ -4613,6 +4894,10 @@ mod snorm_tests;
 #[cfg(test)]
 #[path = "pack_post/depth_test.rs"]
 mod depth_test;
+
+#[cfg(test)]
+#[path = "pack_post/terrain_parts_tests.rs"]
+mod terrain_parts_tests;
 
 #[cfg(test)]
 mod tests {
@@ -4726,6 +5011,7 @@ mod tests {
             sample_type: wgpu::TextureSampleType::Float { filterable: true },
             blur: false,
             clamp: false,
+            png: false,
             image: pack_textures::Image::Atlas,
         }];
         let interface = horizon_shaders::Interface {
@@ -4758,6 +5044,7 @@ mod tests {
             gpu: Gpu::of(&adapter, device.features()),
             storable: 0,
             rgb: 0,
+            packed: [None; BUFFERS],
             released: std::cell::Cell::new(("", 0)),
             stand_ins: &stand_ins,
             shadow_linear: 0,
@@ -4784,6 +5071,102 @@ mod tests {
         pack.released.set(("composite", 1));
         assert!(reads(Group::Composite) == Source::Color(0));
         assert!(reads(Group::Final) == Source::Color(0));
+    }
+
+    /// Iris 1.11.7 (a probe pack of ours, #9064) didn't bind a PNG under
+    /// `texture.<stage>.<name>` when `name` was a name of the pack's own, no sampler of the
+    /// game's; a raw texture there, a PNG over `gaux2` or `noisetex`, and a `customTexture` PNG
+    /// were bound.
+    #[test]
+    fn a_png_under_a_name_of_its_own_is_not_bound() {
+        let instance = crate::gfx::test_gpu::instance();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let Ok((device, _queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+        else {
+            return;
+        };
+        let texture = |stage: &str, name: &str, png: bool| pack_textures::PackTexture {
+            stage: stage.into(),
+            name: name.into(),
+            dimension: wgpu::TextureViewDimension::D2,
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            blur: !png,
+            clamp: !png,
+            png,
+            image: pack_textures::Image::Atlas,
+        };
+        let textures = [
+            texture("composite", "tp", true),
+            texture("composite", "tr", false),
+            texture("composite", "gaux2", true),
+            texture("composite", "noisetex", true),
+            texture(horizon_shaders::EVERY_STAGE, "cp", true),
+        ];
+        let names = ["tp", "tr", "gaux2", "noisetex", "cp"];
+        let interface = horizon_shaders::Interface {
+            uniform_size: 48,
+            uniforms: Vec::new(),
+            samplers: names
+                .iter()
+                .zip(1..)
+                .map(|(name, k)| horizon_shaders::Sampler {
+                    name: (*name).into(),
+                    ty: "sampler2D".into(),
+                    binding: 2 * k - 1,
+                })
+                .collect(),
+            outputs: vec![0],
+            draw: false,
+            images: Vec::new(),
+            buffers: Vec::new(),
+            initial_values: vec![0; 48],
+        };
+        let buffers = pack_images::Buffers::new(
+            &device,
+            Default::default(),
+            Default::default(),
+            wgpu::ShaderStages::FRAGMENT,
+        );
+        let stand_ins = std::cell::RefCell::new(Vec::new());
+        let pack = Resources {
+            textures: &textures,
+            images: &[],
+            left_out: &[],
+            buffers: &buffers,
+            indices: None,
+            gpu: Gpu::of(&adapter, device.features()),
+            storable: 0,
+            rgb: 0,
+            released: std::cell::Cell::new(("", 0)),
+            stand_ins: &stand_ins,
+            shadow_linear: 0,
+            packed: [None; BUFFERS],
+        };
+        let (_, samplers, ..) = bindings(
+            device.features(),
+            &interface,
+            "final",
+            Group::Final,
+            &[0],
+            None,
+            &[T::Rgba8Unorm; BUFFERS],
+            None,
+            &mut Vec::new(),
+            &pack,
+        )
+        .expect("the pass is kept");
+        let read: Vec<Source> = samplers.iter().map(|b| b.source).collect();
+        assert!(
+            read == [
+                Source::Dummy,
+                Source::Atlas,
+                Source::Atlas,
+                Source::Atlas,
+                Source::Atlas
+            ]
+        );
     }
 
     /// Iris 1.11.7 runs a program whose image no `image.*` gives, and its loads read zero
@@ -4838,6 +5221,7 @@ mod tests {
             gpu: Gpu::of(&adapter, device.features()),
             storable: 0,
             rgb: 0,
+            packed: [None; BUFFERS],
             released: std::cell::Cell::new(("", 0)),
             stand_ins: &stand_ins,
             shadow_linear: 0,
@@ -4979,6 +5363,7 @@ mod tests {
             gpu: Gpu::of(&adapter, device.features()),
             storable: 0,
             rgb: 0,
+            packed: [None; BUFFERS],
             released: std::cell::Cell::new(("", 0)),
             stand_ins: &stand_ins,
             shadow_linear: 0,
@@ -5104,6 +5489,27 @@ mod tests {
     }
 
     #[test]
+    fn float_targets_fall_back_when_not_renderable() {
+        let all = |_| true;
+        assert_eq!(renderable_float(T::Rgba32Float, all), T::Rgba32Float);
+        // OpenGL without GL_EXT_color_buffer_float: only half floats render.
+        let half_only = |f: T| matches!(f, T::R16Float | T::Rg16Float | T::Rgba16Float);
+        assert_eq!(renderable_float(T::Rgba32Float, half_only), T::Rgba16Float);
+        assert_eq!(renderable_float(T::Rg32Float, half_only), T::Rg16Float);
+        assert_eq!(renderable_float(T::R32Float, half_only), T::R16Float);
+        assert_eq!(renderable_float(T::Rgba16Float, half_only), T::Rgba16Float);
+        // Neither renders: the 8-bit last resort.
+        assert_eq!(renderable_float(T::Rgba32Float, |_| false), T::Rgba8Unorm);
+        assert_eq!(renderable_float(T::Rg16Float, |_| false), T::Rgba8Unorm);
+        // Other formats are never replaced.
+        assert_eq!(renderable_float(T::Rgba8Uint, |_| false), T::Rgba8Uint);
+        assert_eq!(
+            renderable_float(T::Rgb10a2Unorm, |_| false),
+            T::Rgb10a2Unorm
+        );
+    }
+
+    #[test]
     fn samplers_read_custom_textures_of_their_type() {
         use wgpu::TextureSampleType as T;
         let float = T::Float { filterable: true };
@@ -5152,6 +5558,9 @@ mod material_tests;
 mod rgb_alpha_tests;
 
 #[cfg(test)]
+mod packed_tests;
+
+#[cfg(test)]
 mod trinary_tests;
 
 #[cfg(test)]
@@ -5159,3 +5568,9 @@ mod const_offset_tests;
 
 #[cfg(test)]
 mod integer_colortex0_tests;
+
+#[cfg(test)]
+mod atlas_name_post_tests;
+
+#[cfg(test)]
+mod unknown_sampler_terrain_tests;

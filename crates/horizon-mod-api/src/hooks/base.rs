@@ -26,15 +26,15 @@ pub trait Hooks {
     /// The world's phases, read-only; `error_text` carries the engine's
     /// own open-failure text, empty otherwise. Server-side. A server loop or final
     /// save failure fires `WorldCloseFailed` with the error text.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(side = "server", contract = "listen", version = 2)]
     fn world_lifecycle();
     /// The server is about to open its worlds: nothing of the world is
     /// loaded yet (NeoForge's `ServerAboutToStartEvent`, "called before the
     /// server begins loading anything"). Vanilla's `MinecraftServer.loadLevel`
     /// start. Server-side: the single player server thread once Play is
     /// pressed, a dedicated server once its settings are read. Each is
-    /// followed by `native_world_lifecycle`'s `WorldOpenReady` or
-    /// `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
+    /// followed by `native_server_started` or
+    /// `native_world_lifecycle`'s `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
     /// player one.
     #[hook(
         side = "server",
@@ -43,6 +43,19 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_about_to_start();
+    /// The server has opened its worlds and is about to run its tick loop
+    /// (NeoForge's `ServerStartedEvent`): every level is loaded, no player has
+    /// joined, and the first tick has not run. Fired where `WorldOpenReady` was,
+    /// on the single player server thread and on a dedicated server, once per
+    /// open that succeeds (a failed open fires `WorldOpenFailed` instead).
+    /// `dedicated` tells a dedicated server from the single player one.
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ServerStartedEvent",
+        cancellable = false
+    )]
+    fn server_started();
     /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
@@ -164,9 +177,11 @@ pub trait Hooks {
         neighbour: BlockStateId,
         new: &mut Option<BlockStateId>,
     );
-    /// A command typed or clicked in chat, without its slash, before the
-    /// server and Horizon's commands see it: set `ran` when the mod ran it.
-    #[hook(side = "both", contract = "cancel", out = "ran")]
+    /// A command the local player typed or clicked in chat, without its
+    /// slash, before the server and Horizon's commands see it: set `ran`
+    /// when the mod ran it. Client-side: a server never asks, not for
+    /// command blocks, guests or the console.
+    #[hook(side = "client", contract = "cancel", out = "ran", version = 2)]
     fn command();
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
     /// `command` runs: push a `NativeCommand` per usage (`x <mode:word>`).
@@ -395,7 +410,16 @@ pub trait Hooks {
         scope = "item",
         key = "stack"
     )]
-    fn use_on();
+    fn use_on(
+        stack: &ItemStack,
+        pos: [i32; 3],
+        face: [i32; 3],
+        hand: Hand,
+        hit: BlockHit,
+        player: u128,
+        player_entity_id: i32,
+        claimed: &mut bool,
+    );
     /// A player uses `stack` (right click) with `self.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
@@ -413,7 +437,11 @@ pub trait Hooks {
     /// (the held item can break blocks, the debug stick didn't take the
     /// click): where `ServerPlayerGameMode.destroyBlock` starts. Set
     /// `canceled` to keep the block: nothing is destroyed or dropped, and a
-    /// guest sees it back. Server-side, for every player of the world (the
+    /// guest sees it back. Set `exp_to_drop` to `Some(amount)` to replace
+    /// the vanilla experience sample later, after item drops are prepared;
+    /// `None` keeps vanilla sampling. `block_drops` sees and may change that
+    /// amount afterwards; cancellation or disabled block drops suppresses it.
+    /// Server-side, for every player of the world (the
     /// helpers read the acting one). Diverges from upstream: renamed from
     /// `destroy_block`, to NeoForge's `BlockEvent.BreakEvent`.
     #[hook(
@@ -474,7 +502,15 @@ pub trait Hooks {
         neoforge = "PistonEvent.Pre",
         target = "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_pre"
     )]
-    fn piston_pre();
+    fn piston_pre(
+        dimension: LevelDimension,
+        piston: BlockPos,
+        direction: [i32; 3],
+        extending: bool,
+        push: &[BlockPos],
+        destroy: &[BlockPos],
+        canceled: &mut bool,
+    );
     /// On an authoritative server, the piston at `piston` pushed the blocks at
     /// `push` one step `direction` (`[0, 1, 0]` is up; pulling when it
     /// retracts, `extending` false) and destroyed those at `destroy`
@@ -683,7 +719,15 @@ pub trait Hooks {
         neoforge = "LivingIncomingDamageEvent",
         target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_incoming_damage"
     )]
-    fn living_incoming_damage();
+    fn living_incoming_damage(
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        victim: &Victim,
+        weapon: Option<&ItemStack>,
+        container: &mut DamageContainer,
+        canceled: &mut bool,
+    );
     /// An entity leaves the server level `dimension` (NeoForge's
     /// `EntityLeaveLevelEvent`): vanilla's `onTrackingEnd`, when it is removed
     /// for any reason (picked up, merged, despawned, burnt, blown up, killed,
@@ -725,7 +769,18 @@ pub trait Hooks {
     /// changes apply after the hook; clearing `keep` ends the effect.
     /// Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
-    fn apply_effect_tick();
+    fn apply_effect_tick(
+        effect: &str,
+        dimension: &str,
+        entity: Option<i32>,
+        amplifier: i32,
+        holder: LivingRef,
+        health: f32,
+        max_health: f32,
+        food: Option<NativePlayerFood>,
+        changes: &mut Vec<EffectTickChange>,
+        keep: &mut bool,
+    );
     /// `MobEffect.onEffectAdded`: `LivingEntity.addEffect` gave `entity`
     /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
     /// which it didn't have. Server-side.
@@ -746,7 +801,10 @@ pub trait Hooks {
     /// memory of what never saved. Its blocks and block entities are there,
     /// but its saved entities join afterwards and its light may not be ready:
     /// change the world from a later tick. The chunks around the spawn come
-    /// before `WorldOpenReady`. Not told of a chunk a client receives.
+    /// before `server_started`. Not told of a chunk a client receives.
+    /// The chunks leaving in the same tick were already copied for their last
+    /// save: an edit made here to one of them (a neighbour's block entity, say)
+    /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
     #[hook(side = "server", contract = "listen")]
     fn chunk_load();
@@ -905,7 +963,8 @@ pub trait Hooks {
     fn may_place_on();
     /// Draw the mod block entity at `pos`, of block `block`
     /// (`mymod:machine`), on this client: once a frame while it is in view
-    /// (vanilla's `BlockEntityRenderer.submit`: within 64 blocks, its chunk
+    /// (vanilla's `BlockEntityRenderer.submit`: within its view distance, 64 blocks unless
+    /// `block_entity_view_distance` says otherwise, its chunk
     /// faded in, and its bounds, `native_block_entity_render_bounding_box`,
     /// in the frustum), when its `id` is yours. `state` is the block's state
     /// (`blockEntity.getBlockState()`: read its `facing` with
@@ -928,7 +987,7 @@ pub trait Hooks {
     /// as the block with a block of margin around it; widen it when your
     /// `native_block_entity_submit` draws further (a tall shaft, a beam), or
     /// set an infinite value for one never culled. Asked once a frame for each
-    /// within 64 blocks whose chunk is drawn.
+    /// within its view distance (`block_entity_view_distance`) whose chunk is drawn.
     #[hook(
         side = "client",
         contract = "collect",
@@ -1689,7 +1748,18 @@ pub trait Hooks {
         neoforge = "LivingKnockBackEvent",
         target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_knockback"
     )]
-    fn living_knockback();
+    fn living_knockback(
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    );
     /// Whether the experience orb `into` takes the orb `from` in (vanilla's
     /// `ExperienceOrb.canMerge`): the same value, and ids a multiple of 40 apart. Asked
     /// for each pair whose boxes meet, when an orb spawns (`tryMergeToExisting`: `from` is
@@ -1824,7 +1894,7 @@ pub trait Hooks {
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
     /// posted in `MinecraftServer.createLevels`): before any of its chunks
     /// (`native_chunk_load`), so a mod sets up what it keeps for the level
-    /// here. The level the world opens in comes before `WorldOpenReady`; the
+    /// here. The level the world opens in comes before `server_started`; the
     /// others open when someone first goes there (a player, a portal, an
     /// `execute in` command), with the level in place. Once for each open:
     /// `native_level_unload` follows. Server-side.
@@ -1910,7 +1980,18 @@ pub trait Hooks {
         neoforge = "ProjectileImpactEvent",
         cancellable = true
     )]
-    fn projectile_impact();
+    fn projectile_impact(
+        dimension: &str,
+        projectile: u32,
+        kind: &str,
+        owner: u32,
+        entity: Option<u32>,
+        entity_kind: &str,
+        block: [i32; 3],
+        face: [i32; 3],
+        at: [f64; 3],
+        canceled: &mut bool,
+    );
     /// An entity mounts or dismounts a vehicle (NeoForge's `EntityMountEvent`, posted from
     /// `Entity.startRiding` and `removeVehicle`): `entity` of type `kind` (`minecraft:player`,
     /// `minecraft:zombie`) in the server level `dimension`, getting on (`mounting`) or off the
@@ -1931,7 +2012,15 @@ pub trait Hooks {
         neoforge = "EntityMountEvent",
         cancellable = true
     )]
-    fn entity_mount();
+    fn entity_mount(
+        dimension: &str,
+        entity: u32,
+        kind: &str,
+        vehicle: u32,
+        vehicle_kind: &str,
+        mounting: bool,
+        canceled: &mut bool,
+    );
     /// A player's click is about to act on what the crosshair points at. `event.key` says which: `Attack` (when an attack is allowed, and each tick a held key keeps digging a block), `Use` (once for each hand tried, main hand first, before the hand's target and item) or `PickBlock` (only with a block or entity aimed at). Cancel to skip the action; a cancelled use also gives the other hand no turn. A cancelled attack or use still swings `event.hand` unless the listener clears `event.swing_hand`. Client side: a single player's window and a server's player.
     #[hook(
         side = "client",
@@ -2258,7 +2347,15 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no sign-editing event)",
         cancellable = true
     )]
-    fn sign_changed();
+    fn sign_changed(
+        player: u128,
+        name: &str,
+        dimension: &str,
+        pos: [i32; 3],
+        front: bool,
+        lines: &mut Vec<String>,
+        cancel: &mut bool,
+    );
     /// Models no blockstate names that this client bakes beside the block
     /// models (NeoForge's `ModelEvent.RegisterStandalone`): push their ids
     /// (`mymod:block/shaft_half`, the model at
@@ -2539,7 +2636,15 @@ pub trait Hooks {
         cancellable = true,
         target = "horizon_client::game::native_hooks::GameLevel<'_>::native_cauldron_level_changed"
     )]
-    fn cauldron_level_changed();
+    fn cauldron_level_changed(
+        dimension: LevelDimension,
+        player: Option<u128>,
+        pos: BlockPos,
+        from_level: i32,
+        to_level: i32,
+        reason: &str,
+        cancel: &mut bool,
+    );
     /// A server player who ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
     /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
@@ -2652,7 +2757,15 @@ pub trait Hooks {
         neoforge = "EntityTeleportEvent.EnderPearl",
         cancellable = true
     )]
-    fn ender_pearl_teleport();
+    fn ender_pearl_teleport(
+        player: u128,
+        name: &str,
+        pearl: u32,
+        from: [f64; 3],
+        target: &mut [f64; 3],
+        damage: &mut f32,
+        cancel: &mut bool,
+    );
     /// Entities from `chunk` finished loading into the server world. `count`
     /// is the number of saved entity records read.
     #[hook(
@@ -2778,12 +2891,6 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn exp_bottle();
-    /// Whether a mod hears `native_pickup_xp`: set `listened`
-    /// (a HEAD injection), or the server skips swapping the player in for it,
-    /// and with this empty the pickup costs nothing more without mods.
-    /// Server-side.
-    #[hook(side = "server", contract = "collect", out = "listened")]
-    fn pickup_xp_listened();
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
     /// and `count` take effect only when not canceled; value is clamped to
     /// 1..=i32::MAX and count to at least one.
@@ -4174,21 +4281,28 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn trade_select();
-    /// A server player traded with a villager or a wandering trader
-    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
-    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// A trade of a villager or a wandering trader was made
+    /// (`MerchantResultSlot.onTake` once the offer is taken): `merchant` is
     /// the trader's entity id and `kind` its type (`minecraft:villager`,
-    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
-    /// one (its `uses` counted, `result` what the player got). Once per
-    /// trade, so a shift-click that trades several times is heard for each,
-    /// after the trade's statistic and `villager_trade` trigger. Listen
-    /// only: the trade is made. The player's state is swapped in
-    /// (`native_acting_player`).
+    /// `minecraft:wandering_trader`), `offer` the live one in the trading
+    /// session (not a copy) as the trade left it: `uses` counted, `result`
+    /// what the player got. Once per trade, so a shift-click that trades
+    /// several times is heard for each, after the trade's statistic and
+    /// `villager_trade` trigger. A mod may change the offer (Bukkit's
+    /// `PlayerTradeEvent#getTrade` is mutable): `uses`, `max_uses`, `demand`,
+    /// `special_price_diff`, `price_multiplier`, `xp`. The change stands: the
+    /// next click and the offers sent to the player see it. Not asked for a
+    /// trade window without a trader. The player's state is swapped in
+    /// (`native_acting_player`). Server-side. Version 2: was a listen hook
+    /// returning the offer read-only; now collects the live offer as `out`
+    /// (the moment upstream's separate `merchant_offer_traded` covered).
     #[hook(
         side = "server",
-        contract = "listen",
+        contract = "collect",
+        out = "offer",
         neoforge = "TradeWithVillagerEvent",
-        cancellable = false
+        cancellable = false,
+        version = 2
     )]
     fn trade_with_villager();
     /// A vault at `pos` changed to `state`. Its block state is updated.
@@ -4468,11 +4582,7 @@ pub trait Helpers {
     )]
     fn refresh_biome_colors();
     #[helper(side = "both")]
-    fn weather();
-    #[helper(side = "both")]
     fn day_time();
-    #[helper(side = "both")]
-    fn world_height();
     #[helper(side = "both")]
     fn max_stack_size();
     #[helper(side = "client")]
@@ -4531,6 +4641,19 @@ pub trait Helpers {
     fn block_entity_sync();
     #[helper(side = "client")]
     fn play_local_sound();
+    /// How many particles the client's level has alive (`ParticleEngine.countParticles`): every
+    /// live group, item pickups, firework starters and the elder guardian apparition included.
+    /// Queued particles and emitters are not counted. 0 once `clear_particles` was asked, and on
+    /// a server.
+    #[helper(side = "client")]
+    fn particle_count();
+    /// Removes every particle, queued particle and emitter of the client's level
+    /// (`ParticleEngine.clearParticles`), item pickups, firework starters and the elder guardian
+    /// apparition included. It takes `&self`, so a screen or render hook can ask: the clear
+    /// lands before the next frame is drawn or the next particle tick, whichever comes first,
+    /// paused or not. False on a server.
+    #[helper(side = "client")]
+    fn clear_particles();
     #[helper(side = "client")]
     fn fill();
     #[helper(side = "client")]
@@ -4539,10 +4662,6 @@ pub trait Helpers {
     fn item();
     #[helper(side = "client")]
     fn screen_title();
-    #[helper(side = "both")]
-    fn block();
-    #[helper(side = "both")]
-    fn block_property();
     #[helper(side = "client")]
     fn cursor();
     #[helper(side = "client")]

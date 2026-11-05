@@ -19,6 +19,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "ClientHost",
     "Backend",
     "BackendMut",
+    "ClientBackendMut",
     "DrawContext",
     "BlockEntityDrawContext",
     "LevelHost",
@@ -39,6 +40,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "ServerReloadListeners",
     "ClientReloadListeners",
     "ServerReloadResources",
+    "CriterionContext",
 ];
 
 /// Imported traits a call never hands over, each reached through another's method instead.
@@ -70,6 +72,11 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
         "server_host_mut",
         "crate::backend_mut_of(h).ok_or_else(|| missing(\"game backend\"))",
     ),
+    (
+        "ClientBackendMut",
+        "client_host_mut",
+        "crate::client_backend_mut_of(h).ok_or_else(|| missing(\"client game backend\"))",
+    ),
 ];
 
 /// Traits a mod implements: their methods are the world's exports. The handler traits the
@@ -86,6 +93,7 @@ const EXPORTS: &[&str] = &[
     "ServerReloadListener",
     "ClientReloadListener",
     "PlaceProvider",
+    "CriterionTest",
 ];
 
 /// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
@@ -719,6 +727,94 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn client_handle_writes_have_their_own_wasm_backend() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let client = wasm
+                    .wit
+                    .split("interface client-backend-mut {")
+                    .nth(1)
+                    .unwrap()
+                    .split("\n}")
+                    .next()
+                    .unwrap();
+                assert!(client.contains("menu-click:"));
+                for definition in [
+                    "variant menu-click {",
+                    "variant swap-with {",
+                    "enum mouse-button {",
+                    "enum drag-kind {",
+                ] {
+                    assert!(wasm.wit.contains(definition), "missing {definition}");
+                }
+                let server = wasm
+                    .wit
+                    .split("interface backend-mut {")
+                    .nth(1)
+                    .unwrap()
+                    .split("\n}")
+                    .next()
+                    .unwrap();
+                assert!(!server.contains("menu-click:"));
+                assert!(wasm.host.contains("crate::client_backend_mut_of(h)"));
+                assert!(wasm.guest.contains("ClientBackendMutRef::of(self)"));
+                assert!(
+                    generated
+                        .implementation
+                        .contains("impl ClientBackendMut for")
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn criteria_bind_a_mod_test_and_a_scoped_world_context() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let package = &resolve.packages[package];
+                let context = &resolve.interfaces[package.interfaces["criterion-context"]];
+                assert!(context.functions.contains_key("conditions-json"));
+                assert!(context.functions.contains_key("item"));
+                let test = &resolve.interfaces[package.interfaces["criterion-test"]];
+                assert_eq!(test.functions["test"].params[0].name, "handler");
+                let backend = &resolve.interfaces[package.interfaces["backend-mut"]];
+                assert!(backend.functions.contains_key("player-trigger-criterion"));
+                let host = &resolve.interfaces[package.interfaces["server-host"]];
+                assert!(!host.functions.contains_key("trigger-criterion"));
+                assert!(!wasm.unbound.iter().any(|name| name.contains("Criterion")));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     #[test]
     #[ignore]
     fn print_surface() {

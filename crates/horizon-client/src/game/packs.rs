@@ -251,12 +251,13 @@ impl Game<'_> {
             self.settings.save(&Self::options_path());
             if self.spawn_pack_reload(ReloadKind::Selection).is_ok() {
                 // addResourcePackLoadFailToast(null), SystemToast.addOrUpdate.
-                let title = lang::tr("resourcePack.load_fail", &[]);
+                let title = horizon_client::text::Text::translate("resourcePack.load_fail", &[]);
                 match &mut self.server_packs.load_fail {
                     Some(toast) => toast.reset(title, None),
                     None => {
-                        self.server_packs.load_fail =
-                            Some(horizon_client::toasts::SystemToast::new(title, None));
+                        self.server_packs.load_fail = self.add_system_toast(
+                            horizon_client::toasts::SystemToast::new(title, None),
+                        );
                     }
                 }
                 return;
@@ -374,6 +375,10 @@ impl Game<'_> {
                     self.settings.horizon.translucent_batching,
                     self.settings.horizon.wide_frame(),
                     super::shader_packs::picked_pack_draws_flat(&self.settings),
+                    (
+                        self.settings.file.int("textureFiltering"),
+                        self.settings.file.int("maxAnisotropyBit"),
+                    ),
                 )
             })
             .transpose()
@@ -406,8 +411,10 @@ impl Game<'_> {
             .set_resource_root(self.options.resources.clone());
         self.maps.slots.forget();
         self.map_patches.clear();
-        // Kept mod block entities name the old atlas's sprites.
+        // Kept mod block entities name the old atlas's sprites, and their view distances the old
+        // registry's states.
         self.kept_block_entities.get_mut().clear();
+        self.mod_view_distances.take();
         // The atlas's sprites moved: the particle engine re-reads every rect
         // and the packs' sprite sets, or every particle draws a stale region.
         self.particles

@@ -455,7 +455,6 @@ const NOT_COPIED: &[&str] = &[
     "logs",
     "crash-reports",
     "sessions",
-    "telemetry",
     "mod-browser",
     ".horizon-cache",
     // Far terrain's copies of what servers sent, rebuilt as the instance plays.
@@ -491,6 +490,19 @@ pub fn create_java(name: &str, minecraft: &str) -> Result<Instance, String> {
     )
 }
 
+/// What creating or renaming an instance says when another already has `name`.
+pub fn name_taken(name: &str) -> String {
+    crate::i18n::trf(
+        "There is already an instance called {name}. Choose another name.",
+        &[("name", name)],
+    )
+}
+
+/// `name_taken` for `instance copy-from`, whose flag for another name is `--as`.
+pub fn name_taken_with_flag(name: &str) -> String {
+    format!("{} (`--as NAME`)", name_taken(name))
+}
+
 fn create_in(
     game_home: &Path,
     data: &Path,
@@ -504,7 +516,7 @@ fn create_in(
     }
     let all = list_in(game_home, data);
     if all.iter().any(|i| i.name.eq_ignore_ascii_case(name)) {
-        return Err(format!("There is already an instance called {name}."));
+        return Err(name_taken(name));
     }
     if let Some(from) = from.filter(|f| matches!(f.kind, Kind::Port | Kind::Pack)) {
         return Err(format!(
@@ -623,7 +635,7 @@ fn edit_in(
                 .iter()
                 .any(|i| i.id != instance.id && i.name.eq_ignore_ascii_case(name))
         {
-            return Err(format!("There is already an instance called {name}."));
+            return Err(name_taken(name));
         }
     }
     store.save(data)?;
@@ -684,12 +696,6 @@ fn follow_player(game_home: &Path, home: &Path) {
         if !home.join(f).exists() && game_home.join(f).is_file() {
             let _ = fs::copy(game_home.join(f), home.join(f));
         }
-    }
-    let consent = horizon_telemetry::consent::Consent::path(game_home);
-    if consent.is_file() {
-        let to = horizon_telemetry::consent::Consent::path(home);
-        let _ = fs::create_dir_all(to.parent().unwrap());
-        let _ = fs::copy(consent, to);
     }
     let no_ai = horizon_core::no_ai::is_on(game_home);
     if horizon_core::no_ai::is_on(home) != no_ai {

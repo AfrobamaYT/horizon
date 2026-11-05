@@ -412,6 +412,7 @@ dependencies = [
  "sha2",
  "toml",
  "toml_edit",
+ "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
  "wit-component 0.261.0",
@@ -1565,7 +1566,7 @@ dependencies = [
 name = "horizon-bench"
 version = "0.1.0"
 dependencies = [
- "horizon-telemetry",
+ "horizon-system",
  "serde",
  "serde_json",
 ]
@@ -1608,7 +1609,6 @@ dependencies = [
  "horizon-client-render",
  "horizon-command",
  "horizon-core",
- "horizon-cosmetics",
  "horizon-dualsense",
  "horizon-friends",
  "horizon-hdr",
@@ -1616,6 +1616,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
+ "horizon-mod-points",
  "horizon-mod-wasm",
  "horizon-mods",
  "horizon-narrator",
@@ -1624,7 +1625,7 @@ dependencies = [
  "horizon-server-files",
  "horizon-shader-api",
  "horizon-shaders",
- "horizon-telemetry",
+ "horizon-system",
  "horizon-theme",
  "horizon-threads",
  "horizon-world",
@@ -1679,6 +1680,7 @@ dependencies = [
  "chrono",
  "flate2",
  "fs4",
+ "getrandom 0.3.4",
  "gilrs",
  "glam",
  "horizon-anticheat",
@@ -1703,7 +1705,7 @@ dependencies = [
  "horizon-server-files",
  "horizon-shader-api",
  "horizon-shaders",
- "horizon-telemetry",
+ "horizon-system",
  "horizon-theme",
  "horizon-threads",
  "horizon-world",
@@ -1748,7 +1750,6 @@ dependencies = [
  "horizon-client-input",
  "horizon-command",
  "horizon-core",
- "horizon-cosmetics",
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api",
@@ -1759,7 +1760,7 @@ dependencies = [
  "horizon-protocol",
  "horizon-shader-api",
  "horizon-shaders",
- "horizon-telemetry",
+ "horizon-system",
  "horizon-theme",
  "horizon-threads",
  "horizon-world",
@@ -1800,18 +1801,7 @@ name = "horizon-core"
 version = "0.1.0"
 dependencies = [
  "libm",
-]
-
-[[package]]
-name = "horizon-cosmetics"
-version = "0.1.0"
-dependencies = [
- "base64",
- "glam",
- "png",
  "serde",
- "serde_json",
- "ureq",
 ]
 
 [[package]]
@@ -1895,9 +1885,12 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck",
+ "horizon-mod-point-shape",
+ "proc-macro2",
  "quote",
  "serde",
  "serde_json",
+ "sha2",
  "syn 2.0.119",
  "toml",
  "wit-parser 0.261.0",
@@ -1917,9 +1910,30 @@ dependencies = [
 name = "horizon-mod-api-macros"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-point-shape",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "horizon-mod-point-shape"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "horizon-mod-points"
+version = "0.1.0"
+dependencies = [
+ "horizon-mod-api",
+ "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
+ "wasmtime",
+ "wit-bindgen 0.46.0",
 ]
 
 [[package]]
@@ -1928,6 +1942,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-core",
  "horizon-mod-api",
+ "horizon-mod-points",
  "horizon-mods",
  "horizon-world",
  "log",
@@ -1944,12 +1959,14 @@ name = "horizon-modding-examples"
 version = "0.0.0"
 dependencies = [
  "horizon-mod-api",
+ "horizon-mod-points",
 ]
 
 [[package]]
 name = "horizon-mods"
 version = "0.1.0"
 dependencies = [
+ "horizon-core",
  "horizon-shader-api",
  "log",
  "minisign-verify",
@@ -2125,15 +2142,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-telemetry"
+name = "horizon-system"
 version = "0.1.0"
-dependencies = [
- "getrandom 0.3.4",
- "ruzstd",
- "serde",
- "serde_json",
- "ureq",
-]
 
 [[package]]
 name = "horizon-theme"
@@ -3950,15 +3960,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
-name = "ruzstd"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69e4ce4a039f42bf25920b95667e4d789e98749ab11bbb8d2c2936f788421bb5"
-dependencies = [
- "twox-hash",
-]
-
-[[package]]
 name = "salsa20"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4585,12 +4586,6 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
-
-[[package]]
-name = "twox-hash"
-version = "2.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
 
 [[package]]
 name = "typed-path"

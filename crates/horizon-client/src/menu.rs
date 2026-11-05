@@ -1465,10 +1465,9 @@ impl Menu {
         };
     }
 
-    /// `Item.onCraftedBy` of a taken cartography result
-    /// (`MapItem.onCraftedPostProcess`): the post processing goes, and on a
-    /// level with maps the stack names the scaled or locked copy.
-    fn map_crafted(env: &Env, stack: &mut ItemStack) {
+    /// `MapItem.onCraftedPostProcess`, shared by menu takes and system crafting:
+    /// remove the directive and name the level's scaled or locked saved copy.
+    pub fn map_crafted(maps: Option<&dyn Maps>, stack: &mut ItemStack) {
         if &*stack.item != "minecraft:filled_map" {
             return;
         }
@@ -1477,7 +1476,7 @@ impl Menu {
         };
         stack.data_mut().map_post_processing = None;
         let id = stack.data().and_then(|d| d.map_id);
-        if let (Some(maps), Some(id)) = (env.maps, id)
+        if let (Some(maps), Some(id)) = (maps, id)
             && let Some(new) = maps.derive(id, post == 1)
         {
             stack.data_mut().map_id = Some(new);
@@ -1534,7 +1533,18 @@ impl Menu {
     // ---- item helpers ----
 
     fn max_stack(env: &Env, stack: &ItemStack) -> u32 {
-        env.items.get(&stack.item).map_or(64, |i| i.max_stack)
+        // `ItemStack.getMaxStackSize`: the stack's component, else the item's.
+        // A removed component falls back to the item (`!minecraft:max_stack_size`).
+        let patched = stack.data().and_then(|d| {
+            if d.other("!minecraft:max_stack_size").is_some() {
+                return None;
+            }
+            match d.other("minecraft:max_stack_size") {
+                Some(horizon_world::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
+                _ => None,
+            }
+        });
+        patched.unwrap_or_else(|| env.items.get(&stack.item).map_or(64, |i| i.max_stack))
     }
 
     fn damageable(env: &Env, stack: &ItemStack) -> bool {
@@ -2214,7 +2224,7 @@ impl Menu {
         let mut result = self.try_remove(env, s, amount, max_amount)?;
         self.on_take(env, s, &result);
         if self.slots[s].role == Role::CartoResult {
-            Self::map_crafted(env, &mut result);
+            Self::map_crafted(env.maps, &mut result);
         }
         Some(result)
     }
@@ -2625,7 +2635,7 @@ impl Menu {
                 after_take = true;
                 if index == 2 {
                     // onCraftedBy edits the result in its slot first.
-                    Self::map_crafted(env, &mut stack);
+                    Self::map_crafted(env.maps, &mut stack);
                     self.containers[RESULT][0] = Some(stack.clone());
                     if !self.move_to(env, &mut stack, 3, 39, true) {
                         return None;
@@ -3108,7 +3118,7 @@ impl Menu {
                 copy.count = Self::max_stack(env, stack);
                 // The cartography result's safeClone runs onCraftedBy.
                 if self.slots[slot_index as usize].role == Role::CartoResult {
-                    Self::map_crafted(env, &mut copy);
+                    Self::map_crafted(env.maps, &mut copy);
                 }
                 self.carried = Some(copy);
             }
@@ -3214,7 +3224,7 @@ impl Menu {
                         self.on_take(env, s, &taken);
                         if self.slots[s].role == Role::CartoResult {
                             // onTake's onCraftedBy edits the carried stack.
-                            Self::map_crafted(env, &mut taken);
+                            Self::map_crafted(env.maps, &mut taken);
                             self.carried = Some(taken);
                         }
                     }
@@ -3248,7 +3258,7 @@ impl Menu {
                             self.on_take(env, s, &taken);
                             if self.slots[s].role == Role::CartoResult {
                                 // onCraftedBy edits the taken stack, not the carried one.
-                                Self::map_crafted(env, &mut taken);
+                                Self::map_crafted(env.maps, &mut taken);
                             }
                         }
                     } else {
@@ -3277,7 +3287,7 @@ impl Menu {
                     if self.slots[target].role == Role::CartoResult
                         && let Some(stack) = self.containers[PLAYER][inv_slot].as_mut()
                     {
-                        Self::map_crafted(env, stack);
+                        Self::map_crafted(env.maps, stack);
                     }
                 }
             }
@@ -3883,6 +3893,37 @@ pub(crate) mod tests {
             menu.set_slot(env, 1, stack("diamond", 5));
             menu.anvil_updated(update, true);
             assert_eq!((menu.slot(2), menu.data[0]), (None, 0));
+        });
+    }
+
+    #[test]
+    fn an_anvil_update_preserves_signed_xp_cost_without_allowing_a_refund() {
+        bare_env(|env| {
+            for creative in [false, true] {
+                for cost in [i32::MIN, -7, 0] {
+                    let mut menu = Menu::new(Kind::Anvil);
+                    menu.creative = creative;
+                    menu.levels = 30;
+                    menu.set_slot(env, 0, stack("iron_sword", 1));
+                    menu.set_slot(env, 1, stack("diamond", 5));
+                    let mut update = menu.anvil_update().unwrap();
+                    update.output = stack("netherite_sword", 1);
+                    update.xp_cost = cost;
+                    update.material_cost = -2;
+                    menu.anvil_updated(update.clone(), false);
+                    assert_eq!(menu.data[0], cost);
+                    assert_eq!(menu.anvil.repair_count, 0);
+                    assert_eq!(menu.slot(2), stack("netherite_sword", 1).as_ref());
+                    menu.click(env, 2, 0, Input::Pickup).unwrap();
+                    assert_eq!(menu.carried, None);
+                    assert_eq!(menu.slot(2), stack("netherite_sword", 1).as_ref());
+                    assert_eq!(menu.slot(0), stack("iron_sword", 1).as_ref());
+                    assert_eq!(menu.slot(1), stack("diamond", 5).as_ref());
+                    assert_eq!(menu.level_change, 0);
+                    menu.anvil_updated(update, true);
+                    assert_eq!((menu.slot(2), menu.data[0]), (None, 0));
+                }
+            }
         });
     }
 

@@ -21,7 +21,7 @@ use horizon_protocol::packets::play::{self, Clientbound as C};
 use mod_api::LevelRef;
 use mod_api::{
     ActionOutcome, ActionRefused, FakeEffect, GameMode, NativePlayerAbilities, NativePlayerFood,
-    PlayerAction, PlayerRef,
+    PlayerAction, PlayerActionSetup, PlayerRef, ScopedActionResult,
 };
 pub(crate) use mod_api::{NativeCommand, NativeServerPlayer};
 use serde_json::{Map, Value, json};
@@ -510,6 +510,58 @@ impl Game<'_> {
         player: PlayerRef,
         action: PlayerAction,
     ) -> Result<ActionOutcome, ActionRefused> {
+        let (gi, conn) = self.fake_action_actor(player, action)?;
+        self.perform_fake_action(gi, conn, action)
+    }
+
+    /// A machine's one use on the persistent actor, with its private state put back even
+    /// when the action refuses. Only the existing guest turn runs gameplay and its hooks.
+    pub(super) fn native_player_perform_action_scoped(
+        &mut self,
+        player: PlayerRef,
+        action: PlayerAction,
+        setup: PlayerActionSetup,
+    ) -> Result<ScopedActionResult, ActionRefused> {
+        let (gi, conn) = self.fake_action_actor(player, action)?;
+        if !setup.eye.iter().all(|v| v.is_finite())
+            || !setup.yaw.is_finite()
+            || !setup.pitch.is_finite()
+        {
+            return Err(ActionRefused::InvalidSetup);
+        }
+        let mut state = ScopedPlayerState::new(self.motion, setup)?;
+        let host = self.lan.as_mut().expect("validated fake's host");
+        state.swap(&mut host.hub.guests[gi]);
+        let play = host.play.insert(conn, Default::default());
+        let outcome = self.perform_fake_action(gi, conn, action);
+        let host = self.lan.as_mut().expect("guest turns retain the host");
+        let guest = &mut host.hub.guests[gi];
+        let held = guest
+            .inventory
+            .get_mut(guest.selected)
+            .and_then(Option::take)
+            .filter(|s| s.count > 0);
+        let other = guest
+            .inventory
+            .iter_mut()
+            .chain([&mut guest.offhand, &mut guest.carried])
+            .chain(guest.armor.iter_mut())
+            .filter_map(Option::take)
+            .filter(|s| s.count > 0)
+            .collect();
+        state.swap(guest);
+        host.play.remove(&conn);
+        if let Some(play) = play {
+            host.play.insert(conn, play);
+        }
+        outcome.map(|outcome| ScopedActionResult::new(outcome, held, other))
+    }
+
+    fn fake_action_actor(
+        &self,
+        player: PlayerRef,
+        action: PlayerAction,
+    ) -> Result<(usize, u32), ActionRefused> {
         if self.native_lifecycle.epoch() != Some(player.fields().entity.epoch()) {
             return Err(ActionRefused::Stale);
         }
@@ -538,14 +590,29 @@ impl Game<'_> {
         {
             return Err(ActionRefused::Busy);
         }
-        if let PlayerAction::Attack { target } = action
+        if let PlayerAction::InteractOn { location, .. } = action
+            && !location.iter().all(|v| v.is_finite())
+        {
+            return Err(ActionRefused::InvalidSetup);
+        }
+        if let PlayerAction::Attack { target } | PlayerAction::InteractOn { target, .. } = action
             && (self.native_lifecycle.epoch() != Some(target.epoch())
                 || target.id() == player.fields().entity.id())
         {
             return Err(ActionRefused::InvalidTarget);
         }
+        Ok((gi, conn))
+    }
+
+    fn perform_fake_action(
+        &mut self,
+        gi: usize,
+        conn: u32,
+        action: PlayerAction,
+    ) -> Result<ActionOutcome, ActionRefused> {
         let acting = Acting::start(&self.fake_action);
-        let consumed = match action {
+        let failed = std::mem::replace(&mut self.use_failed, false);
+        let consumed = (|| match action {
             PlayerAction::UseOn { hand, pos, hit } => {
                 let hit = super::Hit {
                     pos,
@@ -553,15 +620,27 @@ impl Game<'_> {
                     point: hit.point,
                     inside: hit.inside,
                 };
-                self.guest_use_item_on(conn, gi, hit, hand)?
+                self.guest_use_item_on(conn, gi, hit, hand)
             }
-            PlayerAction::UseItem { hand } => self.guest_use_item(conn, gi, hand, None)?,
+            PlayerAction::UseItem { hand } => self.guest_use_item(conn, gi, hand, None),
+            PlayerAction::InteractOn {
+                hand,
+                target,
+                location,
+            } => {
+                let id = i32::try_from(target.id()).map_err(|_| ActionRefused::InvalidTarget)?;
+                self.guest_interact(conn, gi, id, hand, location)
+            }
             PlayerAction::Attack { target } => {
                 let id = i32::try_from(target.id()).map_err(|_| ActionRefused::InvalidTarget)?;
-                self.guest_attack(conn, gi, id)?
+                self.guest_attack(conn, gi, id)
             }
-            PlayerAction::BreakBlock { pos } => self.guest_break_block(conn, gi, pos)?,
-        };
+            PlayerAction::BreakBlock { pos } => self.guest_break_block(conn, gi, pos),
+        })();
+        // FAIL ends the click, but is not a consuming InteractionResult.
+        let consumed = consumed.map(|used| used && !self.use_failed);
+        self.use_failed = failed;
+        let consumed = consumed?;
         Ok(match acting.blocked() {
             Some(effect) => ActionOutcome::EffectBlocked(effect),
             None if consumed => ActionOutcome::Consumed,
@@ -909,6 +988,7 @@ impl Game<'_> {
                     yaw: g.yaw,
                     pitch: g.pitch,
                     entity_id: g.entity_id,
+                    address: g.address.ip().to_string(),
                 })
             })
             .collect()
@@ -1143,6 +1223,17 @@ impl Game<'_> {
                 yaw: p.yaw,
                 pitch: p.pitch,
                 entity_id: self.native_acting_entity() as i32,
+                address: self
+                    .lan
+                    .as_ref()
+                    .and_then(|host| {
+                        host.hub
+                            .guests
+                            .iter()
+                            .find(|g| Some(g.uuid) == self.lan_acting_uuid)
+                    })
+                    .map(|g| g.address.ip().to_string())
+                    .unwrap_or_default(),
             },
         ))
     }
@@ -1337,12 +1428,24 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        let (tree, levels, problems) = command_tree(&commands, |name| {
+        // Horizon's own moderation commands go in the same tree, so operators' clients complete them
+        // instead of showing them as unknown; the game still runs them itself (`run_guest_command`).
+        let extras = super::tempban::moderation_commands(
+            host.hub.chat_filter_on(),
+            self.server_lists.is_some(),
+        );
+        commands.extend(extras.iter().cloned());
+        let (tree, mut levels, problems) = command_tree(&commands, |name| {
             host.hub.vanilla_command(name) || vanilla.find(name).is_some()
         });
         for p in problems {
             log::warn!("Horizon: a native mod's command was left out: {p}");
         }
+        levels.retain(|name, _| {
+            !extras
+                .iter()
+                .any(|c| c.usage.split(' ').next() == Some(name.as_str()))
+        });
         let mut dispatcher = Dispatcher::new();
         register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
         let dispatcher = Arc::new(dispatcher);
@@ -1453,6 +1556,7 @@ impl Game<'_> {
             yaw: g.yaw,
             pitch: g.pitch,
             entity_id: g.entity_id,
+            address: g.address.ip().to_string(),
         });
         if !self.native_command_valid(line, permission) {
             return true;
@@ -1494,6 +1598,103 @@ impl Game<'_> {
             );
         }
         true
+    }
+}
+
+/// The temporary state of the same persistent guest, not another player or action engine.
+/// Swapped back after the ordinary guest action has restored the server's outer state.
+struct ScopedPlayerState {
+    motion: Option<Box<PlayerMotion>>,
+    position: [f64; 3],
+    yaw: f32,
+    pitch: f32,
+    head_yaw: f32,
+    on_ground: bool,
+    game_mode: i32,
+    previous_game_mode: Option<i32>,
+    abilities: PlayerAbilities,
+    sneaking: bool,
+    sprinting: bool,
+    fall_flying: bool,
+    inventory: Vec<Option<mod_api::ItemStack>>,
+    selected: usize,
+    armor: [Option<mod_api::ItemStack>; 4],
+    offhand: Option<mod_api::ItemStack>,
+    carried: Option<mod_api::ItemStack>,
+    equipment: horizon_items::equipment::Equipment,
+    effects: horizon_client::effects::PlayerEffects,
+    health: f32,
+    food: i32,
+    saturation: f32,
+}
+impl ScopedPlayerState {
+    fn new(
+        resources: &horizon_client::motion::MotionResources,
+        setup: PlayerActionSetup,
+    ) -> Result<Self, ActionRefused> {
+        // Standing eye height even for secondary use, just as a freshly positioned fake.
+        let position = [
+            setup.eye[0],
+            setup.eye[1] - f64::from(1.62_f32),
+            setup.eye[2],
+        ];
+        let mut motion = PlayerMotion::new(
+            resources,
+            horizon_core::geometry::Vec3::new(position[0], position[1], position[2]),
+        )
+        .map_err(|_| ActionRefused::InvalidSetup)?;
+        motion.shift_key_down = setup.secondary_use;
+        let mut inventory = vec![None; 36];
+        inventory[0] = (setup.stack.count > 0).then_some(setup.stack);
+        Ok(Self {
+            motion: Some(Box::new(motion)),
+            position,
+            yaw: setup.yaw,
+            pitch: setup.pitch,
+            head_yaw: setup.yaw,
+            on_ground: false,
+            game_mode: 0,
+            previous_game_mode: None,
+            abilities: PlayerAbilities::default(),
+            sneaking: setup.secondary_use,
+            sprinting: false,
+            fall_flying: false,
+            inventory,
+            selected: 0,
+            armor: Default::default(),
+            offhand: None,
+            carried: None,
+            equipment: Default::default(),
+            effects: Default::default(),
+            health: 20.0,
+            food: 20,
+            saturation: 5.0,
+        })
+    }
+
+    fn swap(&mut self, guest: &mut Guest) {
+        std::mem::swap(&mut self.motion, &mut guest.motion);
+        std::mem::swap(&mut self.position, &mut guest.position);
+        std::mem::swap(&mut self.yaw, &mut guest.yaw);
+        std::mem::swap(&mut self.pitch, &mut guest.pitch);
+        std::mem::swap(&mut self.head_yaw, &mut guest.head_yaw);
+        std::mem::swap(&mut self.on_ground, &mut guest.on_ground);
+        std::mem::swap(&mut self.game_mode, &mut guest.game_mode);
+        std::mem::swap(&mut self.previous_game_mode, &mut guest.previous_game_mode);
+        std::mem::swap(&mut self.abilities, &mut guest.abilities);
+        std::mem::swap(&mut self.sneaking, &mut guest.sneaking);
+        std::mem::swap(&mut self.sprinting, &mut guest.sprinting);
+        std::mem::swap(&mut self.fall_flying, &mut guest.fall_flying);
+        std::mem::swap(&mut self.inventory, &mut guest.inventory);
+        std::mem::swap(&mut self.selected, &mut guest.selected);
+        std::mem::swap(&mut self.armor, &mut guest.armor);
+        std::mem::swap(&mut self.offhand, &mut guest.offhand);
+        std::mem::swap(&mut self.carried, &mut guest.carried);
+        std::mem::swap(&mut self.equipment, &mut guest.equipment);
+        std::mem::swap(&mut self.effects, &mut guest.effects);
+        std::mem::swap(&mut self.health, &mut guest.health);
+        std::mem::swap(&mut self.food, &mut guest.food);
+        std::mem::swap(&mut self.saturation, &mut guest.saturation);
     }
 }
 
@@ -1657,6 +1858,7 @@ mod tests {
                 sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
+                expected: false,
             },
             1,
             [0.0; 3],
@@ -2017,10 +2219,335 @@ mod fake_action_tests {
         }
     }
 
+    use super::super::{
+        boats::Boat, minecarts::CART_KEY_Y, minecarts::CartKind, minecarts::Minecart,
+        respawn_anchor::RespawnConfig, stations::Kind, stations::Station,
+    };
+
     fn held(game: &Game<'_>, uuid: u128) -> Option<ItemStack> {
         let host = game.lan.as_ref().unwrap();
         let g = host.hub.guests.iter().find(|g| g.uuid == uuid).unwrap();
         g.inventory[g.selected].clone()
+    }
+
+    /// A wandering trader at `at`, entity id `id`, and its handle.
+    fn trader(game: &mut Game<'_>, id: u32, at: [f64; 3]) -> mod_api::EntityRef {
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:wandering_trader")
+            .unwrap()
+            .clone();
+        let [x, y, z] = at;
+        game.mobs.push(horizon_client::mobs::Mob::new(
+            id,
+            kind,
+            horizon_core::geometry::Vec3::new(x, y, z),
+            0.0,
+        ));
+        mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id)
+    }
+
+    /// A fake player's use on a trader frees it again: the session the use
+    /// opened closes through the merchant's own close path, so the trader is
+    /// not left trading and the next use opens it as the first did.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_trader_a_fake_player_used_trades_with_the_next_one() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:stick"), 0);
+            let id = 6000;
+            let target = trader(game, id, [2.5, 64.0, 0.5]);
+            let interact = PlayerAction::InteractOn {
+                hand: Hand::Main,
+                target,
+                location: [0.0, 0.5, 0.0],
+            };
+            assert_eq!(
+                game.native_player_perform_action(player, interact),
+                Ok(ActionOutcome::Consumed)
+            );
+            let mob = game.mobs.iter().find(|m| m.id == id).unwrap();
+            // With no offers the menu never opens, and this test would say nothing.
+            let offers = mob.extra.trade.as_ref().map_or(0, |t| t.offers.len());
+            assert!(offers > 0, "a wandering trader has offers");
+            assert!(!mob.extra.flag2, "the trader is not left trading");
+            assert!(game.station.is_none(), "the session is not left open");
+            assert_eq!(
+                game.native_player_perform_action(player, interact),
+                Ok(ActionOutcome::Consumed),
+                "the next use opens it again",
+            );
+        });
+    }
+
+    /// A chest minecart, a hopper minecart and a chest boat: the items stay
+    /// on the vehicle, and the menu's stand-in is out of the level, where a
+    /// transfer would edit it instead of the vehicle.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_vehicles_chest_a_fake_player_used_keeps_its_items_and_no_stand_in() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, fake_conn, _) = fake(game, None, 0);
+            let at = horizon_core::geometry::Vec3::new(2.5, 64.0, 0.5);
+            let diamonds = Some(ItemStack::new("minecraft:diamond", 5));
+            let mut vehicles = Vec::new();
+            for (id, kind) in [(6100, CartKind::Chest), (6101, CartKind::Hopper)] {
+                let mut cart = Minecart::new(id, kind, at);
+                cart.items[3] = diamonds.clone();
+                vehicles.push((id, false));
+                game.carts.push(cart);
+            }
+            let mut boat = Boat::new(6102, "oak".into(), at, 0.0).with_chest();
+            boat.items[3] = diamonds.clone();
+            // ChestBoat.interact opens the chest for a sneaking player.
+            vehicles.push((6102, true));
+            game.boats.push(boat);
+
+            for (id, sneaking) in vehicles {
+                let target = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id);
+                let interact = PlayerAction::InteractOn {
+                    hand: Hand::Main,
+                    target,
+                    location: [0.0, 0.5, 0.0],
+                };
+                // Twice: the second use is the next one finding it as it was.
+                for _ in 0..2 {
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guest_mut(fake_conn)
+                        .unwrap()
+                        .sneaking = sneaking;
+                    assert_eq!(
+                        game.native_player_perform_action(player, interact),
+                        Ok(ActionOutcome::Consumed)
+                    );
+                    let key = (i32::MAX - 15, CART_KEY_Y, id as i32);
+                    assert!(
+                        game.world.block_entities.get(&key).is_none(),
+                        "vehicle {id} left a stand-in",
+                    );
+                    assert!(game.container.is_none());
+                    let items = game
+                        .carts
+                        .iter()
+                        .find(|c| c.id == id)
+                        .map(|c| &c.items)
+                        .or_else(|| game.boats.iter().find(|b| b.id == id).map(|b| &b.items))
+                        .unwrap();
+                    assert_eq!(items[3], diamonds, "vehicle {id} lost its items");
+                }
+            }
+        });
+    }
+
+    /// A real guest keeps its vehicle menu over a cart a fake player then
+    /// uses: the refused open closes only a stand-in nobody is looking at,
+    /// and the staging does not reset what the viewer's menu is editing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_viewer_keeps_the_vehicle_menu_a_fake_player_used() {
+        use super::super::minecarts::{CART_KEY_Y, CartKind, Minecart};
+        use horizon_client::containers::BlockEntity;
+        use horizon_client::lan::menu::Slots;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, fake_conn, real_conn) = fake(game, None, 0);
+            let at = horizon_core::geometry::Vec3::new(2.5, 64.0, 0.5);
+            let mut cart = Minecart::new(6110, CartKind::Chest, at);
+            cart.items[3] = Some(ItemStack::new("minecraft:diamond", 5));
+            game.carts.push(cart);
+            let gi = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .position(|g| g.conn == real_conn)
+                .unwrap();
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest_mut(real_conn)
+                .unwrap()
+                .position = [0.5, 64.0, 0.5];
+            assert_eq!(
+                game.guest_interact(real_conn, gi, 6110, Hand::Main, [2.5, 64.5, 0.5]),
+                Ok(true),
+                "the guest's use opens the vehicle's menu",
+            );
+            let key = (i32::MAX - 15, CART_KEY_Y, 6110);
+            let viewer = |game: &Game<'_>| {
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guest(real_conn)
+                    .unwrap()
+                    .menu
+                    .as_ref()
+                    .is_some_and(|m| m.slots == Slots::Block(key))
+            };
+            assert!(viewer(game), "the guest's use opened the vehicle's menu");
+            assert!(game.world.block_entities.contains_key(&key));
+            // The viewer's live edit: its menu's clicks write through to the
+            // stand-in (`source.write` after every click).
+            let emerald = Some(ItemStack::new("minecraft:emerald", 2));
+            if let Some(horizon_client::containers::BlockEntity::Chest(items)) =
+                game.world.block_entities.get_mut(&key)
+            {
+                items[4] = emerald.clone();
+            }
+            let target = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), 6110);
+            assert_eq!(
+                game.native_player_perform_action(
+                    player,
+                    PlayerAction::InteractOn {
+                        hand: Hand::Main,
+                        target,
+                        location: [0.0, 0.5, 0.0],
+                    },
+                ),
+                Ok(ActionOutcome::Consumed)
+            );
+            assert!(viewer(game), "the fake's use kept the viewer's menu");
+            assert!(
+                game.world.block_entities.contains_key(&key),
+                "the fake's use kept the stand-in the menu backs",
+            );
+            let BlockEntity::Chest(items) = &game.world.block_entities[&key] else {
+                unreachable!()
+            };
+            assert_eq!(items[3], Some(ItemStack::new("minecraft:diamond", 5)));
+            assert_eq!(items[4], emerald, "the staging kept the viewer's edit");
+            game.guest_close_all(real_conn);
+            assert!(!game.world.block_entities.contains_key(&key));
+            let items = &game.carts.iter().find(|c| c.id == 6110).unwrap().items;
+            assert_eq!(
+                items[3],
+                Some(ItemStack::new("minecraft:diamond", 5)),
+                "the viewer's close put the items back",
+            );
+            assert_eq!(items[4], emerald, "the viewer's edit reached the vehicle");
+            assert!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guest(fake_conn)
+                    .unwrap()
+                    .menu
+                    .is_none()
+            );
+        });
+    }
+
+    /// A fake player's click on a shulker box or an ender chest is refused
+    /// at the open: no open count climbs, no stand-in chest enters the level
+    /// and no lid opens.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_shulker_box_and_an_ender_chest_a_fake_player_used_are_left_shut() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, None, 0);
+            let shulker = [1, 64, 0];
+            place(game, shulker, "minecraft:shulker_box");
+            let count =
+                |game: &Game<'_>| game.be_anims.shulkers.get(&shulker).map(|s| s.open_count);
+            assert_eq!(
+                game.native_player_perform_action(player, on_top(shulker)),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+            assert!(
+                count(game).is_none_or(|c| c == 0),
+                "the use is refused at the open, nothing opened"
+            );
+            assert!(game.container.is_none());
+            assert_eq!(
+                game.native_player_perform_action(player, on_top(shulker)),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu)),
+                "the next use is refused the same way",
+            );
+            assert!(
+                count(game).is_none_or(|c| c == 0),
+                "the count doesn't climb"
+            );
+
+            let ender = [2, 64, 0];
+            place(game, ender, "minecraft:ender_chest");
+            assert_eq!(
+                game.native_player_perform_action(player, on_top(ender)),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+            assert!(game.ender_open.is_none());
+            let key = (ender[0], ender[1], ender[2]);
+            assert!(
+                game.world.block_entities.get(&key).is_none(),
+                "a stand-in chest stayed",
+            );
+            assert!(!game.lid_openers.contains_key(&key), "its lid stayed open");
+        });
+    }
+
+    /// Each field holds a value the use can't have written, so a swap that
+    /// forgets one fails whether the use changed it or not.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_servers_own_player_state_comes_back_after_a_fake_use() {
+        use mod_api::PlayerActionSetup;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, None, 0);
+            let dim = game.dim;
+            let config = RespawnConfig {
+                dim,
+                pos: [1, 2, 3],
+                yaw: 0.0,
+                forced: false,
+            };
+            let spawn = horizon_core::geometry::Vec3::new(1.0, 2.0, 3.0);
+            game.station = Some(Station::new_kind(Kind::Anvil, [4, 5, 6]));
+            game.craft_table = Some([7, 8, 9]);
+            game.experience.level = 7;
+            game.respawn_config = Some(config);
+            game.spawn = Some(spawn);
+            // An ender inventory left open goes back while the fake player
+            // acts, and its stand-in returns afterwards, as a guest's turn does.
+            let stand_in = (12, 64, 8);
+            game.open_ender_chest(stand_in);
+            game.container = None;
+
+            place(game, [1, 64, 0], "minecraft:crafting_table");
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 64, 0])),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+            assert_eq!(
+                game.station.as_ref().map(|s| (s.kind, s.pos)),
+                Some((Kind::Anvil, [4, 5, 6])),
+            );
+            assert_eq!(game.craft_table, Some([7, 8, 9]));
+            assert_eq!(game.experience.level, 7);
+            assert_eq!(game.respawn_config, Some(config));
+            assert_eq!(game.spawn, Some(spawn));
+            assert_eq!(game.ender_open, Some(stand_in));
+            assert!(game.world.block_entities.get(&stand_in).is_some());
+
+            let setup = PlayerActionSetup::new(
+                ItemStack::new("minecraft:fishing_rod", 1),
+                [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                0.0,
+                0.0,
+                false,
+            );
+            let rod = player
+                .perform_action_scoped(game, PlayerAction::UseItem { hand: Hand::Main }, setup)
+                .unwrap();
+            assert_eq!(rod.outcome, ActionOutcome::Consumed, "the rod casts");
+            assert!(game.hook.is_none(), "no hook is left for nobody to reel in");
+        });
     }
 
     #[test]
@@ -2097,6 +2624,311 @@ mod fake_action_tests {
 
     fn health(game: &Game<'_>, id: u32) -> f32 {
         game.mobs.iter().find(|m| m.id == id).unwrap().health
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn scoped_fake_use_returns_items_and_restores_persistent_state() {
+        use mod_api::PlayerActionSetup;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, conn, _) = fake(game, Some("minecraft:diamond"), 1);
+            let guest = game.lan.as_mut().unwrap().hub.guest_mut(conn).unwrap();
+            guest.yaw = 31.0;
+            guest.pitch = 12.0;
+            guest.selected = 3;
+            guest.inventory[3] = Some(ItemStack::new("minecraft:emerald", 4));
+            guest.offhand = Some(ItemStack::new("minecraft:apple", 2));
+            guest.sneaking = true;
+            guest.previous_game_mode = Some(3);
+            guest.motion.as_mut().unwrap().shift_key_down = true;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .play
+                .get_mut(&conn)
+                .unwrap()
+                .cooldowns
+                .add("minecraft:bucket".into(), 100);
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            game.mobs.push(horizon_client::mobs::Mob::new(
+                5000,
+                kind,
+                horizon_core::geometry::Vec3::new(2.0, 64.0, 0.5),
+                0.0,
+            ));
+            let target = game.native_entity(5000).unwrap();
+            let setup = PlayerActionSetup::new(
+                ItemStack::new("minecraft:bucket", 2),
+                [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                170.0,
+                -15.0,
+                false,
+            );
+            let action = PlayerAction::InteractOn {
+                hand: Hand::Main,
+                target,
+                location: [0.0, 0.5, 0.0],
+            };
+            let result = player.perform_action_scoped(game, action, setup).unwrap();
+            assert_eq!(result.outcome, ActionOutcome::Consumed);
+            assert_eq!(result.held, Some(ItemStack::new("minecraft:bucket", 1)));
+            assert_eq!(
+                result.other,
+                vec![ItemStack::new("minecraft:milk_bucket", 1)]
+            );
+            let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+            assert_eq!(guest.position, [0.5, 64.0, 0.5]);
+            assert_eq!(
+                (guest.yaw, guest.pitch, guest.selected, guest.game_mode),
+                (31.0, 12.0, 3, 1)
+            );
+            assert_eq!(guest.previous_game_mode, Some(3));
+            assert_eq!(guest.offhand, Some(ItemStack::new("minecraft:apple", 2)));
+            assert_eq!(
+                guest.inventory[3],
+                Some(ItemStack::new("minecraft:emerald", 4))
+            );
+            assert!(guest.sneaking && guest.motion.as_ref().unwrap().shift_key_down);
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert_eq!(game.native_fake_player(level, 2, "fake"), Some(player));
+            // The original cooldown is still in force, not the temporary action's timer.
+            assert!(
+                game.lan.as_ref().unwrap().play[&conn]
+                    .cooldowns
+                    .is_on_cooldown("minecraft:bucket")
+            );
+            assert_eq!(game.lan.as_ref().unwrap().hub.guests.len(), 2);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn scoped_fake_use_uses_viewpoint_secondary_use_and_restores_on_refusal() {
+        use mod_api::PlayerActionSetup;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, conn, _) = fake(game, Some("minecraft:diamond"), 1);
+            let setup = |item, sneaking| {
+                PlayerActionSetup::new(
+                    ItemStack::new(item, 1),
+                    [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                    0.0,
+                    90.0,
+                    sneaking,
+                )
+            };
+            // Air use rays from the supplied eyes/look, not the persistent fake's view.
+            let mut viewpoint = setup("minecraft:water_bucket", false);
+            viewpoint.eye = [2.5, 64.0 + f64::from(1.62_f32), 2.5];
+            viewpoint.yaw = 117.0;
+            let result = game
+                .native_player_perform_action_scoped(
+                    player,
+                    PlayerAction::UseItem { hand: Hand::Main },
+                    viewpoint,
+                )
+                .unwrap();
+            assert_eq!(result.outcome, ActionOutcome::Consumed);
+            assert_eq!(result.held, Some(ItemStack::new("minecraft:bucket", 1)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert_eq!(
+                game.native_level_block(level, [2, 64, 2]).as_deref(),
+                Some("minecraft:water")
+            );
+            place(game, [1, 64, 0], "minecraft:chest");
+            let result = game
+                .native_player_perform_action_scoped(
+                    player,
+                    on_top([1, 64, 0]),
+                    setup("minecraft:oak_log", false),
+                )
+                .unwrap();
+            assert_eq!(
+                result.outcome,
+                ActionOutcome::EffectBlocked(FakeEffect::Menu)
+            );
+            let result = game
+                .native_player_perform_action_scoped(
+                    player,
+                    on_top([1, 64, 0]),
+                    setup("minecraft:oak_log", true),
+                )
+                .unwrap();
+            assert_eq!(result.outcome, ActionOutcome::Consumed);
+            assert_eq!(
+                result.held, None,
+                "survival placement consumes the temporary stack"
+            );
+            assert_eq!(
+                game.native_level_block(level, [1, 65, 0]).as_deref(),
+                Some("minecraft:oak_log")
+            );
+            assert_eq!(
+                game.native_player_perform_action_scoped(
+                    player,
+                    on_top([40, 63, 0]),
+                    setup("minecraft:oak_log", false)
+                ),
+                Err(ActionRefused::OutOfReach)
+            );
+            let mut invalid = setup("minecraft:oak_log", false);
+            invalid.eye[0] = f64::NAN;
+            assert_eq!(
+                game.native_player_perform_action_scoped(player, on_top([1, 63, 0]), invalid),
+                Err(ActionRefused::InvalidSetup)
+            );
+            let real = game.native_player_ref(1).unwrap();
+            assert_eq!(
+                game.native_player_perform_action_scoped(
+                    real,
+                    on_top([1, 63, 0]),
+                    setup("minecraft:oak_log", false)
+                ),
+                Err(ActionRefused::NotFake)
+            );
+            let acting = Acting::start(&game.fake_action);
+            assert_eq!(
+                game.native_player_perform_action_scoped(
+                    player,
+                    on_top([1, 63, 0]),
+                    setup("minecraft:oak_log", false)
+                ),
+                Err(ActionRefused::Busy)
+            );
+            drop(acting);
+            assert_eq!(held(game, 2), Some(ItemStack::new("minecraft:diamond", 1)));
+            let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+            assert_eq!(guest.game_mode, 1);
+            assert_eq!(guest.position, [0.5, 64.0, 0.5]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fake_entity_interaction_checks_targets_and_does_not_use_items_in_air() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:ender_pearl"), 0);
+            let near = zombie(game, 5000, [2.0, 64.0, 0.5]);
+            let far = zombie(game, 5001, [20.0, 64.0, 0.5]);
+            let interact = |target| PlayerAction::InteractOn {
+                hand: Hand::Main,
+                target,
+                location: [0.0; 3],
+            };
+            assert_eq!(
+                game.native_player_perform_action(player, interact(near)),
+                Ok(ActionOutcome::Passed)
+            );
+            assert_eq!(
+                held(game, 2),
+                Some(ItemStack::new("minecraft:ender_pearl", 1))
+            );
+            assert!(game.creatures.projectiles.is_empty());
+            assert_eq!(
+                game.native_player_perform_action(player, interact(far)),
+                Err(ActionRefused::OutOfReach)
+            );
+            assert_eq!(
+                game.native_player_perform_action(player, interact(player.entity())),
+                Err(ActionRefused::InvalidTarget)
+            );
+            let stale = mod_api::EntityRef::new(mod_api::NativeWorldEpoch::new(0), near.id());
+            assert_eq!(
+                game.native_player_perform_action(player, interact(stale)),
+                Err(ActionRefused::InvalidTarget)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn scoped_fake_use_hooks_see_the_setup_and_fail_is_not_consumed() {
+        use mod_api::{
+            Flow, Hooks, HostSide, NativeInteractionResult, PlayerActionSetup, RightClickBlockEvent,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        #[derive(Default)]
+        struct Deny(Arc<AtomicBool>);
+        #[mod_api::horizon_mod]
+        impl Hooks for Deny {
+            fn right_click_block(&self, host: HostSide, event: &mut RightClickBlockEvent) -> Flow {
+                let HostSide::Server(host) = host else {
+                    panic!("server action");
+                };
+                assert_eq!(event.click.player, 2);
+                let entity = host.entity(event.click.player_entity_id as u32).unwrap();
+                assert_eq!(entity.rotation(host), Some([123.0, 17.0]));
+                assert_eq!(
+                    entity.eye_position(host),
+                    Some([0.5, 64.0 + f64::from(1.62_f32), 0.5])
+                );
+                assert_eq!(entity.is_shift_key_down(host), Some(true));
+                self.0.store(true, Ordering::Relaxed);
+                *event.cancellation_result = NativeInteractionResult::Fail;
+                Flow::Cancel
+            }
+        }
+        let heard = Arc::new(AtomicBool::new(false));
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "deny",
+                Box::new(Deny(heard.clone())),
+            )]
+            .into(),
+            || {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    let (player, ..) = fake(game, Some("minecraft:diamond"), 0);
+                    game.use_failed = true;
+                    let result = player
+                        .perform_action_scoped(
+                            game,
+                            on_top([1, 63, 0]),
+                            PlayerActionSetup::new(
+                                ItemStack::new("minecraft:oak_log", 1),
+                                [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                                123.0,
+                                17.0,
+                                true,
+                            ),
+                        )
+                        .unwrap();
+                    assert!(
+                        heard.load(Ordering::Relaxed),
+                        "normal Host-bearing hook ran"
+                    );
+                    assert_eq!(result.outcome, ActionOutcome::Passed);
+                    assert_eq!(result.held, Some(ItemStack::new("minecraft:oak_log", 1)));
+                    assert!(game.use_failed, "outer per-action flag restored");
+                    let level = game.native_level(game.dim.id()).unwrap();
+                    assert_eq!(
+                        game.native_level_block(level, [1, 64, 0]).as_deref(),
+                        Some("minecraft:air")
+                    );
+                    assert_eq!(held(game, 2), Some(ItemStack::new("minecraft:diamond", 1)));
+                });
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_target_setters_refuse_persistent_and_acting_fakes() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, conn, _) = fake(game, None, 0);
+            let entity = zombie(game, 5000, [2.0, 64.0, 0.5]);
+            let mob = game.native_mob_ref(entity).unwrap();
+            let target = game.native_living(player.entity()).unwrap();
+            assert!(!mob.set_target(game, Some(target)));
+            assert_eq!(mob.target(game), None);
+            assert_eq!(
+                game.as_guest(conn, |g| mob.set_target(g, Some(target))),
+                Some(false)
+            );
+            assert_eq!(mob.target(game), None);
+            assert!(!game.lan.as_ref().unwrap().mob_players.contains_key(&5000));
+        });
     }
 
     #[test]

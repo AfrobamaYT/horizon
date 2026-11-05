@@ -466,6 +466,7 @@ mod tests {
                     yaw: 0.0,
                     color: 0,
                     check_interval: 0,
+                    custom_name: None,
                 });
                 game.paintings.push(horizon_client::entities::Painting {
                     join: Default::default(),
@@ -488,6 +489,7 @@ mod tests {
                     drop_chance: 1.0,
                     fixed: false,
                     invisible: false,
+                    custom_name: None,
                     check_interval: 0,
                 });
                 let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
@@ -510,6 +512,7 @@ mod tests {
                 );
                 drop(seen);
                 game.tnts.push(super::super::tnt::PrimedTnt {
+                    rotation: [0.0, 0.0],
                     join: Default::default(),
                     id: 0,
                     position: Vec3::ZERO,
@@ -521,6 +524,7 @@ mod tests {
                     guest: None,
                     no_gravity: false,
                     power: 4.0,
+                    block_state: None,
                 });
                 game.native_joins_flush(false, 0);
                 game.native_joins_flush(false, 0);

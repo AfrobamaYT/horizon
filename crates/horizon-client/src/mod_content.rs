@@ -713,6 +713,17 @@ struct NewBlock<'a> {
     wall_of: Option<String>,
 }
 impl NewBlock<'_> {
+    /// The item its gameplay row names when that is not the template's item
+    /// renamed: `block_item`, or `minecraft:air` for a block with no item
+    /// (a sign's wall form keeps the paired sign's). Pick-block and
+    /// `Block.asItem` both read this one value.
+    fn item_row(&self) -> Option<&str> {
+        match &self.decl.block_item {
+            Some(item) => Some(item),
+            None => (!self.decl.item && self.wall_of.is_none()).then_some("minecraft:air"),
+        }
+    }
+
     /// Template states and declared combinations in registry order.
     fn state_combinations(&self) -> impl Iterator<Item = (u32, &[(String, String)])> {
         let start = self.rename.states.start;
@@ -729,6 +740,7 @@ struct NewItem {
     components: Vec<(String, J)>,
     crafting_remainder: Option<String>,
     block: Option<String>,
+    arm_pose: Option<horizon_mods::content::ArmPose>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
 }
@@ -938,8 +950,10 @@ fn read_json(path: &Path) -> Result<J> {
 impl Plan<'_> {
     /// `entity-types.json` with a row for each mod type: its template's, so its
     /// size, eyes and category are the template's (`execute anchored eyes`,
-    /// spawner checks and the commands' entity type list, `reg.entity_types`).
-    /// The rows are appended as text: parsed and written back, a float such as
+    /// spawner checks and the commands' entity type list, `reg.entity_types`),
+    /// with `template` naming it and a living type's own attribute bases
+    /// (`MobTypes` makes the mob from it). The rows are appended as text, each
+    /// value as the template has it: parsed and written back, a float such as
     /// a zombie's `movement_speed` can come back one ulp off.
     fn entity_types_json(&self, bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         use serde_json::value::RawValue;
@@ -962,11 +976,47 @@ impl Plan<'_> {
             }
             out.extend(serde_json::to_vec(&t.id).map_err(|e| e.to_string())?);
             out.push(b':');
-            out.extend(row.get().as_bytes());
+            out.extend(mod_entity_row(row, t)?);
         }
         out.push(b'}');
         Ok(out)
     }
+}
+
+/// A mod entity type's row in `entity-types.json`: its template's `row` with
+/// `template` added and the type's attribute bases in place of the
+/// template's. The other values keep the template's text.
+fn mod_entity_row(
+    row: &serde_json::value::RawValue,
+    t: &EntityType,
+) -> std::result::Result<Vec<u8>, String> {
+    use serde_json::value::{RawValue, to_raw_value};
+    type Raw = BTreeMap<String, Box<RawValue>>;
+    let fail = |e: serde_json::Error| format!("{}: {e}", t.template);
+    let mut fields: Raw = serde_json::from_str(row.get()).map_err(fail)?;
+    if !t.attributes.is_empty() {
+        let mut attributes: Raw = match fields.get("attributes") {
+            Some(a) => serde_json::from_str(a.get()).map_err(fail)?,
+            None => Raw::new(),
+        };
+        for (id, value) in &t.attributes {
+            // Refused rather than added: the mob reads the attributes its
+            // template's class has, so an extra one would do nothing.
+            let Some(base) = attributes.get_mut(id) else {
+                return Err(format!(
+                    "{}: attribute {id} is not one of {}'s",
+                    t.id, t.template
+                ));
+            };
+            *base = to_raw_value(value).map_err(fail)?;
+        }
+        fields.insert(
+            "attributes".into(),
+            to_raw_value(&attributes).map_err(fail)?,
+        );
+    }
+    fields.insert("template".into(), to_raw_value(&t.template).map_err(fail)?);
+    serde_json::to_vec(&fields).map_err(fail)
 }
 
 impl<'a> Plan<'a> {
@@ -1301,6 +1351,7 @@ impl<'a> Plan<'a> {
                     components: component_patch(&b.decl.id, &b.decl.components)?,
                     crafting_remainder: None,
                     block: None,
+                    arm_pose: None,
                     wall_block: b.decl.wall_block.clone(),
                 });
             }
@@ -1320,6 +1371,7 @@ impl<'a> Plan<'a> {
                     components: component_patch(&i.id, &i.components)?,
                     crafting_remainder: i.crafting_remainder.clone(),
                     block: i.block.clone(),
+                    arm_pose: i.arm_pose,
                     wall_block: None,
                 });
             }
@@ -1396,8 +1448,8 @@ impl<'a> Plan<'a> {
                 }
                 if gameplay {
                     row.set("id", J::Num(next.into()));
-                    if !b.decl.item && b.wall_of.is_none() {
-                        row.set("item", J::Str("minecraft:air".into()));
+                    if let Some(item) = b.item_row() {
+                        row.set("item", J::Str(item.into()));
                     }
                     self.override_gameplay(b, combo, &mut row);
                     if let Some(shapes) = &b.shapes {
@@ -1553,6 +1605,13 @@ impl<'a> Plan<'a> {
             map.set(&i.rename.to, v);
         }
         if components {
+            for b in &self.blocks {
+                if let Some(item) = &b.decl.block_item
+                    && map.get(item).is_none()
+                {
+                    return Err(format!("{}: block_item {item:?} is not an item", b.decl.id).into());
+                }
+            }
             for i in &self.items {
                 if let Some(rest) = &i.crafting_remainder
                     && map.get(rest).is_none()
@@ -1601,8 +1660,8 @@ impl<'a> Plan<'a> {
                         for r in &self.renames(b) {
                             v.rename(r, false);
                         }
-                        if !b.decl.item && b.wall_of.is_none() {
-                            v.set("item", J::Str("minecraft:air".into()));
+                        if let Some(item) = b.item_row() {
+                            v.set("item", J::Str(item.into()));
                         }
                         // `SignBlock.getWoodType`: the wood's name is what
                         // the editor reads of it.
@@ -1610,6 +1669,15 @@ impl<'a> Plan<'a> {
                             && let Some(name) = v.at("fields/type/name")
                         {
                             *name = J::Str(wood.clone());
+                        }
+                        // `new FenceGateBlock(woodType, ..)`: the gate's own sounds replace its wood's.
+                        if let Some(fields) = v.at("fields/type") {
+                            if let Some(sound) = &b.decl.open_sound {
+                                fields.set("fenceGateOpen", J::Str(sound.clone()));
+                            }
+                            if let Some(sound) = &b.decl.close_sound {
+                                fields.set("fenceGateClose", J::Str(sound.clone()));
+                            }
                         }
                         // `createDefaultSignText`: the colour and glow a new sign's text starts with.
                         if (b.decl.sign_text_color.is_some() || b.decl.sign_text_glow.is_some())
@@ -2939,6 +3007,17 @@ pub fn build(
         overlay.write(
             horizon_items::items::MOD_ITEM_BLOCKS,
             &serde_json::to_vec(&placed_blocks)?,
+        )?;
+    }
+    let arm_poses: BTreeMap<&str, horizon_mods::content::ArmPose> = plan
+        .items
+        .iter()
+        .filter_map(|i| Some((i.rename.to.as_str(), i.arm_pose?)))
+        .collect();
+    if !arm_poses.is_empty() {
+        overlay.write(
+            horizon_items::items::MOD_ITEM_ARM_POSES,
+            &serde_json::to_vec(&arm_poses)?,
         )?;
     }
     overlay.write(

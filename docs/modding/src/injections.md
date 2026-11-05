@@ -1,39 +1,52 @@
 # Injections
 
-An injection is a `[[native.injection]]` table in `horizon-mod.toml`. It changes the game's Rust source
-before it is compiled, using [horizon-mixins](https://github.com/horizon-rust/horizon-mixins). It is an
-escape hatch for a moment the mod API has no hook for, and **every injection is a request for a hook**:
-write it so it can become one by renaming its target, then [ask for the hook](#ask-for-the-hook).
+An injection is a `[[native.injection]]` table in `horizon-mod.toml`. It is an escape hatch for a moment
+the mod API has no hook for, and **every injection is a request for a hook**: write it so it can become one
+by renaming its target, then [ask for the hook](#ask-for-the-hook).
 
-Injections are **native-only**. A `mod.wasm` has no injections; a mod that needs one cannot be a wasm mod
-until the hook exists.
+It comes in two forms:
+
+- A **point injection** (`trait_method`) listens at an *injection point*. Every `Game` method is one,
+  apart from the few its shape rules out ([below](#which-methods-are-points)): the prebuilt game has a slot
+  at each one's head and return, which the game fills at load with the listeners of the mods that name it.
+  It changes no game source, so it builds against the prebuilt game in seconds.
+- A **helper injection** (`helper`) splices your Rust into the game's source with
+  [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) before it is compiled. The game is
+  rebuilt from source.
+
+A `mod.wasm` listens at points too: its `horizon-mod.toml` lists the same point injections, with no
+`[native]` pins, and the game fills those places from the `mod.wasm` at load, with no game rebuild and no
+compiler ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)). Helper injections are
+native-only: a mod that needs one cannot be a wasm mod until the hook exists.
 
 ## For agents
 
 Apply these rules in order and stop at the first that fits.
 
 1. A hook or a Part method exists for the moment: implement it. **No injection.**
-2. No hook, but the moment is a catalog hook point (declared under
-   `crates/horizon-mod-api/src/hooks/`): `hook = "<name>"`, `hook_version = <N>`, with `trait_method`.
-3. No hook point: `trait_method`, `kind`, `target`, and one binding
-   `{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut *self" }`. The body uses only
-   `mod_api` types (handles, attachments, services). This is the default injection.
-4. You need private game internals: `helper = "src/<file>.rs"` bound to `&mut Game`. Last resort. It breaks
-   on game updates and never runs as `mod.wasm`. File a hook request with it.
+2. No hook: a point injection. `target` (the `Game` method), `kind = "HEAD"` or `"RETURN"`, and
+   `trait_method = "<point>"` (head) or `"<point>_return"` (return), where `<point>` is the method's name.
+   Add `horizon-mod-points` to `Cargo.toml` beside `horizon-mod-api` (only a mod that listens at points
+   does). Implement that method in `#[mod_api::horizon_mod] impl mod_points::Points` on the same type as the
+   mod's `Hooks`, at the crate root. The body uses only `mod_api` types. This is the default injection.
+3. You need private game internals, another kind, or another crate: `helper = "src/<file>.rs"` bound to
+   `&mut Game`. Last resort. It breaks on game updates, rebuilds the game and never runs as `mod.wasm`. File a
+   hook request with it.
 
 Exact fields (unknown fields are refused):
 
 | Field | Rule |
 | --- | --- |
 | `id` | unique, nonempty |
-| `kind` | `HEAD`, `RETURN`, `MODIFY_ARG`, `MODIFY_EXPRESSION_VALUE` for `trait_method`; any horizon-mixins kind for `helper` |
-| `hook` + `hook_version` **or** `target` | exactly one of the two forms |
+| `kind` | `HEAD` or `RETURN` for `trait_method`; any horizon-mixins kind for `helper` |
+| `hook` + `hook_version` **or** `target` | exactly one of the two forms; a `trait_method` takes `target` |
 | `trait_method` **or** `helper` | exactly one of the two |
-| `bindings` | `{ name, ty, value }`; `value = "$value"` names the value a `RETURN`, `MODIFY_ARG` or `MODIFY_EXPRESSION_VALUE` trait injection changes |
-| `cancellable` | `true` only on a `HEAD` trait injection of a unit-returning target; the method returns `Flow` |
-| `priority`, `selector`, `require`, `ordinal`, `argument` | horizon-mixins' own fields |
+| `bindings`, `cancellable`, `selector`, `require`, `ordinal`, `argument`, `slice`, `variable`, `result` | `helper` only: horizon-mixins' own fields. A point listener gets the point's record instead and cancels through its `cancel` |
+| `priority` | horizon-mixins' order among helpers |
 
-Errors: `E_HOOK_UNKNOWN` (the `hook` name is not in the catalog: use a name the error lists, or use `target`);
+Point errors name the injection: its `target` isn't a point of the game the mod pins, or it names a method
+that isn't the point's (`tick` at a `RETURN` is `tick_return`), or the mod's `impl Points` doesn't override
+the method it names. Helper errors: `E_HOOK_UNKNOWN` (the `hook` name is not in the catalog: use a name the error lists, or use `target`);
 `E_HOOK_VERSION` (the catalog lacks that `hook_version`: use a version the error lists, and rebuild against the
 game the mod pins).
 
@@ -45,36 +58,35 @@ the event, and writes take `host`.
 1. **A hook or Part method exists: use it.** Read [Hooks](concepts/trait-mods.md) and the
    [rustdoc](reference/api.md). A per-block, per-item or per-entity moment is a Part method. Nothing in this
    chapter applies.
-2. **No hook, but the moment is a named hook point: `hook = "<name>"`.** The catalog names each hook point and
-   the version of its contract. horizon-mixins resolves the name against the game it builds, so the hook
-   point can move in the source without breaking your mod. The launcher tells you when a raw `target` is
-   one (see [the build log](#the-build-log)).
-3. **No hook point: a `trait_method` injection with a `Host` binding.** The default. Your method receives an
-   event with the `Host` in it and uses only `mod_api` types.
-4. **You truly need private internals: a `helper` bound to `Game`.** The last resort. It reads game state no
-   API exposes, so it breaks when the game changes, can never run as `mod.wasm`, and should always come with
-   a hook request.
+2. **No hook: a point injection (`trait_method`).** The default. Your `Points` method gets the side's host
+   and the point's record (`mod_points::<Point>Args`): the function's arguments with API types, and a
+   `cancel` or `result` where the function returns `()` or an API value. It uses only `mod_api` types.
+   Every `Game` method is a point on both routes: the prebuilt game was built with them all, and a source
+   build gets the same points, so a point injection always builds against the prebuilt game in seconds.
+3. **You truly need private internals: a `helper` bound to `Game`.** The last resort. It reads game state no
+   API exposes, so it breaks when the game changes, rebuilds the game, can never run as `mod.wasm`, and should
+   always come with a hook request. `hook = "<name>"` names a catalog hook point's function for a helper, so
+   the function can move without breaking it (see [the build log](#the-build-log)).
 
 ## The forms
 
-| Form | Kinds | Crates | Order | `mod.wasm` |
-| --- | --- | --- | --- | --- |
-| `trait_method` | `HEAD` (listen, or cancellable), `RETURN`, `MODIFY_ARG`, `MODIFY_EXPRESSION_VALUE` | `horizon-client` only | priority descending, then mod id, then injection id | no |
-| `helper` | any | any crate | priority descending, then mod id, then injection id | no |
-| `hook` instead of `target` | as the form it combines with | the hook point's | as the form | no |
-| Hook or Part method (no injection) | — | — | dependency order, after every injection | yes |
-
-A helper and a trait injection are one list at a place: they sort together. A trait injection's generated
-helper calls only its own mod's method.
+| Form | Kinds | Where | Order | Game rebuild | `mod.wasm` |
+| --- | --- | --- | --- | --- | --- |
+| `trait_method` (point) | `HEAD`, `RETURN` | `Game` methods | dependency order | no | yes |
+| `helper` | any | any crate | priority descending, then mod id, then injection id | yes | no |
+| Hook or Part method (no injection) | — | — | dependency order | no | yes |
 
 ## Ordering
 
 ```text
 a call site in the game
  │
- ├─ injections at the place (helpers and trait injections together)
+ ├─ helper injections at the place
  │    priority descending → mod id → injection id
  │    an early return, or a claimed cancel, ends here
+ │
+ ├─ at a point: its head listeners (dependency order); a cancel skips the body
+ │    and its return listeners after the body
  │
  ├─ trait-mod hooks (dependency order; ties in bundle order)
  │    the first Cancel stops the rest; replacement hooks: the first Some wins
@@ -83,14 +95,14 @@ a call site in the game
  └─ the game's own body
 ```
 
-Injections run before trait-mod hooks, and an injection that returns early skips them. Dependency order
+Helpers run before trait-mod hooks, and an injection that returns early skips them. Dependency order
 never changes injection order. `priority` defaults to 0.
 
 ## Make your injection convertible
 
 An injection becomes a hook when its body is a single call a hook can take. Keep to four rules:
 
-- **Bind `Host`**, never `&mut Game`.
+- **Take the host**, never `&mut Game`.
 - **Never read `Game` fields.** Whatever you need comes from handles, attachments and services reached from the
   host.
 - **One call.** Keep the body to a single call into your own code, so the hook's listener is that call.
@@ -118,21 +130,19 @@ fn count(game: &mut crate::game::Game<'_>) {
 }
 ```
 
-**2. A trait injection with a `Host` binding** (the default):
+**2. A point injection** (the default). `Game::tick` is a point, so this builds on the prebuilt game. The
+mod depends on `horizon-mod-points` as well as `horizon-mod-api`:
 
 ```toml
 [[native.injection]]
 id = "count"
-target = "horizon_client::game::Game<'_>::tick_mobs"
+target = "horizon_client::game::Game<'_>::tick"
 kind = "HEAD"
-trait_method = "count"
-bindings = [{ name = "host", ty = "&mut dyn mod_api::Host", value = "&mut *self" }]
+trait_method = "tick"
 ```
 
 ```rust,ignore
-fn inject_example_count(&self, event: &mut InjectExampleCountEvent<'_>) {
-    let _ = count(&mut *event.host);
-}
+{{#include ../examples/src/lib.rs:points}}
 ```
 
 **3. The hook it becomes.** Say the catalog has a hook at that moment (the `server_tick` hook, which fires every server tick, stands in here), so the injection disappears and the
@@ -152,8 +162,7 @@ The `COUNTER` attachment is the same in all three:
 {{#include ../examples/src/lib.rs:counter}}
 ```
 
-Step 2 to step 3 is renaming: the injection's `target` becomes the hook's name, and its event becomes the
-hook's. That is what "convertible" means, and why shape 2 is the default.
+Step 2 to step 3 is renaming: the `Points` method becomes the hook's, and its record the hook's event. That is what "convertible" means, and why shape 2 is the default.
 
 ## Ask for the hook
 
@@ -188,13 +197,13 @@ stop the build:
   `Hooks::frame` with no injection``.
   A scoped hook says "the `<name>` Part method" instead of `Hooks::<name>`.
 
-A panic inside a trait injection reports the mod and the generated method
-(`in native mod <id>, hook inject_<mod>_<method>`).
+A panic inside a point listener reports the mod and the method
+(`in native mod <id>, hook <method>`).
 
 ## Support modules
 
 A `[[native.module]]` table contributes a whole Rust module to a game crate, beside the injections:
-self-contained items that a helper or trait injection calls through ordinary paths. It is the shape
+self-contained items that a helper injection calls through ordinary paths. It is the shape
 for support code a moment needs and one function cannot hold — Portizon's runtime is the case that
 asked for it.
 
@@ -217,20 +226,38 @@ Modules are **native-only** and last-resort support code for helpers, outside th
 line: a mod's behaviour still goes through hooks, handles and Parts. Any capability a module needs
 that the API lacks is a hook request in #44's row form, not a reason to grow the module.
 
+## Which methods are points
+
+Every inherent `Game` method of the game module is a point, named after the method, except:
+
+- the hook functions themselves (`native_*`), which are hooks;
+- a method compiled only under a `cfg`, and one in a `cfg`-gated module;
+- `const`, `async` and `unsafe` functions, and methods without a `&self` or `&mut self` receiver;
+- `impl Trait` or `!` in the signature, `#[inline(always)]`, and a parameter named `cancel` or `result`.
+
+A method whose return value borrows the game (`-> &T`, `-> Option<&mut T>`) has a head and no return; a
+`'static` return (`-> Option<&'static str>`) borrows nothing and has both. A `usize` or `isize` crosses
+the record as `u64` or `i64`, one width for native and wasm listeners.
+`points.json`, beside the prebuilt game, lists them all; the rustdoc of `horizon-mod-points` documents
+each with the function it listens at.
+
+The source tree carries no `#[point]`: the build of the prebuilt game, and the launcher's source builds,
+put one on each method in the copy they compile. A plain `cargo build` of the game in a checkout has no
+points; a mod listening there builds, and its listeners never fire.
+
 ## Reference
 
-- A trait injection's generated method is `inject_<mod_id>_<trait_method>`; its event is that name in CamelCase
-  plus `Event`, with the bindings as fields. Implement it on your `Hooks` object: it is called only for your mod.
-- Types in bindings must be public and available from both the target and `mod_api`.
-- For `RETURN`, `MODIFY_ARG` and `MODIFY_EXPRESSION_VALUE`, the binding whose `value` is `$value` is a plain
-  event field; change it in place and the changed value is what the target returns, passes or uses.
-  `cancellable` is `HEAD`-only.
-- Before the mods are installed, a value passes through unchanged. A trait injection runs in every `Game` that
-  calls its target, and attachments answer `MissingHolder` outside the server's game.
-- Do not specify `helper` on a `trait_method` entry.
-- A trait injection reads `event.host` at any `Game` method horizon-mixins can inject into at HEAD (its README lists
-  the limits).
-- On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`,
+- A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after
+  its body: the value it returns), on `mod_points::Points`. Its record is `mod_points::<Point>Args`.
+- Depend on `horizon-mod-points` only to listen at points. It holds one record per point, so a crate that
+  depends on it compiles a few seconds slower; a mod without point injections leaves it out.
+- A listener's host is a `HostSide` on a function that takes `&mut self`, and `&dyn Host` on one that takes
+  `&self`.
+- The game sets a point's slots once, after the mods are installed; a point no mod listens at costs one
+  atomic load and a branch.
+- A point injection's `hook`, bindings and horizon-mixins fields are refused: a hook is its own `Hooks` method,
+  and the record carries what the point passes.
+- A helper on a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`,
   `native_perform_bonemeal`, `native_is_bonemeal_success`), bind
   `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }` for attachments and
   `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the hook points

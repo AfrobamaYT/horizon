@@ -393,6 +393,7 @@ pub(super) mod tests {
                 sender: PlayerSender::new(tx, Arc::default()),
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
+                expected: false,
             },
             conn as i32 + 19,
             [0.0; 3],
@@ -744,6 +745,7 @@ pub(super) mod tests {
                 (0, 64, 0),
                 Slots::Block((0, 64, 0)),
                 vec![None; 27],
+                None,
             );
             let menu = menu_of(game);
             // Slot 0 is the chest's first, 27 the inventory's 9 and 54 the hotbar's first.
@@ -825,6 +827,7 @@ pub(super) mod tests {
                 (0, 64, 0),
                 Slots::Block((0, 64, 0)),
                 vec![None; 27],
+                None,
             );
             let menu = menu_of(game);
             assert!(game.native_level_set_block(level, [0, 64, 0], furnace, flags));
@@ -978,6 +981,7 @@ pub(super) mod tests {
                 (0, 64, 0),
                 Slots::Block((0, 64, 0)),
                 vec![None; 3],
+                None,
             );
             let menu = menu_of(game);
             let (fuel, result) = (

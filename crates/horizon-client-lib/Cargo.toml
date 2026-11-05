@@ -31,6 +31,8 @@ horizon-world = { path = "../horizon-world" }
 horizon-protocol = { path = "../horizon-protocol" }
 # server.properties, eula.txt and the user lists, shared with horizon-server.
 horizon-server-files = { path = "../horizon-server-files" }
+# The control endpoint's token (control.rs), as horizon-server's and the relay's.
+getrandom = "0.3"
 # The dedicated server's anticheat, off unless server.toml's [anticheat] turns it on (docs/anticheat.md).
 horizon-anticheat = { path = "../horizon-anticheat" }
 # The dedicated server's chat filter: [chat_filter], the slur list, mutes (docs/chat-filter.md).
@@ -69,9 +71,8 @@ mio = { version = "1.2.4", features = ["os-poll", "net"] }
 # Shared chunk frames are found by one keyed 128-bit hash of their body (lan/conn.rs SharedFrames).
 xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
 horizon-theme = { path = "../horizon-theme" }
-# Opt-in data collection: the game keeps, the launcher sends (docs/telemetry.md); `live` is
-# the anonymous "I'm playing" ping the game sends itself (`heartbeat.rs`).
-horizon-telemetry = { path = "../horizon-telemetry", default-features = false, features = ["live"] }
+# Hardware probes for the benchmark report (nothing leaves the machine, docs/telemetry.md).
+horizon-system = { path = "../horizon-system" }
 horizon-bench = { path = "../horizon-bench" }
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 # Controllers (evdev + libudev on Linux, IOKit on macOS, Windows.Gaming.Input); the `controllers` feature.
