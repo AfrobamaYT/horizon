@@ -37,13 +37,13 @@ Level: preview ([API stability](../../../api/stability.md)). Schema 1.
 | `schema` | 1. A reader refuses a higher number with "update Horizon" rather than misread it. |
 | `projects[].id` | `[a-z0-9_]{1,64}`, unique; a mod's is its manifest's `id`. |
 | `kind` | `mod` (content), `native-mod`, `modpack`, `resourcepack`, `shader` (Horizon `.hshader`), `shaderpack` (a `shaders/`-folder zip), `datapack` (a data-pack zip). Other kinds (worlds, themes) may come without a new schema: a reader keeps a kind it doesn't know and doesn't offer it. |
-| `summary`, `description` | One line for lists; Markdown for the project's page. |
+| `summary`, `description` | One line for lists; Markdown for the project's page, required for a listed project and 50–10,000 characters after trimming. |
 | `owners` | GitHub logins allowed to publish updates. |
 | `license`, `source` | An SPDX expression and an `https://` address of the source code: both required. |
-| `icon` | `https://`, optional. |
-| `categories` | Up to 3 from the kind’s category list. |
+| `icon` | Required for a listed project. An HTTPS URL in the generated index, from the registry's `icons/<id>.png` (not a remote image input). |
+| `categories` | 1–3 from the kind’s category list for a listed project. |
 | `tags` | Up to 10 lowercase tags. |
-| `screenshots` | Up to 8 HTTPS PNG or JPEG addresses. |
+| `screenshots` | Optional, up to 8 HTTPS PNG or JPEG URLs in the generated index, from files kept in the registry under `screenshots/<id>/`. |
 | `key` | The author's [minisign](https://jedisct1.github.io/minisign/) public key. When set, every version must be signed with it; an update signed with another key is refused. Absent: the project is unsigned and the launcher says so. |
 | `versions` | Newest first, at least one. |
 | `downloads` | How many times its files were downloaded, every version together: GitHub's count of each release asset, summed by the publish job, which runs every hour. Absent until a file is downloaded. Read-only: never in an entry. |
@@ -103,6 +103,10 @@ them into the profile's game folder.
 check (`index::inspect`): a mod's API, side and capabilities, a modpack's mods, the size. Types and rules:
 `horizon_mods::index::registry`.
 
+Every listed project's resolved page requires a description of 50–10,000 characters after trimming,
+1–3 categories and an icon stored in the registry. Icons and optional screenshots are registry-local
+input paths, not remote HTTPS images; the generated index exposes their registry-hosted HTTPS URLs.
+
 ```toml
 id = "coords_hud"                # the file's name, and the manifest's id
 kind = "mod"                     # mod | native-mod | modpack | resourcepack | shader | shaderpack | datapack
@@ -110,14 +114,14 @@ repo = "horizon-rust/coords-hud" # GitHub owner/name: its releases are its versi
 owners = ["ludovic111"]          # GitHub logins responsible for the project
 owner_ids = [12345678]           # their numeric GitHub IDs: these decide who an owner is (a login can change hands)
 key = "RWT..."                   # optional: the minisign public key every version is signed with
-icon = "icons/coords_hud.png"    # optional: square PNG, 64–1024 pixels, at most 256 KiB, or https://
-categories = ["utility"]         # up to 3 from the kind’s list
+icon = "icons/coords_hud.png"    # required: square PNG, 64–1024 pixels, at most 256 KiB
+categories = ["utility"]         # 1–3 from the kind’s list
 tags = ["hud", "coordinates"]    # up to 10 lowercase tags
-screenshots = ["screenshots/coords_hud/1.png"] # up to 8 PNG/JPEG files, or https://
+screenshots = ["screenshots/coords_hud/1.png"] # optional: up to 8 local PNG/JPEG files
 # The page. Each field may instead come from horizon-registry.toml in the repo (below); these win.
 name = "Coordinates HUD"
 summary = "One line, at most 160 characters."
-description = """Markdown."""
+description = """Shows your current coordinates in a compact HUD so you can find your way back to saved locations."""
 authors = ["Horizon"]
 license = "MIT"
 # source defaults to https://github.com/<repo>
@@ -227,6 +231,7 @@ API line are its facts. A new kind gets its own check before it opens.
 
 ## Changelog
 
+- 2026-11-05: every listed project needs a description of 50 characters or more, 1 to 3 categories and an icon kept in the registry (`icons/<id>.png`); screenshots are kept in the registry too (`registry build` refuses https:// images in entries).
 - 2026-10-30: an entry names its GitHub repository (`repo`) and its versions are the repository's releases, read by the registry's CI; `file.url` may be a release asset of that repository. The index's schema is unchanged.
 - 2026-10-26: `projects[].downloads`, GitHub's download counts of a project's files, refreshed every hour.
 - 2026-10-26: the launcher installs `shader` files into `shaderpacks/`; the sample index lists one (`glow`).

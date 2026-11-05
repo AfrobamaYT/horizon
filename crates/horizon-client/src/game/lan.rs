@@ -1706,7 +1706,8 @@ impl Game<'_> {
             return;
         }
         Self::guest_attachments_into(&self.guest_attachments, guest);
-        if guest.placed {
+        // A proxy released this record to another server, which now owns saving it.
+        if guest.placed && !guest.released {
             let _ = self.finish_player_autosaves(true);
             if self
                 .lan
@@ -1872,6 +1873,7 @@ impl Game<'_> {
     ) {
         if !guest.participates_in_player_simulation()
             || !guest.placed
+            || guest.released
             || self.adv.tree.list.is_empty()
         {
             return;
@@ -2393,11 +2395,15 @@ impl Game<'_> {
                             "INFO",
                             &format!("{} lost connection: {}", guest.name, guest.left_reason),
                         );
-                        super::dedicated::log(
-                            "INFO",
-                            &format!("System chat: {} left the game", guest.name),
-                        );
-                    } else if self.player.is_some() && guest.placed {
+                        // A player moved to another server without `announce` was not
+                        // announced as leaving, so the line is not logged either.
+                        if !guest.quiet_leave {
+                            super::dedicated::log(
+                                "INFO",
+                                &format!("System chat: {} left the game", guest.name),
+                            );
+                        }
+                    } else if self.player.is_some() && guest.placed && !guest.quiet_leave {
                         // ServerGamePacketListenerImpl.removePlayerFromWorld.
                         let who = self.player_text(&guest.name, guest.uuid);
                         self.system_message(

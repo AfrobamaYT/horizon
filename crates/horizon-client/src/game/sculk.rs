@@ -1299,7 +1299,7 @@ impl Game<'_> {
         self.sculk.darkness = darkness_blend_tick(&self.potions.effects, self.sculk.darkness);
     }
     /// The darkness effect's blend factor at the partial tick.
-    fn darkness_blend(&self, partial: f32) -> f32 {
+    pub(super) fn darkness_blend(&self, partial: f32) -> f32 {
         let (previous, current) = self.sculk.darkness;
         previous + (current - previous) * partial
     }

@@ -1857,10 +1857,9 @@ struct Built {
 /// reuses: a native build's own revision when it is one, [`base_for`]), compiled as `target`
 /// (the game, or the headless engine) and installed as its own version,
 /// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
-/// the profile and the target). A build already made is used again. Mods pinning different
-/// revisions build on the newest one, with the newest horizon-mixins they name, only when the
-/// player agreed to try (`anyway`): else the error starts with [`MISMATCH`] and says which.
-/// With `on_base`, every mod builds on `base`'s own commit, pinned or not (the player's choice).
+/// the profile and the target). A build already made is used again. A mod pinned to another
+/// Horizon revision is refused: the error starts with [`MISMATCH`] and names the mismatched pins.
+/// Building never changes a mod's Horizon pin to match the installed game.
 /// Nothing of the player's outside the launcher's data is touched: no instance is edited and
 /// no version selected here.
 fn pipeline(
