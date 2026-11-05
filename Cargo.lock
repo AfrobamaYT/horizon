@@ -1847,6 +1847,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-internals"
+version = "0.1.0"
+
+[[package]]
 name = "horizon-items"
 version = "0.1.0"
 dependencies = [
