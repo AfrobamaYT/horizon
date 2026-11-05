@@ -765,7 +765,7 @@ mod tests {
         for progress_type in [NativeProgressType::Grant, NativeProgressType::Revoke] {
             dispatch_player_advancement_progress(
                 &mut TestHost,
-                PlayerAdvancementProgressCall {
+                calls::PlayerAdvancementProgressCall {
                     player: 123,
                     player_entity_id: 42,
                     name: "Alex",
