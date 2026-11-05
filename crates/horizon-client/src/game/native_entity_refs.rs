@@ -21,6 +21,15 @@ use mod_api::{
 };
 
 impl Game<'_> {
+    /// An entity tracked by the remote client but absent from local entity lists.
+    fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
+        let remote = self.remote.as_ref()?;
+        if !remote.logged_in || self.native_lifecycle.epoch() != Some(entity.epoch()) {
+            return None;
+        }
+        remote.tracked_entity(i32::try_from(entity.id()).ok()?)
+    }
+
     /// Keep a held-out entity inaccessible until its copy has been stored back.
     pub(super) fn with_entity_held_out<R>(
         &mut self,
@@ -99,12 +108,15 @@ impl Game<'_> {
         }
     }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
-    /// methods: None on a client, with no world open, or for no such entity
-    /// in the level in place or among the server's players. API
-    /// 373.
+    /// methods: None with no world open, or for no such entity in the level
+    /// in place or among the server's players. On a client (API
+    /// @API:client_entity_refs@), any entity the server shows this window,
+    /// this window's own player included. API 373.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
-        self.native_entity_read_target(entity).map(|_| entity)
+        (self.native_entity_read_target(entity).is_some()
+            || self.native_client_tracked(entity).is_some())
+        .then_some(entity)
     }
     /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
     /// client, with no world open, or for a dimension the server hasn't
@@ -459,7 +471,12 @@ impl Game<'_> {
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        self.target_position(self.native_entity_read_target(entity)?)
+        match self.native_entity_read_target(entity) {
+            Some(target) => self.target_position(target),
+            None => self
+                .native_client_tracked(entity)
+                .map(|(_, position)| position),
+        }
     }
     /// The block the entity's position is in (`Entity.blockPosition`). API
     /// 373.
@@ -475,12 +492,35 @@ impl Game<'_> {
     /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
     /// 373.
     pub(super) fn native_entity_kind(&self, entity: EntityRef) -> Option<String> {
-        Some(self.target_type(self.native_entity_target(entity)?))
+        match self.native_entity_read_target(entity) {
+            Some(t) => Some(self.target_type(t)),
+            None => self
+                .native_client_tracked(entity)
+                .map(|(kind, _)| kind.to_owned()),
+        }
     }
     /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
     /// entity that has none yet gets it now, as a new vanilla entity does.
-    /// API 373.
+    /// On a client, the one the server added it with (a player's is its
+    /// profile's). API 373.
     pub(super) fn native_entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        if let Some(r) = &self.remote {
+            let id = i32::try_from(entity.id()).ok()?;
+            if self.native_entity_read_target(entity).is_none()
+                && self.native_client_tracked(entity).is_none()
+            {
+                return None;
+            }
+            if let Some((uuid, _)) = r.level_player(id) {
+                return Some(uuid);
+            }
+            return self
+                .persist
+                .uuids
+                .get(&entity.id())
+                .copied()
+                .map(uuid_from_words);
+        }
         let words = match self.native_entity_target(entity)? {
             Target::Player => return self.lan_acting_uuid,
             Target::Guest(conn) => return self.command_guest(conn).map(|g| g.uuid),
@@ -488,9 +528,13 @@ impl Game<'_> {
         };
         Some(uuid_from_words(words))
     }
-    /// The level the entity is in (`Entity.level`). API 373.
+    /// The level the entity is in (`Entity.level`): on a client, the
+    /// client's level. API 373.
     pub(super) fn native_entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
-        let dim: Dim = self.target_level(self.native_entity_target(entity)?);
+        let dim: Dim = match self.native_entity_read_target(entity) {
+            Some(t) => self.target_level(t),
+            None => self.native_client_tracked(entity).map(|_| self.dim)?,
+        };
         Some(LevelRef::new(entity.epoch(), dim.id()))
     }
 }
@@ -1389,6 +1433,7 @@ pub(super) mod tests {
                         sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
                         latency: Arc::new(AtomicI32::new(0)),
                         address: "127.0.0.1:1".parse().unwrap(),
+                        expected: false,
                     },
                     id as i32,
                     [3.0, 64.0, 5.0],
@@ -1463,11 +1508,19 @@ pub(super) mod tests {
                 game.native_living_equipment(living, EquipmentSlot::Saddle),
                 None
             );
+            // The host's own previous mode, which no guest's change may touch.
+            game.previous_mode = Some(horizon_client::command::args::GameMode::Adventure);
+            assert_eq!(game.native_player_previous_game_mode(player), Some(None));
             assert!(!game.native_player_set_game_mode(player, GameMode::Survival));
+            assert_eq!(game.native_player_previous_game_mode(player), Some(None));
             assert!(game.native_player_set_game_mode(player, GameMode::Creative));
             assert_eq!(
                 game.native_player_game_mode(player),
                 Some(GameMode::Creative)
+            );
+            assert_eq!(
+                game.native_player_previous_game_mode(player),
+                Some(Some(GameMode::Survival))
             );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(abilities.invulnerable && abilities.may_fly && abilities.instabuild);
@@ -1548,7 +1601,26 @@ pub(super) mod tests {
             // A mode change in a turn, then a write in the same turn: the write wins.
             game.as_guest(12, |game| {
                 let player = game.native_player_ref(12).unwrap();
+                // The guest's own previous mode is swapped in for the turn.
+                assert_eq!(
+                    game.native_player_previous_game_mode(player),
+                    Some(Some(GameMode::Creative))
+                );
+                assert_eq!(
+                    game.native_player_is_secondary_use_active(player),
+                    Some(false)
+                );
+                game.player.as_mut().unwrap().shift_key_down = true;
+                assert_eq!(
+                    game.native_player_is_secondary_use_active(player),
+                    Some(true)
+                );
+                game.player.as_mut().unwrap().shift_key_down = false;
                 assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+                assert_eq!(
+                    game.native_player_previous_game_mode(player),
+                    Some(Some(GameMode::Survival))
+                );
                 let mut a = game.native_player_abilities(player).unwrap();
                 assert!(a.instabuild && a.may_fly);
                 a.fly_speed = 0.4;
@@ -1558,6 +1630,11 @@ pub(super) mod tests {
             .unwrap();
             let kept = game.lan.as_ref().unwrap().hub.guest(12).unwrap();
             assert_eq!(kept.game_mode, 1);
+            assert_eq!(kept.previous_game_mode, Some(0));
+            assert_eq!(
+                game.previous_mode,
+                Some(horizon_client::command::args::GameMode::Adventure)
+            );
             assert!(kept.abilities.instabuild);
             assert_eq!(kept.abilities.flying_speed, 0.4);
             assert_eq!(kept.abilities.walking_speed, 0.3);
@@ -1778,6 +1855,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 1).into(),
+                    expected: false,
                 },
                 1,
                 [0.0; 3],
@@ -2213,6 +2291,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx2, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 3).into(),
+                    expected: false,
                 },
                 3,
                 [0.0; 3],
@@ -2287,6 +2366,7 @@ pub(super) mod tests {
                     sender: PlayerSender::new(tx, Arc::default()),
                     latency: Arc::default(),
                     address: ([127, 0, 0, 1], 1).into(),
+                    expected: false,
                 })))
                 .unwrap();
             use mod_api;

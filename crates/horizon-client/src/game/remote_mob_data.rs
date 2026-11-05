@@ -149,6 +149,14 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             (Species::Mooshroom, 18, Value::Int(variant)) => {
                 m.extra.variant = (*variant == 1) as u8
             }
+            // Pig.DATA_BOOST_TIME and Strider.DATA_BOOST_TIME (the first entry
+            // after AgeableMob's two; the variant and DATA_SUFFOCATING are 19).
+            // ItemBasedSteering.onSynced: boosting starts, boostTime is 0, and
+            // the total is this int (140 to 980 from boost()).
+            (Species::Pig | Species::Strider, 18, Value::Int(total)) => {
+                m.extra.counter = 0;
+                m.extra.counter2 = *total;
+            }
             // Piglin.DATA_IS_DANCING: the dance pose.
             (Species::Piglin, 19, Value::Bool(dancing)) => m.extra.scratch[0] = i32::from(*dancing),
             // TamableAnimal.DATA_FLAGS_ID: sitting 1, tame 4.
@@ -480,7 +488,7 @@ fn villager_data(m: &mut Mob, data: &[i32], builtin: &Builtin) {
     if let Some(p) = index("minecraft:villager_profession", profession, &PROFESSIONS) {
         m.extra.variant2 = p;
     }
-    m.extra.variant3 = level.clamp(0, i32::from(u8::MAX)) as u8;
+    m.extra.villager_level = level.max(1);
 }
 
 impl Game<'_> {
@@ -1262,7 +1270,7 @@ mod tests {
             (
                 VILLAGER_TYPES[m.extra.variant as usize],
                 PROFESSIONS[m.extra.variant2 as usize],
-                m.extra.variant3,
+                m.extra.villager_level,
             )
         };
         apply(
@@ -1276,6 +1284,15 @@ mod tests {
             &[(19, s::VILLAGER_DATA, Value::Ids(vec![desert, librarian, 5]))],
         );
         assert_eq!(name(&m), ("desert", "librarian", 5));
+        apply(
+            &mut m,
+            &[(
+                19,
+                s::VILLAGER_DATA,
+                Value::Ids(vec![desert, librarian, 123456]),
+            )],
+        );
+        assert_eq!(name(&m), ("desert", "librarian", 123456));
         // A zombie villager's data comes after Zombie's three entries.
         let mut z = mob("minecraft:zombie_villager").unwrap();
         apply(
@@ -1444,5 +1461,77 @@ mod tests {
         apply(&mut m, &[(20, s::INT, Value::Int(0))]);
         // Last fuse tick: still primed at 0 until the server removes it.
         assert_eq!(horizon_client::mobs::sulfur_cube::fuse(&m), 0);
+    }
+
+    /// `Pig.onSyncedDataUpdated` and `Strider.onSyncedDataUpdated`: a synced
+    /// `DATA_BOOST_TIME` (index 18, after AgeableMob's two) calls
+    /// `ItemBasedSteering.onSynced`. Boosting starts, `boostTime` is 0, and
+    /// the total is the int (`boost()`'s minimum is 140). The next
+    /// `tickBoost` then `boostFactor` is `1 + 1.15 * sin(boostTime / total * PI)`.
+    #[test]
+    fn a_synced_boost_starts_the_client_timer() {
+        use horizon_client::mobs::MobTypes;
+        use horizon_core::geometry::trig::Mth;
+        use horizon_world::native_load_context::{
+            DataLoadOrigin, LoadContext, LoadInputs, LoopSide,
+        };
+        use std::{fs, sync::Arc};
+
+        let root = std::env::temp_dir().join(format!("horizon-boost-sync-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("entity-types.json"),
+            r#"{"minecraft:pig": {}, "minecraft:strider": {}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("entity-models.json"),
+            r#"{"minecraft:pig#main": {}, "minecraft:strider#main": {}}"#,
+        )
+        .unwrap();
+        let mut types = MobTypes::load(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
+
+        let context = LoadContext::new(
+            DataLoadOrigin::ClientPreload,
+            Arc::new(LoadInputs::new(Default::default(), Default::default())),
+            [],
+        )
+        .loop_context(LoopSide::Client, []);
+
+        // ItemBasedSteering: nextInt(841) + 140, and 1.15 in boostFactor.
+        const TOTAL: i32 = 140;
+        const FACTOR: f32 = 1.15;
+        for (kind, steer) in [
+            ("minecraft:pig", 0.225_f64),
+            ("minecraft:strider", 0.55_f64),
+        ] {
+            let t = Arc::new(types.types.remove(kind).unwrap());
+            let mut m = Mob::new(1, t, horizon_core::geometry::Vec3::ZERO, 0.0);
+            m.attrs.speed = 0.25;
+            m.extra.set_saddled(true);
+            m.extra.counter = 5;
+            m.extra.counter2 = 3;
+            // The next entry (pig variant, strider suffocating) is not the boost.
+            apply(&mut m, &[(19, s::INT, Value::Int(TOTAL))]);
+            assert_eq!((m.extra.counter, m.extra.counter2), (5, 3), "{kind}");
+            apply(&mut m, &[(18, s::INT, Value::Int(TOTAL))]);
+            assert_eq!(m.extra.counter, 0, "{kind}: onSynced sets boostTime to 0");
+            assert_eq!(m.extra.counter2, TOTAL, "{kind}: the synced total");
+            m.rider = Some(equine::Rider {
+                steer: true,
+                ..Default::default()
+            });
+            equine::ridden_step(&mut m, &context);
+            // tickBoost post-increments, then boostFactor reads boostTime 1.
+            let boost = 1.0 + FACTOR * (1.0_f32 / TOTAL as f32 * std::f32::consts::PI).msin();
+            let expected = (0.25_f64 * steer) as f32 * boost;
+            assert_eq!(m.extra.counter, 1, "{kind}");
+            assert!(
+                (m.ai.speed - expected).abs() < 1.0e-5,
+                "{kind}: {} != {expected}",
+                m.ai.speed
+            );
+        }
     }
 }

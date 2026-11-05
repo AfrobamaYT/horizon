@@ -799,15 +799,15 @@ enum Cmd {
         /// You read the mods' source and trust it with full access to this computer
         #[arg(long)]
         trust_native_code: bool,
-        /// The build profile: performance (the default: incremental, quick to rebuild), dev (quickest
-        /// to rebuild a mod, slow game) or release (thin LTO: slowest to build, slightly faster
-        /// game). Default: the native-profile setting
-        #[arg(long, value_parser = ["performance", "dev", "release"])]
+        /// The build mode: optimized (the default: the prebuilt game when the mods allow it, else
+        /// the game built with the release profile), balanced (built here, quicker to rebuild) or
+        /// developer (quickest to rebuild a mod, slow game). Default: the native-profile setting
+        #[arg(long, value_parser = ["optimized", "balanced", "developer"])]
         profile: Option<String>,
     },
     /// Show a release's patch notes (default: the newest)
     Notes { tag: Option<String> },
-    /// Show the Discord, sponsor and website links
+    /// Show the website, roadmap and documentation links
     Links,
     /// Microsoft accounts: list them (the default), sign in, sign out, or pick the one that plays
     Account {
@@ -815,6 +815,7 @@ enum Cmd {
         action: Option<AccountCmd>,
     },
     /// Show the launcher's settings, or set one (the Settings page): selected-version TAG,
+    /// game-architecture auto|x64|arm64,
     /// minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions
     /// on|off, prune-old-versions on|off (delete old versions after an install, keeping the
     /// selected one, the ones instances use and the newest few), keep-versions N (how many of the
@@ -824,9 +825,9 @@ enum Cmd {
     /// violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any
     /// hue), background PATH (a picture behind Home; "default"
     /// shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit
-    /// in GiB, default 30; 0 disables automatic cleanup), native-profile performance|dev|release (the profile native
-    /// mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game,
-    /// release is slowest to build and slightly faster to play)
+    /// in GiB, default 30; 0 disables automatic cleanup), native-profile optimized|balanced|developer (the build mode native
+    /// mods use: optimized uses the prebuilt game when it can, balanced builds here and rebuilds
+    /// quicker, developer rebuilds a mod quickest for a slow game)
     Settings {
         #[arg(value_parser = SETTING_KEYS)]
         key: Option<String>,
@@ -976,7 +977,7 @@ pub fn command() -> clap::Command {
 pub const AI_COMMANDS: [&str; 2] = ["mcp", "agent-config"];
 
 /// The keys `settings` sets.
-const SETTING_KEYS: [&str; 14] = [
+const SETTING_KEYS: [&str; 15] = [
     "selected-version",
     "minecraft-dir",
     "server-dir",
@@ -984,6 +985,7 @@ const SETTING_KEYS: [&str; 14] = [
     "prune-old-versions",
     "keep-versions",
     "opening-animation",
+    "game-architecture",
     "proxy",
     "while-playing",
     "language",
@@ -1021,6 +1023,18 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
             }
         }
         "opening-animation" => s.skip_opening = !on_off(value)?,
+        "game-architecture" => {
+            let choice = backend::GameArchitecture::parse(value).ok_or_else(|| {
+                tr("Say auto, x64 or arm64 for the game architecture.").to_string()
+            })?;
+            if choice != backend::GameArchitecture::Auto && !backend::can_choose_game_architecture()
+            {
+                return Err(
+                    tr("Manual game architectures are available on Windows ARM only.").into(),
+                );
+            }
+            s.game_architecture = choice;
+        }
         "while-playing" => {
             s.while_playing = backend::WhilePlaying::parse(value)
                 .ok_or_else(|| format!("{value}: say stay, minimize or hide"))?
@@ -1068,12 +1082,12 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
             };
         }
         "native-profile" => {
-            // "default", as for the other settings, goes back to `performance`.
+            // "default", as for the other settings, goes back to `optimized`.
             s.native_profile = match value {
                 "default" => None,
                 _ => Some(
                     native_mods::Profile::parse(value)
-                        .ok_or_else(|| format!("{value}: say performance, dev or release"))?,
+                        .ok_or_else(|| format!("{value}: say optimized, balanced or developer"))?,
                 ),
             };
         }
@@ -1095,6 +1109,7 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
 fn settings_json(s: &backend::Settings) -> serde_json::Value {
     serde_json::json!({
         "selected_version": backend::resolve_version(None).ok(),
+        "game_architecture": s.game_architecture.name(),
         "minecraft_dir": s.minecraft_dir,
         "server_dir": backend::server_dir(None),
         "install_new_versions": s.install_new_versions.unwrap_or(true),
@@ -1169,7 +1184,8 @@ fn json(value: serde_json::Value) {
 }
 
 /// Runs a game process in this terminal and reports how it ended.
-fn attached(mut cmd: Command) -> Result<(), String> {
+fn attached(cmd: Command) -> Result<(), String> {
+    let (mut cmd, _runtime) = backend::prepare_command(cmd)?;
     let status = cmd
         .status()
         .map_err(|e| format!("Could not start {:?}: {e}", cmd.get_program()))?;
@@ -1298,7 +1314,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     // The instance's version is never looked at here: the newest installed
                     // release or Nightly, or that one with `--update` (never a native build).
                     None => native_mods::base_for(None, &backend::installed(), update)
-                        .ok_or_else(|| tr("No version is installed yet."))?,
+                        .ok_or_else(backend::no_version_installed)?,
                 };
                 let built = native_mods::build_server(
                     &base,
@@ -1332,7 +1348,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 None => {
                     let plays = target.resolve_version(None).ok();
                     native_mods::base_for(plays.as_deref(), &backend::installed(), update)
-                        .ok_or("No version is installed yet.")?
+                        .ok_or_else(backend::no_version_installed)?
                 }
             };
             let folder = match folder {
@@ -1557,9 +1573,9 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 json(serde_json::to_value(&links).unwrap());
             } else {
                 for (name, url) in [
-                    ("Discord", &links.discord),
-                    ("Sponsor", &links.sponsor),
                     ("Website", &links.website),
+                    ("Roadmap", &links.roadmap),
+                    ("Docs", &links.docs),
                 ] {
                     println!("{name:<8} {}", if url.is_empty() { "(none)" } else { url });
                 }
@@ -1925,7 +1941,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                     );
                 }
                 if !accounts.has_owner(account::store()) {
-                    println!("{}.", account::NEEDS_OWNER);
+                    println!("{} {}", account::NoOwner, tr(backend::SIGN_IN_HINT));
                 }
             }
         }
@@ -2252,7 +2268,7 @@ fn github_native(
     }
     println!("Build it next: horizon-launcher native-build --trust-native-code");
     println!(
-        "Developing a mod? horizon-launcher settings native-profile dev (or native-build --profile dev): a mod edit rebuilds about 6× faster, while game logic runs up to about twice as slow. Use it while developing, not for playing."
+        "Developing a mod? horizon-launcher settings native-profile developer (or native-build --profile developer): a mod edit rebuilds about 6× faster, while game logic runs up to about twice as slow. Use it while developing, not for playing."
     );
     Ok(())
 }
@@ -3100,11 +3116,14 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                     ));
                 }
             };
-            let made = other_launchers::import(
-                f,
-                new_name.as_deref().unwrap_or(&f.name),
-                minecraft.as_deref(),
-            )?;
+            let target = new_name.as_deref().unwrap_or(&f.name);
+            let made = other_launchers::import(f, target, minecraft.as_deref()).map_err(|e| {
+                if e == instances::name_taken(target.trim()) {
+                    instances::name_taken_with_flag(target.trim())
+                } else {
+                    e
+                }
+            })?;
             let unsupported = other_launchers::loader(f).is_none();
             if let Some(l) = f.loader.as_ref().filter(|_| unsupported && !as_json) {
                 println!(
@@ -3844,7 +3863,7 @@ mod tests {
             "--version",
             "v2026.10.13",
             "--profile",
-            "release",
+            "optimized",
         ])
         .unwrap()
         .command
@@ -3857,7 +3876,7 @@ mod tests {
             }) => {
                 assert_eq!(version.as_deref(), Some("v2026.10.13"));
                 assert!(!update);
-                assert_eq!(profile.as_deref(), Some("release"));
+                assert_eq!(profile.as_deref(), Some("optimized"));
             }
             _ => panic!("expected native-build"),
         }

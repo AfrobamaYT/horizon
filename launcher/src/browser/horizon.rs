@@ -217,10 +217,12 @@ fn kind_of(kind: &index::Kind) -> Option<Kind> {
         index::Kind::Mod => Some(Kind::Mod),
         index::Kind::ResourcePack => Some(Kind::ResourcePack),
         index::Kind::Modpack => Some(Kind::Modpack),
-        index::Kind::Shader => Some(Kind::Shader),
+        // Both go in shaderpacks/: the game reads `.hshader` packs and shaders/-folder zips.
+        index::Kind::Shader | index::Kind::ShaderPack => Some(Kind::Shader),
         // Mixin mods: installed beside the others, compiled into the game by `native_mods`.
         index::Kind::NativeMod => Some(Kind::Mod),
-        index::Kind::Other(_) => None,
+        // Data packs go into a world: offered once the browser's install picks one.
+        index::Kind::DataPack | index::Kind::Other(_) => None,
     }
 }
 
@@ -680,8 +682,12 @@ fn install_version(
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     fs::rename(&path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-    if let Some(old) = old.as_ref().filter(|o| o.file != relative) {
-        let _ = fs::remove_file(home.join(&old.file));
+    if let Some(old) = old
+        .as_ref()
+        .filter(|o| o.file != relative)
+        .and_then(|o| o.path(home))
+    {
+        let _ = fs::remove_file(old);
     }
     if project.kind == Kind::Mod {
         java::set_enabled(home, &p.id, true)?;
