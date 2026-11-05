@@ -25,6 +25,8 @@ struct Sealed {
 struct Open {
     listeners: Vec<Listener>,
     stopped: Vec<String>,
+    /// Set once [`seal`] has taken the list: registering is refused from then on.
+    sealing: bool,
 }
 
 /// Registering, stopping and sealing all hold this lock, so a registration either lands in the
@@ -32,6 +34,7 @@ struct Open {
 static OPEN: Mutex<Open> = Mutex::new(Open {
     listeners: Vec::new(),
     stopped: Vec::new(),
+    sealing: false,
 });
 static SEALED: OnceLock<Sealed> = OnceLock::new();
 
@@ -64,7 +67,7 @@ impl std::error::Error for RegisterError {}
 /// route for both callers: a native mod's generated export and the wasm runtime's proxy.
 pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), RegisterError> {
     let mut open = open();
-    if SEALED.get().is_some() {
+    if open.sealing {
         return Err(RegisterError::Sealed);
     }
     if open.listeners.iter().any(|listener| listener.id == id) {
@@ -95,28 +98,34 @@ pub fn stop(id: &str) {
 /// Seals the list: no listener registers after it. The game calls it once, after the mods load
 /// and before it reads [`listened_at`].
 pub fn seal() {
-    let mut open = open();
-    if SEALED.get().is_some() {
-        return;
-    }
-    let listeners: Box<[Listener]> = std::mem::take(&mut open.listeners).into();
-    for listener in listeners.iter() {
-        if open.stopped.iter().any(|id| id == listener.id) {
-            listener.stopped.store(true, Ordering::Release);
+    // Takes the list under the lock, then asks each mod where it listens without it: a mod's
+    // `subscribed` may call `stop` (or `register`, refused) without deadlocking.
+    let listeners: Box<[Listener]> = {
+        let mut open = open();
+        if open.sealing {
+            return;
         }
-    }
+        open.sealing = true;
+        std::mem::take(&mut open.listeners).into()
+    };
     let mut places = vec![Vec::new(); POINT_COUNT];
     for (index, listener) in listeners.iter().enumerate() {
         for place in listener.points.subscribed().iter().flatten() {
             places[*place as usize].push(index as u32);
         }
     }
-    let sealed = Sealed {
+    let open = open();
+    // Every stop so far, before the seal or while it ran, is in `stopped`; the next ones see
+    // `SEALED`, set while the lock is held.
+    for listener in listeners.iter() {
+        if open.stopped.iter().any(|id| id == listener.id) {
+            listener.stopped.store(true, Ordering::Release);
+        }
+    }
+    let _ = SEALED.set(Sealed {
         listeners,
         places: places.into_iter().map(Vec::into_boxed_slice).collect(),
-    };
-    // Published while the lock is held: nothing registers or stops in between.
-    let _ = SEALED.set(sealed);
+    });
 }
 
 /// Whether a registered mod listens at the place with this `PointId` index.
@@ -166,6 +175,17 @@ mod tests {
         }
     }
 
+    /// Stops its own mod, and tries to register another, from inside the seal.
+    struct SelfStop;
+
+    impl Points for SelfStop {
+        fn subscribed(&self) -> &'static [Option<PointId>] {
+            stop("self_stopping");
+            assert_eq!(register("during", &Quiet), Err(RegisterError::Sealed));
+            &[crate::ids::tick]
+        }
+    }
+
     #[test]
     fn one_list_registered_sealed_and_stopped() {
         assert_eq!(register("tick_mod", &Tick), Ok(()));
@@ -174,6 +194,7 @@ mod tests {
         // A stop before the seal holds after it.
         assert_eq!(register("stopped_early", &Tick), Ok(()));
         stop("stopped_early");
+        assert_eq!(register("self_stopping", &SelfStop), Ok(()));
         assert!(
             !listened_at(PointId::Tick as usize),
             "nothing listens before the seal"
@@ -185,7 +206,7 @@ mod tests {
         assert_eq!(
             listeners(PointId::Tick, "tick").count(),
             1,
-            "the mod stopped before the seal stays stopped"
+            "the mods stopped before and during the seal stay stopped"
         );
         stop("tick_mod");
         assert_eq!(listeners(PointId::Tick, "tick").count(), 0);
