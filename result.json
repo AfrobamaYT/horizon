@@ -1,1 +1,0 @@
-{"status":"pr_opened","pr":1053,"branch":"bulk-batch3-zwnj25-7bd221d78320","head":"66bf7f5dd9","notes":"Removed duplicate block reads; wasm check and focused server-side forwarding test passed. All-targets check failed on nine unrelated existing client test compilation errors. No in-game proof; client-side weather, day_time and world_height handle equivalents need follow-up."}
