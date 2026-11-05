@@ -138,6 +138,7 @@ mod fluid_flow;
 mod fluid_place_block;
 mod game_rule_changed;
 mod game_shutting_down;
+mod gather_effect_screen_tooltips;
 mod get_arm_pose;
 mod get_enchantment_level;
 mod grindstone_place;
