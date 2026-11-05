@@ -292,6 +292,7 @@ mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_effects;
+mod native_living_flags;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -16018,12 +16019,22 @@ impl Game<'_> {
                 return;
             }
         }
-        // LivingEntity.startSleeping: the shape the bed gives the player to
-        // lie on (`getSleepHeight`). A straw bed's head answers with its
-        // foot's shape, and with no foot of its own there is none, so the
-        // player stays up as `startSleeping` returning false leaves them.
+        if self.lie_in_bed(head) {
+            self.award_custom_stat("sleep_in_bed", 1);
+            self.trigger_player("minecraft:slept_in_bed");
+            self.stats.reset("custom", "minecraft:time_since_rest");
+        }
+    }
+    /// `LivingEntity.startSleeping`: the player takes the bed whose head
+    /// `head` names, moved onto it and asleep from now on. False when the
+    /// bed gives no shape to lie on.
+    fn lie_in_bed(&mut self, head: [i32; 3]) -> bool {
+        // The shape the bed gives the player to lie on (`getSleepHeight`).
+        // A straw bed's head answers with its foot's shape, and with no foot
+        // of its own there is none, so the player stays up as
+        // `startSleeping` returning false leaves them.
         let Some(at) = self.sleeping_position(head) else {
-            return;
+            return false;
         };
         // LivingEntity.startSleeping: stopRiding once the bed is valid.
         self.stop_riding();
@@ -16048,9 +16059,7 @@ impl Game<'_> {
             self.snap_player_model_pitch();
         }
         self.occupy_bed(head);
-        self.award_custom_stat("sleep_in_bed", 1);
-        self.trigger_player("minecraft:slept_in_bed");
-        self.stats.reset("custom", "minecraft:time_since_rest");
+        true
     }
     fn wake_up(&mut self) {
         if self.remote.is_some() {
