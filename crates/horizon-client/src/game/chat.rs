@@ -1675,7 +1675,7 @@ impl Game<'_> {
         self.take_screenshot();
         true
     }
-    /// Readback is complete: fire the client hook, then save, never exposing pixels.
+    /// Readback is complete: fire the client hook, then save the image it left.
     pub(super) fn save_screenshot(
         &mut self,
         mut pending: horizon_client::gfx::PendingScreenshot,
@@ -1693,8 +1693,14 @@ impl Game<'_> {
             .into_owned();
         let mut message = None;
         let mut cancel = false;
-        self.native_screenshot(&mut file_name, &mut message, &mut cancel);
+        self.native_screenshot(
+            pending.image_mut(),
+            &mut file_name,
+            &mut message,
+            &mut cancel,
+        );
         if cancel {
+            self.post_screenshot_chat(screenshot_cancel_line(message));
             self.ui.screenshot_message = None;
             return None;
         }
@@ -1731,6 +1737,10 @@ impl Game<'_> {
             }
             Err(e) => Text::translate("screenshot.failure", &[Text::literal(e.clone())]),
         };
+        self.post_screenshot_chat(message);
+    }
+
+    fn post_screenshot_chat(&mut self, message: Text) {
         let focused = self.screen == Screen::Chat;
         self.ui.chat.add(
             &self.gui.atlas,
@@ -1741,6 +1751,16 @@ impl Game<'_> {
             focused,
         );
     }
+}
+
+/// `ScreenshotEvent.getCancelMessage`: the listener's line, or the default reason.
+pub(super) fn screenshot_cancel_line(message: Option<Text>) -> Text {
+    message.unwrap_or_else(|| {
+        Text::translate(
+            "screenshot.failure",
+            &[Text::translate("horizon.screenshot.canceled", &[])],
+        )
+    })
 }
 /// `yyyy-MM-dd_HH.mm.ss[_n].png` (Util.getFilenameFormattedDateTime, in local time).
 pub fn screenshot_name(dir: &std::path::Path) -> String {
@@ -1773,6 +1793,19 @@ const LINK_COPY: usize = 1;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canceled_screenshot_keeps_a_custom_line_or_the_default_reason() {
+        let custom = Text::literal("kept");
+        assert_eq!(screenshot_cancel_line(Some(custom.clone())), custom);
+        assert_eq!(
+            screenshot_cancel_line(None),
+            Text::translate(
+                "screenshot.failure",
+                &[Text::translate("horizon.screenshot.canceled", &[])]
+            )
+        );
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

@@ -831,8 +831,15 @@ there is no per-particle code hook.
 
 `Hooks::screenshot` is the client-thread counterpart of NeoForge 26.3's
 `ScreenshotEvent`. It runs with a `ClientHost` after F2's GPU readback and before
-any file is written. The event carries no pixels. Return `Flow::Cancel` to write
-neither the normal PNG nor its HDR companion and show no chat message.
+any file is written. `event.image` is the in-memory frame (`getImage`): RGBA8,
+top to bottom, `width * height * 4` bytes. Change the pixels, or replace the
+image, and the normal PNG is that image. A buffer whose length is not
+`width * height * 4` writes neither file and shows the translated screenshot
+failure line. The HDR copy is not this image; it stays the read-back frame.
+
+Return `Flow::Cancel` to write neither the normal PNG nor its HDR companion.
+The chat then shows `event.message` when it is set, and otherwise the translated
+cancellation line (`screenshot.failure` with `horizon.screenshot.canceled`).
 
 Change `event.file_name` to a relative path under the player's `screenshots/`
 folder (for example `album/view.png`). Missing parent folders are created.

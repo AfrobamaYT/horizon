@@ -3,11 +3,9 @@ use super::{Result, hdr_icc, hdr_screenshot_path};
 use std::path::{Path, PathBuf};
 
 /// CPU-side frame returned to the game before any screenshot file is written.
-/// Pixels stay in the renderer crate, never in the mod API.
 pub struct PendingScreenshot {
     pub path: PathBuf,
-    pub(super) size: [u32; 2],
-    pub(super) pixels: Vec<u8>,
+    pub(super) image: mod_api::ScreenshotImage,
     pub(super) hdr: Option<HdrScreenshot>,
 }
 
@@ -19,8 +17,26 @@ pub(super) struct HdrScreenshot {
 }
 
 impl PendingScreenshot {
+    /// The frame the screenshot hook may read and change (`ScreenshotEvent.getImage`).
+    pub fn image_mut(&mut self) -> &mut mod_api::ScreenshotImage {
+        &mut self.image
+    }
+
+    /// `width * height * 4` RGBA8 bytes, or a refusal that writes no file.
+    fn rgba(&self) -> Result<&mod_api::ScreenshotImage> {
+        let image = &self.image;
+        let bytes = (image.width as usize)
+            .checked_mul(image.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4));
+        if bytes != Some(image.rgba.len()) {
+            return Err("screenshot image must be width by height RGBA8 pixels".into());
+        }
+        Ok(image)
+    }
+
     /// Save an agent capture or world icon to its requested destination.
     pub fn save(&self) -> Result<[u32; 2]> {
+        let image = self.rgba()?;
         if let Some(hdr) = &self.hdr {
             let path = hdr_screenshot_path(&self.path);
             match hdr.save(&path) {
@@ -30,13 +46,13 @@ impl PendingScreenshot {
         }
         let mut encoder = png::Encoder::new(
             std::io::BufWriter::new(std::fs::File::create(&self.path)?),
-            self.size[0],
-            self.size[1],
+            image.width,
+            image.height,
         );
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header()?.write_image_data(&self.pixels)?;
-        Ok(self.size)
+        encoder.write_header()?.write_image_data(&image.rgba)?;
+        Ok([image.width, image.height])
     }
 
     /// Validate a mod's relative file name at the write boundary, then save
@@ -47,6 +63,7 @@ impl PendingScreenshot {
             let hdr_name = hdr_screenshot_path(Path::new(file_name));
             screenshot_destination(root, &hdr_name.to_string_lossy())?;
         }
+        self.rgba()?;
         std::fs::create_dir_all(path.parent().expect("destination has a parent"))?;
         self.path = path;
         self.save()
@@ -139,8 +156,7 @@ mod tests {
     fn frame(path: PathBuf, hdr: bool) -> PendingScreenshot {
         PendingScreenshot {
             path,
-            size: [1, 1],
-            pixels: vec![12, 34, 56, 255],
+            image: mod_api::ScreenshotImage::new(1, 1, vec![12, 34, 56, 255]),
             hdr: hdr.then(|| HdrScreenshot {
                 size: [1, 1],
                 pixels: vec![0, 0, 255, 255, 128, 0],
@@ -174,6 +190,30 @@ mod tests {
             .unwrap();
         assert_eq!(reader.info().bit_depth, png::BitDepth::Sixteen);
         assert!(reader.info().icc_profile.is_some());
+    }
+
+    #[test]
+    fn pending_screenshot_writes_pixels_a_mod_changed() {
+        let root = tempfile::tempdir().unwrap();
+        let mut pending = frame(root.path().join("unused.png"), false);
+        pending.image_mut().rgba = vec![9, 8, 7, 255];
+        assert_eq!(pending.save_in(root.path(), "changed.png").unwrap(), [1, 1]);
+        let file = std::fs::File::open(root.path().join("changed.png")).unwrap();
+        let mut reader = png::Decoder::new(std::io::BufReader::new(file))
+            .read_info()
+            .unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut bytes).unwrap();
+        assert_eq!(&bytes[..info.buffer_size()], &[9, 8, 7, 255]);
+    }
+
+    #[test]
+    fn pending_screenshot_refuses_a_short_image_without_writing() {
+        let root = tempfile::tempdir().unwrap();
+        let mut pending = frame(root.path().join("unused.png"), true);
+        pending.image_mut().rgba.pop();
+        assert!(pending.save_in(root.path(), "bad.png").is_err());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
     }
 
     #[test]

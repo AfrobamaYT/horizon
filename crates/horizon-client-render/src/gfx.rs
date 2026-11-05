@@ -11152,8 +11152,7 @@ impl Renderer {
         });
         Ok(PendingScreenshot {
             path: request.path.clone(),
-            size: [width, height],
-            pixels,
+            image: mod_api::ScreenshotImage::new(width, height, pixels),
             hdr,
         })
     }
