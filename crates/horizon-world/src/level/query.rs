@@ -333,7 +333,7 @@ impl<L: LevelAccess + ?Sized> Signals<'_, L> {
         {
             return None;
         }
-        let mut world = LevelBlockEntities(&*self.level);
+        let mut world = LevelBlockEntities(self.level);
         self.b
             .dynamic
             .get(&state)?
