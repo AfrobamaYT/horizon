@@ -610,13 +610,10 @@ impl Game<'_> {
         ready: &Sender<Ready>,
         opening: Opening,
     ) -> Result<()> {
-        let result = self.run_integrated_inner(launch, flags, tasks, ready, opening);
-        if let Err(error) = &result {
-            self.native_players_leaving();
-            self.native_lifecycle_close_failed(&error.to_string());
-        }
-        self.native_server_stopped(false);
-        result
+        self.run_server_lifecycle(false, |game, startup_began| {
+            *startup_began = true;
+            game.run_integrated_inner(launch, flags, tasks, ready, opening)
+        })
     }
 
     fn run_integrated_inner(
@@ -641,9 +638,7 @@ impl Game<'_> {
         ) {
             // The script owns the clock: connection setup and terrain loading
             // cannot add wall-clock-dependent world ticks to oracle output.
-            let result = self.run_command_harness(script.as_ref(), output.as_ref());
-            let stopped = self.stop_integrated();
-            return result.and(stopped);
+            return self.run_command_harness(script.as_ref(), output.as_ref());
         }
         let mut next = Instant::now();
         let mut was_paused = false;
@@ -688,7 +683,7 @@ impl Game<'_> {
             self.publish_load_view();
             self.wait_for_next_server_tick(&mut next, paused);
         }
-        self.stop_integrated()
+        Ok(())
     }
 
     /// After the level of `dim` ticked: the window's debug entries' server
@@ -829,7 +824,7 @@ impl Game<'_> {
 
     /// `MinecraftServer.stopServer`: the players are saved and sent away,
     /// then the world is saved.
-    fn stop_integrated(&mut self) -> Result<()> {
+    pub(super) fn stop_integrated(&mut self, crashed: bool) -> Result<()> {
         // Abort background terrain generation/decoration on shutdown, matching vanilla behavior.
         self.streaming.abort_generation();
         // The close request: lifecycle observation stops.
@@ -844,8 +839,10 @@ impl Game<'_> {
         }
         self.flush_native_net();
         // PlayerList.removeAll: the owner and every guest leave the game.
-        self.award_leave_game_to_all();
-        self.save_leaving_guests();
+        if !crashed {
+            self.award_leave_game_to_all();
+            self.save_leaving_guests();
+        }
         if let Some(host) = self.lan.as_mut() {
             let conns: Vec<u32> = host.hub.guests.iter().map(|g| g.conn).collect();
             for conn in conns {
@@ -859,15 +856,7 @@ impl Game<'_> {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
-        // ServerPlayer.disconnect: nobody is left in a bed.
-        self.free_player_beds()?;
-        self.save_game()?;
-        self.lan_close(false);
-        self.save.flush()?;
-        // `WorldCloseFinal` follows a successful final save.
-        self.native_lifecycle_world_closed();
-        self.session_lock = None;
-        Ok(())
+        self.finish_server_save(crashed)
     }
 }
 

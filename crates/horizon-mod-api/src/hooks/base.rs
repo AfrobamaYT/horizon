@@ -66,12 +66,13 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_started();
-    /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
+    /// The server begins teardown (NeoForge's `ServerStoppingEvent`), including
+    /// after startup or the tick loop failed:
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
     /// mod can save its own data or tell them. `native_world_lifecycle`'s
     /// `WorldCloseFinal` follows once the worlds are saved. A server whose loop
-    /// fails stops without this (`WorldCloseFailed` reports it).
+    /// fails still fires this before the final save attempt and `server_stopped`.
     #[hook(
         side = "server",
         contract = "listen",
@@ -81,8 +82,10 @@ pub trait Hooks {
     )]
     fn server_stopping();
     /// Fired once at the end of server teardown, after `server_stopping` and
-    /// the final save on an orderly stop. Also fired when startup or teardown
-    /// fails after startup began, on integrated and dedicated servers.
+    /// final save attempt and storage release. Also fired when startup or
+    /// teardown fails after startup began, on integrated and dedicated servers.
+    /// Failed opens save only worlds already adopted by the server; a failed
+    /// save still reaches this hook, but does not emit `WorldCloseFinal`.
     #[hook(
         side = "server",
         contract = "listen",

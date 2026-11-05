@@ -2998,12 +2998,12 @@ impl Game<'_> {
     pub(super) fn native_server_started(&mut self, dedicated: bool) {
         self.fire_server_started(dedicated);
     }
-    /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
+    /// The server begins teardown (NeoForge's `ServerStoppingEvent`):
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
     /// mod can save its own data or tell them. `native_world_lifecycle`'s
     /// `WorldCloseFinal` follows once the worlds are saved. A server whose loop
-    /// fails stops without this (`WorldCloseFailed` reports it).
+    /// fails still fires this before the final save attempt and `native_server_stopped`.
     pub(super) fn native_server_stopping(&mut self, dedicated: bool) {
         self.fire_server_stopping(dedicated);
     }

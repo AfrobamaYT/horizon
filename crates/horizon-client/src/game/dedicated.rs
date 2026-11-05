@@ -828,17 +828,7 @@ impl Game<'_> {
     /// DedicatedServer.initServer and MinecraftServer.runServer.
     // The epoch starts at world open; failures before that send no lifecycle event.
     pub(super) fn run_dedicated(&mut self) -> Result<()> {
-        let mut startup_began = false;
-        let result = self.run_dedicated_inner(&mut startup_began);
-        if let Err(error) = &result {
-            self.native_players_leaving();
-            self.native_lifecycle_world_failed(&error.to_string());
-            self.native_lifecycle_close_failed(&error.to_string());
-        }
-        if startup_began {
-            self.native_server_stopped(true);
-        }
-        result
+        self.run_server_lifecycle(true, Self::run_dedicated_inner)
     }
 
     fn run_dedicated_inner(&mut self, startup_began: &mut bool) -> Result<()> {
@@ -1336,8 +1326,8 @@ impl Game<'_> {
             watchdog.running.store(false, Ordering::Relaxed);
         }
         match crashed {
-            Some(message) => self.stop_after_crash(&message),
-            None => self.stop_dedicated(),
+            Some(message) => std::panic::resume_unwind(Box::new(message)),
+            None => Ok(()),
         }
     }
 
@@ -2244,42 +2234,7 @@ impl Game<'_> {
         }
     }
 
-    /// `MinecraftServer.runServer`'s `finally`: a tick that panicked still saves. What the panic
-    /// interrupted is not trusted: a guest's turn (`as_guest`) holds the game's player state
-    /// swapped in, so its record is older than what the game holds, and writing it would put
-    /// back older data than the last autosave; that guest keeps the file it has. If the hub
-    /// has already closed, no players can be saved. The levels, the scoreboard and the other
-    /// state are saved as in a normal stop.
-    fn stop_after_crash(&mut self, message: &str) -> Result<()> {
-        log("ERROR", &format!("The server thread panicked: {message}"));
-        let acting = self.lan_acting;
-        let hub_lost = self.lan.is_none();
-        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut())
-            && let Some(guest) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
-        {
-            guest.placed = false;
-        }
-        if hub_lost {
-            log(
-                "WARN",
-                "The panic interrupted the network tick: players are not saved, only the world",
-            );
-        } else if acting.is_some() {
-            log(
-                "WARN",
-                "The panic interrupted a player's turn: that player keeps the last saved file",
-            );
-        }
-        self.native_lifecycle.begin_close();
-        log("INFO", "Saving worlds");
-        self.save_game()?;
-        self.log_saved_levels();
-        self.native_lifecycle_world_closed();
-        self.lan_close(false);
-        Err(format!("the server thread panicked: {message}").into())
-    }
-
-    fn stop_dedicated(&mut self) -> Result<()> {
+    pub(super) fn stop_dedicated(&mut self, crashed: bool) -> Result<()> {
         // The close request starts before player and world saves.
         self.native_lifecycle.begin_close();
         // MinecraftServer.stopServer's start: everyone is still here.
@@ -2291,7 +2246,9 @@ impl Game<'_> {
         self.flush_native_net();
         // PlayerList.removeAll: each player's file, with the vehicle it
         // alone rides, then its records.
-        self.save_leaving_guests();
+        if !crashed {
+            self.save_leaving_guests();
+        }
         if let Some(h) = self.lan.as_mut() {
             let conns: Vec<u32> = h.hub.guests.iter().map(|g| g.conn).collect();
             for conn in conns {
@@ -2303,20 +2260,17 @@ impl Game<'_> {
         }
         std::thread::sleep(Duration::from_millis(100));
         log("INFO", "Saving worlds");
-        // ServerPlayer.disconnect: nobody is left in a bed.
-        self.free_player_beds()?;
-        self.save_game()?;
-        self.log_saved_levels();
-        // Only a successful final save closes the epoch; storage is still held.
-        self.native_lifecycle_world_closed();
-        self.lan_close(false);
-        Ok(())
+        let result = self.finish_server_save(crashed);
+        if result.is_ok() {
+            self.log_saved_levels();
+        }
+        result
     }
 }
 
 /// `tools/test_dedicated_crash_save.py`'s fixture: with `HORIZON_CRASH_FIXTURE` naming `point`
 /// (`guest`: during a placed guest's turn, `hub`: after a console line while a player is in),
-/// the tick panics there, to see what `stop_after_crash` keeps.
+/// the tick panics there, to see what crash teardown keeps.
 /// `armed` is asked only when the variable names `point`, so the tick pays one
 /// load of a `OnceLock` without it.
 pub(super) fn crash_fixture(point: &str, armed: impl FnOnce() -> bool) {
@@ -2328,7 +2282,7 @@ pub(super) fn crash_fixture(point: &str, armed: impl FnOnce() -> bool) {
 }
 
 /// The text of a panic payload (`panic!("..")` is a `&str`, a formatted one a `String`).
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub(super) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_owned())
