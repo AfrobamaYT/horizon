@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "Jatorrizko konpilazio bat edo cachearen garbiketa bat abian da. Saiatu berriro amaitzen denean.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Jatorrizko konpilazioaren cachetik {bytes} byte garbitu dira. Hurrengo konpilazio aldatua hutsetik konpilatuko da.",
+  "Could not access the native build cache: {error}": "Ezin izan da jatorrizko konpilazioaren cachea atzitu: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "Sartu cachearen muga GiB-tan; 0k garbiketa automatikoa desgaitzen du.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "Ukatu egin da jatorrizko cachearen garbiketa ustekabeko fitxategi edo esteka batean: {path}",
+  "Building {name}'s post-build step": "{name}-ren eraikuntza osteko urratsa eraikitzea",
+  "In use": "Erabiltzen",
+  "Prepare": "Prestatu",
+  "Developer options": "Garatzaileen aukerak",
+  "{online} of {max} players": "{max} jokalarietatik {online}",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edizioa). Play-k Mojang-etik deskargatzen du zure konturako lehen aldiz, behar duen Java-rekin.",
+  "Close": "Itxi",
+  "Builds from GitHub. Each one installs into its own folder.": "GitHub-etik eraikitzen da. Bakoitza bere karpetan instalatzen da.",
+  "Copy…": "Kopiatu…",
+  "Play with {count} mods": "Jolastu {count} modekin",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "Oraindik ez dago zerbitzaririk: gehitu bat hemen edo jokoaren jokalari anitzeko pantailan.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} bere Modrinth deskargak zerrendatuta",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge) edo Prism, MultiMC edo CurseForge instantzia bat. Horizon ordenagailu honetan ahal duena porturatzen du, zure deskargatik, eta paketea bere profil gisa erreproduzitzen du. Ez da ezer kargatzen edo partekatzen.",
   "1 hour": "Ordu 1",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "Lortu doan",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Dendaren ordainketa-hornitzaileak ez du zure herrialdean zerbitzurik ematen, beraz Sortzaile multzoa hemen doan lor dezakezu.",
   "The Founder Set is yours.": "Sortzaile multzoa zurea da.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "Ireki denda",
+  "You don't own any cosmetics yet.": "Oraindik ez duzu kosmetikorik.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "Lortu doan",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Dendaren ordainketa-hornitzaileak ez du zure herrialdean zerbitzurik ematen, beraz Sortzaile multzoa hemen doan lor dezakezu.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Sortzaile multzoa zurea da."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

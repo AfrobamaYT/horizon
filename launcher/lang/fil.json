@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "May tumatakbong native build o paglilinis ng cache. Subukang muli kapag tapos na ito.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Nalinis ang {bytes} bytes ng native build cache. Ang susunod na binagong build ay magko-compile mula sa simula.",
+  "Could not access the native build cache: {error}": "Hindi ma-access ang native build cache: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "Maglagay ng limitasyon ng cache sa GiB; ang 0 ay nag-o-off ng awtomatikong paglilinis.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "Tinatanggihan ang paglilinis ng native cache sa hindi inaasahang file o link: {path}",
+  "Building {name}'s post-build step": "Pagbuo ng post-build na hakbang ni {name}",
+  "In use": "Ginagamit",
+  "Prepare": "Maghanda",
+  "Developer options": "Mga pagpipilian sa developer",
+  "{online} of {max} players": "{online} sa {max} manlalaro",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition). I-play ang pag-download nito mula sa Mojang para sa iyong account sa unang pagkakataon, kasama ang Java na kailangan nito.",
+  "Close": "Isara",
+  "Builds from GitHub. Each one installs into its own folder.": "Binubuo mula sa GitHub. Ang bawat isa ay nag-i-install sa sarili nitong folder.",
+  "Copy…": "Kopyahin…",
+  "Play with {count} mods": "Maglaro ng {count} mods",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "Wala pang mga server: magdagdag ng isa dito o sa Multiplayer screen ng laro.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} na nakalista sa pamamagitan ng kanilang pag-download ng Modrinth",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), o isang Prism, MultiMC o CurseForge instance. Horizon port kung ano ang magagawa nito sa computer na ito, mula sa sarili mong mga pag-download, at pinapatugtog ang pack bilang sarili nitong profile. Walang na-upload o ibinahagi.",
   "1 hour": "1 oras",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "Kunin nang libre",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Hindi nagseserbisyo sa bansa mo ang payment provider ng shop, kaya puwede mong kunin dito nang libre ang Set ng founder.",
   "The Founder Set is yours.": "Sa iyo na ang Set ng founder.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "Buksan ang shop",
+  "You don't own any cosmetics yet.": "Wala ka pang pampaganda.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "Kunin nang libre",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Hindi nagseserbisyo sa bansa mo ang payment provider ng shop, kaya puwede mong kunin dito nang libre ang Set ng founder.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Sa iyo na ang Set ng founder."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

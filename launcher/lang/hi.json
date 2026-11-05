@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "नेटिव बिल्ड या कैश की सफाई चल रही है। पूरा होने के बाद फिर कोशिश करें।",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "नेटिव बिल्ड कैश से {bytes} बाइट खाली किए गए। बदलाव वाला अगला बिल्ड शुरुआत से कंपाइल होगा।",
+  "Could not access the native build cache: {error}": "नेटिव बिल्ड कैश तक पहुँच नहीं हो सकी: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "कैश सीमा GiB में दर्ज करें; 0 अपने आप सफाई को बंद करता है।",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "अनपेक्षित फ़ाइल या लिंक के कारण नेटिव कैश की सफाई अस्वीकार की गई: {path}",
+  "Building {name}'s post-build step": "{name} का पोस्ट-बिल्ड चरण बनाया जा रहा है",
+  "In use": "उपयोग में है",
+  "Prepare": "तैयार करें",
+  "Developer options": "डेवलपर विकल्प",
+  "{online} of {max} players": "{max} में से {online} खिलाड़ी",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition)। 'Play' इसे पहली बार आपके खाते के लिए Mojang से डाउनलोड करता है, इसके लिए आवश्यक Java के साथ।",
+  "Close": "बंद करें",
+  "Builds from GitHub. Each one installs into its own folder.": "GitHub से बिल्ड। प्रत्येक अपने स्वयं के फ़ोल्डर में इंस्टॉल होता है।",
+  "Copy…": "कॉपी करें…",
+  "Play with {count} mods": "{count} मॉड के साथ खेलें",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "अभी तक कोई सर्वर नहीं: यहाँ या गेम की मल्टीप्लेयर स्क्रीन में एक जोड़ें।",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", उनके Modrinth डाउनलोड द्वारा सूचीबद्ध {count}",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), या एक Prism, MultiMC या CurseForge इंस्टेंस। Horizon इस कंप्यूटर पर जो कर सकता है उसे पोर्ट करता है, आपके अपने डाउनलोड से, और पैक को अपनी खुद की प्रोफ़ाइल के रूप में चलाता है। कुछ भी अपलोड या साझा नहीं किया जाता है।",
   "1 hour": "1 घंटा",
@@ -1111,8 +1135,32 @@
   "Move…": "स्थानांतरित करें…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "आपका डेटा कॉपी और सत्यापित किए जाने के दौरान लॉन्चर बंद रहता है, फिर दोबारा खुलता है। पुराने फ़ोल्डर सुरक्षित रखे जाते हैं और तब तक डिस्क पर जगह घेरते रहते हैं, जब तक आप स्थानांतरण सफल होने की पुष्टि करके उन्हें खुद नहीं हटा देते।",
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
+<<<<<<< HEAD
   "Claim for free": "मुफ़्त पाएँ",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "दुकान का भुगतान प्रदाता आपके देश में सेवा नहीं देता, इसलिए आप फ़ाउंडर सेट यहाँ मुफ़्त पा सकते हैं।",
   "The Founder Set is yours.": "फ़ाउंडर सेट अब आपका है।",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "दुकान खोलें",
+  "You don't own any cosmetics yet.": "आपके पास अभी कोई कॉस्मेटिक्स नहीं है।",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "स्वचालित इस लॉन्चर के आर्किटेक्चर का उपयोग करता है। Windows ARM पर x64 या ARM64 चुनें। ARM64 न होने वाली रिलीज़ हस्ताक्षरित x64 बिल्ड का उपयोग करती हैं।",
+  "Game architecture": "गेम आर्किटेक्चर",
+  "Install selected build": "चुना हुआ बिल्ड इंस्टॉल करें",
+  "Manual game architectures are available on Windows ARM only.": "गेम आर्किटेक्चर का मैन्युअल चयन केवल Windows ARM पर उपलब्ध है।",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Windows ARM64 लॉन्चर अभी नेटिव मॉड का समर्थन नहीं करता; इसका प्रबंधित कंपाइलर उपलब्ध नहीं है।",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "चुने हुए ARM64 गेम के लिए नेटिव मॉड अभी बिल्ड नहीं हो सकते। उपलब्ध कंपाइलर केवल x64 बिल्ड करता है।",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "चुने हुए x64 गेम के लिए नेटिव मॉड बिल्ड नहीं हो सकते। इस ARM64 लॉन्चर के लिए उपयुक्त कंपाइलर नहीं है।",
+  "Say auto, x64 or arm64 for the game architecture.": "गेम आर्किटेक्चर के लिए auto, x64 या arm64 लिखें।",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "इस संस्करण में {installed} गेम बिल्ड है, लेकिन सेटिंग्स में {selected} चुना गया है। शुरू करने से पहले Versions से चुना हुआ बिल्ड इंस्टॉल करें।",
+  "Automatic": "स्वचालित",
+  "{tag} has no build for the selected game architecture.": "{tag} के लिए चुने हुए गेम आर्किटेक्चर का बिल्ड उपलब्ध नहीं है।",
+  "Unknown": "अज्ञात",
+  "Claim for free": "मुफ़्त पाएँ",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "दुकान का भुगतान प्रदाता आपके देश में सेवा नहीं देता, इसलिए आप फ़ाउंडर सेट यहाँ मुफ़्त पा सकते हैं।",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "फ़ाउंडर सेट अब आपका है।"
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

@@ -484,8 +484,13 @@ impl Game<'_> {
                 let r = self.renderer.as_mut().ok_or("no renderer")?;
                 match words.get(1).copied() {
                     None => {}
-                    Some("on") => r.set_gpu_culling(true)?,
-                    Some("off") => r.set_gpu_culling(false)?,
+                    Some(mode @ ("on" | "off")) => {
+                        // Refused, with the reason, where it isn't offered.
+                        r.set_gpu_culling(mode == "on")?;
+                        // The setting, as its switch sets it; not saved here (as
+                        // `lod-distance`): settings changes and new renderers keep it.
+                        self.settings.horizon.gpu_culling = mode == "on";
+                    }
                     Some(other) => return Err(format!("unknown GPU culling mode {other}").into()),
                 }
                 Ok(Some(json!({ "ok": true, "gpu_culling": r.gpu_culling() })))
@@ -929,12 +934,18 @@ impl Game<'_> {
             }
             "chat" => {
                 let text = line.trim_start().strip_prefix("chat").unwrap_or("").trim();
+<<<<<<< HEAD
                 if self.remote.is_some() {
                     // As typed into the chat screen: history, then the client chat event.
                     self.handle_chat_input(text);
                     return ok();
                 }
+=======
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 self.require_world()?;
+                // As if typed: a client mod's command runs before the line
+                // reaches the server, and the Chat option's restrictions and
+                // the recent list apply to a connected server too.
                 self.handle_chat_input(text);
                 Ok(Some(
                     json!({ "ok": true, "chat": self.ui.chat.recent_lines(5) }),
@@ -1341,6 +1352,8 @@ impl Game<'_> {
                 "gpu_culling": r.gpu_culling(),
                 "gpu_frame": r.gpu_frame(),
                 "gpu_fading": r.gpu_fading(),
+                "gpu_culling_offer": format!("{:?}", r.gpu_culling_offer()),
+                "stats_lag": r.stats_lag(),
                 "uploaded_bytes": r.uploaded_bytes,
                 "resident_sections": r.resident_sections(),
                 "arena_bytes": arena_bytes,

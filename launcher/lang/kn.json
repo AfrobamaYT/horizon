@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "ಸ್ಥಳೀಯ ಬಿಲ್ಡ್ ಅಥವಾ ಕ್ಯಾಶ್ ಸ್ವಚ್ಛಗೊಳಿಸುವಿಕೆ ನಡೆಯುತ್ತಿದೆ. ಅದು ಮುಗಿದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "ಸ್ಥಳೀಯ ಬಿಲ್ಡ್ ಕ್ಯಾಶ್‌ನಿಂದ {bytes} ಬೈಟ್‌ಗಳನ್ನು ತೆರವುಗೊಳಿಸಲಾಗಿದೆ. ಮುಂದಿನ ಬದಲಾದ ಬಿಲ್ಡ್ ಮೊದಲಿನಿಂದ ಕಂಪೈಲ್ ಆಗುತ್ತದೆ.",
+  "Could not access the native build cache: {error}": "ಸ್ಥಳೀಯ ಬಿಲ್ಡ್ ಕ್ಯಾಶ್ ಪ್ರವೇಶಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "GiB ನಲ್ಲಿ ಕ್ಯಾಶ್ ಮಿತಿಯನ್ನು ನಮೂದಿಸಿ; 0 ಸ್ವಯಂಚಾಲಿತ ಸ್ವಚ್ಛಗೊಳಿಸುವಿಕೆಯನ್ನು ನಿಲ್ಲಿಸುತ್ತದೆ.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "ಅನಿರೀಕ್ಷಿತ ಫೈಲ್ ಅಥವಾ ಲಿಂಕ್‌ನಲ್ಲಿ ಸ್ಥಳೀಯ ಕ್ಯಾಶ್ ಸ್ವಚ್ಛಗೊಳಿಸುವಿಕೆಯನ್ನು ನಿರಾಕರಿಸಲಾಗಿದೆ: {path}",
+  "Building {name}'s post-build step": "ಬಿಲ್ಡಿಂಗ್ {name} ನ ನಿರ್ಮಾಣದ ನಂತರದ ಹಂತ",
+  "In use": "ಬಳಕೆಯಲ್ಲಿದೆ",
+  "Prepare": "ತಯಾರು",
+  "Developer options": "ಡೆವಲಪರ್ ಆಯ್ಕೆಗಳು",
+  "{online} of {max} players": "{max} ಆಟಗಾರರಲ್ಲಿ {online}",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java ಆವೃತ್ತಿ). Play ಅದನ್ನು ನಿಮ್ಮ ಖಾತೆಗೆ ಮೊದಲ ಬಾರಿಗೆ Mojang ನಿಂದ ಡೌನ್‌ಲೋಡ್ ಮಾಡುತ್ತದೆ, ಅದಕ್ಕೆ ಅಗತ್ಯವಿರುವ Java.",
+  "Close": "ಮುಚ್ಚಿ",
+  "Builds from GitHub. Each one installs into its own folder.": "GitHub ರಿಂದ ನಿರ್ಮಿಸುತ್ತದೆ. ಪ್ರತಿಯೊಂದೂ ತನ್ನದೇ ಆದ ಫೋಲ್ಡರ್‌ನಲ್ಲಿ ಸ್ಥಾಪಿಸುತ್ತದೆ.",
+  "Copy…": "ನಕಲಿಸಿ...",
+  "Play with {count} mods": "{count} ಮೋಡ್‌ಗಳೊಂದಿಗೆ ಪ್ಲೇ ಮಾಡಿ",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "ಇನ್ನೂ ಯಾವುದೇ ಸರ್ವರ್‌ಗಳಿಲ್ಲ: ಒಂದನ್ನು ಇಲ್ಲಿ ಅಥವಾ ಆಟದ ಮಲ್ಟಿಪ್ಲೇಯರ್ ಪರದೆಯಲ್ಲಿ ಸೇರಿಸಿ.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} ಅನ್ನು ಅವರ Modrinth ಡೌನ್‌ಲೋಡ್‌ನಿಂದ ಪಟ್ಟಿ ಮಾಡಲಾಗಿದೆ",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), ಅಥವಾ Prism, MultiMC ಅಥವಾ CurseForge ನಿದರ್ಶನ. Horizon ನಿಮ್ಮ ಸ್ವಂತ ಡೌನ್‌ಲೋಡ್‌ಗಳಿಂದ ಈ ಕಂಪ್ಯೂಟರ್‌ನಲ್ಲಿ ಸಾಧ್ಯವಿರುವುದನ್ನು ಪೋರ್ಟ್ ಮಾಡುತ್ತದೆ ಮತ್ತು ಪ್ಯಾಕ್ ಅನ್ನು ಅದರದೇ ಪ್ರೊಫೈಲ್ ಆಗಿ ಆಡುತ್ತದೆ. ಯಾವುದನ್ನೂ ಅಪ್‌ಲೋಡ್ ಮಾಡಲಾಗುವುದಿಲ್ಲ ಅಥವಾ ಹಂಚಿಕೊಳ್ಳಲಾಗುವುದಿಲ್ಲ.",
   "1 hour": "1 ಗಂಟೆ",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "ಉಚಿತವಾಗಿ ಪಡೆಯಿರಿ",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "ಅಂಗಡಿಯ ಪಾವತಿ ಸೇವೆ ನಿಮ್ಮ ದೇಶದಲ್ಲಿ ಲಭ್ಯವಿಲ್ಲ, ಆದ್ದರಿಂದ ಸ್ಥಾಪಕ ಸೆಟ್ ಅನ್ನು ಇಲ್ಲಿ ಉಚಿತವಾಗಿ ಪಡೆಯಬಹುದು.",
   "The Founder Set is yours.": "ಸ್ಥಾಪಕ ಸೆಟ್ ಈಗ ನಿಮ್ಮದು.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "ಅಂಗಡಿಯನ್ನು ತೆರೆಯಿರಿ",
+  "You don't own any cosmetics yet.": "ನಿಮ್ಮ ಬಳಿ ಇನ್ನೂ ಯಾವುದೇ ಸೌಂದರ್ಯವರ್ಧಕಗಳಿಲ್ಲ.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "ಉಚಿತವಾಗಿ ಪಡೆಯಿರಿ",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "ಅಂಗಡಿಯ ಪಾವತಿ ಸೇವೆ ನಿಮ್ಮ ದೇಶದಲ್ಲಿ ಲಭ್ಯವಿಲ್ಲ, ಆದ್ದರಿಂದ ಸ್ಥಾಪಕ ಸೆಟ್ ಅನ್ನು ಇಲ್ಲಿ ಉಚಿತವಾಗಿ ಪಡೆಯಬಹುದು.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "ಸ್ಥಾಪಕ ಸೆಟ್ ಈಗ ನಿಮ್ಮದು."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

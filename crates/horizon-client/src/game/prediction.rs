@@ -82,10 +82,14 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+<<<<<<< HEAD
                 loop_context: &self.loop_context,
                 damage_hooks: &self.damage_hooks,
                 tag_items: Some(world_items!(self)),
                 block_registries: Some(&self.pack.block_registries),
+=======
+                health: &self.health_resources,
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             }
             .replayed_tick(keys, sprinting)
         };

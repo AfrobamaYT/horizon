@@ -380,6 +380,7 @@ impl Goal for GhastTempt {
         let Some(p) = &cx.w.player else { return false };
         // getNearestPlayer(TargetingConditions.forNonCombat()
         // .ignoreLineOfSight().range(TEMPT_RANGE 16)): creative players too.
+<<<<<<< HEAD
         // The selector (the held items) comes before the range in
         // `TargetingConditions.test`, and the range asks the visibility.
         if !p.alive || p.spectator || !(Self::wants(m, &p.main_hand) || Self::wants(m, &p.off_hand))
@@ -390,6 +391,14 @@ impl Goal for GhastTempt {
             cx.w.player_visibility(p, m.id, p.visibility_percent(m.species()));
         let range = (16.0_f64 * visibility).max(2.0);
         m.distance_sqr(p.position) <= range * range
+=======
+        let range =
+            (16.0_f64 * p.visibility_percent(Some(m.kind.id.as_str()), cx.w.items)).max(2.0);
+        p.alive
+            && !p.spectator
+            && (Self::wants(m, &p.main_hand) || Self::wants(m, &p.off_hand))
+            && m.distance_sqr(p.position) <= range * range
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
         // stopNavigation: setWait; calmDown = reducedTickDelay(100).

@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "நேட்டிவ் உருவாக்கம் அல்லது தற்காலிக சேமிப்பு சுத்தம் நடைபெறுகிறது. அது முடிந்ததும் மீண்டும் முயலவும்.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "நேட்டிவ் உருவாக்க தற்காலிக சேமிப்பிலிருந்து {bytes} பைட்டுகள் அழிக்கப்பட்டன. அடுத்த மாற்றப்பட்ட உருவாக்கம் தொடக்கத்திலிருந்து தொகுக்கப்படும்.",
+  "Could not access the native build cache: {error}": "நேட்டிவ் உருவாக்க தற்காலிக சேமிப்பை அணுக முடியவில்லை: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "தற்காலிக சேமிப்பு வரம்பை GiB-இல் உள்ளிடவும்; 0 தானியங்கு சுத்தத்தை முடக்கும்.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "எதிர்பாராத கோப்பு அல்லது இணைப்பில் நேட்டிவ் தற்காலிக சேமிப்பு சுத்தம் மறுக்கப்படுகிறது: {path}",
+  "Building {name}'s post-build step": "கட்டிடம் {name} இன் பிந்தைய கட்ட படி",
+  "In use": "பயன்பாட்டில் உள்ளது",
+  "Prepare": "தயார் செய்",
+  "Developer options": "டெவலப்பர் விருப்பங்கள்",
+  "{online} of {max} players": "{max} வீரர்களில் {online}",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition). முதல் முறை, “விளையாடு” அதை உங்கள் கணக்கிற்காக Mojang-இடமிருந்து அதற்குத் தேவையான Java-வுடன் பதிவிறக்குகிறது.",
+  "Close": "மூடு",
+  "Builds from GitHub. Each one installs into its own folder.": "GitHub இலிருந்து உருவாக்குகிறது. ஒவ்வொன்றும் அதன் சொந்த கோப்புறையில் நிறுவப்படும்.",
+  "Copy…": "நகலெடு…",
+  "Play with {count} mods": "{count} மோட்களுடன் விளையாடு",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "இதுவரை சேவையகங்கள் இல்லை: ஒன்றை இங்கே அல்லது விளையாட்டின் மல்டிபிளேயர் திரையில் சேர்க்கவும்.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} Modrinth பதிவிறக்க எண்ணிக்கையின்படி பட்டியலிடப்பட்டுள்ளன",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), அல்லது Prism, MultiMC அல்லது CurseForge நிகழ்வு. Horizon உங்கள் சொந்தப் பதிவிறக்கங்களிலிருந்து இந்தக் கணினியிலேயே முடிந்ததை மாற்றி, பொதியை அதன் சொந்த சுயவிவரமாக இயக்குகிறது. எதுவும் பதிவேற்றப்படுவதோ பகிரப்படுவதோ இல்லை.",
   "1 hour": "1 மணிநேரம்",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "இலவசமாகப் பெறு",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "கடையின் கட்டணச் சேவை உங்கள் நாட்டில் இயங்காததால், நிறுவனர் தொகுப்பை இங்கே இலவசமாகப் பெறலாம்.",
   "The Founder Set is yours.": "நிறுவனர் தொகுப்பு இப்போது உங்களுடையது.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "கடையைத் திற",
+  "You don't own any cosmetics yet.": "உங்களிடம் இன்னும் அழகுசாதனப் பொருட்கள் எதுவும் இல்லை.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "இலவசமாகப் பெறு",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "கடையின் கட்டணச் சேவை உங்கள் நாட்டில் இயங்காததால், நிறுவனர் தொகுப்பை இங்கே இலவசமாகப் பெறலாம்.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "நிறுவனர் தொகுப்பு இப்போது உங்களுடையது."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

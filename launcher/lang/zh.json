@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "原生构建或缓存清理正在进行中。请在完成后重试。",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "已清理 {bytes} 字节的原生构建缓存。下次有更改的构建将从头编译。",
+  "Could not access the native build cache: {error}": "无法访问原生构建缓存：{error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "请输入以 GiB 为单位的缓存上限；0 表示禁用自动清理。",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "由于存在意外的文件或链接，已拒绝清理原生缓存：{path}",
+  "Building {name}'s post-build step": "正在构建 {name} 的构建后步骤",
+  "In use": "使用中",
+  "Prepare": "准备",
+  "Developer options": "开发者选项",
+  "{online} of {max} players": "{online} / {max} 名玩家",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version}（Java 版）。首次点击“开始游戏”时，会用你的账户从 Mojang 下载游戏及其所需的 Java。",
+  "Close": "关闭",
+  "Builds from GitHub. Each one installs into its own folder.": "来自 GitHub 的构建版本。每个版本均安装在各自的文件夹中。",
+  "Copy…": "复制…",
+  "Play with {count} mods": "游玩包含 {count} 个模组的版本",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "还没有服务器：可以在这里或游戏的“多人游戏”界面中添加。",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": "，其中 {count} 个通过 Modrinth 下载链接列出",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth)、.zip (CurseForge)，或 Prism、MultiMC、CurseForge 实例。Horizon 会在您的电脑上利用您已下载的文件尽最大可能进行移植，并作为独立配置文件运行该整合包。绝不会上传或共享任何内容。",
   "1 hour": "1 小时",
@@ -1111,8 +1135,32 @@
   "Move…": "迁移…",
   "Move and restart": "迁移并重启",
   "Could not open the data folder: {error}": "无法打开数据文件夹：{error}",
+<<<<<<< HEAD
   "Claim for free": "免费领取",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "商店的支付服务商不在你所在的国家提供服务，因此你可以在这里免费领取创始者套装。",
   "The Founder Set is yours.": "创始者套装已归你所有。",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "打开商店",
+  "You don't own any cosmetics yet.": "你还没有任何装饰。",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "自动使用此启动器的架构。在 Windows ARM 上可选择 x64 或 ARM64。没有 ARM64 版本的发行版将使用已签名的 x64 版本。",
+  "Game architecture": "游戏架构",
+  "Install selected build": "安装所选版本",
+  "Manual game architectures are available on Windows ARM only.": "仅 Windows ARM 支持手动选择游戏架构。",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Windows ARM64 启动器暂不支持原生模组；目前没有可用的托管编译器。",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "目前无法为所选 ARM64 游戏构建原生模组。现有编译器仅构建 x64 版本。",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "无法为所选 x64 游戏构建原生模组。此 ARM64 启动器没有匹配的编译器。",
+  "Say auto, x64 or arm64 for the game architecture.": "游戏架构请输入 auto、x64 或 arm64。",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "此版本的游戏为 {installed} 架构，但设置中选择了 {selected}。启动前请在“版本”中安装所选版本。",
+  "Automatic": "自动",
+  "{tag} has no build for the selected game architecture.": "{tag} 没有适用于所选游戏架构的版本。",
+  "Unknown": "未知",
+  "Claim for free": "免费领取",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "商店的支付服务商不在你所在的国家提供服务，因此你可以在这里免费领取创始者套装。",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "创始者套装已归你所有。"
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

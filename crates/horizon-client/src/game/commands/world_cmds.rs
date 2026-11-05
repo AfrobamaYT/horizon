@@ -1449,8 +1449,101 @@ impl Game<'_> {
             return Err(err(
                 "commands.ride.mount.failure.generic",
                 &[&name.plain(), &vehicle_name.plain()],
+<<<<<<< HEAD
+=======
+            )
+        };
+        // Only players and mobs ride.
+        if !(target == Target::Player || rider.is_some()) {
+            return Err(generic());
+        }
+        // `RideCommand.mount` forces the ride (`startRiding(vehicle, true, true)`),
+        // which skips `canRide` and `canAddPassenger`: a boat under water still
+        // takes the rider. Horizon's boats seat at most `max_passengers`, so a
+        // full boat still refuses. Minecarts carry only players here: Horizon's
+        // carts have no mob passengers yet.
+        match vehicle {
+            Target::Boat(id) => {
+                let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+                    return Err(generic());
+                };
+                if self.boat_passengers(id) >= self.boats[i].max_passengers() {
+                    return Err(generic());
+                }
+                if let Some(rider) = rider {
+                    if !self.try_mount_mob(rider, id) {
+                        return Err(generic());
+                    }
+                } else {
+                    if !self.native_may_board(id) {
+                        return Err(generic());
+                    }
+                    self.yaw = self.boats[i].yaw;
+                    // ServerPlayer.startRiding seats the player immediately.
+                    let at = self.player_boat_seat(i);
+                    if let Some(player) = self.player.as_mut() {
+                        player.position = at;
+                        player.velocity = horizon_core::geometry::Vec3::ZERO;
+                        player.teleported = true;
+                    }
+                    self.previous_position = at;
+                    // sendEventAndTriggers: START_RIDING_TRIGGER.
+                    self.start_riding(id);
+                }
+                self.feedback(Text::translate(
+                    "commands.ride.mount.success",
+                    &[name, vehicle_name],
+                ));
+                return Ok(1);
+            }
+            Target::Cart(id) => {
+                if target != Target::Player
+                    || self.ridden_by_guest(id)
+                    || !self.native_may_board(id)
+                {
+                    return Err(generic());
+                }
+                self.start_riding(id);
+                self.feedback(Text::translate(
+                    "commands.ride.mount.success",
+                    &[name, vehicle_name],
+                ));
+                return Ok(1);
+            }
+            _ => {}
+        }
+        // Mobs carry players and mobs.
+        let Target::Mob(mob_id) = vehicle else {
+            return Err(generic());
+        };
+        if !self.mobs.iter().any(|m| m.id == mob_id && m.alive()) {
+            return Err(generic());
+        }
+        if let Some(rider) = rider {
+            // Entity.startRiding.
+            if !self.try_mount_mob(rider, mob_id) {
+                return Err(generic());
+            }
+            self.feedback(Text::translate(
+                "commands.ride.mount.success",
+                &[name, vehicle_name],
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             ));
         }
+<<<<<<< HEAD
+=======
+        if !self.native_may_board(mob_id) {
+            return Err(generic());
+        }
+        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob_id) {
+            m.extra.flag = false;
+            m.extra.counter = 0;
+            self.yaw = m.yaw;
+        }
+        self.mount.jump_ticks = 0;
+        self.mount.jump_scale = 0.0;
+        self.start_riding(mob_id);
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         self.feedback(Text::translate(
             "commands.ride.mount.success",
             &[name, vehicle_name],
@@ -1488,11 +1581,22 @@ impl Game<'_> {
             return;
         }
         self.mobs[i].extra.mount = None;
+        let remaining = self
+            .mobs
+            .iter()
+            .find(|m| m.extra.mount == Some(v))
+            .map(|m| m.id);
+        if let Some(vehicle) = self.mobs.iter_mut().find(|m| m.id == v) {
+            vehicle.extra.rider = remaining;
+        }
         let (width, yaw) = (f64::from(self.mobs[i].width()), self.mobs[i].yaw);
         let at = if let Some(b) = self.boats.iter().position(|b| b.id == v) {
             self.boat_dismount_target(b, width, yaw)
+        } else if let Some(at) = self.horse_dismount_point(v, i) {
+            at
+        } else if let Some(at) = self.cart_dismount_point(v, i) {
+            at
         } else if let Some(m) = self.mobs.iter_mut().find(|m| m.id == v) {
-            m.extra.rider = None;
             // Entity.getDismountLocationForPassenger: on top of the vehicle.
             let p = m.position;
             horizon_core::geometry::Vec3::new(p.x, p.y + f64::from(m.height()), p.z)

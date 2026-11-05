@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "Build native atau pembersihan cache sedang berjalan. Coba lagi setelah selesai.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Membersihkan {bytes} bita cache build native. Build berikutnya yang memiliki perubahan akan dikompilasi dari awal.",
+  "Could not access the native build cache: {error}": "Tidak dapat mengakses cache build native: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "Masukkan batas cache dalam GiB; 0 menonaktifkan pembersihan otomatis.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "Menolak pembersihan cache native karena ada berkas atau tautan yang tidak terduga: {path}",
+  "Building {name}'s post-build step": "Membangun langkah pasca-bangun {name}",
+  "In use": "Digunakan",
+  "Prepare": "Siapkan",
+  "Developer options": "Opsi pengembang",
+  "{online} of {max} players": "{online} dari {max} pemain",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition). Tombol Main mengunduhnya dari Mojang untuk akun Anda pada kali pertama, beserta Java yang dibutuhkannya.",
+  "Close": "Tutup",
+  "Builds from GitHub. Each one installs into its own folder.": "Build dari GitHub. Masing-masing diinstal ke foldernya sendiri.",
+  "Copy…": "Salin…",
+  "Play with {count} mods": "Bermain dengan {count} mod",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "Belum ada server: tambahkan di sini atau di layar Multiplayer game.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} dicantumkan berdasarkan unduhan Modrinth mereka",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), atau instans Prism, MultiMC, maupun CurseForge. Horizon memindahkan apa pun yang bisa dilakukan di komputer ini dari unduhan Anda sendiri, dan memainkan paket sebagai profilnya sendiri. Tidak ada yang diunggah atau dibagikan.",
   "1 hour": "1 jam",
@@ -1111,8 +1135,32 @@
   "Move…": "Pindahkan…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "Peluncur ditutup selama data Anda disalin dan diverifikasi, lalu dibuka kembali. Folder lama tetap disimpan dan menggunakan ruang disk hingga Anda memastikan pemindahan berhasil dan menghapusnya sendiri.",
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
+<<<<<<< HEAD
   "Claim for free": "Klaim gratis",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Penyedia pembayaran toko tidak melayani negaramu, jadi kamu bisa mengklaim Set pendiri di sini secara gratis.",
   "The Founder Set is yours.": "Set pendiri kini milikmu.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "Buka toko",
+  "You don't own any cosmetics yet.": "Kamu belum punya kosmetik.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "Klaim gratis",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Penyedia pembayaran toko tidak melayani negaramu, jadi kamu bisa mengklaim Set pendiri di sini secara gratis.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Set pendiri kini milikmu."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

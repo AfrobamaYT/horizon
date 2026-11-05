@@ -102,13 +102,12 @@ impl Game<'_> {
             // timeout.
             self.mobs[index].extra.counter = 0;
             self.yaw = self.mobs[index].yaw;
-            self.riding = Some(id);
             self.mount.reset_jump();
             if was_empty {
                 let down = happy_ghast::goggles(true, &self.mobs[index]);
                 let _ = self.handle_mob_events(vec![down]);
             }
-            self.trigger_player("minecraft:started_riding");
+            self.start_riding(id);
             return true;
         }
         false
@@ -119,7 +118,7 @@ impl Game<'_> {
         // aboard the ghast forgets its home.
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             m.extra.counter = 10;
-            m.ai.home = None;
+            m.ai.clear_home();
         }
         let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
             return;
@@ -171,12 +170,27 @@ impl Game<'_> {
             m.yaw = yaw;
             m.body_yaw = yaw;
             m.head_yaw = yaw;
+<<<<<<< HEAD
             // DriedGhastBlock.spawnGhastling: level.playSound(null, ghastling,
             // GHASTLING_SPAWN, BLOCKS, 1, 1).
             let (id, at) = (m.id, [m.position.x, m.position.y, m.position.z]);
             let sound = LevelSound::new("minecraft:entity.ghastling.spawn", at, 1.0, 1.0)
                 .in_source(SoundSource::Blocks);
             self.play_bound_sound(sound, id, None);
+=======
+            self.audio.play_bound(
+                "minecraft:entity.ghastling.spawn",
+                4,
+                1.0,
+                1.0,
+                horizon_client::sound_engine::SoundEntity::new(
+                    m.id,
+                    [m.position.x, m.position.y, m.position.z],
+                    m.silent,
+                ),
+                None,
+            );
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         }
     }
 }

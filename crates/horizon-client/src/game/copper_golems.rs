@@ -321,10 +321,21 @@ impl Game<'_> {
         if name == "minecraft:shears" && self.golem_shearable(index) {
             // CopperGolem.shear: the sound, the antenna slot emptied (an
             // unequip) and the flower dropped 1.5 up.
+<<<<<<< HEAD
             // level.playSound(null, this, COPPER_GOLEM_SHEAR, PLAYERS, 1, 1).
             let shear = LevelSound::new("minecraft:entity.copper_golem.shear", at, 1.0, 1.0)
                 .in_source(SoundSource::Players);
             self.play_bound_sound(shear, self.mobs[index].id, None);
+=======
+            self.play_mob_bound_sound(
+                index,
+                "minecraft:entity.copper_golem.shear",
+                7,
+                1.0,
+                1.0,
+                false,
+            );
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             let antenna = self.mobs[index].saddle_item();
             self.mobs[index].set_saddle(None);
             let id = self.mobs[index].id;
@@ -351,10 +362,14 @@ impl Game<'_> {
         }
         if is_axe && waxed {
             self.mobs[index].extra.vector[0] = -1.0;
+<<<<<<< HEAD
             // level.playSound(null, this, AXE_SCRAPE, getSoundSource(), 1, 1).
             let scrape = LevelSound::new("minecraft:item.axe.scrape", at, 1.0, 1.0)
                 .in_source(SoundSource::Neutral);
             self.play_bound_sound(scrape, self.mobs[index].id, None);
+=======
+            self.play_mob_bound_sound(index, "minecraft:item.axe.scrape", 6, 1.0, 1.0, false);
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             self.level_event_at(3004, block, 0);
             self.damage_held_tool();
             return true;
@@ -363,11 +378,15 @@ impl Game<'_> {
             let m = &mut self.mobs[index];
             m.extra.vector[0] = -1.0;
             m.extra.variant = horizon_client::mobs::copper_golem::weather_previous(m.extra.variant);
+<<<<<<< HEAD
             let id = m.id;
             self.persist.force_meta(id, 16);
             let scrape = LevelSound::new("minecraft:item.axe.scrape", at, 1.0, 1.0)
                 .in_source(SoundSource::Neutral);
             self.play_bound_sound(scrape, id, None);
+=======
+            self.play_mob_bound_sound(index, "minecraft:item.axe.scrape", 6, 1.0, 1.0, false);
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             self.level_event_at(3005, block, 0);
             self.damage_held_tool();
             return true;

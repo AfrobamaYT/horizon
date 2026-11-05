@@ -73,6 +73,7 @@ pub mod ravager;
 pub mod render;
 pub mod riders;
 pub mod seen_grid;
+pub mod sheep_dye;
 pub mod shulker;
 pub mod skin;
 pub mod skin_layers;
@@ -1155,6 +1156,9 @@ pub struct Extra {
     /// vanilla code calls `setBred` outside `readAdditionalSaveData`), so only
     /// a save or `/summon` gives it, and `followMommy` reads it.
     pub bred: bool,
+    /// `Hoglin`'s `CannotBeHunted` save flag: a bastion's own hoglins have it,
+    /// so its piglins leave them alone (`Hoglin.canBeHunted`).
+    pub cannot_be_hunted: bool,
     /// `AbstractHorse.allowStandSliding`: the rider's jump sets it, and a
     /// horse still rearing then goes on with the rider's keys until the rear
     /// ends (`tick` clears it).
@@ -1578,6 +1582,25 @@ pub fn after_break(events: &mut Vec<MobEvent>, mob: u32, start: usize) {
 }
 
 /// Events a mob tick asks the game to act on.
+impl MobEvent {
+    pub fn entity_sound(
+        mob: &Mob,
+        name: &'static str,
+        source: usize,
+        volume: f32,
+        pitch: f32,
+    ) -> Self {
+        Self::EntitySound {
+            mob: mob.id,
+            name,
+            at: [mob.position.x, mob.position.y, mob.position.z],
+            volume,
+            pitch,
+            source,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum MobEvent {
     /// Squid.handleEntityEvent(19), resetting the remote tentacle cycle.
@@ -1634,6 +1657,7 @@ pub enum MobEvent {
         count: u32,
     },
     Sound(&'static str, [f64; 3], f32, f32),
+<<<<<<< HEAD
     /// `level.playSound(null, mob, sound, source, volume, pitch)`: a sound
     /// bound to mob `mob` (`ServerLevel.playSeededSound`'s entity overload),
     /// in vanilla's `source`, from where the mob stands.
@@ -1644,6 +1668,17 @@ pub enum MobEvent {
         at: [f64; 3],
         volume: f32,
         pitch: f32,
+=======
+    /// The entity overload of `Level.playSound`: keep the emitter and the
+    /// call site's category rather than turning it into a positional sound.
+    EntitySound {
+        mob: u32,
+        name: &'static str,
+        at: [f64; 3],
+        volume: f32,
+        pitch: f32,
+        source: usize,
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     },
     /// `Entity.sendBubbleColumnParticles`: a mob at the top of the bubble column
     /// block at `pos` (the splash and bubble particles over it).
@@ -2283,6 +2318,14 @@ pub enum MobEvent {
         table: &'static str,
         at: [f64; 3],
     },
+    /// `Chicken.aiStep`: the egg timer ran out. The `chicken_lay` gift table
+    /// drops at the chicken; only when it dropped something does the egg sound
+    /// play (at `pitch`) and `entity_place` reach listeners.
+    LayEgg {
+        mob: u32,
+        at: [f64; 3],
+        pitch: f32,
+    },
     /// `Armadillo.customServerAiStep`: the armadillo sheds a scute.
     ShedScute {
         mob: u32,
@@ -2483,6 +2526,8 @@ pub struct Seen {
     pub hunted_recently: bool,
     /// A piglin's `HURT_BY` memory.
     pub hurt_recently: bool,
+    /// `Hoglin.canBeHunted`: an adult hoglin without `CannotBeHunted`.
+    pub huntable: bool,
 }
 impl Seen {
     /// `LivingEntity.hasEffect`, by id without namespace.
@@ -2681,6 +2726,7 @@ impl Mob {
                 .collect(),
             hunted_recently: m.species() == Species::Piglin && m.extra.ints[0] > 0,
             hurt_recently: m.species() == Species::Piglin && m.extra.piglin.hurt,
+            huntable: m.species() == Species::Hoglin && !m.is_baby() && !m.extra.cannot_be_hunted,
         }
     }
     /// `EntityType.getCategory`'s name.
@@ -2869,6 +2915,10 @@ pub struct PlayerView {
     pub main_hand: Option<Arc<str>>,
     pub off_hand: Option<Arc<str>>,
     pub head: Option<Arc<str>>,
+    /// `getItemBySlot` for chest, legs and feet.
+    pub chest: Option<Arc<str>>,
+    pub legs: Option<Arc<str>>,
+    pub feet: Option<Arc<str>>,
     pub armor_cover: f32,
     /// The Invisibility effect (`isInvisible`).
     pub invisible: bool,
@@ -2917,10 +2967,35 @@ pub struct Vehicle {
     pub velocity: Vec3,
 }
 impl PlayerView {
+<<<<<<< HEAD
     /// `LivingEntity.getVisibilityPercent(level, looking)` before NeoForge's
     /// event and the clamp: sneaking, invisibility by armour cover, and the
     /// worn head's `mob_visibility` for the `looking` mob's type.
     pub fn visibility_percent(&self, looking: Species) -> f64 {
+=======
+    /// Worn stacks in `EquipmentSlot.VALUES` order. A player has no body or
+    /// saddle slot.
+    fn worn_slots(&self) -> [(&'static str, Option<&str>); 6] {
+        [
+            ("mainhand", self.main_hand.as_deref()),
+            ("offhand", self.off_hand.as_deref()),
+            ("feet", self.feet.as_deref()),
+            ("legs", self.legs.as_deref()),
+            ("chest", self.chest.as_deref()),
+            ("head", self.head.as_deref()),
+        ]
+    }
+    /// `LivingEntity.getVisibilityPercent`: 1, ×0.8 while discrete
+    /// (`isShiftKeyDown`), ×0.7×armor cover (at least 0.1) while invisible,
+    /// then each worn stack's `minecraft:mob_visibility` when its equippable
+    /// slot matches and `targeting` is in `targetingEntityTypes`. Clamped to
+    /// 0..=10 (`Mth.clamp`). `targeting` is null when nobody is looking.
+    pub fn visibility_percent(
+        &self,
+        targeting: Option<&str>,
+        items: Option<&crate::items::Items>,
+    ) -> f64 {
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         let mut visibility = 1.0;
         if self.sneaking {
             visibility *= 0.8;
@@ -2928,10 +3003,27 @@ impl PlayerView {
         if self.invisible {
             visibility *= 0.7 * f64::from(self.armor_cover).max(0.1);
         }
+<<<<<<< HEAD
         if let Some(head) = self.head.as_deref() {
             visibility *= f64::from(mob_visibility(head, looking));
         }
         visibility
+=======
+        if let (Some(targeting), Some(items)) = (targeting, items) {
+            for (slot, item) in self.worn_slots() {
+                let Some(item) = item else { continue };
+                if let Some(factor) = items.worn_visibility(item, slot, targeting) {
+                    visibility *= f64::from(factor);
+                }
+            }
+        }
+        // `Mth.clamp`: value < min ? min : Math.min(value, max).
+        if visibility < 0.0 {
+            0.0
+        } else {
+            visibility.min(10.0)
+        }
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     /// `LivingEntity.hasEffect`, by id without namespace.
     pub fn has_effect(&self, effect: &str) -> bool {
@@ -3116,14 +3208,20 @@ impl<'a> Teams<'a> {
         }
     }
 }
+/// `Entity.random` of a client's copy of entity `id` first seen at `position`: vanilla's is its
+/// own (`RandomSource.create()`), drawn on by nothing else; this one is seeded from the two.
+pub fn entity_random(id: u32, position: Vec3) -> LegacyRandom {
+    let mut random = LegacyRandom::new(
+        i64::from(id).wrapping_mul(0x5DEE_CE66D)
+            ^ (position.x.to_bits() as i64)
+            ^ (position.z.to_bits() as i64).rotate_left(17),
+    );
+    let _ = random.next_int();
+    random
+}
 impl Mob {
     pub fn new(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
-        let mut random = LegacyRandom::new(
-            i64::from(id).wrapping_mul(0x5DEE_CE66D)
-                ^ (position.x.to_bits() as i64)
-                ^ (position.z.to_bits() as i64).rotate_left(17),
-        );
-        let _ = random.next_int();
+        let random = entity_random(id, position);
         let mut mob = Self {
             join: Default::default(),
             id,
@@ -5952,5 +6050,102 @@ mod silent_voice_tests {
         assert!((0.8..=1.2).contains(&loud[0].2), "{}", loud[0].2);
         assert!(quiet.is_empty(), "{quiet:?}");
         assert_eq!(quiet_next, loud_next, "the pitch is drawn either way");
+    }
+}
+
+#[cfg(test)]
+mod visibility_percent_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The four heads `Items` registers, with the component JSON vanilla writes.
+    fn heads() -> crate::items::Items {
+        let mut items = crate::items::Items::for_tests(HashMap::new());
+        items.insert_mob_visibility_component(
+            "minecraft:skeleton_skull",
+            &json!({
+                "minecraft:equippable": {"slot": "head", "swappable": false},
+                "minecraft:mob_visibility": {
+                    "targeting_entity_types": "minecraft:skeleton",
+                    "visibility": 0.5
+                }
+            }),
+        );
+        items.insert_mob_visibility_component(
+            "minecraft:zombie_head",
+            &json!({
+                "minecraft:equippable": {"slot": "head"},
+                "minecraft:mob_visibility": {
+                    "targeting_entity_types": "minecraft:zombie",
+                    "visibility": 0.5
+                }
+            }),
+        );
+        items.insert_mob_visibility_component(
+            "minecraft:creeper_head",
+            &json!({
+                "minecraft:equippable": {"slot": "head"},
+                "minecraft:mob_visibility": {
+                    "targeting_entity_types": "minecraft:creeper",
+                    "visibility": 0.5
+                }
+            }),
+        );
+        items.insert_mob_visibility_component(
+            "minecraft:piglin_head",
+            &json!({
+                "minecraft:equippable": {"slot": "head"},
+                "minecraft:mob_visibility": {
+                    "targeting_entity_types": ["minecraft:piglin", "minecraft:piglin_brute"],
+                    "visibility": 0.5
+                }
+            }),
+        );
+        items
+    }
+
+    /// `LivingEntity.getVisibilityPercent` halves the range for the mob named
+    /// on the worn head, and leaves every other mob at full range. A skull
+    /// held in the hand does not count: its equippable slot is the head.
+    #[test]
+    fn worn_mob_heads_halve_that_mobs_detection_range() {
+        let items = heads();
+        let see = |head: &str, mob: &str| {
+            let mut player = world::test_player(Vec3::ZERO);
+            player.head = Some(Arc::from(head));
+            player.visibility_percent(Some(mob), Some(&items))
+        };
+        assert_eq!(see("minecraft:skeleton_skull", "minecraft:skeleton"), 0.5);
+        assert_eq!(see("minecraft:zombie_head", "minecraft:zombie"), 0.5);
+        assert_eq!(see("minecraft:creeper_head", "minecraft:creeper"), 0.5);
+        assert_eq!(see("minecraft:piglin_head", "minecraft:piglin"), 0.5);
+        assert_eq!(see("minecraft:piglin_head", "minecraft:piglin_brute"), 0.5);
+        assert_eq!(see("minecraft:skeleton_skull", "minecraft:zombie"), 1.0);
+        assert_eq!(
+            see("minecraft:piglin_head", "minecraft:zombified_piglin"),
+            1.0
+        );
+        assert_eq!(
+            see(
+                "minecraft:wither_skeleton_skull",
+                "minecraft:wither_skeleton"
+            ),
+            1.0
+        );
+
+        let mut held = world::test_player(Vec3::ZERO);
+        held.main_hand = Some(Arc::from("minecraft:skeleton_skull"));
+        assert_eq!(
+            held.visibility_percent(Some("minecraft:skeleton"), Some(&items)),
+            1.0
+        );
+
+        let mut sneaking = world::test_player(Vec3::ZERO);
+        sneaking.head = Some(Arc::from("minecraft:skeleton_skull"));
+        sneaking.sneaking = true;
+        assert_eq!(
+            sneaking.visibility_percent(Some("minecraft:skeleton"), Some(&items)),
+            0.4
+        );
     }
 }

@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "กำลังคอมไพล์โค้ดเนทีฟหรือล้างแคช โปรดลองอีกครั้งเมื่อเสร็จสิ้น",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "ล้างแคชการคอมไพล์โค้ดเนทีฟแล้ว {bytes} ไบต์ การคอมไพล์ครั้งถัดไปที่มีการเปลี่ยนแปลงจะเริ่มใหม่ทั้งหมด",
+  "Could not access the native build cache: {error}": "ไม่สามารถเข้าถึงแคชการคอมไพล์โค้ดเนทีฟได้: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "ป้อนขีดจำกัดแคชเป็น GiB; 0 จะปิดการล้างอัตโนมัติ",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "ปฏิเสธการล้างแคชโค้ดเนทีฟเนื่องจากพบไฟล์หรือลิงก์ที่ไม่คาดหมาย: {path}",
+  "Building {name}'s post-build step": "การสร้างขั้นตอนหลังการสร้างของ {name}",
+  "In use": "ในการใช้งาน",
+  "Prepare": "เตรียมตัว",
+  "Developer options": "ตัวเลือกสำหรับนักพัฒนา",
+  "{online} of {max} players": "{online} จาก {max} ผู้เล่น",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (รุ่น Java) เล่นดาวน์โหลดจาก Mojang สำหรับบัญชีของคุณในครั้งแรก โดยมี Java ที่ต้องการ",
+  "Close": "ปิด",
+  "Builds from GitHub. Each one installs into its own folder.": "สร้างจาก GitHub แต่ละคนจะติดตั้งลงในโฟลเดอร์ของตัวเอง",
+  "Copy…": "คัดลอก...",
+  "Play with {count} mods": "เล่นกับ {count} ม็อด",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "ยังไม่มีเซิร์ฟเวอร์: เพิ่มเซิร์ฟเวอร์ที่นี่หรือในหน้าจอผู้เล่นหลายคนของเกม",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} แสดงรายการตามการดาวน์โหลด Modrinth",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge) หรืออินสแตนซ์ Prism, MultiMC หรือ CurseForge Horizon พอร์ตสิ่งที่สามารถทำได้บนคอมพิวเตอร์เครื่องนี้ จากการดาวน์โหลดของคุณเอง และเล่นแพ็คเป็นโปรไฟล์ของตัวเอง ไม่มีอะไรถูกอัพโหลดหรือแชร์",
   "1 hour": "1 ชั่วโมง",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "รับฟรี",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "ผู้ให้บริการชำระเงินของร้านค้าไม่ให้บริการในประเทศของคุณ คุณจึงรับชุดผู้ก่อตั้งได้ที่นี่ฟรี",
   "The Founder Set is yours.": "ชุดผู้ก่อตั้งเป็นของคุณแล้ว",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "เปิดร้านค้า",
+  "You don't own any cosmetics yet.": "คุณยังไม่มีเครื่องสำอาง",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "รับฟรี",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "ผู้ให้บริการชำระเงินของร้านค้าไม่ให้บริการในประเทศของคุณ คุณจึงรับชุดผู้ก่อตั้งได้ที่นี่ฟรี",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "ชุดผู้ก่อตั้งเป็นของคุณแล้ว"
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

@@ -350,7 +350,21 @@ impl Game<'_> {
             if ok && !s.predicates.is_empty() {
                 // EntityPredicates: the datapack predicate with the entity as
                 // `this` and the entity's position as origin.
+<<<<<<< HEAD
                 let view = self.entity_view_of(t);
+=======
+                self.ensure_datapacks();
+                // The player's records only as far as the predicates may ask.
+                let asked = (s.predicates.iter())
+                    .filter_map(|(id, _)| self.fns.store.predicates.get(id))
+                    .fold(
+                        Default::default(),
+                        |all: horizon_client::advancements::FactsAsked, p| {
+                            all.or(horizon_client::advancements::facts_asked_in(p))
+                        },
+                    );
+                let view = self.entity_view_asking(t, asked);
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 let origin = self.target_position(t).unwrap_or_default();
                 for (id, negated) in &s.predicates {
                     // EntitySelectorOptions rejects a missing registry entry
@@ -862,7 +876,7 @@ impl Game<'_> {
             objective,
             screen_width: batch.width as i32,
             online_mode,
-            gui_ticks: self.ticks as i64,
+            gui_ticks: self.visual_ticks() as i64,
             // Horizon has no "chat background only" option: vanilla's default (on).
             background: tab_list::row_background(
                 true,
@@ -972,6 +986,7 @@ mod tab_list_tests {
                 sender: PlayerSender::new(tx, Arc::default()),
                 latency: Arc::new(AtomicI32::new(42)),
                 address: "127.0.0.1:25565".parse().unwrap(),
+                expected: false,
             },
             uuid as i32,
             [0.0, 64.0, 0.0],

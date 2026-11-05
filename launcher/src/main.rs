@@ -899,7 +899,10 @@ impl Launcher {
     /// When another launcher already put it there, this one only restarts.
     fn apply_launcher_update(&mut self, cx: &mut App) {
         match horizon_launcher::update_handoff::start_now() {
-            Ok(true) => shut_down(cx),
+            Ok(true) => {
+                servers_page::keep_running_through_update();
+                shut_down(cx)
+            }
             Ok(false) => self.self_update = SelfUpdate::Failed(backend::restart()),
             Err(e) => self.self_update = SelfUpdate::Failed(e),
         }
@@ -1114,8 +1117,10 @@ impl Launcher {
                             if e == account::NoOwner.to_string() {
                                 self.owner = Some(false);
                                 self.owner_screen_open = true;
+                                self.client_error = Some(account::NoOwner::in_window());
+                            } else {
+                                self.client_error = Some(e);
                             }
-                            self.client_error = Some(e);
                         }
                     }
                 }
@@ -1128,7 +1133,7 @@ impl Launcher {
                             Err(account::NoOwner) => {
                                 self.owner = Some(false);
                                 self.owner_screen_open = true;
-                                self.client_error = Some(format!("{}.", tr(account::NEEDS_OWNER)));
+                                self.client_error = Some(account::NoOwner::in_window());
                                 self.starting_pack = None;
                                 self.joining = None;
                                 self.quick_play = None;
@@ -3881,7 +3886,8 @@ impl Launcher {
                     .child(group("Network", "globe"))
                     .child(self.proxy_row(n + 4, cx))
                     .child(group("Game", "gamepad"))
-                    .child(self.game_args_row(n + 5, cx))
+                    .child(self.game_architecture_row(n + 5, cx))
+                    .child(self.game_args_row(n + 6, cx))
                     .child(group("AI", "terminal"))
                     .child(self.no_ai_row(n + 6, cx))
                     .child(group("About", "info-box"))
@@ -3983,8 +3989,98 @@ impl Launcher {
         ))
     }
 
+<<<<<<< HEAD
     /// Settings' Game arguments row: the extra arguments the game starts with, kept in
     /// `settings.json` and appended to the launcher's own (quotes group a word with spaces).
+=======
+    /// Mods made for other Horizon versions: which, and the version the build uses. They often
+    /// still work, so the player may build anyway.
+    fn native_mismatch_panel(&self, list: &str, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .mt(px(8.))
+            .p(px(12.))
+            .bg(t.well)
+            .child(div().text_color(t.danger).child(tr("These mods were made for different Horizon versions").to_string()))
+            .child(list.to_owned())
+            .child(tr("They often still work together. If the build fails, install versions made for the same Nightly.").to_string())
+            .child(
+                div()
+                    .flex()
+                    .gap(px(8.))
+                    .mt(px(4.))
+                    .child(
+                        button("native-anyway", "Build anyway", Kind::Primary, &t).on_click(
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.build_native(true);
+                                cx.notify();
+                            }),
+                        ),
+                    )
+                    .child(
+                        button("native-mismatch-cancel", "Cancel", Kind::Secondary, &t).on_click(
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.native_mismatch = None;
+                                cx.notify();
+                            }),
+                        ),
+                    ),
+            )
+    }
+
+    /// Settings' Windows ARM game architecture choice; release installation, updates and launch
+    /// use the saved choice, while launcher updates continue to follow this process.
+    fn game_architecture_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
+        if !backend::can_choose_game_architecture() {
+            return div();
+        }
+        let t = self.theme;
+        let picker = segments(
+            "game-architecture",
+            &[
+                (backend::GameArchitecture::Auto, "Automatic"),
+                (backend::GameArchitecture::X64, "x64"),
+                (backend::GameArchitecture::Arm64, "ARM64"),
+            ],
+            self.settings.game_architecture,
+            &t,
+            {
+                let this = cx.entity().downgrade();
+                move |choice, _, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.settings.game_architecture == choice {
+                            return;
+                        }
+                        this.settings.game_architecture = choice;
+                        this.save_settings();
+                        // The release and update lists contain the selected game's assets.
+                        this.releases = Load::Loading;
+                        this.updates = backend::Updates::default();
+                        this.fetch_startup_releases();
+                        cx.notify();
+                    });
+                }
+            },
+        );
+        index_row(
+            n,
+            tr("Game architecture"),
+            Some(
+                div()
+                    .child(tr(
+                        "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+                    ))
+                    .into_any_element(),
+            ),
+            Some(picker.into_any_element()),
+            &t,
+        )
+    }
+
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     fn game_args_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let focused = self.args_focused;
@@ -4756,6 +4852,22 @@ impl Launcher {
                         .child(progress_bar(None, &t))
                         .child(text(theme::MICRO).text_color(t.muted).child("Removing…"))
                         .into_any_element()
+                } else if installed && backend::needs_game_architecture_install(&tag, &release) {
+                    let mut b = button(
+                        format!("install-selected-architecture-{tag}"),
+                        tr("Install selected build"),
+                        Kind::Secondary,
+                        &t,
+                    );
+                    if self.installing.is_some() {
+                        b = disabled(b);
+                    } else {
+                        b = b.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.install(&release);
+                            cx.notify();
+                        }));
+                    }
+                    b.into_any_element()
                 } else if installed {
                     self.version_actions(&tag, selected, cx).into_any_element()
                 } else if release.asset.is_none() {

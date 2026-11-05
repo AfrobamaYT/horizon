@@ -680,8 +680,17 @@ fn install_version(
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     fs::rename(&path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+<<<<<<< HEAD
     if let Some(old) = old.as_ref().filter(|o| o.file != relative) {
         let _ = fs::remove_file(home.join(&old.file));
+=======
+    if let Some(old) = old
+        .as_ref()
+        .filter(|o| o.file != relative && !stays(native, &o.file))
+        .and_then(|o| o.path(home))
+    {
+        let _ = fs::remove_file(old);
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     if project.kind == Kind::Mod {
         java::set_enabled(home, &p.id, true)?;

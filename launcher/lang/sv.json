@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "En kompilering av plattformsspecifik kod eller rensning av cachen pågår. Försök igen när den är klar.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Rensade {bytes} byte ur cachen för kompilering av plattformsspecifik kod. Nästa kompilering med ändringar börjar om från början.",
+  "Could not access the native build cache: {error}": "Det gick inte att komma åt cachen för kompilering av plattformsspecifik kod: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "Ange en cachegräns i GiB; 0 inaktiverar automatisk rensning.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "Rensning av cachen för plattformsspecifik kod nekades vid en oväntad fil eller länk: {path}",
+  "Building {name}'s post-build step": "Bygga {name}s efterbyggnadssteg",
+  "In use": "I bruk",
+  "Prepare": "Förbered",
+  "Developer options": "Utvecklaralternativ",
+  "{online} of {max} players": "{online} av {max} spelare",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition). Play laddar ner det från Mojang för ditt konto första gången, med den Java den behöver.",
+  "Close": "Stäng",
+  "Builds from GitHub. Each one installs into its own folder.": "Bygger från GitHub. Var och en installeras i sin egen mapp.",
+  "Copy…": "Kopiera...",
+  "Play with {count} mods": "Spela med {count} mods",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "Inga servrar ännu: lägg till en här eller på spelets Multiplayer-skärm.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} listade av deras Modrinth-nedladdning",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge) eller en Prism-, MultiMC- eller CurseForge-instans. Horizon portar vad den kan på den här datorn, från dina egna nedladdningar, och spelar paketet som sin egen profil. Ingenting laddas upp eller delas.",
   "1 hour": "1 timme",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "Hämta gratis",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Butikens betalleverantör finns inte i ditt land, så du kan hämta Grundaruppsättningen här gratis.",
   "The Founder Set is yours.": "Grundaruppsättningen är din.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "Öppna butiken",
+  "You don't own any cosmetics yet.": "Du äger ingen kosmetika än.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "Hämta gratis",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Butikens betalleverantör finns inte i ditt land, så du kan hämta Grundaruppsättningen här gratis.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Grundaruppsättningen är din."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

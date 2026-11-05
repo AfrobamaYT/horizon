@@ -11,6 +11,7 @@ mod tests {
         count: i32,
     }
     struct BlockEntityDraw(Vec<u32>);
+    struct NativeWorldDraw(Vec<u32>);
     #[allow(dead_code)]
     mod stubs {
         #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,10 +100,15 @@ mod tests {
         pub(super) struct ClientPacket;
         pub(super) struct Corners;
         pub(super) struct Suggestion;
+<<<<<<< HEAD
         pub(super) struct HudBatch;
         pub(super) struct TooltipElement;
         #[derive(Clone, Copy)]
         pub(super) struct TooltipPlace;
+=======
+        #[derive(Default)]
+        pub(super) struct HudBatch(pub Vec<u32>);
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         pub(super) struct BiomeColors;
         pub(super) struct SpawnEntry;
         pub(super) struct UseAnimation;
@@ -133,6 +139,7 @@ mod tests {
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
+<<<<<<< HEAD
         pub(super) struct ShieldBlock;
         pub(super) struct HurtSource<'a> {
             pub(super) damage_type: &'a str,
@@ -147,6 +154,9 @@ mod tests {
         pub(super) struct PhantomSpawnResult;
         #[derive(Clone, Copy)]
         pub(super) struct SleepProblem;
+=======
+        pub(super) struct WorldPrimitives;
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         pub(super) struct Music;
         pub(super) struct MusicLayer;
         pub(super) struct NativeBlockRim;
@@ -717,6 +727,7 @@ mod tests {
         id: u32,
         calls: Arc<Mutex<Vec<u32>>>,
     }
+<<<<<<< HEAD
     impl BlockPart for Mod {
         fn block_subscribed(&self) -> &'static [Option<HookId>] {
             &[]
@@ -738,6 +749,13 @@ mod tests {
             });
         }
         fn block_entity_submit(&self, _: &dyn ClientHost, event: &mut BlockEntitySubmitEvent<'_>) {
+=======
+    impl Hooks for Mod {
+        fn world_submit(&self, _: &dyn Host, event: &mut WorldSubmitEvent<'_>) {
+            event.draw.0.push(self.id);
+        }
+        fn block_entity_submit(&self, _: &dyn Host, event: &mut BlockEntitySubmitEvent<'_>) {
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             assert_eq!(event.pos, [1, 2, 3]);
             assert_eq!(event.block, "example:machine");
             event.draw.mark(self.id);
@@ -869,6 +887,22 @@ mod tests {
     }
 
     #[test]
+    fn world_submit_dispatches_in_order_with_shared_draw() {
+        let mods: Vec<Box<dyn Hooks>> = vec![1, 2]
+            .into_iter()
+            .map(|id| {
+                Box::new(Mod {
+                    id,
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                }) as Box<dyn Hooks>
+            })
+            .collect();
+        let mut draw = NativeWorldDraw(Vec::new());
+        dispatch_world_submit(&TestHost, &mods, &mut draw);
+        assert_eq!(draw.0, [1, 2]);
+    }
+
+    #[test]
     fn block_entity_submit_dispatches_in_order_with_shared_draw() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         install_parts(Parts {
@@ -885,6 +919,35 @@ mod tests {
             &mut draw,
         );
         assert_eq!(draw.0, [1, 2]);
+    }
+
+    #[test]
+    fn foreground_gui_preserves_draws_and_dispatches_with_visibility_flags() {
+        struct Indicator(u32);
+        impl Hooks for Indicator {
+            fn gui_render_post(&self, _: &dyn Host, event: &mut GuiRenderPostEvent<'_>) {
+                // A persistent indicator opts into F1 and hides on focus loss.
+                if event.focused {
+                    event
+                        .batch
+                        .0
+                        .push(self.0 + u32::from(event.gui_hidden) * 10);
+                }
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Indicator(1)), Box::new(Indicator(2))];
+        for (hidden, focused, expected) in [
+            (false, true, vec![99, 1, 2]),
+            (true, true, vec![99, 11, 12]),
+            (true, false, vec![99]),
+        ] {
+            let mut batch = HudBatch(vec![99]);
+            dispatch_gui_render_post(&TestHost, &mods, &mut batch, hidden, focused);
+            assert_eq!(batch.0, expected);
+        }
+        let mut batch = HudBatch(vec![99]);
+        dispatch_gui_render_post(&TestHost, &[], &mut batch, true, true);
+        assert_eq!(batch.0, [99]);
     }
 
     #[test]

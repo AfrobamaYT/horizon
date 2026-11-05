@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "Tá tógáil dhúchasach nó glanadh taisce ar siúl. Bain triail eile as nuair a bheidh sé críochnaithe.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Glanadh {bytes} beart den taisce tógála dúchasaí. Tiomsófar an chéad tógáil athraithe eile ón tús.",
+  "Could not access the native build cache: {error}": "Níorbh fhéidir rochtain a fháil ar an taisce tógála dúchasaí: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "Cuir isteach teorainn taisce i GiB; múchann 0 an glanadh uathoibríoch.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "Diúltaítear glanadh na taisce dúchasaí ag comhad nó nasc gan choinne: {path}",
+  "Building {name}'s post-build step": "Céim iar-thógála {name} a thógáil",
+  "In use": "In úsáid",
+  "Prepare": "Ullmhaigh",
+  "Developer options": "Roghanna forbróirí",
+  "{online} of {max} players": "{online} de {max} imreoir",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Eagrán Java). Íoslódálann Play é ó Mojang do do chuntas den chéad uair, leis an Java atá de dhíth air.",
+  "Close": "Dún",
+  "Builds from GitHub. Each one installs into its own folder.": "Tógann ó GitHub. Suiteálann gach ceann ina fhillteán féin.",
+  "Copy…": "Cóipeáil…",
+  "Play with {count} mods": "Seinn le {count} mods",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "Níl aon freastalaithe fós: cuir ceann anseo nó i scáileán Il-imreora an chluiche.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} liostaithe ag a n-íoslódáil Modrinth",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), nó mar shampla Prism, MultiMC nó CurseForge. Horizon poirt an méid is féidir leis ar an ríomhaire seo, ó d’íoslódálacha féin, agus seinneann sé an paca mar a phróifíl féin. Níl aon rud uaslódáilte nó roinnte.",
   "1 hour": "1 uair",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "Faigh saor in aisce",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Ní fhreastalaíonn soláthraí íocaíochta an tsiopa ar do thír, mar sin is féidir leat an tSraith bunaitheoir a fháil anseo saor in aisce.",
   "The Founder Set is yours.": "Is leatsa an tSraith bunaitheoir.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "Oscail an siopa",
+  "You don't own any cosmetics yet.": "Níl aon chosmaid agat go fóill.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "Faigh saor in aisce",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Ní fhreastalaíonn soláthraí íocaíochta an tsiopa ar do thír, mar sin is féidir leat an tSraith bunaitheoir a fháil anseo saor in aisce.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Is leatsa an tSraith bunaitheoir."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

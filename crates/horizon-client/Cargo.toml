@@ -149,6 +149,16 @@ path = "tests/launch_api.rs"
 name = "mod_api_hooks"
 path = "tests/mod_api_hooks.rs"
 
+<<<<<<< HEAD
+=======
+[[example]]
+name = "native_gui_overlay_probe"
+path = "examples/native_gui_overlay_probe.rs"
+
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 [lints]
 workspace = true
 

@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "Ein nativer Build oder eine Cache-Bereinigung läuft. Versuche es nach dem Abschluss erneut.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} Bytes des nativen Build-Caches freigegeben. Der nächste geänderte Build wird vollständig neu kompiliert.",
+  "Could not access the native build cache: {error}": "Zugriff auf den nativen Build-Cache fehlgeschlagen: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "Gib ein Cache-Limit in GiB ein; 0 deaktiviert die automatische Bereinigung.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "Bereinigung des nativen Caches wegen unerwarteter Datei oder Verknüpfung verweigert: {path}",
+  "Building {name}'s post-build step": "Post-Build-Schritt von {name} wird gebaut",
+  "In use": "In Verwendung",
+  "Prepare": "Vorbereiten",
+  "Developer options": "Entwickleroptionen",
+  "{online} of {max} players": "{online} von {max} Spielern",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition). Beim ersten Mal lädt „Spielen“ es für dein Konto von Mojang herunter, mit dem Java, das es braucht.",
+  "Close": "Schließen",
+  "Builds from GitHub. Each one installs into its own folder.": "Builds von GitHub. Jedes wird in einen eigenen Ordner installiert.",
+  "Copy…": "Kopieren…",
+  "Play with {count} mods": "Play with {count} mods",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "Noch keine Server: Füge hier oder im Mehrspieler-Bildschirm des Spiels einen hinzu.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} über ihren Modrinth-Download aufgeführt",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.",
   "1 hour": "1 Stunde",
@@ -1111,8 +1135,32 @@
   "Move…": "Verschieben…",
   "Move and restart": "Verschieben und neu starten",
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
+<<<<<<< HEAD
   "Claim for free": "Kostenlos holen",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Der Zahlungsanbieter des Shops ist in deinem Land nicht verfügbar, daher kannst du das Gründer-Set hier kostenlos holen.",
   "The Founder Set is yours.": "Das Gründer-Set gehört dir.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "Shop öffnen",
+  "You don't own any cosmetics yet.": "Du besitzt noch keine Kosmetik.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatisch übernimmt die Architektur dieses Launchers. Unter Windows ARM können Sie x64 oder ARM64 wählen. Versionen ohne ARM64 verwenden den signierten x64-Build.",
+  "Game architecture": "Spielarchitektur",
+  "Install selected build": "Ausgewählten Build installieren",
+  "Manual game architectures are available on Windows ARM only.": "Manuelle Spielarchitekturen sind nur unter Windows ARM verfügbar.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native Mods werden vom Windows-ARM64-Launcher noch nicht unterstützt; der verwaltete Compiler ist nicht verfügbar.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native Mods können noch nicht für das ausgewählte ARM64-Spiel erstellt werden. Der verfügbare Compiler erstellt nur x64-Builds.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native Mods können nicht für das ausgewählte x64-Spiel erstellt werden. Für diesen ARM64-Launcher gibt es keinen passenden Compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Geben Sie auto, x64 oder arm64 für die Spielarchitektur ein.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "Diese Version enthält einen {installed}-Spielbuild, in den Einstellungen ist jedoch {selected} ausgewählt. Installieren Sie den ausgewählten Build unter Versionen, bevor Sie das Spiel starten.",
+  "Automatic": "Automatisch",
+  "{tag} has no build for the selected game architecture.": "Für {tag} gibt es keinen Build für die ausgewählte Spielarchitektur.",
+  "Unknown": "Unbekannt",
+  "Claim for free": "Kostenlos holen",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Der Zahlungsanbieter des Shops ist in deinem Land nicht verfügbar, daher kannst du das Gründer-Set hier kostenlos holen.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Das Gründer-Set gehört dir."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

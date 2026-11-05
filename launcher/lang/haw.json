@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "Ke holo nei kekahi kūkulu maoli a i ʻole ka hoʻomaʻemaʻe ʻana i ka waihona. E hoʻāʻo hou ke pau.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Ua hoʻomaʻemaʻe ʻia nā paita {bytes} o ka waihona kūkulu maoli. E hōʻuluʻulu hou ʻia ke kūkulu hoʻololi aʻe mai ka hoʻomaka.",
+  "Could not access the native build cache: {error}": "ʻAʻole hiki ke komo i ka waihona kūkulu maoli: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "E hoʻokomo i ka palena waihona ma GiB; hoʻopau ka 0 i ka hoʻomaʻemaʻe ʻakomi.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "Hōʻole ʻia ka hoʻomaʻemaʻe ʻana i ka waihona maoli ma kekahi faila a loulou i manaʻo ʻole ʻia: {path}",
+  "Building {name}'s post-build step": "Ke kaʻina hana o {name} ma hope o ke kūkulu ʻana",
+  "In use": "Ke hoʻohana nei",
+  "Prepare": "Hoʻomākaukau",
+  "Developer options": "Nā koho mea hoʻomohala",
+  "{online} of {max} players": "{online} o {max} mea pāʻani",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition). Hoʻoiho iā ia mai Mojang no kāu moʻokāki i ka manawa mua, me ka Java e pono ai.",
+  "Close": "Pani",
+  "Builds from GitHub. Each one installs into its own folder.": "Kūkulu ʻia mai GitHub. Hoʻokomo kēlā me kēia i kāna waihona ponoʻī.",
+  "Copy…": "kope…",
+  "Play with {count} mods": "E pāʻani me {count} mods",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "ʻAʻohe kikowaena i kēia manawa: hoʻohui i hoʻokahi ma ʻaneʻi a i ʻole ma ka pale Multiplayer o ka pāʻani.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} i helu ʻia e kā lākou Modrinth download",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), a i ʻole kahi laʻana Prism, MultiMC a i ʻole CurseForge. Horizon awa i nā mea hiki iā ia ma kēia kamepiula, mai kāu hoʻoiho ponoʻī, a hoʻokani i ka pūʻolo ma ke ʻano he ʻike ponoʻī. ʻAʻohe mea i hoʻouka ʻia a kaʻana like.",
   "1 hour": "1 hola",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "Kiʻi manuahi",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "ʻAʻole lawelawe ka mea uku o ka hale kūʻai i kou ʻāina, no laila hiki iā ʻoe ke kiʻi i ka Hoʻonohonoho hoʻokumu ma ʻaneʻi me ka manuahi.",
   "The Founder Set is yours.": "Nou ka Hoʻonohonoho hoʻokumu.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "E wehe i ka hale kūʻai",
+  "You don't own any cosmetics yet.": "ʻAʻohe āu mea hoʻonaninani i kēia manawa.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "Kiʻi manuahi",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "ʻAʻole lawelawe ka mea uku o ka hale kūʻai i kou ʻāina, no laila hiki iā ʻoe ke kiʻi i ka Hoʻonohonoho hoʻokumu ma ʻaneʻi me ka manuahi.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Nou ka Hoʻonohonoho hoʻokumu."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

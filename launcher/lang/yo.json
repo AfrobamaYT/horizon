@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "Ìkọ́lé abínibí tàbí ìmọ́tótó cache ń lọ lọ́wọ́. Gbìyànjú lẹ́ẹ̀kan sí i nígbà tí ó bá parí.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "A ti pa {bytes} bytes rẹ́ kúrò nínú cache ìkọ́lé abínibí. Ìkọ́lé tí a yí padà tó kàn yóò kó jọ láti ìbẹ̀rẹ̀.",
+  "Could not access the native build cache: {error}": "Kò ṣeé ṣe láti wọlé sí cache ìkọ́lé abínibí: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "Tẹ ààlà cache sínú GiB; 0 ń pa ìmọ́tótó aládàáṣe.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "A kọ ìmọ́tótó cache abínibí ní fáìlì tàbí ìjápọ̀ tí a kò retí: {path}",
+  "Building {name}'s post-build step": "Igbesẹ ikọle {name}",
+  "In use": "Ni lilo",
+  "Prepare": "Murasilẹ",
+  "Developer options": "Olùgbéejáde aṣayan",
+  "{online} of {max} players": "{online} ti {max} awọn ẹrọ orin",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition). Mu awọn igbasilẹ lati Mojang fun akọọlẹ rẹ fun igba akọkọ, pẹlu Java ti o nilo.",
+  "Close": "Sunmọ",
+  "Builds from GitHub. Each one installs into its own folder.": "Kọ lati GitHub. Olukuluku wọn fi sori ẹrọ sinu folda tirẹ.",
+  "Copy…": "Daakọ…",
+  "Play with {count} mods": "Mu ṣiṣẹ pẹlu awọn mods {count}",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "Ko si olupin sibẹsibẹ: ṣafikun ọkan nibi tabi ni iboju pupọ ti ere naa.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} ti a ṣe akojọ nipasẹ igbasilẹ Modrinth wọn",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), tabi Prism, MultiMC tabi CurseForge apeere. Horizon awọn ebute oko oju omi ohun ti o le lori kọnputa yii, lati awọn igbasilẹ tirẹ, ati mu idii naa ṣiṣẹ bi profaili tirẹ. Ko si ohun ti a po si tabi pin.",
   "1 hour": "Wakati 1",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "Gbà á lọ́fẹ̀ẹ́",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Olùpèsè ìsanwó ṣọ́ọ̀bù kò ṣiṣẹ́ ní orílẹ̀-èdè rẹ, nítorí náà o lè gba Oludasile ṣeto níbí lọ́fẹ̀ẹ́.",
   "The Founder Set is yours.": "Oludasile ṣeto jẹ́ tìrẹ.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "Ṣí ṣọ́ọ̀bù",
+  "You don't own any cosmetics yet.": "O ò tíì ní ohun ikunra kankan.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "Gbà á lọ́fẹ̀ẹ́",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Olùpèsè ìsanwó ṣọ́ọ̀bù kò ṣiṣẹ́ ní orílẹ̀-èdè rẹ, nítorí náà o lè gba Oludasile ṣeto níbí lọ́fẹ̀ẹ́.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Oludasile ṣeto jẹ́ tìrẹ."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

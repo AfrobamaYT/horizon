@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "Выполняется нативная сборка или очистка кэша. Повторите попытку после завершения.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Освобождено {bytes} байт кэша нативной сборки. Следующая сборка с изменениями будет выполнена с нуля.",
+  "Could not access the native build cache: {error}": "Не удалось получить доступ к кэшу нативной сборки: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "Введите ограничение кэша в ГиБ; 0 отключает автоматическую очистку.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "Очистка нативного кэша отклонена из-за неожиданного файла или ссылки: {path}",
+  "Building {name}'s post-build step": "Сборка шага после сборки мода {name}",
+  "In use": "Используется",
+  "Prepare": "Подготовить",
+  "Developer options": "Для разработчиков",
+  "{online} of {max} players": "{online} из {max} игроков",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java Edition). При первом запуске «Играть» скачает его у Mojang для вашего аккаунта вместе с нужной ему Java.",
+  "Close": "Закрыть",
+  "Builds from GitHub. Each one installs into its own folder.": "Сборки с GitHub. Каждая устанавливается в собственную папку.",
+  "Copy…": "Копировать…",
+  "Play with {count} mods": "Play with {count} mods",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "Серверов пока нет: добавьте сервер здесь или в меню «Сетевая игра».",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} указано по ссылке на скачивание с Modrinth",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.",
   "1 hour": "1 час",
@@ -1111,8 +1135,32 @@
   "Move…": "Перенести…",
   "Move and restart": "Перенести и перезапустить",
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
+<<<<<<< HEAD
   "Claim for free": "Получить бесплатно",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Платёжный сервис магазина не работает в вашей стране, поэтому Набор основателя можно получить здесь бесплатно.",
   "The Founder Set is yours.": "Набор основателя теперь ваш.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "Открыть магазин",
+  "You don't own any cosmetics yet.": "У вас пока нет косметики.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Автоматически использует архитектуру этого лаунчера. В Windows на ARM можно выбрать x64 или ARM64. В выпусках без ARM64 используется подписанная сборка x64.",
+  "Game architecture": "Архитектура игры",
+  "Install selected build": "Установить выбранную сборку",
+  "Manual game architectures are available on Windows ARM only.": "Ручной выбор архитектуры игры доступен только в Windows на ARM.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Нативные моды пока не поддерживаются лаунчером Windows ARM64: управляемый компилятор недоступен.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Пока нельзя собрать нативные моды для выбранной игры ARM64. Доступный компилятор собирает только для x64.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Нельзя собрать нативные моды для выбранной игры x64. Для этого лаунчера ARM64 нет подходящего компилятора.",
+  "Say auto, x64 or arm64 for the game architecture.": "Укажите auto, x64 или arm64 для архитектуры игры.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "В этой версии установлена сборка игры {installed}, а в настройках выбрана {selected}. Перед запуском установите выбранную сборку на странице «Версии».",
+  "Automatic": "Автоматически",
+  "{tag} has no build for the selected game architecture.": "Для {tag} нет сборки для выбранной архитектуры игры.",
+  "Unknown": "Неизвестно",
+  "Claim for free": "Получить бесплатно",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Платёжный сервис магазина не работает в вашей стране, поэтому Набор основателя можно получить здесь бесплатно.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "Набор основателя теперь ваш."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }

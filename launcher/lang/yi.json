@@ -1,4 +1,28 @@
 {
+<<<<<<< HEAD
+=======
+  "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.": "{carried} of {total} mods that need porting come over as content (blocks, items and structures); their own code does not run.",
+  "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).": "Not yet: {ready} are content mods Port can carry over, {blocked} need mod support Horizon does not have yet (machines, menus, behaviour, mobs, dimensions, client features), {later} are not sorted yet (not identified, or waiting on other mods or other work).",
+  "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.": "Partial means part of a mod came over, but something is left out, differs from the original or has not been checked yet.",
+  "Performance mode": "Performance mode",
+  "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.": "Smoother on older computers: a lower-resolution sky, a cheaper blur, window resizes baked in the background and no frame per mouse move.",
+  "A native build or cache cleanup is running. Try again when it finishes.": "א נאַטיווער בוי אָדער אַ רייניקונג פֿון דעם קעש לויפֿט. פּרוּווט נאָך אַ מאָל ווען ער ענדיקט זיך.",
+  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "אויסגעליידיקט {bytes} בייטן פֿון דעם נאַטיוון בוי־קעש. דער קומעדיקער געענדערטער בוי וועט קאָמפּילירט ווערן פֿון אָנהייב.",
+  "Could not access the native build cache: {error}": "מע קען נישט צוקומען צום נאַטיוון בוי־קעש: {error}",
+  "Enter a cache limit in GiB; 0 disables automatic cleanup.": "שרייבט אַרײַן אַ קעש־גרענעץ אין GiB; 0 שטעלט אָפּ די אויטאָמאַטישע רייניקונג.",
+  "Refusing native cache cleanup at an unexpected file or link: {path}": "מע וואָרפֿט אָפּ די רייניקונג פֿון דעם נאַטיוון קעש בײַ אַן אומגעריכטער טעקע אָדער לינק: {path}",
+  "Building {name}'s post-build step": "בילדינג {name} ס פּאָסטן-בויען שריט",
+  "In use": "אין נוצן",
+  "Prepare": "צוגרייטן",
+  "Developer options": "דעוועלאָפּער אָפּציעס",
+  "{online} of {max} players": "{online} פון {max} פּלייַערס",
+  "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.": "Minecraft {version} (Java אַדישאַן). שפּיל דאַונלאָודז עס פֿון Mojang פֿאַר דיין חשבון די ערשטער מאָל, מיט די Java עס דאַרף.",
+  "Close": "נאָענט",
+  "Builds from GitHub. Each one installs into its own folder.": "בויען פֿון GitHub. יעדער איז אינסטאַלירן אין זיין אייגענע טעקע.",
+  "Copy…": "קאָפּי ...",
+  "Play with {count} mods": "שפּיל מיט {count} מאָדס",
+  "No servers yet: add one here or in the game's Multiplayer screen.": "נאָך קיין סערווערס: לייג איינער דאָ אָדער אין די שפּיל ס מולטיפּלייַער פאַרשטעלן.",
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
   ", {count} listed by their Modrinth download": ", {count} ליסטעד דורך זייער Modrinth אראפקאפיע",
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), אָדער אַ Prism־, MultiMC־ אָדער CurseForge־אינסטאַנץ. Horizon פּאָרטירט וואָס עס קען אויף דעם קאָמפּיוטער, פֿון אײַערע אייגענע אַראָפּלאָדונגען, און שפּילט דעם פּאַק ווי אַן אייגענעם פּראָפֿיל. גאָרנישט ווערט אַרויפֿגעלאָדן אָדער געטיילט.",
   "1 hour": "1 שעה",
@@ -1111,8 +1135,32 @@
   "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.": "Moves all launcher, game and build data, including settings, worlds, instances and installed versions. Choose an empty folder with enough free space.",
   "Move…": "Move…",
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
+<<<<<<< HEAD
   "Claim for free": "באַקום אומזיסט",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "דער צאָלונג־סערוויס פֿון דעם קראָם אַרבעט נישט אין דײַן לאַנד, דערפֿאַר קענסטו דאָ באַקומען דעם גרינדער שטעלן אומזיסט.",
   "The Founder Set is yours.": "דער גרינדער שטעלן איז דײַנער.",
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+=======
+  "Open the shop": "עפֿן דעם קראָם",
+  "You don't own any cosmetics yet.": "דו האסט נאָך קיין קאָסמעטיקס נישט.",
+  "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.": "Automatic follows this launcher's architecture. On Windows ARM, choose x64 or ARM64. Releases without ARM64 use the signed x64 build.",
+  "Game architecture": "Game architecture",
+  "Install selected build": "Install selected build",
+  "Manual game architectures are available on Windows ARM only.": "Manual game architectures are available on Windows ARM only.",
+  "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.": "Native mods are not supported by the Windows ARM64 launcher yet; its managed compiler is not available.",
+  "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.": "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.",
+  "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.": "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.",
+  "Say auto, x64 or arm64 for the game architecture.": "Say auto, x64 or arm64 for the game architecture.",
+  "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.": "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
+  "Automatic": "Automatic",
+  "{tag} has no build for the selected game architecture.": "{tag} has no build for the selected game architecture.",
+  "Unknown": "Unknown",
+  "Claim for free": "באַקום אומזיסט",
+  "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "דער צאָלונג־סערוויס פֿון דעם קראָם אַרבעט נישט אין דײַן לאַנד, דערפֿאַר קענסטו דאָ באַקומען דעם גרינדער שטעלן אומזיסט.",
+  "Run `horizon-launcher install latest` to get one.": "Run `horizon-launcher install latest` to get one.",
+  "There is already an instance called {name}. Choose another name.": "There is already an instance called {name}. Choose another name.",
+  "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
+  "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
+  "The Founder Set is yours.": "דער גרינדער שטעלן איז דײַנער."
+>>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }
