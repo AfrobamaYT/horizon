@@ -1378,7 +1378,14 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
                 stack.opaque_reason,
                 Some("not an unconditional game dependency")
             );
-            let (_, counts) = crate::internals_table::table(&widened.entries);
+            let (_, counts) = crate::internals_table::table(
+                &widened.entries,
+                &widened
+                    .entries
+                    .iter()
+                    .map(|i| i.path.clone())
+                    .collect::<Vec<_>>(),
+            );
             assert_eq!(
                 counts.skipped_types["not an unconditional game dependency"],
                 1
@@ -1413,7 +1420,14 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             widened.entries[0].opaque_reason,
             Some("shape module walk failed")
         );
-        let (_, counts) = crate::internals_table::table(&widened.entries);
+        let (_, counts) = crate::internals_table::table(
+            &widened.entries,
+            &widened
+                .entries
+                .iter()
+                .map(|i| i.path.clone())
+                .collect::<Vec<_>>(),
+        );
         assert_eq!(counts.types, 0);
         assert_eq!(counts.skipped_types["shape module walk failed"], 1);
     }
@@ -1588,7 +1602,14 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
             "struct Guarded { #[cfg(feature = \"audio\")] sound: u8 }\nenum Cases { #[cfg_attr(feature = \"audio\", cfg(unix))] Audio, Normal }\n",
         );
         let widened = widen_with(&fixture.0, &[]).unwrap();
-        let (_, counts) = crate::internals_table::table(&widened.entries);
+        let (_, counts) = crate::internals_table::table(
+            &widened.entries,
+            &widened
+                .entries
+                .iter()
+                .map(|i| i.path.clone())
+                .collect::<Vec<_>>(),
+        );
         assert_eq!(counts.types, 0);
         assert_eq!(counts.skipped_types["conditional field or variant"], 2);
     }

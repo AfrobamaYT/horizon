@@ -1,6 +1,37 @@
 //! `horizon-stage ROOT POINTS_JSON INTERNALS_JSON`: mark points and expose internals in a staged
 //! source copy, then write both manifests (#589). Never run on a working tree.
-use std::path::PathBuf;
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
+
+/// One file per mod; sorting and deduplication make the union independent of directory order.
+fn declarations(root: &Path) -> Result<Vec<String>, String> {
+    let directory = root.join("crates/horizon-mod-api-gen/wasm-internals");
+    let files = match std::fs::read_dir(&directory) {
+        Ok(files) => files,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("{}: {error}", directory.display())),
+    };
+    let mut paths = BTreeSet::new();
+    for file in files {
+        let file = file
+            .map_err(|e| format!("{}: {e}", directory.display()))?
+            .path();
+        if file.extension().is_none_or(|ext| ext != "txt") {
+            continue;
+        }
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        for line in text.lines() {
+            let path = line.split('#').next().unwrap_or_default().trim();
+            if !path.is_empty() {
+                paths.insert(path.to_owned());
+            }
+        }
+    }
+    Ok(paths.into_iter().collect())
+}
 
 /// Keep unsafe forbidden everywhere except the generated table, in the staged copy only.
 fn with_internals_table(source: &str, table: &str) -> String {
@@ -20,20 +51,19 @@ fn main() {
         std::fs::write(internals, text + "\n")
             .map_err(|e| format!("{}: {e}", internals.display()))?;
         // The table a wasm mod reaches the internals through, at the game crate's root.
-        let (table, counts) = horizon_mod_api_gen::internals_table::table(&widened.entries);
+        let declared = declarations(root)?;
+        let (table, counts) =
+            horizon_mod_api_gen::internals_table::table(&widened.entries, &declared);
         let lib = root.join("crates/horizon-client/src/lib.rs");
         let text = std::fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
         std::fs::write(&lib, with_internals_table(&text, &table))
             .map_err(|e| format!("{}: {e}", lib.display()))?;
         println!(
-            "internals table: {} types, {} thunks, {} functions that can't cross",
-            counts.types, counts.thunks, counts.skipped
+            "internals table: {} types, {} thunks from {} declared paths ({} skipped)",
+            counts.types, counts.thunks, counts.declared, counts.skipped
         );
-        for (reason, count) in &counts.skipped_types {
-            println!("internals table: skipped {count} types: {reason}");
-        }
-        for (reason, count) in &counts.skipped_functions {
-            println!("internals table: skipped {count} functions: {reason}");
+        for (path, reason) in &counts.refused {
+            println!("internals table: skipped {path}: {reason}");
         }
         let staged = horizon_mod_api_gen::points::stage(root)?;
         let points = horizon_mod_api_gen::points::game_points(root)?;

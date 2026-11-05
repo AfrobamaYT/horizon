@@ -1,4 +1,4 @@
-//! The staged game's internals table (#589 W): for every type and function `internals.json` lists
+//! The staged game's opt-in internals table (#589 W): for declared `internals.json` items
 //! that can cross to a wasm mod, the code the wasm runtime reaches them through
 //! (`mod_points::internals::Table`). Generated into the staged copy only, as the crate root's
 //! `__internals`; the working tree has none of it.
@@ -14,7 +14,7 @@ use crate::crossing::{Collection, Crossing, Rule, Scalar, Shape, Wrapper, bare};
 use crate::internals::Internal;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// The game's crate.
 const GAME: &str = "horizon_client";
@@ -23,6 +23,10 @@ const GAME: &str = "horizon_client";
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Counts {
     pub types: usize,
+    /// Distinct paths requested by the per-mod declaration files.
+    pub declared: usize,
+    /// Declared paths that cannot be exposed, with their reason.
+    pub refused: BTreeMap<String, &'static str>,
     pub thunks: usize,
     /// Functions with a part that can't cross, or a form a thunk can't make (a generic, a `self`
     /// taken by value, a returned value that is no copy).
@@ -33,8 +37,47 @@ pub struct Counts {
     pub skipped_functions: BTreeMap<&'static str, usize>,
 }
 
+/// A field owner or receiver exposes only declared fields. A type reached below a field,
+/// or through a function's arguments/result, exposes its whole crossable layout.
+#[derive(Clone, Default)]
+struct Selection {
+    full: HashSet<String>,
+    owners: BTreeMap<String, BTreeSet<usize>>,
+}
+
+impl Selection {
+    fn reach(&mut self, shape: &Shape, rule: &Rule) {
+        if rule.crossing_of(shape) == Crossing::Opaque {
+            return;
+        }
+        match shape {
+            Shape::Named(path, _) => {
+                if !self.full.insert(path.clone()) {
+                    return;
+                }
+                let named = rule.named(path).expect("listed");
+                for field in rule.fields(path) {
+                    self.reach(&rule.shape(&named.module, Some(path), field.ty), rule);
+                }
+            }
+            Shape::Ref { to, .. }
+            | Shape::Wrapped(_, to)
+            | Shape::Array(to, _)
+            | Shape::Slice(to)
+            | Shape::Option(to) => self.reach(to, rule),
+            Shape::Tuple(parts) | Shape::Collection(_, parts) => {
+                for part in parts {
+                    self.reach(part, rule);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 struct Gen<'r> {
     rule: &'r Rule,
+    selection: Selection,
     /// Each walked type's id, by its spelling.
     ids: HashMap<String, u32>,
     /// Each walked type, in id order: its spelling and node function.
@@ -159,6 +202,18 @@ fn codec_names(path: &str) -> (syn::Ident, syn::Ident) {
 }
 
 impl<'r> Gen<'r> {
+    fn new(rule: &'r Rule, selection: Selection) -> Self {
+        Self {
+            rule,
+            selection,
+            ids: HashMap::new(),
+            nodes: Vec::new(),
+            codecs: HashMap::new(),
+            items: Vec::new(),
+            skip_reason: "unknown",
+        }
+    }
+
     /// An expression of `Value` from `expr`, a reference to a copy of `shape`.
     fn encode(&mut self, shape: &Shape, expr: TokenStream) -> TokenStream {
         match shape {
@@ -483,8 +538,10 @@ impl<'r> Gen<'r> {
     fn node_body(&mut self, shape: &Shape) -> TokenStream {
         let rule = self.rule;
         let rust = spell(shape).expect("crossable");
+        // Reading a whole copy would also expose undeclared fields of a partial owner.
+        let full = !matches!(shape, Shape::Named(path, _) if !self.selection.full.contains(path));
         let read = match rule.crossing_of(shape) {
-            Crossing::Copy(_) => {
+            Crossing::Copy(_) if full => {
                 let read = self.encode(shape, quote!(r));
                 quote!(I::Op::Read => { let r = &*(p as *const #rust); Ok(I::Reply::Value(#read)) })
             }
@@ -498,6 +555,15 @@ impl<'r> Gen<'r> {
                 let path_ty = path_tokens(path);
                 let mut arms = Vec::new();
                 for (i, field) in rule.fields(path).iter().enumerate() {
+                    if !full
+                        && !self
+                            .selection
+                            .owners
+                            .get(path)
+                            .is_some_and(|fields| fields.contains(&i))
+                    {
+                        continue;
+                    }
                     let part_shape = rule.shape(&named.module, Some(path), field.ty);
                     let member = &field.member;
                     let (get, set, ptr) = match field.case {
@@ -693,6 +759,7 @@ impl<'r> Gen<'r> {
             if rule.crossing_of(&shape) == Crossing::Opaque {
                 return None;
             }
+            self.selection.owners.entry(this.clone()).or_default();
             let ty = spell(&shape)?;
             if r.mutability.is_some() {
                 writes |= 1;
@@ -773,6 +840,7 @@ impl<'r> Gen<'r> {
                 return None;
             }
             let shape = rule.shape(module, this, &input.ty);
+            self.selection.reach(&shape, rule);
             let arg = format_ident!("a{i}");
             match (&shape, rule.crossing_of(&shape)) {
                 (_, Crossing::Opaque) => return None,
@@ -823,6 +891,7 @@ impl<'r> Gen<'r> {
             syn::ReturnType::Default => quote!(Ok(I::Reply::Done)),
             syn::ReturnType::Type(_, ty) => {
                 let shape = rule.shape(module, this, ty);
+                self.selection.reach(&shape, rule);
                 match (&shape, rule.crossing_of(&shape)) {
                     (_, Crossing::Opaque) => return None,
                     (_, Crossing::Copy(_)) => {
@@ -909,53 +978,123 @@ fn signature(written: &str) -> Option<syn::Signature> {
     parser.parse_str(written).ok()
 }
 
-/// The `__internals` module for `internals`, and what it holds.
-pub fn table(internals: &[Internal]) -> (String, Counts) {
+/// The `__internals` module for the union of declared manifest paths, and what it holds.
+/// Missing or unsupported declarations are reported, not fatal: the loader refuses that mod.
+pub fn table(internals: &[Internal], declared: &[String]) -> (String, Counts) {
     let rule = Rule::new(internals);
-    let mut generator = Gen {
-        rule: &rule,
-        ids: HashMap::new(),
-        nodes: Vec::new(),
-        codecs: HashMap::new(),
-        items: Vec::new(),
-        skip_reason: "unknown",
-    };
-    let mut paths: Vec<&str> = rule.paths().collect();
-    paths.sort_unstable();
-    for path in paths {
-        let shape = Shape::Named(path.to_owned(), rule.named(path).expect("listed").lifetimes);
-        if rule.crossing_of(&shape) != Crossing::Opaque {
-            generator.node(&shape);
-        }
-    }
-    let mut thunks = Vec::new();
+    let declared: BTreeSet<_> = declared.iter().map(String::as_str).collect();
     let mut counts = Counts {
-        skipped_types: rule.skipped_types(),
+        declared: declared.len(),
         ..Counts::default()
     };
-    for internal in internals {
-        if !matches!(internal.kind, "method" | "fn") {
+    let mut selection = Selection::default();
+    let mut functions = Vec::new();
+    for path in declared {
+        let entries: Vec<_> = internals.iter().filter(|i| i.path == path).collect();
+        let Some(internal) = entries.iter().find(|i| i.cfg.is_empty()).copied() else {
+            counts.refused.insert(
+                path.into(),
+                if entries.is_empty() {
+                    "not in internals.json"
+                } else {
+                    "conditional item"
+                },
+            );
             continue;
-        }
-        if !internal.cfg.is_empty() {
-            counts.skipped += 1;
+        };
+        let reason = match internal.kind {
+            "method" | "fn" => {
+                functions.push(internal);
+                continue;
+            }
+            "struct" | "enum" => {
+                let ty = bare(path);
+                let shape = Shape::Named(ty.clone(), rule.named(&ty).map_or(0, |n| n.lifetimes));
+                if rule.crossing_of(&shape) == Crossing::Opaque {
+                    let reason = rule
+                        .named(&ty)
+                        .and_then(|n| n.opaque_reason)
+                        .unwrap_or("opaque type");
+                    *counts.skipped_types.entry(reason).or_default() += 1;
+                    reason
+                } else {
+                    selection.reach(&shape, &rule);
+                    continue;
+                }
+            }
+            "field" => {
+                // An enum field's manifest path includes its case; numbering spans all cases.
+                let field = rule.paths().find_map(|owner| {
+                    rule.fields(owner)
+                        .into_iter()
+                        .enumerate()
+                        .find_map(|(index, field)| {
+                            use quote::ToTokens;
+                            let member = field.member.to_token_stream().to_string();
+                            let field_path = match field.case {
+                                Some((_, case)) => format!("{owner}::{case}::{member}"),
+                                None => format!("{owner}::{member}"),
+                            };
+                            (bare(path) == field_path).then_some((owner, index, field))
+                        })
+                });
+                if let Some((owner, index, field)) = field {
+                    let named = rule.named(owner).expect("listed");
+                    let shape = rule.shape(&named.module, Some(owner), field.ty);
+                    let owner_shape = Shape::Named(owner.into(), named.lifetimes);
+                    if rule.crossing_of(&owner_shape) == Crossing::Opaque {
+                        named.opaque_reason.unwrap_or("opaque owner")
+                    } else if rule.crossing_of(&shape) == Crossing::Opaque {
+                        "field type cannot cross"
+                    } else {
+                        selection
+                            .owners
+                            .entry(owner.into())
+                            .or_default()
+                            .insert(index);
+                        selection.reach(&shape, &rule);
+                        continue;
+                    }
+                } else {
+                    "unresolved field owner"
+                }
+            }
+            _ => "unsupported item kind",
+        };
+        counts.refused.insert(path.into(), reason);
+    }
+    // Validate functions before generating the final nodes: arguments/results may promote a
+    // partial owner to a full layout. Discard each refused probe, including its nodes/codecs.
+    let mut accepted = Vec::new();
+    for internal in functions {
+        let mut probe = Gen::new(&rule, selection.clone());
+        if probe.thunk(internal).is_some() {
+            selection = probe.selection;
+            accepted.push(internal);
+        } else {
             *counts
                 .skipped_functions
-                .entry("conditional function")
+                .entry(probe.skip_reason)
                 .or_default() += 1;
-            continue;
-        }
-        match generator.thunk(internal) {
-            Some(thunk) => thunks.push(thunk),
-            None => {
-                counts.skipped += 1;
-                *counts
-                    .skipped_functions
-                    .entry(generator.skip_reason)
-                    .or_default() += 1;
-            }
+            counts
+                .refused
+                .insert(internal.path.clone(), probe.skip_reason);
         }
     }
+    let mut roots: BTreeSet<_> = selection.full.iter().cloned().collect();
+    roots.extend(selection.owners.keys().cloned());
+    let mut generator = Gen::new(&rule, selection);
+    for path in roots {
+        generator.node(&Shape::Named(
+            path.clone(),
+            rule.named(&path).expect("listed").lifetimes,
+        ));
+    }
+    let thunks: Vec<_> = accepted
+        .into_iter()
+        .map(|i| generator.thunk(i).expect("validated thunk"))
+        .collect();
+    counts.skipped = counts.refused.len();
     counts.types = generator.nodes.len();
     counts.thunks = thunks.len();
     let types = generator
@@ -986,6 +1125,13 @@ mod tests {
     use super::*;
     use crate::crossing::tests::internal;
 
+    fn all_table(internals: &[Internal]) -> (String, Counts) {
+        table(
+            internals,
+            &internals.iter().map(|i| i.path.clone()).collect::<Vec<_>>(),
+        )
+    }
+
     #[test]
     fn generated_collection_nodes_compile_and_read_the_actual_element() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -997,7 +1143,7 @@ mod tests {
             .join("crates/horizon-mod-points/src/internals.rs")
             .canonicalize()
             .unwrap();
-        let (code, _) = table(&[internal(
+        let (code, _) = all_table(&[internal(
             "horizon_client::Bag",
             "struct",
             "struct Bag { items: Vec<u8> }",
@@ -1050,7 +1196,7 @@ mod tests {
             "fn count(&self) -> usize",
             "impl Game<'_> { fn count(&self) -> usize }",
         ] {
-            let (_, counts) = table(&[
+            let (_, counts) = all_table(&[
                 internal(
                     "horizon_client::Game",
                     "struct",
@@ -1067,7 +1213,7 @@ mod tests {
 
     #[test]
     fn a_call_cannot_keep_a_decoded_borrow_beyond_its_frame() {
-        let (_, counts) = table(&[
+        let (_, counts) = all_table(&[
             internal(
                 "horizon_client::take_static",
                 "fn",
@@ -1089,7 +1235,7 @@ mod tests {
 
     #[test]
     fn an_argument_cannot_supply_a_borrow_stored_in_the_receiver() {
-        let (_, counts) = table(&[
+        let (_, counts) = all_table(&[
             internal(
                 "horizon_client::World",
                 "struct",
@@ -1122,7 +1268,7 @@ mod tests {
 
     #[test]
     fn conditional_layouts_and_unwidened_lower_layouts_stay_opaque() {
-        let (code, counts) = table(&[
+        let (code, counts) = all_table(&[
             internal(
                 "horizon_client::Conditional",
                 "struct",
@@ -1167,7 +1313,7 @@ mod tests {
             entry.shape_only = true;
             entry
         };
-        let (code, counts) = table(&[
+        let (code, counts) = all_table(&[
             shape(
                 "horizon_items::Stack",
                 "struct",
@@ -1200,7 +1346,7 @@ mod tests {
         let mut take = internal("horizon_client::b::take", "fn", "fn take(data: Alias)");
         take.refs
             .insert("Alias".into(), "horizon_client::a::Data".into());
-        let (_, counts) = table(&[
+        let (_, counts) = all_table(&[
             internal("horizon_client::a::Data", "struct", "struct Data { x: u8 }"),
             take,
         ]);
@@ -1209,7 +1355,7 @@ mod tests {
 
     #[test]
     fn unresolved_imports_and_unexpected_generics_do_not_borrow_another_types_layout() {
-        let (_, counts) = table(&[
+        let (_, counts) = all_table(&[
             internal("horizon_client::a::Cell", "struct", "struct Cell { x: u8 }"),
             internal("horizon_client::a::take", "fn", "fn take(c: Cell<u64>)"),
             internal("horizon_client::b::take", "fn", "fn take(c: Cell)"),
@@ -1221,7 +1367,7 @@ mod tests {
 
     #[test]
     fn unsized_and_custom_hasher_fields_are_not_walked() {
-        let (code, counts) = table(&[internal(
+        let (code, counts) = all_table(&[internal(
             "horizon_client::Fields",
             "struct",
             "struct Fields { slice: &'static [u8], map: HashMap<String, u8, UnknownHasher>, tuple: (u8, Unknown) }",
@@ -1294,7 +1440,7 @@ mod tests {
                 "fn helper (world : & mut World , pos : [i32 ; 3]) -> bool",
             ),
         ];
-        let (code, counts) = table(&internals);
+        let (code, counts) = all_table(&internals);
         syn::parse_file(&code).unwrap_or_else(|e| panic!("{e}\n{code}"));
         // Pos, Mode, Player, World, Game, and World's list and map; `Option<Pos>` is a copy.
         assert_eq!(counts.types, 7, "{code}");
