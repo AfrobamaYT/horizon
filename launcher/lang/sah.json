@@ -1078,7 +1078,6 @@
   "Native": "Native",
   "Nothing to build": "Nothing to build",
   "Optimized": "Optimized",
-  "Prebuilt game": "Prebuilt game",
   "Show last log": "Show last log",
   "The build is running. Cancel it from the card above.": "The build is running. Cancel it from the card above.",
   "Turn off {mod}": "Turn off {mod}",
@@ -1090,5 +1089,6 @@
   "Build cancelled": "Build cancelled",
   "Another build is running": "Another build is running",
   "This instance's build waits until it finishes.": "This instance's build waits until it finishes.",
-  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds."
+  "Can use the prebuilt game": "Can use the prebuilt game",
+  "Can use the prebuilt game, in seconds, if one exists for your Horizon and it serves every mod you turned on. Otherwise the whole game builds.": "Can use the prebuilt game, in seconds, if one exists for your Horizon and it serves every mod you turned on. Otherwise the whole game builds."
 }

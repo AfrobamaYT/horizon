@@ -2322,6 +2322,10 @@ fn install(
                 .join(&bundle.manifest.id),
         )?;
     }
+    if let Err(cancelled) = check_cancelled() {
+        let _ = fs::remove_dir_all(&partial);
+        return Err(cancelled);
+    }
     let dir = target.directory(version);
     let _ = fs::remove_dir_all(&dir);
     fs::rename(&partial, &dir).map_err(|e| e.to_string())?;

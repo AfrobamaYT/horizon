@@ -430,8 +430,8 @@ impl Launcher {
                 Route::Prebuilt => (
                     "flash",
                     pal.accent,
-                    tr("Prebuilt game"),
-                    tr("Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.").to_string(),
+                    tr("Can use the prebuilt game"),
+                    tr("Can use the prebuilt game, in seconds, if one exists for your Horizon and it serves every mod you turned on. Otherwise the whole game builds.").to_string(),
                 ),
                 Route::Game { reason } => (
                     "hammer",
