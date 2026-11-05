@@ -804,6 +804,9 @@ pub trait Hooks {
     /// but its saved entities join afterwards and its light may not be ready:
     /// change the world from a later tick. The chunks around the spawn come
     /// before `server_started`. Not told of a chunk a client receives.
+    /// The chunks leaving in the same tick were already copied for their last
+    /// save: an edit made here to one of them (a neighbour's block entity, say)
+    /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
     #[hook(side = "server", contract = "listen")]
     fn chunk_load();
@@ -2890,12 +2893,6 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn exp_bottle();
-    /// Whether a mod hears `native_pickup_xp`: set `listened`
-    /// (a HEAD injection), or the server skips swapping the player in for it,
-    /// and with this empty the pickup costs nothing more without mods.
-    /// Server-side.
-    #[hook(side = "server", contract = "collect", out = "listened")]
-    fn pickup_xp_listened();
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
     /// and `count` take effect only when not canceled; value is clamped to
     /// 1..=i32::MAX and count to at least one.

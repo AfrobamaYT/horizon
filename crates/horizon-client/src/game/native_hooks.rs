@@ -2801,6 +2801,59 @@ impl Game<'_> {
     ) {
         self.fire_client_chat_received(system, overlay, sender, chat_type, message, cancel);
     }
+    /// `ToastAddEvent`: admit one client toast before it enters a visible queue.
+    pub(super) fn native_toast_add(
+        &self,
+        kind: mod_api::ToastKind,
+        title: &mut Text,
+        description: &mut Option<Text>,
+        cancel: &mut bool,
+    ) {
+        self.fire_toast_add(kind, title, description, cancel);
+    }
+
+    /// The single admission point for all toast families. Producers decide the
+    /// candidate first; only an accepted candidate is applied to its queue.
+    pub(super) fn add_toast(
+        &self,
+        kind: mod_api::ToastKind,
+        title: &mut Text,
+        description: &mut Option<Text>,
+    ) -> bool {
+        // Shared advancement/recipe producers also run on logical servers;
+        // only their receiving client owns toast presentation and its hook.
+        if self.is_logical_server() {
+            return false;
+        }
+        let mut cancel = false;
+        self.native_toast_add(kind, title, description, &mut cancel);
+        !cancel
+    }
+
+    pub(super) fn add_system_toast(
+        &self,
+        mut toast: horizon_client::toasts::SystemToast,
+    ) -> Option<horizon_client::toasts::SystemToast> {
+        self.add_toast(
+            mod_api::ToastKind::System,
+            &mut toast.title,
+            &mut toast.message,
+        )
+        .then_some(toast)
+    }
+
+    pub(super) fn settle_title_toasts(&mut self) {
+        let pending = self.title.as_mut().and_then(|title| {
+            title.poll_backup();
+            title.take_pending_toast()
+        });
+        if let Some(toast) = pending.and_then(|toast| self.add_system_toast(toast))
+            && let Some(title) = self.title.as_mut()
+        {
+            title.apply_toast(toast);
+        }
+    }
+
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
     pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
         self.fire_client_pause_change_pre(paused, cancel);
@@ -8443,13 +8496,6 @@ impl Game<'_> {
     ) {
         self.fire_food_level_changed(player, name, from, to, cancel);
     }
-    /// Whether a mod hears `native_pickup_xp`: set `listened`
-    /// (a HEAD injection), or the server skips swapping the player in for it,
-    /// and with this empty the pickup costs nothing more without mods.
-    /// Server-side.
-    pub(super) fn native_pickup_xp_listened(&mut self, listened: &mut bool) {
-        self.fire_pickup_xp_listened(listened);
-    }
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
     /// and `count` take effect only when not canceled; value is clamped to
     /// 1..=i32::MAX and count to at least one.
@@ -8996,7 +9042,8 @@ impl HitLevel<'_> {
     }
     /// NeoForge's `LivingDamageEvent.Post`: the health of entity `entity` of type `kind` has
     /// just lost the hit `container` describes, with its final values (health damage, the
-    /// reductions, the post-attack invulnerability ticks). It only listens, and fires where
+    /// reductions, the post-attack invulnerability ticks, and `should_cause_side_effects`,
+    /// `hurtServer`'s fresh-hit decision). It only listens, and fires where
     /// `native_living_damage_pre` does once the health took more than 0. It can't write the
     /// entity or the world's blocks: the level host gives the hit's random and level attachments.
     pub(super) fn native_living_damage_post(

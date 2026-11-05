@@ -3662,6 +3662,7 @@ impl Mob {
         let absorbed = self.wolf_armor_absorbs(&source);
         let mut knock = true;
         let window = self.invulnerable as f32 > 10.0;
+        container.record_should_cause_side_effects(!window);
         if window && amount <= self.last_hurt {
             return false;
         }
