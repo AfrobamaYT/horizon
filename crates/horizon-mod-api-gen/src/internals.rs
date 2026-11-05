@@ -1044,7 +1044,8 @@ impl Pass {
             .entries
             .values()
             .filter(|entry| {
-                entry.shape_only
+                matches!(entry.kind, "struct" | "enum")
+                    && !entry.path.starts_with("horizon_client::")
                     && !API_CRATES.contains(&entry.path.split("::").next().unwrap_or_default())
             })
             .map(|entry| entry.path.clone())
@@ -1355,6 +1356,40 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
         let again = widen_with(&fixture.0, &[]).unwrap();
         assert_eq!(result.entries, again.entries);
         assert!(again.changed.is_empty());
+    }
+
+    #[test]
+    fn explicitly_listed_lower_layouts_are_widened_and_walked() {
+        let fixture = shapes_fixture("struct Game {}\n");
+        fixture.put(
+            "crates/horizon-items/src/item_stack.rs",
+            "pub(crate) struct ItemStack { count: u8 }\n",
+        );
+        let result = widen_with(
+            &fixture.0,
+            &[(
+                "internals.txt",
+                "horizon_items::item_stack::ItemStack\n".into(),
+            )],
+        )
+        .unwrap();
+        let path = "horizon_items::item_stack::ItemStack";
+        let entry = result
+            .entries
+            .iter()
+            .find(|entry| entry.path == path)
+            .unwrap();
+        assert!(!entry.shape_only);
+        assert_eq!(entry.opaque_reason, None);
+        let text =
+            fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs")).unwrap();
+        assert!(
+            text.contains("pub struct ItemStack { pub count: u8 }"),
+            "{text}"
+        );
+        let (code, counts) = crate::internals_table::table(&result.entries, &[path.into()]);
+        assert_eq!(counts.types, 1, "{code}");
+        assert_eq!(counts.skipped, 0);
     }
 
     #[test]

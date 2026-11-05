@@ -36,6 +36,8 @@ pub enum Scalar {
     Signed(&'static str),
     Unsigned(&'static str),
     Float(&'static str),
+    /// A 128-bit integer, carried as high and low unsigned 64-bit leaves.
+    Wide(&'static str),
     /// `str`: read only.
     Str,
     String,
@@ -93,11 +95,13 @@ const SCALARS: &[(&str, Scalar)] = &[
     ("i16", Scalar::Signed("i16")),
     ("i32", Scalar::Signed("i32")),
     ("i64", Scalar::Signed("i64")),
+    ("i128", Scalar::Wide("i128")),
     ("isize", Scalar::Signed("isize")),
     ("u8", Scalar::Unsigned("u8")),
     ("u16", Scalar::Unsigned("u16")),
     ("u32", Scalar::Unsigned("u32")),
     ("u64", Scalar::Unsigned("u64")),
+    ("u128", Scalar::Wide("u128")),
     ("usize", Scalar::Unsigned("usize")),
     ("f32", Scalar::Float("f32")),
     ("f64", Scalar::Float("f64")),
@@ -218,12 +222,9 @@ impl Rule {
                 Some("generic type")
             } else if guarded {
                 Some("conditional field or variant")
-            } else if foreign
-                && (!internal.shape_only
-                    || API_CRATES.contains(&path.split("::").next().unwrap_or_default()))
-            {
-                // Only a reachable shape's layout is widened in the staged copy, and never the
-                // mod API's own.
+            } else if foreign && API_CRATES.contains(&path.split("::").next().unwrap_or_default()) {
+                // Listed lower types and reachable shapes are both widened in the staged copy;
+                // the mod API's own layouts never are.
                 Some("lower-crate layout not widened")
             } else {
                 None
@@ -456,6 +457,7 @@ impl Rule {
 
     fn of(&self, shape: &Shape, open: &mut Vec<String>) -> Crossing {
         match shape {
+            Shape::Scalar(Scalar::Wide(_)) => Crossing::Copy(2),
             Shape::Scalar(_) | Shape::Unit => Crossing::Copy(1),
             Shape::Ref { to, .. } | Shape::Wrapped(_, to) => self.of(to, open),
             Shape::Tuple(parts) => {

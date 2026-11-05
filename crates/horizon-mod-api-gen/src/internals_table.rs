@@ -95,7 +95,10 @@ fn spell(shape: &Shape) -> Option<TokenStream> {
         Shape::Scalar(scalar) => match scalar {
             Scalar::Bool => quote!(bool),
             Scalar::Char => quote!(char),
-            Scalar::Signed(name) | Scalar::Unsigned(name) | Scalar::Float(name) => {
+            Scalar::Signed(name)
+            | Scalar::Unsigned(name)
+            | Scalar::Float(name)
+            | Scalar::Wide(name) => {
                 let name = format_ident!("{name}");
                 quote!(#name)
             }
@@ -229,6 +232,10 @@ impl<'r> Gen<'r> {
                 Scalar::Signed(_) => quote!(V::S(*#expr as i64)),
                 Scalar::Unsigned(_) => quote!(V::U(*#expr as u64)),
                 Scalar::Float(_) => quote!(V::F(*#expr as f64)),
+                Scalar::Wide(_) => quote!({
+                    let bits = *#expr as u128;
+                    V::Rec(::std::vec![V::U((bits >> 64) as u64), V::U(bits as u64)])
+                }),
                 Scalar::Str | Scalar::String => {
                     quote!(V::Str(::std::string::ToString::to_string(&#expr[..])))
                 }
@@ -279,6 +286,13 @@ impl<'r> Gen<'r> {
                 Scalar::Float(name) => {
                     let name = format_ident!("{name}");
                     quote!(match #expr { V::F(f) => f as #name, _ => return Err(I::changed("a float")) })
+                }
+                Scalar::Wide(name) => {
+                    let name = format_ident!("{name}");
+                    quote!({
+                        let [high, low] = I::fields::<_, 2>(I::rec(#expr)?)?;
+                        ((u128::from(I::int::<u64>(high)?) << 64) | u128::from(I::int::<u64>(low)?)) as #name
+                    })
                 }
                 Scalar::String => {
                     quote!(match #expr { V::Str(s) => s, _ => return Err(I::changed("a string")) })
@@ -1431,7 +1445,7 @@ pub(crate) mod tests {
 
     #[test]
     fn declared_fields_are_partial_and_keep_global_ids() {
-        let entries = [
+        let mut entries = [
             internal(
                 "horizon_client::Owner",
                 "struct",
@@ -1440,6 +1454,7 @@ pub(crate) mod tests {
             internal("horizon_client::Owner::first", "field", "u8"),
             internal("horizon_client::Owner::second", "field", "u8"),
         ];
+        entries[2].hash = "second-field".into();
         for first in [false, true] {
             let mut declared = vec!["horizon_client::Owner::second".into()];
             if first {
@@ -1453,7 +1468,10 @@ pub(crate) mod tests {
                 &format!(
                     r#"
                 let mut owner = Owner {{ first: 3, second: 7 }};
-                let walk = __internals::TABLE.types[0].node;
+                let member = __internals::TABLE.members.iter().find(|m| m.path == "horizon_client::Owner::second").unwrap();
+                assert_eq!(member.field, 1);
+                assert_eq!(member.hash, "second-field");
+                let walk = __internals::TABLE.types[member.owner as usize].node;
                 assert_eq!(owner.first, 3);
                 let ptr = &raw mut owner as *mut ();
                 unsafe {{
@@ -1504,6 +1522,69 @@ pub(crate) mod tests {
         assert!(!code.contains("Game :: skip"));
         assert!(code.contains("horizon_client::Arg"));
         assert!(code.contains("horizon_client::Answer"));
+    }
+
+    #[test]
+    fn wide_integers_round_trip_as_high_and_low_leaves() {
+        let entries = [internal(
+            "horizon_client::Wide",
+            "struct",
+            "struct Wide { unsigned: u128, signed: i128 }",
+        )];
+        let (code, _) = all_table(&entries);
+        run_fixture(
+            &code,
+            "struct Wide { unsigned: u128, signed: i128 }",
+            r#"
+            let mut value = Wide { unsigned: u128::MAX, signed: i128::MIN };
+            let walk = __internals::TABLE.types[0].node;
+            let ptr = &raw mut value as *mut ();
+            let unsigned = Value::Rec(vec![Value::U(u64::MAX), Value::U(u64::MAX)]);
+            let signed = Value::Rec(vec![Value::U(1 << 63), Value::U(0)]);
+            unsafe {
+                assert_eq!(walk(ptr, true, Op::Get(0)), Ok(Reply::Value(unsigned.clone())));
+                assert_eq!(walk(ptr, true, Op::Get(1)), Ok(Reply::Value(signed.clone())));
+                value.unsigned = 0;
+                value.signed = 0;
+                assert_eq!(walk(ptr, true, Op::Set(0, unsigned)), Ok(Reply::Done));
+                assert_eq!(walk(ptr, true, Op::Set(1, signed)), Ok(Reply::Done));
+            }
+            assert_eq!(value.unsigned, u128::MAX);
+            assert_eq!(value.signed, i128::MIN);
+        "#,
+        );
+    }
+
+    #[test]
+    fn a_shared_field_and_method_path_opts_in_both_kinds() {
+        let entries = [
+            internal(
+                "horizon_client::Owner",
+                "struct",
+                "struct Owner { same: u8 }",
+            ),
+            internal("horizon_client::Owner::same", "field", "u8"),
+            internal(
+                "horizon_client::Owner::same",
+                "method",
+                "fn same(&self) -> u8",
+            ),
+        ];
+        let (code, counts) = table(&entries, &["horizon_client::Owner::same".into()]);
+        assert_eq!(counts.types, 1);
+        assert_eq!(counts.thunks, 1);
+        assert_eq!(counts.skipped, 0);
+        run_fixture(
+            &code,
+            "struct Owner { same: u8 } impl Owner { fn same(&self) -> u8 { self.same } }",
+            r#"
+            assert_eq!(__internals::TABLE.members.len(), 1);
+            let mut owner = Owner { same: 7 };
+            let member = &__internals::TABLE.members[0];
+            let walk = __internals::TABLE.types[member.owner as usize].node;
+            unsafe { assert_eq!(walk(&raw mut owner as *mut (), false, Op::Get(member.field)), Ok(Reply::Value(Value::U(7)))); }
+        "#,
+        );
     }
 
     #[test]
@@ -1614,7 +1695,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn conditional_layouts_and_unwidened_lower_layouts_stay_opaque() {
+    fn conditional_layouts_and_api_owned_layouts_stay_opaque() {
         let (code, counts) = all_table(&[
             internal(
                 "horizon_client::Conditional",
@@ -1647,9 +1728,9 @@ pub(crate) mod tests {
                 "struct Generic<T> { value: T }",
             ),
         ]);
-        assert_eq!(counts.types, 0, "{code}");
+        assert_eq!(counts.types, 1, "{code}");
         assert_eq!(counts.skipped_types["conditional field or variant"], 2);
-        assert_eq!(counts.skipped_types["lower-crate layout not widened"], 3);
+        assert_eq!(counts.skipped_types["lower-crate layout not widened"], 2);
         assert_eq!(counts.skipped_types["generic type"], 1);
     }
 

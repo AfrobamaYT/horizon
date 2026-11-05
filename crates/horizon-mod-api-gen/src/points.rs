@@ -1006,57 +1006,60 @@ mod tests {
     #[test]
     fn declared_raw_places_read_and_write_the_live_head_and_return() {
         use crate::crossing::tests::internal;
-        let sig: syn::Signature =
-            syn::parse_str("fn change(&mut self, pos: [i32; 3]) -> f32").unwrap();
-        let shape = point_shape::shape(quote!(name = "change", raw), &sig).unwrap();
-        let point = GamePoint {
-            name: "change".into(),
-            target: "horizon_client::Game::change".into(),
-            side: "none",
-            host: "none",
-            record: "Change".into(),
-            args: Vec::new(),
-            returns: "result",
-            at_return: true,
-            raw: true,
-            listener: Some("horizon_client::__ChangeListener".into()),
-            return_listener: None,
-            record_item: String::new(),
-            api: std::array::from_fn(|_| String::new()),
-            wire_shape: shape.wire_shape(),
-        };
-        let mut game = internal("horizon_client::Game", "struct", "struct Game { x: u8 }");
-        game.hash = "game-layout".into();
-        let mut change = internal(
-            "horizon_client::Game::change",
-            "method",
-            "fn change(&mut self, pos: [i32; 3]) -> f32",
-        );
-        change.hash = "change-signature".into();
-        let (code, counts) = crate::internals_table::table_with_points(
-            &[game, change],
-            &[point.target.clone()],
-            &[point],
-        );
-        assert_eq!(counts.skipped, 0);
-        let raw = shape.raw_items(&sig, Some(&syn::parse_quote!(Game)), None);
-        let declarations = format!(
-            r#"
+        for (receiver, writable) in [("&mut self", true), ("&self", false)] {
+            let sig: syn::Signature =
+                syn::parse_str(&format!("fn change({receiver}, pos: [i32; 3]) -> f32")).unwrap();
+            let shape = point_shape::shape(quote!(name = "change", raw), &sig).unwrap();
+            let point = GamePoint {
+                name: "change".into(),
+                target: "horizon_client::Game::change".into(),
+                side: "none",
+                host: "none",
+                record: "Change".into(),
+                args: Vec::new(),
+                returns: "result",
+                at_return: true,
+                raw: true,
+                listener: Some("horizon_client::__ChangeListener".into()),
+                return_listener: None,
+                record_item: String::new(),
+                api: std::array::from_fn(|_| String::new()),
+                wire_shape: shape.wire_shape(),
+            };
+            let mut game = internal("horizon_client::Game", "struct", "struct Game { x: u8 }");
+            game.hash = "game-layout".into();
+            let mut change = internal(
+                "horizon_client::Game::change",
+                "method",
+                &sig.to_token_stream().to_string(),
+            );
+            change.hash = "change-signature".into();
+            let (code, counts) = crate::internals_table::table_with_points(
+                &[game, change],
+                &[point.target.clone()],
+                &[point],
+            );
+            assert_eq!(counts.skipped, 0);
+            let raw = shape.raw_items(&sig, Some(&syn::parse_quote!(Game)), None);
+            let declarations = format!(
+                r#"
             pub struct Game {{ x: u8 }}
-            impl Game {{ fn change(&mut self, _pos: [i32; 3]) -> f32 {{ self.x as f32 }} }}
+            impl Game {{ fn change({receiver}, _pos: [i32; 3]) -> f32 {{ self.x as f32 }} }}
             pub enum PointId {{ Change, ChangeReturn }}
+            const RECEIVER_WRITABLE: bool = {writable};
             {raw}
         "#
-        );
-        crate::internals_table::tests::run_fixture(
-            &code,
-            &declarations,
-            r#"
+            );
+            crate::internals_table::tests::run_fixture(
+                &code,
+                &declarations,
+                r#"
             assert_eq!(__internals::TABLE.types.iter().find(|t| t.path == "horizon_client::Game").unwrap().hash, "game-layout");
             assert_eq!(__internals::TABLE.thunks[0].hash, "change-signature");
             let head = &__internals::TABLE.places[0];
             assert_eq!(head.place, PointId::Change as usize);
             assert!(head.receiver.is_some());
+            assert_eq!(head.receiver_writable, RECEIVER_WRITABLE);
             let walk = __internals::TABLE.types[head.record as usize].node;
             let mut pos = [1, 2, 3];
             let mut result = None::<f32>;
@@ -1071,12 +1074,14 @@ mod tests {
             assert_eq!(result, Some(0.5));
             let back = &__internals::TABLE.places[1];
             assert_eq!(back.place, PointId::ChangeReturn as usize);
+            assert_eq!(back.receiver_writable, RECEIVER_WRITABLE);
             let walk = __internals::TABLE.types[back.record as usize].node;
             let mut result = 2.0f32;
             unsafe { assert_eq!(walk(&raw mut result as *mut (), true, Op::Set(0, Value::F(3.0))), Ok(Reply::Done)); }
             assert_eq!(result, 3.0);
         "#,
-        );
+            );
+        }
     }
 
     #[test]
