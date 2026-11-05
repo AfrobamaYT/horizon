@@ -145,7 +145,6 @@
   "Close the game and servers, and wait for downloads, builds, imports and sign-in to finish before moving data.": "데이터를 이동하기 전에 게임과 서버를 종료하고 다운로드, 빌드, 가져오기 및 로그인이 완료될 때까지 기다리세요.",
   "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "버튼, 스위치, 하늘에 색을 입힙니다. 하나를 고르거나 원하는 hex 색을 입력하세요.",
   "Compile": "Compile",
-  "Compiles against the prebuilt game, in seconds.": "Compiles against the prebuilt game, in seconds.",
   "Compiling the game ({profile}): {done} crates, now {name}": "게임 컴파일 중 ({profile}): 크레이트 {done}개, 현재 {name}",
   "Compiling the game ({profile}): {done} of {total} crates, now {name}": "게임 컴파일 중 ({profile}): 크레이트 {done}/{total}개, 현재 {name}",
   "Compiling the mods against the prebuilt game": "Compiling the mods against the prebuilt game",
@@ -1084,5 +1083,9 @@
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (또는 프로젝트 내 .mcp.json)",
   "← All servers": "← 모든 서버",
-  "← Newer": "← 최신"
+  "← Newer": "← 최신",
+  "Build cancelled": "Build cancelled",
+  "Another build is running": "Another build is running",
+  "This instance's build waits until it finishes.": "This instance's build waits until it finishes.",
+  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds."
 }

@@ -214,6 +214,30 @@ pub fn built(version: &str) -> Option<Vec<Mod>> {
     Some(parse_built(&about))
 }
 
+/// The profile native build `version` was built with (`native-mods.json`'s `profile`).
+pub fn built_profile(version: &str) -> Option<native_mods::Profile> {
+    if !native_mods::is_native(version) {
+        return None;
+    }
+    let path = backend::version_dir(version).join("native-mods.json");
+    let about: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    native_mods::Profile::parse(about["profile"].as_str()?)
+}
+
+/// `state`, once the mode counts: a build made in another mode than `chosen` is not this mode's
+/// build, so it needs its own.
+pub fn in_mode(
+    state: State,
+    built: Option<native_mods::Profile>,
+    chosen: native_mods::Profile,
+) -> State {
+    if state == State::UpToDate && built != Some(chosen) {
+        State::Outdated
+    } else {
+        state
+    }
+}
+
 fn parse_built(about: &serde_json::Value) -> Vec<Mod> {
     let mods = about["mods"].as_array().map(Vec::as_slice).unwrap_or(&[]);
     mods.iter()
@@ -381,6 +405,21 @@ mod tests {
         );
         assert!(files[0].icon.is_err(), "a refusal is not an absent icon");
         fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_build_made_in_another_mode_needs_a_build() {
+        use native_mods::Profile::{Developer, Optimized};
+        assert_eq!(
+            in_mode(State::UpToDate, Some(Developer), Optimized),
+            State::Outdated
+        );
+        assert_eq!(in_mode(State::UpToDate, None, Optimized), State::Outdated);
+        assert_eq!(
+            in_mode(State::UpToDate, Some(Optimized), Optimized),
+            State::UpToDate
+        );
+        assert_eq!(in_mode(State::NoMods, None, Optimized), State::NoMods);
     }
 
     #[test]

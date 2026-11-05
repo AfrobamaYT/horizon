@@ -145,7 +145,6 @@
   "Close the game and servers, and wait for downloads, builds, imports and sign-in to finish before moving data.": "Close the game and servers, and wait for downloads, builds, imports and sign-in to finish before moving data.",
   "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Na-agba bọtịnụ, mgba ọkụ na mbara igwe. Họrọ otu, ma ọ bụ pịnye agba hex ọ bụla.",
   "Compile": "Compile",
-  "Compiles against the prebuilt game, in seconds.": "Compiles against the prebuilt game, in seconds.",
   "Compiling the game ({profile}): {done} crates, now {name}": "Ịchịkọta egwuregwu ({profile}): {done} crates, ugbu a {name}",
   "Compiling the game ({profile}): {done} of {total} crates, now {name}": "Ịchịkọta egwuregwu ({profile}): {done} nke {total} crates, ugbu a {name}",
   "Compiling the mods against the prebuilt game": "Compiling the mods against the prebuilt game",
@@ -1084,5 +1083,9 @@
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ma ọ bụ .mcp.json na oru ngo)",
   "← All servers": "← Sava niile",
-  "← Newer": "← Ọhụrụ"
+  "← Newer": "← Ọhụrụ",
+  "Build cancelled": "Build cancelled",
+  "Another build is running": "Another build is running",
+  "This instance's build waits until it finishes.": "This instance's build waits until it finishes.",
+  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds."
 }

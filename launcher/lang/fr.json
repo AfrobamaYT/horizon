@@ -145,7 +145,6 @@
   "Close the game and servers, and wait for downloads, builds, imports and sign-in to finish before moving data.": "Fermez le jeu et les serveurs, puis attendez la fin des téléchargements, des compilations, des imports et de la connexion au compte avant de déplacer les données.",
   "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Colore les boutons, les interrupteurs et le ciel. Choisis-en une, ou tape n'importe quelle couleur hex.",
   "Compile": "Compile",
-  "Compiles against the prebuilt game, in seconds.": "Compiles against the prebuilt game, in seconds.",
   "Compiling the game ({profile}): {done} crates, now {name}": "Compilation du jeu ({profile}) : {done} crates, actuellement {name}",
   "Compiling the game ({profile}): {done} of {total} crates, now {name}": "Compilation du jeu ({profile}) : {done} sur {total} crates, actuellement {name}",
   "Compiling the mods against the prebuilt game": "Compiling the mods against the prebuilt game",
@@ -1084,5 +1083,15 @@
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ou .mcp.json dans un projet)",
   "← All servers": "← Tous les serveurs",
-  "← Newer": "← Plus récentes"
+  "← Newer": "← Plus récentes",
+  "Build cancelled": "Build cancelled",
+  "Another build is running": "Another build is running",
+  "This instance's build waits until it finishes.": "This instance's build waits until it finishes.",
+  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.",
+  "Horizon is built in the open. Sponsors fund the next release.": "Horizon is built in the open. Sponsors fund the next release.",
+  "Join the Discord": "Join the Discord",
+  "PARTNER": "PARTNER",
+  "Partner": "Partner",
+  "Sponsor": "Sponsor",
+  "Sponsor on GitHub": "Sponsor on GitHub"
 }

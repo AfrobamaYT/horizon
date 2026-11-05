@@ -145,7 +145,6 @@
   "Close the game and servers, and wait for downloads, builds, imports and sign-in to finish before moving data.": "Tutup game dan hentikan server, lalu tunggu hingga unduhan, build, impor, dan proses masuk selesai sebelum memindahkan data.",
   "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Mewarnai tombol, sakelar, dan langit. Pilih satu, atau ketik warna hex apa pun.",
   "Compile": "Compile",
-  "Compiles against the prebuilt game, in seconds.": "Compiles against the prebuilt game, in seconds.",
   "Compiling the game ({profile}): {done} crates, now {name}": "Mengkompilasi game ({profile}): {done} crate, sekarang {name}",
   "Compiling the game ({profile}): {done} of {total} crates, now {name}": "Mengkompilasi game ({profile}): {done} dari {total} crate, sekarang {name}",
   "Compiling the mods against the prebuilt game": "Compiling the mods against the prebuilt game",
@@ -1084,5 +1083,9 @@
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (atau .mcp.json di dalam proyek)",
   "← All servers": "← Semua server",
-  "← Newer": "← Lebih baru"
+  "← Newer": "← Lebih baru",
+  "Build cancelled": "Build cancelled",
+  "Another build is running": "Another build is running",
+  "This instance's build waits until it finishes.": "This instance's build waits until it finishes.",
+  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds."
 }

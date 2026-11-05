@@ -145,13 +145,21 @@ impl Launcher {
     fn native_state_of(&self, instance: &instances::Instance) -> State {
         let version = self.version_of(instance).cloned();
         let home = self.mods.home();
-        let key = native_status::fingerprint(&home, version.as_deref());
+        let profile = Profile::chosen(&self.settings);
+        let key = format!(
+            "{}{profile:?}",
+            native_status::fingerprint(&home, version.as_deref())
+        );
         let mut memo = self.mods.native_state.borrow_mut();
         match memo.as_ref() {
             Some((k, state)) if *k == key => *state,
             _ => {
                 let built = version.as_deref().and_then(native_status::built);
-                let state = native_status::state(&native_status::enabled(&home), built.as_deref());
+                let state = native_status::in_mode(
+                    native_status::state(&native_status::enabled(&home), built.as_deref()),
+                    version.as_deref().and_then(native_status::built_profile),
+                    profile,
+                );
                 *memo = Some((key, state));
                 state
             }
@@ -391,7 +399,8 @@ impl Launcher {
         let pal = Pal::of(&t);
         let instance = self.selected_instance()?;
         let state = self.native_state_of(instance);
-        let building = self.native_step.is_some();
+        let busy = self.native_step.is_some();
+        let building = busy && self.native_for.as_deref() == Some(instance.id.as_str());
         let routes = self.native_routes();
         let route = routes.iter().find(|(id, _)| id == mod_id).map(|(_, r)| r)?;
         let profile = Profile::chosen(&self.settings);
@@ -401,6 +410,13 @@ impl Launcher {
                 pal.accent,
                 tr("Building"),
                 tr("The build is running. Cancel it from the card above.").to_string(),
+            )
+        } else if busy {
+            (
+                "refresh",
+                pal.muted,
+                tr("Another build is running"),
+                tr("This instance's build waits until it finishes.").to_string(),
             )
         } else if state == State::UpToDate {
             (
@@ -415,7 +431,7 @@ impl Launcher {
                     "flash",
                     pal.accent,
                     tr("Prebuilt game"),
-                    tr("Compiles against the prebuilt game, in seconds.").to_string(),
+                    tr("Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.").to_string(),
                 ),
                 Route::Game { reason } => (
                     "hammer",
@@ -427,27 +443,30 @@ impl Launcher {
         };
         let open = self.mods.route_open.as_deref() == Some(mod_id);
         let id = mod_id.to_owned();
-        let chip = div()
-            .id(SharedString::from(format!("route-{mod_id}")))
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .size(px(28.))
-            .rounded(px(8.))
-            .bg(color.opacity(if open { 0.24 } else { 0.14 }))
-            .cursor_pointer()
-            .child(ui::icon(glyph, 16., color))
-            .on_click(cx.listener({
-                let id = id.clone();
-                move |this, _: &ClickEvent, _, cx| {
-                    this.mods.route_open = match this.mods.route_open.as_deref() {
-                        Some(open) if open == id => None,
-                        _ => Some(id.clone()),
-                    };
-                    cx.notify();
-                }
-            }));
+        let chip = crate::keyboard(
+            div()
+                .id(SharedString::from(format!("route-{mod_id}")))
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(px(28.))
+                .rounded(px(8.))
+                .bg(color.opacity(if open { 0.24 } else { 0.14 }))
+                .cursor_pointer()
+                .child(ui::icon(glyph, 16., color)),
+            &t,
+        )
+        .on_click(cx.listener({
+            let id = id.clone();
+            move |this, _: &ClickEvent, _, cx| {
+                this.mods.route_open = match this.mods.route_open.as_deref() {
+                    Some(open) if open == id => None,
+                    _ => Some(id.clone()),
+                };
+                cx.notify();
+            }
+        }));
         let mut wrap = div().relative().flex_none().child(chip);
         if open {
             let home = self.mods.home();
@@ -457,10 +476,13 @@ impl Launcher {
                     "route-off",
                     trf("Turn off {mod}", &[("mod", mod_id)]).into(),
                     tr("Keeps the file, leaves it out of the game").to_string(),
-                    building,
+                    busy,
                     &t,
                 )
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if this.native_step.is_some() {
+                        return;
+                    }
                     this.mods.message =
                         horizon_launcher::browser::java::set_enabled(&home, &id, false)
                             .err()
@@ -474,10 +496,13 @@ impl Launcher {
                 "route-build",
                 tr("Build now").into(),
                 tr("Builds the game with your mods").to_string(),
-                building || state == State::NoMods,
+                busy || state == State::NoMods,
                 &t,
             )
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                if this.native_step.is_some() {
+                    return;
+                }
                 this.mods.route_open = None;
                 this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
                 cx.notify();

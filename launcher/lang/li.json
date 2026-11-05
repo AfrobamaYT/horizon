@@ -145,7 +145,6 @@
   "Close the game and servers, and wait for downloads, builds, imports and sign-in to finish before moving data.": "Close the game and servers, and wait for downloads, builds, imports and sign-in to finish before moving data.",
   "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Kleur de knoppe, de schakelaars en de loch. Kies ein, of typ eder hexkleur.",
   "Compile": "Compile",
-  "Compiles against the prebuilt game, in seconds.": "Compiles against the prebuilt game, in seconds.",
   "Compiling the game ({profile}): {done} crates, now {name}": "‘t Sjpel compilere ({profile}): {done} kiste, noe {name}",
   "Compiling the game ({profile}): {done} of {total} crates, now {name}": "‘t Sjpel samestèlle ({profile}): {done} vaan {total} kiste, noe {name}",
   "Compiling the mods against the prebuilt game": "Compiling the mods against the prebuilt game",
@@ -1084,5 +1083,9 @@
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (of .mcp.json in un projek)",
   "← All servers": "← Alle servers",
-  "← Newer": "← Nuujer"
+  "← Newer": "← Nuujer",
+  "Build cancelled": "Build cancelled",
+  "Another build is running": "Another build is running",
+  "This instance's build waits until it finishes.": "This instance's build waits until it finishes.",
+  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds."
 }

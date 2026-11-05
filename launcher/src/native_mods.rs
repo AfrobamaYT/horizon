@@ -1430,6 +1430,15 @@ fn run_with_compiler(
 /// What a cancelled build fails with: the card shows no error for it.
 pub const CANCELLED: &str = "Build cancelled";
 
+/// Ends the build with [`CANCELLED`] when the player cancelled it: checked between stages and
+/// before anything is installed or selected, so a cancel never ends as a finished build.
+fn check_cancelled() -> Result<(), String> {
+    if CANCEL.load(Ordering::Relaxed) {
+        return Err(CANCELLED.into());
+    }
+    Ok(())
+}
+
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
 /// Stops the build under way: its command is killed and the build ends with [`CANCELLED`].
@@ -1878,6 +1887,7 @@ fn pipeline(
         };
         game.map_err(|reason| log_warning(&reason.to_string())).ok()
     };
+    check_cancelled()?;
     let plan = match prebuilt {
         Some(_) => Plan::Prebuilt,
         None => classify(exists, last_record(target, profile).as_ref(), &now),
@@ -1924,6 +1934,7 @@ fn pipeline(
             &resolution,
         )
         .map_err(blame)?;
+        check_cancelled()?;
         progress(Step::Install);
         install(
             base,
@@ -1937,6 +1948,7 @@ fn pipeline(
     } else if !exists {
         linker()?;
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
+        check_cancelled()?;
         let needs_mixins = mods.iter().any(Bundle::needs_mixins);
         progress(Step::Source(revision.clone()));
         let source = source(&revision)?;
@@ -2078,6 +2090,7 @@ fn pipeline(
             }),
         )
         .map_err(|e| blame(crates::locked(e)))?;
+        check_cancelled()?;
         save_record(target, profile, &now);
         let binary = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
         progress(Step::Install);
@@ -2118,6 +2131,7 @@ pub fn build(
     }
     logged(|| {
         let built = pipeline(base, folder, profile, Target::Client, false, &progress)?;
+        check_cancelled()?;
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
         })?;

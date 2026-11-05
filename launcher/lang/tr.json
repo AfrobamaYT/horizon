@@ -145,7 +145,6 @@
   "Close the game and servers, and wait for downloads, builds, imports and sign-in to finish before moving data.": "Verileri taşımadan önce oyunu ve sunucuları kapatın; indirmelerin, derlemelerin, içe aktarmaların ve oturum açma işleminin tamamlanmasını bekleyin.",
   "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Düğmeleri, anahtarları ve gökyüzünü renklendirir. Birini seç ya da herhangi bir hex rengi yaz.",
   "Compile": "Compile",
-  "Compiles against the prebuilt game, in seconds.": "Compiles against the prebuilt game, in seconds.",
   "Compiling the game ({profile}): {done} crates, now {name}": "Oyun derleniyor ({profile}): {done} crate, şimdi {name}",
   "Compiling the game ({profile}): {done} of {total} crates, now {name}": "Oyun derleniyor ({profile}): {done}/{total} crate, şimdi {name}",
   "Compiling the mods against the prebuilt game": "Compiling the mods against the prebuilt game",
@@ -1084,5 +1083,9 @@
   "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (veya bir projede .mcp.json)",
   "← All servers": "← Tüm sunucular",
-  "← Newer": "← Newer"
+  "← Newer": "← Newer",
+  "Build cancelled": "Build cancelled",
+  "Another build is running": "Another build is running",
+  "This instance's build waits until it finishes.": "This instance's build waits until it finishes.",
+  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds."
 }
