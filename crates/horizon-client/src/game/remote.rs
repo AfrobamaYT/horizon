@@ -11957,8 +11957,8 @@ mod tests {
     }
 
     /// The `both` handle reads answer on a client from its own copy: the local
-    /// player's health, effects, equipment and last death, the blocks of the
-    /// level it shows and the entities it tracks.
+    /// player's health, effects, equipment and last death, the blocks and time
+    /// of day of the level it shows and the entities it tracks.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_handle_reads_answer_from_the_clients_copy() {
@@ -12081,6 +12081,20 @@ mod tests {
             assert_eq!(level.block_property(game, [160, 64, 0], "facing"), None);
             assert_eq!(game.world.chunks.len(), chunks);
 
+            // The time of day, as the server's clock last set it.
+            game.remote.as_mut().unwrap().clock = Some(0);
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 100,
+                clocks: vec![play::ClockState {
+                    clock: 0,
+                    total_ticks: 30_000,
+                    partial_tick: 0.0,
+                    rate: 1.0,
+                }],
+            }))
+            .unwrap();
+            assert_eq!(level.day_time(game), Some(30_000));
+
             // An entity the server told the client of; others read None.
             let pig = game
                 .remote
@@ -12121,6 +12135,7 @@ mod tests {
             assert_eq!(living.health(game), None);
             assert_eq!(level.block(game, at), None);
             assert!(!level.is_loaded(game, at));
+            assert_eq!(level.day_time(game), None);
             assert_eq!(player.last_death_location(game), None);
 
             // The server's role keeps its own reads: a client handle names nothing there.
