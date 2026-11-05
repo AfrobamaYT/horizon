@@ -1385,7 +1385,10 @@ impl Game<'_> {
         let list = &mut self.potions.effects.list;
         match list.iter_mut().find(|x| x.id == id) {
             // forceAddEffect's copyBlendState: an updated effect keeps its fade.
-            Some(existing) => *existing = e,
+            Some(existing) => {
+                e.client_blend = existing.client_blend;
+                *existing = e;
+            }
             None => {
                 // ClientboundUpdateMobEffectPacket.shouldBlend (flag 8).
                 let blend = p.flags & 8 != 0;
@@ -1395,6 +1398,9 @@ impl Game<'_> {
                     let (o_nausea, nausea) = screen_effects::nausea_blend_added(&e, blend);
                     self.screen_fx.o_nausea = o_nausea;
                     self.screen_fx.nausea = nausea;
+                } else if !blend {
+                    let has_effect = !e.ends_within(0);
+                    e.client_blend = (has_effect, has_effect);
                 }
                 list.push(e);
             }
@@ -11333,6 +11339,9 @@ mod interaction_event_tests;
 
 #[cfg(test)]
 mod native_entity_tests;
+
+#[cfg(test)]
+mod effect_blend_tests;
 
 #[cfg(test)]
 mod tests {
