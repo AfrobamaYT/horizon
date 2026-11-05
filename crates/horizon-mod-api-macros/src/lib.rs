@@ -59,6 +59,9 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         "BlockEntityPart" => (false, Some("block_entity_subscribed")),
         "ItemPart" => (false, Some("item_subscribed")),
         "MenuPart" => (false, Some("menu_subscribed")),
+        // Entity parts carry no scoped hook yet (#1077): `register_goals` is
+        // not one, so its subscriptions stay empty whatever it overrides.
+        "EntityPart" => (false, Some("entity_subscribed_empty")),
         _ => {
             return syn::Error::new_spanned(name, "expected a hook or part trait")
                 .into_compile_error()
@@ -95,9 +98,19 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         format_ident!("hook_ids")
     };
     let subscribed_name = format_ident!("{}", part.unwrap_or("subscribed"));
-    let subscribed = syn::parse_quote! {
-        fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
-            &[#(#(#cfgs)* mod_api::#ids::#methods),*]
+    let subscribed = if subscribed_name == "entity_subscribed_empty" {
+        // Entity parts (arismoko/horizon#1077): no scoped hook exists for them
+        // yet, so `register_goals` cannot be mistaken for one.
+        syn::parse_quote! {
+            fn entity_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+                &[]
+            }
+        }
+    } else {
+        syn::parse_quote! {
+            fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
+                &[#(#(#cfgs)* mod_api::#ids::#methods),*]
+            }
         }
     };
     implementation.items.push(subscribed);

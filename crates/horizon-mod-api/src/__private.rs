@@ -30,9 +30,15 @@ pub fn listened(hook: HookId) -> bool {
 pub use crate::block_entity_type::validate_block_entity_type_keys;
 pub use crate::generated::calls::*;
 pub use crate::part_table::{
-    HookParts, KnownIds, PartsRef, block_entity_types, block_listens, has_part_hook,
-    has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
+    HookParts, KnownIds, PartsRef, block_entity_types, block_listens, entity_parts,
+    has_entity_parts, has_part_hook, has_scoped_hook, install_parts, mark_game_thread, parts,
+    resolve_parts,
 };
+/// A read backend wrapper for a host the game builds narrowed: the mob tick's
+/// goal view hands itself out as its own backend (#1077).
+pub fn backend_ref(inner: &dyn Backend) -> crate::BackendRef<'_> {
+    crate::BackendRef::of(inner)
+}
 pub use crate::phase::install_packages;
 /// The game's side of wasm mods, for `horizon-mod-wasm`.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]

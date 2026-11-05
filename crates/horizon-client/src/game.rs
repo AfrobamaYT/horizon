@@ -274,6 +274,7 @@ mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
+mod native_goal_ticks;
 #[cfg(test)]
 mod native_guest_turn_tests;
 #[cfg(test)]

@@ -2082,6 +2082,7 @@ mod tests {
                 }
             }
             let w = MobWorld {
+                goal_host: None,
                 teams: Default::default(),
                 loop_context: crate::test_resources::server_loop_context(),
                 world: &world,
@@ -2208,6 +2209,7 @@ mod tests {
             }
         }
         let w = MobWorld {
+            goal_host: None,
             teams: Default::default(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
@@ -2420,6 +2422,7 @@ mod tests {
             let mut east_edge = [0.0; 2];
             for (i, bordered) in [false, true].into_iter().enumerate() {
                 let w = MobWorld {
+                    goal_host: None,
                     border: bordered.then_some(&border),
                     ..w.clone()
                 };

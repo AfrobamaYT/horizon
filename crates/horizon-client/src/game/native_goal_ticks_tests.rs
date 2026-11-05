@@ -1,0 +1,463 @@
+//! Tests for `native_goal_ticks` (arismoko/horizon#1077): registration order,
+//! priorities and interruption, per-mob state and random streams, the read
+//! view, `set_target`, and the no-mod-goals fast path.
+use super::super::creatures;
+use super::super::native_entity_refs::tests::with_game;
+use horizon_client::mobs::{self, Mob, goals::Cx};
+use horizon_core::{geometry::Vec3, random::RandomSource};
+use mod_api::{
+    EntityPart, EntityRef, Goal, GoalContext, GoalFlags, GoalRegistrar, Hooks, LivingRef, ModEntry,
+    Registrar, RegistrationContext,
+};
+use std::sync::Mutex;
+
+/// The mods of these tests, installed with their parts, as a game's open does:
+/// `with_mods` for the mods, `install_parts` for what they register,
+/// `resolve_parts` for the game's own table.
+fn install_game_mods() {
+    mod_api::__private::install(vec![ModEntry::new("test", Box::new(Mod))].into());
+    mod_api::__private::install_parts(&[ModEntry::new("test", Box::new(Mod))]).unwrap();
+}
+
+/// What one test goal did, by mob id.
+static EVENTS: Mutex<Vec<(u32, &'static str)>> = Mutex::new(Vec::new());
+/// The other mob a tick reads through the view, as a handle.
+static OTHER: Mutex<Option<EntityRef>> = Mutex::new(None);
+/// What the last tick read of `OTHER`: its health, position and a refused
+/// read (a potion check, which the snapshot does not carry).
+static READS: Mutex<Vec<(Option<f32>, Option<[f64; 3]>, bool)>> = Mutex::new(Vec::new());
+
+fn record(id: u32, call: &'static str) {
+    EVENTS.lock().unwrap().push((id, call));
+}
+
+fn set_other(handle: EntityRef) {
+    *OTHER.lock().unwrap() = Some(handle);
+}
+
+/// The mod goal of every test: counts its calls in its own state and in the
+/// shared journal, draws from the mob's own random at start, and reads the
+/// other mob through the tick's view on tick.
+#[derive(Default)]
+struct Counter {
+    ticks: u32,
+    draw: i32,
+}
+impl Goal for Counter {
+    fn flags(&self) -> GoalFlags {
+        GoalFlags::MOVE
+    }
+    fn name(&self) -> &'static str {
+        "Counter"
+    }
+    fn can_use(&mut self, cx: &mut GoalContext<'_>) -> bool {
+        record(cx.mob().entity().id(), "can_use");
+        true
+    }
+    fn start(&mut self, cx: &mut GoalContext<'_>) {
+        record(cx.mob().entity().id(), "start");
+        self.draw = cx.random().next_int_bound(1000).unwrap_or(0);
+    }
+    fn tick(&mut self, cx: &mut GoalContext<'_>) {
+        self.ticks += 1;
+        record(cx.mob().entity().id(), "tick");
+        if let Some(other) = OTHER.lock().unwrap().as_ref().copied() {
+            let health = LivingRef::new(other).health(cx.host());
+            let position = other.position(cx.host());
+            let refused = LivingRef::new(other).potion_affected(cx.host(), "minecraft:poison");
+            READS.lock().unwrap().push((health, position, refused));
+        }
+    }
+    fn stop(&mut self, cx: &mut GoalContext<'_>) {
+        record(cx.mob().entity().id(), "stop");
+    }
+}
+
+struct ZombieGoals;
+#[mod_api::horizon_part]
+impl EntityPart for ZombieGoals {
+    fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+        assert_eq!(goals.mob().id(), "minecraft:zombie");
+        goals.add_goal(7, Counter::default());
+    }
+}
+
+struct Mod;
+#[mod_api::__subscriptions]
+impl Hooks for Mod {
+    fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
+        r.entity_part("minecraft:zombie", ZombieGoals);
+    }
+}
+
+/// A vanilla-standin goal for the interruption test: a MOVE goal whose
+/// `can_use` says yes.
+#[derive(Debug, Clone)]
+struct Vanilla;
+impl mobs::goals::Goal for Vanilla {
+    fn flags(&self) -> u8 {
+        mobs::goals::MOVE
+    }
+    fn can_use(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+        true
+    }
+    fn box_clone(&self) -> Box<dyn mobs::goals::Goal> {
+        Box::new(self.clone())
+    }
+    fn name(&self) -> &'static str {
+        "Vanilla"
+    }
+}
+
+/// A zombie in the game's list, as `Mob::new` builds it.
+fn zombie(game: &mut super::super::Game<'_>, id: u32, at: [f64; 3]) {
+    let kind = game
+        .res
+        .mob_types()
+        .get("minecraft:zombie")
+        .unwrap()
+        .clone();
+    let mut m = Mob::new(id, kind, Vec3::new(at[0], at[1], at[2]), 0.0);
+    m.on_ground = true;
+    game.mobs.push(m);
+}
+
+/// The zombie's goal selector ticks once, as `server_ai_step` ticks it: the
+/// world out of the game, the goal host beside it.
+fn tick_goals(game: &mut super::super::Game<'_>, index: usize) {
+    // The native-authoritative side, whose mob tick builds the goal host.
+    game.options.dedicated = Some(Vec::new());
+    let mut mobs = std::mem::take(&mut game.mobs);
+    let snapshot: Vec<_> = mobs
+        .iter()
+        .map(|m| creatures::seen(m, game.level.player_uuid))
+        .collect();
+    let mut index_by_id = horizon_client::fast_hash::FxHashMap::<u32, u32>::default();
+    for (i, s) in snapshot.iter().enumerate() {
+        index_by_id.entry(s.id).or_insert(i as u32);
+    }
+    let mut test_level = horizon_client::health::TestLevel::new(0);
+    let mut level = test_level.level();
+    let mut events = Vec::new();
+    {
+        let mut w = game.mob_world_base(&snapshot);
+        w.others_index = Some(&index_by_id);
+        let mut selector = std::mem::take(&mut mobs[index].ai.goals);
+        let mut cx = Cx {
+            w: &w,
+            level: &mut level,
+            events: &mut events,
+        };
+        selector.tick(&mut mobs[index], &mut cx);
+        mobs[index].ai.goals = selector;
+    }
+    game.mobs = mobs;
+}
+
+/// The events of one mob's goal, in order.
+fn calls(id: u32) -> Vec<&'static str> {
+    EVENTS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(mob, _)| *mob == id)
+        .map(|(_, call)| *call)
+        .collect()
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn goals_register_after_the_species_own_and_only_on_their_type() {
+    EVENTS.lock().unwrap().clear();
+    with_game(|game| {
+        // A zombie without the parts: the species list alone.
+        let bare: Vec<(i32, &'static str, bool)> = {
+            zombie(game, 90, [3.5, 65.0, 3.5]);
+            let names: Vec<_> = game.mobs.last().unwrap().ai.goals.entries().collect();
+            game.mobs.clear();
+            names
+        };
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        zombie(game, 91, [3.5, 65.0, 3.5]);
+        let entries: Vec<_> = game.mobs.last().unwrap().ai.goals.entries().collect();
+        assert_eq!(entries[0], bare[0], "the species goals lead");
+        assert_eq!(
+            entries.last().unwrap(),
+            &(7, "Counter", false),
+            "the mod goal joins last, at its priority"
+        );
+        assert_eq!(entries.len(), bare.len() + 1, "exactly one goal was added");
+        // A cow of the same game: nothing of it.
+        let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+        let cow = Mob::new(92, kind, Vec3::new(3.5, 65.0, 5.5), 0.0);
+        assert!(
+            !cow.ai.goals.entries().any(|(_, name, _)| name == "Counter"),
+            "a type with no part pays nothing"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn two_mobs_keep_independent_state_and_random_streams() {
+    EVENTS.lock().unwrap().clear();
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        zombie(game, 10, [3.5, 65.0, 3.5]);
+        zombie(game, 11, [23.5, 65.0, 23.5]);
+        // Only the mod goal, so the species' own draws stay out of the count.
+        game.mobs[0].ai.goals.clear();
+        game.mobs[1].ai.goals.clear();
+        mobs::part_goals::attach(&mut game.mobs[0]);
+        mobs::part_goals::attach(&mut game.mobs[1]);
+        tick_goals(game, 0);
+        tick_goals(game, 1);
+        assert_eq!(calls(10), ["can_use", "start", "tick"]);
+        assert_eq!(calls(11), ["can_use", "start", "tick"]);
+        // Each start drew once from its own mob's generator: the next draws
+        // match fresh copies advanced by one, and the two drew differently.
+        let mut after_first = mobs::entity_random(10, Vec3::new(3.5, 65.0, 3.5));
+        let mut after_second = mobs::entity_random(11, Vec3::new(23.5, 65.0, 23.5));
+        let (first_draw, second_draw) = (
+            after_first.next_int_bound(1000).unwrap(),
+            after_second.next_int_bound(1000).unwrap(),
+        );
+        assert_ne!(first_draw, second_draw);
+        assert_eq!(
+            game.mobs[0].random.next_int_bound(1000).unwrap(),
+            after_first.next_int_bound(1000).unwrap()
+        );
+        assert_eq!(
+            game.mobs[1].random.next_int_bound(1000).unwrap(),
+            after_second.next_int_bound(1000).unwrap()
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn reads_answer_the_tick_view_and_refuse_what_it_lacks() {
+    EVENTS.lock().unwrap().clear();
+    READS.lock().unwrap().clear();
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        zombie(game, 20, [3.5, 65.0, 3.5]);
+        zombie(game, 21, [13.5, 65.0, 13.5]);
+        game.mobs[1].health = 12.5;
+        let other = game.native_entity(21).unwrap();
+        set_other(other);
+        tick_goals(game, 0);
+        let reads = READS.lock().unwrap();
+        let (health, position, refused) = reads.last().copied().unwrap();
+        assert_eq!(health, Some(12.5), "the other mob's snapshot health");
+        assert_eq!(
+            position,
+            Some([13.5, 65.0, 13.5]),
+            "the other mob's snapshot position"
+        );
+        assert!(
+            !refused,
+            "a read the view refuses: not carried by the snapshot"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_higher_priority_goal_interrupts_a_running_mod_goal() {
+    EVENTS.lock().unwrap().clear();
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        zombie(game, 30, [3.5, 65.0, 3.5]);
+        // Just the two competing goals: the mod goal (registered at 7 by the
+        // part) and a vanilla standin above it at 3.
+        game.mobs[0].ai.goals.clear();
+        mobs::part_goals::attach(&mut game.mobs[0]);
+        assert!(
+            game.mobs[0]
+                .ai
+                .goals
+                .entries()
+                .any(|(_, name, _)| name == "Counter"),
+            "the re-attach registered the mod goal"
+        );
+        game.mobs[0].ai.goals.add(3, Vanilla);
+        tick_goals(game, 0);
+        // The mod goal started (can_use, start, its reduced-cadence tick),
+        // then the higher-priority standin replaced it: stop ran, and the
+        // standin holds MOVE.
+        // The standin replaced the mod goal within the same tick, so the
+        // mod goal started and stopped without a tick of its own (across
+        // ticks it ticks first; the live check shows that shape).
+        assert_eq!(
+            calls(30),
+            ["can_use", "start", "stop"],
+            "the mod goal ran and was interrupted"
+        );
+        assert!(
+            game.mobs[0].ai.goals.is_running("Vanilla"),
+            "the higher-priority goal holds MOVE"
+        );
+        assert!(
+            !game.mobs[0].ai.goals.is_running("Counter"),
+            "the interrupted goal stopped"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn set_target_follows_the_write_rules() {
+    use horizon_client::mobs::Who;
+    struct SetTarget;
+    impl Goal for SetTarget {
+        fn flags(&self) -> GoalFlags {
+            GoalFlags::MOVE
+        }
+        fn name(&self) -> &'static str {
+            "SetTarget"
+        }
+        fn can_use(&mut self, _cx: &mut GoalContext<'_>) -> bool {
+            true
+        }
+        fn start(&mut self, cx: &mut GoalContext<'_>) {
+            let other = OTHER.lock().unwrap().as_ref().copied();
+            cx.set_target(other.map(LivingRef::new));
+        }
+    }
+    struct Targets;
+    #[mod_api::horizon_part]
+    impl EntityPart for Targets {
+        fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+            goals.add_goal(5, SetTarget);
+        }
+    }
+    struct TargetMod;
+    #[mod_api::__subscriptions]
+    impl Hooks for TargetMod {
+        fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
+            r.entity_part("minecraft:zombie", Targets);
+        }
+    }
+    EVENTS.lock().unwrap().clear();
+    with_game(|game| {
+        mod_api::__private::install(vec![ModEntry::new("targets", Box::new(TargetMod))].into());
+        mod_api::__private::install_parts(&[ModEntry::new("targets", Box::new(TargetMod))])
+            .unwrap();
+        game.resolve_parts().unwrap();
+        zombie(game, 40, [3.5, 65.0, 3.5]);
+        zombie(game, 41, [13.5, 65.0, 13.5]);
+        let other = game.native_entity(41).unwrap();
+        set_other(other);
+        // Only the writing goal, so no species goal races it.
+        game.mobs[0].ai.goals.clear();
+        game.mobs[0].ai.targets.clear();
+        mobs::part_goals::attach(&mut game.mobs[0]);
+        tick_goals(game, 0);
+        assert_eq!(
+            game.mobs[0].ai.target,
+            Some(Who::Mob(41)),
+            "a snapshot mob target stores"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn mobs_without_mod_goals_tick_as_before() {
+    EVENTS.lock().unwrap().clear();
+    with_game(|game| {
+        // No parts at all: no goal host is built, and the species goals
+        // answer for themselves.
+        zombie(game, 50, [3.5, 65.0, 3.5]);
+        game.mobs[0].ai.goals.clear();
+        game.mobs[0].ai.goals.add(3, Vanilla);
+        tick_goals(game, 0);
+        assert!(
+            game.mobs[0].ai.goals.is_running("Vanilla"),
+            "a plain goal ticks with no goal host in place"
+        );
+    });
+}
+
+/// What one mod-goal tick costs against a plain engine goal, in nanoseconds:
+/// printed once for the PR body (#1077). Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "cost probe"]
+fn mod_goal_tick_cost() {
+    use horizon_client::mobs::goals::GoalSelector;
+    use std::time::Instant;
+
+    fn spin(selector: &mut GoalSelector, m: &mut Mob, cx: &mut Cx, rounds: usize) -> f64 {
+        // Warm up, then the best of three: a debug-build probe, but a stable one.
+        for _ in 0..rounds / 4 {
+            selector.tick(m, cx);
+        }
+        (0..3)
+            .map(|_| {
+                let start = Instant::now();
+                let mut held = 0u64;
+                for _ in 0..rounds {
+                    selector.tick(m, cx);
+                    held = held.wrapping_add(1);
+                }
+                std::hint::black_box(held);
+                start.elapsed().as_nanos() as f64 / rounds as f64
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    EVENTS.lock().unwrap().clear();
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        zombie(game, 60, [3.5, 65.0, 3.5]);
+        let mut mobs = std::mem::take(&mut game.mobs);
+        let snapshot: Vec<_> = mobs
+            .iter()
+            .map(|m| creatures::seen(m, game.level.player_uuid))
+            .collect();
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        let mut events = Vec::new();
+        game.options.dedicated = Some(Vec::new());
+        let mut w = game.mob_world_base(&snapshot);
+        w.others_index = None;
+        let mut cx = Cx {
+            w: &w,
+            level: &mut level,
+            events: &mut events,
+        };
+        // One plain engine goal of the same shape (always can_use, MOVE).
+        let mut plain = GoalSelector::default();
+        plain.add(3, Vanilla);
+        let per_plain = spin(&mut plain, &mut mobs[0], &mut cx, 20_000);
+        // The mod goal through its wrapper and context: a fresh zombie's
+        // registered Counter, alone in its selector.
+        let per_mod = {
+            let mut mob = Mob::new(
+                60,
+                game.res
+                    .mob_types()
+                    .get("minecraft:zombie")
+                    .unwrap()
+                    .clone(),
+                Vec3::new(3.5, 65.0, 3.5),
+                0.0,
+            );
+            mob.ai.goals.clear();
+            mobs::part_goals::attach(&mut mob);
+            let mut wrapped = std::mem::take(&mut mob.ai.goals);
+            spin(&mut wrapped, &mut mobs[0], &mut cx, 20_000)
+        };
+        println!(
+            "per tick: plain engine goal {per_plain:.1} ns, mod goal {per_mod:.1} ns, \
+             wrapper overhead {:+.1} ns",
+            per_mod - per_plain
+        );
+    });
+}

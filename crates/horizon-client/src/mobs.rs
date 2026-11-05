@@ -62,6 +62,7 @@ pub mod nav;
 pub mod nether;
 pub mod panda;
 pub mod parrot;
+pub mod part_goals;
 pub mod path;
 pub mod phantom;
 pub mod piglin;
@@ -3153,6 +3154,9 @@ pub struct MobWorld<'a> {
     /// The mod hooks the AI asks mid-tick, on a server where a mod listens
     /// (None otherwise: the AI asks nothing).
     pub mob_hooks: Option<&'a dyn MobHooks>,
+    /// The goal view's facts (#1077), on the native-authoritative side where
+    /// a mod attached an entity part (None otherwise: no mod goal runs).
+    pub goal_host: Option<&'a dyn part_goals::GoalHost>,
     /// Whether a listener can cancel animal taming.
     pub asks_animal_tame: bool,
     /// Whether a listener can cancel a mob's block destruction.
@@ -3361,6 +3365,9 @@ impl Mob {
         // The PathNavigation constructor: the base follow range.
         mob.ai.nav.max_visited_nodes = (mob.kind.follow_range * 16.0).floor() as i32;
         ai::register(&mut mob);
+        // The parts a mod attached to this entity type add their goals right
+        // after the species' own (#1077): vanilla's `registerGoals` moment.
+        part_goals::attach(&mut mob);
         mob
     }
     /// `Mob.canPickUpLoot`, with the overrides: an allay that holds

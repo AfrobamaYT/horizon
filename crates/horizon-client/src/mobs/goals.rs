@@ -3010,6 +3010,7 @@ mod breeding_variant_tests {
             let partner = [mate.seen(None)];
             for asks_baby_spawn in [false, true] {
                 let w = MobWorld {
+                    goal_host: None,
                     asks_baby_spawn,
                     mob_drops: false,
                     others: &partner,
@@ -3071,6 +3072,7 @@ mod breeding_variant_tests {
                     [(false, true), (false, false), (true, true), (true, false)]
                 {
                     let world = MobWorld {
+                        goal_host: None,
                         asks_baby_spawn: ask_mods,
                         mob_drops,
                         others: &partner,

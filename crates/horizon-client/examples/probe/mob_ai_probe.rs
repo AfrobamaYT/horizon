@@ -1173,6 +1173,7 @@ pub fn main() -> horizon_client::Result<()> {
             };
             ($snapshot:expr, $grid:expr) => {
                 MobWorld {
+                    goal_host: None,
                     teams: Default::default(),
                     loop_context: crate::test_resources::server_loop_context(),
                     world: &world,

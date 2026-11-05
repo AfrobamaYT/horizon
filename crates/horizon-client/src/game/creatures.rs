@@ -995,6 +995,8 @@ impl Game<'_> {
                 .into_iter()
                 .any(mod_api::__private::listened))
             .then_some(self as &dyn horizon_client::mobs::MobHooks),
+            goal_host: (self.native_authoritative() && mod_api::__private::has_entity_parts())
+                .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
             asks_animal_tame: self.remote.is_none()
                 && mod_api::__private::listened(mod_api::HookId::AnimalTame),
             asks_living_destroy_block: self.remote.is_none()
@@ -9603,6 +9605,7 @@ mod pearl_tests {
         }
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
+            goal_host: None,
             teams: Default::default(),
             loop_context: &crate::game::test_server_load()
                 .loop_context(horizon_world::native_load_context::LoopSide::Server, []),

@@ -1,24 +1,7 @@
 //! Mob handles for native server mods.
 use super::{Game, commands::Target};
-use horizon_client::mobs::{self, Mob, Species, Who};
+use horizon_client::mobs::{self, Mob, Species, Who, ai::brain_target};
 use mod_api::{EntityRef, LivingRef, MobRef};
-
-/// Brain-backed vanilla `getTarget` overrides. Piglins and hoglins use
-/// Horizon's `ai.target` as the stand-in for their brain memory.
-fn brain_target(mob: &Mob) -> Option<Option<Who>> {
-    Some(match mob.species() {
-        Species::Warden => mobs::warden::brain_target(mob),
-        Species::Breeze | Species::Creaking => mobs::monster_brain::attack_target(mob),
-        Species::Axolotl => mob
-            .extra
-            .animal_brain
-            .as_ref()
-            .and_then(|b| b.mem.attack_target.value()),
-        Species::Frog => mobs::frog::attack_target(mob),
-        Species::Piglin | Species::PiglinBrute | Species::Hoglin | Species::Zoglin => mob.ai.target,
-        _ => return None,
-    })
-}
 
 /// What decides whether a player can be a mob's target.
 pub(super) struct PlayerFacts {

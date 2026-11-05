@@ -1159,6 +1159,7 @@ mod tests {
                 .unwrap();
             for asks_animal_tame in [false, true] {
                 let world = crate::mobs::MobWorld {
+                    goal_host: None,
                     asks_animal_tame,
                     ..world.clone()
                 };

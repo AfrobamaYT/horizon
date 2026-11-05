@@ -4415,6 +4415,10 @@ pub use part_table::{
     ProvidedBy, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
+mod goals;
+pub use goals::{Goal, GoalContext, GoalFlags, GoalRegistrar, RegistrarMob};
+#[doc(hidden)]
+pub use goals::{GoalCxBackend, GoalRegistrarBackend};
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

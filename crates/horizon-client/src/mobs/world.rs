@@ -482,6 +482,7 @@ pub(crate) fn with_resource_test_world(
     build(&mut world, registry);
     let lid_openers = std::collections::HashMap::new();
     let w = MobWorld {
+        goal_host: None,
         teams: Default::default(),
         loop_context: crate::test_resources::server_loop_context(),
         world: &world,
