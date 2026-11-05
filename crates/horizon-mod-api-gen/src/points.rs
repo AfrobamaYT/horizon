@@ -48,68 +48,137 @@ pub struct GamePoint {
 /// matching on `HostSide` where it takes `&mut self`.
 const ATTRIBUTE: &str = "side = \"both\"";
 
-/// A source file of the game module, with its module path.
+/// A source file of the game module, with its module path and the `cfg`s it is compiled under.
 pub(crate) struct GameFile {
     pub(crate) module: String,
     pub(crate) path: PathBuf,
+    /// The conditions of the `mod` declarations that lead to it, outermost first.
+    pub(crate) cfg: Vec<String>,
 }
 
-/// The files of `horizon_client::game` that every build compiles, following its `mod`
-/// declarations (and `#[path]`s) from `game.rs`: a module behind a `cfg` is left out with
-/// everything under it.
-pub(crate) fn game_files(src: &Path) -> Result<Vec<GameFile>, String> {
+/// The `cfg` conditions in `attrs`, as written, except `cfg(test)`.
+pub(crate) fn conditions(attrs: &[syn::Attribute]) -> Vec<String> {
+    attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("cfg") && !test_only(std::slice::from_ref(attr)))
+        .filter_map(|attr| attr.parse_args::<syn::Meta>().ok())
+        .map(|meta| meta.to_token_stream().to_string())
+        .collect()
+}
+
+/// Whether `attrs` hold `#[cfg(test)]`: compiled only into tests.
+pub(crate) fn test_only(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("cfg")
+            && matches!(attr.parse_args::<syn::Meta>(), Ok(syn::Meta::Path(path)) if path.is_ident("test"))
+    })
+}
+
+/// The files of `horizon_client::game`, following its `mod` declarations (and `#[path]`s, and
+/// inline modules that declare files) from `game.rs`. With `every_build`, a module behind a `cfg`
+/// is left out with everything under it (the points: functions every build compiles); without, it
+/// is kept with its conditions (the internals, listed with the builds they exist in). Test-only
+/// modules are always left out.
+pub(crate) fn game_files(src: &Path, every_build: bool) -> Result<Vec<GameFile>, String> {
     let mut files = Vec::new();
     let mut pending = vec![(
         "horizon_client::game".to_owned(),
         src.join("game.rs"),
         src.join("game"),
+        Vec::new(),
     )];
-    while let Some((module, path, dir)) = pending.pop() {
+    while let Some((module, path, dir, cfg)) = pending.pop() {
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         let here = path
             .parent()
             .expect("a source file has a folder")
             .to_owned();
-        for item in &file.items {
-            let Item::Mod(declared) = item else { continue };
-            if declared.content.is_some() || gated(&declared.attrs) {
-                continue;
-            }
-            let name = declared.ident.to_string();
-            let child = format!("{module}::{name}");
-            let explicit = declared.attrs.iter().find_map(|attr| match &attr.meta {
-                syn::Meta::NameValue(value) if attr.path().is_ident("path") => match &value.value {
-                    syn::Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Str(path),
-                        ..
-                    }) => Some(path.value()),
-                    _ => None,
-                },
-                _ => None,
-            });
-            let (file, child_dir) = match explicit {
-                Some(relative) => {
-                    let file = here.join(relative);
-                    let dir = file.with_extension("");
-                    (file, dir)
-                }
-                None if dir.join(format!("{name}.rs")).is_file() => {
-                    (dir.join(format!("{name}.rs")), dir.join(&name))
-                }
-                None => (dir.join(&name).join("mod.rs"), dir.join(&name)),
-            };
-            pending.push((child, file, child_dir));
-        }
-        files.push(GameFile { module, path });
+        children(
+            &module,
+            &file.items,
+            &here,
+            &dir,
+            &cfg,
+            every_build,
+            &mut pending,
+        );
+        files.push(GameFile { module, path, cfg });
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
 
+/// A module file still to read: its module path, file, children's folder and conditions.
+type Pending = (String, PathBuf, PathBuf, Vec<String>);
+
+/// Queues the module files `items` declare, looking inside inline modules too: a file module
+/// declared in `mod a { mod b; }` lives in `dir/a/b.rs`. A `#[path]` is relative to `here`.
+fn children(
+    module: &str,
+    items: &[Item],
+    here: &Path,
+    dir: &Path,
+    cfg: &[String],
+    every_build: bool,
+    pending: &mut Vec<Pending>,
+) {
+    for item in items {
+        let Item::Mod(declared) = item else { continue };
+        if test_only(&declared.attrs) || (every_build && gated(&declared.attrs)) {
+            continue;
+        }
+        let name = declared.ident.to_string();
+        let child = format!("{module}::{name}");
+        let cfg: Vec<String> = cfg
+            .iter()
+            .cloned()
+            .chain(conditions(&declared.attrs))
+            .collect();
+        if let Some((_, inner)) = &declared.content {
+            let inner_dir = dir.join(&name);
+            children(
+                &child,
+                inner,
+                &inner_dir,
+                &inner_dir,
+                &cfg,
+                every_build,
+                pending,
+            );
+            continue;
+        }
+        let explicit = declared.attrs.iter().find_map(|attr| match &attr.meta {
+            syn::Meta::NameValue(value) if attr.path().is_ident("path") => match &value.value {
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(path),
+                    ..
+                }) => Some(path.value()),
+                _ => None,
+            },
+            _ => None,
+        });
+        let (file, child_dir) = match explicit {
+            Some(relative) => {
+                let file = here.join(relative);
+                let dir = file.with_extension("");
+                (file, dir)
+            }
+            None if dir.join(format!("{name}.rs")).is_file() => {
+                (dir.join(format!("{name}.rs")), dir.join(&name))
+            }
+            None => (dir.join(&name).join("mod.rs"), dir.join(&name)),
+        };
+        pending.push((child, file, child_dir, cfg));
+    }
+}
+
 /// The game module's files, for a build script to track.
 pub fn tracked(src: &Path) -> Result<Vec<PathBuf>, String> {
-    Ok(game_files(src)?.into_iter().map(|file| file.path).collect())
+    Ok(game_files(src, true)?
+        .into_iter()
+        .map(|file| file.path)
+        .collect())
 }
 
 /// Whether `attrs` hold a `cfg` (or `cfg_attr`): the item is compiled only in some builds.
@@ -156,7 +225,7 @@ fn file_points<'a>(module: &str, items: &'a [Item], out: &mut Vec<(String, &'a s
 /// names Rust already keeps unique.
 pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     let mut points = Vec::new();
-    for file in game_files(&root.join("crates/horizon-client/src"))? {
+    for file in game_files(&root.join("crates/horizon-client/src"), true)? {
         let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
         let parsed =
             syn::parse_file(&source).map_err(|e| format!("{}: {e}", file.path.display()))?;
@@ -222,7 +291,7 @@ pub struct Staged {
 /// place. Run on a copy, never on a working tree: the source tree carries no `#[point]`.
 pub fn stage(root: &Path) -> Result<Staged, String> {
     let mut staged = Staged::default();
-    for file in game_files(&root.join("crates/horizon-client/src"))? {
+    for file in game_files(&root.join("crates/horizon-client/src"), true)? {
         let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
         let parsed =
             syn::parse_file(&source).map_err(|e| format!("{}: {e}", file.path.display()))?;
@@ -441,6 +510,8 @@ mod tests {
             "fn slot(&mut self, i: u32) -> Option<&mut ItemStack> {}"
         ));
         assert!(!at_return("fn view(&self) -> View<'_> {}"));
+        // A `'static` return borrows nothing from the receiver.
+        assert!(at_return("fn jab(&self) -> Option<&'static str> {}"));
     }
 
     #[test]
@@ -472,7 +543,7 @@ mod tests {
         std::fs::create_dir_all(src.join("game/remote")).unwrap();
         std::fs::write(
             src.join("game.rs"),
-            "mod remote;\n#[cfg(test)]\nmod probes;\nimpl Game<'_> {\n    fn tick(&mut self) {}\n    pub(super) fn slot(&mut self) -> &mut u8 { todo!() }\n    fn native_tick(&mut self) {}\n}\n",
+            "mod remote;\nmod nested { mod leaf; }\n#[cfg(test)]\nmod probes;\nimpl Game<'_> {\n    fn tick(&mut self) {}\n    pub(super) fn slot(&mut self) -> &mut u8 { todo!() }\n    fn native_tick(&mut self) {}\n}\n",
         )
         .unwrap();
         std::fs::write(
@@ -485,6 +556,12 @@ mod tests {
             "impl Game<'_> { fn join(&mut self) {} }",
         )
         .unwrap();
+        std::fs::create_dir_all(src.join("game/nested")).unwrap();
+        std::fs::write(
+            src.join("game/nested/leaf.rs"),
+            "impl Game<'_> { fn fall(&mut self) {} }",
+        )
+        .unwrap();
         std::fs::write(
             src.join("game/probes.rs"),
             "impl Game<'_> { fn probe(&self) {} }",
@@ -495,6 +572,7 @@ mod tests {
         assert_eq!(
             targets,
             [
+                "horizon_client::game::nested::leaf::Game<'_>::fall",
                 "horizon_client::game::remote::lan::Game<'_>::join",
                 "horizon_client::game::remote::Game<'_>::send",
                 "horizon_client::game::Game<'_>::slot",
@@ -509,9 +587,9 @@ mod tests {
         assert_eq!(
             stage(&root).unwrap(),
             Staged {
-                points: 4,
+                points: 5,
                 head_only: 1,
-                files: 3
+                files: 4
             }
         );
         let game = std::fs::read_to_string(src.join("game.rs")).unwrap();

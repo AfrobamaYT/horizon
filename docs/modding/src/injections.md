@@ -235,7 +235,9 @@ Every inherent `Game` method of the game module is a point, named after the meth
 - `const`, `async` and `unsafe` functions, and methods without a `&self` or `&mut self` receiver;
 - `impl Trait` or `!` in the signature, `#[inline(always)]`, and a parameter named `cancel` or `result`.
 
-A method whose return value borrows the game (`-> &T`, `-> Option<&mut T>`) has a head and no return.
+A method whose return value borrows the game (`-> &T`, `-> Option<&mut T>`) has a head and no return; a
+`'static` return (`-> Option<&'static str>`) borrows nothing and has both. A `usize` or `isize` crosses
+the record as `u64` or `i64`, one width for native and wasm listeners.
 `points.json`, beside the prebuilt game, lists them all; the rustdoc of `horizon-mod-points` documents
 each with the function it listens at.
 

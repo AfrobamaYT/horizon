@@ -108,15 +108,21 @@ pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
         })
 }
 
-/// Whether `ty` holds a reference or a named lifetime.
+/// Whether `ty` holds a reference or a lifetime other than `'static`: a value that may borrow.
 fn borrows(ty: &Type) -> bool {
     struct Find(bool);
     impl<'ast> syn::visit::Visit<'ast> for Find {
-        fn visit_type_reference(&mut self, _: &'ast syn::TypeReference) {
-            self.0 = true;
+        fn visit_type_reference(&mut self, reference: &'ast syn::TypeReference) {
+            match &reference.lifetime {
+                Some(lifetime) if lifetime.ident == "static" => {}
+                _ => self.0 = true,
+            }
+            syn::visit::visit_type_reference(self, reference);
         }
-        fn visit_lifetime(&mut self, _: &'ast syn::Lifetime) {
-            self.0 = true;
+        fn visit_lifetime(&mut self, lifetime: &'ast syn::Lifetime) {
+            if lifetime.ident != "static" {
+                self.0 = true;
+            }
         }
     }
     let mut find = Find(false);
@@ -228,6 +234,19 @@ fn scalar(ty: &Type) -> bool {
     matches!(ty, Type::Path(_)) && api_typed(ty)
 }
 
+/// The type a scalar crosses as in a record: `usize`/`isize` as `u64`/`i64`, one width on every
+/// host and in a wasm guest (whose `usize` is 32-bit); none for a type that crosses as itself.
+pub fn wide(ty: &Type) -> Option<Type> {
+    let Type::Path(path) = ty else { return None };
+    if path.path.is_ident("usize") {
+        Some(syn::parse_quote!(u64))
+    } else if path.path.is_ident("isize") {
+        Some(syn::parse_quote!(i64))
+    } else {
+        None
+    }
+}
+
 /// `tick_return` as `TickReturn`.
 pub fn camel(name: &str) -> String {
     name.split('_')
@@ -244,9 +263,9 @@ pub fn camel(name: &str) -> String {
 /// Whether the API can carry `ty` to a listener: a scalar, or `&str` with its lifetime elided (a listener
 /// may replace that text with its own, which a named lifetime such as `'static` couldn't hold).
 fn api_typed(ty: &Type) -> bool {
-    const SCALARS: [&str; 15] = [
-        "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16",
-        "u32", "u64", "usize",
+    const SCALARS: [&str; 14] = [
+        "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32",
+        "u64", "usize",
     ];
     match ty {
         Type::Path(path) => {
@@ -297,16 +316,18 @@ impl Shape {
         let (types, fields): (Vec<_>, Vec<_>) = self
             .args
             .iter()
-            .map(|arg| match &arg.ty {
-                Type::Reference(_) => (quote!(&'a str), quote!(::std::borrow::Cow<'a, str>)),
-                ty => (quote!(#ty), quote!(#ty)),
+            .map(|arg| match (&arg.ty, wide(&arg.ty)) {
+                (Type::Reference(_), _) => (quote!(&'a str), quote!(::std::borrow::Cow<'a, str>)),
+                (ty, Some(wide)) => (quote!(#ty), quote!(#wide)),
+                (ty, None) => (quote!(#ty), quote!(#ty)),
             })
             .unzip();
         let inits = self.args.iter().map(|arg| {
             let name = &arg.name;
-            match &arg.ty {
-                Type::Reference(_) => quote!(#name: ::std::borrow::Cow::Borrowed(#name)),
-                _ => quote!(#name),
+            match (&arg.ty, wide(&arg.ty)) {
+                (Type::Reference(_), _) => quote!(#name: ::std::borrow::Cow::Borrowed(#name)),
+                (_, Some(wide)) => quote!(#name: #name as #wide),
+                (_, None) => quote!(#name),
             }
         });
         let field_docs = names.iter().map(|name| {
@@ -322,14 +343,17 @@ impl Shape {
                 },
                 quote!(cancel: false,),
             ),
-            Returns::Value(ty) => (
-                quote! {
-                    /// Set by a head listener: the function returns this at once, skipping its body.
-                    /// Return listeners find the value it returns here, and may change it.
-                    pub result: Option<#ty>,
-                },
-                quote!(result: None,),
-            ),
+            Returns::Value(ty) => {
+                let ty = wide(ty).unwrap_or_else(|| ty.clone());
+                (
+                    quote! {
+                        /// Set by a head listener: the function returns this at once, skipping its body.
+                        /// Return listeners find the value it returns here, and may change it.
+                        pub result: Option<#ty>,
+                    },
+                    quote!(result: None,),
+                )
+            }
             Returns::Opaque => (quote!(), quote!()),
         };
         let doc = format!(
