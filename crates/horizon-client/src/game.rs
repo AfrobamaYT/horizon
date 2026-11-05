@@ -6934,19 +6934,8 @@ impl Game<'_> {
                         stacks,
                     )
                 });
-                for item in dropped.items {
-                    self.spawn_item(item.stack, item.position, item.velocity, item.pickup_delay);
-                }
-                if dropped.experience > 0 {
-                    self.spawn_orbs(
-                        [
-                            f64::from(pos[0]) + 0.5,
-                            f64::from(pos[1]) + 0.5,
-                            f64::from(pos[2]) + 0.5,
-                        ],
-                        dropped.experience,
-                    );
-                }
+                let canceled = dropped.canceled;
+                self.spawn_block_drops(pos, dropped);
                 // BeehiveBlock.playerDestroy: silk touch keeps the bees in, so
                 // the trigger counts them; otherwise they are out already.
                 if let Some((hive, (honey, facing))) = hive {
@@ -6960,7 +6949,7 @@ impl Game<'_> {
                 // tool has silk touch (#prevents_infested_spawns) or blocks don't drop.
                 if facts.name.starts_with("minecraft:infested_")
                     && !silk
-                    && !dropped.canceled
+                    && !canceled
                     && self.ui.rules.bool("block_drops")
                 {
                     let at = [

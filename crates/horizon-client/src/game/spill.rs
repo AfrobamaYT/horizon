@@ -478,24 +478,52 @@ impl GameLevel<'_> {
         tool: Option<&ItemStack>,
         stacks: Vec<ItemStack>,
     ) -> BlockDrops {
-        let at = [pos.x, pos.y, pos.z];
-        let mut items: Vec<NativeItemDrop> = stacks
+        let items = stacks
             .into_iter()
             .filter(|stack| &*stack.item != "minecraft:air" && stack.count > 0)
-            .map(|mut stack| {
-                self.pending.attach(at, &mut stack);
-                let position = pop_position(&mut self.world.random, at);
-                NativeItemDrop::new(stack, position, new_item_motion(), 10)
-            })
+            .map(|stack| self.block_drop_item([pos.x, pos.y, pos.z], stack))
             .collect();
         // `tryDropExperience` samples before the silk touch effect zeroes the
         // amount; a spawner's experience ignores the tool.
         let name = self.facts.get(state).name.clone();
         let silk = tool.is_some_and(|tool| tool.enchantment_level("minecraft:silk_touch") > 0);
-        let mut experience = removal::break_experience(&mut self.world.random, &name)
+        let experience = removal::break_experience(&mut self.world.random, &name)
             .filter(|_| !silk || &*name == "minecraft:spawner")
             .unwrap_or(0);
-        let mut canceled = false;
+        self.block_drops_ready(
+            pos,
+            state,
+            breaker,
+            tool,
+            BlockDrops {
+                items,
+                experience,
+                canceled: false,
+            },
+        )
+    }
+    /// Build item entities only after vanilla has finished merging stacks.
+    pub(super) fn block_drop_item(&mut self, at: [i32; 3], mut stack: ItemStack) -> NativeItemDrop {
+        self.pending.attach(at, &mut stack);
+        let position = pop_position(&mut self.world.random, at);
+        NativeItemDrop::new(stack, position, new_item_motion(), 10)
+    }
+    /// The one event/filter boundary for prepared block item entities and XP.
+    /// Explosions supply their merged entities with zero initial experience
+    /// (`BlockBehaviour.onExplosionHit` passes false to `spawnAfterBreak`).
+    pub(super) fn block_drops_ready(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        breaker: Option<u128>,
+        tool: Option<&ItemStack>,
+        dropped: BlockDrops,
+    ) -> BlockDrops {
+        let BlockDrops {
+            mut items,
+            mut experience,
+            mut canceled,
+        } = dropped;
         if self.native_authoritative {
             self.native_block_drops(mod_api::__private::BlockDropsCall {
                 dimension: self.dimension,
@@ -792,6 +820,15 @@ impl GameLevel<'_> {
 }
 
 impl Game<'_> {
+    /// Apply the shared block-drop event's item entities and experience unchanged.
+    pub(super) fn spawn_block_drops(&mut self, pos: [i32; 3], dropped: BlockDrops) {
+        for item in dropped.items {
+            self.spawn_item(item.stack, item.position, item.velocity, item.pickup_delay);
+        }
+        if dropped.experience > 0 {
+            self.spawn_orbs(pos.map(|v| f64::from(v) + 0.5), dropped.experience);
+        }
+    }
     /// Add the item entities the block behaviour spawned and follow up on the
     /// block entities it removed.
     pub(super) fn flush_spill(&mut self) {

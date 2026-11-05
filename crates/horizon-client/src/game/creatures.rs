@@ -3185,28 +3185,6 @@ impl Game<'_> {
                         broke.push(mob);
                     }
                     let old = self.world.block(pos[0], pos[1], pos[2]);
-                    // InfestedBlock.spawnAfterBreak: its silverfish comes out
-                    // when blocks drop.
-                    if drop
-                        && self
-                            .res
-                            .facts()
-                            .get(old)
-                            .name
-                            .starts_with("minecraft:infested_")
-                        && self.ui.rules.bool("block_drops")
-                    {
-                        let at = [
-                            f64::from(pos[0]) + 0.5,
-                            f64::from(pos[1]),
-                            f64::from(pos[2]) + 0.5,
-                        ];
-                        if let Some(id) =
-                            self.spawn_mob("minecraft:silverfish", at, false, SpawnSite::Plain)
-                        {
-                            self.mob_poof(id);
-                        }
-                    }
                     // Block.spawnDestroyParticles: fire breaks leave nothing.
                     if !self.res.facts().get(old).has_class("BaseFireBlock") {
                         self.level_event_at(2001, pos, old.0 as i32);
@@ -3220,8 +3198,38 @@ impl Game<'_> {
                             Some((&mut self.rand_sequences, self.level.seed)),
                         );
                         self.native_block_loot(pos, old, None, None, None, &mut drops);
-                        for d in drops {
-                            self.pop_resource(pos, d);
+                        let dropped = self.with_level(|_, level, _| {
+                            level.block_dropped(
+                                BlockPos::new(pos[0], pos[1], pos[2]),
+                                old,
+                                None,
+                                None,
+                                drops,
+                            )
+                        });
+                        let canceled = dropped.canceled;
+                        self.spawn_block_drops(pos, dropped);
+                        // InfestedBlock.spawnAfterBreak runs after the drops,
+                        // unless BlockDropsEvent canceled it.
+                        if !canceled
+                            && self
+                                .res
+                                .facts()
+                                .get(old)
+                                .name
+                                .starts_with("minecraft:infested_")
+                            && self.ui.rules.bool("block_drops")
+                        {
+                            let at = [
+                                f64::from(pos[0]) + 0.5,
+                                f64::from(pos[1]),
+                                f64::from(pos[2]) + 0.5,
+                            ];
+                            if let Some(id) =
+                                self.spawn_mob("minecraft:silverfish", at, false, SpawnSite::Plain)
+                            {
+                                self.mob_poof(id);
+                            }
                         }
                     }
                     // Level.destroyBlock: setBlock(fluidState.createLegacyBlock(), 3),
