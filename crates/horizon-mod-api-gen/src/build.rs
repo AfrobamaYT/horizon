@@ -55,7 +55,7 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     let src = root.join("crates/horizon-client/src");
     println!("cargo:rerun-if-changed={}", src.join("game.rs").display());
     println!("cargo:rerun-if-changed={}", src.join("game").display());
-    for path in super::points::tracked(&src)? {
+    for path in super::points::tracked(root)? {
         println!("cargo:rerun-if-changed={}", path.display());
     }
     let code = super::points::records(&super::points::game_points(root)?);
