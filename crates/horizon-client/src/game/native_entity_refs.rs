@@ -2121,7 +2121,7 @@ pub(super) mod tests {
             game.options.dedicated = None;
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
-            assert_eq!(players[0].uuid, 1);
+            assert_eq!(players[0].uuid(), 1);
             // A fake record in the Nether does not keep that level ticking.
             game.lan.as_mut().unwrap().hub.guests[1].dimension = "minecraft:the_nether".into();
             let ticking = game.levels_to_tick();

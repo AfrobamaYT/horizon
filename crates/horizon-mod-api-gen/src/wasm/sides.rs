@@ -314,6 +314,18 @@ fn guest_call(
     callee: &str,
     lead: Option<&str>,
 ) -> Result<String, String> {
+    if super::frame_accessor(method) {
+        let Ty::Dyn(_, mutable) = method.ret else {
+            unreachable!()
+        };
+        // `Guest` is a unit type: this mutable frame view allocates no memory.
+        let value = if mutable {
+            "Box::leak(Box::new(Guest))"
+        } else {
+            "&Guest"
+        };
+        return Ok(format!("{} {{ {value} }}\n", rust_sig(types, method)));
+    }
     let sig = signature(types, method)?;
     let mut prep = String::new();
     let mut args = Vec::new();

@@ -40,6 +40,36 @@ instance they are installed in.
 Villager handles preserve the full signed integer level (at least 1), including values above the
 five vanilla trade tiers. Higher levels use the master badge and do not gain further vanilla trades.
 
+## Server services and player handles
+
+Server hooks reach commands through `host.commands()`: `run_command(line)` uses
+console permission level 4 and the existing console command path, while
+`feedback(text)` answers the current command source. `host.messages()` provides
+`broadcast(text)` (including the broadcast hook and server log) and
+`text_allowed(text)` (the server chat filter).
+
+`host.players().server_players()` returns `Vec<PlayerRef>` in connection order;
+`host.players().acting_player()` returns the optional `PlayerRef` whose state is
+swapped in for this hook. The online list includes connected players even during
+nested player turns; a displaced body's reads still refuse where they did before.
+Read identity through `player.uuid()`, `player.name(host)` and
+`player.op_level(host)`, and use the entity and living handles for world-state reads.
+No snapshot of event data is returned by these services.
+
+Send to one player with `player.tell(host, text)`, `action_bar(host, text)` or
+`tab_list(host, header, footer)`. `set_nickname(host, nickname)`,
+`set_sleep_ignored(host, ignored)` and `hide(host, permission)` keep their existing
+server behavior. Messaging reaches the acting player and other connected players,
+including displaced online records; it refuses stale or disconnected identities.
+Vanish state is stored by UUID and can be changed with a retained handle after
+disconnection, until its world epoch closes. The state survives reconnects.
+
+These small services exist only on `ServerHost`, not `Host`, `ClientHost` or a
+restricted level host. Native and wasm mods use the same calls: service methods
+are generated imports, and acquiring a service just reborrows the current call's
+frame resource. Block and fluid scheduling stays on `LevelTicksHost`, and
+`tick_stats()` stays on `ServerHost`.
+
 ## Filtering toast notifications
 
 Implement `Hooks::toast_add` to filter a client notification before it enters its
