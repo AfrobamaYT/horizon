@@ -1,46 +1,64 @@
-//! The one list of point listeners. A native mod's `#[horizon_mod] impl Points` and the wasm
-//! runtime's proxies both [`register`] here while the game loads; the game then [`seal`]s it and
-//! sets its slot table from [`listened_at`]. A firing slot walks [`listeners`]: the mods
-//! subscribed to that place, in registration order (dispatch order), skipping any [`stop`]ped.
+//! The one list of point listeners, and the slot table the points read. A native mod's
+//! `#[horizon_mod] impl Points` and the wasm runtime's proxies both [`register`] here while the game
+//! loads, and a native mod's raw listeners [`register_raw`]; the game then [`seal`]s the list, which
+//! sets [`POINTS`]. A firing slot walks the mods subscribed to that place, API listeners first and
+//! then raw ones, each in registration (dispatch) order, skipping any [`stop`]ped mod.
 use crate::{POINT_COUNT, PointId, Points};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Each place's slot: set once, at the seal, where a mod listens. A point that nothing listens at
+/// costs one load of it.
+pub static POINTS: [AtomicBool; POINT_COUNT] = [const { AtomicBool::new(false) }; POINT_COUNT];
+
 struct Listener {
     id: &'static str,
-    points: &'static dyn Points,
+    /// The mod's `impl Points`, when it has one.
+    points: Option<&'static dyn Points>,
     /// Set when the mod stopped (a trap in its wasm group, or the game giving up on it): its
     /// listeners are skipped from then on.
     stopped: AtomicBool,
 }
 
-struct Sealed {
-    listeners: Box<[Listener]>,
-    /// Each place's subscribed listeners, by index into `listeners`, in order.
-    places: Box<[Box<[u32]>]>,
+/// A raw listener: a plain function of the mod's, whose type the generated `main` checked against
+/// the place's listener type before erasing it.
+#[derive(Clone, Copy)]
+struct Raw {
+    listener: u32,
+    function: *const (),
 }
+
+// A function pointer: no data behind it, so it moves between threads.
+unsafe impl Send for Raw {}
+unsafe impl Sync for Raw {}
 
 /// The list while mods load: registrations, and stops that came before the seal.
 struct Open {
     listeners: Vec<Listener>,
+    raw: Vec<(PointId, Raw)>,
     stopped: Vec<String>,
     /// Set once [`seal`] has taken the list: registering is refused from then on.
     sealing: bool,
+}
+
+struct Sealed {
+    listeners: Box<[Listener]>,
+    /// Each place's subscribed `impl Points`, by index into `listeners`, in order.
+    places: Box<[Box<[u32]>]>,
+    /// Each place's raw listeners, in order.
+    raw: Box<[Box<[Raw]>]>,
 }
 
 /// Registering, stopping and sealing all hold this lock, so a registration either lands in the
 /// sealed list or is refused, and a stop before the seal still holds after it.
 static OPEN: Mutex<Open> = Mutex::new(Open {
     listeners: Vec::new(),
+    raw: Vec::new(),
     stopped: Vec::new(),
     sealing: false,
 });
 static SEALED: OnceLock<Sealed> = OnceLock::new();
-
-fn open() -> std::sync::MutexGuard<'static, Open> {
-    OPEN.lock().unwrap_or_else(|e| e.into_inner())
-}
 
 /// Why a listener wasn't registered.
 #[derive(Debug, PartialEq, Eq)]
@@ -48,7 +66,7 @@ fn open() -> std::sync::MutexGuard<'static, Open> {
 pub enum RegisterError {
     /// The list was sealed: listeners register while the game loads, before its points are set.
     Sealed,
-    /// The mod already registered its listeners.
+    /// The mod already registered its `impl Points`.
     Twice,
 }
 
@@ -63,28 +81,96 @@ impl std::fmt::Display for RegisterError {
 
 impl std::error::Error for RegisterError {}
 
-/// Registers mod `id`'s listeners, `points`, at the places its [`Points::subscribed`] names. One
-/// route for both callers: a native mod's generated export and the wasm runtime's proxy.
-pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), RegisterError> {
-    let mut open = open();
+fn lock() -> std::sync::MutexGuard<'static, Open> {
+    OPEN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The open list, while listeners may still register.
+fn open() -> Result<std::sync::MutexGuard<'static, Open>, RegisterError> {
+    let open = lock();
     if open.sealing {
         return Err(RegisterError::Sealed);
     }
-    if open.listeners.iter().any(|listener| listener.id == id) {
+    Ok(open)
+}
+
+/// Mod `id`'s entry in the open list, added on its first registration.
+fn listener(open: &mut Open, id: &'static str) -> usize {
+    match open.listeners.iter().position(|listener| listener.id == id) {
+        Some(index) => index,
+        None => {
+            open.listeners.push(Listener {
+                id,
+                points: None,
+                stopped: AtomicBool::new(false),
+            });
+            open.listeners.len() - 1
+        }
+    }
+}
+
+/// Registers mod `id`'s listeners, `points`, at the places its [`Points::subscribed`] names. One
+/// route for both callers: a native mod's generated export and the wasm runtime's proxy.
+pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), RegisterError> {
+    let mut open = open()?;
+    let index = listener(&mut open, id);
+    let entry = &mut open.listeners[index].points;
+    if entry.is_some() {
         return Err(RegisterError::Twice);
     }
-    open.listeners.push(Listener {
-        id,
-        points,
-        stopped: AtomicBool::new(false),
-    });
+    *entry = Some(points);
+    Ok(())
+}
+
+/// A native mod's raw listener at one place: a function of the place's listener type, erased.
+/// Only [`RawListener::new`], which is `unsafe`, makes one, so safe code can't hand a slot a
+/// pointer it would call as a listener.
+pub struct RawListener {
+    id: &'static str,
+    place: PointId,
+    function: *const (),
+}
+
+impl RawListener {
+    /// Mod `id`'s listener `function` at `place`.
+    ///
+    /// # Safety
+    ///
+    /// `function` is a function of `place`'s raw listener type: `__<Point>Listener` at a head,
+    /// `__<Point>ReturnListener` at a return. The place's slot casts it back to that type and calls
+    /// it. The launcher's generated `main` checks the type with a typed `let` before erasing it.
+    pub const unsafe fn new(id: &'static str, place: PointId, function: *const ()) -> Self {
+        Self {
+            id,
+            place,
+            function,
+        }
+    }
+
+    /// The mod's id.
+    pub fn id(&self) -> &'static str {
+        self.id
+    }
+}
+
+/// Registers a native mod's raw listener.
+pub fn register_raw(raw: &RawListener) -> Result<(), RegisterError> {
+    let mut open = open()?;
+    let listener = listener(&mut open, raw.id) as u32;
+    open.raw.push((
+        raw.place,
+        Raw {
+            listener,
+            function: raw.function,
+        },
+    ));
     Ok(())
 }
 
 /// Stops mod `id`'s listeners: none of them runs again, whether the list is sealed yet or not. A
 /// trap that stops a wasm group and the game giving up on a native mod both end here.
 pub fn stop(id: &str) {
-    let mut open = open();
+    let mut open = lock();
     match SEALED.get() {
         Some(sealed) => {
             for listener in sealed.listeners.iter().filter(|listener| listener.id == id) {
@@ -95,120 +181,81 @@ pub fn stop(id: &str) {
     }
 }
 
-/// Seals the list: no listener registers after it. The game calls it once, after the mods load
-/// and before it reads [`listened_at`].
+/// Seals the list, so no listener registers after it, and sets each slot a mod listens at. The game
+/// calls it once, after the mods load.
 pub fn seal() {
     // Takes the list under the lock, then asks each mod where it listens without it: a mod's
     // `subscribed` may call `stop` (or `register`, refused) without deadlocking.
-    let listeners: Box<[Listener]> = {
-        let mut open = open();
+    let (listeners, raw_list) = {
+        let mut open = lock();
         if open.sealing {
             return;
         }
         open.sealing = true;
-        std::mem::take(&mut open.listeners).into()
+        (
+            std::mem::take(&mut open.listeners),
+            std::mem::take(&mut open.raw),
+        )
     };
     let mut places = vec![Vec::new(); POINT_COUNT];
     for (index, listener) in listeners.iter().enumerate() {
-        for place in listener.points.subscribed().iter().flatten() {
+        for place in listener
+            .points
+            .iter()
+            .flat_map(|points| points.subscribed())
+            .flatten()
+        {
             places[*place as usize].push(index as u32);
         }
     }
-    let open = open();
+    let mut raw = vec![Vec::new(); POINT_COUNT];
+    for (place, function) in raw_list {
+        raw[place as usize].push(function);
+    }
+    let open = lock();
     // Every stop so far, before the seal or while it ran, is in `stopped`; the next ones see
     // `SEALED`, set while the lock is held.
-    for listener in listeners.iter() {
+    for listener in &listeners {
         if open.stopped.iter().any(|id| id == listener.id) {
             listener.stopped.store(true, Ordering::Release);
         }
     }
-    let _ = SEALED.set(Sealed {
-        listeners,
+    let sealed = SEALED.get_or_init(|| Sealed {
+        listeners: listeners.into(),
         places: places.into_iter().map(Vec::into_boxed_slice).collect(),
+        raw: raw.into_iter().map(Vec::into_boxed_slice).collect(),
     });
+    for (index, slot) in POINTS.iter().enumerate() {
+        let listened = !sealed.places[index].is_empty() || !sealed.raw[index].is_empty();
+        slot.store(listened, Ordering::Release);
+    }
 }
 
-/// Whether a registered mod listens at the place with this `PointId` index.
-pub fn listened_at(index: usize) -> bool {
-    SEALED.get().is_some_and(|sealed| {
-        sealed
-            .places
-            .get(index)
-            .is_some_and(|place| !place.is_empty())
-    })
+/// Runs `call` for the mod `listener` while it runs `name`, so a panic in it names the mod; a
+/// stopped mod is skipped.
+fn run(sealed: &Sealed, listener: u32, name: &'static str, call: impl FnOnce()) {
+    let listener = &sealed.listeners[listener as usize];
+    if !listener.stopped.load(Ordering::Acquire) {
+        let _guard = mod_api::__private::enter(listener.id, name);
+        call();
+    }
 }
 
-/// The listeners at `place`, in dispatch order, each marked as running `name` while it runs so a
-/// panic in it names the mod; stopped mods are skipped.
-pub fn listeners(place: PointId, name: &'static str) -> impl Iterator<Item = &'static dyn Points> {
-    let sealed = SEALED.get();
-    let indices = sealed.map_or(&[][..], |sealed| &sealed.places[place as usize][..]);
-    let mut guard = None;
-    indices.iter().filter_map(move |&index| {
-        drop(guard.take());
-        let listener = &sealed?.listeners[index as usize];
-        if listener.stopped.load(Ordering::Acquire) {
-            return None;
-        }
-        guard = Some(mod_api::__private::enter(listener.id, name));
-        Some(listener.points)
-    })
+/// Runs the `impl Points` listeners at `place` (the `Points` method `name`), each through `call`.
+pub(crate) fn fire(place: PointId, name: &'static str, call: &mut dyn FnMut(&'static dyn Points)) {
+    let Some(sealed) = SEALED.get() else { return };
+    for &index in &sealed.places[place as usize] {
+        let points = sealed.listeners[index as usize].points;
+        run(sealed, index, name, || {
+            call(points.expect("a subscribed mod has its Points"))
+        });
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Tick;
-
-    impl Points for Tick {
-        fn subscribed(&self) -> &'static [Option<PointId>] {
-            &[crate::ids::tick, crate::ids::tick_return]
-        }
-    }
-
-    struct Quiet;
-
-    impl Points for Quiet {
-        fn subscribed(&self) -> &'static [Option<PointId>] {
-            &[]
-        }
-    }
-
-    /// Stops its own mod, and tries to register another, from inside the seal.
-    struct SelfStop;
-
-    impl Points for SelfStop {
-        fn subscribed(&self) -> &'static [Option<PointId>] {
-            stop("self_stopping");
-            assert_eq!(register("during", &Quiet), Err(RegisterError::Sealed));
-            &[crate::ids::tick]
-        }
-    }
-
-    #[test]
-    fn one_list_registered_sealed_and_stopped() {
-        assert_eq!(register("tick_mod", &Tick), Ok(()));
-        assert_eq!(register("tick_mod", &Quiet), Err(RegisterError::Twice));
-        assert_eq!(register("quiet_mod", &Quiet), Ok(()));
-        // A stop before the seal holds after it.
-        assert_eq!(register("stopped_early", &Tick), Ok(()));
-        stop("stopped_early");
-        assert_eq!(register("self_stopping", &SelfStop), Ok(()));
-        assert!(
-            !listened_at(PointId::Tick as usize),
-            "nothing listens before the seal"
-        );
-        seal();
-        assert_eq!(register("late", &Quiet), Err(RegisterError::Sealed));
-        assert!(listened_at(PointId::Tick as usize) && listened_at(PointId::TickReturn as usize));
-        assert!(!listened_at(PointId::Tick as usize + 2));
-        assert_eq!(
-            listeners(PointId::Tick, "tick").count(),
-            1,
-            "the mods stopped before and during the seal stay stopped"
-        );
-        stop("tick_mod");
-        assert_eq!(listeners(PointId::Tick, "tick").count(), 0);
+/// Runs the raw listeners at `place`, each through `call` with its erased function.
+pub(crate) fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(*const ())) {
+    let Some(sealed) = SEALED.get() else { return };
+    for raw in &sealed.raw[place as usize] {
+        run(sealed, raw.listener, name, || call(raw.function));
     }
 }
