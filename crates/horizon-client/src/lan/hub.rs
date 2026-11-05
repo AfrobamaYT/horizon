@@ -3482,10 +3482,9 @@ impl Hub {
         if !Arc::ptr_eq(&self.sync, &task.sync) {
             return None;
         }
-        let guest = self
-            .guests
-            .iter_mut()
-            .find(|g| g.conn == task.conn && g.uuid == task.player)?;
+        let guest = self.guests.iter_mut().find(|g| {
+            g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
+        })?;
         task.sync
             .advancements
             .grant_tick(&mut guest.advancements, grant, task.now_millis)
@@ -3501,11 +3500,9 @@ impl Hub {
         if !Arc::ptr_eq(&self.sync, &task.sync) {
             return;
         }
-        let Some(guest) = self
-            .guests
-            .iter_mut()
-            .find(|g| g.conn == task.conn && g.uuid == task.player)
-        else {
+        let Some(guest) = self.guests.iter_mut().find(|g| {
+            g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
+        }) else {
             return;
         };
         if let Some(add) = task.sync.advancements.reward_tick(
@@ -3524,11 +3521,9 @@ impl Hub {
         if !task.first_tick || !Arc::ptr_eq(&self.sync, &task.sync) {
             return;
         }
-        if let Some(i) = self
-            .guests
-            .iter()
-            .position(|g| g.conn == task.conn && g.uuid == task.player)
-        {
+        if let Some(i) = self.guests.iter().position(|g| {
+            g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
+        }) {
             self.flush_advancements(i, true);
         }
     }

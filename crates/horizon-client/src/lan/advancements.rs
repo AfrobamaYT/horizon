@@ -779,6 +779,59 @@ mod tests {
     }
 
     #[test]
+    fn tick_grants_wait_for_listener_before_reward_and_recheck_progress() {
+        use crate::advancements::{Advancement, Criterion, Rewards};
+        let mut tree = Tree::default();
+        tree.list.push(Advancement {
+            id: "test:tick".into(),
+            parent: None,
+            display: None,
+            criteria: ["first", "second"]
+                .into_iter()
+                .map(|name| Criterion {
+                    name: name.into(),
+                    trigger: "minecraft:tick".into(),
+                    conditions: Value::Null.into(),
+                })
+                .collect(),
+            requirements: vec![vec!["first".into()], vec!["second".into()]],
+            rewards: Rewards {
+                recipes: vec!["test:reward".into()],
+                ..Default::default()
+            },
+        });
+        let mut sync = SyncData::empty();
+        sync.advancements.tree = std::sync::Arc::new(tree);
+        let advancement = &sync.advancements;
+        let mut progress = Progress::default();
+        let mut book = Settings::default();
+        let candidates = advancement.tick_candidates(&progress);
+        assert_eq!(candidates.len(), 2);
+        let was_done = advancement
+            .grant_tick(&mut progress, &candidates[0], 0)
+            .unwrap();
+        assert!(progress.has("test:tick", "first"));
+        assert!(!book.knows("test:reward"));
+        advancement.reward_tick(&sync, &progress, &mut book, &candidates[0], was_done);
+        assert!(!book.knows("test:reward"));
+        let was_done = advancement
+            .grant_tick(&mut progress, &candidates[1], 0)
+            .unwrap();
+        assert!(progress.has("test:tick", "second"));
+        // This is where the Game invokes the mod listener: the criterion is
+        // visible, and the completion reward is still absent.
+        assert!(!book.knows("test:reward"));
+        advancement.reward_tick(&sync, &progress, &mut book, &candidates[1], was_done);
+        assert!(book.knows("test:reward"));
+        assert!(
+            advancement
+                .grant_tick(&mut progress, &candidates[1], 0)
+                .is_none()
+        );
+        assert!(advancement.tick_candidates(&progress).is_empty());
+    }
+
+    #[test]
     fn content_recipe_unlock_sends_a_display() {
         let root = resources("content_display", &[]);
         std::fs::write(
