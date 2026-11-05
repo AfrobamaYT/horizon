@@ -21,7 +21,7 @@ use mod_api::LivingRef;
 impl Game<'_> {
     /// Run a player sleep write in the authoritative body. An acting player's
     /// hub record is displaced until its turn ends; only inactive guests enter
-    /// another turn. Fake players never sleep.
+    /// another turn, in the level already in place. Fake players never sleep.
     fn native_player_sleep_write(
         &mut self,
         target: Target,
@@ -29,9 +29,18 @@ impl Game<'_> {
     ) -> bool {
         match target {
             Target::Player => !self.lan_acting_fake && write(self),
-            Target::Guest(conn) => self
-                .as_guest(conn, |game| !game.lan_acting_fake && write(game))
-                .unwrap_or(false),
+            Target::Guest(conn) => {
+                let Some(gi) = self.guest_index(conn) else {
+                    return false;
+                };
+                // The entity resolver includes players in other levels, but a
+                // body swap does not swap the world a bed write would touch.
+                if self.lan.as_ref().unwrap().hub.guests[gi].dimension != self.dim.id() {
+                    return false;
+                }
+                self.as_guest_at(gi, conn, |game| !game.lan_acting_fake && write(game))
+                    .unwrap_or(false)
+            }
             _ => false,
         }
     }
@@ -153,7 +162,8 @@ impl Game<'_> {
     /// place is moved onto the bed, put to sleep and occupies it; a
     /// villager or wandering trader takes a valid, unoccupied bed. Normal
     /// integrated-owner, LAN and dedicated guests use their server body,
-    /// inside or outside their own turn. False for a fake player, another
+    /// inside or outside their own turn, in the level in place. False for
+    /// a guest in another level, a fake player, another
     /// mob, an armor stand or the dragon, or a bed without a sleep shape.
     pub(super) fn native_living_start_sleeping(
         &mut self,
@@ -200,7 +210,8 @@ impl Game<'_> {
     /// `LivingEntity.stopSleeping`: the sleeper stands up beside the bed, as
     /// the game's own waking does, with its pose and packets. True when the
     /// entity slept; false for a fake player, another mob, an armor stand
-    /// or the dragon. Normal server guests use the same wake-up path.
+    /// or the dragon. Normal server guests in the level in place use the
+    /// same wake-up path; guests in another level are refused.
     pub(super) fn native_living_stop_sleeping(&mut self, living: LivingRef) -> bool {
         match self.native_living_target(living) {
             Some(target @ (Target::Player | Target::Guest(_))) => {
@@ -236,8 +247,9 @@ impl Game<'_> {
     /// the player sleeps in, without moving them; the next entity sync
     /// tells the players around they sleep there, as it tells them the
     /// game's own sleep. The villagers' beds belong to the evening's bed
-    /// path (`start_sleeping`). Normal server guests are supported; fake
-    /// players, mobs, armor stands and the dragon are refused. This only
+    /// path (`start_sleeping`). Normal server guests in the level in place
+    /// are supported; guests in another level, fake players, mobs, armor
+    /// stands and the dragon are refused. This only
     /// changes the sleeping position/pose, not bed occupancy.
     pub(super) fn native_living_set_sleeping_pos(
         &mut self,
@@ -257,8 +269,9 @@ impl Game<'_> {
     }
     /// `LivingEntity.clearSleepingPos`: the player no longer names a bed, so
     /// `is_sleeping` is false and the next entity sync stands them up.
-    /// Normal server guests are supported; fake players, mobs, armor stands
-    /// and the dragon are refused. This does not run the wake-up animation
+    /// Normal server guests in the level in place are supported; guests in
+    /// another level, fake players, mobs, armor stands and the dragon are
+    /// refused. This does not run the wake-up animation
     /// or move the player; use `stop_sleeping` to stand beside the bed.
     pub(super) fn native_living_clear_sleeping_pos(&mut self, living: LivingRef) -> bool {
         let Some(target) = self.native_living_target(living) else {
@@ -733,6 +746,30 @@ mod tests {
             with_game(|game| {
                 guest_server(game, dedicated, owner);
                 let (living, rx) = guest(game, 12);
+                // Outside the turn the client owns jump input. Only the
+                // active body exposes and accepts the controller's state.
+                assert_eq!(game.native_living_is_jumping(living), Some(false));
+                assert!(!game.native_living_set_is_jumping(living, true));
+                game.as_guest(12, |game| {
+                    assert_eq!(game.native_living_is_jumping(living), Some(false));
+                    assert!(game.native_living_set_is_jumping(living, true));
+                    assert!(game.player.as_ref().unwrap().jumping);
+                    assert_eq!(game.native_living_is_jumping(living), Some(true));
+                    assert!(game.native_living_set_is_jumping(living, false));
+                    assert!(!game.player.as_ref().unwrap().jumping);
+                    assert_eq!(game.native_living_is_jumping(living), Some(false));
+                })
+                .unwrap();
+                assert!(
+                    !game
+                        .command_guest(12)
+                        .unwrap()
+                        .motion
+                        .as_ref()
+                        .unwrap()
+                        .jumping
+                );
+                assert!(!game.native_living_set_is_jumping(living, false));
                 bed(game, "minecraft:red_bed", [5, 64, 5]);
                 let at = game.sleeping_position([5, 64, 5]).unwrap();
                 assert!(game.native_living_start_sleeping(living, [5, 64, 5]));
@@ -840,6 +877,141 @@ mod tests {
                     Some("false")
                 );
             });
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn living_flags_foreign_level_guest_sleep_writes_refuse_without_mutation() {
+        for sleeping in [false, true] {
+            for acting in [false, true] {
+                with_game(|game| {
+                    guest_server(game, true, false);
+                    let (outer, outer_rx) = guest(game, 12);
+                    let (foreign, foreign_rx) = guest(game, 13);
+                    bed(game, "minecraft:red_bed", [5, 64, 5]);
+                    bed(game, "minecraft:blue_bed", [7, 64, 7]);
+                    // Initialize a real body in its own turn before moving its
+                    // hub record to another level. Its bed coordinates also
+                    // name a real bed here, so a wrong-world write is visible.
+                    game.as_guest(13, |game| {
+                        if sleeping {
+                            assert!(game.native_living_start_sleeping(foreign, [5, 64, 5]));
+                        }
+                        let p = game.player.as_mut().unwrap();
+                        p.velocity = Vec3::new(0.25, 0.5, -0.25);
+                        p.jumping = true;
+                        game.sleep_timer = 37;
+                    })
+                    .unwrap();
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guest_mut(13)
+                        .unwrap()
+                        .dimension = "minecraft:the_nether".into();
+                    // Entity/living lookup intentionally still includes all
+                    // server players; the sleep write must own the refusal.
+                    assert_eq!(game.native_entity(13), Some(foreign.entity()));
+                    let _ = packets(&outer_rx);
+                    let _ = packets(&foreign_rx);
+                    let refuse = |game: &mut Game<'_>| {
+                        let foreign_before = SleepState::guest(game, 13);
+                        let outer_before = SleepState::acting(game);
+                        let outer_guest_before = SleepState::guest(game, 12);
+                        let foreign_bed = game.world.block(5, 64, 5);
+                        let outer_bed = game.world.block(7, 64, 7);
+                        for mutation in 0..4 {
+                            let changed = match mutation {
+                                0 => game.native_living_start_sleeping(foreign, [5, 64, 5]),
+                                1 => game.native_living_stop_sleeping(foreign),
+                                2 => game.native_living_set_sleeping_pos(foreign, [6, 64, 6]),
+                                3 => game.native_living_clear_sleeping_pos(foreign),
+                                _ => unreachable!(),
+                            };
+                            assert!(
+                                !changed,
+                                "mutation {mutation}, sleeping {sleeping}, acting {acting}"
+                            );
+                            // Include deferred wake/bed cleanup: a refusal must
+                            // not leave a write queued for the current world.
+                            game.wake_woken_guests();
+                            game.free_left_beds();
+                            assert_eq!(SleepState::guest(game, 13), foreign_before);
+                            assert_eq!(SleepState::acting(game), outer_before);
+                            assert_eq!(SleepState::guest(game, 12), outer_guest_before);
+                            assert_eq!(game.world.block(5, 64, 5), foreign_bed);
+                            assert_eq!(game.world.block(7, 64, 7), outer_bed);
+                            assert!(packets(&foreign_rx).is_empty());
+                            assert!(packets(&outer_rx).is_empty());
+                        }
+                    };
+                    if acting {
+                        game.as_guest(12, |game| {
+                            assert!(game.native_living_start_sleeping(outer, [7, 64, 7]));
+                            let _ = packets(&outer_rx);
+                            let _ = packets(&foreign_rx);
+                            refuse(game);
+                            assert_eq!(game.lan_acting, Some(12));
+                            assert!(!game.lan_acting_fake);
+                        })
+                        .unwrap();
+                    } else {
+                        refuse(game);
+                    }
+                    assert!(game.lan_guest_swaps.is_empty());
+                    assert_eq!(game.dim, super::super::Dim::Overworld);
+                });
+            }
+        }
+    }
+
+    /// Observable body, bed and pending wake/teleport state of a sleep write.
+    #[derive(Debug, PartialEq)]
+    struct SleepState {
+        position: Option<Vec3>,
+        velocity: Option<Vec3>,
+        sleeping: bool,
+        jumping: Option<bool>,
+        bed: Option<[i32; 3]>,
+        timer: u32,
+        spawn: Option<Vec3>,
+        woke_from: Option<[i32; 3]>,
+        awaiting_teleport: Option<(i32, [f64; 3])>,
+        teleport_counter: i32,
+    }
+
+    impl SleepState {
+        fn acting(game: &Game<'_>) -> Self {
+            Self {
+                position: game.player.as_ref().map(|p| p.position),
+                velocity: game.player.as_ref().map(|p| p.velocity),
+                sleeping: game.player.as_ref().is_some_and(|p| p.sleeping),
+                jumping: game.player.as_ref().map(|p| p.jumping),
+                bed: game.sleeping,
+                timer: game.sleep_timer,
+                spawn: game.spawn,
+                woke_from: None,
+                awaiting_teleport: None,
+                teleport_counter: 0,
+            }
+        }
+
+        fn guest(game: &Game<'_>, conn: u32) -> Self {
+            let g = game.command_guest(conn).unwrap();
+            Self {
+                position: Some(Vec3::new(g.position[0], g.position[1], g.position[2])),
+                velocity: g.motion.as_ref().map(|p| p.velocity),
+                sleeping: g.sleeping,
+                jumping: g.motion.as_ref().map(|p| p.jumping),
+                bed: g.bed,
+                timer: g.sleep_timer,
+                spawn: g.spawn.map(|p| Vec3::new(p[0], p[1], p[2])),
+                woke_from: g.woke_from,
+                awaiting_teleport: g.awaiting_teleport,
+                teleport_counter: g.teleport_counter,
+            }
         }
     }
 
