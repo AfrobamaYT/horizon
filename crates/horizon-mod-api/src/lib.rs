@@ -4376,6 +4376,10 @@ mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
+mod structure_template;
+pub use structure_template::{
+    StructureMirror, StructureRotation, StructureTemplateBlock, StructureTemplateSnapshot,
+};
 mod structure_type;
 /// The structure box a piece's `bounding_box` answers, in world blocks.
 pub use horizon_world::worldgen::structure::BoundingBox;
