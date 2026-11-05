@@ -316,7 +316,7 @@ impl Game<'_> {
         }
     }
     /// `ServerPlayer`'s `warden_spawn_tracker` from the player data.
-    fn load_warden_tracker(&mut self) {
+    pub(super) fn load_warden_tracker(&mut self) {
         if self.sculk.tracker_loaded {
             return;
         }
