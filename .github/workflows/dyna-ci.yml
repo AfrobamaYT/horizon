@@ -460,7 +460,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
-          python3 tools/ci/ignored_tests.py "$SHARD"
+          python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
   # Aggregate the main-push and dispatch shards: green when each passed or was skipped.
   ignored-tests:
     needs: [changes, ignored-tests-shards]
