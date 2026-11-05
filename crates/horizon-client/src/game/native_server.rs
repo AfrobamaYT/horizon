@@ -991,7 +991,7 @@ impl Game<'_> {
     }
 
     /// A connected player's record, including one displaced by a nested turn.
-    fn online_player_record(&self, player: PlayerRef) -> Option<&Guest> {
+    pub(super) fn online_player_record(&self, player: PlayerRef) -> Option<&Guest> {
         (self.native_lifecycle.epoch()? == player.entity().epoch()).then_some(())?;
         self.lan
             .as_ref()?
@@ -1009,13 +1009,15 @@ impl Game<'_> {
         Some(self.online_player_record(player)?.name.clone())
     }
 
-    /// The connected or acting player's operator permission level (0 through 4).
-    /// None for a stale or unavailable player.
-    pub(super) fn native_player_op_level(&self, player: PlayerRef) -> Option<u8> {
-        if self.native_acting_player() == Some(player) {
-            return self.lan_acting_permission;
+    /// The IP address the player connects from, without the port (behind a
+    /// Velocity proxy, the address the proxy forwards). Displaced connected
+    /// players keep their address; an acting player with no known connection
+    /// has an empty address. None for a stale or unavailable player.
+    pub(super) fn native_player_address(&self, player: PlayerRef) -> Option<String> {
+        if let Some(guest) = self.online_player_record(player) {
+            return Some(guest.address.ip().to_string());
         }
-        Some(self.online_player_record(player)?.permission)
+        (self.native_acting_player() == Some(player)).then(String::new)
     }
 
     /// Validate identity without requiring a live body: sending to an online

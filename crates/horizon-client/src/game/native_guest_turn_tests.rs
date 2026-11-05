@@ -577,7 +577,12 @@ fn server_services_preserve_identity_and_message_delivery() {
     use horizon_protocol::packets::play::Clientbound as C;
     use mod_api::{ServerHost, Text};
     with_guests(|game| {
-        game.lan.as_mut().unwrap().hub.guests[0].permission = 3;
+        let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+        guests[0].permission = 3;
+        guests[0].game_mode = 1;
+        guests[0].address = "192.0.2.12:25565".parse().unwrap();
+        guests[1].permission = 1;
+        guests[1].address = "[2001:db8::13]:25566".parse().unwrap();
         let players = game.players().server_players();
         assert_eq!(
             players.iter().map(|p| p.uuid()).collect::<Vec<_>>(),
@@ -587,7 +592,24 @@ fn server_services_preserve_identity_and_message_delivery() {
         let b = players[1];
         assert!(game.players().acting_player().is_none());
         assert_eq!(a.name(game).as_deref(), Some("guest12"));
-        assert_eq!(a.op_level(game), Some(3));
+        assert_eq!(a.permission_level(game), Some(3));
+        assert_eq!(b.permission_level(game), Some(1));
+        assert_eq!(a.can_use_game_master_blocks(game), Some(true));
+        assert_eq!(a.address(game).as_deref(), Some("192.0.2.12"));
+        assert_eq!(b.address(game).as_deref(), Some("2001:db8::13"));
+        let stale = mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(
+                mod_api::NativeWorldEpoch::new(a.entity().epoch().get() + 1),
+                a.entity().id(),
+            ),
+            a.uuid(),
+        );
+        let wrong_entity = mod_api::__private::game::player_ref(b.entity(), a.uuid());
+        let wrong_uuid = mod_api::__private::game::player_ref(a.entity(), 99);
+        for invalid in [stale, wrong_entity, wrong_uuid] {
+            assert_eq!(invalid.address(game), None);
+            assert_eq!(invalid.permission_level(game), None);
+        }
         assert!(game.commands().run_command("list"));
         game.chat_capture = Some(Vec::new());
         game.commands().feedback(Text::literal("command answer"));
@@ -599,6 +621,16 @@ fn server_services_preserve_identity_and_message_delivery() {
         game.as_guest(12, |game| {
             assert_eq!(game.players().acting_player(), Some(a));
             assert_eq!(game.players().server_players(), players);
+            assert_eq!(a.address(game).as_deref(), Some("192.0.2.12"));
+            assert_eq!(b.address(game).as_deref(), Some("2001:db8::13"));
+            assert_eq!(a.permission_level(game), Some(3));
+            assert_eq!(b.permission_level(game), Some(1));
+            assert_eq!(a.can_use_game_master_blocks(game), Some(true));
+            // Acting permissions come from the swapped state, not a parked record.
+            game.ui.registries.permission = 1;
+            assert_eq!(a.permission_level(game), Some(1));
+            assert_eq!(a.can_use_game_master_blocks(game), Some(false));
+            game.ui.registries.permission = 3;
             assert!(a.tell(game, Text::literal("chat")));
             assert!(a.action_bar(game, Text::literal("overlay")));
             assert!(a.tab_list(game, &Text::literal("header"), &Text::literal("footer")));
@@ -613,7 +645,16 @@ fn server_services_preserve_identity_and_message_delivery() {
                 assert_eq!(game.players().acting_player(), Some(b));
                 assert_eq!(game.players().server_players(), players);
                 assert_eq!(a.name(game).as_deref(), Some("guest12"));
-                assert_eq!(a.op_level(game), Some(3));
+                assert_eq!(a.permission_level(game), Some(3));
+                assert_eq!(b.permission_level(game), Some(1));
+                assert_eq!(a.address(game).as_deref(), Some("192.0.2.12"));
+                assert_eq!(b.address(game).as_deref(), Some("2001:db8::13"));
+                assert_eq!(a.game_mode(game), None, "body remains displaced");
+                assert_eq!(a.can_use_game_master_blocks(game), None);
+                for invalid in [stale, wrong_entity, wrong_uuid] {
+                    assert_eq!(invalid.address(game), None);
+                    assert_eq!(invalid.permission_level(game), None);
+                }
                 assert!(a.tell(game, Text::literal("displaced but connected")));
             })
             .unwrap();
@@ -626,15 +667,75 @@ fn server_services_preserve_identity_and_message_delivery() {
         assert!(!a.tell(game, Text::literal("offline")));
         assert!(!a.set_nickname(game, Some("offline")));
         assert!(!a.set_sleep_ignored(game, true));
-        let stale = mod_api::__private::game::player_ref(
-            mod_api::EntityRef::new(
-                mod_api::NativeWorldEpoch::new(a.entity().epoch().get() + 1),
-                a.entity().id(),
-            ),
-            a.uuid(),
-        );
+        assert_eq!(a.address(game), None);
+        assert_eq!(a.permission_level(game), None);
         assert!(!stale.hide(game, None));
         assert_eq!(stale.name(game), None);
+    });
+}
+
+/// Permission reads keep the existing owner and fake-player contracts, not
+/// just the connected-player list that the services enumerate.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn canonical_permissions_preserve_owner_and_fake_player_reads() {
+    use horizon_client::motion::PlayerMotion;
+    use mod_api::{GameMode, ServerHost};
+
+    with_guests(|game| {
+        let _serving = super::integrated::tests::install_serving(game, false);
+        game.level.player_uuid = Some([0, 0, 0, 99]);
+        let mut body = PlayerMotion::new(game.motion, Vec3::new(0.0, 64.0, 0.0)).unwrap();
+        body.entity_id = 99;
+        game.player = Some(Box::new(body));
+        game.creative = true;
+        let owner = game.native_player_ref(99).unwrap();
+        for (allow, permission) in [(false, 0), (true, 4)] {
+            game.set_allow_commands(allow);
+            assert_eq!(owner.permission_level(game), Some(permission));
+            assert_eq!(owner.can_use_game_master_blocks(game), Some(allow));
+        }
+        game.creative = false;
+        assert_eq!(owner.permission_level(game), Some(4));
+        assert_eq!(owner.can_use_game_master_blocks(game), Some(false));
+
+        game.next_entity = 100;
+        let level = game.native_level(game.dim.id()).unwrap();
+        let fake = game.native_fake_player(level, 1234, "machine").unwrap();
+        assert!(!game.players().server_players().contains(&fake));
+        assert_eq!(fake.permission_level(game), Some(0));
+        assert_eq!(
+            fake.address(game),
+            None,
+            "no connection outside an acting turn"
+        );
+        assert_eq!(fake.can_use_game_master_blocks(game), Some(false));
+        assert!(fake.set_game_mode(game, GameMode::Creative));
+        assert_eq!(fake.permission_level(game), Some(0));
+        assert_eq!(fake.can_use_game_master_blocks(game), Some(false));
+        let conn = game
+            .lan
+            .as_ref()
+            .unwrap()
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == fake.uuid())
+            .unwrap()
+            .conn;
+        game.as_guest(conn, |game| {
+            assert_eq!(fake.permission_level(game), Some(0));
+            assert_eq!(
+                fake.address(game).as_deref(),
+                Some(""),
+                "unknown acting address"
+            );
+            assert_eq!(fake.can_use_game_master_blocks(game), Some(false));
+        })
+        .unwrap();
+        assert!(game.native_player_remove_fake(fake));
+        assert_eq!(fake.permission_level(game), None);
+        assert_eq!(fake.address(game), None);
     });
 }
 
