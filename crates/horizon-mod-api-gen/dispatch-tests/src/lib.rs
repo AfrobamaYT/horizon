@@ -83,6 +83,7 @@ mod tests {
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        pub(super) struct NativeActiveEffect;
         #[derive(Debug, PartialEq)]
         pub(super) enum ScreenOpening {
             Cancel,
@@ -393,6 +394,8 @@ mod tests {
             pub mod hud_layout {
                 pub struct HealthInputs;
                 pub struct GuiDraw;
+                #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+                pub enum HeartKind {}
             }
         }
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]

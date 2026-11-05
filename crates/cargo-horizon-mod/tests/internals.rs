@@ -127,6 +127,17 @@ fn internals_add_refuses_missing_gated_and_shape_only_paths_without_partial_edit
         vec!["internals"],
         vec!["internals", "add"],
         vec!["internals", "remove", "path"],
+        vec!["internals", "add", "path", "--kind"],
+        vec![
+            "internals",
+            "add",
+            "path",
+            "--kind",
+            "fn",
+            "--kind",
+            "field",
+        ],
+        vec!["internals", "add", "path", "--unknown"],
     ] {
         assert!(!project.run(&args).status.success());
     }
@@ -206,6 +217,62 @@ fn table_declarations_keep_their_format_when_adding_and_refreshing() {
     assert!(report.contains("unchanged: horizon_client::game::Game"));
     assert_eq!(project.manifest().native.unwrap().internals.len(), 2);
     assert!(project.text().contains("# fingerprint"));
+}
+
+#[test]
+fn internals_add_requires_kind_for_ambiguous_paths_and_update_keeps_it() {
+    let path = "horizon_client::game::Round::listening";
+    for kind in ["fn", "method"] {
+        for (form, declarations) in [
+            ("inline", String::new()),
+            (
+                "existing",
+                format!("internals = [{{path='{path}',hash='stale'}}]\n"),
+            ),
+            (
+                "tables",
+                format!("\n[[native.internals]]\npath='{path}'\nhash='stale'\n"),
+            ),
+        ] {
+            let project = Project::new(&format!("ambiguous-{kind}-{form}"), &declarations);
+            let catalog = serde_json::json!([
+                { "path": path, "kind": "field", "signature": "bool", "hash": "field" },
+                { "path": path, "kind": kind, "signature": "fn listening(&self) -> bool", "hash": "function" }
+            ]);
+            project.catalog(OLD, &catalog.to_string());
+            let mut new = catalog.clone();
+            new[1]["hash"] = "new-function".into();
+            new[1]["signature"] = "fn listening(&mut self) -> bool".into();
+            project.catalog(NEW, &new.to_string());
+            let before = project.text();
+            let output = project.run(&["internals", "add", path]);
+            assert!(!output.status.success());
+            let error = String::from_utf8(output.stderr).unwrap();
+            assert!(error.contains("E_INTERNAL_AMBIGUOUS"), "{error}");
+            assert!(error.contains(path), "{error}");
+            assert!(error.contains(&format!("field, {kind}")), "{error}");
+            assert_eq!(project.text(), before);
+            success(&project.run(&["internals", "add", path, "--kind", kind]));
+            let declaration = &project.manifest().native.unwrap().internals[0];
+            assert_eq!(declaration.kind.as_deref(), Some(kind));
+            assert_eq!(declaration.hash, "function");
+            success(&project.run(&["internals", "add", path, "--kind", "field"]));
+            let before = project.text();
+            success(&project.run(&["internals", "add", "--kind", kind, path]));
+            assert_eq!(project.text(), before);
+            let report = success(&project.run(&["update", "--horizon", NEW]));
+            assert!(
+                report.contains("fn listening(&self) -> bool → fn listening(&mut self) -> bool"),
+                "{report}"
+            );
+            let native = project.manifest().native.unwrap();
+            assert_eq!(native.internals.len(), 2);
+            assert_eq!(native.internals[0].kind.as_deref(), Some(kind));
+            assert_eq!(native.internals[0].hash, "new-function");
+            assert_eq!(native.internals[1].kind.as_deref(), Some("field"));
+            assert_eq!(native.internals[1].hash, "field");
+        }
+    }
 }
 
 #[test]

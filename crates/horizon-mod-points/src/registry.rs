@@ -27,7 +27,15 @@ pub enum RawKind {
     /// A function of the place's listener type, cast back by the slot before calling it.
     Typed(*const ()),
     /// A runtime listener receiving the place index, receiver and raw record or return value.
-    Erased(fn(usize, *mut (), *mut ())),
+    ///
+    /// # Safety
+    ///
+    /// The caller must pass the registered place's index and valid pointers of that place's exact
+    /// receiver and raw record or return types, respecting their mutability, aliasing, ownership
+    /// and lifetime requirements for the call's duration. The receiver is null for a free or
+    /// associated function, and at a borrowed-return place. A shared receiver must not be written
+    /// to; its mutable pointer only erases the type, not its mutability.
+    Erased(unsafe fn(usize, *mut (), *mut ())),
 }
 
 // Function pointers: no data behind them, so they move between threads.
@@ -164,14 +172,15 @@ impl RawListener {
     ///
     /// # Safety
     ///
-    /// `function` must interpret the pointers using `place`'s exact receiver and raw record or
-    /// return types, respecting their mutability, aliasing, ownership and lifetime requirements.
-    /// The pointers and any references derived from them are valid only for the callback's
-    /// duration and must not escape it. In particular, a shared receiver must not be written to.
+    /// Given the pointers guaranteed by [`RawKind::Erased`], `function` must interpret them using
+    /// `place`'s exact receiver and raw record or return types, respecting their mutability,
+    /// aliasing, ownership and lifetime requirements. The pointers and any references derived
+    /// from them must not escape the callback. In particular, a shared receiver must not be
+    /// written to.
     pub const unsafe fn erased(
         id: &'static str,
         place: PointId,
-        function: fn(usize, *mut (), *mut ()),
+        function: unsafe fn(usize, *mut (), *mut ()),
     ) -> Self {
         Self {
             id,

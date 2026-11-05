@@ -85,18 +85,23 @@ The launcher's **Mods** page has the five kinds as tabs: **Mods**, **Modpacks**,
 and **Data packs**, each with a search field (Enter searches). Mods, Modpacks, Resource packs and Data packs pick their
 source: Horizon's registry or Modrinth, with **CurseForge (coming soon)** beside them, disabled. Mods start on
 Horizon's registry; **Shader packs** search it only (Horizon's own packs); data packs install into the world picked
-under the search. On Horizon's registry, **Filters** lists the kind's categories (`horizon_mods::index::page::categories`):
-a result has every category picked; the search words also match a project's tags. A project's page shows its
-categories. A Java instance's tabs always search Modrinth for its version and
+under the search. On Horizon's registry, **Filters** lists the kind's categories (`horizon_mods::index::page::categories`,
+named and ordered as on playhorizon.dev) and the tags its projects carry (the 30 most used, `#tag`): a result has
+every category and tag picked, and the search words, which also match a project's tags, narrow them further. While
+the panel is closed, what is picked stays in view as chips under **Filters**, each with a cross that removes it, and
+**Clear filters**. A project's page shows its categories. A Java instance's tabs always search Modrinth for its version and
 loader, with the version and loader filters. A Horizon instance searching Modrinth's Java mods sees them all, each
 marked **Works**, **Partly** or **Doesn't run in Horizon** once its jar is checked; **Show everything** adds what was
 made for other Minecraft versions. Each result is an index row: its summary, author,
 downloads, source and licence, how well it runs (and why), **Page** (the project's page on its source) and
-**Install** (**Import** for a modpack). The Modpacks tab lists the imported packs first, with their coverage
+**Install** (**Import** for a modpack). A registry result says **from Horizon** only when Horizon made it (author
+Horizon, source under github.com/horizon-rust: the site's "Official"); a contributor's reads **by <author>** alone. The Modpacks tab lists the imported packs first, with their coverage
 report, **Port** and **Play** ([modpacks.md](modpacks.md)). Installed packs are listed above the results with their version, source,
 file and the checksum they were checked against, with **Update to …** when a newer version runs and **Remove**
 (asked twice). **Update all (N)** above the list updates every pack a newer version was found for, of every kind,
 one after the other; one that fails is named and doesn't stop the others.
+
+**Automatic updates** run at launcher start and before Play for eligible content packages from Horizon's registry, when enabled in Settings. They never update a modpack's pinned files or native and wasm code packages. Updates that remove content used by worlds wait for an explicit update on the Mods page. Native and wasm updates are explicit too: Play never rebuilds code mods or repins their game revision. The replaced file is retained for recovery if an update is interrupted; recovery runs before checking the automatic-update setting or fetching the registry, even when updates are disabled or the registry is offline. Failed recovery keeps the backup for retry.
 
 ### Project pages, filters and icons
 
