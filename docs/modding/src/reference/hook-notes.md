@@ -270,6 +270,11 @@ requires a farmer at work and `mob_griefing` enabled.
   draws replaces all the rows — armour, hearts, food, air and the heights above the hotbar — for that
   frame. Nothing answered draws Horizon's own.
 
+- Which hearts the player's health bar draws through `native_player_heart_type` (NeoForge's `PlayerHeartTypeEvent`):
+  each frame the HUD draws the hearts, `kind` comes in as vanilla's pick (poisoned, withered, frozen or normal) and a mod
+  may set another. It runs before `native_health_hud`, whose `inputs.kind` carries the answer; only the heart sprites
+  change.
+
 - Where the in-game chat is drawn through `native_customize_chat_overlay` (NeoForge's `CustomizeGuiOverlayEvent.Chat`):
   each frame the chat layer draws, `x` and `y` come in as the chat's bottom-left corner (0 and the GUI height minus 40)
   with the GUI size and whether the chat screen is open, and the chat is drawn shifted to where a mod moved them. Not
