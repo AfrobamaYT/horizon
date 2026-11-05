@@ -1488,6 +1488,45 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_declared_field_reaches_its_nested_elements_but_not_its_siblings() {
+        let entries = [
+            internal(
+                "horizon_client::Owner",
+                "struct",
+                "struct Owner { chosen: Nested, sibling: Other }",
+            ),
+            internal("horizon_client::Owner::chosen", "field", "Nested"),
+            internal(
+                "horizon_client::Nested",
+                "struct",
+                "struct Nested { children: Vec<Child> }",
+            ),
+            internal("horizon_client::Child", "struct", "struct Child { n: u8 }"),
+            internal("horizon_client::Other", "struct", "struct Other { n: u8 }"),
+        ];
+        let (code, counts) = table(&entries, &["horizon_client::Owner::chosen".into()]);
+        assert_eq!(counts.types, 4);
+        assert!(!code.contains("Other"));
+        run_fixture(
+            &code,
+            "struct Owner { chosen: Nested, sibling: Other } struct Nested { children: Vec<Child> } struct Child { n: u8 } struct Other { n: u8 }",
+            r#"
+            let mut owner = Owner { chosen: Nested { children: vec![Child { n: 7 }] }, sibling: Other { n: 3 } };
+            assert_eq!(owner.sibling.n, 3);
+            let root = __internals::TABLE.members[0].owner as usize;
+            unsafe {
+                let node = |p, ty: usize, op| (__internals::TABLE.types[ty].node)(p, true, op);
+                let Reply::Node(p, ty, _) = node(&raw mut owner as *mut (), root, Op::Field(0)).unwrap() else { panic!("nested") };
+                let Reply::Node(p, ty, _) = node(p, ty as usize, Op::Field(0)).unwrap() else { panic!("list") };
+                let Reply::Node(p, ty, _) = node(p, ty as usize, Op::Index(0)).unwrap() else { panic!("child") };
+                assert_eq!(node(p, ty as usize, Op::Get(0)), Ok(Reply::Value(Value::U(7))));
+                assert!(node(&raw mut owner as *mut (), root, Op::Field(1)).is_err());
+            }
+        "#,
+        );
+    }
+
+    #[test]
     fn declared_methods_reach_arguments_results_and_fields_transitively_but_not_receiver_siblings()
     {
         let entries = [
