@@ -6,8 +6,8 @@ mod pufferfish_player;
 
 use super::level_sounds::LevelSound;
 use super::{
-    Dim, Game, Hand, InteractTarget, dispenser, native_mob_draw::NativePlayerRender,
-    native_projectiles::Impact, view_vector,
+    Dim, Game, Hand, InteractTarget, dispenser, entity_culling::EntityCullDecision,
+    native_mob_draw::NativePlayerRender, native_projectiles::Impact, view_vector,
 };
 use horizon_assets::item_model::DisplayContext;
 use horizon_client::{
@@ -16,6 +16,7 @@ use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
     crafting::Recipes,
+    graphics::EntityCullingMode,
     health::{Attack, HurtSource, Hurting, Knock},
     items::ItemStack,
     mesher::Vertex,
@@ -708,6 +709,28 @@ impl Game<'_> {
             self.lan_entity_event(id as i32, event, at);
         }
     }
+    /// Transfer the entity-owned state that is stored outside `Mob`.
+    fn transfer_conversion_identity(&mut self, from: u32, to: u32) {
+        use super::commands::Target;
+        use horizon_client::save::uuid_text;
+
+        let tags = self.tags_of(Target::Mob(from));
+        if !tags.is_empty() {
+            self.set_entity_tags(Target::Mob(to), &tags);
+        }
+        self.load_scoreboard();
+        let old_name = uuid_text(self.uuid_for(from));
+        let team = self
+            .score
+            .board
+            .players_team(&old_name)
+            .map(|t| t.name.clone());
+        if let Some(team) = team {
+            let new_name = uuid_text(self.uuid_for(to));
+            self.score.board.add_to_team(&new_name, &team);
+            self.score.board.remove_from_team(&old_name);
+        }
+    }
     /// Finalize a converted frog or witch before it joins the level.
     fn finalize_converted(&mut self, mob: &mut Mob) {
         // A mod that stops a conversion's finalization leaves the mob as converted.
@@ -752,6 +775,7 @@ impl Game<'_> {
         self.next_entity += 1;
         let mut mob = Mob::new(self.next_entity, t, from.position, from.yaw);
         horizon_client::mobs::conversion::single(&from, &mut mob, params);
+        self.transfer_conversion_identity(from.id, mob.id);
         if matches!(from.species(), Species::Zombie | Species::Husk) {
             let at = [from.position.x, from.position.y, from.position.z];
             let special = self.local_difficulty(at).special();
@@ -3891,7 +3915,7 @@ impl Game<'_> {
                     child.extra.owner = p.extra.owner;
                     let mixed = dye_mix(
                         &self.loop_context,
-                        self.res.recipes(),
+                        world_recipes!(self),
                         &mut self.world.random,
                         p.extra.color,
                         other.extra.color,
@@ -3914,7 +3938,7 @@ impl Game<'_> {
                     child.extra.owner = p.extra.owner;
                     let mixed = dye_mix(
                         &self.loop_context,
-                        self.res.recipes(),
+                        world_recipes!(self),
                         &mut self.world.random,
                         p.extra.color,
                         other.extra.color,
@@ -3957,7 +3981,7 @@ impl Game<'_> {
                 let other = q.as_ref().unwrap_or(&p);
                 let mixed = dye_mix(
                     &self.loop_context,
-                    self.res.recipes(),
+                    world_recipes!(self),
                     &mut self.world.random,
                     p.extra.color,
                     other.extra.color,
@@ -7394,6 +7418,25 @@ impl Game<'_> {
         skinned: Skinned,
     ) {
         let corners = skinned.and_then(|(_, bounds)| bounds);
+        if out.len() == entity_start {
+            if let Some((lo, hi)) = corners
+                && self.cull_entity_camera_bounds(lo, hi)
+                && let Some((mark, _)) = skinned
+            {
+                if self.pack_shadow_casters.0 {
+                    let mut frame = self.skin_frame.borrow_mut();
+                    let end = frame.vertices as usize;
+                    horizon_client::gfx::pack_draw::EntitySpan::hide(
+                        &mut frame.spans,
+                        mark.2 as usize,
+                        end,
+                    );
+                } else {
+                    self.skin_frame.borrow_mut().truncate(mark);
+                }
+            }
+            return;
+        }
         if let Some((lo, hi)) = corners {
             out.extend([lo, hi].map(|pos| Vertex {
                 pos: pos.to_array(),
@@ -7429,6 +7472,30 @@ impl Game<'_> {
     }
 
     pub(super) fn mob_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
+        // The coarse mob bounds pay off only in dense async scenes; otherwise,
+        // keep the existing exact mesh-culling path.
+        if self.settings.horizon.entity_culling == EntityCullingMode::Asynchronous
+            && self
+                .async_occlusion_culler
+                .as_ref()
+                .is_some_and(|culler| culler.camera_is_stationary())
+            && self.settings.horizon.entity_culling_precheck != 0
+            && self.mobs.len() >= self.settings.horizon.entity_culling_precheck as usize
+            && !self.pack_shadow_casters.0
+            && mod_api::__private::mods().is_empty()
+        {
+            self.mob_geometry_inner::<true>(camera, alpha, out);
+        } else {
+            self.mob_geometry_inner::<false>(camera, alpha, out);
+        }
+    }
+
+    fn mob_geometry_inner<const PRECHECK: bool>(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
@@ -7454,43 +7521,27 @@ impl Game<'_> {
             ..Default::default()
         });
         for mob in &self.mobs {
-            let entity_start = out.len();
-            self.mark_motion(entity_start, (1 << 32) | u64::from(mob.id));
-            let outline = self.mob_outline(mob);
-            // Entity.DATA_SHARED_FLAGS_ID invisible: only the name tag draws (and
-            // the outline of a glowing mob, LivingEntityRenderer.getRenderType).
-            // A player keeps its armour, elytra and held items
-            // (`LivingEntityRenderer.submit` skips only the body).
-            let is_player = &*mob.kind.id == "minecraft:player";
-            let layers_only = mob.invisible && outline.is_none() && is_player;
-            if mob.invisible && outline.is_none() && !layers_only {
-                continue;
-            }
             // LevelRenderer: the entity the view looks out of is not drawn
             // in first person.
             if self.hides_as_camera(mob.id) {
                 continue;
             }
+            let is_player = &*mob.kind.id == "minecraft:player";
             let d = glam::DVec3::new(mob.position.x, mob.position.y, mob.position.z) - camera;
             // Entity.shouldRenderAtSqrDistance: 64 times the bounding box's
             // mean edge, scaled by the view scale. RemotePlayer's box counts
             // ten times.
             let (w, h, _) = mob.dims();
-            let edge = (w + h + w) / 3.0
-                * if &*mob.kind.id == "minecraft:player" {
-                    10.0
-                } else {
-                    1.0
-                };
+            let edge = (w + h + w) / 3.0 * if is_player { 10.0 } else { 1.0 };
             let range = edge * 64.0 * scale;
             if d.length_squared() >= range * range {
                 continue;
             }
-            // EntityRenderer.shouldRender: the box its renderer culls with
-            // (`getBoundingBoxForCulling`, interpolated over the frame), grown
-            // by 0.5 (GuardianRenderer also draws while its beam is out).
+            let beam = horizon_client::mobs::guardian::beam(mob, alpha as f32);
+            // EntityRenderer.shouldRender: the renderer's interpolated culling box,
+            // grown by 0.5 (GuardianRenderer also draws while its beam is out).
             if let Some(view) = &self.view_frustum
-                && horizon_client::mobs::guardian::beam(mob, alpha as f32).is_none()
+                && beam.is_none()
             {
                 let (lo, hi) = super::entity_culling::cull_box(mob, alpha);
                 let (lo, hi) = (
@@ -7501,6 +7552,31 @@ impl Game<'_> {
                     continue;
                 }
             }
+            let outline = self.mob_outline(mob);
+            // Entity.DATA_SHARED_FLAGS_ID invisible: only the name tag draws (and
+            // the outline of a glowing mob, LivingEntityRenderer.getRenderType).
+            // A player keeps its armour, elytra and held items
+            // (`LivingEntityRenderer.submit` skips only the body).
+            let layers_only = mob.invisible && outline.is_none() && is_player;
+            if mob.invisible && outline.is_none() && !layers_only {
+                continue;
+            }
+            let culling = if PRECHECK
+                && outline.is_none()
+                && !is_player
+                && mob.kind.id.starts_with("minecraft:")
+                && (0..6).all(|slot| mob.extra.slot_stack(slot).is_none())
+                && beam.is_none()
+            {
+                self.entity_cull_decision(mob, alpha)
+            } else {
+                EntityCullDecision::CheckVertices
+            };
+            if culling.hides_entity() {
+                continue;
+            }
+            let entity_start = out.len();
+            self.mark_motion(entity_start, (1 << 32) | u64::from(mob.id));
             self.mark_entity(entity_start, &mob.kind.id);
             self.rendered_mobs.set(self.rendered_mobs.get() + 1);
             let light = self.world.light(
@@ -7678,14 +7754,12 @@ impl Game<'_> {
             }
             // Glowing outlines and a guardian's beam remain visible independently
             // of whether the body is hidden behind terrain.
-            if outline.is_none()
-                && horizon_client::mobs::guardian::beam(mob, alpha as f32).is_none()
-            {
+            if outline.is_none() && culling.checks_vertices() && beam.is_none() {
                 // What the GPU draws of the mob counts by its bounds' corners.
                 self.cull_skinned(out, entity_start, skinned);
             }
             // GuardianRenderer: the laser to the locked target.
-            if let Some((time, scale)) = horizon_client::mobs::guardian::beam(mob, alpha as f32)
+            if let Some((time, scale)) = beam
                 && let Some(target) = self.beam_target(mob.ai.target, alpha)
                 && let Some(uv) = lookup("entity/guardian/guardian_beam")
             {
@@ -8537,6 +8611,49 @@ mod tests {
     use super::thrown_item_axes;
     use super::thrown_item_quad;
     use super::{ProjectileKind, is_item_billboard};
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn conversion_transfers_tags_and_team() {
+        use super::super::commands::Target;
+        use horizon_client::{
+            mobs::{Mob, conversion::Params},
+            save::uuid_text,
+        };
+        use horizon_core::geometry::Vec3;
+
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:villager")
+                .unwrap()
+                .clone();
+            let from = Mob::new(100, kind, Vec3::ZERO, 0.0);
+            game.mobs.push(from.clone());
+            game.next_entity = 100;
+            game.set_entity_tags(Target::Mob(100), &["tracked".into()]);
+            let old = uuid_text(game.uuid_for(100));
+            game.load_scoreboard();
+            game.score.board.add_team("test");
+            game.score.board.add_to_team(&old, "test");
+            let id = game
+                .convert_to(
+                    &from,
+                    "minecraft:zombie_villager",
+                    Params {
+                        keep_equipment: false,
+                        preserve_can_pick_up_loot: true,
+                    },
+                    |_, _| {},
+                )
+                .unwrap();
+            assert_eq!(game.tags_of(Target::Mob(id)), ["tracked"]);
+            let new = uuid_text(game.uuid_for(id));
+            assert_eq!(game.score.board.players_team(&new).unwrap().name, "test");
+            assert!(game.score.board.players_team(&old).is_none());
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

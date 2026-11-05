@@ -378,6 +378,8 @@ pub struct Attack {
     pub attacker: i32,
     /// The projectile delivering this hit, if any (`DamageSource.getDirectEntity`).
     pub projectile: Option<i32>,
+    /// The verified causing player's UUID, when the attacker is a player.
+    pub player_uuid: Option<[i32; 4]>,
     /// What it holds, or none when it is not known (no native mod listens: the game only
     /// records it then).
     pub held: Held,
@@ -386,6 +388,7 @@ pub struct Attack {
 pub static NO_ATTACK: Attack = Attack {
     attacker: 0,
     projectile: None,
+    player_uuid: None,
     held: [None, None],
 };
 impl Attack {
@@ -1445,6 +1448,7 @@ mod tests {
         let attack = Attack {
             attacker: 7,
             projectile: None,
+            player_uuid: None,
             held: [Some(sword.clone()), None],
         };
         assert_eq!(attack.weapon_of(7), Some(&sword));
