@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} ez dago instalatuta",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (edo .mcp.json proiektu batean)",
   "← All servers": "← Zerbitzari guztiak",
-  "← Newer": "← Berriagoa",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← Berriagoa"
 }

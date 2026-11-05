@@ -35,7 +35,7 @@ LINK_ARG = "cargo:rustc-link-arg-bin=horizon-client="
 # cargo passes their folders to rustc, a plain rustc gets them from here (`-L native=OUT/native`).
 NATIVE = "native"
 NATIVE_SUFFIXES = (".a", ".lib")
-# The game's injection points, from its build script's output: the launcher routes mods' point injections by it.
+# The game's injection points, listed by the staging pass: the launcher routes mods' point injections by it.
 POINTS = "points.json"
 
 
@@ -57,15 +57,34 @@ def rustc_host() -> str:
     return next(line.split(": ", 1)[1] for line in verbose.splitlines() if line.startswith("host: "))
 
 
+def stage(target_dir: Path) -> Path:
+    """A copy of the tracked source with the staging pass run over it (#589): every point method gets its
+    `#[point]`, and the copy's `points.json` lists them. The working tree is never rewritten."""
+    staged = target_dir / "stage"
+    if staged.exists():
+        shutil.rmtree(staged)
+    tracked = run(["git", "ls-files", "-z"], cwd=ROOT).split("\0")
+    for name in filter(None, tracked):
+        source = ROOT / name
+        if source.is_file():
+            (staged / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, staged / name)
+    print(run(["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage",
+               "--", str(staged), str(staged / POINTS)],
+              cwd=staged, env={**os.environ, "CARGO_TARGET_DIR": str(target_dir / "tools")}), end="")
+    return staged
+
+
 def build(out: Path, server: bool) -> None:
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "prebuilt"
+    staged = stage(target_dir)
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
     features = ["--no-default-features"] if server else []
     messages = run(
         ["cargo", "rustc", "--locked", "-p", "horizon-client", "--lib", "--crate-type", "dylib",
          "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features],
-        cwd=ROOT,
+        cwd=staged,
         env={**os.environ, "RUSTFLAGS": rustflags, "CARGO_TARGET_DIR": str(target_dir)},
     )
     scripts = [
@@ -100,7 +119,7 @@ def build(out: Path, server: bool) -> None:
         if source is not None:
             shutil.copy2(source, out / name)
     game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
-    shutil.copy2(Path(game["out_dir"]) / POINTS, out / POINTS)
+    shutil.copy2(staged / POINTS, out / POINTS)
     output = Path(game["out_dir"]).parent / "output"
     link_args = [line[len(LINK_ARG):] for line in output.read_text().splitlines() if line.startswith(LINK_ARG)]
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}

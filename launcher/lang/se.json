@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} ii leat installerejuvvon",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (dahje .mcp.json prošeavttas)",
   "← All servers": "← Buot bálvaleaddjit",
-  "← Newer": "← Ođđaseabbo",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← Ođđaseabbo"
 }

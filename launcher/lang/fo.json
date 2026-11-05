@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} er ikki sett upp",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ella .mcp.json í verkætlan)",
   "← All servers": "← Allir ambætarar",
-  "← Newer": "← Nýggjari",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← Nýggjari"
 }

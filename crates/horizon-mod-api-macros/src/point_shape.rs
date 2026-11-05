@@ -57,6 +57,59 @@ pub struct Shape {
     /// would become API.
     pub args: Vec<Arg>,
     pub returns: Returns,
+    /// The value it returns borrows from `self` (`-> &T`, `-> Option<&mut T>`): the game is still
+    /// borrowed when the body ends, so the point has a head and no return.
+    pub borrowed_return: bool,
+}
+
+/// Whether the staging pass gives an inherent `Game` method with these `attrs` and `sig` a point: one predicate for
+/// the pass and for the generator that lists the points, so the two always agree. Left out:
+/// the hooks' own functions (`native_*`, whose bodies the generator reads), anything compiled only
+/// under a `cfg`, `const`, `async` and `unsafe` functions, methods without a `&self`/`&mut self`
+/// receiver, `impl Trait` in the signature, `-> !`, `#[inline(always)]`, and parameters named
+/// `cancel` or `result`, which the record has its own of.
+pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
+    let impl_trait = |ty: &Type| matches!(ty, Type::ImplTrait(_));
+    !sig.ident.to_string().starts_with("native_")
+        && sig.constness.is_none()
+        && sig.asyncness.is_none()
+        && sig.unsafety.is_none()
+        && sig.abi.is_none()
+        && matches!(sig.inputs.first(), Some(FnArg::Receiver(receiver)) if receiver.reference.is_some())
+        && !matches!(&sig.output, syn::ReturnType::Type(_, ty) if impl_trait(ty) || matches!(**ty, Type::Never(_)))
+        && sig.inputs.iter().all(|input| match input {
+            FnArg::Typed(typed) => {
+                !impl_trait(&typed.ty)
+                    && !matches!(&*typed.pat, Pat::Ident(pat) if pat.ident == "cancel" || pat.ident == "result")
+            }
+            FnArg::Receiver(_) => true,
+        })
+        && !attrs.iter().any(|attr| {
+            let path = attr.path();
+            path.is_ident("cfg")
+                || path.is_ident("cfg_attr")
+                || path.is_ident("test")
+                || (path.is_ident("inline")
+                    && attr
+                        .parse_args::<syn::Ident>()
+                        .is_ok_and(|arg| arg == "always"))
+        })
+}
+
+/// Whether `ty` holds a reference or a named lifetime.
+fn borrows(ty: &Type) -> bool {
+    struct Find(bool);
+    impl<'ast> syn::visit::Visit<'ast> for Find {
+        fn visit_type_reference(&mut self, _: &'ast syn::TypeReference) {
+            self.0 = true;
+        }
+        fn visit_lifetime(&mut self, _: &'ast syn::Lifetime) {
+            self.0 = true;
+        }
+    }
+    let mut find = Find(false);
+    syn::visit::Visit::visit_type(&mut find, ty);
+    find.0
 }
 
 /// The point of the function `sig`, from `#[point(side = "…", name = "…", hot)]`'s arguments.
@@ -130,6 +183,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
             "a point's record has its own `cancel` and `result`: rename the parameter",
         ));
     }
+    let borrowed_return = matches!(&sig.output, syn::ReturnType::Type(_, ty) if borrows(ty));
     let returns = match &sig.output {
         syn::ReturnType::Default => Returns::Unit,
         syn::ReturnType::Type(_, ty) if unit_result(ty) => Returns::UnitResult,
@@ -143,6 +197,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         hot,
         args,
         returns,
+        borrowed_return,
     })
 }
 
@@ -196,14 +251,14 @@ fn api_typed(ty: &Type) -> bool {
 }
 
 impl Shape {
-    /// The slot's static in the game's generated `points` module.
-    pub fn slot(&self) -> syn::Ident {
-        syn::Ident::new(&self.name.to_uppercase(), Span::call_site())
+    /// The `PointId` variant of its head: `Tick` for `tick`.
+    pub fn variant(&self) -> syn::Ident {
+        syn::Ident::new(&camel(&self.name), Span::call_site())
     }
 
-    /// The slot its return listeners wait in.
-    pub fn return_slot(&self) -> syn::Ident {
-        syn::Ident::new(&format!("{}_RETURN", self.slot()), Span::call_site())
+    /// The `PointId` variant of its return.
+    pub fn return_variant(&self) -> syn::Ident {
+        syn::Ident::new(&camel(&format!("{}_return", self.name)), Span::call_site())
     }
 
     /// The record its listeners get, in `mod_api::points`: `TickArgs` for `tick`.
@@ -272,6 +327,7 @@ impl Shape {
             impl #lifetime #record #lifetime {
                 /// The record of a call, before its listeners run (the game's side of the point).
                 #[doc(hidden)]
+                #[inline]
                 pub fn __new(#(#names: #types),*) -> Self {
                     Self { #(#names,)* #extra_init }
                 }
@@ -279,8 +335,9 @@ impl Shape {
         }
     }
 
-    /// The `Points` methods for this point (its head, then its return), their `PointId` variants and
-    /// the dispatchers that run every subscribed mod's method: generated into `mod_api::points`.
+    /// The `Points` methods for this point (its head, then its return when it has one), their
+    /// `PointId` variants, and the `Option<PointId>` consts `#[horizon_mod]` subscribes a mod by:
+    /// generated into `mod_api::points`.
     pub fn api_items(&self, target: &str) -> (TokenStream, TokenStream, TokenStream) {
         let record = self.record();
         let record = if self.borrows() {
@@ -289,32 +346,26 @@ impl Shape {
             quote!(#record)
         };
         let host = match (self.mutable, self.side) {
-            (false, _) => quote!(&dyn crate::Host),
-            (true, Side::Server) => quote!(&mut dyn crate::ServerHost),
-            (true, Side::Client) => quote!(&mut dyn crate::ClientHost),
-            (true, Side::Both) => quote!(crate::HostSide<'_>),
+            (false, _) => quote!(&dyn ::mod_api::Host),
+            (true, Side::Server) => quote!(&mut dyn ::mod_api::ServerHost),
+            (true, Side::Client) => quote!(&mut dyn ::mod_api::ClientHost),
+            (true, Side::Both) => quote!(::mod_api::HostSide<'_>),
         };
-        let (binding, reborrow) = match (self.mutable, self.side) {
-            (false, _) => (quote!(host), quote!(host)),
-            (true, Side::Both) => (quote!(mut host), quote!(host.reborrow())),
-            (true, _) => (quote!(host), quote!(&mut *host)),
-        };
-        let (mut methods, mut variants, mut dispatch) = (quote!(), quote!(), quote!());
-        for (method, place) in [
-            (
-                self.name.clone(),
-                "head: before its body runs, with the arguments it was called with",
-            ),
-            (
+        let mut places = vec![(
+            self.name.clone(),
+            "head: before its body runs, with the arguments it was called with",
+        )];
+        if self.has_return() {
+            places.push((
                 format!("{}_return", self.name),
                 "return: after its body, with the value it returns",
-            ),
-        ] {
+            ));
+        }
+        let (mut methods, mut variants, mut consts) = (quote!(), quote!(), quote!());
+        for (method, place) in places {
             let method = syn::Ident::new(&method, Span::call_site());
             let variant = syn::Ident::new(&camel(&method.to_string()), Span::call_site());
-            let dispatcher = syn::Ident::new(&format!("dispatch_{method}"), Span::call_site());
             let doc = format!("`{target}`'s {place}.");
-            let name = method.to_string();
             methods.extend(quote! {
                 #[doc = #doc]
                 fn #method(&self, host: #host, args: &mut #record) {
@@ -322,35 +373,17 @@ impl Shape {
                 }
             });
             variants.extend(quote!(#variant,));
-            dispatch.extend(quote! {
-                #[doc(hidden)]
-                pub fn #dispatcher(#binding: #host, args: &mut #record) {
-                    for points in super::entered_points(PointId::#variant, #name) {
-                        points.#method(#reborrow, args);
-                    }
-                }
+            consts.extend(quote! {
                 #[doc(hidden)]
                 #[allow(non_upper_case_globals)]
                 pub const #method: Option<PointId> = Some(PointId::#variant);
             });
         }
-        (methods, variants, dispatch)
+        (methods, variants, consts)
     }
 
-    /// The listener's function type.
-    pub fn listener(&self) -> TokenStream {
-        let record = self.record();
-        let record = if self.borrows() {
-            quote!(::mod_api::points::#record<'_>)
-        } else {
-            quote!(::mod_api::points::#record)
-        };
-        let host = match (self.mutable, self.side) {
-            (false, _) => quote!(&dyn ::mod_api::Host),
-            (true, Side::Server) => quote!(&mut dyn ::mod_api::ServerHost),
-            (true, Side::Client) => quote!(&mut dyn ::mod_api::ClientHost),
-            (true, Side::Both) => quote!(::mod_api::HostSide<'_>),
-        };
-        quote!(fn(#host, &mut #record))
+    /// Whether its listeners also run after the body.
+    pub fn has_return(&self) -> bool {
+        !self.borrowed_return
     }
 }
