@@ -12175,8 +12175,12 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_day_time_reads_overworld_clock_across_packets_and_levels() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
-        use horizon_protocol::connection::Pipe;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{self, Clientbound as C},
+        };
         use mod_api::LevelRef;
+        use std::sync::Arc;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
