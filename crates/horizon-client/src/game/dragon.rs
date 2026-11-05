@@ -5009,11 +5009,14 @@ mod tests {
                     let refused = refused_finalization || answer == Answer::RefuseJoin;
                     assert_eq!(result, !refused);
                     assert_eq!(game.dragon.is_none(), refused);
-                    // snapTo always draws yaw; only completed Mob.finalizeSpawn
-                    // draws the follow-range triangle and handedness roll.
+                    // The finalized constructor draws yaw, then Mob.finalizeSpawn
+                    // draws follow range and handedness unless skipped. The NBT
+                    // loader instead draws the dragon seed from the level RNG.
                     let mut expected = LegacyRandom::new(42);
                     if nbt.is_none() {
                         expected.next_float();
+                    } else {
+                        expected.next_long();
                     }
                     if nbt.is_none() && matches!(answer, Answer::Keep | Answer::RefuseJoin) {
                         expected.triangle(0.0, 0.114_850_000_000_000_01);
