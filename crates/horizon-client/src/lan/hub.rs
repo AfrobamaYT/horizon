@@ -949,11 +949,7 @@ impl Hub {
     /// `PermissionLevel.ADMINS` (3) or more get `ClientboundLowDiskSpaceWarningPacket`.
     pub fn send_low_disk_space_warning(&self) {
         let body = C::LowDiskSpaceWarning(horizon_protocol::packets::Empty).encode();
-        for g in self
-            .guests
-            .simulation_iter()
-            .filter(|g| g.placed && g.permission >= 3)
-        {
+        for g in self.guests.iter().filter(|g| g.placed && g.permission >= 3) {
             g.sender.send(body.clone());
         }
     }

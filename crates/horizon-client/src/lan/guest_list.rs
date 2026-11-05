@@ -47,6 +47,10 @@ impl GuestList {
         self.reindex();
         guest
     }
+    pub fn retain(&mut self, keep: impl FnMut(&Guest) -> bool) {
+        self.rows.retain(keep);
+        self.reindex();
+    }
     pub fn insert(&mut self, index: usize, guest: Guest) {
         self.rows.insert(index, guest);
         self.reindex();
@@ -182,6 +186,10 @@ mod tests {
         list[0].placed = true;
         list[0].position[0] = 42.0;
         check(&list);
+        list.retain(|g| g.conn != 2);
+        check(&list);
+        assert_eq!(list.connection_index(2), None);
+        assert_eq!(list.identity_index(102, 12), None);
         list.clear();
         assert!(list.is_empty());
         assert_eq!(list.connection_index(3), None);
