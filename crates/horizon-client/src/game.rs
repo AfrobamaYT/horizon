@@ -132,29 +132,11 @@ mod entity_sounds;
 mod event_loop;
 mod events;
 mod execution_role;
-/// The injection points' slots (#589): one per point's head and return, indexed by
-/// `mod_points::PointId`, set once after the mods are installed where one listens.
+/// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
 pub mod points {
-    // `fire` and `host_side` are called only by the `#[point]`s the stage adds to its copy.
-    #[allow(unused_imports, reason = "used by the staged copy's points")]
-    pub(crate) use mod_points::__private::fire;
-    pub(crate) use mod_points::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    pub(crate) static POINTS: [AtomicBool; POINT_COUNT] =
-        [const { AtomicBool::new(false) }; POINT_COUNT];
-
-    /// Seals the listener list and sets each slot a mod listens at, once, after the mods are
-    /// installed and their listeners registered.
-    pub(crate) fn attach_installed() {
-        mod_points::__private::seal();
-        for (index, slot) in POINTS.iter().enumerate() {
-            slot.store(mod_points::__private::listened_at(index), Ordering::Release);
-        }
-    }
-
     /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
+    /// Called only by the `#[point]`s the stage adds to its copy.
     #[inline(never)]
     #[allow(dead_code, reason = "used by the staged copy's points")]
     pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
