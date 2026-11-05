@@ -135,6 +135,7 @@ mod entity_state;
 mod entity_struck_by_lightning;
 mod explosion_knockback;
 mod explosion_start;
+mod extract_block_screen_effect;
 mod farmland_trample;
 mod finalize_spawn;
 mod fluid_capability;

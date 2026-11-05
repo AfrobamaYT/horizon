@@ -153,6 +153,8 @@ mod tooltip_element;
 pub use tooltip_element::{TooltipElement, TooltipImage, TooltipPlace};
 mod screenshot;
 pub use screenshot::ScreenshotImage;
+mod block_screen_effect;
+pub use block_screen_effect::BlockScreenEffect;
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
