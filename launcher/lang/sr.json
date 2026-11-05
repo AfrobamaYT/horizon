@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} није инсталиран",
   "~/.claude.json (or .mcp.json in a project)": "~/.цлауде.јсон (или .мцп.јсон у пројекту)",
   "← All servers": "← Сви сервери",
-  "← Newer": "← Новије"
+  "← Newer": "← Новије",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

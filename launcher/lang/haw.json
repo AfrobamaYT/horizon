@@ -1073,5 +1073,6 @@
   "{version} is not installed": "ʻAʻole hoʻokomo ʻia ʻo {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (a i ʻole .mcp.json ma kahi papahana)",
   "← All servers": "← Nā kikowaena āpau",
-  "← Newer": "← Mea hou"
+  "← Newer": "← Mea hou",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

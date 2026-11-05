@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} इंस्टॉल नहीं है",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (या किसी प्रोजेक्ट में .mcp.json)",
   "← All servers": "← सभी सर्वर",
-  "← Newer": "← नया"
+  "← Newer": "← नया",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

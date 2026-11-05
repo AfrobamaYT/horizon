@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} neįdiegtas",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (arba .mcp.json projekte)",
   "← All servers": "← Visi serveriai",
-  "← Newer": "← Naujesnis"
+  "← Newer": "← Naujesnis",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

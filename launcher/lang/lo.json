@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} ບໍ່ໄດ້ຕິດຕັ້ງ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ຫຼື .mcp.json ໃນໂຄງການ)",
   "← All servers": "← ເຊີບເວີທັງໝົດ",
-  "← Newer": "← ໃໝ່ກວ່າ"
+  "← Newer": "← ໃໝ່ກວ່າ",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

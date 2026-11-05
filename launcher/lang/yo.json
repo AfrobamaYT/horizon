@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} ko fi sori ẹrọ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (tabi .mcp.json ninu ise agbese kan)",
   "← All servers": "← Gbogbo olupin",
-  "← Newer": "← Tuntun"
+  "← Newer": "← Tuntun",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

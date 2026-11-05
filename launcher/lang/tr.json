@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} yüklü değil",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (veya bir projede .mcp.json)",
   "← All servers": "← Tüm sunucular",
-  "← Newer": "← Newer"
+  "← Newer": "← Newer",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

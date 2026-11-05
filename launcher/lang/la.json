@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version}non installed",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (vel .mcp.json in project)",
   "← All servers": "Omnes servers",
-  "← Newer": "Recentior"
+  "← Newer": "Recentior",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

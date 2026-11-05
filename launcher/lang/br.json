@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} n'eo ket staliet",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (pe .mcp.json en ur raktres)",
   "← All servers": "← An holl servijerioù",
-  "← Newer": "← Nevesoc'h"
+  "← Newer": "← Nevesoc'h",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

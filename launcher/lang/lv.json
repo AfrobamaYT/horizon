@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} nav instalēts",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (vai .mcp.json projektā)",
   "← All servers": "← Visi serveri",
-  "← Newer": "← Jaunāks"
+  "← Newer": "← Jaunāks",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }

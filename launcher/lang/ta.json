@@ -1073,5 +1073,6 @@
   "{version} is not installed": "{version} நிறுவப்படவில்லை",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (அல்லது திட்டத்தில் .mcp.json)",
   "← All servers": "← அனைத்து சர்வர்கள்",
-  "← Newer": "← புதியது"
+  "← Newer": "← புதியது",
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
 }
