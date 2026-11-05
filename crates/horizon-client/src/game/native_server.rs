@@ -2340,9 +2340,111 @@ mod fake_action_tests {
         });
     }
 
-    /// A fake player's click on a shulker box or an ender chest leaves both
-    /// shut: no open count climbs, no stand-in chest stays in the level and
-    /// no lid stays open.
+    /// A real guest keeps its vehicle menu over a cart a fake player then
+    /// uses: the refused open closes only a stand-in nobody is looking at,
+    /// and the staging does not reset what the viewer's menu is editing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_viewer_keeps_the_vehicle_menu_a_fake_player_used() {
+        use super::super::minecarts::{CART_KEY_Y, CartKind, Minecart};
+        use horizon_client::containers::BlockEntity;
+        use horizon_client::lan::menu::Slots;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, fake_conn, real_conn) = fake(game, None, 0);
+            let at = horizon_core::geometry::Vec3::new(2.5, 64.0, 0.5);
+            let mut cart = Minecart::new(6110, CartKind::Chest, at);
+            cart.items[3] = Some(ItemStack::new("minecraft:diamond", 5));
+            game.carts.push(cart);
+            let gi = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .position(|g| g.conn == real_conn)
+                .unwrap();
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest_mut(real_conn)
+                .unwrap()
+                .position = [0.5, 64.0, 0.5];
+            assert_eq!(
+                game.guest_interact(real_conn, gi, 6110, Hand::Main, [2.5, 64.5, 0.5]),
+                Ok(true),
+                "the guest's use opens the vehicle's menu",
+            );
+            let key = (i32::MAX - 15, CART_KEY_Y, 6110);
+            let viewer = |game: &Game<'_>| {
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guest(real_conn)
+                    .unwrap()
+                    .menu
+                    .as_ref()
+                    .is_some_and(|m| m.slots == Slots::Block(key))
+            };
+            assert!(viewer(game), "the guest's use opened the vehicle's menu");
+            assert!(game.world.block_entities.contains_key(&key));
+            // The viewer's live edit: its menu's clicks write through to the
+            // stand-in (`source.write` after every click).
+            let emerald = Some(ItemStack::new("minecraft:emerald", 2));
+            if let Some(horizon_client::containers::BlockEntity::Chest(items)) =
+                game.world.block_entities.get_mut(&key)
+            {
+                items[4] = emerald.clone();
+            }
+            let target = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), 6110);
+            assert_eq!(
+                game.native_player_perform_action(
+                    player,
+                    PlayerAction::InteractOn {
+                        hand: Hand::Main,
+                        target,
+                        location: [0.0, 0.5, 0.0],
+                    },
+                ),
+                Ok(ActionOutcome::Consumed)
+            );
+            assert!(viewer(game), "the fake's use kept the viewer's menu");
+            assert!(
+                game.world.block_entities.contains_key(&key),
+                "the fake's use kept the stand-in the menu backs",
+            );
+            let BlockEntity::Chest(items) = &game.world.block_entities[&key] else {
+                unreachable!()
+            };
+            assert_eq!(items[3], Some(ItemStack::new("minecraft:diamond", 5)));
+            assert_eq!(items[4], emerald, "the staging kept the viewer's edit");
+            game.guest_close_all(real_conn);
+            assert!(!game.world.block_entities.contains_key(&key));
+            let items = &game.carts.iter().find(|c| c.id == 6110).unwrap().items;
+            assert_eq!(
+                items[3],
+                Some(ItemStack::new("minecraft:diamond", 5)),
+                "the viewer's close put the items back",
+            );
+            assert_eq!(items[4], emerald, "the viewer's edit reached the vehicle");
+            assert!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guest(fake_conn)
+                    .unwrap()
+                    .menu
+                    .is_none()
+            );
+        });
+    }
+
+    /// A fake player's click on a shulker box or an ender chest is refused
+    /// at the open: no open count climbs, no stand-in chest enters the level
+    /// and no lid opens.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_shulker_box_and_an_ender_chest_a_fake_player_used_are_left_shut() {
@@ -2358,13 +2460,13 @@ mod fake_action_tests {
             );
             assert!(
                 count(game).is_none_or(|c| c == 0),
-                "the use opened it, and it shut"
+                "the use is refused at the open, nothing opened"
             );
             assert!(game.container.is_none());
             assert_eq!(
                 game.native_player_perform_action(player, on_top(shulker)),
                 Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu)),
-                "the next use opens it again",
+                "the next use is refused the same way",
             );
             assert!(
                 count(game).is_none_or(|c| c == 0),
