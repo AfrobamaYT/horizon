@@ -85,8 +85,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/ci/dyna_ci_pool_watch.py
 
-  # One job, not one per check: each job takes a runner from the organisation's shared pool, and with every pull request
-  # and every merge to main starting this workflow, three jobs a run left the pool's queue tens of minutes deep.
+  # Tests share verify rather than taking one runner per check. Lint runs separately on GitHub's pool.
   #
   # Dyna's slot shares a 40 GiB persistent cache between verify and launcher; the pool wipes it above that size.
   # Where: Dyna when its switch and lease allow it, otherwise GitHub's runners. With the repository variable
@@ -101,6 +100,9 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # Keep incremental check state too: changed workspace crates can reuse unchanged queries.
+      CARGO_INCREMENTAL: 1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -117,21 +119,52 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - name: Lint cache toolchain
         if: steps.rust.outputs.required != 'false'
+        id: toolchain
+        run: echo "hash=$(rustc +stable -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      # rust-cache's default removes workspace artifacts. Those are the expensive part here,
+      # in two feature graphs; keep both, and publish a fresh snapshot on each completed main head.
+      - uses: actions/cache/restore@v4
+        if: steps.rust.outputs.required != 'false'
+        id: lint-cache
         with:
-          shared-key: lint
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-${{ github.sha }}
+          restore-keys: |
+            lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
+            lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
+      # A fresh checkout otherwise makes every workspace source newer than the cached artifacts.
+      # Only byte-identical Git objects regain their cached mtimes; changed inputs stay new.
+      - name: Restore unchanged source timestamps
+        if: steps.rust.outputs.required != 'false'
+        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json
       - name: Check formatting and lint
         if: steps.rust.outputs.required != 'false'
+        id: native-lint
         run: |
           cargo +stable fmt --all -- --check
           cargo +stable clippy --workspace --all-targets -- -D warnings
-          # The server build (released as horizon-engine): the game without sound or controllers.
-          cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
+      - name: Lint the server build without sound or controllers
+        if: steps.rust.outputs.required != 'false'
+        id: server-lint
+        run: cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
       - name: The mod API builds for wasm32
         if: steps.rust.outputs.required != 'false'
         run: cargo +stable check -p horizon-mod-api --target wasm32-unknown-unknown --locked
+      # Publish native work even if the independent wasm check fails. Pull requests only read
+      # main's snapshots; they can never replace a cache subsequently consumed by main.
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.native-lint.outcome == 'success' && steps.server-lint.outcome == 'success' && steps.lint-cache.outputs.cache-hit != 'true' }}
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.lint-cache.outputs.cache-primary-key }}
 
   wasm-mods:
     # Main pushes and dispatches: a mod built to mod.wasm and loaded as the game loads it;
@@ -344,7 +377,7 @@ jobs:
       # each go past it, so Dyna runs build two crates at a time. Formatting and lint run in parallel on GitHub's
       # runners (the lint job), so this job only tests. A cargo flag, not CARGO_BUILD_JOBS: sccache hashes
       # CARGO_* variables, and that would split the runners' cache from the boxes'.
-      # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which clippy above already
+      # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).
       # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
       # these 4-core runners it was no faster (#4978).
