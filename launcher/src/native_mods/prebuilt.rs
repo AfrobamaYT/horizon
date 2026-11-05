@@ -17,7 +17,8 @@ use std::process::Command;
 const IDENTITY: &str = "horizon-prebuilt.json";
 const TEMPLATE: &str = "native_main.rs.template";
 const SUMS: &str = "SHA256SUMS";
-/// The `fast` profile the prebuilt game is built with: the mods' code matches the game's.
+/// The optimization level of the `release` profile the prebuilt game is built with: the mods' code
+/// matches the game's.
 const OPT_LEVEL: &str = "opt-level=3";
 /// The archive's largest plausible unpacked size: a corrupt or hostile archive stops there.
 const UNPACKED_LIMIT: u64 = 8 << 30;
@@ -33,7 +34,7 @@ pub(super) enum SourceReason {
     Features { mod_id: String },
     /// A mod depends on a crate other than the mod API and other mods.
     Crate { mod_id: String, krate: String },
-    /// The player chose a profile other than the prebuilt game's `performance` (`fast`).
+    /// The player chose a profile other than Optimized, the one the prebuilt game is built with.
     Profile { profile: &'static str },
     /// No prebuilt game for this computer.
     Host,
@@ -63,7 +64,7 @@ impl std::fmt::Display for SourceReason {
                 &[("mod", mod_id), ("crate", krate)],
             ),
             Self::Profile { profile } => trf(
-                "the {profile} profile builds the game from source; the prebuilt game is performance only",
+                "{profile} builds the game on this computer; only Optimized uses the prebuilt game",
                 &[("profile", profile)],
             ),
             Self::Host => {
@@ -83,16 +84,21 @@ impl std::fmt::Display for SourceReason {
 }
 
 /// The first reason `projects` can't build against the prebuilt game with `profile`, or `None`
-/// when they can: the profile is `performance`, the one the game is prebuilt with, and each mod is
+/// when they can: the profile is `optimized`, the one the game is prebuilt with, and each mod is
 /// a crate that depends on the mod API (with its default features) and on other mods, with no
 /// injections, build script or features of its own.
 pub(super) fn refusal(projects: &[api::Project<'_>], profile: Profile) -> Option<SourceReason> {
-    if profile != Profile::Performance {
+    if profile != Profile::Optimized {
         return Some(SourceReason::Profile {
             profile: profile.name(),
         });
     }
-    projects.iter().find_map(|project| {
+    projects.iter().find_map(project_refusal)
+}
+
+/// Why `project` alone can't build against the prebuilt game, or `None` when it can.
+pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason> {
+    {
         let mod_id = || project.bundle.manifest.id.clone();
         if project.bundle.needs_mixins() {
             return Some(SourceReason::Injections { mod_id: mod_id() });
@@ -138,7 +144,7 @@ pub(super) fn refusal(projects: &[api::Project<'_>], profile: Profile) -> Option
             }
         }
         None
-    })
+    }
 }
 
 /// Checks `injections` against the prebuilt `game`'s points. A target that isn't a point is an
@@ -504,10 +510,7 @@ mod tests {
         )
         .unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-        refusal(
-            &[api::Project::read(&bundle).unwrap()],
-            Profile::Performance,
-        )
+        refusal(&[api::Project::read(&bundle).unwrap()], Profile::Optimized)
     }
 
     #[test]
@@ -531,8 +534,8 @@ mod tests {
     }
 
     #[test]
-    fn only_the_performance_profile_takes_the_prebuilt_game() {
-        for profile in [Profile::Dev, Profile::Release] {
+    fn only_the_optimized_profile_takes_the_prebuilt_game() {
+        for profile in [Profile::Developer, Profile::Balanced] {
             assert_eq!(
                 refusal(&[], profile),
                 Some(SourceReason::Profile {
@@ -540,7 +543,7 @@ mod tests {
                 })
             );
         }
-        assert_eq!(refusal(&[], Profile::Performance), None);
+        assert_eq!(refusal(&[], Profile::Optimized), None);
     }
 
     #[test]
