@@ -1,0 +1,1 @@
+{"status":"pr_opened","pr":1058,"branch":"bulk-batch2-2j42fp-df6a379c7821","head":"11e23b665d4469d72bc407efdb5acaa68ee99c2f","notes":"Focused test and all-targets check blocked by nine unrelated existing test compilation errors; wasm target unavailable; no in-game proof."}
