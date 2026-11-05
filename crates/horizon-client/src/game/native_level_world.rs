@@ -293,6 +293,20 @@ mod tests {
             assert_eq!(level.weather(game), Some((0.0, 0.0)));
             game.options.execution_role = ExecutionRole::Client;
             assert_eq!(level.weather(game), None, "no logged-in remote level");
+            let (client, _server) = horizon_protocol::connection::Pipe::pair();
+            game.connect_local(client, "WeatherTest").unwrap();
+            assert_eq!(level.weather(game), None, "login has not completed");
+            game.remote.as_mut().unwrap().logged_in = true;
+            game.world.weather.rain_level = (0.0, 0.5);
+            game.world.weather.thunder_level = (0.0, 0.75);
+            assert_eq!(level.weather(game), Some((0.5, 0.375)));
+            let other = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            assert_eq!(
+                other.weather(game),
+                None,
+                "client shows only its current level"
+            );
+            assert_eq!(stale.weather(game), None);
         });
     }
 
