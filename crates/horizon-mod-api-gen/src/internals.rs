@@ -129,12 +129,33 @@ struct Pass {
 // each entry records them: changing visibility doesn't select an OS or feature for the build.
 use crate::points::{conditions, test_only};
 
+fn clean_attrs(attrs: &mut Vec<syn::Attribute>) {
+    attrs.retain(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
+}
+
 fn clean_fields(fields: &Fields) -> Fields {
     let mut fields = fields.clone();
+    match &mut fields {
+        Fields::Named(fields) => {
+            fields.named = fields
+                .named
+                .iter()
+                .filter(|field| !test_only(&field.attrs))
+                .cloned()
+                .collect()
+        }
+        Fields::Unnamed(fields) => {
+            fields.unnamed = fields
+                .unnamed
+                .iter()
+                .filter(|field| !test_only(&field.attrs))
+                .cloned()
+                .collect()
+        }
+        Fields::Unit => {}
+    }
     for field in &mut fields {
-        field
-            .attrs
-            .retain(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
+        clean_attrs(&mut field.attrs);
         field.vis = Visibility::Inherited;
     }
     fields
@@ -153,10 +174,14 @@ fn shape_signature(item: &Item) -> Option<Item> {
             let mut value = value.clone();
             value.attrs.clear();
             value.vis = Visibility::Inherited;
+            value.variants = value
+                .variants
+                .iter()
+                .filter(|variant| !test_only(&variant.attrs))
+                .cloned()
+                .collect();
             for variant in &mut value.variants {
-                variant
-                    .attrs
-                    .retain(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
+                clean_attrs(&mut variant.attrs);
                 variant.fields = clean_fields(&variant.fields);
             }
             Some(Item::Enum(value))
@@ -685,10 +710,10 @@ impl Pass {
                 let mut signature = value.clone();
                 signature.attrs.clear();
                 signature.vis = Visibility::Inherited;
-                for field in &mut signature.fields.named {
-                    field.attrs.clear();
-                    field.vis = Visibility::Inherited;
-                }
+                let Fields::Named(fields) = clean_fields(&Fields::Named(signature.fields)) else {
+                    unreachable!()
+                };
+                signature.fields = fields;
                 expose!(value, "struct", value.union_token.span(), signature);
                 if children {
                     self.fields(
@@ -1145,6 +1170,59 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
     }
 
     #[test]
+    fn signatures_keep_field_and_variant_configuration() {
+        let fixture = Fixture::new(
+            r#"
+struct Game {
+    #[cfg(windows)] #[cfg_attr(unix, cfg(feature = "extra"))] #[doc = "hidden"] #[serde(default)] windows: u32,
+    #[cfg(test)] test_field: u32,
+}
+enum Choice {
+    #[cfg(windows)] #[doc = "hidden"] #[serde(rename = "x")] Windows,
+    #[cfg(test)] Test,
+}
+union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
+"#,
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let signature = |name: &str| {
+            &entries
+                .iter()
+                .find(|e| e.path == format!("horizon_client::game::{name}"))
+                .unwrap()
+                .signature
+        };
+        assert!(signature("Game").contains("cfg_attr"));
+        for name in ["Game", "Choice", "Value"] {
+            let signature = signature(name);
+            assert!(signature.contains("cfg (windows)"), "{signature}");
+            assert!(
+                !signature.contains("test_field") && !signature.contains("Test"),
+                "{signature}"
+            );
+            assert!(
+                !signature.contains("doc") && !signature.contains("serde"),
+                "{signature}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_entry_resolves_glob_and_std_imports() {
+        let fixture = shapes_fixture(
+            "use horizon_items::kinds::*; use std::cell::Cell; struct Game { kind: Kind, cell: Cell<u32> }\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let game = entries
+            .iter()
+            .find(|e| e.path == "horizon_client::game::Game")
+            .unwrap();
+        assert!(!game.shape_only);
+        assert_eq!(game.refs["Kind"], "horizon_items::kinds::Kind");
+        assert_eq!(game.refs["Cell"], "std::cell::Cell");
+    }
+
+    #[test]
     fn reachable_lower_shapes_are_transitive_and_do_not_widen_sources() {
         let fixture = shapes_fixture(
             "use std::time::Duration; struct Game { stack: horizon_items::ItemStack, external: Duration }\n",
@@ -1346,7 +1424,7 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
     #[test]
     fn conditional_layouts_remain_unwalkable_after_staging() {
         let fixture = Fixture::new(
-            "struct Guarded { #[cfg(test)] only_in_tests: u8 }\nenum Cases { #[cfg(test)] Test, Normal }\n",
+            "struct Guarded { #[cfg(feature = \"audio\")] sound: u8 }\nenum Cases { #[cfg_attr(feature = \"audio\", cfg(unix))] Audio, Normal }\n",
         );
         let widened = widen_with(&fixture.0, &[]).unwrap();
         let (_, counts) = crate::internals_table::table(&widened.entries);

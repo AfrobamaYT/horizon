@@ -382,6 +382,8 @@ fn rustc(rust: &Toolchain, game: &Path, out: &Path, edition: &str) -> Command {
 /// Compiles the mods (`resolution`'s order, each with its installed mod dependencies) and the
 /// launcher's executable against the prebuilt game in `game`, into `out`. Returns the executable
 /// and the dynamic libraries it loads, to be installed beside it.
+// Unlike the source workspace, this route invokes rustc with only selected --extern
+// libraries; it does not resolve or compile arbitrary transitive Cargo dependencies.
 pub(super) fn compile(
     rust: &Toolchain,
     game: &Path,
