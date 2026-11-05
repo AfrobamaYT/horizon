@@ -179,6 +179,23 @@ impl Game<'_> {
             }
         }
     }
+    /// Only the connected owner's acting context supplies a verified identity.
+    /// Guests and unresolved sources retain the existing damage API behavior.
+    pub(super) fn owner_damage_uuid(&self) -> Option<[i32; 4]> {
+        if self.lan_acting.is_some() && self.lan_acting_uuid.is_none() {
+            return None;
+        }
+        let actual = self
+            .lan_acting_uuid
+            .map(horizon_client::lan::playerdata::uuid_ints)
+            .or(self.level.player_uuid)?;
+        let owner = self
+            .serving
+            .as_ref()
+            .map(|s| horizon_client::lan::playerdata::uuid_ints(s.owner))
+            .or(self.level.player_uuid)?;
+        (actual == owner).then_some(actual)
+    }
     /// `LivingEntity.hurtServer` of the mob at `index` by the player's hit:
     /// the weapon's `armor_effectiveness` enchantments (Breach) thin its armor.
     pub(super) fn hurt_by_player(&mut self, index: usize, amount: f32, source: Damage) -> bool {
