@@ -1413,6 +1413,87 @@ mod tests {
         assert!(!after.game().contains("game_modules.rs"));
     }
 
+    #[test]
+    fn lan_action_areas_preserve_helpers_internals_and_point_contracts() {
+        let before = Fixture::new("struct Game; mod lan_actions;");
+        before.put(
+            "crates/horizon-client/src/game/lan_actions.rs",
+            "struct State; impl Game { fn vehicle_has_other_viewers() -> bool { true } fn action(&self, value: u8) -> u8 { value } }",
+        );
+        let after = Fixture::new("struct Game; mod lan_actions;");
+        let directory = "crates/horizon-client/src/game/lan_actions";
+        after.put(
+            &format!("{directory}/mod.rs"),
+            "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));\ninclude!(\"shared.rs\");",
+        );
+        after.put(
+            &format!("{directory}/shared.rs"),
+            "struct State; impl Game { fn vehicle_has_other_viewers() -> bool { true } }",
+        );
+        after.put(
+            &format!("{directory}/turns.rs"),
+            "impl Game { pub(super) fn action(&self, value: u8) -> u8 { value } }",
+        );
+        for fixture in [&before, &after] {
+            fixture.put("crates/horizon-mod-api-gen/points.txt", "");
+            fixture.put("crates/horizon-mod-api-gen/internals.txt", "");
+            fixture.put(
+                "crates/horizon-mod-points/Cargo.toml",
+                "[package]\nname = 'horizon-mod-points'\nversion = '0.1.0'\n",
+            );
+        }
+        fn inventory(root: &Path) -> (Vec<String>, Vec<serde_json::Value>) {
+            let mut methods = Vec::new();
+            crate::game_methods(
+                &root.join("crates/horizon-client/src/game"),
+                "horizon_client::game",
+                &mut methods,
+            )
+            .unwrap();
+            let methods = methods
+                .into_iter()
+                .map(|(module, method)| {
+                    format!(
+                        "{}::{}",
+                        module.replace("::turns", ""),
+                        method.sig.to_token_stream()
+                    )
+                })
+                .collect();
+            let points = crate::points::game_points(root)
+                .unwrap()
+                .into_iter()
+                .map(|point| {
+                    let json = serde_json::to_string(&point)
+                        .unwrap()
+                        .replace("::turns", "");
+                    serde_json::from_str(&json).unwrap()
+                })
+                .collect();
+            (methods, points)
+        }
+        assert_eq!(inventory(&before.0), inventory(&after.0));
+        let old = discover(&before.0).unwrap();
+        let new = discover(&after.0).unwrap();
+        let normalize = |entries: Vec<Internal>| {
+            entries
+                .into_iter()
+                .filter(|entry| !entry.path.ends_with("::turns"))
+                .map(|entry| {
+                    (
+                        entry.path.replace("::turns", ""),
+                        (entry.signature, entry.hash),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(normalize(old.entries), normalize(new.entries));
+        widen_with(&after.0, &[]).unwrap();
+        let staged = fs::read_to_string(after.0.join(format!("{directory}/mod.rs"))).unwrap();
+        assert!(staged.contains("pub mod turns;"));
+        assert!(!staged.contains("lan_action_modules.rs"));
+    }
+
     fn shapes_fixture(game: &str) -> Fixture {
         let fixture = Fixture::new(game);
         fixture.put(

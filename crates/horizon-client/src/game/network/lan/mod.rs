@@ -84,6 +84,33 @@ pub(super) fn server_sources(
     Ok(sources)
 }
 
+/// Build server recipes privately so a refused reload leaves the current cache intact.
+pub(super) fn prepare_server_sources(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> std::io::Result<Arc<ResolvedSources>> {
+    Ok(Arc::new(ResolvedSources::load_or_empty(
+        root,
+        overlay,
+        &server_data_load(root, item_data)?,
+    )))
+}
+
+pub(super) fn install_server_sources(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+    sources: Arc<ResolvedSources>,
+) {
+    *SOURCES.lock().unwrap_or_else(|e| e.into_inner()) = Some(ServerSources {
+        root: root.to_owned(),
+        generation: item_data.defaults().generation(),
+        overlay: overlay_key(overlay),
+        sources,
+    });
+}
+
 /// The recipes of a load of `origin`: a server's are shared, a client's own.
 pub(super) fn load_sources(
     root: &std::path::Path,
@@ -433,7 +460,7 @@ pub(super) struct LanHost {
     /// The world border as the guests were last told of it (lan/border.rs).
     pub border_sent: Option<lan::border::Sent>,
     /// Guests' commands waiting for the hub to be back in `self.lan`, where
-    /// a command can reach every player (game/network/lan_actions.rs).
+    /// a command can reach every player (game/network/lan_actions/commands.rs).
     pub commands: Vec<super::lan_actions::GuestCommand>,
     /// Mods' quiet commands waiting to run a few a tick (game/network/lan_quiet.rs).
     pub quiet: std::collections::VecDeque<super::lan_quiet::QuietBatch>,

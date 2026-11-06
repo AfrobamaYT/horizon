@@ -195,10 +195,7 @@ pub mod tests {
                 .iter()
                 .any(|error| error == "mod requester requested unknown block later:machine")
         );
-        assert!(
-            block(keys[0]).is_none(),
-            "a refused reload must not leave stale state mappings"
-        );
+        assert_eq!(block(keys[0]).unwrap().default, BlockStateId(20));
         assert!(BlockKey::from_slot(u32::MAX).is_err());
         assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
         assert_eq!(block_id(keys[0]), Some("minecraft:stone"));

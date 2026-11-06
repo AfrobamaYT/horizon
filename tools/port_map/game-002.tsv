@@ -40,7 +40,7 @@ ServerLevel.getNextEntityId	inline	crates/horizon-client/src/game/network/lan_en
 ServerLevel.tickCustomSpawners	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::tick_creatures	wandering trader, patrol, cat and siege spawners; the phantom spawner runs from stats.rs
 ServerLevel.tickThunder	port	crates/horizon-client/src/game/entities/lightning.rs::Game::tick_thunder	
 ServerLevel.findLightningTargetAround	port	crates/horizon-client/src/game/entities/lightning.rs::Game::lightning_target	
-ServerLevel.announceSleepStatus	port	crates/horizon-client/src/game/network/lan_actions.rs::Game::announce_sleep_status	
+ServerLevel.announceSleepStatus	port	crates/horizon-client/src/game/network/lan_actions/sleep.rs::Game::announce_sleep_status	
 ServerLevel.getMoonBrightness	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::local_difficulty	MOON_BRIGHTNESS table indexed by day / 24000 mod 8
 ServerLevel.prepareWeather	port	crates/horizon-client/src/save.rs::Level::read	rain and thunder levels start at 1 when the saved flags are on
 ServerLevel.advanceWeatherCycle	port	crates/horizon-client-render/src/world.rs::Weather::tick_timers	level fade in tick_levels, game events broadcast in Hub::sync_world
@@ -49,7 +49,7 @@ ServerLevel.tickFluid	port	crates/horizon-world/src/level/tick.rs::Behaviours::s
 ServerLevel.tickBlock	port	crates/horizon-world/src/level/tick.rs::Behaviours::scheduled_step	
 ServerLevel.tickPassenger	inline	crates/horizon-client/src/game/entities/passengers.rs::Game::sync_riders	a rider whose vehicle is gone or dead lets go; others are re-seated each tick
 ServerLevel.updateNeighboursOnBlockSet	inline	crates/horizon-world/src/level/update.rs::Sim::set_block_limit	neighbour and comparator updates inside setBlock
-ServerLevel.mayInteract	inline	crates/horizon-client/src/game/network/lan_actions.rs::Game::under_spawn_protection	gap: minor: spawn protection only for guests on a dedicated server; the world border check is a stub that always allows (hand.rs within_border), so blocks can be built and broken outside the border
+ServerLevel.mayInteract	inline	crates/horizon-client/src/game/network/lan_actions/packets.rs::Game::under_spawn_protection	gap: minor: spawn protection only for guests on a dedicated server; the world border check is a stub that always allows (hand.rs within_border), so blocks can be built and broken outside the border
 ServerLevel.save	port	crates/horizon-client/src/game.rs::Game::save_level	
 ServerLevel.saveLevelData	port	crates/horizon-client/src/game.rs::Game::save_game_metadata	
 ServerLevel.getEntities	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::select_in_level	entity selectors filter the per-kind entity lists
@@ -64,7 +64,7 @@ ServerLevel.neighborChanged	port	crates/horizon-world/src/level/hooks.rs::Sim::n
 ServerLevel.getDestroyType	port	crates/horizon-client/src/game.rs::Game::explode	mob explosions pick Keep, Destroy or DestroyWithDecay from mob_griefing and mob_explosion_drop_decay
 ServerLevel.doBlockEvent	inline	crates/horizon-world/src/level/pistons.rs::Behaviours::run_block_events	
 ServerLevel.getEntityInAnyDimension	missing		minor: owner and target references resolve in the level in place only; parked levels are not searched
-ServerLevel.getEntityOrPart	inline	crates/horizon-client/src/game/network/lan_actions.rs::Game::look_at_entity	an entity id from a guest finds a mob, an object or a tracked dragon part or end crystal
+ServerLevel.getEntityOrPart	inline	crates/horizon-client/src/game/network/lan_actions/interaction.rs::Game::look_at_entity	an entity id from a guest finds a mob, an object or a tracked dragon part or end crystal
 ServerLevel.findClosestBiome3d	port	crates/horizon-client/src/vanillagen.rs::VanillaTerrain::find_closest_biome	
 ServerLevel.getWorldBorder	inline	crates/horizon-client/src/game/interface/scoreboard/mod.rs::Game::load_scoreboard	the border is unpacked from saved data next to the scoreboard
 ServerLevel.setChunkForced	port	crates/horizon-client/src/game/administration/commands/terrain_cmds.rs::Game::cmd_forceload	
@@ -123,9 +123,9 @@ ServerPlayer.onEffectUpdated	port	crates/horizon-client/src/lan/hub.rs::Hub::syn
 ServerPlayer.onEffectsRemoved	port	crates/horizon-client/src/lan/hub.rs::Hub::sync_effects	same effect comparison and trigger as onEffectUpdated
 ServerPlayer.magicCrit	port	crates/horizon-client/src/lan/containers.rs::Hub::critical_hit	
 ServerPlayer.onUpdateAbilities	inline	crates/horizon-client/src/lan/hub.rs::Hub::set_game_mode	abilities go out with a game mode change; there is no other way abilities change
-ServerPlayer.createCommandSourceStack	inline	crates/horizon-client/src/game/network/lan_actions.rs::Game::run_guest_command	the guest is swapped in as the acting player and its permission level applied
+ServerPlayer.createCommandSourceStack	inline	crates/horizon-client/src/game/network/lan_actions/commands.rs::Game::run_guest_command	the guest is swapped in as the acting player and its permission level applied
 ServerPlayer.sendSystemMessage	port	crates/horizon-client/src/lan/hub.rs::Hub::system_message	
-ServerPlayer.sendBuildLimitMessage	port	crates/horizon-client/src/game/network/lan_actions.rs::Game::build_limit_message	the build.tooHigh and build.tooLow overlay at the world height limits
+ServerPlayer.sendBuildLimitMessage	port	crates/horizon-client/src/game/network/lan_actions/packets.rs::Game::build_limit_message	the build.tooHigh and build.tooLow overlay at the world height limits
 ServerPlayer.getIpAddress	skip:server		for ban-ip and the dedicated server log
 ServerPlayer.updateOptions	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	the ClientInformation arm: view distance, main hand, model parts and chat visibility are kept
 ServerPlayer.clientInformation	skip:java		getter
@@ -135,7 +135,7 @@ ServerPlayer.drop	port	crates/horizon-client/src/game.rs::Game::player_drop	item
 ServerPlayer.calculateGameModeForNewPlayer	port	crates/horizon-client/src/game/network/lan/mod.rs::Game::lan_guest_joined	default or forced game mode for a new or force-gamemode guest
 ServerPlayer.storeGameTypes	port	crates/horizon-client/src/save.rs::Level::player_tag	both are saved: playerGameType, and previousPlayerGameType (absent when unset, as storeNullable is), read back into previous_game_mode
 ServerPlayer.shouldFilterMessageTo	skip:service		text filtering
-ServerPlayer.mayInteract	inline	crates/horizon-client/src/game/network/lan_actions.rs::Game::under_spawn_protection	gap: minor: same as ServerLevel.mayInteract, no world border check
+ServerPlayer.mayInteract	inline	crates/horizon-client/src/game/network/lan_actions/packets.rs::Game::under_spawn_protection	gap: minor: same as ServerLevel.mayInteract, no world border check
 ServerPlayer.onItemPickup	port	crates/horizon-client/src/game/interface/advancements/mod.rs::Game::trigger_thrown_picked_up_by_player	a taken stack whose owner is another player fires thrown_item_picked_up_by_player, whole or partial
 ServerPlayer.getChatSession	skip:java		getter with an expiry check
 ServerPlayer.startRiding	inline	crates/horizon-client/src/game/network/lan_entities.rs::Game::lan_riding	gap: minor: SetPassengers goes out, but the mount's active effects (a horse's speed) are not sent to the rider

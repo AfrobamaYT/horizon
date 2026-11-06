@@ -1531,7 +1531,9 @@ pub trait Hooks {
     /// is where a mod recomputes them.
     /// Contributed files sit below the world's own data packs: a pack's file
     /// for the same path still overrides a mod's. Server-side (the single
-    /// player's integrated server included).
+    /// player's integrated server included). Listener applies run first. A later reload refusal
+    /// preserves the old engine generation, but does not undo callback effects. Contributions
+    /// share one list, so a failed file cannot be attributed to a particular mod.
     #[hook(side = "server", contract = "collect", out = "files")]
     fn data_pack_files();
     /// Change the colours of `biome` (`minecraft:plains`) on this client: the
@@ -2239,6 +2241,15 @@ pub trait Hooks {
     /// side, before any resource loads: push the same ones every time, from
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
+    #[notes = r#"## Villager farming
+
+Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
+`native_blocks`. A crop block's generated item is its seed: add that item to
+`minecraft:villager_plantable_seeds` to let farmers plant its default block state from their inventory.
+Untagged items and tagged items without a block are skipped. Crop maturity follows the template's class:
+beetroots mature at age 3, ordinary crops at 7; torchflower crops never reach their maximum age 2 while
+still crops. Pitcher crops are not `CropBlock`s and are not harvested by this behavior. Farming still
+requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "both",
         contract = "collect",

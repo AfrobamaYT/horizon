@@ -198,3 +198,79 @@ fn saved_paintings_stay_in_their_dimension_and_empty_reads_do_not_bind() {
         assert!(!detached.has_index_binding());
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn first_write_painting_publication_and_rollback() {
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(Dim::Overworld);
+        let uuid = [31, 32, 33, 34];
+        game.load_painting(
+            painting(uuid, Tag::Compound(Compound::new())),
+            Some(uuid),
+            (0, 0),
+        );
+        let id = game.paintings[0].id;
+        let holder = Holder::Entity(id);
+        let store: &mut dyn horizon_world::attachments::AttachmentStore = game;
+        assert_eq!(VALUE.has(store, holder), Ok(false));
+        assert_eq!(VALUE.get_existing(store, holder), Ok(None));
+        assert_eq!(VALUE.remove(store, holder), Ok(None));
+        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        let bad = AttachmentType {
+            namespace: "test",
+            name: "bad",
+            default: || 0i32,
+            codec: None,
+            copy_on_death: true,
+            sync: false,
+        };
+        let store: &mut dyn horizon_world::attachments::AttachmentStore = game;
+        assert_eq!(
+            bad.set(store, holder, 1),
+            Err(AttachmentError::InvalidCopyPolicy)
+        );
+        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        let aborted: Result<(), AttachmentError> = game.transaction(|host, _| {
+            let store: &mut dyn horizon_world::attachments::AttachmentStore = host;
+            assert_eq!(VALUE.get(store, holder), Ok(0));
+            let index = host.attachment_indexes[&Dim::Overworld].clone();
+            let key = ("test".into(), "mana".into());
+            let before = index.lock().unwrap().snapshot(&key);
+            assert_eq!(before[0].entry.read(&VALUE), Ok(&0));
+            VALUE.set(host, holder, 10)?;
+            let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
+                VALUE.set(host, holder, 20)?;
+                Err(AttachmentError::MissingHolder)
+            });
+            assert!(inner.is_err());
+            assert_eq!(
+                index.lock().unwrap().snapshot(&key)[0].entry.read(&VALUE),
+                Ok(&10)
+            );
+            assert_eq!(before[0].entry.read(&VALUE), Ok(&0));
+            Err(AttachmentError::MissingHolder)
+        });
+        assert!(aborted.is_err());
+        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        let index = game.attachment_indexes[&Dim::Overworld].clone();
+        let key = ("test".into(), "mana".into());
+        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+        let store: &mut dyn horizon_world::attachments::AttachmentStore = game;
+        VALUE.set(store, holder, 17).unwrap();
+        assert_eq!(
+            index.lock().unwrap().snapshot(&key)[0].entry.read(&VALUE),
+            Ok(&17)
+        );
+        let entity = game.native_entity(id).unwrap();
+        assert!(game.native_entity_discard(entity));
+        let store: &mut dyn horizon_world::attachments::AttachmentStore = game;
+        assert_eq!(
+            VALUE.set(store, holder, 18),
+            Err(AttachmentError::MissingHolder)
+        );
+        game.native_removals_flush();
+        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+    });
+}
