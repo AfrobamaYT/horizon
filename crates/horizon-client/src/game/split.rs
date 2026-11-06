@@ -224,12 +224,6 @@ impl<'a> Split<'a> {
     /// Player `i`'s turn (0 = P1): its options file, and its own buttons and focus targets, which
     /// screens record while drawing and the control socket and the controller's cursor read.
     fn turn(&mut self, i: usize) {
-        if let Some(game) = self.game(i) {
-            horizon_client::hud::GUI_SCALE.store(
-                game.settings.gui_scale,
-                std::sync::atomic::Ordering::Relaxed,
-            );
-        }
         if i == self.turn {
             return;
         }

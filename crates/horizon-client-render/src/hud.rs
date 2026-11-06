@@ -1514,9 +1514,13 @@ fn clip_polygon(poly: &[HudVertex], axis: usize, limit: f32, keep_below: bool) -
     }
     out
 }
-/// The GUI Scale option (0 = auto).
-pub static GUI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-pub static GUI_UNICODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Scale inputs for one view, copied from its owner's settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuiScale {
+    pub requested: u32,
+    pub unicode: bool,
+}
+
 /// One frame of overlay geometry in GUI pixels.
 pub struct HudBatch {
     pub vertices: Vec<HudVertex>,
@@ -1575,12 +1579,9 @@ pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
 impl HudBatch {
     /// Window.calculateScale: the largest scale keeping >= 320x240 GUI pixels,
     /// capped by the GUI Scale option (0 = auto).
-    pub fn new(window: [u32; 2]) -> Self {
-        let gui = horizon_client_input::window::GuiSize::new(
-            window,
-            GUI_SCALE.load(std::sync::atomic::Ordering::Relaxed),
-            GUI_UNICODE.load(std::sync::atomic::Ordering::Relaxed),
-        );
+    pub fn new(window: [u32; 2], inputs: GuiScale) -> Self {
+        let gui =
+            horizon_client_input::window::GuiSize::new(window, inputs.requested, inputs.unicode);
         Self::with_gui_size(gui)
     }
     /// An offscreen or test batch, independent of the active view's settings.
