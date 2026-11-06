@@ -162,12 +162,21 @@ impl Game<'_> {
     /// None for a stale handle, an unavailable level or a client not logged in.
     pub(super) fn native_level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
         let world = self.native_level_read_world(level)?;
-        Some(weather_for_world(world, level.dimension() == Dim::End.id()))
+        Some(weather_for_world(
+            world,
+            level.dimension() == Dim::End.key(),
+        ))
     }
     /// Whether it rains (`Level.isRaining`: a rain level above 0.2).
     pub(super) fn native_level_is_raining(&self, level: LevelRef) -> Option<bool> {
         let world = self.native_level_world(level)?;
-        Some(weather_flags(weather_for_world(world, level.dimension() == Dim::End.id())).0)
+        Some(
+            weather_flags(weather_for_world(
+                world,
+                level.dimension() == Dim::End.key(),
+            ))
+            .0,
+        )
     }
     /// `Level.isRainingAt(pos)` in the level a handle names, the one in place or a parked one:
     /// it rains there and `pos` is under open sky in a biome that rains. None for a stale
@@ -186,7 +195,7 @@ impl Game<'_> {
             world,
             facts: self.res.facts(),
             biomes: world_biomes!(self),
-            dimension: Dim::from_id(level.dimension()).level(),
+            dimension: Dim::from_id(level.dimension_id()).level(),
             raining: self.native_level_is_raining(level)?,
             random: LegacyRandom::new(0),
         };
@@ -205,7 +214,13 @@ impl Game<'_> {
     /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
     pub(super) fn native_level_is_thundering(&self, level: LevelRef) -> Option<bool> {
         let world = self.native_level_world(level)?;
-        Some(weather_flags(weather_for_world(world, level.dimension() == Dim::End.id())).1)
+        Some(
+            weather_flags(weather_for_world(
+                world,
+                level.dimension() == Dim::End.key(),
+            ))
+            .1,
+        )
     }
 }
 
@@ -466,7 +481,10 @@ mod tests {
                 level.dimension(),
             );
             assert_eq!(stale.weather(game), None);
-            let absent = LevelRef::new(level.epoch(), "missing:level");
+            let absent = LevelRef::new(
+                level.epoch(),
+                mod_api::__private::dimension_key("missing:level"),
+            );
             assert_eq!(absent.weather(game), None);
             // The current world's dimension type, not its id alone, gates weather.
             game.world.shape.has_ceiling = true;
@@ -480,7 +498,7 @@ mod tests {
             game.world.weather.rain_level = (0.0, 0.5);
             game.world.weather.thunder_level = (0.0, 0.75);
             assert_eq!(level.weather(game), Some((0.5, 0.375)));
-            let other = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            let other = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(
                 other.weather(game),
                 None,
