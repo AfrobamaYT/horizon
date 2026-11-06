@@ -4766,15 +4766,19 @@ impl Game<'_> {
     /// `after` ticks counted from then (0 to 1200, a minute; `SoundEngine.playDelayed`). `SoundPlay::ui` plays it at the listener as an interface sound
     /// (`SimpleSoundInstance.forUI`); `SoundPlay::at` at a position in the client's level,
     /// fading with distance (`volume` past 1 carries farther, 16 blocks times the volume), as
-    /// thunder heard after the flash or a blast heard when its shock wave arrives. False,
-    /// with nothing played, on a server or for a value out of range; an event the resources
-    /// don't have plays nothing, as vanilla's.
-    pub(in crate::game) fn native_play_local_sound(&self, sound: &SoundPlay, after: u32) -> bool {
+    /// thunder heard after the flash or a blast heard when its shock wave arrives. Its
+    /// `SoundRef` follows and controls this play: `state`, `stop` and `fade`. None, with nothing
+    /// played, on a server or for a value out of range; an event the resources don't have plays
+    /// nothing, as vanilla's, and its handle reads `Stopped` once the update has tried it.
+    pub(in crate::game) fn native_play_local_sound(
+        &self,
+        sound: &SoundPlay,
+        after: u32,
+    ) -> Option<SoundRef> {
         if !self.native_window() || !local_sound_ok(sound, after) {
-            return false;
+            return None;
         }
-        self.mod_sounds.borrow_mut().push((sound.clone(), after));
-        true
+        Some(self.mod_sounds.queue(sound, after))
     }
     /// The particles alive in the client's level (`ParticleEngine.countParticles`): 0 once
     /// a clear is asked, and on a server.

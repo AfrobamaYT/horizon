@@ -80,7 +80,7 @@ use mod_api::{
 use mod_api::{BlockKey, DebugEntry, EffectKey};
 use mod_api::{
     CameraType, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason,
-    Recipe, SoundPlay,
+    Recipe, SoundPlay, SoundRef,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
