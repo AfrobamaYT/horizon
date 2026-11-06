@@ -2579,6 +2579,14 @@ impl Game<'_> {
                 }
             }
         }
+        // RegisterTooltipAppendersEvent: the lines a mod gives each registered component the stack carries.
+        horizon_client::item_tooltip::append_component_lines(
+            stack,
+            item_info,
+            &display,
+            horizon_client::item_tooltip::registered_appenders(),
+            |component| self.native_tooltip_appender(component, stack, &mut lines),
+        );
         if display.shows("minecraft:damage")
             && let Some(info) = item_info
             && info.max_damage > 0

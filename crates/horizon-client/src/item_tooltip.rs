@@ -7,7 +7,32 @@ use crate::{
     items::{ItemInfo, ItemStack, Items},
 };
 use horizon_world::nbt::Tag;
+use mod_api::ComponentId;
 pub use mod_api::item_tooltip::TooltipDisplay;
+use std::sync::OnceLock;
+
+/// The components native mods registered for tooltip lines, kept once at start.
+static APPENDERS: OnceLock<Vec<String>> = OnceLock::new();
+
+/// Keeps the components native mods registered (`native_register_tooltip_appenders`),
+/// once at start. An id that isn't a data component id is logged and left out; one
+/// registered twice is kept once.
+pub fn register_appenders(components: Vec<String>) {
+    let mut kept: Vec<String> = Vec::new();
+    for id in components {
+        if ComponentId::new(&id).is_none() {
+            log::warn!("tooltip component {id:?} is not a namespaced data component id");
+        } else if !kept.contains(&id) {
+            kept.push(id);
+        }
+    }
+    let _ = APPENDERS.set(kept);
+}
+
+/// The components registered for tooltip lines; none until a mod registers one.
+pub fn registered_appenders() -> &'static [String] {
+    APPENDERS.get().map_or(&[], Vec::as_slice)
+}
 
 /// `EquipmentSlotGroup` in declaration order, the order tooltips list them in.
 const SLOT_GROUPS: [&str; 11] = [
@@ -756,9 +781,9 @@ pub fn stew_lines(
     lines
 }
 
-/// `ItemStack.components.size()`: the item's default components with the
+/// The data components of `stack`: the item's default components with the
 /// stack's own changes applied.
-pub fn component_count(stack: &ItemStack, info: Option<&ItemInfo>) -> usize {
+fn component_keys(stack: &ItemStack, info: Option<&ItemInfo>) -> std::collections::HashSet<String> {
     let mut keys: std::collections::HashSet<String> = info
         .map(|i| i.components.iter().cloned().collect())
         .unwrap_or_default();
@@ -772,7 +797,33 @@ pub fn component_count(stack: &ItemStack, info: Option<&ItemInfo>) -> usize {
             };
         }
     }
-    keys.len()
+    keys
+}
+
+/// `ItemStack.components.size()`.
+pub fn component_count(stack: &ItemStack, info: Option<&ItemInfo>) -> usize {
+    component_keys(stack, info).len()
+}
+
+/// `RegisterTooltipAppendersEvent`'s selection: asks `append` for each of `registered` that
+/// `stack` carries and whose tooltip `display` shows, in registration order. A display that
+/// hides the component (or the whole tooltip) asks nothing for it.
+pub fn append_component_lines(
+    stack: &ItemStack,
+    info: Option<&ItemInfo>,
+    display: &TooltipDisplay,
+    registered: &[String],
+    mut append: impl FnMut(&str),
+) {
+    if registered.is_empty() {
+        return;
+    }
+    let keys = component_keys(stack, info);
+    for id in registered {
+        if keys.contains(id) && display.shows(id) {
+            append(id.as_str());
+        }
+    }
 }
 
 /// `SmithingTemplateItem.appendHoverText`: the template's kind, what it applies to
@@ -1790,5 +1841,35 @@ mod tests {
             Some(Tag::compound([("id", Tag::String("zombie".into()))])),
         );
         assert_eq!(line(&stand, true).as_deref(), Some("Disabled in Peaceful"));
+    }
+
+    /// The appender is asked only for a registered component the stack carries, and a
+    /// tooltip display that hides the component asks nothing.
+    #[test]
+    fn a_registered_component_is_asked_only_for_stacks_that_carry_it() {
+        let registered = ["mymod:charge".to_owned()];
+        let asked = |stack: &ItemStack| {
+            let mut asked = Vec::new();
+            let display = TooltipDisplay::for_stack(stack);
+            append_component_lines(stack, None, &display, &registered, |id| {
+                asked.push(id.to_owned())
+            });
+            asked
+        };
+        let mut carrying = ItemStack::new("minecraft:stick", 1);
+        carrying
+            .data_mut()
+            .set_other("mymod:charge", Some(Tag::Int(3)));
+        assert_eq!(asked(&carrying), ["mymod:charge"]);
+        assert!(asked(&ItemStack::new("minecraft:stick", 1)).is_empty());
+
+        carrying.data_mut().set_other(
+            "minecraft:tooltip_display",
+            Some(Tag::compound([(
+                "hidden_components",
+                Tag::List(vec![Tag::String("mymod:charge".into())]),
+            )])),
+        );
+        assert!(asked(&carrying).is_empty());
     }
 }

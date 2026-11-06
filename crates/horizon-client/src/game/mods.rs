@@ -181,6 +181,17 @@ pub(super) fn register_layer_definitions(role: ExecutionRole) {
     horizon_client::mobs::model_layers::register(layers);
 }
 
+/// The data components native mods register for tooltip lines
+/// (`native_register_tooltip_appenders`), kept once at start.
+pub(super) fn register_tooltip_appenders(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut components = Vec::new();
+    Game::native_register_tooltip_appenders(&RegistrationContext::new(), &mut components);
+    horizon_client::item_tooltip::register_appenders(components);
+}
+
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
 /// start, before the resources load; a mod whose content is refused is left
