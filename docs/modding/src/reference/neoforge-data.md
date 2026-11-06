@@ -11,9 +11,9 @@ fixtures checked; the modifier gaps are tracked separately.
 | Global loot modifiers | Not loaded by any reader found today. `mod_content::build` copies ordinary files to its overlay, but a workspace search for `loot_modifiers` found no loader. The `native_loot_drops` code hook in `crates/horizon-mod-api/src/hooks/base.rs` is not a data-file reader. | No verified current-format in-tree example. [#1270](https://github.com/arismoko/horizon/issues/1270) tracks loading and applying them. The old `global.json` in `carry::tests::claims_the_namespaces_its_files_name` is a carry classification fixture, not proof of current-format loading. |
 
 Recipes and tag layers use `conditions::conditions_hold` from
-`crates/horizon-world/src/conditions.rs`. Tag files are checked individually before
-merge or `replace`, both while generating content roots and while loading world
-pack stacks. A false or unknown condition omits that layer; it cannot clear lower
+`crates/horizon-world/src/conditions.rs`. Tag files handled by `mod_content::build` and `items::load_tag_lists` are
+checked individually before merge or `replace`, while generating content roots
+and loading world-pack tables. A false or unknown condition omits that layer; it cannot clear lower
 entries. Supported forms are `neoforge:mod_loaded`, `neoforge:true`, `neoforge:not`,
 `neoforge:and` and `neoforge:or`, inside `neoforge:conditions` arrays.
 
@@ -23,4 +23,6 @@ are absent. Namespaces do not imply a loaded mod. Changed enabled IDs select a n
 content-cache root and are published with successful reloads. The conditional-tag
 cache and reload fixtures cover this contract. Conditions on other non-recipe data
 readers remain in [#814](https://github.com/arismoko/horizon/issues/814); this does
-not add readers for the two modifier kinds above.
+not add readers for the two modifier kinds above. The separate tag merges in
+`horizon-world/src/loot.rs` and `horizon-world/src/damage_source/resources.rs`
+still need their own condition integration under #814.
