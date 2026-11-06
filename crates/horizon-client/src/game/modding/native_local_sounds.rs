@@ -2,7 +2,7 @@
 //! doing, stopping and fading it, and the sounds and devices the client has.
 use super::Game;
 use horizon_client::sound_engine::InstanceId;
-use horizon_world::identifier::Identifier;
+use horizon_core::identifier::Identifier;
 use mod_api::__private::game::*;
 use mod_api::{SoundPlay, SoundRef, SoundState};
 use std::cell::{Cell, RefCell};
@@ -186,7 +186,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use horizon_world::identifier::Identifier;
+    use horizon_core::identifier::Identifier;
     use mod_api::__private::game::{Fields, sound_ref};
     use mod_api::{
         ClientHost, Flow, Hooks, ModEntry, RenderGuiPreEvent, SoundPlay, SoundRef, SoundState,
