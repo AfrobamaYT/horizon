@@ -167,7 +167,7 @@ fn match_state(
         matches &= state
             .properties
             .get(&constraint.name)
-            .is_some_and(|value| value == constraint.value);
+            .is_some_and(|value| value == &constraint.value);
     }
     Ok(matches)
 }
