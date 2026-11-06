@@ -2949,7 +2949,7 @@ impl Game<'_> {
             S::SetGameRule(p) if permission >= 2 => {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
-                        if let Some(rule) = horizon_client::gamerules::rule(&entry.name)
+                        if let Some(rule) = self.ui.rules.rule(&entry.name).cloned()
                             && let Some(value) = self.ui.rules.get(rule.name)
                         {
                             let Some(host) = self.lan.as_ref() else {
