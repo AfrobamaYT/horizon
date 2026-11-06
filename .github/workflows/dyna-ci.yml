@@ -474,6 +474,16 @@ jobs:
           for dir in minecraft datagen horizon-client tools; do
             ln -sfn "/cache/horizon-local/$dir" ".local/$dir"
           done
+      - uses: actions/setup-java@v4
+        if: steps.data.outputs.present != 'false' && matrix.shard == 'horizon-client'
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Generate the fishing test's vanilla reference inputs
+        if: steps.data.outputs.present != 'false' && matrix.shard == 'horizon-client'
+        run: |
+          reference=$(mktemp -d "$RUNNER_TEMP/fishing-reference.XXXXXX")
+          python3 tools/test_fishing_rng_parity.py --prepare-reference "$reference" --env-file "$GITHUB_ENV"
       - name: Run the ignored tests that need prepared data
         if: steps.data.outputs.present != 'false'
         env:
