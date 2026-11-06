@@ -363,7 +363,7 @@ impl Game<'_> {
                     e.equipment.push((slot as u8, host.hub.stack(item)));
                 }
             }
-            e.attributes = self.stand_attributes(a.id, &a.equipment);
+            e.attributes = self.stand_attributes(&a.live);
             out.push(e);
         }
         for f in self.item_frames.iter().filter(|f| f.id > after) {

@@ -33,11 +33,11 @@ thread_local! {
 
 /// Bind the world's merged tags alongside its block mappings, including the resource-only case.
 /// Never cache on Items: its string tables also serve tools and client network snapshots.
-pub(super) fn resolve_block_tags(
+pub(super) fn prepare_block_tags(
     items: &Items,
     mut resolve: impl FnMut(&str) -> Option<horizon_world::level::states::BlockId>,
-) {
-    let tags = items
+) -> std::collections::HashMap<String, horizon_world::level::data::BlockSet> {
+    items
         .block_tags
         .iter()
         .map(|(tag, members)| {
@@ -49,7 +49,12 @@ pub(super) fn resolve_block_tags(
             }
             (tag.clone(), set)
         })
-        .collect();
+        .collect()
+}
+
+pub(super) fn install_block_tags(
+    tags: std::collections::HashMap<String, horizon_world::level::data::BlockSet>,
+) {
     BLOCK_TAGS.with(|snapshot| *snapshot.borrow_mut() = tags);
 }
 
@@ -309,7 +314,7 @@ mod tests {
                 })
             })
             .unwrap();
-            resolve_block_tags(&items, resolve);
+            install_block_tags(prepare_block_tags(&items, resolve));
             assert_eq!(block_in_tag(machine, "test:machines"), Some(true));
             assert_eq!(block_in_tag(stone, "test:machines"), Some(false));
             assert_eq!(block_in_tag(stone, "base_stone_overworld"), Some(true));
@@ -324,11 +329,11 @@ mod tests {
         items
             .block_tags
             .insert("test:machines".into(), ["minecraft:stone".into()].into());
-        resolve_block_tags(&items, |name| match name {
+        install_block_tags(prepare_block_tags(&items, |name| match name {
             "minecraft:stone" => Some(BlockId(96)),
             "test:machine" => Some(BlockId(5)),
             _ => None,
-        });
+        }));
         assert_eq!(block_in_tag(machine, "test:machines"), Some(false));
         assert_eq!(block_in_tag(stone, "test:machines"), Some(true));
         // Valid key, no owning world: never answer false using another thread's tags.

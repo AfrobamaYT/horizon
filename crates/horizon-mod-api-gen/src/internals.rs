@@ -1414,6 +1414,49 @@ mod tests {
     }
 
     #[test]
+    fn materialized_game_modules_survive_source_tree_relocation() {
+        let mut fixture = Fixture::new(
+            "struct Game;\nmod native_hooks;\ninclude!(concat!(env!(\"OUT_DIR\"), \"/game_modules.rs\"));",
+        );
+        fixture.put("crates/horizon-client/src/game/runtime/.game-area", "");
+        fixture.put(
+            "crates/horizon-client/src/game/runtime/feature.rs",
+            "use super::Game; impl Game { fn action(&self) {} }",
+        );
+        fixture.put("crates/horizon-client/src/game/native_hooks/mod.rs", "include!(concat!(env!(\"OUT_DIR\"), \"/native_hook_modules.rs\"));\ninclude!(\"shared.rs\");");
+        fixture.put(
+            "crates/horizon-client/src/game/native_hooks/shared.rs",
+            "struct State;",
+        );
+        fixture.put(
+            "crates/horizon-client/src/game/native_hooks/area.rs",
+            "use super::super::Game; impl Game { fn native_action(&self) {} }",
+        );
+        fixture.put("crates/horizon-client/src/game/network/.game-area", "");
+        fixture.put("crates/horizon-client/src/game/network/lan_actions/mod.rs", "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));\ninclude!(\"shared.rs\");");
+        fixture.put(
+            "crates/horizon-client/src/game/network/lan_actions/shared.rs",
+            "struct GuestState;",
+        );
+        fixture.put(
+            "crates/horizon-client/src/game/network/lan_actions/turns.rs",
+            "use crate::game::Game; impl Game { fn guest_action(&self) {} }",
+        );
+        let before = widen_with(&fixture.0, &[]).unwrap().entries;
+        let moved = fixture.0.with_extension("relocated");
+        fs::rename(&fixture.0, &moved).unwrap();
+        fixture.0 = moved;
+        let files =
+            crate::points::game_files(&fixture.0.join("crates/horizon-client/src"), true).unwrap();
+        assert!(files.iter().all(|file| file.path.starts_with(&fixture.0)));
+        let modules: BTreeSet<_> = files.iter().map(|file| file.module.as_str()).collect();
+        assert!(modules.contains("horizon_client::game::feature"));
+        assert!(modules.contains("horizon_client::game::native_hooks::area"));
+        assert!(modules.contains("horizon_client::game::lan_actions::turns"));
+        assert_eq!(before, widen_with(&fixture.0, &[]).unwrap().entries);
+    }
+
+    #[test]
     fn lan_action_areas_preserve_helpers_internals_and_point_contracts() {
         let before = Fixture::new("struct Game; mod lan_actions;");
         before.put(
