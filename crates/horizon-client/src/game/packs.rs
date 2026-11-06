@@ -279,10 +279,12 @@ impl Game<'_> {
         if self.ui.vanilla_root.as_os_str().is_empty() {
             self.ui.vanilla_root = vanilla.clone();
         }
-        let (selected, server, mod_sources) = (
+        let enabled = self.applied_mods();
+        self.mods.select(&Self::game_dir(), &enabled);
+        let mod_sources = self.mods.clone();
+        let (selected, server) = (
             self.settings.resource_packs.clone(),
             self.server_packs.active.clone(),
-            self.mods.clone(),
         );
         let (assets, res, context) = (
             self.pack.assets.clone(),
@@ -324,6 +326,7 @@ impl Game<'_> {
             staged.and_then(|staged| self.apply_staged_pack(staged).map_err(|e| e.to_string()));
         match kind {
             ReloadKind::Selection => {
+                self.mods_reloaded(result.is_ok());
                 if let Err(e) = result {
                     self.selection_reload_failed(&e);
                 }
