@@ -2319,56 +2319,86 @@ impl Menu {
             })
     }
 
-    /// `Inventory.addResource`: returns what did not fit.
-    fn add_resource(&mut self, env: &Env, stack: &ItemStack) -> u32 {
-        let slot = self.slot_with_space(env, stack).or_else(|| {
-            self.containers[PLAYER][..36]
-                .iter()
-                .position(Option::is_none)
-        });
-        let Some(slot) = slot else { return stack.count };
-        let cell = self.containers[PLAYER][slot].get_or_insert_with(|| {
-            let mut empty = stack.clone();
-            empty.count = 0;
-            empty
-        });
-        let room = Self::max_stack(env, cell).saturating_sub(cell.count);
-        let add = stack.count.min(room);
-        cell.count += add;
-        tidy(&mut self.containers[PLAYER][slot]);
-        stack.count - add
-    }
-
     /// `Inventory.add(stack)`: the leftover stays in `stack`.
     fn inventory_add(&mut self, env: &Env, stack: &mut ItemStack) -> bool {
-        if stack.count == 0 {
-            return false;
+        inventory_add(
+            &mut self.containers[PLAYER],
+            self.selected,
+            self.creative,
+            env.items,
+            stack,
+        )
+    }
+}
+
+pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
+    let patched = stack.data().and_then(|d| {
+        if d.other("!minecraft:max_stack_size").is_some() {
+            return None;
         }
-        if Self::damageable(env, stack) && stack.damage > 0 {
-            if let Some(slot) = self.containers[PLAYER][..36]
-                .iter()
-                .position(Option::is_none)
-            {
-                self.containers[PLAYER][slot] = Some(stack.clone());
+        match d.other("minecraft:max_stack_size") {
+            Some(horizon_world::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
+            _ => None,
+        }
+    });
+    patched.unwrap_or_else(|| items.get(&stack.item).map_or(64, |i| i.max_stack))
+}
+
+pub(crate) fn inventory_add(
+    inventory: &mut [Option<ItemStack>],
+    selected: usize,
+    creative: bool,
+    items: &Items,
+    stack: &mut ItemStack,
+) -> bool {
+    if stack.count == 0 {
+        return false;
+    }
+    if items.get(&stack.item).is_some_and(|i| i.max_damage > 0) && stack.damage > 0 {
+        if let Some(slot) = inventory[..36].iter().position(Option::is_none) {
+            inventory[slot] = Some(stack.clone());
+            stack.count = 0;
+            return true;
+        }
+        if creative {
+            stack.count = 0;
+            return true;
+        }
+        return false;
+    }
+    loop {
+        let last = stack.count;
+        let slot = [selected, OFFHAND]
+            .into_iter()
+            .chain(0..36)
+            .find(|&i| {
+                inventory[i].as_ref().is_some_and(|have| {
+                    have.same_item_same_components(stack)
+                        && item_max_stack(items, have) > 1
+                        && !(have.damage > 0
+                            && items.get(&have.item).is_some_and(|i| i.max_damage > 0))
+                        && have.count < item_max_stack(items, have)
+                })
+            })
+            .or_else(|| inventory[..36].iter().position(Option::is_none));
+        if let Some(slot) = slot {
+            let cell = inventory[slot].get_or_insert_with(|| {
+                let mut empty = stack.clone();
+                empty.count = 0;
+                empty
+            });
+            let add = stack
+                .count
+                .min(item_max_stack(items, cell).saturating_sub(cell.count));
+            cell.count += add;
+            stack.count -= add;
+        }
+        if stack.count == 0 || stack.count >= last {
+            if stack.count == last && creative {
                 stack.count = 0;
                 return true;
             }
-            if self.creative {
-                stack.count = 0;
-                return true;
-            }
-            return false;
-        }
-        loop {
-            let last = stack.count;
-            stack.count = self.add_resource(env, stack);
-            if stack.count == 0 || stack.count >= last {
-                if stack.count == last && self.creative {
-                    stack.count = 0;
-                    return true;
-                }
-                return stack.count < last;
-            }
+            return stack.count < last;
         }
     }
 }
@@ -3758,6 +3788,26 @@ pub(crate) mod tests {
         assert_eq!(menu.registry_id(), Some("example:chest"));
         menu.set_registry_id(None);
         assert_eq!(menu.registry_id(), None);
+    }
+
+    #[test]
+    fn inventory_add_respects_component_cap_and_remainder() {
+        with_menu(Kind::Inventory, |env, menu| {
+            menu.creative = false;
+            let mut item = ItemStack::new("minecraft:stone", 15);
+            item.data_mut().set_other(
+                "minecraft:max_stack_size",
+                Some(horizon_world::nbt::Tag::Int(16)),
+            );
+            menu.set_player_item(0, Some(item.clone()));
+            for i in 1..36 {
+                menu.set_player_item(i, stack("minecraft:dirt", 64));
+            }
+            item.count = 8;
+            menu.give(env, &mut item);
+            assert_eq!(menu.player_item(0).unwrap().count, 16);
+            assert_eq!(item.count, 7);
+        });
     }
 
     /// The Mouse Tweaks wheel's targets: vanilla's routing of one item.
