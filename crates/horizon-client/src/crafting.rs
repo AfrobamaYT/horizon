@@ -3035,7 +3035,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            root.join(horizon_mods::enabled::MARKER),
+            root.join(horizon_mod_package::enabled::MARKER),
             br#"{"mymod":"both"}"#,
         )
         .unwrap();

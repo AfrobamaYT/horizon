@@ -311,6 +311,7 @@ impl Game<'_> {
                         });
                     }
                     (g.forced_hit, g.guest_use) = saved;
+                    reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
                     (g.swings_started != swings, consumed, attempt)
                 })
                 .ok();
@@ -413,6 +414,7 @@ impl Game<'_> {
                 let swings = g.swings_started;
                 let consumed = matches!(g.use_item(), Ok(Some(_)));
                 g.guest_use = saved;
+                reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
                 (g.swings_started != swings, horn, consumed)
             })
             .ok();
@@ -454,6 +456,7 @@ impl Game<'_> {
                 .as_guest_at(gi, conn, |g| {
                     let swings = g.swings_started;
                     let consumed = g.with_hand(hand, |g| g.use_knot(knot, true));
+                    reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
                     (g.swings_started != swings, consumed)
                 })
                 .ok();
@@ -477,6 +480,7 @@ impl Game<'_> {
                 let consumed = matches!(g.use_item(), Ok(Some(_))) && !g.use_failed;
                 g.guest_use = saved;
                 g.use_failed = failed;
+                reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
                 (g.swings_started != swings, consumed)
             })
             .ok();

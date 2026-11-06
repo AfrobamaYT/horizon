@@ -24,7 +24,7 @@ use axum::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use github::GitHub;
 use hmac::{Hmac, Mac};
-use horizon_mods::index::{
+use horizon_mod_package::index::{
     self, Kind,
     registry::{self, Entry, EntryVersion, Sources},
 };

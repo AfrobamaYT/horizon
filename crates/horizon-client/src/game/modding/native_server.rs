@@ -1509,18 +1509,22 @@ pub(super) struct NativeCommands {
 /// Where the game calls the server hook points.
 impl Game<'_> {
     /// Asks the mods for their commands once per hub, and puts them in every
-    /// player's command tree.
+    /// player's command tree; again when a mod asked (`native_refresh_commands`).
     pub(super) fn register_native_commands(&mut self) {
+        let refresh = std::mem::take(&mut self.native_commands_refresh);
         if self
             .lan
             .as_ref()
-            .is_none_or(|host| host.native_commands.is_some())
+            .is_none_or(|host| host.native_commands.is_some() && !refresh)
         {
             return;
         }
         let mut commands = Vec::new();
         self.native_register_commands(&mut commands);
-        let vanilla = self.ui.dispatcher.0.clone();
+        let vanilla = Arc::new(horizon_client::command::vanilla::session_dispatcher(
+            &self.level.rule_registry,
+            &self.level.enabled_features,
+        ));
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -1549,12 +1553,20 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        host.hub.set_mod_commands(0, tree);
         host.native_commands = Some(NativeCommands {
             levels,
             tree: execution_tree,
         });
+        if refresh {
+            host.hub.store_mod_commands(0, tree);
+        } else {
+            host.hub.set_mod_commands(0, tree);
+        }
+        self.ui.dispatcher.0 = vanilla;
         self.restore_native_commands();
+        if refresh {
+            self.resend_commands_filtered();
+        }
     }
 
     /// Restore mod nodes after vanilla rebuilds the session's command tree.
@@ -1570,6 +1582,16 @@ impl Game<'_> {
                 "native_mod_command",
             );
         }
+    }
+
+    /// A mod changed the commands it registers (`native_register_commands`):
+    /// at the start of the next server tick every mod is asked again, the
+    /// commands players may run are rebuilt, and every player on the server is
+    /// sent their tree again, after `native_player_commands_sent`. Nothing
+    /// happens where no world is open to players, and nothing for a server
+    /// whose mods never call it. API @API:refresh_commands@.
+    pub(super) fn native_refresh_commands(&mut self) {
+        self.native_commands_refresh = true;
     }
 
     /// Asks the mods what root commands each player's tree keeps
@@ -2353,6 +2375,107 @@ mod tests {
                 .parse("toggle maybe", &registries)
                 .executable()
                 .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn command_refresh_rebuilds_the_typed_dispatcher_only_on_request() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        struct ChangingCommands {
+            changed: Arc<AtomicBool>,
+            registrations: Arc<AtomicUsize>,
+        }
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for ChangingCommands {
+            fn register_commands(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RegisterCommandsEvent<'_>,
+            ) {
+                self.registrations.fetch_add(1, Ordering::Relaxed);
+                event.commands.push(NativeCommand::new(
+                    if self.changed.load(Ordering::Relaxed) {
+                        "after <n:integer>"
+                    } else {
+                        "before"
+                    },
+                ));
+            }
+        }
+        let changed = Arc::new(AtomicBool::new(false));
+        let registrations = Arc::new(AtomicUsize::new(0));
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "refresh",
+                Box::new(ChangingCommands {
+                    changed: changed.clone(),
+                    registrations: registrations.clone(),
+                }),
+            )]
+            .into(),
+            || {
+                super::super::native_guest_turn_tests::with_guests(|game| {
+                    game.build_registries();
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 1);
+                    changed.store(true, Ordering::Relaxed);
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 1);
+                    let host = game.lan.as_ref().unwrap();
+                    assert!(
+                        host.native_commands
+                            .as_ref()
+                            .unwrap()
+                            .levels
+                            .contains_key("before")
+                    );
+                    mod_api::Commands::refresh_commands(game);
+                    mod_api::Commands::refresh_commands(game);
+                    assert_eq!(
+                        registrations.load(Ordering::Relaxed),
+                        1,
+                        "requests are deferred"
+                    );
+                    game.register_native_commands();
+                    assert!(!game.native_commands_refresh);
+                    assert_eq!(
+                        registrations.load(Ordering::Relaxed),
+                        2,
+                        "requests coalesce"
+                    );
+                    let commands = game.lan.as_ref().unwrap().native_commands.as_ref().unwrap();
+                    assert!(!commands.levels.contains_key("before"));
+                    assert!(commands.levels.contains_key("after"));
+                    let dispatcher = &game.ui.dispatcher.0;
+                    assert!(
+                        dispatcher
+                            .parse("after 7", &game.ui.registries)
+                            .executable()
+                            .is_ok()
+                    );
+                    assert!(
+                        dispatcher
+                            .parse("after nope", &game.ui.registries)
+                            .executable()
+                            .is_err()
+                    );
+                    assert!(
+                        dispatcher
+                            .parse("before", &game.ui.registries)
+                            .executable()
+                            .is_err()
+                    );
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 2);
+                    mod_api::Commands::refresh_commands(game);
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 3);
+                    assert!(
+                        Game::native_command_level(game.lan.as_ref().unwrap(), "after").is_some()
+                    );
+                })
+            },
         );
     }
 

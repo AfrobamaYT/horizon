@@ -1043,7 +1043,7 @@ impl Game<'_> {
     }
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
-    /// push a `horizon_mods::content::Block` per block, the same declaration
+    /// push a `horizon_mod_package::content::Block` per block, the same declaration
     /// a content mod's `data/<id>/horizon/block/<path>.json` holds (a
     /// vanilla `template`, `properties`, `state_properties`, `shapes`...),
     /// with its id in your mod's namespace. `item: true` gives it a block
@@ -1058,20 +1058,20 @@ impl Game<'_> {
     /// are logged and that namespace's are left out.
     pub(in crate::game) fn native_blocks(
         context: &mod_api::RegistrationContext,
-        blocks: &mut Vec<horizon_mods::content::Block>,
+        blocks: &mut Vec<horizon_mod_package::content::Block>,
     ) {
         Self::fire_blocks(context, blocks);
     }
     /// Items this mod adds, declared in code (NeoForge's
     /// `DeferredRegister.Items`), as `native_blocks` declares blocks: a
-    /// `horizon_mods::content::Item` per item, a content mod's
+    /// `horizon_mod_package::content::Item` per item, a content mod's
     /// `data/<id>/horizon/item/<path>.json` (a vanilla `template`,
     /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
     /// block's item comes with its block (`item: true`), not from here.
     /// Asked once at start, on every side.
     pub(in crate::game) fn native_items(
         context: &mod_api::RegistrationContext,
-        items: &mut Vec<horizon_mods::content::Item>,
+        items: &mut Vec<horizon_mod_package::content::Item>,
     ) {
         Self::fire_items(context, items);
     }
@@ -1633,7 +1633,8 @@ impl Game<'_> {
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
     /// chat box then completes them as vanilla's, within their level. A
-    /// name vanilla has is left out.
+    /// name vanilla has is left out. Asked again after a mod calls
+    /// `native_refresh_commands`. API 8.
     pub(in crate::game) fn native_register_commands(&mut self, commands: &mut Vec<NativeCommand>) {
         self.fire_register_commands(commands);
     }
@@ -5675,22 +5676,14 @@ mod screen_open_tests {
         with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 game.focused = false;
-                assert!(!mod_api::prelude::ClientGuiStateClientHost::window_focused(
-                    game
-                ));
+                assert!(!mod_api::prelude::ScreensClientHost::window_focused(game));
                 game.focused = true;
-                assert!(mod_api::prelude::ClientGuiStateClientHost::window_focused(
-                    game
-                ));
+                assert!(mod_api::prelude::ScreensClientHost::window_focused(game));
                 game.title = None;
                 game.screen = Screen::Playing;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 game.screen = Screen::Inventory;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 let mut builder = winit::event_loop::EventLoop::builder();
                 #[cfg(target_os = "linux")]
                 {
@@ -5711,13 +5704,11 @@ mod screen_open_tests {
                 game.options.offscreen = true;
                 game.renderer = Some(game.new_renderer(window).unwrap());
                 game.screen = Screen::Playing;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 game.set_screen(Screen::Inventory);
                 game.observe_screen();
                 assert_eq!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game)
+                    mod_api::prelude::ScreensClientHost::observed_screen_id(game)
                         .unwrap()
                         .id,
                     "inventory"
@@ -5726,7 +5717,7 @@ mod screen_open_tests {
                     game.link_prompt = Some("https://example.com".into());
                 });
                 assert_eq!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game)
+                    mod_api::prelude::ScreensClientHost::observed_screen_id(game)
                         .unwrap()
                         .id,
                     "link_prompt"
@@ -5820,5 +5811,82 @@ mod text_tests {
             // RGB alone, as the API took before, is fully transparent now.
             assert!(drawn(0x00FF_FFFF).is_empty());
         });
+    }
+}
+
+#[cfg(test)]
+mod held_break_slot_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn held_durability_retains_the_stack_hand_and_explicit_break_slot() {
+        use crate::game::{Audio, Game, Hand, Options, Progress, Settings, load_resources};
+        use horizon_client::{items::ItemStack, motion::PlayerMotion};
+        use horizon_core::equipment_slot::EquipmentSlot;
+        use horizon_core::geometry::Vec3;
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.0, 70.0, 0.0)).unwrap());
+        game.set_mode_id(0);
+        // Stage an acting guest: break events are queued instead of rendering local crumbs.
+        game.lan_acting = Some(1);
+        game.hand = Hand::Off;
+        let main = ItemStack::new("minecraft:stick", 3);
+        game.inventory[game.selected] = Some(main.clone());
+        let max = game
+            .items()
+            .get("minecraft:flint_and_steel")
+            .unwrap()
+            .max_damage;
+        game.offhand = Some(ItemStack::new("minecraft:flint_and_steel", 1));
+        game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+        assert_eq!(game.offhand.as_ref().unwrap().damage, 1);
+        assert!(game.guest_equipment_breaks.is_empty());
+        for (explicit, event) in [(true, 48), (false, 47)] {
+            let mut tool = ItemStack::new("minecraft:flint_and_steel", 1);
+            tool.damage = max - 1;
+            game.offhand = Some(tool);
+            if explicit {
+                game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+            } else {
+                game.damage_held(1);
+            }
+            assert!(game.offhand.is_none());
+            assert_eq!(game.inventory[game.selected], Some(main.clone()));
+            assert_eq!(*game.guest_equipment_breaks.last().unwrap(), event);
+        }
+        game.set_mode_id(1);
+        game.offhand = Some(ItemStack::new("minecraft:flint_and_steel", 1));
+        game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+        assert_eq!(game.offhand.as_ref().unwrap().damage, 0);
     }
 }

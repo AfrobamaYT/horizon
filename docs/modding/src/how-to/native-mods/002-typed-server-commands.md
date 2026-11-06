@@ -31,3 +31,10 @@ function permission; blocks and carts use game-master permission. `execute as`,
 `host.commands().feedback` honours the underlying source's silence and track-output.
 
 `player_command` stays player-only pre-execution cancellation (NeoForge's `CommandEvent`), including vanilla commands.
+
+When the usages a mod registers change at runtime, call
+`host.commands().refresh_commands()` on the server. At the start of the next
+server tick, every mod is asked to register again. The server rebuilds the typed
+command dispatcher and sends each player's tree after `player_commands_sent`
+filters it, as vanilla does after `/reload`. Repeated requests before that tick
+coalesce; without a world open to players, nothing is rebuilt.
