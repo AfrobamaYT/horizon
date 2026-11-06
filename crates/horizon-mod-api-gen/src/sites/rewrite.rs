@@ -9,6 +9,16 @@ fn digest(text: String) -> String {
     format!("{:x}", Sha256::digest(text.as_bytes()))[..16].to_owned()
 }
 
+pub(crate) fn name(declaration: &Declaration, ordinal: usize) -> String {
+    format!(
+        "S{}",
+        digest(format!(
+            "{}|{}|{ordinal}",
+            declaration.target, declaration.selector
+        ))
+    )
+}
+
 /// Rewrite one source file. Missing targets are left for the coordinator to check across files;
 /// every matched target must resolve its call, and overlapping declarations are refused.
 pub fn rewrite(
@@ -66,13 +76,7 @@ pub fn rewrite(
                     types,
                     output,
                 } = resolve(expr, enclosing, found.sig, &lexical, entries, &rule)?;
-                let name = format!(
-                    "S{}",
-                    digest(format!(
-                        "{}|{}|{ordinal}",
-                        declaration.target, declaration.selector
-                    ))
-                );
+                let name = name(declaration, ordinal);
                 let record = format_ident!("__{name}Args");
                 let listener = format_ident!("__{name}Listener");
                 let variant = format_ident!("{name}");
