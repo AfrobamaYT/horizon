@@ -1946,6 +1946,83 @@ mod tests {
     use super::*;
     use horizon_client::items::ItemStack;
 
+    fn with_command_sources(test: impl FnOnce(&mut Game<'_>)) {
+        use horizon_client::{
+            block_entities::BlockEntity, chunk::Chunk, command_block::CommandBlock,
+        };
+        use horizon_core::geometry::Vec3;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.build_registries();
+            game.register_native_commands();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:command_block")
+                .unwrap();
+            game.world.set(1, 64, 1, state).unwrap();
+            game.world.block_entities.insert(
+                (1, 64, 1),
+                BlockEntity::CommandBlock(CommandBlock {
+                    command: "origin".into(),
+                    condition_met: true,
+                    ..Default::default()
+                }),
+            );
+            let mut cart = super::super::minecarts::Minecart::new(
+                99,
+                super::super::minecarts::CartKind::CommandBlock,
+                Vec3::new(1.0, 64.0, 1.0),
+            );
+            cart.command.command = "origin".into();
+            game.carts.push(cart);
+            test(game);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn native_command_feedback_respects_track_output_and_silence() {
+        use super::super::commands::execute::Source;
+        use horizon_client::block_entities::BlockEntity;
+        with_command_sources(|game| {
+            let source = Source {
+                block: Some((1, 64, 1)),
+                silent: false,
+                ..game.server_source()
+            };
+            for track in [true, false] {
+                if let Some(BlockEntity::CommandBlock(block)) =
+                    game.world.block_entities.get_mut(&(1, 64, 1))
+                {
+                    block.track_output = track;
+                    block.last_output = None;
+                }
+                game.with_source(source, |game| game.native_feedback(Text::literal("answer")));
+                let Some(BlockEntity::CommandBlock(block)) =
+                    game.world.block_entities.get(&(1, 64, 1))
+                else {
+                    panic!("block missing")
+                };
+                assert_eq!(block.last_output.is_some(), track);
+            }
+            game.chat_capture = Some(Vec::new());
+            game.with_source(
+                Source {
+                    silent: true,
+                    block: None,
+                    ..source
+                },
+                |game| game.native_feedback(Text::literal("silent")),
+            );
+            assert!(game.chat_capture.take().unwrap().is_empty());
+            assert!(game.command_source.is_none());
+        });
+    }
+
     type Heard = Vec<(&'static str, u32, u128, &'static str, [i32; 2])>;
     /// Logs each of the watch trio: (hook, player id, UUID, level, chunk).
     struct Watcher(std::sync::Arc<std::sync::Mutex<Heard>>);
