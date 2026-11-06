@@ -11,7 +11,10 @@ pub struct Counter {
 }
 
 impl mod_api::Host for Counter {}
+
+mod_api::impl_host_areas!(Counter);
 impl ServerHost for Counter {}
+mod_api::impl_server_host_areas!(Counter);
 
 /// A type off `Game`: its points have no host.
 pub struct Pen {

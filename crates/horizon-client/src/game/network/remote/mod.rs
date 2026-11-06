@@ -4027,6 +4027,15 @@ impl Game<'_> {
                                     pl.air = *air;
                                 }
                             }
+                            // Entity.DATA_TICKS_FROZEN: the server's count of the
+                            // powder snow freeze, which the client's own copy reads
+                            // for the frost overlay, the frozen hearts and the
+                            // shiver of its third-person model (#11217).
+                            (7, Value::Int(ticks)) => {
+                                if let Some(pl) = self.player.as_mut() {
+                                    pl.ticks_frozen = *ticks;
+                                }
+                            }
                             // LivingEntity.DATA_ARROW_COUNT_ID and DATA_STINGER_COUNT_ID.
                             (12, Value::Int(count)) => {
                                 if let Some(r) = self.remote.as_mut() {
@@ -12012,25 +12021,24 @@ mod tests {
     fn mod_chat_needs_a_joined_player_and_what_the_chat_option_allows() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_protocol::connection::Pipe;
-        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+            assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "/warp spawn").is_err());
             let (client, _server) = Pipe::pair();
             game.connect_local(client, "ChatTest").unwrap();
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+            assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "/warp spawn").is_err());
             game.remote.as_mut().unwrap().joined = true;
-            assert!(ClientHost::send_chat(game, "  ").is_err());
+            assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "  ").is_err());
             // Full, then Commands Only, then Hidden.
             game.settings.chat_visibility = 0;
-            assert!(ClientHost::send_chat(game, "hello").is_ok());
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_ok());
+            assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "hello").is_ok());
+            assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "/warp spawn").is_ok());
             game.settings.chat_visibility = 1;
-            assert!(ClientHost::send_chat(game, "hello").is_err());
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_ok());
+            assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "hello").is_err());
+            assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "/warp spawn").is_ok());
             game.settings.chat_visibility = 2;
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+            assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "/warp spawn").is_err());
         });
     }
 

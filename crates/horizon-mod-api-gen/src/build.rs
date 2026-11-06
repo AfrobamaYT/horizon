@@ -1,5 +1,5 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
-use super::{Catalog, Target, free_function_source, native_hook_files, sources};
+use super::{Catalog, Target, free_function_source, host, native_hook_files, sources};
 use quote::ToTokens;
 use std::{fs, path::Path};
 
@@ -21,7 +21,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                     &root.join("crates/horizon-client/src/game/network/lan_actions"),
                 )?,
             ),
-            ("mod_api_host_generated.rs", generated.implementation),
+            ("game_host_modules.rs", game_host_modules(root)?),
             ("mod_api_fire_generated.rs", generated.fire),
             // The mob tick's goal read view (#1077), included beside the
             // engine's `GoalCx` in `mobs/part_goals.rs`.
@@ -38,6 +38,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             }
             let hooks = generated.hooks;
             let included = [
+                (host::AREAS_OUTPUT, generated.areas.as_str()),
                 ("mod_api_generated.rs", hooks.as_str()),
                 ("mod_api_generated_host.rs", generated.host.as_str()),
                 ("native_render_generated.rs", generated.render.as_str()),
@@ -56,6 +57,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             }
             fs::write(out_dir.join("mod-api.wit"), &wasm.wit).map_err(|e| e.to_string())?;
             vec![
+                (host::AREAS_OUTPUT, generated.areas),
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("native_render_generated.rs", generated.render),
@@ -85,6 +87,18 @@ pub(crate) fn native_hook_modules(root: &Path) -> Result<String, String> {
         syn::parse_str::<syn::Ident>(module).map_err(|e| e.to_string())?;
         let path = fs::canonicalize(&path).map_err(|e| e.to_string())?;
         modules.push_str(&format!("#[path = {path:?}] mod {module};\n"));
+    }
+    Ok(modules)
+}
+
+/// The game's side of the host traits: one module for each area file of `game/host/`.
+pub(crate) fn game_host_modules(root: &Path) -> Result<String, String> {
+    let dir = root.join("crates/horizon-client/src/game/host");
+    let mut modules = String::new();
+    for stem in Catalog::modules(&dir)? {
+        syn::parse_str::<syn::Ident>(&stem).map_err(|e| e.to_string())?;
+        let path = fs::canonicalize(dir.join(format!("{stem}.rs"))).map_err(|e| e.to_string())?;
+        modules.push_str(&format!("#[path = {path:?}] pub(crate) mod {stem};\n"));
     }
     Ok(modules)
 }

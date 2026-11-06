@@ -17,7 +17,7 @@ fn overworld() -> LevelRef {
     LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD)
 }
 
-impl Backend for World {
+impl mod_api::prelude::LevelsBackend for World {
     fn level_in_place(&self, level: LevelRef) -> bool {
         level == overworld()
     }
@@ -25,26 +25,36 @@ impl Backend for World {
         (level == overworld() && mod_api::__private::game_rule_bool_slot(key).is_some())
             .then_some(true)
     }
+}
+impl mod_api::prelude::BlockEntitiesBackend for World {
     fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
         (entity.fields().position == [0, 64, 0])
             .then(|| mod_api::__private::block_entity_type_key("test:counter_box"))
             .flatten()
     }
 }
+impl Backend for World {}
+mod_api::impl_backend_areas!(World, except(block_entities, levels));
 
-impl Host for World {
-    fn backend(&self) -> Option<BackendRef<'_>> {
-        Some(BackendRef::of(self))
-    }
+impl mod_api::prelude::EntitiesHost for World {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         (dimension == "minecraft:overworld").then(overworld)
     }
+}
+impl mod_api::prelude::BlockEntitiesHost for World {
     fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
         Some(mod_api::__private::game::block_entity_ref(level, position))
     }
 }
+impl Host for World {
+    fn backend(&self) -> Option<BackendRef<'_>> {
+        Some(BackendRef::of(self))
+    }
+}
+mod_api::impl_host_areas!(World, except(block_entities, entities));
 
 impl ServerHost for World {}
+mod_api::impl_server_host_areas!(World);
 
 /// The built group mods, and the std member.
 fn built() -> ([horizon_mod_wasm::WasmPackage; 4], Vec<u8>) {

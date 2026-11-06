@@ -229,6 +229,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
     use horizon_client::gamerules;
+    use mod_api::prelude::*;
     use mod_api::testing::with_mods;
     use mod_api::{
         FeatureFlags, GameRuleChangedEvent, GameRuleValue, Hooks, LevelHost, ModEntry, ServerHost,
