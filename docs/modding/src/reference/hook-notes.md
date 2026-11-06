@@ -19,6 +19,34 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Client session and local-player status
+
+`ClientHost::client_session()` supplies read-only `client_server()`,
+`client_language()` and `client_frame_stats()`. All return `None` outside a
+logged-in client world. These reads use existing local state and send nothing.
+`ClientServer` keeps missing names and addresses explicit: its `name` is the
+integrated world's display name, or `None` for an external connection (the game
+retains the player name, not a server display name). Its `address` is absent for
+memory connections; friend-invite secrets are redacted. `integrated_local`
+means this window actually owns that integrated server, not that the address
+looks like localhost. A splitscreen guest does not own the server.
+
+`client_language()` reads the applied language, not a pending options choice.
+Use the existing `ClientHost::is_paused()` for the applied pause state.
+`ClientFrameStats` reports the game's most recently computed `fps`, lifetime
+`rendered_frames` (menus included), and the newest completed frame's wall
+interval as `frame_time_ns` (including waits). The interval is `None` until a
+sample exists or after the chart is reset. Reading it starts no new recording.
+
+`PlayerRef::block_breaking(&dyn ClientHost)` and `ambient_mood(&dyn ClientHost)`
+only accept the current local player's handle. Stale, fake and nonlocal handles
+return `None`, as does a disconnected client. `BlockBreakingState::Idle` is
+instead a valid local player who is not breaking a block. `Breaking` gives the
+target position, accumulated predicted progress and optional visible crack
+stage (0 through 9; absent at zero progress). The stage uses the same
+calculation as the world overlay. Mood is the existing cave ambience value,
+normally 0 through 1, not a server-side measurement.
+
 ## Sending a map image
 
 `PlayerRef::send_map` sends a complete 128-by-128 map image through a
@@ -1692,8 +1720,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   even if `foo bar` is public. Players can traverse the shared `foo` prefix to reach `bar`, but cannot execute
   `foo` itself. Optional arguments make their preceding prefixes executable at that usage's level; if several
   usages execute at the same prefix, its lowest executable usage level wins. A rejected usage does not change
-  the permissions of accepted usages. A name vanilla has, or a usage that doesn't parse, is left out with a
-  warning in the log.
+  the permissions of accepted usages. When argument alternatives consume the same input without errors, an
+  executable alternative takes precedence over a denied one; equally valid alternatives keep registration order.
+  A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
 
 - **`perform_command` / `perform_console_command`**: `event.command` is an owned `CommandInvocation`
   with its literal path and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean

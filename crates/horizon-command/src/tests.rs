@@ -131,6 +131,87 @@ fn execution_requirement_keeps_public_children_reachable() {
 }
 
 #[test]
+fn authorized_argument_alternatives_win_only_complete_ties() {
+    for reverse in [false, true] {
+        let mut dispatcher = Dispatcher::new();
+        let root = dispatcher.literal(0, "foo");
+        let first_word = reverse.then(|| dispatcher.argument(root, "b", ArgType::Word));
+        let integer = dispatcher.argument(root, "a", integer(i32::MIN));
+        dispatcher.executes(integer, "admin");
+        dispatcher.requires_execution(integer, 4);
+        let bar = dispatcher.literal(integer, "bar");
+        dispatcher.executes(bar, "child");
+        let word = first_word.unwrap_or_else(|| dispatcher.argument(root, "b", ArgType::Word));
+        dispatcher.executes(word, "public");
+        for permission in 0..=4 {
+            let registries = Registries {
+                permission,
+                ..Registries::default()
+            };
+            let parsed = dispatcher.parse("foo 7", &registries);
+            let (context, command) = parsed.executable().unwrap();
+            let admin = permission == 4 && !reverse;
+            assert_eq!(command, if admin { "admin" } else { "public" });
+            assert_eq!(context.get("a").is_some(), admin);
+            assert_eq!(
+                dispatcher
+                    .parse("foo 7 bar", &registries)
+                    .executable()
+                    .unwrap()
+                    .1,
+                "child"
+            );
+            assert!(dispatcher.parse("foo", &registries).executable().is_err());
+        }
+        let registries = Registries::default();
+        // A nonmatching literal is not tried; use failing argument parsers to
+        // exercise error ordering independently of the complete-tie case.
+        let tail = dispatcher.argument(integer, "tail", ArgType::Bool);
+        dispatcher.executes(tail, "integer_child");
+        let unread = dispatcher.parse("foo 7 nope", &registries);
+        assert!(unread.can_read());
+        assert!(unread.errors.is_empty());
+        assert!(
+            unread.context.get("b").is_some(),
+            "the error-free peer wins"
+        );
+        let tail = dispatcher.argument(word, "tail", ArgType::Bool);
+        dispatcher.executes(tail, "word_child");
+        let failed = dispatcher.parse("foo 7 nope", &registries);
+        assert!(failed.can_read() && !failed.errors.is_empty());
+        assert_eq!(
+            failed.context.get("b").is_some(),
+            reverse,
+            "invalid ties stay stable"
+        );
+        let literal = dispatcher.literal(root, "7");
+        dispatcher.executes(literal, "literal");
+        assert_eq!(
+            dispatcher
+                .parse("foo 7", &registries)
+                .executable()
+                .unwrap()
+                .1,
+            "literal"
+        );
+    }
+    let mut dispatcher = Dispatcher::new();
+    let root = dispatcher.literal(0, "foo");
+    let integer = dispatcher.argument(root, "a", integer(i32::MIN));
+    dispatcher.executes(integer, "admin");
+    dispatcher.requires_execution(integer, 4);
+    let bar = dispatcher.literal(integer, "bar");
+    dispatcher.executes(bar, "public");
+    assert!(
+        dispatcher
+            .parse("foo 7", &Registries::default())
+            .executable()
+            .is_err(),
+        "no authorized alternative must still refuse"
+    );
+}
+
+#[test]
 fn reader_matches_brigadier() {
     let mut r = Reader::new("12 -3.5 abc \"q\\\"x\" true");
     assert_eq!(r.read_int().unwrap(), 12);

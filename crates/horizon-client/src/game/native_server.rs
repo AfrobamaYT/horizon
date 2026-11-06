@@ -2429,6 +2429,9 @@ mod tests {
                 event.commands.extend([
                     NativeCommand::op("foo [value:integer]", 4),
                     NativeCommand::new("foo bar"),
+                    NativeCommand::op("choice <a:integer>", 4),
+                    NativeCommand::new("choice <a:integer> bar"),
+                    NativeCommand::new("choice <b:word>"),
                 ]);
             }
             fn perform_command(
@@ -2461,8 +2464,11 @@ mod tests {
                 assert!(game.perform_native_command(1, 0, "foo bar"));
                 assert!(game.perform_native_command(1, 4, "foo"));
                 assert!(game.perform_native_command(1, 4, "foo 7"));
+                for line in ["choice 7", "choice 7 bar", "choice text"] {
+                    assert!(game.perform_native_command(1, 0, line));
+                }
                 let heard = heard.lock().unwrap();
-                assert_eq!(heard.len(), 3);
+                assert_eq!(heard.len(), 6);
                 assert_eq!(heard[0].literals, ["foo", "bar"]);
                 assert_eq!(heard[1].literals, ["foo"]);
                 assert!(heard[1].arguments.is_empty());
@@ -2470,6 +2476,17 @@ mod tests {
                 assert_eq!(
                     heard[2].argument("value"),
                     Some(&mod_api::CommandArgumentValue::Integer(7))
+                );
+                assert_eq!(heard[3].literals, ["choice"]);
+                assert_eq!(
+                    heard[3].argument("a"),
+                    Some(&mod_api::CommandArgumentValue::Integer(7))
+                );
+                assert_eq!(heard[4].literals, ["choice", "bar"]);
+                assert_eq!(heard[5].literals, ["choice"]);
+                assert_eq!(
+                    heard[5].argument("b"),
+                    Some(&mod_api::CommandArgumentValue::String("text".into()))
                 );
             });
         });
