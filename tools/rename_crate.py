@@ -126,7 +126,7 @@ def main():
                 (ROOT / path).write_bytes(updated)
         run("git", "mv", OLD_PATH, NEW_PATH)
         for manifest in ["Cargo.toml", "launcher/Cargo.toml", "crates/horizon-mod-registry/Cargo.toml"]:
-            run("cargo", "metadata", "--offline", "--no-deps", "--format-version", "1", "--manifest-path", manifest)
+            run("cargo", "metadata", "--offline", "--format-version", "1", "--manifest-path", manifest)
     else:
         verify(args.verify)
     if args.report:
