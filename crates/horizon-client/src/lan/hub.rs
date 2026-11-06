@@ -6183,6 +6183,152 @@ mod tests {
         assert_eq!(slots, Some(vec![1, 6, 7]));
     }
 
+    /// A mod's named effect particle goes out as id -1, which vanilla's
+    /// `ParticleTypes.STREAM_CODEC` cannot read: the entity data sent to a
+    /// Horizon client has it, a vanilla client's has the rest of the list. As
+    /// the bytes on the wire, when a client starts tracking the entity, when
+    /// the list changes, and when the entity is paired as it joins.
+    #[test]
+    fn a_named_effect_particle_is_sent_only_to_horizon_clients() {
+        // id, name length, name.
+        const NAMED: [u8; 19] = [
+            0xFF, 0xFF, 0xFF, 0xFF, 0x0F, 13, b'e', b'x', b'a', b'm', b'p', b'l', b'e', b':', b's',
+            b'w', b'i', b'r', b'l',
+        ];
+        // ClientboundSetEntityDataPacket: the packet's id, then the entity's.
+        let data = |entity: u8, entries: &[&[u8]]| {
+            let mut body = vec![101, entity];
+            body.extend(entries.concat());
+            body.push(0xFF);
+            body
+        };
+        // Entry 10, PARTICLES (17), then the count.
+        let particles = |list: &[&[u8]]| {
+            let mut entry = vec![10, 17, list.len() as u8];
+            entry.extend(list.concat());
+            entry
+        };
+        let ambient: &[u8] = &[11, 8, 1];
+        let plain: &[u8] = &[0];
+
+        let (mut hub, bob_rx) = hub_with_a_guest();
+        let (tx, ann_rx) = std::sync::mpsc::channel();
+        let mut ann = Guest::new(
+            crate::lan::Joined {
+                conn: 2,
+                uuid: 2,
+                name: "Ann".into(),
+                properties: Vec::new(),
+                info: horizon_protocol::packets::configuration::ClientInformation::new(8),
+                brand: "horizon".into(),
+                sender: crate::lan::PlayerSender::new(tx, std::sync::Arc::default()),
+                latency: std::sync::Arc::default(),
+                address: "127.0.0.1:25566".parse().unwrap(),
+                expected: false,
+            },
+            2,
+            [4.5, 64.0, 0.5],
+            8,
+        );
+        ann.placed = true;
+        ann.dimension = "minecraft:overworld".into();
+        hub.guests.push(ann);
+        hub.guests.update_all(|g| {
+            g.sent_chunks.insert((0, 0));
+        });
+        // The test hub syncs no entity type registry.
+        hub.entity_types.insert("minecraft:zombie".into(), 1);
+
+        // The entity data a client was sent since the last look.
+        let sent = |rx: &std::sync::mpsc::Receiver<crate::lan::Out>| {
+            let mut bodies = Vec::new();
+            while let Ok(out) = rx.try_recv() {
+                match out {
+                    crate::lan::Out::Packet(body) => bodies.push(body),
+                    crate::lan::Out::Packets(list) => bodies.extend(list),
+                    crate::lan::Out::Disconnect(_) => panic!("disconnected"),
+                }
+            }
+            bodies.retain(|body| body.first() == Some(&101));
+            bodies
+        };
+        let zombie = |id: i32, meta: Vec<(u8, i32, Value)>| EntityState {
+            id,
+            uuid: id as u128,
+            kind: "minecraft:zombie".into(),
+            position: [2.5, 64.0, 0.5],
+            meta,
+            ..EntityState::default()
+        };
+        let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 200;
+        let border = crate::worldborder::WorldBorder::default();
+        let mut track = |hub: &mut Hub, state: EntityState| {
+            let entities = [state];
+            hub.track_entities(&mut TickCtx {
+                world: &mut world,
+                entities: &entities,
+                next_entity: &mut next_entity,
+                spawn: [0.5, 64.0, 0.5],
+                difficulty: 2,
+                difficulty_locked: false,
+                clock_rate: 1.0,
+                tick_rate: 20.0,
+                tick_frozen: false,
+                tick_steps: Default::default(),
+                collision: None,
+                border: &border,
+                streaming: None,
+            });
+        };
+
+        // What a listener's replacement becomes.
+        let named = crate::particles::ParticleOptions::named("example:swirl");
+        let only_named = hub.particle_meta(std::slice::from_ref(&named), false);
+        let Value::Particles(list) = &only_named[0].2 else {
+            panic!("expected particles");
+        };
+        let mixed = vec![
+            (
+                10,
+                serializer::PARTICLES,
+                Value::Particles(vec![list[0].clone(), Particle { id: 0, data: None }]),
+            ),
+            (11, serializer::BOOLEAN, Value::Bool(true)),
+        ];
+
+        // Starting to track it.
+        track(&mut hub, zombie(100, mixed.clone()));
+        assert_eq!(
+            sent(&ann_rx),
+            [data(100, &[&particles(&[&NAMED, plain]), ambient])]
+        );
+        assert_eq!(sent(&bob_rx), [data(100, &[&particles(&[plain]), ambient])]);
+
+        // The change leaves only the named particle: vanilla's list empties.
+        let mut changed = only_named.clone();
+        changed.push(mixed[1].clone());
+        track(&mut hub, zombie(100, changed));
+        assert_eq!(sent(&ann_rx), [data(100, &[&particles(&[&NAMED])])]);
+        assert_eq!(sent(&bob_rx), [data(100, &[&particles(&[])])]);
+
+        // No named particle: both clients get the same bytes.
+        let ordinary = vec![(
+            10,
+            serializer::PARTICLES,
+            Value::Particles(vec![Particle { id: 0, data: None }]),
+        )];
+        track(&mut hub, zombie(100, ordinary));
+        let expected = [data(100, &[&particles(&[plain])])];
+        assert_eq!(sent(&ann_rx), expected);
+        assert_eq!(sent(&bob_rx), expected);
+
+        // Paired as it joins, after the tracking pass.
+        hub.note_joined(&[zombie(101, only_named)]);
+        assert_eq!(sent(&ann_rx), [data(101, &[&particles(&[&NAMED])])]);
+        assert_eq!(sent(&bob_rx), [data(101, &[&particles(&[])])]);
+    }
+
     /// `handleChatSessionUpdate` shares `chatMessageChain` with chat: a new
     /// session is announced after a message that came before it. With mods
     /// loaded that message waits for the game (`ChatSubmitted`), so the

@@ -2395,8 +2395,8 @@ impl Game<'_> {
         // Before the world has an epoch no handle can name the entity.
         let living = (self.native_lifecycle.epoch())
             .map(|epoch| mod_api::LivingRef::new(mod_api::EntityRef::new(epoch, entity)));
-        let (particles, ambient) = visible_effect_particles(effects().enumerate().filter_map(
-            |(i, e)| {
+        let (particles, ambient) =
+            visible_effect_particles(effects().enumerate().filter_map(|(i, e)| {
                 let original = effect_particle(e.effect, e.ambient);
                 let mut particle = original.clone();
                 let mut visible = e.visible;
@@ -2411,8 +2411,7 @@ impl Game<'_> {
                     );
                 }
                 visible.then(|| (e.ambient, particle.or(original)))
-            },
-        ));
+            }));
         let meta = hub.particle_meta(&particles, ambient);
         Some(Some(ModifiedEffectParticles::new(effects(), meta)))
     }
@@ -4947,7 +4946,14 @@ mod tests {
         const PLAYER: i32 = 12;
         // What the first mod was asked: the entity, the effect's name and
         // amplifier, the original and current particle, and `visible`.
-        type Asked = (u32, String, i32, ParticleOptions, Option<ParticleOptions>, bool);
+        type Asked = (
+            u32,
+            String,
+            i32,
+            ParticleOptions,
+            Option<ParticleOptions>,
+            bool,
+        );
         static ASKED: Mutex<Vec<Asked>> = Mutex::new(Vec::new());
         // MobEffects' colours as `entity_effect` takes them, with their alpha.
         let swirl = |alpha: u32, rgb: u32| ParticleData::Color(((alpha << 24) | rgb) as i32);
@@ -5165,16 +5171,17 @@ mod tests {
                 let guest_swirls = vec![(10, vec![entity_effect(38, SPEED)]), (11, Vec::new())];
                 assert_eq!(sent(game), (zombie_swirls.clone(), guest_swirls.clone()));
                 let omen_options = ParticleOptions::simple(ParticleType::TrialOmen);
-                let asked_for = |id: i32, name: &str, amplifier, original: &ParticleOptions, visible| {
-                    (
-                        id as u32,
-                        format!("minecraft:{name}"),
-                        amplifier,
-                        original.clone(),
-                        Some(original.clone()),
-                        visible,
-                    )
-                };
+                let asked_for =
+                    |id: i32, name: &str, amplifier, original: &ParticleOptions, visible| {
+                        (
+                            id as u32,
+                            format!("minecraft:{name}"),
+                            amplifier,
+                            original.clone(),
+                            Some(original.clone()),
+                            visible,
+                        )
+                    };
                 let mut first = asked();
                 first.sort_by_key(|a| a.0);
                 assert_eq!(

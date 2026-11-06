@@ -54,19 +54,12 @@ fn send_native_nearby(
         g.placed && g.dimension == dimension && Some(g.conn) != except && within_range(g.position)
     }) {
         // A vanilla client cannot decode a native mod's particle id; see
-        // `mod_particle_only_for_horizon`.
-        if horizon_only && guest.brand != "horizon" {
+        // `Particle::horizon_only`.
+        if horizon_only && !guest.is_horizon() {
             continue;
         }
         guest.sender.send(packet.clone());
     }
-}
-
-/// A native mod's particle travels as `MOD_PARTICLE_ID` (-1) plus its name.
-/// Vanilla reads the id with `IdMap.byIdOrThrow`, which throws on -1 and
-/// drops the connection, so such a particle may only go to Horizon clients.
-fn mod_particle_only_for_horizon(particle: &Particle) -> bool {
-    matches!(particle.data, Some(ParticleData::Mod(_)))
 }
 
 /// One of a packet's `count` particles (`handleParticleEvent`): its position
@@ -198,7 +191,7 @@ pub(super) fn send_hub_level_particles(
     let Some(particle) = hub.particle(options, state) else {
         return;
     };
-    let horizon_only = mod_particle_only_for_horizon(&particle);
+    let horizon_only = particle.horizon_only();
     let packet = C::LevelParticles(play::LevelParticles {
         particle,
         override_limiter: false,
@@ -210,7 +203,7 @@ pub(super) fn send_hub_level_particles(
         randomization: 0,
     });
     for g in hub.guests.iter().filter(|g| hub.here(g)) {
-        if horizon_only && g.brand != "horizon" {
+        if horizon_only && !g.is_horizon() {
             continue;
         }
         // ServerLevel compares the player's block centre, strictly within 32.
@@ -572,7 +565,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        let horizon_only = mod_particle_only_for_horizon(&particle);
+        let horizon_only = particle.horizon_only();
         let body = C::LevelParticles(play::LevelParticles {
             particle,
             override_limiter: false,

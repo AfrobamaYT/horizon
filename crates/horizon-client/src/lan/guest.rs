@@ -854,6 +854,11 @@ impl Guest {
     pub fn spectator(&self) -> bool {
         self.game_mode == SPECTATOR
     }
+    /// Its client's `minecraft:brand` is Horizon's: it reads the protocol's
+    /// extensions, such as a native mod's particle (`Particle::horizon_only`).
+    pub fn is_horizon(&self) -> bool {
+        self.brand == "horizon"
+    }
     /// `Player.getDesiredPose`: sleeping, gliding, then the body's own pose
     /// (swimming, crawling, crouching) once its server tick has run.
     pub fn pose(&self) -> Pose {
