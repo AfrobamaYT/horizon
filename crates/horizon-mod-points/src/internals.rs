@@ -253,8 +253,16 @@ pub use wit_bindgen::rt;
 /// A plain value as pre-order cells. Compound counts count children, not all descendants.
 #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
 pub fn flatten(value: Value) -> Vec<Cell> {
-    let (mut first, mut pending) = (Some(value), Vec::new());
     let mut cells = Vec::new();
+    flatten_into(value, &mut cells, &mut Vec::new());
+    cells
+}
+
+/// Appends pre-order cells using caller-owned output and traversal buffers.
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+pub fn flatten_into(value: Value, cells: &mut Vec<Cell>, pending: &mut Vec<Value>) {
+    pending.clear();
+    let mut first = Some(value);
     while let Some(value) = first.take().or_else(|| pending.pop()) {
         cells.push(match value {
             Value::None => Cell::None,
@@ -281,13 +289,17 @@ pub fn flatten(value: Value) -> Vec<Cell> {
             }
         });
     }
-    cells
 }
 
 /// One value from pre-order cells. Refuses missing children, trailing cells and excessive nesting.
 #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
-pub fn unflatten(cells: Vec<Cell>) -> Result<Value, Refusal> {
-    fn next(cells: &mut std::vec::IntoIter<Cell>, depth: usize) -> Result<Value, Refusal> {
+pub fn unflatten(
+    cells: impl IntoIterator<Item = Cell, IntoIter: ExactSizeIterator>,
+) -> Result<Value, Refusal> {
+    fn next(
+        cells: &mut impl ExactSizeIterator<Item = Cell>,
+        depth: usize,
+    ) -> Result<Value, Refusal> {
         if depth > 128 {
             return Err(changed("a value nested too deeply"));
         }

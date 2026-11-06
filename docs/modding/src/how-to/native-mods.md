@@ -618,8 +618,10 @@ content checks as a content mod. They are normal pack resources, not a second na
 [Server data reload listeners](../reference/hook-notes.md#server-data-reload-listeners) register through
 `Hooks::add_server_reload_listeners`. Their `ServerReloadContext` lists namespaced IDs and reads the
 winning bytes from selected datapacks and the mod's own `data/`. Parse once in prepare and publish in
-apply, not on the tick. The original pack trees remain separate from the launcher's code-only
-horizon-mixins input.
+apply, not on the tick. Server listener applies run before `data_pack_files`. A later refusal
+keeps the old engine tables and Parts, but cannot undo effects of listeners or hooks that already
+ran. Contributions share a list, so a failed file cannot be attributed to a particular mod.
+The original pack trees remain separate from the launcher's code-only horizon-mixins input.
 
 Client-side asset reads use [client asset reload listeners](../reference/hook-notes.md#client-asset-reload-listeners); server
 listeners cannot read `assets/`. Packaged assets also participate in the game's normal resource

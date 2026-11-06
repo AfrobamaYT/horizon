@@ -49,6 +49,15 @@ impl ItemEnv for Env<'_, '_> {
             .native_item_model_range_property(property, stack, &mut value);
         value
     }
+    fn item_model_select_property(&self, property: &str, stack: &StackView) -> Option<String> {
+        if !mod_api::__private::listened(mod_api::HookId::ItemModelSelectProperty) {
+            return None;
+        }
+        let mut value = None;
+        self.game
+            .native_item_model_select_property(property, stack, &mut value);
+        value
+    }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
     }
@@ -872,6 +881,81 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let env = Env { game };
                 assert_eq!(env.item_model_range_property("example:fill", &stack), 0.0);
+            });
+        });
+    }
+
+    struct Mode;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Mode {
+        fn register_select_item_model_property(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterSelectItemModelPropertyEvent<'_>,
+        ) {
+            event.properties.push("example:mode".into());
+        }
+        fn item_model_select_property(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::ItemModelSelectPropertyEvent<'_>,
+        ) {
+            if event.property == "example:mode" {
+                *event.value = Some(
+                    if event.stack.count > 1 {
+                        "build"
+                    } else {
+                        "dig"
+                    }
+                    .into(),
+                );
+            }
+        }
+    }
+
+    /// A mod registers its categorical property once at start.
+    #[test]
+    fn a_mod_registers_its_select_item_model_property() {
+        use mod_api::__private::game::*;
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("mode", Box::new(Mode))].into();
+        mod_api::testing::with_mods(mods, || {
+            let mut properties = Vec::new();
+            Game::native_register_select_item_model_property(
+                &mod_api::RegistrationContext::new(),
+                &mut properties,
+            );
+            assert_eq!(properties, ["example:mode"]);
+        });
+    }
+
+    /// The resolver reads a mod's value for its property, none for another's or with no mod.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn item_model_select_property_reads_the_mods_value() {
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("mode", Box::new(Mode))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                let one = StackView::new("minecraft:stick", 1);
+                let two = StackView::new("minecraft:stick", 2);
+                assert_eq!(
+                    env.item_model_select_property("example:mode", &one)
+                        .as_deref(),
+                    Some("dig")
+                );
+                assert_eq!(
+                    env.item_model_select_property("example:mode", &two)
+                        .as_deref(),
+                    Some("build")
+                );
+                assert_eq!(env.item_model_select_property("other:mode", &one), None);
+            });
+        });
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                let one = StackView::new("minecraft:stick", 1);
+                assert_eq!(env.item_model_select_property("example:mode", &one), None);
             });
         });
     }

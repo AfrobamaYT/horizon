@@ -210,14 +210,12 @@ impl Game<'_> {
         let context = self
             .prepare_loop_context(&resources)
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
+        let switched = self.mods.data_switched || next_root.is_some();
+        let prepared = self.apply_server_reload_callbacks(prepared);
         let world = if run_load && self.remote.is_none() {
             Some(
-                self.prepare_world_reload(
-                    &stack,
-                    &resources,
-                    self.mods.data_switched || next_root.is_some(),
-                )
-                .map_err(|error| ReloadStageError::DataSource(error.to_string()))?,
+                self.prepare_world_reload(&stack, &resources, switched)
+                    .map_err(|error| ReloadStageError::DataSource(error.to_string()))?,
             )
         } else {
             None
@@ -1052,6 +1050,7 @@ impl Game<'_> {
                 )));
             }
         };
+        let prepared = self.apply_server_reload_callbacks(prepared);
         let world = match self.prepare_world_reload(&stack, &root, self.mods.data_switched) {
             Ok(world) => world,
             Err(error) => {

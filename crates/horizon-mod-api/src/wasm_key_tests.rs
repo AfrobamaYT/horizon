@@ -39,6 +39,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             let _restore = Restore(CURRENT.replace(&mut frame));
             let mut state = State {
                 limits: wasmtime::StoreLimitsBuilder::new().build(),
+                buffers: HashMap::new(),
             };
             use glue::horizon::mod_api::host::Host as Reads;
             assert_eq!(
@@ -126,6 +127,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     let _restore = Restore(CURRENT.replace(&mut frame));
     let mut state = State {
         limits: wasmtime::StoreLimitsBuilder::new().build(),
+        buffers: HashMap::new(),
     };
     use glue::horizon::mod_api::backend::Host as Imports;
     assert_eq!(
