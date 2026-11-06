@@ -51,10 +51,10 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
             if message.as_str() == "fuel_get" {
                 let _ = view::get_many(&[(node, 0), (node, 1)]);
             } else {
-                let _ = view::set_many(&[
-                    (node, 0, vec![view::Cell::S(9)]),
-                    (node, 1, vec![view::Cell::S(9)]),
-                ]);
+                let _ = view::set_many(
+                    &[(node, 0, 1), (node, 1, 1)],
+                    &[view::Cell::S(9), view::Cell::S(9)],
+                );
             }
         }
     }
@@ -68,8 +68,13 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
             ]
         };
         if message.as_str() == "strings_batch" {
-            let writes = (0..12).map(|_| (node, 0, cells())).collect::<Vec<_>>();
-            assert!(view::set_many(&writes).iter().all(Result::is_err));
+            let writes = (0..12).map(|_| (node, 0, 2)).collect::<Vec<_>>();
+            let all_cells = (0..12).flat_map(|_| cells()).collect::<Vec<_>>();
+            assert!(
+                view::set_many(&writes, &all_cells)
+                    .iter()
+                    .all(Result::is_err)
+            );
         } else {
             for _ in 0..12 {
                 assert!(node.set(0, &cells()).is_err());
@@ -80,10 +85,11 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
     if message.as_str() == "oversize_cells" {
         use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
         let node = game.node();
-        let writes = (0..12)
-            .map(|_| (node, 0, (0..65_537).map(|_| view::Cell::None).collect()))
+        let writes = (0..12).map(|_| (node, 0, 65_537)).collect::<Vec<_>>();
+        let cells = (0..12 * 65_537)
+            .map(|_| view::Cell::None)
             .collect::<Vec<_>>();
-        let results = view::set_many(&writes);
+        let results = view::set_many(&writes, &cells);
         assert_eq!(results.len(), 12);
         assert!(
             results
@@ -99,10 +105,8 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
             let reads = (0..13).map(|_| (node, 0)).collect::<Vec<_>>();
             let _ = view::get_many(&reads);
         } else {
-            let writes = (0..13)
-                .map(|_| (node, 0, vec![view::Cell::S(9)]))
-                .collect::<Vec<_>>();
-            let _ = view::set_many(&writes);
+            let writes = (0..13).map(|_| (node, 0, 0)).collect::<Vec<_>>();
+            let _ = view::set_many(&writes, &[]);
         }
         panic!("oversized batch did not trap");
     }
