@@ -3,7 +3,7 @@
 //! loads, and raw listeners [`register_raw`]; the game then [`seal`]s the list, which
 //! sets [`POINTS`]. A firing slot walks the mods subscribed to that place, API listeners first and
 //! then raw ones, each in registration (dispatch) order, skipping disabled and [`stop`]ped mods.
-use crate::{POINT_COUNT, PointId, Points};
+use crate::{POINT_COUNT, PointId, Points, SITE_COUNT, SiteId};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Each place's slot: set once, at the seal, where a mod listens. A point that nothing listens at
 /// costs one load of it.
 pub static POINTS: [AtomicBool; POINT_COUNT] = [const { AtomicBool::new(false) }; POINT_COUNT];
+/// Call-expression slots, using the same sealed raw-listener table as points.
+pub static SITES: [AtomicBool; SITE_COUNT] = [const { AtomicBool::new(false) }; SITE_COUNT];
 
 struct Listener {
     id: &'static str,
@@ -49,12 +51,14 @@ unsafe impl Sync for RawKind {}
 struct Raw {
     listener: u32,
     kind: RawKind,
+    priority: i32,
+    injection: &'static str,
 }
 
 /// The list while mods load: registrations, and stops that came before the seal.
 struct Open {
     listeners: Vec<Listener>,
-    raw: Vec<(PointId, Raw)>,
+    raw: Vec<(usize, Raw)>,
     stopped: Vec<String>,
     /// Set once [`seal`] has taken the list: registering is refused from then on.
     sealing: bool,
@@ -145,8 +149,10 @@ pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), Reg
 /// Both constructors are `unsafe`: the caller guarantees the slot's pointers are used correctly.
 pub struct RawListener {
     id: &'static str,
-    place: PointId,
+    place: usize,
     kind: RawKind,
+    priority: i32,
+    injection: &'static str,
 }
 
 impl RawListener {
@@ -160,8 +166,10 @@ impl RawListener {
     pub const unsafe fn new(id: &'static str, place: PointId, function: *const ()) -> Self {
         Self {
             id,
-            place,
+            place: place as usize,
             kind: RawKind::Typed(function),
+            priority: 0,
+            injection: "",
         }
     }
 
@@ -187,8 +195,32 @@ impl RawListener {
     ) -> Self {
         Self {
             id,
-            place,
+            place: place as usize,
             kind: RawKind::Erased(function),
+            priority: 0,
+            injection: "",
+        }
+    }
+
+    /// A typed call-site wrap listener, sorted by priority, mod id and injection id.
+    ///
+    /// # Safety
+    ///
+    /// `function` must have this site's exact generated listener type. Erased point callbacks
+    /// cannot register as site listeners: their signature has no original continuation.
+    pub const unsafe fn site(
+        id: &'static str,
+        place: SiteId,
+        priority: i32,
+        injection: &'static str,
+        function: *const (),
+    ) -> Self {
+        Self {
+            id,
+            place: POINT_COUNT + place as usize,
+            kind: RawKind::Typed(function),
+            priority,
+            injection,
         }
     }
 
@@ -207,6 +239,8 @@ pub fn register_raw(raw: &RawListener) -> Result<(), RegisterError> {
         Raw {
             listener,
             kind: raw.kind,
+            priority: raw.priority,
+            injection: raw.injection,
         },
     ));
     Ok(())
@@ -254,9 +288,21 @@ pub fn seal() {
             places[*place as usize].push(index as u32);
         }
     }
-    let mut raw = vec![Vec::new(); POINT_COUNT];
+    let mut raw = vec![Vec::new(); POINT_COUNT + SITE_COUNT];
     for (place, function) in raw_list {
-        raw[place as usize].push(function);
+        raw[place].push(function);
+    }
+    for site in &mut raw[POINT_COUNT..] {
+        site.sort_by(|a, b| {
+            b.priority
+                .cmp(&a.priority)
+                .then_with(|| {
+                    listeners[a.listener as usize]
+                        .id
+                        .cmp(listeners[b.listener as usize].id)
+                })
+                .then_with(|| a.injection.cmp(b.injection))
+        });
     }
     let open = lock();
     // Every stop so far, before the seal or while it ran, is in `stopped`; the next ones see
@@ -275,17 +321,53 @@ pub fn seal() {
         let listened = !sealed.places[index].is_empty() || !sealed.raw[index].is_empty();
         slot.store(listened, Ordering::Release);
     }
+    for (index, slot) in SITES.iter().enumerate() {
+        slot.store(
+            !sealed.raw[POINT_COUNT + index].is_empty(),
+            Ordering::Release,
+        );
+    }
+}
+
+fn active(listener: &Listener) -> bool {
+    !listener.stopped.load(Ordering::Acquire)
+        && listener
+            .mod_index
+            .is_none_or(mod_api::__private::mod_index_on)
+}
+
+/// Invoke the next enabled site listener under its mod guard. The generated typed slot recurses
+/// from the returned index, so the first listener is outermost, without allocating a chain.
+pub fn wrap<O>(
+    place: SiteId,
+    from: usize,
+    call: impl FnOnce(Option<(*const (), usize)>) -> O,
+) -> O {
+    if let Some(sealed) = SEALED.get() {
+        for (index, raw) in sealed.raw[POINT_COUNT + place as usize]
+            .iter()
+            .enumerate()
+            .skip(from)
+        {
+            let listener = &sealed.listeners[raw.listener as usize];
+            if !active(listener) {
+                continue;
+            }
+            let RawKind::Typed(function) = raw.kind else {
+                unreachable!("only typed listeners register at sites")
+            };
+            let _guard = mod_api::__private::enter(listener.id, raw.injection);
+            return call(Some((function, index + 1)));
+        }
+    }
+    call(None)
 }
 
 /// Runs `call` for the mod `listener` while it runs `name`, so a panic in it names the mod; a
 /// disabled or stopped mod is skipped.
 fn run(sealed: &Sealed, listener: u32, name: &'static str, call: impl FnOnce()) {
     let listener = &sealed.listeners[listener as usize];
-    if !listener.stopped.load(Ordering::Acquire)
-        && listener
-            .mod_index
-            .is_none_or(mod_api::__private::mod_index_on)
-    {
+    if active(listener) {
         let _guard = mod_api::__private::enter(listener.id, name);
         call();
     }

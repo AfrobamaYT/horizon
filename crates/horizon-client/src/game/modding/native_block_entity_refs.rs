@@ -1,0 +1,1157 @@
+//! Block entity handles for native server mods: reads, and the writes `/data merge block`
+//! and `BlockEntity.setChanged` make. A write inside `host.transaction` is journaled
+//! (`transactions.rs`) and tells the world at the root commit.
+use super::{Game, transactions::After};
+use horizon_client::{
+    block_entity_nbt,
+    containers::{BlockEntity, ModBlockEntity},
+    lan::menu::{Menu, Slots},
+    save,
+    world::World,
+};
+use horizon_world::nbt::{Compound, Tag};
+use mod_api::__private::game::*;
+use mod_api::{
+    BlockEntityDataError, BlockEntityItemError, BlockEntityRef, BlockEntityTypeKey, ItemStack,
+    LevelRef, PlayerRef, Transaction,
+};
+
+impl Game<'_> {
+    fn native_block_entity_target(&self, entity: BlockEntityRef) -> Option<(&World, &BlockEntity)> {
+        let world = self.native_level_read_world(entity.fields().level)?;
+        Some((world, loaded_block_entity(world, entity.fields().position)?))
+    }
+
+    /// Find a block entity in a loaded chunk of an open level, or on a client in
+    /// the level it shows. An entity taken out for its tick cannot be read in that tick.
+    pub(super) fn native_block_entity_ref(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<BlockEntityRef> {
+        let entity = mod_api::__private::game::block_entity_ref(level, pos);
+        self.native_block_entity_target(entity).map(|_| entity)
+    }
+
+    /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
+    /// Returns false for a stale or wrong-level handle, a non-provider, a cancelled
+    /// open, or an unconnected player such as a fake player.
+    pub(super) fn native_player_open_block_menu(
+        &mut self,
+        player: PlayerRef,
+        entity: BlockEntityRef,
+    ) -> bool {
+        if self.player_handle_read(player).is_none()
+            || !self.native_level_in_place(entity.fields().level)
+            || self.native_block_entity_target(entity).is_none()
+        {
+            return false;
+        }
+        let Some(conn) = self.lan.as_ref().and_then(|host| {
+            host.hub
+                .guests
+                .iter()
+                .find(|guest| {
+                    guest.uuid == player.fields().uuid
+                        && guest.placed
+                        && guest.dimension == entity.fields().level.dimension()
+                })
+                .map(|guest| guest.conn)
+        }) else {
+            return false;
+        };
+        let [x, y, z] = entity.fields().position;
+        matches!(
+            self.open_block_menu(conn, (x, y, z)),
+            super::lan_actions::MenuOpen::Opened
+        )
+    }
+
+    /// The block entity's type (`BlockEntity.getType`).
+    pub(super) fn native_block_entity_kind(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<BlockEntityTypeKey> {
+        let (world, block_entity) = self.native_block_entity_target(entity)?;
+        let [x, y, z] = entity.fields().position;
+        let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
+        mod_api::__private::block_entity_type_key(save::block_entity_id(block_entity, block))
+    }
+
+    /// The block entity's position.
+    pub(super) fn native_block_entity_position(&self, entity: BlockEntityRef) -> Option<[i32; 3]> {
+        self.native_block_entity_target(entity)?;
+        Some(entity.fields().position)
+    }
+
+    /// The block entity's level.
+    pub(super) fn native_block_entity_level(&self, entity: BlockEntityRef) -> Option<LevelRef> {
+        self.native_block_entity_target(entity)?;
+        Some(entity.fields().level)
+    }
+
+    /// The data saved without identity or position metadata
+    /// (`BlockEntity.saveWithoutMetadata`).
+    pub(super) fn native_block_entity_data(&self, entity: BlockEntityRef) -> Option<Compound> {
+        let (world, block_entity) = self.native_block_entity_target(entity)?;
+        let [x, y, z] = entity.fields().position;
+        let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
+        save_without_metadata(world, (x, y, z), block_entity, block)
+    }
+
+    /// The vanilla lock's item predicate, if present on a loaded block entity.
+    pub(super) fn native_block_entity_lock(&self, entity: BlockEntityRef) -> Option<Compound> {
+        let (world, _) = self.native_block_entity_target(entity)?;
+        let [x, y, z] = entity.fields().position;
+        match world.block_lock((x, y, z))? {
+            Tag::Compound(lock) => Some(lock.clone()),
+            _ => None,
+        }
+    }
+
+    /// Change the lock through the same storage used by container opening and saving.
+    pub(super) fn native_block_entity_set_lock(
+        &mut self,
+        entity: BlockEntityRef,
+        lock: Option<Compound>,
+    ) -> bool {
+        let Some((key, block)) = self.native_block_entity_write_target(entity) else {
+            return false;
+        };
+        if matches!((self.world.block_lock(key), &lock), (None, None))
+            || matches!((self.world.block_lock(key), &lock), (Some(Tag::Compound(old)), Some(new)) if old == new)
+        {
+            return false;
+        }
+        let Some(mut tag) = self
+            .world
+            .block_entities
+            .get(&key)
+            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
+        else {
+            return false;
+        };
+        match lock {
+            Some(lock) => {
+                tag.insert("lock".into(), Tag::Compound(lock));
+            }
+            None => {
+                tag.remove(&"lock".into());
+            }
+        }
+        self.journal_block_entity(key);
+        self.world.set_block_lock(key, &Tag::Compound(tag));
+        self.after_commit(After::Updated(key));
+        self.after_commit(After::Changed(key));
+        true
+    }
+
+    /// A loaded block entity of the server level in place, when a write may change it.
+    fn native_block_entity_write_key(&self, entity: BlockEntityRef) -> Option<(i32, i32, i32)> {
+        if !self.native_level_in_place(entity.fields().level) {
+            return None;
+        }
+        let pos = entity.fields().position;
+        loaded_block_entity(&self.world, pos)?;
+        Some((pos[0], pos[1], pos[2]))
+    }
+
+    /// The block entity's key and block name when a write may change it.
+    fn native_block_entity_write_target(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<((i32, i32, i32), String)> {
+        let key = self.native_block_entity_write_key(entity)?;
+        let block = self
+            .pack
+            .assets
+            .registry
+            .state(self.world.block(key.0, key.1, key.2))?
+            .name
+            .clone();
+        Some((key, block))
+    }
+
+    /// A snapshot of a mod block entity's menu data slots, on the server or in the
+    /// client's copy. None for a stale/missing/vanilla entity. Item storage is separate.
+    pub(super) fn native_block_entity_data_slots(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<Vec<i32>> {
+        let (_, BlockEntity::Mod(block_entity)) = self.native_block_entity_target(entity)? else {
+            return None;
+        };
+        Some(block_entity.data.clone())
+    }
+
+    /// Set a mod block entity's menu data slot in place, joining the current transaction
+    /// and its setChanged notice. False for a stale/client/parked/vanilla entity, an
+    /// invalid slot or no change. Does not resize the mod's declared data slots.
+    pub(super) fn native_block_entity_set_data_slot(
+        &mut self,
+        entity: BlockEntityRef,
+        slot: u32,
+        value: i32,
+    ) -> bool {
+        let Some((key, block_entity)) = self.mod_block_entity_write_target(entity) else {
+            return false;
+        };
+        let index = slot as usize;
+        if block_entity
+            .data
+            .get(index)
+            .is_none_or(|current| *current == value)
+        {
+            return false;
+        }
+        self.write_mod_block_entity(key, |block_entity| block_entity.data[index] = value);
+        true
+    }
+
+    /// Sizes a mod block entity's menu data explicitly, using the same write
+    /// target, journal and Changed notice as scalar data-slot writes.
+    pub(super) fn native_block_entity_set_data_slots(
+        &mut self,
+        entity: BlockEntityRef,
+        values: Vec<i32>,
+    ) -> Result<bool, BlockEntityDataError> {
+        let limit = usize::from(horizon_mods::content::MAX_MENU_SLOTS);
+        if values.len() > limit {
+            return Err(BlockEntityDataError::TooManySlots {
+                count: values.len() as u64,
+                limit: limit as u64,
+            });
+        }
+        let (key, block_entity) = self
+            .mod_block_entity_write_target(entity)
+            .ok_or(BlockEntityDataError::Unavailable)?;
+        if block_entity.data == values {
+            return Ok(false);
+        }
+        self.write_mod_block_entity(key, |block_entity| block_entity.data = values);
+        Ok(true)
+    }
+
+    fn mod_block_entity_write_target(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<((i32, i32, i32), &ModBlockEntity)> {
+        let key = self.native_block_entity_write_key(entity)?;
+        let BlockEntity::Mod(block_entity) = self.world.block_entities.get(&key)? else {
+            return None;
+        };
+        Some((key, block_entity))
+    }
+
+    // The target was resolved above, and journaling invokes no listener that could replace it.
+    fn write_mod_block_entity(
+        &mut self,
+        key: (i32, i32, i32),
+        edit: impl FnOnce(&mut ModBlockEntity),
+    ) {
+        self.journal_block_entity(key);
+        let BlockEntity::Mod(block_entity) = self.world.block_entities.get_mut(&key).unwrap()
+        else {
+            unreachable!("resolved mod holder replaced before its write")
+        };
+        edit(block_entity);
+        self.after_commit(After::Changed(key));
+    }
+
+    /// Read a configured mod holder's declared internal item slot, without automation policy.
+    pub(super) fn native_block_entity_item_slot(
+        &self,
+        entity: BlockEntityRef,
+        slot: u32,
+    ) -> Result<Option<ItemStack>, BlockEntityItemError> {
+        let (world, BlockEntity::Mod(block_entity)) = self
+            .native_block_entity_target(entity)
+            .ok_or(BlockEntityItemError::Unavailable)?
+        else {
+            return Err(BlockEntityItemError::Unavailable);
+        };
+        let [x, y, z] = entity.fields().position;
+        mod_item_slots(world, (x, y, z), slot)?;
+        Ok(block_entity.items.get(slot as usize).cloned().flatten())
+    }
+
+    /// Replace internal storage under the existing transaction; external ITEMS routing is separate.
+    pub(super) fn native_block_entity_set_item_slot(
+        &mut self,
+        entity: BlockEntityRef,
+        tx: &Transaction,
+        slot: u32,
+        stack: Option<ItemStack>,
+    ) -> Result<bool, BlockEntityItemError> {
+        let _ = tx;
+        let (key, block_entity) = self
+            .mod_block_entity_write_target(entity)
+            .ok_or(BlockEntityItemError::Unavailable)?;
+        let slots = mod_item_slots(&self.world, key, slot)?;
+        if let Some(stack) = &stack {
+            if stack.count == 0
+                || stack.item.as_ref() == "minecraft:air"
+                || self.items().get(&stack.item).is_none()
+            {
+                return Err(BlockEntityItemError::InvalidStack);
+            }
+            let limit = self.stack_max_size(stack);
+            if stack.count > limit {
+                return Err(BlockEntityItemError::StackTooLarge {
+                    count: stack.count,
+                    limit,
+                });
+            }
+        }
+        let index = slot as usize;
+        if block_entity.items.get(index).and_then(Option::as_ref) == stack.as_ref() {
+            return Ok(false);
+        }
+        self.write_mod_block_entity(key, |block_entity| {
+            let items = &mut block_entity.items;
+            if items.len() < slots {
+                items.resize(slots, None);
+            }
+            items[index] = stack;
+        });
+        Ok(true)
+    }
+
+    /// Merges `data` into the block entity's saved data and loads it, as `/data merge block`
+    /// does (`BlockDataAccessor.setData`: `loadWithComponents`, `setChanged`, then
+    /// `sendBlockUpdated`, so comparators re-read it and clients get the update). `id`, `x`,
+    /// `y` and `z` in `data` are ignored. True when the data changed; false for a stale
+    /// handle, a client, another level than the one in place, data nested too deep or that
+    /// changes nothing, or a result the block entity can't load. Inside a transaction an
+    /// abort puts the block entity, its name, `lock`, loot table roll and attachments back.
+    pub(super) fn native_block_entity_merge_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> bool {
+        self.write_block_entity_data(entity, data, false)
+    }
+
+    /// Replaces the saved payload, retaining identity and position metadata.
+    /// Uses the same transactional load and client update path as `merge_data`.
+    /// False for a missing or stale block entity, unsupported data, or no change.
+    pub(super) fn native_block_entity_replace_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> bool {
+        self.write_block_entity_data(entity, data, true)
+    }
+
+    fn write_block_entity_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+        replace: bool,
+    ) -> bool {
+        let Some((key, block)) = self.native_block_entity_write_target(entity) else {
+            return false;
+        };
+        let mut nbt = data;
+        for field in ["id", "x", "y", "z"] {
+            nbt.remove(&field.into());
+        }
+        let nbt = Tag::Compound(nbt);
+        if horizon_client::nbt_path::too_deep(&nbt, 0) {
+            return false;
+        }
+        let Some(old) = self
+            .world
+            .block_entities
+            .get(&key)
+            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
+            .map(Tag::Compound)
+        else {
+            return false;
+        };
+        let base = if replace {
+            let mut metadata = Compound::new();
+            if let Tag::Compound(fields) = &old {
+                for key in ["id", "x", "y", "z"] {
+                    if let Some(value) = fields.get(&key.into()) {
+                        metadata.insert(key.into(), value.clone());
+                    }
+                }
+            }
+            Tag::Compound(metadata)
+        } else {
+            old.clone()
+        };
+        let merged = horizon_client::data_cmd::merged(&base, &nbt);
+        if merged == old {
+            return false;
+        }
+        self.journal_block_entity(key);
+        if !self.load_block_entity_data(key, &merged) {
+            return false;
+        }
+        let kept = self.world.block_entities.get(&key);
+        if kept.is_some_and(|kept| {
+            !matches!(kept, BlockEntity::Banner(_) | BlockEntity::Sign(_))
+                && nameable(key, kept, &block)
+        }) {
+            match save::text(merged.get("CustomName")) {
+                Some(name) => self.world.block_names.insert(key, name),
+                None => self.world.block_names.remove(&key),
+            };
+        }
+        self.after_commit(After::Updated(key));
+        self.after_commit(After::Changed(key));
+        true
+    }
+
+    /// `BlockEntity.setChanged`: the chunk is saved again and comparators re-read the
+    /// container (`updateNeighbourForOutputSignal`). Inside a transaction it runs once at the
+    /// root commit. False for a stale handle, a client or another level than the one in place.
+    pub(super) fn native_block_entity_set_changed(&mut self, entity: BlockEntityRef) -> bool {
+        let Some((key, _)) = self.native_block_entity_write_target(entity) else {
+            return false;
+        };
+        self.after_commit(After::Changed(key));
+        true
+    }
+
+    /// The custom name (`Nameable.getCustomName`) as plain text. None when the block entity
+    /// has none or isn't nameable (chests, barrels, furnaces, hoppers, brewing stands,
+    /// banners, beacons, enchanting tables, command blocks...), or for a stale handle or a
+    /// client.
+    pub(super) fn native_block_entity_name(&self, entity: BlockEntityRef) -> Option<String> {
+        let (world, block_entity) = self.native_block_entity_target(entity)?;
+        let [x, y, z] = entity.fields().position;
+        match block_entity {
+            BlockEntity::Banner(banner) => banner.name.clone(),
+            _ => world.block_names.get(&(x, y, z)).cloned(),
+        }
+    }
+
+    /// The players whose open menu holds this block entity's container (for openers'
+    /// containers, `ContainerOpenersCounter.getEntitiesWithContainerOpen`'s players), from the menus the opener counts read
+    /// (`tick_mod_container_viewers`, `ChestBlockEntity$1.isOwnContainer`). Guests in
+    /// its level, not spectators nor fake players, then the acting player for a menu
+    /// their action opened, which the hub records when the action ends. None for a
+    /// stale handle or a client.
+    pub(super) fn native_block_entity_viewers(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<Vec<PlayerRef>> {
+        if !self.is_logical_server() {
+            return None;
+        }
+        self.native_block_entity_target(entity)?;
+        let epoch = self.native_lifecycle.epoch()?;
+        let level = entity.fields().level;
+        let [x, y, z] = entity.fields().position;
+        let key = (x, y, z);
+        let mut viewers: Vec<PlayerRef> = self
+            .lan
+            .iter()
+            .flat_map(|host| host.hub.guests.simulation_iter())
+            .filter(|g| {
+                // The acting guest's mode is live in `Game` during its turn; the hub
+                // hears of a change only in `leave_guest`.
+                let spectator = if self.lan_acting_uuid == Some(g.uuid) {
+                    self.spectator()
+                } else {
+                    g.spectator()
+                };
+                g.participates_online()
+                    && g.placed
+                    && !spectator
+                    && g.dimension == level.dimension()
+                    && g.menu.as_ref().is_some_and(|m| menu_holds(m, key))
+            })
+            .filter_map(|g| {
+                let id = u32::try_from(g.entity_id).ok()?;
+                Some(player_ref(mod_api::EntityRef::new(epoch, id), g.uuid))
+            })
+            .collect();
+        if self.native_level_in_place(level)
+            && !self.lan_acting_fake
+            && !self.spectator()
+            && self
+                .container
+                .is_some_and(|open| open == key || self.chest_other_half(open) == Some(key))
+            && let Some(player) = self.native_acting_player()
+            && !viewers.contains(&player)
+        {
+            viewers.push(player);
+        }
+        Some(viewers)
+    }
+
+    /// Sets the custom name, or clears it with None, as an anvil-renamed item placed with
+    /// `components` sets `CustomName`. Plain text only. Clients get a block entity update.
+    /// False for a block entity that isn't nameable, a stale handle, a client or another
+    /// level than the one in place. Inside a transaction an abort puts the name back.
+    pub(super) fn native_block_entity_set_name(
+        &mut self,
+        entity: BlockEntityRef,
+        name: Option<&str>,
+    ) -> bool {
+        let Some((key, block)) = self.native_block_entity_write_target(entity) else {
+            return false;
+        };
+        let nameable = self
+            .world
+            .block_entities
+            .get(&key)
+            .is_some_and(|current| nameable(key, current, &block));
+        if !nameable {
+            return false;
+        }
+        self.journal_block_entity(key);
+        match self.world.block_entities.get_mut(&key) {
+            Some(BlockEntity::Banner(banner)) => banner.name = name.map(str::to_owned),
+            _ => {
+                match name {
+                    Some(name) => self.world.block_names.insert(key, name.to_owned()),
+                    None => self.world.block_names.remove(&key),
+                };
+            }
+        }
+        self.after_commit(After::Updated(key));
+        true
+    }
+}
+
+/// The block entity as `/data get block` shows it (`saveWithFullMetadata`), with the custom
+/// name Horizon keeps beside the model.
+fn save_with_metadata(
+    world: &World,
+    pos: (i32, i32, i32),
+    entity: &BlockEntity,
+    block: &str,
+) -> Option<Compound> {
+    let mut tag = save::block_entity_data(pos, entity, block, world.block_lock(pos));
+    Game::restore_loot_table(world, pos, &mut tag);
+    let Tag::Compound(mut data) = tag else {
+        return None;
+    };
+    if let Some(name) = world.block_names.get(&pos) {
+        data.insert("CustomName".into(), Tag::String(name.as_str().into()));
+    }
+    Some(data)
+}
+
+fn save_without_metadata(
+    world: &World,
+    pos: (i32, i32, i32),
+    entity: &BlockEntity,
+    block: &str,
+) -> Option<Compound> {
+    let mut data = save_with_metadata(world, pos, entity, block)?;
+    for key in ["id", "x", "y", "z"] {
+        data.remove(&key.into());
+    }
+    Some(data)
+}
+
+/// Whether the block entity keeps a `CustomName` (`Nameable`): its saved form does.
+fn nameable(pos: (i32, i32, i32), entity: &BlockEntity, block: &str) -> bool {
+    let mut tag = save::encode_block_entity(pos, entity, block);
+    if let Tag::Compound(map) = &mut tag {
+        map.insert("CustomName".into(), Tag::String("x".into()));
+    }
+    block_entity_nbt::canonical(&tag).is_some_and(|tag| tag.get("CustomName").is_some())
+}
+
+fn mod_item_slots(
+    world: &World,
+    key: (i32, i32, i32),
+    slot: u32,
+) -> Result<usize, BlockEntityItemError> {
+    let slots = world
+        .block_entities
+        .mod_container(world.block(key.0, key.1, key.2).0)
+        .ok_or(BlockEntityItemError::Unavailable)?
+        .slots;
+    if slot as usize >= slots {
+        return Err(BlockEntityItemError::SlotOutOfBounds {
+            slot,
+            slots: slots as u32,
+        });
+    }
+    Ok(slots)
+}
+
+fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntity> {
+    if !world.loaded(x, z) {
+        return None;
+    }
+    world
+        .block_entities
+        .get(&(x, y, z))
+        .filter(|entity| !save::block_entity_placeholder(entity))
+}
+
+/// Whether an open menu holds the container at `key` (`isOwnContainer`): a double
+/// chest's holds both halves, an ender chest's the block it was opened from.
+fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
+    match menu.slots {
+        Slots::Block(at) => at == key,
+        Slots::Double(first, second) => first == key || second == key,
+        Slots::Ender => menu.pos == Some(key),
+        Slots::Native => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_client::chunk::Chunk;
+    use horizon_world::registry::BlockStateId;
+    use mod_api::HostTransaction;
+    use mod_api::ServerHost;
+    use std::sync::Arc;
+
+    #[test]
+    fn saved_data_omits_metadata_but_keeps_contents() {
+        let world = World::new(BlockStateId(0), 0);
+        let entity = BlockEntity::Chest(vec![None; 27]);
+        let data = save_without_metadata(&world, (1, 64, 2), &entity, "minecraft:chest").unwrap();
+        for key in ["id", "x", "y", "z"] {
+            assert!(!data.contains_key(&key.into()));
+        }
+        assert!(data.contains_key(&"Items".into()));
+    }
+
+    #[test]
+    fn lookup_requires_loaded_chunk_and_tracks_removal_and_replacement() {
+        let mut world = World::new(BlockStateId(0), 0);
+        let pos = [-1, 64, 0];
+        let key = (-1, 64, 0);
+        world.block_entities.insert(key, BlockEntity::Chest(vec![]));
+        assert!(loaded_block_entity(&world, pos).is_none());
+        world.chunks.insert((-1, 0), Arc::new(Chunk::empty(-1, 0)));
+        assert!(matches!(
+            loaded_block_entity(&world, pos),
+            Some(BlockEntity::Chest(_))
+        ));
+        world.block_entities.remove(&key);
+        assert!(loaded_block_entity(&world, pos).is_none());
+        world
+            .block_entities
+            .insert(key, BlockEntity::DaylightDetector);
+        assert!(matches!(
+            loaded_block_entity(&world, pos),
+            Some(BlockEntity::DaylightDetector)
+        ));
+        world
+            .block_entities
+            .insert(key, BlockEntity::Mod(Box::default()));
+        assert!(loaded_block_entity(&world, pos).is_none());
+    }
+
+    fn compound(snbt: &str) -> Compound {
+        match horizon_world::nbt::parse_snbt(snbt).unwrap().0 {
+            Tag::Compound(c) => c,
+            _ => panic!("not a compound"),
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_opens_provider_and_refuses_non_provider() {
+        use mod_api::NativeBlockUpdateFlags;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            for (x, name) in [
+                (0, "minecraft:chest"),
+                (2, "minecraft:furnace"),
+                (4, "minecraft:oak_sign"),
+            ] {
+                let state = game.pack.assets.registry.default_state(name).unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NEIGHBORS
+                ));
+            }
+            let player = game.native_player_ref(12).unwrap();
+            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+            let furnace = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
+            let sign = game.native_block_entity_ref(level, [4, 64, 0]).unwrap();
+            use super::super::lan_actions::MenuOpen;
+            assert!(!player.open_menu(game, sign));
+            assert_eq!(game.open_block_menu(999, (0, 64, 0)), MenuOpen::Refused);
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(vec![None; 2]));
+            assert!(!player.open_menu(game, chest));
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(vec![None; 27]));
+            let dimension = game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                std::mem::replace(&mut guest.dimension, "minecraft:the_nether".to_owned())
+            });
+            assert!(!player.open_menu(game, chest));
+            {
+                let value = dimension;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
+            let host = game.lan.take();
+            assert!(!player.open_menu(game, chest));
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Refused);
+            game.lan = host;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = horizon_client::lan::guest::GuestKind::Fake;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Cancelled);
+            assert!(!player.open_menu(game, chest));
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = horizon_client::lan::guest::GuestKind::Network;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
+            assert!(player.open_menu(game, chest));
+            let stick_lock = compound("{items:\"minecraft:stick\"}");
+            assert!(chest.set_lock(game, Some(stick_lock.clone())));
+            assert_eq!(chest.lock(game), Some(stick_lock));
+            assert!(!player.open_menu(game, chest));
+            {
+                let value = Some(horizon_client::items::ItemStack::new("minecraft:stick", 1));
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.inventory[0] = value);
+            }
+            assert!(player.open_menu(game, chest));
+            {
+                let value = None;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.inventory[0] = value);
+            }
+            assert!(chest.set_lock(game, None));
+            assert!(player.open_menu(game, chest));
+            assert!(player.open_menu(game, furnace));
+
+            // Both halves of a double chest participate, whichever half is opened.
+            use horizon_world::chunk::BlockState;
+            for (x, kind) in [(6, "left"), (7, "right")] {
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .resolve(&BlockState {
+                        name: "minecraft:chest".into(),
+                        properties: [
+                            ("facing".into(), "north".into()),
+                            ("type".into(), kind.into()),
+                            ("waterlogged".into(), "false".into()),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    })
+                    .unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NEIGHBORS
+                ));
+            }
+            let left = game.native_block_entity_ref(level, [6, 64, 0]).unwrap();
+            let right = game.native_block_entity_ref(level, [7, 64, 0]).unwrap();
+            assert!(game.chest_partner((6, 64, 0)).is_some());
+            for half in [left, right] {
+                assert!(half.set_lock(game, Some(compound("{items:\"minecraft:stick\"}"))));
+                assert!(!player.open_menu(game, left));
+                assert!(!player.open_menu(game, right));
+                assert!(half.set_lock(game, None));
+                assert!(player.open_menu(game, left));
+            }
+            game.world.block_entities.remove(&(2, 64, 0));
+            assert!(!player.open_menu(game, furnace));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn viewers_follow_open_menus_per_level_and_leave_out_fake_players() {
+        use super::super::Dim;
+        use horizon_world::chunk::BlockState;
+        use mod_api::{EntityRef, Host, NativeBlockUpdateFlags};
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let chest = |game: &mut Game<'_>, level, x: i32, kind: &str| {
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .resolve(&BlockState {
+                        name: "minecraft:chest".into(),
+                        properties: [
+                            ("facing".into(), "north".into()),
+                            ("type".into(), kind.into()),
+                            ("waterlogged".into(), "false".into()),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    })
+                    .unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NEIGHBORS
+                ));
+                game.native_block_entity_ref(level, [x, 64, 0]).unwrap()
+            };
+            let single = chest(game, level, 0, "single");
+            let left = chest(game, level, 6, "left");
+            let right = chest(game, level, 7, "right");
+            let epoch = game.native_lifecycle.epoch().unwrap();
+            // with_guests: uuids and entity ids 12 and 13.
+            let guest12 = player_ref(EntityRef::new(epoch, 12), 12);
+            let guest13 = player_ref(EntityRef::new(epoch, 13), 13);
+            let host: &dyn Host = game;
+            assert_eq!(single.viewers(host), Some(vec![]));
+
+            // Two players open the chest, then close it one by one.
+            assert!(guest12.open_menu(game, single));
+            assert!(guest13.open_menu(game, single));
+            assert_eq!(single.viewers(game), Some(vec![guest12, guest13]));
+            game.guest_close_all(12);
+            assert_eq!(single.viewers(game), Some(vec![guest13]));
+            game.guest_close_all(13);
+            assert_eq!(single.viewers(game), Some(vec![]));
+
+            // A menu the acting player's action opened counts before the hub records it,
+            // and only once when the hub already has it.
+            game.as_guest(13, |game| {
+                game.container = Some((0, 64, 0));
+                assert_eq!(single.viewers(game), Some(vec![guest13]));
+                game.container = None;
+            })
+            .unwrap();
+            assert!(guest12.open_menu(game, single));
+            game.as_guest(12, |game| {
+                game.container = Some((0, 64, 0));
+                assert_eq!(single.viewers(game), Some(vec![guest12]));
+                game.container = None;
+            })
+            .unwrap();
+            game.guest_close_all(12);
+
+            // A guest that turns spectator during its own turn stops being a viewer then,
+            // though the hub still has the old mode until the turn ends.
+            assert!(guest12.open_menu(game, single));
+            game.as_guest(12, |game| {
+                assert!(game.set_game_mode(horizon_client::command::args::GameMode::Spectator));
+                assert_eq!(single.viewers(game), Some(vec![]));
+            })
+            .unwrap();
+            game.guest_close_all(12);
+            game.as_guest(12, |game| {
+                assert!(game.set_game_mode(horizon_client::command::args::GameMode::Survival));
+            })
+            .unwrap();
+
+            // A double chest's menu holds both halves, whichever was opened.
+            assert!(guest12.open_menu(game, right));
+            assert_eq!(left.viewers(game), Some(vec![guest12]));
+            assert_eq!(right.viewers(game), Some(vec![guest12]));
+            assert_eq!(single.viewers(game), Some(vec![]));
+
+            // A fake player holding the same menu is not a viewer.
+            assert!(guest13.open_menu(game, left));
+            let mut fake = game.lan.as_mut().unwrap().hub.guests.remove(1);
+            fake.kind = horizon_client::lan::guest::GuestKind::Fake;
+            game.lan.as_mut().unwrap().hub.guests.insert(1, fake);
+            assert_eq!(left.viewers(game), Some(vec![guest12]));
+
+            // The same position in another level has none of these viewers.
+            let nether = LevelRef::new(epoch, "minecraft:the_nether");
+            game.enter_level(Dim::Nether).unwrap();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let nether_right = chest(game, nether, 7, "single");
+            assert_eq!(nether_right.viewers(game), Some(vec![]));
+            assert_eq!(right.viewers(game), Some(vec![guest12]), "parked level");
+            game.enter_level(Dim::Overworld).unwrap();
+
+            // A stale handle reads None.
+            game.world.block_entities.remove(&(7, 64, 0));
+            assert_eq!(right.viewers(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn writes_merge_data_name_and_roll_back_with_a_transaction() {
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+        use mod_api::NativeBlockUpdateFlags;
+        if run_fresh_cases(
+            "game::native_block_entity_refs::tests::writes_merge_data_name_and_roll_back_with_a_transaction",
+            "HORIZON_VANILLA_BE_REGISTRY_CHILD",
+            &["vanilla"],
+        ) {
+            return;
+        }
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = super::super::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_path_buf();
+        with_game_at(root, |game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let states = ["minecraft:chest", "minecraft:daylight_detector"];
+            for (i, name) in states.into_iter().enumerate() {
+                let state = game.pack.assets.registry.default_state(name).unwrap();
+                assert!(game.native_level_set_block(level, [i as i32 * 2, 64, 0], state, flags));
+            }
+            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+            let sensor = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
+            let stick = "{Items:[{Slot:3b,id:\"minecraft:stick\",count:3}]}";
+            let slot3 = |game: &Game<'_>| match game.world.block_entities.get(&(0, 64, 0)) {
+                Some(BlockEntity::Chest(items)) => items[3].as_ref().map(|s| s.count),
+                _ => panic!("chest block entity missing"),
+            };
+
+            // A merge loads the data, ignores the identity keys and keeps the rest.
+            assert!(chest.merge_data(
+                game,
+                compound(&format!("{{id:\"minecraft:furnace\",x:9,{}", &stick[1..]))
+            ));
+            assert_eq!(slot3(game), Some(3));
+            assert_eq!(
+                chest.kind(game).map(|kind| kind.id(game)),
+                Some("minecraft:chest".to_owned())
+            );
+            assert_eq!(chest.position(game), Some([0, 64, 0]));
+            assert!(!chest.merge_data(game, compound(stick)), "no change");
+            assert!(chest.merge_data(game, compound("{Items:[]}")));
+            assert_eq!(slot3(game), None);
+
+            // Names: a chest has one, a daylight detector does not.
+            assert_eq!(chest.name(game), None);
+            assert!(chest.set_name(game, Some("Loot")));
+            assert_eq!(chest.name(game), Some("Loot".to_owned()));
+            let data = chest.data(game).unwrap();
+            assert_eq!(
+                data.get(&"CustomName".into()),
+                Some(&Tag::String("Loot".into()))
+            );
+            assert!(!sensor.set_name(game, Some("Nope")));
+            assert_eq!(sensor.name(game), None);
+            assert!(chest.set_name(game, None));
+            assert_eq!(chest.name(game), None);
+
+            // An abort puts back data and name; a commit keeps them.
+            let host: &mut dyn ServerHost = game;
+            let aborted: Result<(), ()> = host.transaction(|host, _| {
+                assert!(chest.merge_data(host, compound(stick)));
+                assert!(chest.set_name(host, Some("Gone")));
+                assert!(chest.set_changed(host));
+                Err(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert_eq!((slot3(game), chest.name(game)), (None, None));
+            assert!(game.transactions.is_empty());
+            let host: &mut dyn ServerHost = game;
+            let committed: Result<(), ()> = host.transaction(|host, _| {
+                assert!(chest.merge_data(host, compound(stick)));
+                assert!(chest.set_name(host, Some("Kept")));
+                Ok(())
+            });
+            assert_eq!(committed, Ok(()));
+            assert_eq!(
+                (slot3(game), chest.name(game)),
+                (Some(3), Some("Kept".to_owned()))
+            );
+
+            // Replacement uses the same journal and restores the original payload on abort.
+            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
+                assert!(chest.replace_data(host, compound("{}")));
+                Err(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert_eq!(
+                (slot3(game), chest.name(game)),
+                (Some(3), Some("Kept".to_owned()))
+            );
+
+            // Merge preserves omitted data; replacement clears the name and items.
+            assert!(chest.merge_data(game, compound("{CustomName:\"Changed\"}")));
+            assert_eq!(slot3(game), Some(3));
+            assert_eq!(chest.name(game), Some("Changed".to_owned()));
+            game.world.block_log = Some(Vec::new());
+            assert!(chest.replace_data(game, compound("{}")));
+            assert_eq!((slot3(game), chest.name(game)), (None, None));
+            assert_eq!(game.world.block_log, Some(vec![(0, 64, 0)]));
+
+            // Clients are told: the block log names the position, and the chunk is dirty.
+            game.world.block_log = Some(Vec::new());
+            game.world.modified.clear();
+            assert!(chest.set_name(game, Some("Told")));
+            assert_eq!(game.world.block_log, Some(vec![(0, 64, 0)]));
+            assert!(game.world.modified.contains(&(0, 0)));
+            game.world.modified.clear();
+            assert!(chest.set_changed(game));
+            assert!(game.world.modified.contains(&(0, 0)));
+
+            // A removed block entity is a stale handle.
+            game.world.block_entities.remove(&(0, 64, 0));
+            assert!(!chest.replace_data(game, compound("{}")));
+            assert!(!chest.set_changed(game));
+            assert!(!chest.merge_data(game, compound(stick)));
+            assert!(!chest.set_name(game, Some("x")));
+            assert_eq!(chest.name(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_abort_puts_back_the_lock_and_the_loot_table_roll() {
+        use super::super::native_entity_refs::tests::with_game;
+        use mod_api::NativeBlockUpdateFlags;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let chest = game.pack.assets.registry.default_state("minecraft:chest");
+            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            assert!(game.native_level_set_block(level, [0, 64, 0], chest.unwrap(), flags));
+            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+            let key = (0, 64, 0);
+            let lock = compound("{lock:{items:\"minecraft:stick\"}}");
+            let table = compound("{LootTable:\"minecraft:chests/simple_dungeon\"}");
+            let before = game.world.block_entity_extras(key);
+
+            let host: &mut dyn ServerHost = game;
+            let aborted: Result<(), ()> = host.transaction(|host, _| {
+                assert!(chest.set_lock(host, Some(compound("{items:\"minecraft:stick\"}"))));
+                assert!(chest.merge_data(host, table.clone()));
+                Err(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert_eq!(game.world.block_entity_extras(key), before);
+            assert!(game.world.block_lock(key).is_none());
+
+            let host: &mut dyn ServerHost = game;
+            let committed: Result<(), ()> = host.transaction(|host, _| {
+                assert!(chest.merge_data(host, lock.clone()));
+                assert!(chest.merge_data(host, table.clone()));
+                Ok(())
+            });
+            assert_eq!(committed, Ok(()));
+            assert!(game.world.block_lock(key).is_some());
+            assert_ne!(game.world.block_entity_extras(key), before);
+        });
+    }
+
+    /// `LevelWriteHost::set_block` in a level hook: the block entity goes with
+    /// its block and comes with the new one, as the Host's write does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_hook_set_block_replaces_whole_states_and_their_block_entities() {
+        use super::super::mod_api_host::LevelTicks;
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_world::chunk::BlockState;
+        use mod_api::{LevelWriteHost, NativeBlockUpdateFlags};
+
+        fn write(
+            game: &mut Game<'_>,
+            pos: [i32; 3],
+            state: BlockStateId,
+            flags: NativeBlockUpdateFlags,
+        ) -> bool {
+            game.with_level(|_, level, ticks| {
+                LevelWriteHost::set_block(&mut LevelTicks { level, ticks }, pos, state, flags)
+            })
+        }
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let state = |name: &str, age: Option<&str>| {
+                registry
+                    .resolve(&BlockState {
+                        name: name.into(),
+                        properties: age
+                            .map(|age| ("age".into(), age.into()))
+                            .into_iter()
+                            .collect(),
+                    })
+                    .unwrap()
+            };
+            let stone = state("minecraft:stone", None);
+            let chest = state("minecraft:chest", None);
+            let young = state("minecraft:wheat", Some("0"));
+            let grown = state("minecraft:wheat", Some("7"));
+            let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::KNOWN_SHAPE;
+            let key = (0, 64, 0);
+
+            assert!(write(game, [0, 64, 0], stone, flags));
+            assert!(game.world.block_entities.get(&key).is_none());
+            assert!(write(game, [0, 64, 0], chest, flags));
+            assert!(matches!(
+                game.world.block_entities.get(&key),
+                Some(BlockEntity::Chest(_))
+            ));
+            assert!(write(game, [0, 64, 0], stone, flags));
+            assert_eq!(game.world.block(0, 64, 0), stone);
+            assert!(game.world.block_entities.get(&key).is_none());
+
+            // A crop's whole-state growth: no block entity, and a repeat changes nothing.
+            assert!(write(game, [0, 64, 0], young, flags));
+            assert!(write(game, [0, 64, 0], grown, flags));
+            assert_eq!(game.world.block(0, 64, 0), grown);
+            assert!(game.world.block_entities.get(&key).is_none());
+            assert!(!write(game, [0, 64, 0], grown, flags));
+
+            // Unloaded, outside the build height and invalid: refused, nothing loaded.
+            let chunks = game.world.chunks.len();
+            assert!(!write(game, [16, 64, 0], stone, flags));
+            assert!(!write(game, [0, 10000, 0], stone, flags));
+            assert!(!write(game, [0, 64, 0], BlockStateId(u32::MAX), flags));
+            assert_eq!(game.world.chunks.len(), chunks);
+            assert_eq!(game.world.block(0, 64, 0), grown);
+
+            // The same Host write still creates the block entity.
+            assert!(game.native_set_block("minecraft:overworld", [1, 64, 0], chest, flags.bits()));
+            assert!(matches!(
+                game.world.block_entities.get(&(1, 64, 0)),
+                Some(BlockEntity::Chest(_))
+            ));
+
+            // A client's copy of the level is not the server's.
+            game.options.dedicated = None;
+            assert!(!write(game, [0, 64, 0], stone, flags));
+            assert_eq!(game.world.block(0, 64, 0), grown);
+        });
+    }
+}

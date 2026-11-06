@@ -1,15 +1,22 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
 mod catalog;
+mod dispatch_fixtures;
 mod exports;
+mod game_modules;
+#[doc(hidden)]
+pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 mod host;
+mod layout;
+mod part_table;
 pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
+pub use layout::native_hook_layout;
 use quote::ToTokens;
 use std::{
     collections::{BTreeMap, HashSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
 };
 use syn::{FnArg, ImplItem, Item, Pat, Type, visit::Visit, visit_mut::VisitMut};
@@ -33,21 +40,14 @@ fn game_methods(
     module: &str,
     methods: &mut Vec<(String, syn::ItemFn)>,
 ) -> Result<(), String> {
-    for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default();
-        let inner = if stem == "mod" {
-            module.to_owned()
-        } else {
-            format!("{module}::{stem}")
-        };
-        if path.is_dir() {
-            game_methods(&path, &inner, methods)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            file_game_methods(&path, &inner, methods)?;
+    for file in points::module_files(
+        module.to_owned(),
+        path.with_extension("rs"),
+        path.to_owned(),
+        false,
+    )? {
+        if file.module != module {
+            file_game_methods(&file.path, &file.module, methods)?;
         }
     }
     Ok(())
@@ -885,9 +885,8 @@ struct Sources {
     goal_view: String,
 }
 
-/// Parse and validate the catalog and hook/helper signatures.
-fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
-    let catalog = Catalog::load(root)?;
+/// The hand-written sources, in deterministic order; `fire.rs` includes generated dispatch.
+fn native_hook_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     let dir = root.join("crates/horizon-client/src/game/native_hooks");
     let mut paths = fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
@@ -898,9 +897,15 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             && path.file_name().is_some_and(|name| name != "fire.rs")
     });
     paths.sort();
+    Ok(paths)
+}
+
+/// Parse and validate the catalog and hook/helper signatures.
+fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
+    let catalog = Catalog::load(root)?;
     let mut files = Vec::new();
     let mut methods = Vec::new();
-    for path in paths {
+    for path in native_hook_files(root)? {
         let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
         let mut names = HashSet::new();
@@ -1005,22 +1010,22 @@ mod host_param;
 pub mod internals;
 pub mod internals_table;
 pub mod internals_view;
+pub mod notes;
 pub mod points;
-// Inactive until the dispatch/activation step of I4.
-#[expect(
-    dead_code,
-    reason = "site consumers arrive in the following stacked PRs"
-)]
 pub(crate) mod sites;
 pub mod staging;
 mod wasm;
+/// Shared registration emitter for component-model WIT worlds.
+pub mod wasm_imports;
 pub use build::{generate, generate_points};
+pub use notes::generate as generate_hook_notes;
 pub use wasm::{Wasm, generate as generate_wasm};
 
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.
 #[doc(hidden)]
 pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
     build::track(root)?;
+    dispatch_fixtures::generate(root, out_dir)?;
     let code = sources(root, FillMode::Ignore)?.hooks;
     fs::write(out_dir.join("mod_api_generated.rs"), code).map_err(|e| e.to_string())
 }
@@ -1082,7 +1087,7 @@ mod tests {
         assert_eq!(frame.version, 1);
         assert_eq!(
             frame.target,
-            "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre"
+            "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre"
         );
         assert!(!frame.scoped);
         let scoped = points
@@ -1624,6 +1629,7 @@ mod tests {
         let mut inputs: Vec<String> = [
             "crates/horizon-mod-api/src/hooks",
             "crates/horizon-mod-api/src/exports",
+            "crates/horizon-client/src/game.rs",
             "crates/horizon-client/src/game",
             "crates/horizon-mod-api/src/lib.rs",
         ]
@@ -1675,7 +1681,7 @@ mod tests {
             without_counterparts
         );
         std::fs::write(&first, original).unwrap();
-        let hooks = root.join("crates/horizon-client/src/game/native_hooks/mod.rs");
+        let hooks = root.join("crates/horizon-client/src/game/native_hooks/base.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
         let call = "self.fire_item_damaged(player, name, item, amount, cancel);";
         assert_eq!(shipped.matches(call).count(), 1);
@@ -1716,10 +1722,18 @@ mod tests {
                 .contains("item_damaged: needs a #[hook(...)] attribute")
         );
         std::fs::write(&declared, shipped_declarations).unwrap();
+        let second = root.join("crates/horizon-client/src/game/native_hooks/client_tick_pre.rs");
+        let second_shipped = std::fs::read_to_string(&second).unwrap();
+        std::fs::write(
+            &second,
+            second_shipped.replace("self.fire_client_tick_pre();", "let _ = ();"),
+        )
+        .unwrap();
         let decoy = hooks.with_file_name("decoy.rs");
         let decoy_source = "impl Game<'_> { /// mentions fn native_item_damaged(\n fn unrelated(&self) { let _ = self; } }\n";
         std::fs::write(&decoy, decoy_source).unwrap();
         super::fill_hooks(&root).unwrap();
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), second_shipped);
         assert_eq!(std::fs::read_to_string(decoy).unwrap(), decoy_source);
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");

@@ -112,6 +112,7 @@ fn table() -> &'static Table {
                 hash: hash("horizon_client::game::Game"),
                 node: game,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
             Type {
@@ -119,6 +120,7 @@ fn table() -> &'static Table {
                 hash: hash("horizon_client::game::Child"),
                 node: child,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
             Type {
@@ -126,6 +128,7 @@ fn table() -> &'static Table {
                 hash: "",
                 node: record,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
         ])),
@@ -289,6 +292,69 @@ fn internals_accesses_against_native() {
             report.push_str(&format!(
                 "| {access} | {fields} | {:.2} | {:.2} |\n",
                 ns[0], ns[1]
+            ));
+        }
+    }
+    report.push_str("\n### Reused list transport\n\n128 twelve-field batches per listener, baseline subtracted. Host counts include journal growth; guest counts cover only the access loop.\n\n| Access | ns/batch | Host alloc/batch | Host realloc/batch | Guest alloc/batch | Guest realloc/batch |\n| --- | ---: | ---: | ---: | ---: | ---: |\n");
+    for mode in ["get12-batch", "set12-batch"] {
+        const BATCHES: i64 = 128;
+        assert_eq!(wasm(mode, BATCHES), native(mode, BATCHES));
+        let base = super::timed(100, || {
+            std::hint::black_box(wasm(mode, 0));
+        });
+        let work = super::timed(100, || {
+            std::hint::black_box(wasm(mode, BATCHES));
+        });
+        let count = |batches| {
+            super::allocations::start(true);
+            std::hint::black_box(wasm(mode, batches));
+            super::allocations::stop()
+        };
+        let baseline = count(0);
+        let allocations = count(BATCHES);
+        let host = (allocations.0 - baseline.0, allocations.1 - baseline.1);
+        if mode.starts_with("get") {
+            assert!(
+                host.0 <= BATCHES as usize && host.1 <= 2 * BATCHES as usize,
+                "get adds no allocation above Wasmtime's per-import borrow ledger: {host:?}"
+            );
+        }
+        let guest: Vec<usize> = wasm(&format!("{mode}-alloc"), BATCHES)
+            .1
+            .split_whitespace()
+            .map(|n| n.parse().unwrap())
+            .collect();
+        report.push_str(&format!(
+            "| {mode} | {:.2} | {:.4} | {:.4} | {:.4} | {:.4} |\n",
+            (work.as_secs_f64() - base.as_secs_f64()).max(0.0) * 1e9 / BATCHES as f64,
+            host.0 as f64 / BATCHES as f64,
+            host.1 as f64 / BATCHES as f64,
+            guest[0] as f64 / BATCHES as f64,
+            guest[1] as f64 / BATCHES as f64
+        ));
+        if mode.starts_with("set") {
+            super::allocations::start(true);
+            let mut journal = horizon_mod_wasm::journal::Journal::default();
+            for i in 0..BATCHES {
+                for field in 0..12 {
+                    journal.set(
+                        horizon_mod_wasm::journal::Path {
+                            root: 0,
+                            steps: Vec::new(),
+                        },
+                        field,
+                        Value::S(i),
+                    );
+                }
+            }
+            let owned = super::allocations::stop();
+            assert!(
+                host.0 <= owned.0 + BATCHES as usize && host.1 <= owned.1 + 2 * BATCHES as usize,
+                "set adds no allocation above the journal and Wasmtime borrow ledger: {host:?}"
+            );
+            report.push_str(&format!(
+                "\nJournal alone, 1,536 scalar root writes: {} allocations, {} reallocations.\n\n",
+                owned.0, owned.1
             ));
         }
     }

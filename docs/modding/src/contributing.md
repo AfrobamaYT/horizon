@@ -20,9 +20,22 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
   `#[allow(clippy::too_many_arguments)]`. The hooks that were already over the limit are listed in
   `FLAT_TARGETS_OVER_THE_LIMIT` in the same file; that list only shrinks (convert a hook, delete its line) and a new hook
   is never added to it. The carrier is host-internal plain data, never on wasm, and no modder sees it.
+- **Hook notes:** keep longer prose in a `#[notes = r#"..."#]` attribute on its hook or helper declaration,
+  heading included. General catalog prose lives in `hooks/notes.rs`. `mdbook build docs/modding` renders
+  the Hook notes chapter from those attributes without writing a Markdown source page. To preview just
+  that chapter, run `cargo run --quiet -p xtask -- mod-api notes`; do not commit its output.
 - **A guide page:** `docs/modding/src/`. Code in a page is `{{#include}}`d from `docs/modding/examples`, which
   compiles, so a change to the API that breaks an example fails the build.
 - **A mod API change** updates its fragment `doc` and any page it affects in the same PR.
+- **Trait-mod and native-mod concepts:** edit one source in `concepts/trait-mods/` or
+  `how-to/native-mods/`. Sorted filenames set reading order; the leading `<!-- chapter: Title -->`
+  supplies the navigation title. New files are discovered automatically, without a shared list edit.
+  The old pages are assembled from these sources to preserve published links and heading anchors.
+  Do not append prose to the aggregate pages or remove an existing heading anchor.
+  Each `legacy-anchors.txt` freezes the pre-split published anchors; never extend it per new concept.
+  Optional `<!-- separator: N -->` metadata preserves original inter-section blank lines in aggregates
+  without trailing blank lines in source files; new pages default to one blank line.
+  Use relative links (inline or reference-style); root-relative links are refused.
 - `src/llms.txt` is the index for agents; keep it in step with `SUMMARY.md`.
 
 Build the book with `mdbook build docs/modding` and the reference with `cargo doc -p horizon-mod-api --no-deps`.

@@ -1,7 +1,7 @@
 //! Players that are about to arrive from another server, and a connected
 //! player read out of this one and sent away: the control endpoint's
 //! `player-expect`, `player-drop`, `player-export`, `player-release` and
-//! `player-confirm` (`game/dedicated/transfer.rs` runs them; `player-import` is
+//! `player-confirm` (`game/interface/dedicated/transfer.rs` runs them; `player-import` is
 //! `import.rs`'s).
 //!
 //! A proxy that moves a player between two servers first tells the target
@@ -2125,7 +2125,7 @@ mod hub_tests {
         (record, hub, seen, mine)
     }
 
-    /// What the game does with a request (`game/dedicated/transfer.rs`), without the disk: the
+    /// What the game does with a request (`game/interface/dedicated/transfer.rs`), without the disk: the
     /// import, then the placing unless `"place": false`.
     fn import_player(
         hub: &mut Hub,

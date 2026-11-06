@@ -14,8 +14,9 @@ pub trait DrawContexts {
 }
 
 pub trait Hooks {
-    /// The world frame's local visual sources. Push requests; Horizon validates
-    /// and limits them before rendering. Called only while a world is visible.
+    /// The world frame's local, world-space rim and colored-light sources.
+    /// Push requests; Horizon validates and limits them before rendering.
+    /// Called only while a world is visible.
     #[hook(side = "client", contract = "listen")]
     fn visuals();
     /// At most 32 pairs of already-loaded base and transparent overlay sprites.
@@ -122,7 +123,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_changed"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_changed"
     )]
     fn block_changed();
     /// An authoritative server is about to deliver `neighborChanged`.
@@ -136,7 +137,7 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         version = 2,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_neighbor_changed"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_neighbor_changed"
     )]
     fn neighbor_changed();
     /// An authoritative server's `ServerLevel.tickChunk` is about to
@@ -154,7 +155,7 @@ pub trait Hooks {
         out = "handled",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_random_tick"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_random_tick"
     )]
     fn random_tick();
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a
@@ -169,7 +170,7 @@ pub trait Hooks {
         out = "handled",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_tick_block"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_tick_block"
     )]
     fn tick_block();
     /// An authoritative server is about to compute the state the block
@@ -191,7 +192,7 @@ pub trait Hooks {
         out = "new",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_update_shape"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_update_shape"
     )]
     fn update_shape(
         dimension: LevelDimension,
@@ -252,7 +253,7 @@ pub trait Hooks {
         out = "entity",
         scope = "block_entity",
         key = "block",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_entity"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_entity"
     )]
     fn block_entity();
     /// Whether block `block`'s block entity ticks (`EntityBlock.getTicker`):
@@ -300,7 +301,8 @@ pub trait Hooks {
     )]
     fn block_entity_update_tag();
     /// Block `block`'s block entity has item slots (a `WorldlyContainer`):
-    /// set `container` when the block is yours. Asked once for each mod
+    /// hoppers, comparators and breaking the block use them as vanilla's containers.
+    /// Set `container` when the block is yours. Asked once for each mod
     /// block when the ticking table is built; at most 256 slots, and slot
     /// numbers past the count are left out. Its `menu`, one of
     /// `containers::MOD_MENUS` or a content mod's menu type
@@ -509,7 +511,7 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_spread"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_spread"
     )]
     fn block_spread();
     /// On an authoritative server, the piston at `piston` is about to push
@@ -526,7 +528,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "PistonEvent.Pre",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_pre"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_piston_pre"
     )]
     fn piston_pre(
         dimension: LevelDimension,
@@ -548,7 +550,7 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PistonEvent.Post",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_post"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_piston_post"
     )]
     fn piston_post();
     /// An explosion at `center` in `dimension` (`minecraft:overworld`) is
@@ -648,7 +650,7 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_signal"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_signal"
     )]
     fn block_signal();
     /// `BlockState.isSignalSource`: set `source` for a block of yours that
@@ -659,7 +661,7 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_is_signal_source"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_signal_source"
     )]
     fn is_signal_source();
     /// The player-health HUD rows, once a frame the HUD draws them
@@ -753,7 +755,7 @@ pub trait Hooks {
         out = "canceled",
         host = "level",
         neoforge = "LivingIncomingDamageEvent",
-        target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_incoming_damage"
+        target = "horizon_client::game::native_hooks::base::HitLevel<'_>::native_living_incoming_damage"
     )]
     fn living_incoming_damage(
         entity: i32,
@@ -771,9 +773,9 @@ pub trait Hooks {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 told item entities, experience orbs and mobs; it now
-    /// tells every kind `native_entity_join_level` does (`kind` is the type), each
-    /// once, when the game next notices it gone (the tick or action that removed
+    /// It only hears. It tells every kind `native_entity_join_level` does
+    /// (`kind` is the type), each once, when the game next notices it gone
+    /// (the tick or action that removed
     /// it). Check `kind`. Server-side.
     #[hook(side = "server", contract = "listen")]
     fn entity_leave_level();
@@ -873,7 +875,8 @@ pub trait Hooks {
         target = "mod_api::render::native_world_drawn"
     )]
     fn world_drawn();
-    /// Asked as a frame is built and drawn: set what your mod needs.
+    /// Asked as a frame is built and drawn: set what your mod needs in
+    /// `RenderNeeds`, including entity runs and the world's depth without a shader pack.
     #[hook(
         side = "client",
         contract = "collect",
@@ -898,7 +901,7 @@ pub trait Hooks {
         out = "output",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_has_analog_output"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_has_analog_output"
     )]
     fn has_analog_output();
     /// `BlockState.getAnalogOutputSignal`: the signal a comparator reads from
@@ -919,7 +922,7 @@ pub trait Hooks {
         out = "output",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_analog_output"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_analog_output"
     )]
     fn analog_output();
     /// Register namespaced NBT component types before content loads.
@@ -978,7 +981,7 @@ pub trait Hooks {
         out = "survives",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_can_survive"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_can_survive"
     )]
     fn can_survive();
     /// On an authoritative server, `VegetationBlock.mayPlaceOn` for the
@@ -994,7 +997,7 @@ pub trait Hooks {
         out = "may",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_may_place_on"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_may_place_on"
     )]
     fn may_place_on();
     /// Draw the mod block entity at `pos`, of block `block`
@@ -1051,7 +1054,7 @@ pub trait Hooks {
         out = "valid",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_is_valid_bonemeal_target"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_valid_bonemeal_target"
     )]
     fn is_valid_bonemeal_target();
     /// `BonemealableBlock.isBonemealSuccess` for a block that answered
@@ -1066,7 +1069,7 @@ pub trait Hooks {
         out = "success",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_is_bonemeal_success"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_bonemeal_success"
     )]
     fn is_bonemeal_success();
     /// `BonemealableBlock.performBonemeal` for a block that answered
@@ -1080,7 +1083,7 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_perform_bonemeal"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_perform_bonemeal"
     )]
     fn perform_bonemeal();
     /// `Block.stepOn` for a mod block, on its authoritative server level.
@@ -1125,7 +1128,9 @@ pub trait Hooks {
     /// `LootTableEvents.MODIFY_DROPS`); `context` says what dropped them and
     /// how, and it is called even when `drops` is empty. A player's use drops
     /// through it too (`NativeLootDrops::used`: shears, a brush, an item
-    /// frame), with that player named. It hears blocks that a
+    /// frame), with that player named. Lead drops from untying or cutting a
+    /// leash, and from a mob a player killed while leashed, pass through here
+    /// too, with that player named. It hears blocks that a
     /// player, an explosion or a mob breaks, not other breaks (leaves decaying,
     /// a torch losing its wall, a piston, `/setblock ... destroy`), nor a
     /// creative break or a tool that can't harvest the block, nor experience.
@@ -1159,7 +1164,7 @@ pub trait Hooks {
         out = "answer",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_state_for_placement"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_state_for_placement"
     )]
     fn state_for_placement();
     /// A `minecraft:post_attack` effect of a mod's own kind, on a mob a
@@ -1197,7 +1202,14 @@ pub trait Hooks {
         cancellable = false
     )]
     fn screen_render_post();
-    /// NeoForge 26.3's ModifyDefaultComponentsEvent: once per item after registries freeze, before the owning load publishes immutable defaults. Receives a read-only DataLoadContext with the actual ServerDataLoad or ClientPreload origin, frozen registry names, settings captured once for loaded packages at this load boundary, and the shared LoadedMods view. Readers and datapack reloads do not replay this event. No runtime Host, world handles or transaction access.
+    /// NeoForge 26.3's ModifyDefaultComponentsEvent: set or remove entries in
+    /// `components`, the default component map for `item`, including vanilla items.
+    /// Asked once per item after registries freeze, before the owning load
+    /// publishes immutable defaults. Receives a read-only DataLoadContext with
+    /// the actual ServerDataLoad or ClientPreload origin, frozen registry names,
+    /// settings captured once for loaded packages at this load boundary, and
+    /// the shared LoadedMods view. Readers and datapack reloads do not replay
+    /// this event. No runtime Host, world handles or transaction access.
     #[hook(
         side = "both",
         contract = "collect",
@@ -1519,7 +1531,9 @@ pub trait Hooks {
     /// is where a mod recomputes them.
     /// Contributed files sit below the world's own data packs: a pack's file
     /// for the same path still overrides a mod's. Server-side (the single
-    /// player's integrated server included).
+    /// player's integrated server included). Listener applies run first. A later reload refusal
+    /// preserves the old engine generation, but does not undo callback effects. Contributions
+    /// share one list, so a failed file cannot be attributed to a particular mod.
     #[hook(side = "server", contract = "collect", out = "files")]
     fn data_pack_files();
     /// Change the colours of `biome` (`minecraft:plains`) on this client: the
@@ -1788,7 +1802,7 @@ pub trait Hooks {
         out = "canceled",
         host = "level",
         neoforge = "LivingKnockBackEvent",
-        target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_knockback"
+        target = "horizon_client::game::native_hooks::base::HitLevel<'_>::native_living_knockback"
     )]
     fn living_knockback(
         entity: i32,
@@ -2227,6 +2241,15 @@ pub trait Hooks {
     /// side, before any resource loads: push the same ones every time, from
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
+    #[notes = r#"## Villager farming
+
+Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
+`native_blocks`. A crop block's generated item is its seed: add that item to
+`minecraft:villager_plantable_seeds` to let farmers plant its default block state from their inventory.
+Untagged items and tagged items without a block are skipped. Crop maturity follows the template's class:
+beetroots mature at age 3, ordinary crops at 7; torchflower crops never reach their maximum age 2 while
+still crops. Pitcher crops are not `CropBlock`s and are not harvested by this behavior. Farming still
+requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "both",
         contract = "collect",
@@ -2505,7 +2528,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BellRingEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_bell_ring"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_bell_ring"
     )]
     fn bell_ring();
     /// A server guest's block-breaking animation changed to `progress` at
@@ -2524,7 +2547,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BlockBurnEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_burn"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_burn"
     )]
     fn block_burn();
     /// A block finished cooking `item` into `result` at `pos`.
@@ -2561,7 +2584,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_fade"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_fade"
     )]
     fn block_fade();
     /// A dispenser at `pos` failed to dispense `item`. Server-side.
@@ -2571,15 +2594,16 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn block_failed_dispense();
-    /// Precipitation is about to form or add to a block at `pos`. `from` and
-    /// `to` are block state IDs. Set `cancel` to keep the old state. Server-side.
+    /// Precipitation is about to form ice or place or thicken snow at `pos`.
+    /// `from` and `to` are block state IDs. Set `cancel` to keep the old state.
+    /// Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_form"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_form"
     )]
     fn block_form();
     /// On an authoritative server, fire is about to be placed at `pos` by
@@ -2592,7 +2616,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BlockIgniteEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_ignite"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_ignite"
     )]
     fn block_ignite();
     /// A guest's block inventory lock check at `pos`. `locked` is the
@@ -2671,7 +2695,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's CauldronLevelChangeEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_cauldron_level_changed"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_cauldron_level_changed"
     )]
     fn cauldron_level_changed(
         dimension: LevelDimension,
@@ -2701,7 +2725,7 @@ pub trait Hooks {
         cancellable = true
     )]
     fn item_consumption_teleport();
-    /// A compostable item was added to the composter at `pos`.
+    /// A player added a compostable item to the composter at `pos`.
     #[hook(
         side = "server",
         contract = "listen",
@@ -2766,7 +2790,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_dragon_egg_form"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_dragon_egg_form"
     )]
     fn dragon_egg_form();
     /// A server player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. The player's state is not swapped in.
@@ -2972,7 +2996,7 @@ pub trait Hooks {
         out = "odds",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_fire_odds"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_fire_odds"
     )]
     fn fire_odds();
     /// On an authoritative server, `CampfireBlock.isSmokeSource` for the
@@ -2986,7 +3010,7 @@ pub trait Hooks {
         out = "smoke",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_smoke_source"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_smoke_source"
     )]
     fn smoke_source();
     /// A firework rocket completed its explosion effects.
@@ -3005,7 +3029,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_fluid_level_change"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_fluid_level_change"
     )]
     fn fluid_level_change();
     /// The frame rate this window is about to be held to: Max Framerate after the
@@ -3066,7 +3090,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no direct equivalent; Bukkit's InventoryPickupItemEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_hopper_pickup_item"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_hopper_pickup_item"
     )]
     fn hopper_pickup_item();
     /// A recipe ingredient of a mod's own kind: the entry named a type in a
@@ -3169,7 +3193,7 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)",
         paper = "LeavesDecayEvent",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_leaves_decay"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_leaves_decay"
     )]
     fn leaves_decay();
     /// A server lightning bolt is about to be created. `cause` is `weather`,
@@ -3224,7 +3248,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_moisture_change"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_moisture_change"
     )]
     fn moisture_change();
     /// A player took an anvil's result at `pos` and the levels, inputs and anvil wear are done (`AnvilCraftEvent.Post`); a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not called when `native_anvil_craft_pre` cancelled.
@@ -4284,7 +4308,7 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_sponge_absorb"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_sponge_absorb"
     )]
     fn sponge_absorb();
     /// A guest asked to complete `command`; `suggestions` may be added to or
@@ -4408,9 +4432,13 @@ pub trait Hooks {
     fn world_saved();
     /// An entity that can't breathe and has no air (`LivingDrownEvent`, posted
     /// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
-    /// drowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;
-    /// changes to the event field do not affect the vanilla entity event. Asked on
-    /// servers, for the entities `native_living_breathe` is. It is given the loop `context` of the server that ticks the entity (its registries, settings and mod list), because it fires inside the tick's own air and damage update.
+    /// drowns at -20 air, for 2 damage and 8 bubbles. Change `is_drowning` or
+    /// `damage_amount`, or cancel to skip drowning this tick. Bubble count is
+    /// read-only; changes to the event field do not affect the vanilla entity
+    /// event. Asked on servers, for the entities `native_living_breathe` is.
+    /// It is given the loop `context` of the server that ticks the entity (its
+    /// registries, settings and mod list), because it fires inside the tick's
+    /// own air and damage update.
     #[hook(
         side = "server",
         contract = "cancel",

@@ -1491,6 +1491,8 @@ impl BoxReach {
 
 #[derive(Clone, Debug)]
 pub struct Mob {
+    /// Entity-owned registration metadata; content clones are detached.
+    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
@@ -3369,6 +3371,7 @@ impl Mob {
     pub fn new_remote(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
         let random = entity_random(id, position);
         let mut mob = Self {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id,
             health: kind.max_health,
@@ -3562,21 +3565,6 @@ impl Mob {
     }
     /// LivingEntity.hurtServer: invulnerability frames, armor, knockback and
     /// the last-hurt-by bookkeeping goals read.
-    /// The `armor` and `armor_toughness` modifiers of worn humanoid armour.
-    pub fn worn_armor(&self) -> (f32, f32) {
-        let body = if equine::is_equine(self.species()) {
-            self.extra
-                .body_id()
-                .map_or((0.0, 0.0), spawning::horse_armor_stats)
-        } else {
-            (0.0, 0.0)
-        };
-        horizon_items::equipment::ARMOR
-            .into_iter()
-            .filter_map(|slot| self.extra.slot_id(slot))
-            .map(spawning::armor_stats)
-            .fold(body, |(a, t), (x, y)| (a + x, t + y))
-    }
     /// `damage` of a blow whose causing entity is `aim` (`SulfurCube.knockback` reads it).
     pub fn damage_aimed(
         &mut self,
@@ -5901,8 +5889,6 @@ mod armor_hurt_tests {
             slot(EquipmentSlot::Body),
             Some("minecraft:diamond_horse_armor".to_owned())
         );
-        let (armor, _) = m.worn_armor();
-        assert!(armor > 0.0, "the body piece armors the horse");
         // Death keeps both (`Mob.dropCustomDeathLoot` by slot).
         let body = crate::mobs::drops::slot_item(&m, "body").unwrap();
         let head = crate::mobs::drops::slot_item(&m, "head").unwrap();
@@ -6309,6 +6295,7 @@ mod effect_refusal_tests {
     }
 }
 crate::impl_joined!(Mob);
+horizon_world::impl_attachment_lifetime!(Mob);
 
 #[cfg(test)]
 mod named_damage_tests {
