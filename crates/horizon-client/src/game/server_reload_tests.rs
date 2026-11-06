@@ -92,6 +92,42 @@ fn write(path: &Path, bytes: impl AsRef<[u8]>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, bytes).unwrap();
 }
+// The generated table directory deliberately contains no copied raw mod data.
+// Fixtures publish the same retained data views as the real content loader.
+fn build_mod_resources(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[horizon_client::mod_content::ContentMod],
+    prepared: &Path,
+    inventory: &horizon_mods::enabled::EnabledMods,
+) -> horizon_assets::resource_source::ResourceRoot {
+    horizon_client::mod_content::build(base, jar_store, mods, prepared, inventory).unwrap();
+    let resolved = horizon_client::mod_content::resolved_resources(
+        base,
+        prepared.to_owned(),
+        jar_store,
+        mods,
+        prepared.with_extension("cache"),
+    )
+    .unwrap();
+    for name in resolved.data_changes().list("data/reload_test/machines/") {
+        assert!(
+            !prepared.join(&name).exists(),
+            "raw mod data was copied: {name}"
+        );
+    }
+    resolved
+}
+fn install_mod_resources(
+    game: &mut crate::game::Game<'_>,
+    root: &horizon_assets::resource_source::ResourceRoot,
+) {
+    game.options.resources = root.prepared().to_owned();
+    game.pack.source = root.source().clone();
+    game.pack.data_source = root.data().clone();
+    game.pack.data_changes = root.data_changes().clone();
+}
+
 fn request(root: &Path) -> WorldRequest {
     WorldRequest {
         rule_registry: std::sync::Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
@@ -161,7 +197,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
     let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
     let resources = root.join("resources");
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    horizon_client::mod_content::build(
+    let resources = build_mod_resources(
         &base,
         jar_file.parent().unwrap(),
         &[horizon_client::mod_content::ContentMod {
@@ -174,8 +210,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
             "reload_test".into(),
             horizon_mods::Side::Both,
         )]),
-    )
-    .unwrap();
+    );
     let world = root.join("world");
     let function = world.join("datapacks/test/data/reload_test/function/keep.mcfunction");
     write(&world.join("datapacks/test/pack.mcmeta"), "{}");
@@ -185,7 +220,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
         r#"{"enabled":["file/test"],"disabled":[]}"#,
     );
     with_game(|game| {
-        game.options.resources = resources.clone();
+        install_mod_resources(game, &resources);
         game.load_world(request(&world)).unwrap();
         let previous = game.fns.store.functions["reload_test:keep"].clone();
         let enabled = game.fns.enabled().to_vec();
@@ -207,7 +242,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
         let reported = game.cmd_reload().unwrap_err().message.plain();
         assert!(reported.contains("reload_test: original 1:"), "{reported}");
         assert!(reported.contains(jar.sha512()), "{reported}");
-        assert_eq!(game.options.resources, resources);
+        assert_eq!(game.options.resources, resources.prepared().to_owned());
         assert_eq!(game.fns.store.functions["reload_test:keep"], previous);
         assert_eq!(game.fns.enabled(), enabled);
         write(&jar_file, &original);
@@ -239,7 +274,7 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
     let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
     let resources = root.join("resources");
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    horizon_client::mod_content::build(
+    let resources = build_mod_resources(
         &base,
         Path::new(""),
         &[horizon_client::mod_content::ContentMod {
@@ -252,8 +287,7 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
             "reload_test".into(),
             horizon_mods::Side::Both,
         )]),
-    )
-    .unwrap();
+    );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
     write(&pack.join("pack.mcmeta"), "{}");
@@ -280,7 +314,7 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
     .into();
     mod_api::testing::with_mods(mods, || {
         with_game(|game| {
-            game.options.resources = resources;
+            install_mod_resources(game, &resources);
             game.load_world(request(&world)).unwrap();
             assert_eq!(
                 *live.lock().unwrap(),
@@ -417,7 +451,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
     let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
     let resources = root.join("resources");
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    horizon_client::mod_content::build(
+    let resources = build_mod_resources(
         &base,
         Path::new(""),
         &[horizon_client::mod_content::ContentMod {
@@ -430,8 +464,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
             "reload_test".into(),
             horizon_mods::Side::Both,
         )]),
-    )
-    .unwrap();
+    );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
     write(&pack.join("pack.mcmeta"), "{}");
@@ -454,7 +487,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
         .into(),
         || {
             with_game(|game| {
-                game.options.resources = resources;
+                install_mod_resources(game, &resources);
                 game.load_world(request(&world)).unwrap();
                 assert_eq!(
                     *live.lock().unwrap(),
@@ -617,7 +650,7 @@ fn server_reload_retains_listeners_for_other_hooks() {
     let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
     let resources = root.join("resources");
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    horizon_client::mod_content::build(
+    let resources = build_mod_resources(
         &base,
         Path::new(""),
         &[horizon_client::mod_content::ContentMod {
@@ -630,8 +663,7 @@ fn server_reload_retains_listeners_for_other_hooks() {
             "reload_test".into(),
             horizon_mods::Side::Both,
         )]),
-    )
-    .unwrap();
+    );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
     write(&pack.join("pack.mcmeta"), "{}");
@@ -657,7 +689,7 @@ fn server_reload_retains_listeners_for_other_hooks() {
     mod_api::testing::with_mods(mods, || {
         with_game(|game| {
             assert!(game.native_reload_resources().listener(&key).is_none());
-            game.options.resources = resources;
+            install_mod_resources(game, &resources);
             game.load_world(request(&world)).unwrap();
             let kept = game.native_reload_resources().listener(&key).unwrap();
             assert_eq!(*kept.live.lock().unwrap(), 2);
