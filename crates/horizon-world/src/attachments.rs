@@ -1,4 +1,7 @@
 //! Typed native-mod data attached to server-owned holders.
+#[doc(hidden)]
+pub mod index;
+
 use std::{
     any::Any,
     collections::{BTreeMap, BTreeSet},

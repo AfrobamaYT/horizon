@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use super::Entry;
+use super::AttachmentEntry;
 use crate::nbt::JavaString;
 
 /// An already-resolved attachment namespace and name.
@@ -18,7 +18,7 @@ pub struct AttachmentRow<H> {
     /// The ready-to-use holder identity; iteration needs no lookup or conversion.
     pub holder: H,
     /// Shared with the holder's attachment map, never copied by snapshot acquisition.
-    pub entry: Arc<Entry>,
+    pub entry: Arc<AttachmentEntry>,
 }
 
 /// Authority to publish one registration's changes. Cloning or dropping this token has
@@ -41,7 +41,7 @@ struct Bucket<H> {
 }
 
 impl<H: Copy + Eq + Hash> Bucket<H> {
-    fn set(&mut self, holder: H, entry: Arc<Entry>) {
+    fn set(&mut self, holder: H, entry: Arc<AttachmentEntry>) {
         let rows = Arc::make_mut(&mut self.rows);
         let row = AttachmentRow { holder, entry };
         if let Some(&slot) = self.slots.get(&holder) {
@@ -101,7 +101,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     pub fn register(
         &mut self,
         holder: H,
-        entries: impl IntoIterator<Item = (AttachmentKey, Arc<Entry>)>,
+        entries: impl IntoIterator<Item = (AttachmentKey, Arc<AttachmentEntry>)>,
     ) -> AttachmentOwner<H> {
         if let Some(previous) = self.owners.remove(&holder) {
             self.remove_memberships(holder, previous.keys);
@@ -138,7 +138,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         &mut self,
         token: &AttachmentOwner<H>,
         key: &AttachmentKey,
-        entry: Arc<Entry>,
+        entry: Arc<AttachmentEntry>,
     ) -> bool {
         let Some(owner) = self.owners.get_mut(&token.holder) else {
             return false;
@@ -209,8 +209,10 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attachments::{AttachmentCodec, AttachmentType, Attachments, Holder};
-    use crate::nbt::{Compound, Tag};
+    use crate::attachments::{
+        AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
+    };
+    use crate::nbt::Tag;
 
     static VALUE: AttachmentType<i32> = AttachmentType {
         namespace: "test",
@@ -218,7 +220,10 @@ mod tests {
         default: || 0,
         codec: Some(AttachmentCodec {
             encode: |n| Ok([("value".into(), Tag::Int(*n))].into()),
-            decode: |_| unreachable!(),
+            decode: |form| match form.get(&"value".into()) {
+                Some(Tag::Int(n)) => Ok(*n),
+                _ => Err(AttachmentError::Decode),
+            },
         }),
         copy_on_death: false,
         sync: false,
@@ -228,21 +233,15 @@ mod tests {
         ("test".into(), name.into())
     }
 
-    fn entry(n: i32) -> Arc<Entry> {
+    fn entry(n: i32) -> Arc<AttachmentEntry> {
         let mut map = Attachments::default();
         VALUE.set(&mut map, Holder::Level, n).unwrap();
-        map.entries.values().next().unwrap().clone()
+        map.entry("test", "value").unwrap().unwrap().clone()
     }
 
     fn values(rows: &[AttachmentRow<u32>]) -> Vec<(u32, i32)> {
         rows.iter()
-            .map(|row| {
-                let form: &Compound = row.entry.synced_value().unwrap();
-                let Tag::Int(n) = form[&"value".into()] else {
-                    panic!("not an integer")
-                };
-                (row.holder, n)
-            })
+            .map(|row| (row.holder, *row.entry.read(&VALUE).unwrap()))
             .collect()
     }
 
@@ -259,6 +258,23 @@ mod tests {
         index.register(3, [(key("value"), entry(30))]);
         assert_eq!(values(&before), [(1, 10), (2, 20)]);
         assert_eq!(values(&index.snapshot(&key("value"))), [(1, 11), (3, 30)]);
+    }
+
+    #[test]
+    fn saved_entries_join_without_a_typed_read_and_remain_snapshot_values() {
+        let mut source = Attachments::default();
+        VALUE.set(&mut source, Holder::Level, 42).unwrap();
+        let nbt = source.to_nbt();
+        let loaded = Attachments::from_nbt(nbt.clone());
+        let raw = loaded.entry("test", "value").unwrap().unwrap().clone();
+        let mut index = AttachmentIndex::default();
+        let owner = index.register(1, [(key("value"), raw.clone())]);
+        let before = index.snapshot(&key("value"));
+        assert!(Arc::ptr_eq(&raw, &before[0].entry));
+        index.set(&owner, &key("value"), entry(99));
+        assert_eq!(values(&before), [(1, 42)]);
+        assert_eq!(values(&index.snapshot(&key("value"))), [(1, 99)]);
+        assert_eq!(loaded.to_nbt(), nbt);
     }
 
     #[test]
