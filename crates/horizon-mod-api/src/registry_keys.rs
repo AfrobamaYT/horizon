@@ -312,26 +312,28 @@ thread_local! {
     static BLOCKS: std::cell::RefCell<Option<Vec<ResolvedBlock>>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Rebind this game's slots at the owning load/reload boundary. A refused reload clears the
-/// mapping, so no operation can accidentally use states from the previous tables.
-pub fn resolve_blocks(
+/// Prepare this game's block slots without changing its current mapping.
+pub fn prepare_blocks(
     mut resolve: impl FnMut(&str) -> Option<ResolvedBlock>,
-) -> Result<(), Vec<String>> {
-    let result = crate::part_table::requested_keys()
+) -> Result<Vec<ResolvedBlock>, Vec<String>> {
+    crate::part_table::requested_keys()
         .blocks
         .resolve(&mut resolve, |mod_id, id| {
             format!("mod {mod_id} requested unknown block {id}")
-        });
-    BLOCKS.with(|blocks| {
-        *blocks.borrow_mut() = None;
-        match result {
-            Ok(values) => {
-                *blocks.borrow_mut() = Some(values);
-                Ok(())
-            }
-            Err(errors) => Err(errors),
-        }
-    })
+        })
+}
+
+/// Install a prepared mapping on its owning game thread.
+pub fn install_blocks(values: Vec<ResolvedBlock>) {
+    BLOCKS.with(|blocks| *blocks.borrow_mut() = Some(values));
+}
+
+/// Rebind this game's slots at the owning load boundary.
+pub fn resolve_blocks(
+    resolve: impl FnMut(&str) -> Option<ResolvedBlock>,
+) -> Result<(), Vec<String>> {
+    install_blocks(prepare_blocks(resolve)?);
+    Ok(())
 }
 
 /// The current numeric mapping for a trusted key. None means this thread has no resolved

@@ -2408,6 +2408,7 @@ struct WorldTables {
     items: Items,
     recipes: Recipes,
     stations: horizon_client::stations::StationData,
+    reload_sources: Option<Arc<horizon_client::crafting::ResolvedSources>>,
     /// The values of the data map types native mods registered
     /// (`native_data_map_types`).
     data_maps: native_data_maps::DataMaps,
@@ -2415,6 +2416,18 @@ struct WorldTables {
     /// over the game's own, by registry (`TagLoader.loadTagsForExistingRegistries`):
     /// what the predicates' `#tag`s of those registries read.
     pack_tags: HashMap<&'static str, HashMap<String, HashSet<String>>>,
+}
+
+struct PreparedParts {
+    blocks: Vec<mod_api::__private::ResolvedBlock>,
+    tags: HashMap<String, horizon_world::level::data::BlockSet>,
+    parts: Option<mod_api::Parts>,
+}
+
+struct PreparedWorldReload {
+    tables: Option<WorldTables>,
+    health: horizon_client::health::HealthResources,
+    parts: PreparedParts,
 }
 
 impl WorldTables {
@@ -13982,7 +13995,9 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         let stack = self.reload_datapacks(false, &level.enabled_features)?;
-        (self.world_tables, self.health_resources) = self.build_world_tables(&stack, false)?;
+        let root = self.options.resources.clone();
+        (self.world_tables, self.health_resources) =
+            self.build_world_tables(&stack, false, &root, self.mods.data_switched)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
@@ -22203,6 +22218,8 @@ impl Game<'_> {
         &mut self,
         stack: &functions::PackStack,
         reload: bool,
+        root: &std::path::Path,
+        data_switched: bool,
     ) -> Result<(Option<WorldTables>, horizon_client::health::HealthResources)> {
         let phase = self.mod_phase.clone();
         let _reload = phase
@@ -22216,7 +22233,6 @@ impl Game<'_> {
         let overlay = horizon_world::loot::PackOverlay { files: &files };
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
-        let root = &self.options.resources;
         let base = if reload {
             &self.health_resources
         } else {
@@ -22225,7 +22241,7 @@ impl Game<'_> {
         let health = base.with_packs(root, &overlay, reload)?;
         // With no pack, `res` holds the tables, unless content mods switched
         // live since it was loaded: their data is in the new root.
-        if files.is_empty() && !self.mods.data_switched {
+        if files.is_empty() && !data_switched {
             return Ok((None, health));
         }
         let mut items = Items::load(
@@ -22240,12 +22256,16 @@ impl Game<'_> {
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-        let sources = lan::load_sources(
-            root,
-            &self.res.core.item_data,
-            self.options.execution_role.data_load_origin(),
-            &overlay,
-        )?;
+        let sources = if reload {
+            lan::prepare_server_sources(root, &self.res.core.item_data, &overlay)?
+        } else {
+            lan::load_sources(
+                root,
+                &self.res.core.item_data,
+                self.options.execution_role.data_load_origin(),
+                &overlay,
+            )?
+        };
         let recipes = Recipes::from_resolved(root, &items, &overlay, &sources)?;
         let stations = horizon_client::stations::StationData::from_sources(
             root,
@@ -22292,6 +22312,7 @@ impl Game<'_> {
                 items,
                 recipes,
                 stations,
+                reload_sources: reload.then_some(sources),
                 data_maps,
                 pack_tags,
             }),
@@ -22348,9 +22369,13 @@ impl Game<'_> {
     /// Resolve the mods' parts against the tags this game plays with (`/reload` again): mods
     /// that attach parts to a block or item it doesn't have are an error.
     pub(super) fn resolve_parts(&self) -> Result<()> {
-        let items = self.items();
+        let prepared = self.prepare_parts(self.items())?;
+        self.install_parts(prepared);
+        Ok(())
+    }
+    fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         let registry = self.pack.assets.registry;
-        mod_api::__private::resolve_blocks(|id| {
+        let blocks = mod_api::__private::prepare_blocks(|id| {
             let default = registry.default_state(id)?;
             let of_block = |state| {
                 registry
@@ -22372,12 +22397,12 @@ impl Game<'_> {
             })
         })
         .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
-        native_world_read::resolve_block_tags(items, |name| {
+        let tags = native_world_read::prepare_block_tags(items, |name| {
             registry
                 .default_state(name)
                 .map(|state| self.res.behaviours().block(state))
         });
-        mod_api::__private::resolve_parts(
+        let parts = mod_api::__private::prepare_parts(
             &items.block_tags,
             &items.item_tags,
             mod_api::__private::KnownIds {
@@ -22401,8 +22426,17 @@ impl Game<'_> {
             }
             _ => "Mod parts refused".to_owned(),
         })?;
+        Ok(PreparedParts {
+            blocks,
+            tags,
+            parts,
+        })
+    }
+    fn install_parts(&self, prepared: PreparedParts) {
+        mod_api::__private::install_blocks(prepared.blocks);
+        native_world_read::install_block_tags(prepared.tags);
+        mod_api::__private::install_resolved_parts(prepared.parts);
         self.resolve_pathfindable();
-        Ok(())
     }
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
     /// on nothing else, so path finding and spawning read it with no dispatch.
@@ -22416,34 +22450,52 @@ impl Game<'_> {
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
-    pub(super) fn reload_world_tables(&mut self, stack: &functions::PackStack) {
-        if self.remote.is_some() {
-            return;
-        }
-        // One pass over the recipes for this reload: the tables built next and
-        // the players' copy below share it.
+    fn prepare_world_reload(
+        &mut self,
+        stack: &functions::PackStack,
+        root: &std::path::Path,
+        data_switched: bool,
+    ) -> Result<PreparedWorldReload> {
+        let (tables, health) = self.build_world_tables(stack, true, root, data_switched)?;
+        let items = tables
+            .as_ref()
+            .map_or_else(|| self.res.items(), |tables| &tables.items);
+        let parts = self.prepare_parts(items)?;
+        Ok(PreparedWorldReload {
+            tables,
+            health,
+            parts,
+        })
+    }
+
+    fn reload_world_tables(&mut self, prepared: PreparedWorldReload) {
+        let PreparedWorldReload {
+            tables,
+            health,
+            parts,
+        } = prepared;
         lan::forget_server_sources();
-        if let Err(error) = self.refresh_loop_context() {
-            log::warn!("Horizon: data-load inventory could not be refreshed: {error}");
-            return;
+        if let Some(tables) = &tables
+            && let Some(sources) = &tables.reload_sources
+        {
+            let overlay = horizon_world::loot::PackOverlay {
+                files: &tables.files,
+            };
+            lan::install_server_sources(
+                &self.options.resources,
+                &self.res.core.item_data,
+                &overlay,
+                sources.clone(),
+            );
         }
-        match self.build_world_tables(stack, true) {
-            Ok((tables, health)) => {
-                self.world_tables = tables;
-                self.health_resources = health;
-            }
-            Err(e) => {
-                log::warn!("Horizon: the world's data packs are not applied: {e}");
-                return;
-            }
-        }
+        self.world_tables = tables;
+        self.health_resources = health;
+        self.server_items = None;
+        self.install_parts(parts);
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
-        if let Err(e) = self.resolve_parts() {
-            log::warn!("Horizon: {e}");
-        }
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
         // PlayerList.reloadResources: the tags and recipes go to the players
@@ -24961,7 +25013,11 @@ mod tests {
                 game.cmds.vanilla_disabled,
                 &game.level.enabled_features,
             );
-            game.reload_world_tables(&stack);
+            let root = game.options.resources.clone();
+            let prepared = game
+                .prepare_world_reload(&stack, &root, game.mods.data_switched)
+                .unwrap();
+            game.reload_world_tables(prepared);
             assert_eq!(stone_key.id(game), name);
             assert_eq!(
                 stone_key,
