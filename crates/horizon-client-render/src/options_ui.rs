@@ -2078,30 +2078,25 @@ fn narrate_widget(
                     active,
                 };
             }
-            Act::ModKey(i, k) => {
-                let installed = s.mods.installed.get(*i)?;
-                let mapping = installed.native.as_ref()?.mappings.get(*k)?;
-                let (key, modifiers) = s.mods.binding(
-                    &installed.id,
-                    &mapping.id,
-                    (&mapping.key, mapping.modifiers),
-                );
-                let conflicts = key_conflicts(
-                    s,
-                    &installed.id,
-                    &mapping.id,
-                    &key,
-                    modifiers,
-                    mapping.context,
-                    key == mapping.key && modifiers == mapping.modifiers,
-                );
-                if conflicts.is_empty() {
-                    return tip;
+            Act::ModKey(i, k) | Act::ResetModKey(i, k) => {
+                if let Some(installed) = s.mods.installed.get(*i)
+                    && let Some(mapping) = installed
+                        .native
+                        .as_ref()
+                        .and_then(|page| page.mappings.get(*k))
+                {
+                    let title = if matches!(act, Act::ResetModKey(..)) {
+                        t("narrator.controls.reset", &[tr(&mapping.label)])
+                    } else {
+                        let (key, _) = s.mods.binding(
+                            &installed.id,
+                            &mapping.id,
+                            (&mapping.key, mapping.modifiers),
+                        );
+                        bind(tr(&mapping.label), key != "key.keyboard.unknown")
+                    };
+                    n.what = What::Named { title, active };
                 }
-                Some(Text::translate(
-                    "controls.keybinds.duplicateKeybinds",
-                    &[Text::literal(conflicts.join(", "))],
-                ))
             }
             Act::Key(name) => {
                 let bound = s.keys.get(name) != "key.keyboard.unknown";
@@ -6183,6 +6178,40 @@ mod tests {
         });
         let mut ui = OptionsUi::default();
         ui.show(Page::KeyBinds);
+        for (key, bound) in [("key.keyboard.z", true), ("key.keyboard.unknown", false)] {
+            settings.mods.set_binding("zoom", "zoom", key, 0);
+            for act in [Act::ModKey(0, 0), Act::ResetModKey(0, 0)] {
+                let reset = matches!(act, Act::ResetModKey(..));
+                let widget = button(0.0, 0.0, 75.0, Text::literal("Z"), act);
+                let mut narration = crate::widgets::Narratable::button("", [0.0; 4], true);
+                narrate_widget(&mut narration, &settings, &widget, false, 0, [480, 240]);
+                let name = tr("controls.reset");
+                let expected = if reset {
+                    Text::translate("narrator.controls.reset", &[name])
+                } else if bound {
+                    Text::translate(
+                        "narrator.controls.bound",
+                        &[
+                            name,
+                            Text::translate("gui.narrate.button", &[Text::literal("Z")]),
+                        ],
+                    )
+                } else {
+                    Text::translate("narrator.controls.unbound", &[name])
+                };
+                assert_eq!(
+                    narration.what,
+                    crate::widgets::What::Named {
+                        title: expected.plain(),
+                        active: true,
+                    }
+                );
+                assert_eq!(
+                    narration.hint,
+                    tooltip_text(&settings, &widget).map(|tip| tip.plain())
+                );
+            }
+        }
         for query in [
             lang::get("controls.reset"),
             lang::get("controls.keybinds.title"),
