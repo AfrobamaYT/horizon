@@ -7098,14 +7098,11 @@ mod tests {
                     if &*event.stack.item == "minecraft:diorite" && event.stack.count >= 8 {
                         event.max_stack = 3;
                     }
-                    if &*event.stack.item == "minecraft:andesite" {
+                    if matches!(&*event.stack.item, "minecraft:andesite" | "minecraft:stone") {
                         event.max_stack = 3;
                     }
                     if &*event.stack.item == "minecraft:dirt" {
                         event.may_place = false;
-                    }
-                    if &*event.stack.item == "minecraft:stone" {
-                        event.max_stack = 3;
                     }
                 }
             }
@@ -7232,8 +7229,6 @@ mod tests {
                                 .map_or(0, |s| s.count)
                         );
                     }
-                    // Both engines use the original cursor for every drag decision, and
-                    // return items when a listener cap is below an existing stack.
                     for (item, existing, carried, expected) in [
                         ("minecraft:granite", 0, 8, (4, 4, 0)),
                         ("minecraft:andesite", 8, 8, (3, 4, 9)),
@@ -7291,7 +7286,6 @@ mod tests {
                         assert_eq!(predicted, expected, "{item} mod={is_mod}");
                         assert_eq!(result.0 + result.1 + result.2, existing + carried);
                     }
-                    // Vanilla moveItemStackTo tops up an existing stack before empty slots.
                     game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
                         Some(ItemStack::new("minecraft:dirt", 2));
                     let mut prediction = Menu::new(if is_mod {
@@ -7332,7 +7326,6 @@ mod tests {
                         2
                     );
                     assert_eq!(prediction.slot(0).unwrap().count, 2);
-                    // Hotbar zero and its displayed slot are the same backing slot.
                     game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
                         guest.inventory.fill(None);
                         guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 8));
@@ -7352,7 +7345,6 @@ mod tests {
                     let guest = &game.lan.as_ref().unwrap().hub.guests[0];
                     assert_eq!(guest.inventory[0].as_ref().unwrap().count, 8);
                     assert_eq!(guest.inventory.iter().flatten().count(), 1);
-                    // A capped occupied swap preserves both stacks and their total count.
                     game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
                         Some(ItemStack::new("minecraft:dirt", 2));
                     game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
