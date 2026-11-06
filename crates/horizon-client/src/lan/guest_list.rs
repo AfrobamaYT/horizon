@@ -1,10 +1,11 @@
 //! Ordered guests with indexes for connection and exact player identity.
 use super::guest::Guest;
 use crate::fast_hash::FxHashMap;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
-/// Guest identities and kind stay fixed while listed; replace an entire guest with `replace`.
-/// State mutation does not rebuild indexes. Membership changes preserve iteration order.
+/// Collection-owned mutation keeps identity and material-body indexes current.
+/// Ordinary state writes compare only the indexed fields; membership or key
+/// changes rebuild indexes while preserving join order and first-match lookup.
 #[derive(Default)]
 pub struct GuestList {
     rows: Vec<Guest>,
@@ -13,6 +14,130 @@ pub struct GuestList {
     identities: FxHashMap<(u128, u32), usize>,
 }
 impl GuestList {
+    /// Edit one row without lending a mutable row or slice outside this call.
+    /// Indexed-key changes are published before the caller can use the list
+    /// again, including when the callback unwinds. Ordinary state writes do
+    /// not scan the collection or rebuild its indexes.
+    pub fn update<T>(&mut self, index: usize, update: impl FnOnce(&mut Guest) -> T) -> T {
+        let before = index_fields(&self.rows[index]);
+        let edit = Edit {
+            list: self,
+            index,
+            before,
+        };
+        update(&mut edit.list.rows[index])
+    }
+
+    /// Edit the first guest for a connection using the indexed lookup.
+    pub fn update_connection<T>(
+        &mut self,
+        conn: u32,
+        update: impl FnOnce(&mut Guest) -> T,
+    ) -> Option<T> {
+        let index = self.connection_index(conn)?;
+        Some(self.update(index, update))
+    }
+
+    /// Edit rows in join order, through the same bounded mutation scope.
+    pub fn update_all(&mut self, mut update: impl FnMut(&mut Guest)) {
+        for index in 0..self.rows.len() {
+            self.update(index, &mut update);
+        }
+    }
+
+    /// Borrow only the tracker and its read-only view inputs for a tracking pass.
+    /// The predicate cannot mutate indexed keys, and no whole mutable guest escapes.
+    pub(super) fn tracking_viewers<'a>(
+        &'a mut self,
+        visible: impl Fn(&Guest) -> bool,
+        outputs: impl IntoIterator<Item = (&'a mut Vec<Vec<u8>>, Option<&'a mut Vec<[f64; 3]>>)>,
+        take_moved: bool,
+    ) -> Vec<super::entity::Viewer<'a>> {
+        self.rows
+            .iter_mut()
+            .filter(|g| visible(g))
+            .zip(outputs)
+            .map(|(g, (out, gone))| super::entity::Viewer {
+                entity_id: g.entity_id,
+                spectator: g.spectator(),
+                permission: g.permission,
+                moved: take_moved && std::mem::take(&mut g.moved),
+                position: g.position,
+                view_distance: g.view_distance,
+                chunks: &g.sent_chunks,
+                tracker: &mut g.tracker,
+                out,
+                gone,
+            })
+            .collect()
+    }
+
+    /// Borrow only queued packets, without exposing the guest's indexed fields.
+    pub fn inbox_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<
+        &mut std::collections::VecDeque<(horizon_protocol::packets::play::Serverbound, usize)>,
+    > {
+        Some(&mut self.rows.get_mut(index)?.inbox)
+    }
+
+    /// Borrow saved data without exposing indexed identity fields.
+    pub fn saved_data_mut(&mut self, conn: u32) -> Option<&mut Option<horizon_world::nbt::Tag>> {
+        let index = self.connection_index(conn)?;
+        Some(&mut self.rows[index].saved)
+    }
+
+    /// Borrow only the stored menu items at this collection index.
+    pub fn ender_items_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<&mut [Option<crate::items::ItemStack>]> {
+        Some(&mut self.rows.get_mut(index)?.ender_items)
+    }
+
+    /// Borrow only the stored menu items at this collection index.
+    pub fn craft_grid_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<&mut [Option<crate::items::ItemStack>]> {
+        Some(&mut self.rows.get_mut(index)?.craft_grid)
+    }
+
+    /// Borrow only the stored menu items at this collection index.
+    pub fn native_menu_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<&mut [Option<crate::items::ItemStack>]> {
+        Some(&mut self.rows.get_mut(index)?.native_menu)
+    }
+
+    /// Borrow a body without exposing the guest's indexed fields or row replacement.
+    pub fn motion_mut(&mut self, conn: u32) -> Option<&mut crate::motion::PlayerMotion> {
+        let index = self.connection_index(conn)?;
+        self.rows[index].motion.as_deref_mut()
+    }
+
+    /// Borrow only advancement state; indexed identity and kind stay inaccessible.
+    pub(super) fn advancement_state(
+        &mut self,
+        index: usize,
+    ) -> Option<super::hub::advancements::AdvancementState<'_>> {
+        let guest = self.rows.get_mut(index)?;
+        Some(super::hub::advancements::AdvancementState {
+            progress: &mut guest.advancements,
+            changed: &mut guest.advancements_changed,
+            unlocked: &mut guest.recipes_unlocked,
+            book: &mut guest.recipe_book,
+        })
+    }
+
+    /// Reorder rows without exposing a mutable slice.
+    pub fn swap(&mut self, a: usize, b: usize) {
+        self.rows.swap(a, b);
+        self.reindex();
+    }
+
     pub fn connection_index(&self, conn: u32) -> Option<usize> {
         self.connections.get(&conn).copied()
     }
@@ -54,8 +179,10 @@ impl GuestList {
         guest
     }
     pub fn retain(&mut self, keep: impl FnMut(&Guest) -> bool) {
-        self.rows.retain(keep);
-        self.reindex();
+        // Vec::retain may have removed earlier rows when the predicate unwinds.
+        // Publish the surviving order on both the success and unwind paths.
+        let repair = Reindex(self);
+        repair.0.rows.retain(keep);
     }
     pub fn insert(&mut self, index: usize, guest: Guest) {
         self.rows.insert(index, guest);
@@ -97,11 +224,6 @@ impl Deref for GuestList {
         &self.rows
     }
 }
-impl DerefMut for GuestList {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.rows
-    }
-}
 impl<'a> IntoIterator for &'a GuestList {
     type Item = &'a Guest;
     type IntoIter = std::slice::Iter<'a, Guest>;
@@ -109,11 +231,32 @@ impl<'a> IntoIterator for &'a GuestList {
         self.rows.iter()
     }
 }
-impl<'a> IntoIterator for &'a mut GuestList {
-    type Item = &'a mut Guest;
-    type IntoIter = std::slice::IterMut<'a, Guest>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.rows.iter_mut()
+struct Reindex<'a>(&'a mut GuestList);
+impl Drop for Reindex<'_> {
+    fn drop(&mut self) {
+        self.0.reindex();
+    }
+}
+
+// The guard stays private: callers cannot forget it to bypass publication.
+struct Edit<'a> {
+    list: &'a mut GuestList,
+    index: usize,
+    before: (u32, u128, i32, bool),
+}
+fn index_fields(guest: &Guest) -> (u32, u128, i32, bool) {
+    (
+        guest.conn,
+        guest.uuid,
+        guest.entity_id,
+        guest.participates_in_player_simulation(),
+    )
+}
+impl Drop for Edit<'_> {
+    fn drop(&mut self) {
+        if index_fields(&self.list.rows[self.index]) != self.before {
+            self.list.reindex();
+        }
     }
 }
 
@@ -185,6 +328,30 @@ mod tests {
     }
 
     #[test]
+    fn a_panicking_retain_preserves_surviving_lookup_indexes() {
+        let mut list = GuestList::default();
+        list.extend([guest(1), guest(2), guest(3)]);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            list.retain(|row| match row.conn {
+                1 => false,
+                2 => panic!("retain predicate failed"),
+                _ => true,
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(list.iter().map(|g| g.conn).collect::<Vec<_>>(), [2, 3]);
+        assert_eq!(list.connection_index(1), None);
+        assert_eq!(list.identity_index(101, 11), None);
+        check(&list);
+        assert_eq!(
+            list.simulation_indexed_iter()
+                .map(|(i, g)| (i, g.conn))
+                .collect::<Vec<_>>(),
+            [(0, 2), (1, 3)]
+        );
+    }
+
+    #[test]
     fn membership_changes_keep_both_indexes_and_iteration_order() {
         let mut list = GuestList::default();
         list.extend([guest(1), guest(2), guest(3)]);
@@ -201,8 +368,10 @@ mod tests {
         assert_eq!(list.connection_index(1), None);
         list.reverse();
         check(&list);
-        list[0].placed = true;
-        list[0].position[0] = 42.0;
+        list.update(0, |guest| {
+            guest.placed = true;
+            guest.position[0] = 42.0;
+        });
         check(&list);
         list.retain(|g| g.conn != 2);
         check(&list);
@@ -212,5 +381,61 @@ mod tests {
         assert!(list.is_empty());
         assert_eq!(list.connection_index(3), None);
         assert_eq!(list.identity_index(103, 13), None);
+    }
+
+    #[test]
+    fn key_and_kind_changes_repair_lookups_before_return_and_after_unwind() {
+        let mut list = GuestList::default();
+        list.extend([guest(1), guest(2)]);
+        list.update(0, |row| {
+            row.conn = 9;
+            row.uuid = 900;
+            row.entity_id = 90;
+            row.kind = crate::lan::guest::GuestKind::Fake;
+        });
+        assert_eq!(list.connection_index(1), None);
+        assert_eq!(list.identity_index(101, 11), None);
+        assert_eq!(list.connection_index(9), Some(0));
+        assert_eq!(list.identity_index(900, 90), Some(0));
+        assert_eq!(
+            list.simulation_iter()
+                .map(|row| row.conn)
+                .collect::<Vec<_>>(),
+            [2]
+        );
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            list.update(0, |row| {
+                *row = guest(3);
+                panic!("mutation fixture");
+            });
+        }));
+        assert!(failed.is_err());
+        assert_eq!(list.connection_index(9), None);
+        assert_eq!(list.identity_index(900, 90), None);
+        assert_eq!(list.connection_index(3), Some(0));
+        assert_eq!(
+            list.simulation_iter()
+                .map(|row| row.conn)
+                .collect::<Vec<_>>(),
+            [3, 2]
+        );
+    }
+
+    #[test]
+    fn duplicate_keys_keep_first_match_after_supported_reorders_and_replacement() {
+        let mut list = GuestList::default();
+        list.extend([guest(1), guest(2), guest(1)]);
+        list.swap(0, 1);
+        assert_eq!(list.connection_index(1), Some(1));
+        assert_eq!(list.identity_index(101, 11), Some(1));
+        list.update(0, |row| *row = guest(1));
+        assert_eq!(list.connection_index(1), Some(0));
+        list.remove(0);
+        assert_eq!(list.connection_index(1), Some(0));
+        list.replace(0, guest(4));
+        assert_eq!(list.connection_index(1), Some(1));
+        list.update_all(|row| row.position[0] += 1.0);
+        assert!(list.iter().all(|row| row.position[0] == 1.0));
+        assert_eq!(list.connection_index(1), Some(1));
     }
 }

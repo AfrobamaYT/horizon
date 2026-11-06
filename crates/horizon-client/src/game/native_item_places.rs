@@ -628,7 +628,15 @@ pub(super) mod tests {
             };
             assert_eq!(take(host), Ok(0));
             // A creative player takes it off (`ArmorSlot.mayPickup`'s `isCreative`).
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 1;
+            {
+                let value = 1;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
             assert_eq!(take(game), Ok(1));
             assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].armor[0], None);
         });
@@ -1015,7 +1023,10 @@ pub(super) mod tests {
             let title = horizon_world::nbt::Tag::String("new".into());
             let hub = &mut game.lan.as_mut().unwrap().hub;
             hub.open_native_menu(1, 1, title, vec![]).unwrap();
-            hub.guests[0].carried = Some(ItemStack::new("minecraft:stick", 1));
+            {
+                let value = Some(ItemStack::new("minecraft:stick", 1));
+                hub.guests.update(0, |guest| guest.carried = value);
+            }
             assert_eq!(stale.carried(game), None);
             assert_eq!(write(game, &stale.cursor(), "minecraft:stick", -1, true), 0);
             assert_eq!(write(game, &stale.cursor(), "minecraft:stick", 1, true), 0);
@@ -1206,13 +1217,17 @@ pub(super) mod tests {
             // The seller used a diamond after offering three, and the buyer moved the emeralds
             // to another slot: each offer no longer matches its index.
             let guests = &mut game.lan.as_mut().unwrap().hub.guests;
-            guests[0].inventory[0] = Some(ItemStack::new("minecraft:diamond", 2));
+            guests.update(0, |g| {
+                g.inventory[0] = Some(ItemStack::new("minecraft:diamond", 2))
+            });
             let before = inventories(game);
             assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
             assert_eq!(inventories(game), before);
             let guests = &mut game.lan.as_mut().unwrap().hub.guests;
-            guests[0].inventory[0] = Some(ItemStack::new("minecraft:diamond", 3));
-            guests[1].inventory[4] = guests[1].inventory[0].take();
+            guests.update(0, |g| {
+                g.inventory[0] = Some(ItemStack::new("minecraft:diamond", 3))
+            });
+            guests.update(1, |g| g.inventory[4] = g.inventory[0].take());
             let before = inventories(game);
             assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
             assert_eq!(inventories(game), before);

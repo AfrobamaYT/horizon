@@ -302,12 +302,13 @@ impl Game<'_> {
             menu.slot(2).cloned(),
         ];
         if let Some(host) = self.lan.as_mut() {
-            let g = &mut host.hub.guests[gi];
-            for i in 0..36 {
-                g.inventory[i] = menu.player_item(i).cloned();
-            }
-            g.offhand = menu.player_item(40).cloned();
-            g.carried = menu.carried.take();
+            host.hub.guests.update(gi, |g| {
+                for i in 0..36 {
+                    g.inventory[i] = menu.player_item(i).cloned();
+                }
+                g.offhand = menu.player_item(40).cloned();
+                g.carried = menu.carried.take();
+            });
         }
         self.register_exploration_maps(made);
         let opaque = gm

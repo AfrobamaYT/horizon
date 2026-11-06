@@ -128,14 +128,15 @@ impl Hub {
         update: &play::LastSeenUpdate,
         events: &mut Vec<HostEvent>,
     ) -> Option<Vec<Signature>> {
-        let g = &mut self.guests[i];
-        match g
-            .last_seen
-            .apply_update(update.offset, update.acknowledged, update.checksum)
-        {
+        let result = self.guests.update(i, |g| {
+            g.last_seen
+                .apply_update(update.offset, update.acknowledged, update.checksum)
+        });
+        match result {
             Ok(seen) => Some(seen),
             // Vanilla logs the ValidationException's stack trace after the line.
             Err(_) => {
+                let g = &self.guests[i];
                 events.push(HostEvent::Error(format!(
                     "Failed to validate message acknowledgements from {}",
                     g.name
@@ -152,8 +153,12 @@ impl Hub {
 
     /// handleChatAck.
     pub(super) fn chat_ack(&mut self, i: usize, offset: i32, events: &mut Vec<HostEvent>) {
-        let g = &mut self.guests[i];
-        if g.last_seen.apply_offset(offset).is_err() {
+        if self
+            .guests
+            .update(i, |g| g.last_seen.apply_offset(offset))
+            .is_err()
+        {
+            let g = &self.guests[i];
             events.push(HostEvent::Error(format!(
                 "Failed to validate message acknowledgement offset from {}",
                 g.name
@@ -197,12 +202,16 @@ impl Hub {
             last_seen: &last_seen,
         };
         let signature = c.signature.as_deref().and_then(secure_chat::signature);
-        let g = &mut self.guests[i];
-        let (uuid, name) = (g.uuid, g.name.clone());
-        let message = match g
-            .chain
-            .unpack(uuid, signature.as_ref(), &body, enforce, now)
-        {
+        let (uuid, name, unpacked) = self.guests.update(i, |g| {
+            let uuid = g.uuid;
+            (
+                uuid,
+                g.name.clone(),
+                g.chain
+                    .unpack(uuid, signature.as_ref(), &body, enforce, now),
+            )
+        });
+        let message = match unpacked {
             Ok(unpacked) => ChatMessage::new(uuid, unpacked, &body, now),
             Err(e) => return self.decode_failure(i, e, events),
         };
@@ -303,7 +312,7 @@ impl Hub {
         match ChatSession::validate(p.session, key, keys, uuid) {
             Ok(session) => {
                 let data = session.data();
-                self.guests[i].chain = Chain::keyed(session);
+                self.guests.update(i, |g| g.chain = Chain::keyed(session));
                 // resetPlayerChatState: INITIALIZE_CHAT to every player.
                 self.announce_chat_session(
                     play::PlayerInfoUpdate {
@@ -349,39 +358,43 @@ impl Hub {
     /// packed against its cache; a signed message joins the cache and the
     /// messages the player must acknowledge.
     pub fn send_chat(&mut self, k: usize, message: &ChatMessage, bound: &play::ChatTypeBound) {
-        let g = &mut self.guests[k];
-        if g.info.chat_visibility != 0 {
-            return;
-        }
-        let last_seen = message
-            .last_seen
-            .iter()
-            .map(|s| g.signatures.pack(s))
-            .collect();
-        g.send(&C::PlayerChat(play::PlayerChat {
-            global_index: g.chat_index,
-            sender: message.sender,
-            index: message.index,
-            signature: message.signature.map(|s| s.to_vec()),
-            content: message.content.clone(),
-            timestamp: message.timestamp,
-            salt: message.salt,
-            last_seen,
-            unsigned_content: message.unsigned_content.clone(),
-            filter: (0, Vec::new()),
-            chat_type: bound.clone(),
-        }));
-        g.chat_index += 1;
-        if let Some(signature) = &message.signature {
-            g.signatures.push(&message.last_seen, Some(signature));
-            g.last_seen.add_pending(signature);
-            if g.last_seen.tracked_count() > 4096 {
-                let conn = g.conn;
-                self.kick(
-                    conn,
-                    translatable("multiplayer.disconnect.too_many_pending_chats", &[]),
-                );
+        let overflow = self.guests.update(k, |g| {
+            if g.info.chat_visibility != 0 {
+                return false;
             }
+            let last_seen = message
+                .last_seen
+                .iter()
+                .map(|s| g.signatures.pack(s))
+                .collect();
+            g.send(&C::PlayerChat(play::PlayerChat {
+                global_index: g.chat_index,
+                sender: message.sender,
+                index: message.index,
+                signature: message.signature.map(|s| s.to_vec()),
+                content: message.content.clone(),
+                timestamp: message.timestamp,
+                salt: message.salt,
+                last_seen,
+                unsigned_content: message.unsigned_content.clone(),
+                filter: (0, Vec::new()),
+                chat_type: bound.clone(),
+            }));
+            g.chat_index += 1;
+            if let Some(signature) = &message.signature {
+                g.signatures.push(&message.last_seen, Some(signature));
+                g.last_seen.add_pending(signature);
+                if g.last_seen.tracked_count() > 4096 {
+                    return true;
+                }
+            }
+            false
+        });
+        if overflow {
+            self.kick(
+                self.guests[k].conn,
+                translatable("multiplayer.disconnect.too_many_pending_chats", &[]),
+            );
         }
     }
 
@@ -409,7 +422,7 @@ impl Hub {
         events: &mut Vec<HostEvent>,
     ) -> Result<Vec<(String, ChatMessage)>, DecodeError> {
         let (enforce, now) = (self.enforces_secure_chat(), now_millis());
-        let g = &mut self.guests[i];
+        self.guests.update(i, |g| {
         let uuid = g.uuid;
         let mut out = Vec::new();
         if p.arguments.is_empty() {
@@ -459,6 +472,7 @@ impl Hub {
             return Err(mismatch(events));
         }
         Ok(out)
+        })
     }
 
     /// A message command's chat (SayCommand, EmoteCommands): to everyone,
