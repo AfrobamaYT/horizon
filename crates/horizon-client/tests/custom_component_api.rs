@@ -134,7 +134,18 @@ fn registration_limits_and_defaults_are_bound_to_the_connection() {
     fs::create_dir_all(&blockstates).unwrap();
     fs::write(blockstates.join("stone.json"), "{}").unwrap();
     let out = scratch.join("out");
-    build(&base, Path::new(""), &accepted, &out).unwrap();
+    build(
+        &base,
+        Path::new(""),
+        &accepted,
+        &out,
+        &horizon_mods::enabled::EnabledMods::new(
+            accepted
+                .iter()
+                .map(|package| (package.id.clone(), horizon_mods::Side::Both)),
+        ),
+    )
+    .unwrap();
     let items: serde_json::Value =
         serde_json::from_slice(&fs::read(out.join("items.json")).unwrap()).unwrap();
     assert_eq!(

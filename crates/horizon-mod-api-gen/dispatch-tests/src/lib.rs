@@ -160,7 +160,6 @@ mod tests {
         pub(super) struct NativeBlockRim;
         pub(super) struct NativeColoredLight;
         pub(super) struct NativeMinimap;
-        pub(super) struct NativeMod;
         pub(super) struct NativePanelEvent;
         pub(super) struct NativeScreen;
         #[derive(Default)]
@@ -289,6 +288,7 @@ mod tests {
     trait Host {}
     trait ServerHost: Host {}
     trait ClientHost: Host {}
+    trait WorldDrawContext {}
     trait DrawContext {
         fn mark(&mut self, value: u32);
     }
@@ -358,6 +358,7 @@ mod tests {
                 pub struct FovPlayer;
             }
             pub struct NativeClientInfo;
+            pub struct WorldRenderView;
             #[derive(Clone, Copy)]
             pub struct FluidKey;
             #[derive(Clone, Copy)]
@@ -370,6 +371,8 @@ mod tests {
             }
             #[derive(Clone, Copy)]
             pub struct RaidRef;
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub enum CameraType {}
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum ToastKind {
                 Advancement,
@@ -496,6 +499,12 @@ mod tests {
         }
     }
     trait Registrar {}
+    /// The goal registrar of the generated `EntityPart`, as the fixture sees
+    /// it: no methods, its type is all the generated trait asks of the scope.
+    #[expect(dead_code)]
+    struct GoalRegistrar<'a> {
+        _lifetime: std::marker::PhantomData<&'a ()>,
+    }
     /// The parts every thing in a scope has, whatever its key: a test's own, or none.
     #[derive(Default)]
     struct Parts {

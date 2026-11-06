@@ -63,6 +63,7 @@ pub mod nav;
 pub mod nether;
 pub mod panda;
 pub mod parrot;
+pub mod part_goals;
 pub mod path;
 pub mod phantom;
 pub mod piglin;
@@ -2530,6 +2531,9 @@ pub struct Seen {
     pub bounds: Aabb,
     pub eye_y: f64,
     pub alive: bool,
+    /// `invulnerable_flag`, which `asValidTarget` refuses a target by
+    /// (#1175): a valid-target rule the tick's view asks.
+    pub invulnerable: bool,
     pub baby: bool,
     pub in_love: bool,
     pub tame: bool,
@@ -2750,6 +2754,7 @@ impl Mob {
             bounds: m.bounds(),
             eye_y: m.eye_y(),
             alive: m.alive(),
+            invulnerable: m.invulnerable_flag,
             baby: m.is_baby(),
             // A villager is "in love" when it is willing to breed (`canBreed`).
             in_love: if villager {
@@ -3062,6 +3067,9 @@ pub struct PlayerView {
     pub bounds: Aabb,
     pub eye: [f64; 3],
     pub alive: bool,
+    /// The `invulnerable` ability, which `asValidTarget` refuses a target
+    /// by (#1175): a valid-target rule a goal tick's view asks.
+    pub invulnerable: bool,
     pub creative: bool,
     pub sneaking: bool,
     /// `Entity.isSwimming`.
@@ -3179,6 +3187,12 @@ pub struct MobWorld<'a> {
     pub suffocation: &'a horizon_world::suffocation::SuffocationRegistry<'a>,
     pub data: &'a MobData,
     pub player: Option<PlayerView>,
+    /// The uuid and entity id of the player whose view `player` is (#1077):
+    /// captured once where the tick lends its player — the game's own, or the
+    /// guest a server's mob sees — so a goal resolves that player without a
+    /// scan, and a fake player's view resolves as none. None when `player` is
+    /// None.
+    pub player_identity: Option<([i32; 4], u32)>,
     /// `getKnownMovement` of a mob's controlling player passenger, if any.
     pub controlling_player_movement: Option<Vec3>,
     /// `getNearestPlayer(mob, -1)`: where the nearest non-spectator of every
@@ -3239,6 +3253,9 @@ pub struct MobWorld<'a> {
     /// The mod hooks the AI asks mid-tick, on a server where a mod listens
     /// (None otherwise: the AI asks nothing).
     pub mob_hooks: Option<&'a dyn MobHooks>,
+    /// The goal view's facts (#1077), on the native-authoritative side where
+    /// a mod attached an entity part (None otherwise: no mod goal runs).
+    pub goal_host: Option<&'a dyn part_goals::GoalHost>,
     /// Whether a listener can cancel animal taming.
     pub asks_animal_tame: bool,
     /// Whether a listener can cancel a mob's block destruction.
@@ -3333,7 +3350,25 @@ pub fn entity_random(id: u32, position: Vec3) -> LegacyRandom {
     random
 }
 impl Mob {
+    /// A mob as its authoritative side builds it — spawned, or loaded from a
+    /// chunk (`Mob.finalizeSpawn` runs around it): the species' own goals, then
+    /// the goals every mod part attached to its type (#1077), vanilla's
+    /// `registerGoals` moment.
     pub fn new(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
+        let mut mob = Self::new_remote(id, kind, position, yaw);
+        // The parts a mod attached to this entity type add their goals right
+        // after the species' own (#1077): vanilla's `registerGoals` moment,
+        // which belongs to the authoritative construction.
+        part_goals::attach(&mut mob);
+        mob
+    }
+    /// The same construction without the mod parts' goals: a client's copy of
+    /// a server's mob, from its spawn packet. The species' goals stand — the
+    /// client's own reads of its copy ask them — but a mod part's
+    /// `register_goals` runs nowhere here: the authoritative side already ran
+    /// it for the mob itself, and a copy's would only allocate goal state no
+    /// tick runs (#1077).
+    pub fn new_remote(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
         let random = entity_random(id, position);
         let mut mob = Self {
             attachment_lifetime: Default::default(),

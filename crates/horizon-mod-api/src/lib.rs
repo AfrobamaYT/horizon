@@ -22,6 +22,32 @@ pub use registry_keys::UnknownFluid;
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
 
+/// A baked standalone model resolved through [`RenderAssets::model`].
+/// Retain it between frames; reacquire it after a successful resource reload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: private fields; only the engine resolves model handles
+#[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
+pub struct ModelRef(u64, u32);
+
+impl ModelRef {
+    pub(crate) fn from_parts(generation: u64, slot: u32) -> Result<Self, &'static str> {
+        if generation == 0 {
+            return Err("unpublished model generation");
+        }
+        Ok(Self(generation, slot))
+    }
+}
+
+/// Why a standalone model could not be resolved or drawn. Errors append no geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ModelError {
+    /// The name is not a registered, successfully baked standalone model, or its slot is absent.
+    UnknownModel,
+    /// A successful resource replacement superseded the handle's generation.
+    StaleModel,
+}
+
 /// Why a game rule category declaration was refused.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -34,6 +60,11 @@ pub enum GameRuleError {
     Duplicate,
 }
 
+/// A boolean game rule declared by a mod.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only the registration table creates keys
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct BoolGameRuleKey(u32);
 /// A load-owned fluid identity requested through [`Registrar::fluid_key`] or resolved through
 /// [`DataLoadContext::fluid_key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -58,9 +89,6 @@ pub struct EffectKey(u32);
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockEntityTypeKey(u32);
 
-// Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
-#[cfg(any())]
-mod hooks;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod biome;
@@ -72,6 +100,8 @@ pub mod block_sprites;
 pub mod camera;
 mod command;
 pub use command::{CommandArgument, CommandArgumentValue, CommandInvocation};
+mod key_mapping;
+pub use key_mapping::{KeyConflictContext, NativeKeyRegistration};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod containers;
@@ -148,6 +178,10 @@ use std::sync::{Arc, OnceLock};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod __private;
+mod world_draw;
+pub use world_draw::{
+    DrawError, WorldDepth, WorldDrawUsage, WorldLine, WorldQuad, WorldRenderView,
+};
 mod model_layers;
 pub use model_layers::{
     CubeDefinition, CubeDeformation, CubeListBuilder, LayerDefinition, MeshDefinition, ModelPart,
@@ -169,7 +203,9 @@ mod criteria;
 pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
 mod packets;
 pub use packets::{SendPacketError, ServerboundPlayPacket};
+mod attachment_holder;
 mod scene;
+pub use attachment_holder::AttachmentHolder;
 pub use block_sprites::BlockFaceTexture;
 pub use scene::{NativeSceneBlock, NativeSceneView, SceneBlockEntity};
 mod config_files;
@@ -209,7 +245,7 @@ pub use client_reload::ClientListenerRegistry;
 
 pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
-pub use crate::camera::{CameraEntity, FovPlayer};
+pub use crate::camera::{CameraEntity, CameraType, FovPlayer};
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{CraftResult, Ingredient, Recipe, RecipePropertyAddition};
 pub use crate::extras::Corner;
@@ -1232,18 +1268,6 @@ pub struct NativeScreen {
     pub own_background: bool,
 }
 
-/// Key definitions for a compiled mod's Options > Mods page (`native_mods`).
-/// Its display metadata comes from its validated runtime package.
-#[derive(Clone, Debug, Default, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
-pub struct NativeMod {
-    /// Its id: its settings folder and its keys' lines.
-    pub id: String,
-    /// Its keys: name, label and default key (`key.keyboard.z`). The page
-    /// lists them first; `native_mod_key` reads the player's choice.
-    pub keys: Vec<[String; 3]>,
-}
-
 /// An item the panel shows (`native_panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
@@ -1272,7 +1296,7 @@ pub enum NativePanelEvent {
     },
     /// The search box's text, each time the player changes it.
     Search(String),
-    /// A key (`key.keyboard.r`; compare it with `native_mod_key`) went down
+    /// A physical key (`key.keyboard.r`) went down
     /// while the pointer was on an item: a slot of the screen's, or the
     /// panel's.
     Key {
@@ -4356,7 +4380,7 @@ mod generated_host {
 pub use generated_host::{Backend, BackendMut, ClientBackendMut};
 pub use generated_host::{
     BlockEntityDrawContext, ClientHost, ClientSession, Commands, DrawContext, Host, HostSide,
-    LevelSide, Levels, Messages, Players, ServerHost,
+    LevelSide, Levels, Messages, Players, RenderAssets, ServerHost, WorldDrawContext,
 };
 
 /// Result of accessing or decoding an attachment.
@@ -4706,6 +4730,11 @@ pub use part_table::{
     ProvidedBy, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
+mod goals;
+pub use goals::{Goal, GoalContext, GoalFlags, GoalRegistrar, RegistrarMob};
+// hidden: the game's goal plumbing, not part of the mod surface
+#[doc(hidden)]
+pub use goals::{GoalCxBackend, GoalRegistrarBackend};
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -4717,7 +4746,7 @@ mod wasm_refused;
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
 }
-pub use generated::Hooks;
+pub use generated::{EntityPart, Hooks};
 impl FallOnEvent<'_> {
     /// Ask for a write at the block the entity landed on. It is applied once the entity's
     /// batch has ticked, in the order asked, if the block is still the state it landed on.

@@ -38,6 +38,7 @@ pub type SavedReferences = std::sync::Arc<dyn Fn(&str, i32, i32) -> i32 + Send +
 /// Borrowed generation inputs from the owner's published resource tables.
 #[derive(Clone, Copy)]
 pub struct TerrainResources<'a> {
+    pub data: Option<&'a horizon_assets::resource_source::ResourceSource>,
     pub dir: &'a Path,
     pub registry: &'static BlockRegistry,
     pub biomes: &'a Biomes,
@@ -205,8 +206,7 @@ impl VanillaTerrain {
         structures: bool,
         saved_stem: Option<&serde_json::Value>,
     ) -> crate::Result<Self> {
-        let data: Arc<GeneratorData> =
-            shared_data_with(resources.dir, overrides, resources.registry)?;
+        let data: Arc<GeneratorData> = shared_resource_data(resources, overrides)?;
         let generator = OverworldGenerator::for_world_with_settings(
             data, seed, preset, dimension, structures, saved_stem,
         )?;
@@ -221,8 +221,7 @@ impl VanillaTerrain {
         flat: &horizon_world::worldgen::generator::FlatSettings,
         structures: bool,
     ) -> crate::Result<Self> {
-        let data: Arc<GeneratorData> =
-            shared_data_with(resources.dir, overrides, resources.registry)?;
+        let data: Arc<GeneratorData> = shared_resource_data(resources, overrides)?;
         let generator = OverworldGenerator::flat(data, seed, flat, structures)?;
         let mut terrain = Self::assemble(
             resources,
@@ -253,6 +252,7 @@ impl VanillaTerrain {
         dimension: &str,
     ) -> crate::Result<Self> {
         let TerrainResources {
+            data: _,
             dir,
             registry,
             biomes,
@@ -705,6 +705,42 @@ pub fn forget_shared_data() {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clear();
+}
+fn shared_resource_data(
+    resources: TerrainResources<'_>,
+    overrides: &WorldgenOverrides,
+) -> crate::Result<Arc<GeneratorData>> {
+    match resources.data {
+        Some(source) => shared_data_from(resources.dir, overrides, resources.registry, source),
+        None => shared_data_with(resources.dir, overrides, resources.registry),
+    }
+}
+/// Shared worldgen tables with lazy passive structure templates below world packs.
+pub fn shared_data_from(
+    dir: &Path,
+    overrides: &WorldgenOverrides,
+    registry: &'static BlockRegistry,
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> crate::Result<Arc<GeneratorData>> {
+    let mut resolved = overrides.clone();
+    {
+        for name in source.list_under("data", &["structure"]) {
+            if let Some((namespace, path)) = name
+                .strip_prefix("data/")
+                .and_then(|rest| rest.split_once("/structure/"))
+                .and_then(|(ns, path)| Some((ns, path.strip_suffix(".nbt")?)))
+            {
+                let id = format!("{namespace}:{path}");
+                if !resolved.templates().contains_key(&id) {
+                    resolved.set_template(
+                        id,
+                        horizon_assets::resource_source::Resource::file(source.clone(), name),
+                    );
+                }
+            }
+        }
+    }
+    shared_data_with(dir, &resolved, registry)
 }
 /// The worldgen bundle at `dir`, loaded once and shared by every generator
 /// and by live feature placement (sapling growth, bone meal).

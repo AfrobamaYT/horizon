@@ -13,17 +13,31 @@ use horizon_core::{
 /// A baked frame model: (corners in block units, unit UVs, sprite) per quad.
 pub(super) type FrameModel = Vec<([[f32; 3]; 4], [[f32; 2]; 4], String)>;
 
+/// Item-frame variants prepared together for one resource generation.
+pub(super) fn bake_frames(
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> [FrameModel; 4] {
+    [
+        "item_frame",
+        "glow_item_frame",
+        "item_frame_map",
+        "glow_item_frame_map",
+    ]
+    .map(|name| bake_frame(source, name))
+}
+
 /// Bake `block/<name>` (item_frame / glow_item_frame) from the resources.
-pub(super) fn bake_frame(root: &std::path::Path, name: &str) -> FrameModel {
+pub(super) fn bake_frame(
+    root: &horizon_assets::resource_source::ResourceSource,
+    name: &str,
+) -> FrameModel {
     let mut models = std::collections::BTreeMap::new();
     let mut pending = vec![format!("minecraft:block/{name}")];
     while let Some(model) = pending.pop() {
         let Some((ns, path)) = model.split_once(':') else {
             continue;
         };
-        let Ok(text) =
-            std::fs::read_to_string(root.join(format!("assets/{ns}/models/{path}.json")))
-        else {
+        let Ok(text) = root.read_to_string(&format!("assets/{ns}/models/{path}.json")) else {
             continue;
         };
         let Ok(m) = CuboidModel::from_json(&text) else {
@@ -730,5 +744,19 @@ impl Game<'_> {
                 self.cull_entity_vertices(out, entity_start);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    #[test]
+    fn frame_model_reads_resolved_resources_without_files() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            ("assets/minecraft/models/block/item_frame.json".into(), Resource::bytes(br##"{"textures":{"x":"example:block/frame"},"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"north":{"texture":"#x"}}}]}"##.to_vec())),
+        ]));
+        let model = super::bake_frame(&source, "item_frame");
+        assert_eq!(model.len(), 1);
+        assert_eq!(model[0].2, "example:block/frame");
     }
 }

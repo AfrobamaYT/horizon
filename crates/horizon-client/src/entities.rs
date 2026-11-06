@@ -2527,7 +2527,11 @@ mod fire_environment_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::load(
@@ -2685,7 +2689,11 @@ mod destroyed_bundle_environment_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::load(
@@ -3148,7 +3156,11 @@ mod world_border_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
@@ -3207,7 +3219,11 @@ mod world_border_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
@@ -3287,7 +3303,11 @@ mod honey_slide_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
@@ -3336,7 +3356,11 @@ mod honey_slide_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
@@ -3403,7 +3427,11 @@ mod honey_slide_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
         let mut world = World::test_scene(&assets, &render, 3).unwrap();
@@ -3658,7 +3686,11 @@ mod slime_bounce_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
@@ -3783,7 +3815,11 @@ mod entity_collision_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
@@ -3828,7 +3864,11 @@ mod entity_collision_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
@@ -4160,7 +4200,11 @@ mod armor_stand_motion_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
         let world = World::test_scene(&assets, &render, 3).unwrap();
@@ -4254,7 +4298,11 @@ mod armor_stand_motion_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let world = World::test_scene(&assets, &render, 3).unwrap();
@@ -4290,7 +4338,11 @@ mod armor_stand_motion_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let world = World::test_scene(&assets, &render, 3).unwrap();
@@ -4320,7 +4372,11 @@ mod armor_stand_motion_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let mut world = World::test_scene(&assets, &render, 3).unwrap();
@@ -4764,7 +4820,11 @@ mod orb_lava_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
