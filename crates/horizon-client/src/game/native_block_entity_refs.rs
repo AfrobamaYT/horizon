@@ -66,7 +66,7 @@ impl Game<'_> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        BlockEntityTypeKey::registered(save::block_entity_id(block_entity, block))
+        mod_api::__private::block_entity_type_key(save::block_entity_id(block_entity, block))
     }
 
     /// The block entity's position.
@@ -605,8 +605,8 @@ mod tests {
             ));
             assert_eq!(slot3(game), Some(3));
             assert_eq!(
-                chest.kind(game).as_ref().map(|kind| kind.id()),
-                Some("minecraft:chest")
+                chest.kind(game).map(|kind| kind.id(game)),
+                Some("minecraft:chest".to_owned())
             );
             assert_eq!(chest.position(game), Some([0, 64, 0]));
             assert!(!chest.merge_data(game, compound(stick)), "no change");

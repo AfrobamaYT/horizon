@@ -339,10 +339,11 @@ block hooks) by block. The factory is a `BlockEntityPart` method, not a global `
 
 `r.block_entity_type_key("other:press")` looks up another mod's type, and
 `r.block_entity_type_key("minecraft:chest")` looks up a vanilla type. Both return the same opaque
-`BlockEntityTypeKey` as the declaration builder: equality and hashing use the type ID, not its blocks.
-The final registry checks these requests at load and refuses unknown IDs, naming the requesting mod
-and type. Use a canonical type ID, not a block ID (`minecraft:shulker_box`, not
-`minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
+`BlockEntityTypeKey` as the declaration builder: equality and hashing use the shared load-owned
+registration slot, not the type's blocks. Bare names use the `minecraft:` namespace. The final
+registry resolves requests after all declarations and refuses unknown IDs, naming the requesting mod
+and type. `key.id(host)` reads the canonical name for diagnostics; a key retains its identity until
+restart. Use a type ID, not a block ID (`minecraft:shulker_box`, not `minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
 `living.hurt_and_break(host, slot, amount)` changes equipped durability on the server; negative amounts repair. It returns the pre-shrink stack only on break, and `None` when nothing breaks or the entity or slot is unavailable. Creative players' equipment is exempt. The operation does not fire equip effects.
 
 `block_entity.replace_data(host, data)` replaces its saved payload, clearing omitted fields while retaining

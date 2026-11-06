@@ -19,6 +19,12 @@ pub struct BlockKey(u32);
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct EffectKey(u32);
 
+/// A block entity type requested at registration. Its slot remains stable for the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only the load-owned table creates keys
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct BlockEntityTypeKey(u32);
+
 // Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
 #[cfg(any())]
 mod hooks;
@@ -4604,7 +4610,7 @@ pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transac
 mod custom_spawners;
 pub use custom_spawners::{CustomSpawners, SpawnerEntry, SpawnerError, SpawnerKey, SpawnerKind};
 mod block_entity_type;
-pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
+pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod structure_template;
