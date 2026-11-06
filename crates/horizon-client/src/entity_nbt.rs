@@ -1205,6 +1205,11 @@ pub fn mob_to_nbt(
             map.insert("drop_chances".into(), Tag::compound(set));
         }
     }
+    // SpellcasterIllager.addAdditionalSaveData: save the live casting timer,
+    // including zero and negative values, rather than stale loaded NBT.
+    if matches!(m.species(), S::Evoker | S::Illusioner) {
+        map.insert("SpellTicks".into(), Tag::Int(m.extra.counter));
+    }
     crate::mobs::raider::write_nbt(m, map);
     crate::mobs::riders::write_nbt(m, map);
     // LivingEntity equipment: what the mob holds and wears now.
@@ -2100,6 +2105,14 @@ pub fn mob_from_nbt(
         // one spent on the next tick.
         m.extra.counter2 = if time == -1 { 0 } else { time.max(0) + 1 };
     }
+    // SpellcasterIllager.readAdditionalSaveData: this is the same timer used
+    // by casting goals and the existing customServerAiStep countdown.
+    if matches!(
+        m.species(),
+        crate::mobs::Species::Evoker | crate::mobs::Species::Illusioner
+    ) {
+        m.extra.counter = number(tag.get("SpellTicks")).unwrap_or(0) as i32;
+    }
     crate::mobs::raider::read_nbt(&mut m, tag);
     crate::mobs::riders::read_nbt(&mut m, tag);
     // A mob saved mid-death finishes dying; one saved dead is dropped.
@@ -2165,7 +2178,9 @@ pub fn tnt_power(tag: &Tag) -> f32 {
 }
 
 /// `PrimedTnt.addAdditionalSaveData`: its `fuse` and, when it is not the
-/// default, its `explosion_power`, and the encoded live block state.
+/// default, its `explosion_power`, the encoded live block state, and its
+/// `owner` (`EntityReference.store`). With no live owner, a loaded `owner`
+/// stays as the raw compound has it.
 #[allow(clippy::too_many_arguments)]
 pub fn tnt_to_nbt(
     position: Vec3,
@@ -2176,6 +2191,7 @@ pub fn tnt_to_nbt(
     block_state: Tag,
     rotation: [f32; 2],
     uuid: [i32; 4],
+    owner: Option<[i32; 4]>,
     raw: Option<&Tag>,
 ) -> Tag {
     let mut tag = Base {
@@ -2193,7 +2209,14 @@ pub fn tnt_to_nbt(
         put(&mut tag, "explosion_power", Tag::Float(power.to_bits()));
     }
     put(&mut tag, "block_state", block_state);
+    if let Some(owner) = owner {
+        put(&mut tag, "owner", Tag::IntArray(owner.to_vec()));
+    }
     tag
+}
+/// `PrimedTnt.readAdditionalSaveData`: `EntityReference.read(input, "owner")`.
+pub fn tnt_owner(tag: &Tag) -> Option<[i32; 4]> {
+    uuid_from_tag(tag.get("owner"))
 }
 /// `EvokerFangs.addAdditionalSaveData`: always save the live warmup counter.
 /// Known Owner UUIDs use `EntityReference.store` encoding; unresolved
@@ -3562,6 +3585,7 @@ mod tnt_power_tests {
             [0.0, 0.0],
             [1, 2, 3, 4],
             None,
+            None,
         );
         assert_eq!(tnt_power(&saved), 10.0);
         let plain = tnt_to_nbt(
@@ -3574,8 +3598,107 @@ mod tnt_power_tests {
             [0.0, 0.0],
             [1, 2, 3, 4],
             None,
+            None,
         );
         assert!(plain.get("explosion_power").is_none());
+    }
+
+    /// `EntityReference.store(owner, output, "owner")`: the igniter's UUID as
+    /// an int array, read back by `EntityReference.read`; an owner the save
+    /// could not name keeps the loaded one from the raw compound.
+    #[test]
+    fn the_owner_round_trips_as_a_uuid() {
+        let save = |owner, raw: Option<&Tag>| {
+            let t = string("minecraft:tnt");
+            tnt_to_nbt(
+                Vec3::ZERO,
+                Vec3::ZERO,
+                false,
+                80,
+                4.0,
+                t,
+                [0.0; 2],
+                [1; 4],
+                owner,
+                raw,
+            )
+        };
+        let saved = save(Some([5, 6, 7, 8]), None);
+        assert_eq!(saved.get("owner"), Some(&Tag::IntArray(vec![5, 6, 7, 8])));
+        assert_eq!(tnt_owner(&saved), Some([5, 6, 7, 8]));
+        assert_eq!(tnt_owner(&save(None, None)), None);
+        assert_eq!(tnt_owner(&save(None, Some(&saved))), Some([5, 6, 7, 8]));
+        assert_eq!(tnt_owner(&save(Some([9; 4]), Some(&saved))), Some([9; 4]));
+    }
+}
+
+#[cfg(test)]
+mod spell_ticks_nbt_tests {
+    use super::*;
+    use crate::mobs::Species;
+
+    fn caster(species: Species, name: &str) -> Mob {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.species = species;
+        ty.id = format!("minecraft:{name}");
+        Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0)
+    }
+
+    /// `SpellcasterIllager.readAdditionalSaveData`: bind loaded values to the
+    /// counter already used by casting goals and customServerAiStep.
+    #[test]
+    fn spell_ticks_load_into_the_live_counter() {
+        for (species, name) in [
+            (Species::Evoker, "evoker"),
+            (Species::Illusioner, "illusioner"),
+        ] {
+            let m = caster(species, name);
+            let types = HashMap::from([(m.kind.id.clone(), m.kind.clone())]);
+            for value in [None, Some(30), Some(0), Some(-2)] {
+                let mut raw = Tag::compound([
+                    ("id", string(&m.kind.id)),
+                    ("Pos", doubles(&[0.5, 64.0, 0.5])),
+                ]);
+                if let Some(value) = value {
+                    put(&mut raw, "SpellTicks", Tag::Int(value));
+                }
+                let loaded = mob_from_nbt(&raw, &types, 2, None).unwrap();
+                assert_eq!(
+                    loaded.extra.counter,
+                    value.unwrap_or(0),
+                    "{name}: {value:?}"
+                );
+                let saved = mob_to_nbt(&loaded, [1, 2, 3, 4], None, None);
+                assert_eq!(saved.get("SpellTicks"), Some(&Tag::Int(value.unwrap_or(0))));
+            }
+        }
+    }
+
+    /// `SpellcasterIllager.addAdditionalSaveData`: live state wins even when
+    /// no raw input exists or the original raw counter has become stale.
+    #[test]
+    fn spell_ticks_save_the_mutated_model_without_a_raw_fallback() {
+        for (species, name) in [
+            (Species::Evoker, "evoker"),
+            (Species::Illusioner, "illusioner"),
+        ] {
+            let mut m = caster(species, name);
+            let raw = Tag::compound([
+                ("SpellTicks", Tag::Int(30)),
+                ("audit:unrelated", Tag::Int(7)),
+            ]);
+            for value in [29, 27, 20, 0, -2] {
+                m.extra.counter = value;
+                for raw in [None, Some(&raw)] {
+                    let saved = mob_to_nbt(&m, [1, 2, 3, 4], raw, None);
+                    assert_eq!(saved.get("SpellTicks"), Some(&Tag::Int(value)), "{name}");
+                    if raw.is_some() {
+                        assert_eq!(saved.get("audit:unrelated"), Some(&Tag::Int(7)));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -4428,6 +4551,7 @@ mod tests {
             string("minecraft:tnt"),
             [90.0, 10.0],
             [1; 4],
+            None,
             None,
         );
         assert_eq!(rotation(&tnt), [90.0, 10.0]);
