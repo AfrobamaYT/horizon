@@ -4644,6 +4644,8 @@ mod custom_spawners;
 pub use custom_spawners::{CustomSpawners, SpawnerEntry, SpawnerError, SpawnerKey, SpawnerKind};
 mod block_entity_data;
 pub use block_entity_data::BlockEntityDataError;
+mod block_entity_items;
+pub use block_entity_items::BlockEntityItemError;
 mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder};
 mod ticket_controller;

@@ -1,0 +1,41 @@
+[
+  {
+    "path": "horizon_client::game::Game",
+    "kind": "struct",
+    "signature": "struct Game { copy: i64, child: Child }",
+    "hash": "a98f7c9ba7322f5f85745e234615a70594546bacba43f65dd1add8972edade9f"
+  },
+  {
+    "path": "horizon_client::game::Child",
+    "kind": "struct",
+    "signature": "struct Child { value: i64, padding: Vec<u8> }",
+    "hash": "84a6b818891b93cdbd5c938cc7502e0ea196186e6e19df9edf72342d75c88030"
+  },
+  {
+    "path": "horizon_client::game::Game::copy",
+    "kind": "field",
+    "signature": "copy: i64",
+    "hash": "0b896961744e53dfcddbec9c832954712f0070f38ad7a2e9859f81fbf41d8bfd"
+  },
+  {
+    "path": "horizon_client::game::Game::child",
+    "kind": "field",
+    "signature": "child: Child",
+    "hash": "95cc2037765def3756ce9258f493bfdedbb94b29f018186748866d9e556a4c8f"
+  },
+  {
+    "path": "horizon_client::game::Game::add",
+    "kind": "method",
+    "signature": "fn add(&mut self, delta: i64) -> i64",
+    "hash": "638665cf01d552d5765711831232b653f7b98d9c7bdddb54a58182e433e5cd0e"
+  },
+  {
+    "path": "horizon_client::game::chat::Game<'_>::handle_chat_input",
+    "kind": "method",
+    "signature": "fn handle_chat_input(&mut self, message: &str)",
+    "hash": "df88374b913f33938db7405e22fcd4735fdf97dbe015ea38600985540c57d63a",
+    "refs": {
+      "Game": "horizon_client::game::Game"
+    }
+  }
+]
