@@ -54,6 +54,31 @@ pub trait Helpers {
         target = "horizon_client::game::native_level_refs::Game<'_>::native_level_height"
     )]
     fn level_height();
+    /// Whether `pos` is inside the level's world bounds (`Level.isInWorldBounds`): within 30,000,000
+    /// blocks of the origin on x and z, and between the level's lowest and highest build height.
+    /// None for a stale handle, before client login, or for a dimension unavailable on this side.
+    /// Does not load chunks.
+    #[notes = r#"## World and spawnable bounds
+
+`LevelRef::in_world_bounds(host, pos)` and `in_spawnable_bounds(host, pos)` answer
+`Level.isInWorldBounds` and `Level.isInSpawnableBounds` without loading a chunk. The first also
+needs the position inside the level's build height; the second is the wider limit `/summon` and
+`/tp` use (30,000,000 on x and z, 20,000,000 on y, whatever the level's height). A mod checks them
+before reading or writing a far position, rather than learning it from a failed write."#]
+    #[helper(
+        side = "both",
+        receiver = "level",
+        target = "horizon_client::game::native_level_refs::Game<'_>::native_level_in_world_bounds"
+    )]
+    fn level_in_world_bounds();
+    /// Whether `pos` is inside the spawnable bounds (`Level.isInSpawnableBounds`): within
+    /// 30,000,000 blocks on x and z and 20,000,000 on y. None as for `in_world_bounds`.
+    #[helper(
+        side = "both",
+        receiver = "level",
+        target = "horizon_client::game::native_level_refs::Game<'_>::native_level_in_spawnable_bounds"
+    )]
+    fn level_in_spawnable_bounds();
     #[helper(
         side = "server",
         receiver = "level",

@@ -460,6 +460,26 @@ impl Game<'_> {
         self.native_level_read_world(level)
             .map(|w| (w.shape.min_y, w.shape.height))
     }
+    /// `Level.isInWorldBounds`: `pos` within 30,000,000 blocks on x and z and inside the level's
+    /// build height. None as for `native_level_height`. Does not load chunks.
+    pub(super) fn native_level_in_world_bounds(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<bool> {
+        let (min_y, height) = self.native_level_height(level)?;
+        Some(horizontal_in_bounds(pos) && pos[1] >= min_y && pos[1] < min_y.saturating_add(height))
+    }
+    /// `Level.isInSpawnableBounds`: 30,000,000 blocks on x and z, 20,000,000 on y. None as for
+    /// `native_level_height`. Does not load chunks.
+    pub(super) fn native_level_in_spawnable_bounds(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<bool> {
+        self.native_level_read_world(level)?;
+        Some(horizontal_in_bounds(pos) && (-20_000_000..20_000_000).contains(&pos[1]))
+    }
     /// The ticks the server has run (`Level.getGameTime`), shared by every
     /// level as in vanilla. API 381.
     pub(super) fn native_level_game_time(&self, level: LevelRef) -> Option<i64> {
@@ -478,6 +498,11 @@ impl Game<'_> {
             self.remote.as_ref().map(|r| r.overworld_clock_time())
         }
     }
+}
+
+/// `Level.isInWorldBoundsHorizontal`: x and z inside the 30,000,000-block limit.
+fn horizontal_in_bounds(pos: [i32; 3]) -> bool {
+    (-30_000_000..30_000_000).contains(&pos[0]) && (-30_000_000..30_000_000).contains(&pos[2])
 }
 
 #[cfg(test)]
@@ -657,6 +682,37 @@ mod tests {
                 assert_eq!(unavailable.signal(host, [1, y, 1], Direction::East), None);
                 assert!(!unavailable.has_neighbor_signal(host, [2, y, 1]));
             }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn bounds_reads_follow_the_level_without_loading_chunks() {
+        with_game(|game| {
+            let level = game.level("minecraft:overworld").unwrap();
+            let nether = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            assert_eq!(level.in_world_bounds(game, [0, 64, 0]), Some(true));
+            assert_eq!(level.in_world_bounds(game, [0, -65, 0]), Some(false));
+            assert_eq!(level.in_world_bounds(game, [0, 320, 0]), Some(false));
+            assert_eq!(
+                level.in_world_bounds(game, [30_000_000, 64, 0]),
+                Some(false)
+            );
+            assert_eq!(level.in_world_bounds(game, [0, i32::MAX, 0]), Some(false));
+            assert_eq!(level.in_spawnable_bounds(game, [0, 320, 0]), Some(true));
+            assert_eq!(
+                level.in_spawnable_bounds(game, [29_999_999, 19_999_999, -30_000_000]),
+                Some(true)
+            );
+            assert_eq!(
+                level.in_spawnable_bounds(game, [0, 20_000_000, 0]),
+                Some(false)
+            );
+            assert_eq!(
+                nether.in_world_bounds(game, [0, 64, 0]),
+                None,
+                "not opened yet"
+            );
         });
     }
 
