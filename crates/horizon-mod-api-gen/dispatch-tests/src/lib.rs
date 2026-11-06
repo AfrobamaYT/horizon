@@ -244,6 +244,9 @@ mod tests {
         pub(super) struct ChannelRef;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
+        pub(super) struct CommandInvocation {
+            pub(super) amount: i32,
+        }
         #[derive(Clone, Copy)]
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
@@ -734,6 +737,40 @@ mod tests {
                 [(0, "toast_add"), (1, "toast_add")]
             );
         });
+    }
+
+    #[test]
+    fn command_dispatch_forwards_typed_input_to_player_and_console_listeners() {
+        struct Observer(Arc<Mutex<Vec<i32>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Observer {
+            fn perform_command(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut PerformCommandEvent<'_>,
+            ) -> Flow {
+                self.0.lock().unwrap().push(event.command.amount);
+                Flow::Cancel
+            }
+            fn perform_console_command(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut PerformConsoleCommandEvent<'_>,
+            ) -> Flow {
+                self.0.lock().unwrap().push(-event.command.amount);
+                Flow::Cancel
+            }
+        }
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        install(vec![ModEntry::new("commands", Box::new(Observer(calls.clone())))].into());
+        let command = CommandInvocation { amount: 37 };
+        let mut ran = false;
+        dispatch_perform_command(&mut TestHost, &NativeServerPlayer, &command, &mut ran);
+        assert!(ran);
+        ran = false;
+        dispatch_perform_console_command(&mut TestHost, &command, &mut ran);
+        assert!(ran);
+        assert_eq!(*calls.lock().unwrap(), vec![37, -37]);
     }
 
     #[test]

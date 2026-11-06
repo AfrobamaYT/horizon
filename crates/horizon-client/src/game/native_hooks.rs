@@ -1015,12 +1015,12 @@ use mod_api::__private::game::IngredientTest;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
-    GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
-    NativeServerPlayer, PathComputationType, Placement, PlayerRef, RecipeBookCategory,
-    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
-    ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, ClientModifiers, ClientReloadListeners, CommandInvocation,
+    EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
+    NativeNoteBlockChange, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase,
+    TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
@@ -4761,8 +4761,10 @@ impl Game<'_> {
         self.fire_register_commands(commands);
     }
     /// A player's command on the server (`Commands.performCommand`),
-    /// without its slash, for a command a mod registered and the player's
-    /// level allows: set `ran` when it is yours. The player's state is
+    /// parsed into `command` with typed, source-resolved arguments, for a command
+    /// a mod registered and the player's level allows: set `ran` when it is yours.
+    /// Missing optional arguments are absent; parsing or resolution failures never
+    /// reach listeners. The player's state is
     /// swapped in for the call, so `native_player` and the other helpers
     /// read that player; `native_feedback` answers them. A single player's
     /// owner console (`horizon-ctl command`) reaches it too, as the owner at
@@ -4770,7 +4772,7 @@ impl Game<'_> {
     pub(super) fn native_perform_command(
         &mut self,
         player: &NativeServerPlayer,
-        command: &str,
+        command: &CommandInvocation,
         ran: &mut bool,
     ) {
         self.fire_perform_command(player, command, ran);
@@ -4981,13 +4983,20 @@ impl Game<'_> {
     }
     /// A command a mod registered, typed on the dedicated server's console
     /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), without its slash: set `ran`
-    /// when it is yours. There is no player: the source is the console, at
+    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
+    /// typed arguments: set `ran` when it is yours. Relative coordinates and
+    /// selectors use the console at the Overworld spawn, with zero rotation.
+    /// Missing optional arguments are absent; invalid input never reaches listeners.
+    /// There is no player: the source is the console, at
     /// permission level 4, so `native_acting_player` is None and the
     /// player-only helpers give nothing; `native_feedback` answers on the
     /// console. A name no mod registered goes to vanilla's dispatcher as
     /// before.
-    pub(super) fn native_perform_console_command(&mut self, command: &str, ran: &mut bool) {
+    pub(super) fn native_perform_console_command(
+        &mut self,
+        command: &CommandInvocation,
+        ran: &mut bool,
+    ) {
         self.fire_perform_console_command(command, ran);
     }
     /// A server player's ender pearl landed and is about to teleport them
@@ -10629,6 +10638,11 @@ impl Game<'_> {
     pub(super) fn native_clicks(&mut self) -> (u32, u32) {
         self.click_reading()
     }
+    /// The current window modifier keys in the same GLFW encoding as input hooks.
+    /// Cleared when the window loses focus; available even outside a world.
+    pub(super) fn native_modifiers(&self) -> ClientModifiers {
+        ClientModifiers::new(super::glfw_modifiers(self.modifiers))
+    }
     /// A vanilla mapping (`key.forward`, `key.jump`, `key.attack`…): whether
     /// it is held (`KeyMapping.isDown`), and its key's name as Controls shows
     /// it. None for a mapping it doesn't answer for.
@@ -10732,7 +10746,10 @@ impl Game<'_> {
     /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
     /// the content mods (`.hmod`) and the world's data packs, in file order: each
-    /// one typed (`Recipe`: its ingredients, results, group and cooking time and experience) with its file as JSON for a mod's own type. These are the
+    /// one typed (`Recipe`: its ingredients, results, group, cooking time and
+    /// experience, or its stonecutting, smithing or special crafting rule),
+    /// with its file as JSON for a mod's own type. Dynamic rules are not fixed
+    /// outputs; use `LevelRef::craft` to assemble a crafting grid. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
     /// load conditions held, so a pack's override or removal shows. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty

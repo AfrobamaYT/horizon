@@ -37,7 +37,7 @@ side does not compile:
   `&dyn ClientHost`.
 
 A method with a natural receiver belongs to a handle, not to the host: `EntityRef`, `LivingRef`, `PlayerRef`,
-`LevelRef`, `BlockEntityRef` and the other handles carry the per-object methods. Reads take `&dyn Host`; writes
+`LevelRef`, `BlockEntityRef` and the other handles carry the per-object methods. A block entity's lock is the vanilla item-predicate compound: `lock` reads it and `set_lock` sets or clears it through the transaction journal. `replace_data` replaces saved data while retaining the entity's identity and position; it does not change its type. Changing type requires the owning block's lifecycle path, as described in [transactional block-entity removal](block-entity-removal.md). Reads take `&dyn Host`; writes
 take `&mut dyn ServerHost`. Once a handle method exists, the id-based helper it covers is removed, so there is
 one way to do each thing. Attachments live on handles too. Commands, players, messages and scheduling are small
 services reached from the host, not methods on it.

@@ -192,6 +192,7 @@ mod lan_chat;
 mod lan_crafting;
 mod lan_entities;
 mod lan_far;
+mod lan_idle;
 mod lan_mobs;
 mod lan_mount_menu;
 mod lan_particles;
@@ -241,6 +242,7 @@ mod native_boss_bar_refs;
 mod native_chunk_save;
 mod native_claimed_items;
 pub mod native_client_services;
+mod native_client_session;
 mod native_components;
 mod native_config_files;
 mod native_configs;
@@ -277,6 +279,7 @@ mod native_level_effects;
 mod native_level_events;
 mod native_level_items;
 mod native_level_refs;
+mod native_level_signals;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_effects;
@@ -1026,6 +1029,20 @@ struct Mining {
     progress: f32,
     ticks: u32,
 }
+impl Mining {
+    fn stage(&self) -> Option<u8> {
+        (self.progress > 0.0).then(|| ((self.progress * 10.0) as u8).min(9))
+    }
+}
+#[derive(Clone, Copy)]
+struct TransformContext<'a> {
+    world: &'a World,
+    player: Option<u32>,
+    hand: mod_api::Hand,
+    blocking: bool,
+    simulated: bool,
+}
+
 #[derive(Clone, Copy)]
 struct Hit {
     pos: [i32; 3],
@@ -1726,12 +1743,11 @@ impl LevelAccess for GameLevel<'_> {
         direct: bool,
         vanilla: i32,
     ) -> i32 {
-        let mut signal = vanilla;
-        if self.native_authoritative {
-            let face = direction.opposite();
-            self.native_block_signal(self.dimension, pos, state, face, direct, &mut signal);
-        }
-        signal.clamp(0, 15)
+        native_level_signals::adjust_signal(direction, vanilla, |face, signal| {
+            if self.native_authoritative {
+                self.native_block_signal(self.dimension, pos, state, face, direct, signal);
+            }
+        })
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         let mut output = vanilla;
@@ -1961,17 +1977,7 @@ impl LevelAccess for GameLevel<'_> {
         _state: BlockStateId,
         _direction: Direction,
     ) -> i32 {
-        // TestBlock.ownSignal.
-        if let Some(BlockEntity::TestBlock(b)) =
-            self.world.block_entities.get(&(pos.x, pos.y, pos.z))
-        {
-            return b.own_signal();
-        }
-        // TrappedChestBlock.getSignal: the players with it open, at most 15.
-        if let Some(count) = self.lid_openers.get(&(pos.x, pos.y, pos.z)) {
-            return (*count).clamp(0, 15);
-        }
-        jukebox::jukebox_signals(self.world, self.items, pos).map_or(0, |(signal, _)| signal)
+        native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)
     }
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
         let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
@@ -12826,9 +12832,9 @@ impl Game<'_> {
             None => stages.push((pos, stage)),
         };
         if let Some(m) = &self.mining
-            && m.progress > 0.0
+            && let Some(stage) = m.stage()
         {
-            add(m.pos, ((m.progress * 10.0) as u32).min(9));
+            add(m.pos, u32::from(stage));
         }
         let now = self.world.game_time;
         for (pos, stage, at) in self.destroying.values() {
@@ -14468,7 +14474,38 @@ impl Game<'_> {
         stack: &ItemStack,
         hit: &Hit,
     ) -> Option<(BlockStateId, String, Option<String>, u32, String)> {
+        let blocking = self
+            .offhand
+            .as_ref()
+            .is_some_and(|s| self.blocks_attacks(s).is_some())
+            && !self.keys.held(Mapping::Sneak);
+        self.block_transform_in(
+            stack,
+            hit,
+            TransformContext {
+                world: &self.world,
+                player: self.player.is_some().then(|| self.own_entity_id() as u32),
+                hand: self.hand,
+                blocking,
+                simulated: false,
+            },
+        )
+    }
+
+    fn block_transform_in(
+        &self,
+        stack: &ItemStack,
+        hit: &Hit,
+        context: TransformContext<'_>,
+    ) -> Option<(BlockStateId, String, Option<String>, u32, String)> {
         use horizon_client::block_transform::Around;
+        let TransformContext {
+            world,
+            player,
+            hand,
+            blocking,
+            simulated,
+        } = context;
         let Hit { pos, face, .. } = *hit;
         struct Column<'w> {
             world: &'w World,
@@ -14495,11 +14532,7 @@ impl Game<'_> {
             .and_then(|i| i.block_transformer.clone())?;
         // playerHasBlockingItemUseIntent: a shield in the off hand is raised
         // instead, unless sneaking.
-        let shield = self
-            .offhand
-            .as_ref()
-            .is_some_and(|s| self.blocks_attacks(s).is_some());
-        if shield && !self.keys.held(Mapping::Sneak) {
+        if blocking {
             return None;
         }
         let face_name = match face {
@@ -14512,7 +14545,7 @@ impl Game<'_> {
         };
         let registry = self.pack.assets.registry;
         let around = Column {
-            world: &self.world,
+            world,
             registry,
             pos,
         };
@@ -14548,13 +14581,13 @@ impl Game<'_> {
             let matches_vanilla = state.is_some();
             let mut cancel = false;
             let tool = mod_api::ToolUse::from(mod_api::__private::built::ToolUse {
-                player: self.player.is_some().then(|| self.own_entity_id() as u32),
-                hand: self.hand,
+                player,
+                hand,
                 pos,
                 face,
                 click: hit.point,
                 ability,
-                simulated: false,
+                simulated,
             });
             self.native_block_tool_modification(stack, &tool, &mut state, &mut cancel);
             if cancel {
@@ -19123,6 +19156,7 @@ impl Game<'_> {
     /// screen's own raw keys, text and mods' key hooks stay raw on purpose.
     fn handle_window_event_inner(&mut self, event_loop: &dyn EventLoopCtl, mut event: WindowEvent) {
         if let WindowEvent::Focused(false) = &event {
+            self.modifiers = winit::keyboard::ModifiersState::empty();
             self.physical_keys.clear();
             self.physical_buttons.clear();
             self.drag_button = None;
@@ -21886,9 +21920,7 @@ impl Game<'_> {
             Some(kept) => {
                 match lan::reload_sync_data(&self.res.core.item_data, &self.pack_files(), &kept) {
                     Ok(sync) => {
-                        if let Some(host) = self.lan.as_mut() {
-                            host.hub.reload_resources(sync);
-                        }
+                        self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
                         self.run_native_advancement_grants();
                     }
                     Err(e) => {
@@ -23584,9 +23616,9 @@ impl Loading {
         };
         drop(game_step);
         let game_ms = game_at.elapsed().as_millis();
+        game.renderer = Some(renderer);
         game.resize_state = Some(game.resize_state_of(window.inner_size()));
         game.window = Some(window);
-        game.renderer = Some(renderer);
         game.world_renderer_ready = true;
         game.fullscreen = self.fullscreen;
         game.panorama_rotation = self.panorama_rotation;
@@ -24351,6 +24383,29 @@ mod tests {
 
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_modifier_snapshot_tracks_focus_loss() {
+        use mod_api::ClientHost;
+        use winit::{event_loop::ControlFlow, keyboard::ModifiersState};
+        struct TestLoop;
+        impl EventLoopCtl for TestLoop {
+            fn exit(&self) {}
+            fn set_control_flow(&self, _: ControlFlow) {}
+        }
+        super::native_entity_refs::tests::with_client_game(|game| {
+            game.modifiers = ModifiersState::SHIFT | ModifiersState::ALT;
+            let snapshot = (game as &dyn ClientHost).modifiers();
+            assert!(snapshot.shift());
+            assert!(snapshot.alt());
+            assert!(!snapshot.control());
+            assert!(!snapshot.super_key());
+            game.handle_window_event_inner(&TestLoop, WindowEvent::Focused(false));
+            assert_eq!((game as &dyn ClientHost).modifiers().bits, 0);
+            assert_eq!(snapshot.bits, 5);
+        });
+    }
 
     /// `ClipContext.Block.OUTLINE` for the SOURCE_ONLY ray (#8180): a ray
     /// through the empty part of a torch's cell is not stopped by it.

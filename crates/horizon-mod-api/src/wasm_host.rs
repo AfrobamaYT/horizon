@@ -948,6 +948,110 @@ mod glue {
 mod tests {
     use super::*;
 
+    #[test]
+    fn recipe_rule_generated_wire_roundtrip() {
+        use crate::{Ingredient, Recipe, RecipeRule, RecipeTemplate, Tag};
+        let mut recipe = Recipe::new(
+            "test:rule",
+            "minecraft:crafting_transmute",
+            Arc::new(serde_json::json!({"custom": 42})),
+        );
+        recipe.rule = Some(RecipeRule::Transmute {
+            input: Ingredient::of(vec!["test:input".into()]),
+            material: Ingredient::of(vec!["test:material".into()]),
+            min: 2,
+            max: 4,
+            add_count: true,
+            result: RecipeTemplate::new(
+                None,
+                3,
+                Some(Tag::compound([("!test:removed", Tag::Int(0))])),
+            ),
+        });
+        let output = glue::recipe_roundtrip(&recipe).unwrap();
+        assert_eq!(output.id, recipe.id);
+        assert_eq!(*output.json, *recipe.json);
+        let Some(RecipeRule::Transmute {
+            input,
+            material,
+            min,
+            max,
+            add_count,
+            result,
+        }) = output.rule
+        else {
+            panic!("wrong generated recipe rule")
+        };
+        assert_eq!(input.order, ["test:input"]);
+        assert_eq!(material.order, ["test:material"]);
+        assert_eq!((min, max, add_count), (2, 4, true));
+        assert_eq!((result.item, result.count), (None, 3));
+        assert!(matches!(
+            result.components.unwrap().get("!test:removed"),
+            Some(Tag::Int(0))
+        ));
+    }
+
+    #[test]
+    fn smithing_rule_generated_wire_roundtrip() {
+        use crate::{Ingredient, Recipe, RecipeRule, RecipeTemplate, RecipeTrimPattern, Tag};
+        let mut recipe = Recipe::new(
+            "test:smith",
+            "minecraft:smithing_transform",
+            Arc::new(serde_json::json!({})),
+        );
+        recipe.rule = Some(RecipeRule::SmithingTransform {
+            template: None,
+            base: Ingredient::of(vec!["test:base".into()]),
+            addition: None,
+            result: RecipeTemplate::new(
+                Some("test:result".into()),
+                2,
+                Some(Tag::compound([("test:patch", Tag::Int(7))])),
+            ),
+        });
+        let Some(RecipeRule::SmithingTransform {
+            template,
+            addition,
+            result,
+            ..
+        }) = glue::recipe_roundtrip(&recipe).unwrap().rule
+        else {
+            panic!("wrong rule")
+        };
+        assert!(template.is_none() && addition.is_none());
+        assert_eq!(result.count, 2);
+        assert_eq!(
+            result.components.unwrap().get("test:patch"),
+            Some(&Tag::Int(7))
+        );
+        recipe.rule = Some(RecipeRule::SmithingTrim {
+            template: Ingredient::of(vec![]),
+            base: Ingredient::of(vec![]),
+            addition: Ingredient::of(vec![]),
+            pattern: RecipeTrimPattern::Inline {
+                asset_id: "test:pattern".into(),
+                description: Tag::String("description".into()),
+                decal: true,
+            },
+        });
+        let Some(RecipeRule::SmithingTrim {
+            pattern:
+                RecipeTrimPattern::Inline {
+                    asset_id,
+                    description,
+                    decal,
+                },
+            ..
+        }) = glue::recipe_roundtrip(&recipe).unwrap().rule
+        else {
+            panic!("wrong rule")
+        };
+        assert_eq!(asset_id, "test:pattern");
+        assert_eq!(description, Tag::String("description".into()));
+        assert!(decal);
+    }
+
     fn group(wait: Duration) -> Arc<Group> {
         let engine = wasmtime::Engine::default();
         let limits = wasmtime::StoreLimitsBuilder::new().build();
