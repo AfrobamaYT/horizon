@@ -98,9 +98,8 @@ pub trait ClientSession {
 /// The commands service, reached through its host.
 pub trait Commands {
     /// Side: server.
-    /// A line of the command's answer, inside `native_perform_command`:
-    /// sent to the player whose command it is after the call, as vanilla
-    /// commands' feedback is.
+    /// A command's success feedback, routed to its originating source using
+    /// vanilla's silence, send-command-feedback and block/cart track-output rules.
     fn feedback(&mut self, line: Text) {
         crate::phase::unprovided(
             "Commands::feedback",
