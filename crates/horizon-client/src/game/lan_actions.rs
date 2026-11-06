@@ -660,6 +660,8 @@ impl Game<'_> {
         let attack_item = std::mem::replace(&mut self.attack_item, play.attack_item.take());
         let swing = std::mem::replace(&mut self.swing, play.swing);
         std::mem::swap(&mut self.mount, &mut play.mount);
+        // `Entity.portalCooldown` and `portalProcess` are the player's own.
+        std::mem::swap(&mut self.portals.player, &mut play.portal);
         let (left, right) = (self.left, self.right);
         self.left = play.digging.is_some();
         self.right = play.using.is_some() || self.using.is_some();
@@ -1096,6 +1098,7 @@ impl Game<'_> {
         play.attack_item = std::mem::replace(&mut self.attack_item, attack_item);
         play.swing = std::mem::replace(&mut self.swing, swing);
         std::mem::swap(&mut self.mount, &mut play.mount);
+        std::mem::swap(&mut self.portals.player, &mut play.portal);
         self.container = container;
         self.screen = screen;
         // A sign the guest's placement opened (SignBlock.openTextEdit).

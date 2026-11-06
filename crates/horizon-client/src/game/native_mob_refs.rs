@@ -186,15 +186,6 @@ impl Game<'_> {
         }
     }
 
-    /// The active mob's portal cooldown, or zero when no portal state exists.
-    pub(super) fn native_mob_portal_cooldown(&self, mob: MobRef) -> Option<i32> {
-        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
-            return None;
-        };
-        self.mobs.iter().find(|m| m.id == id)?;
-        Some(self.portals.entities.get(&id).map_or(0, |p| p.cooldown))
-    }
-
     /// The existing portal decision for an available mob in the current level.
     pub(super) fn native_mob_can_use_portal(&self, mob: MobRef) -> Option<bool> {
         let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
@@ -575,41 +566,6 @@ mod tests {
             assert_eq!(stale.leash_holder(game), None);
             game.enter_level(super::super::Dim::Nether).unwrap();
             assert_eq!(cow.leash_holder(game), None);
-        });
-    }
-
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn mob_portal_cooldown_tracks_ticks_and_refuses_unavailable_handles() {
-        use super::super::Dim;
-        use horizon_client::nether_portal::ENTITY_DELAY;
-
-        with_game(|game| {
-            let mob = add_mob(game, 12, "minecraft:cow");
-            assert_eq!(mob.portal_cooldown(game), Some(0));
-            game.set_portal_cooldown(12);
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY));
-            game.handle_entity_portals();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 1));
-            game.handle_entity_portals();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 2));
-
-            let stale = MobRef::new(EntityRef::new(
-                NativeWorldEpoch::new(mob.entity().epoch().get() + 1),
-                12,
-            ));
-            assert_eq!(stale.portal_cooldown(game), None);
-            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
-            dragon.id = 15;
-            game.dragon = Some(dragon);
-            let dragon = game
-                .native_mob_ref(game.native_entity(15).unwrap())
-                .unwrap();
-            assert_eq!(dragon.portal_cooldown(game), None);
-            game.enter_level(Dim::Nether).unwrap();
-            assert_eq!(mob.portal_cooldown(game), None);
-            game.enter_level(Dim::Overworld).unwrap();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 2));
         });
     }
 
