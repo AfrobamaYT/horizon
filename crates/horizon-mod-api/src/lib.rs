@@ -406,6 +406,28 @@ pub struct NativeCamera {
     pub dimension: String,
 }
 
+/// A snapshot of the client's input preferences.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientInputOptions {
+    /// Mouse sensitivity, normally between 0 and 1.
+    pub sensitivity: f32,
+    /// Whether horizontal mouse movement is inverted.
+    pub invert_x: bool,
+    /// Whether vertical mouse movement is inverted.
+    pub invert_y: bool,
+    /// Multiplier applied to mouse wheel movement.
+    pub mouse_wheel_sensitivity: f32,
+    /// Whether scroll input is reduced to discrete steps.
+    pub discrete_scroll: bool,
+    /// Whether crouching toggles instead of requiring a held key.
+    pub toggle_crouch: bool,
+    /// Whether sprinting toggles instead of requiring a held key.
+    pub toggle_sprint: bool,
+    /// Whether automatic jumping is enabled.
+    pub auto_jump: bool,
+}
+
 /// Context and adjustable pose for a first-person hand render.
 ///
 /// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).

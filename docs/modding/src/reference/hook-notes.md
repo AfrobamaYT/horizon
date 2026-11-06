@@ -19,6 +19,12 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Input preferences
+
+`ClientHost::input_options()` returns a copy of the current mouse and movement
+input preferences, even outside a world. Read again after settings change; an
+older snapshot stays unchanged. The fields are documented in the API reference.
+
 ## Sending a map image
 
 `PlayerRef::send_map` sends a complete 128-by-128 map image through a
