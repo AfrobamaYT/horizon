@@ -369,6 +369,7 @@ mod tests {
                     "minecraft:crossbow",
                     "minecraft:trident",
                     "minecraft:brush",
+                    "minecraft:wooden_spear",
                     "minecraft:stick",
                 ] {
                     r.item_part(id, Part(self.0.clone()));
@@ -385,6 +386,7 @@ mod tests {
                     "minecraft:crossbow",
                     "minecraft:trident",
                     "minecraft:brush",
+                    "minecraft:wooden_spear",
                 ] {
                     assert_eq!(
                         game.item_use_animation(&horizon_client::items::ItemStack::new(id, 1)),
@@ -398,7 +400,7 @@ mod tests {
                     )),
                     UseAnimation::None
                 );
-                assert_eq!(calls.load(Ordering::Relaxed), 5);
+                assert_eq!(calls.load(Ordering::Relaxed), 6);
             });
         });
     }
