@@ -166,17 +166,6 @@ pub fn rule_registry() -> Arc<RuleRegistry> {
         .get_or_init(|| Arc::new(RuleRegistry::vanilla()))
         .clone()
 }
-pub fn available_rules(minecart_improvements: bool) -> impl Iterator<Item = &'static Rule> {
-    static REGISTRY: OnceLock<Arc<RuleRegistry>> = OnceLock::new();
-    REGISTRY
-        .get_or_init(rule_registry)
-        .available_rules(minecart_improvements)
-}
-pub fn rule(name: &str) -> Option<&'static Rule> {
-    let name = name.strip_prefix("minecraft:").unwrap_or(name);
-    available_rules(true).find(|r| r.name == name)
-}
-
 /// A vanilla rule's resolved position in the registration order.
 #[derive(Clone, Copy, Debug)]
 pub struct RuleIndex(usize);
@@ -549,7 +538,7 @@ mod tests {
         assert!(Arc::ptr_eq(&registry, &rules.registry));
         assert!(std::ptr::eq(
             registry.rule("minecraft:keep_inventory").unwrap(),
-            rule("keep_inventory").unwrap()
+            rules.rule("keep_inventory").unwrap()
         ));
         assert_eq!(
             registry.available_rules(false).count() + 1,
