@@ -127,8 +127,7 @@ impl Game<'_> {
         rule: &str,
     ) -> Option<GameRuleValue> {
         self.native_level_world(level)?;
-        let r = horizon_client::gamerules::rule(rule)?;
-        self.ui.rules.get(r.name)
+        self.ui.rules.get(rule)
     }
     /// Every game rule the world has (`GameRules`) with its current value, by `minecraft:` id
     /// (`max_minecart_speed` only with minecart improvements): None for a stale handle and on
