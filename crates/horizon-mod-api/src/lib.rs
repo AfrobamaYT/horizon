@@ -113,6 +113,10 @@ pub use phase::{
 };
 mod advancement_progress;
 pub use advancement_progress::{AdvancementProgress, CriterionProgress};
+mod recipe_rule;
+pub use recipe_rule::{
+    FireworkShape, FireworkShapeIngredient, RecipeRule, RecipeTemplate, RecipeTrimPattern,
+};
 mod criteria;
 pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
 mod packets;
@@ -4592,6 +4596,55 @@ mod hooks_tests;
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn native_host_returns_typed_recipe_rules() {
+        struct Recipes(Arc<[Recipe]>);
+        impl Host for Recipes {
+            fn recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
+                if kind == "minecraft:crafting_transmute" {
+                    self.0.clone()
+                } else {
+                    Arc::from([])
+                }
+            }
+        }
+        let mut recipe = Recipe::new(
+            "test:recipe",
+            "minecraft:crafting_transmute",
+            Arc::new(serde_json::json!({"source": "test"})),
+        );
+        recipe.rule = Some(RecipeRule::Transmute {
+            input: Ingredient::of(vec!["test:input".into()]),
+            material: Ingredient::of(vec!["test:material".into()]),
+            min: 2,
+            max: 4,
+            add_count: true,
+            result: RecipeTemplate::new(None, 3, None),
+        });
+        let host = Recipes(Arc::from([recipe]));
+        let view = (&host as &dyn Host).recipes_of_type("minecraft:crafting_transmute");
+        let Some(RecipeRule::Transmute {
+            input,
+            material,
+            min,
+            max,
+            add_count,
+            result,
+        }) = &view[0].rule
+        else {
+            panic!("wrong rule")
+        };
+        assert_eq!(input.order, ["test:input"]);
+        assert_eq!(material.order, ["test:material"]);
+        assert_eq!((*min, *max, *add_count, result.count), (2, 4, true, 3));
+        assert_eq!(view[0].json["source"], "test");
+        assert!(
+            (&host as &dyn Host)
+                .recipes_of_type("test:other")
+                .is_empty()
+        );
+    }
 
     #[test]
     fn client_menu_click_refuses_a_host_without_its_backend() {
