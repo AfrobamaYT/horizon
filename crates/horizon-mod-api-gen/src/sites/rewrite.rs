@@ -262,8 +262,9 @@ pub fn rewrite(
                     selector: declaration.selector.clone(),
                     ordinal,
                     hash: digest(format!(
-                        "{}|{}|{}|{nth}|{same}|{}",
+                        "{}|{}|{}|{}|{nth}|{same}|{}",
                         enclosing.signature,
+                        plain_path(&callee.path),
                         callee.signature,
                         expr.to_token_stream(),
                         call_context(found.body, expr)

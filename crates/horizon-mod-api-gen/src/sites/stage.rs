@@ -172,7 +172,18 @@ mod tests {
         let sites = stage(&root, &entries).unwrap();
         assert_eq!(sites.len(), 1);
         assert!(ids(&root).unwrap().contains(&sites[0].name));
-        syn::parse_file(&fs::read_to_string(&file).unwrap()).unwrap();
+        let rewritten = fs::read_to_string(&file).unwrap();
+        syn::parse_file(&rewritten).unwrap();
+        fs::write(&file, source).unwrap();
+        fs::write(
+            &list,
+            format!("horizon_client::game::run | add | 0 | {}\n", sites[0].ctx),
+        )
+        .unwrap();
+        let pinned = stage(&root, &entries).unwrap();
+        assert_eq!(pinned[0].hash, sites[0].hash);
+        assert_eq!(pinned[0].name, sites[0].name);
+        assert_eq!(fs::read_to_string(&file).unwrap(), rewritten);
         fs::remove_dir_all(root).unwrap();
     }
 }

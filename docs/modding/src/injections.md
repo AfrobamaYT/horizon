@@ -375,15 +375,27 @@ build routes use the same `points.json` object: `points` lists function points a
 call sites. Only reviewed call entries in `crates/horizon-mod-api-gen/slots/<mod_id>.txt` become sites:
 
 ```text
-horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 |
+horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 | <ctx from points.json>
 ```
 
 Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (reserved for extension
-fields; not consumed yet). `ctx` is carried but may be empty until context identity is implemented.
-Files support `#` comments; identical declarations merge, and conflicting contexts name both files.
-The stage reads their sorted union, evaluates the receiver once,
-and rewrites only the selected call expression in its copy of the game. Ordinals count matching
-runtime calls in source order; constant contexts and nested item bodies are not selected.
+fields; not consumed yet). Files support `#` comments; identical declarations merge, and conflicting
+contexts name both files. The stage reads their sorted union, evaluates the receiver once, and rewrites
+only the selected call expression in its copy of the game.
+
+Call identity uses the resolved callee path, not its spelling: aliases and different receivers of the
+same type share one ordinal sequence. Ordinals count runtime calls in source order; constant contexts
+and nested item bodies are not selected. `points.json` publishes each site's resolved `call`, `ctx`,
+and `hash`. The fingerprint includes the callee path and signatures. `ctx` hashes the containing
+statement's tokens and its block/if/match-arm path, ignoring source formatting. Empty contexts are
+for tool discovery only; copy the generated context when listing a slot, never invent one.
+
+A unique matching context at another ordinal refuses with `E_INJECT_MOVED`, naming the new `nth`.
+A changed or missing context refuses with `E_INJECT_LOST`. Two calls to the same callee with identical
+contexts are also lost, even when `nth` still matches: the tool cannot prove which identical statement
+was intended. Refresh a moved ordinal with `inject update`; reselect a lost call with `inject add`.
+Function signature changes and missing functions use `E_INJECT_CHANGED` and `E_INJECT_MISSING` at the
+unified routing boundary. Freshness errors never silently select a different call.
 
 ```toml
 [[native.injection]]
@@ -393,7 +405,7 @@ selector = "autosave_interval"
 ordinal = 0                    # omitted means 0
 kind = "MODIFY_EXPRESSION_VALUE"
 raw = "autosave"
-fingerprint = "5873182907d67cea" # this seeded site's hash in points.json
+fingerprint = "b27c99081cbd928c" # this seeded site's hash in points.json
 ```
 
 The facade's `internals::raw` module exports this site's exact `Args`, `Receiver`, `Output` and
