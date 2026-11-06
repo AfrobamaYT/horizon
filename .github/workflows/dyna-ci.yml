@@ -311,7 +311,7 @@ jobs:
         env:
           HORIZON_WASM_INTERNALS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: cargo +stable test -j4 -p horizon-mod-wasm --lib view::tests:: -- --ignored
+        run: 'cargo +stable test -j4 -p horizon-mod-wasm --lib "view::tests::" -- --ignored'
       - name: A listener refused with its library keeps nothing of their group
         env:
           HORIZON_WASM_GROUPS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/groups
