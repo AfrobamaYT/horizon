@@ -15,7 +15,7 @@ fn empty_tag_selectors_follow_actual_tag_edits() {
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
