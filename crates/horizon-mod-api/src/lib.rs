@@ -22,6 +22,32 @@ pub use registry_keys::UnknownFluid;
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
 
+/// A baked standalone model resolved through [`RenderAssets::model`].
+/// Retain it between frames; reacquire it after a successful resource reload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: private fields; only the engine resolves model handles
+#[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
+pub struct ModelRef(u64, u32);
+
+impl ModelRef {
+    pub(crate) fn from_parts(generation: u64, slot: u32) -> Result<Self, &'static str> {
+        if generation == 0 {
+            return Err("unpublished model generation");
+        }
+        Ok(Self(generation, slot))
+    }
+}
+
+/// Why a standalone model could not be resolved or drawn. Errors append no geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ModelError {
+    /// The name is not a registered, successfully baked standalone model, or its slot is absent.
+    UnknownModel,
+    /// A successful resource replacement superseded the handle's generation.
+    StaleModel,
+}
+
 /// Why a game rule category declaration was refused.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -4356,7 +4382,7 @@ mod generated_host {
 pub use generated_host::{Backend, BackendMut, ClientBackendMut};
 pub use generated_host::{
     BlockEntityDrawContext, ClientHost, ClientSession, Commands, DrawContext, Host, HostSide,
-    LevelSide, Levels, Messages, Players, ServerHost,
+    LevelSide, Levels, Messages, Players, RenderAssets, ServerHost,
 };
 
 /// Result of accessing or decoding an attachment.
