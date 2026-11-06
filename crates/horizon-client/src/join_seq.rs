@@ -89,6 +89,16 @@ macro_rules! impl_joined {
 /// ```
 /// ```compile_fail
 /// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32>::default();
+/// list.iter_mut().as_mut_slice().reverse();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32>::default();
+/// (&mut list).into_iter().as_mut_slice().reverse();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
 /// let _: JoinList<u32> = vec![1].into();
 /// ```
 /// ```compile_fail
@@ -140,8 +150,8 @@ impl<T> JoinList<T> {
     pub fn swap(&mut self, a: usize, b: usize) {
         self.0.swap(a, b);
     }
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
-        self.0.iter_mut()
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut(self.0.iter_mut())
     }
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         self.0.get_mut(index)
@@ -213,11 +223,38 @@ impl<'a, T> IntoIterator for &'a JoinList<T> {
         self.0.iter()
     }
 }
+/// Mutable entity iteration without lending out the backing slice.
+/// Unlike `slice::IterMut`, this cannot reorder the remaining list as a slice.
+pub struct IterMut<'a, T>(std::slice::IterMut<'a, T>);
+
+impl<'a, T> Iterator for IterMut<'a, T> {
+    type Item = &'a mut T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.0.nth(n)
+    }
+}
+impl<T> DoubleEndedIterator for IterMut<'_, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back()
+    }
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.0.nth_back(n)
+    }
+}
+impl<T> ExactSizeIterator for IterMut<'_, T> {}
+impl<T> std::iter::FusedIterator for IterMut<'_, T> {}
+
 impl<'a, T> IntoIterator for &'a mut JoinList<T> {
     type Item = &'a mut T;
-    type IntoIter = std::slice::IterMut<'a, T>;
+    type IntoIter = IterMut<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter_mut()
+        self.iter_mut()
     }
 }
 impl<T> IntoIterator for JoinList<T> {
