@@ -240,10 +240,10 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
     Game::native_standalone_models(&RegistrationContext::new(), &mut names);
     Some(names)
 }
-pub(super) fn collect_key_mappings(
+pub(super) fn collect_key_mappings<'declared>(
     role: ExecutionRole,
-    declared: &[(&'static str, mod_api::NativeKeyRegistration)],
-) -> &[(&'static str, mod_api::NativeKeyRegistration)] {
+    declared: &'declared [(&'static str, mod_api::NativeKeyRegistration)],
+) -> &'declared [(&'static str, mod_api::NativeKeyRegistration)] {
     if role.is_client() { declared } else { &[] }
 }
 

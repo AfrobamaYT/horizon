@@ -2012,7 +2012,7 @@ fn tooltip_text(s: &Settings, wd: &Widget) -> Option<Text> {
             if conflicts.is_empty() {
                 return tip;
             }
-            let names = conflicts.iter().cloned().collect::<Vec<_>>().join(", ");
+            let names = conflicts.join(", ");
             Some(Text::translate(
                 "controls.keybinds.duplicateKeybinds",
                 &[Text::literal(names)],
