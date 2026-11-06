@@ -323,13 +323,13 @@ mod tests {
         let old = index.register(1, [(key("a"), entry(1)), (key("b"), entry(2))]);
         index.register(2, [(key("b"), entry(20))]);
         let retained = index.snapshot(&key("a"));
-        let current = index.register(1, [(key("c"), entry(3))]);
-        assert!(!index.set(&old, &key("c"), entry(99)));
-        assert!(!index.remove(&old, &key("c")));
+        let current = index.register(1, [(key("b"), entry(22)), (key("c"), entry(3))]);
+        assert!(!index.set(&old, &key("b"), entry(99)));
+        assert!(!index.remove(&old, &key("b")));
         assert!(!index.unregister(&old));
         assert_eq!(values(&retained), [(1, 1)]);
         assert!(index.snapshot(&key("a")).is_empty());
-        assert_eq!(values(&index.snapshot(&key("b"))), [(2, 20)]);
+        assert_eq!(values(&index.snapshot(&key("b"))), [(2, 20), (1, 22)]);
         assert_eq!(values(&index.snapshot(&key("c"))), [(1, 3)]);
         let clone = current.clone();
         drop(current);
