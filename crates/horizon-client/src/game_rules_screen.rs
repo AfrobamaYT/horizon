@@ -315,10 +315,10 @@ impl RulesScreen {
             self.scroll.amount = 0.0;
             return;
         };
-        let Some(r) = self.values.rule(&name) else {
+        let Some(r) = self.values.rule(&name).cloned() else {
             return;
         };
-        let value = self.number(&name).map(|b| parse(r, &b.value));
+        let value = self.number(&name).map(|b| parse(&r, &b.value));
         if let Some(Some(v)) = value {
             self.values.set(&name, Value::Int(v));
         }
@@ -388,7 +388,7 @@ impl RulesScreen {
         let Row::Rule(ref name) = rows[i] else {
             return None;
         };
-        let r = self.values.rule(name).expect("row rule exists");
+        let r = self.values.rule(name).expect("row rule exists").clone();
         if !on(control_x(w), self.row_top(i) + 2.0, 44.0, 20.0) {
             return None;
         }
@@ -508,8 +508,8 @@ impl RulesScreen {
                     });
                 }
                 Row::Rule(id) => {
-                    let r = self.values.rule(id).expect("row rule exists");
-                    let name = lines(&atlas.font, &Text::translate(&name_key(r), &[]), 170.0);
+                    let r = self.values.rule(id).expect("row rule exists").clone();
+                    let name = lines(&atlas.font, &Text::translate(&name_key(&r), &[]), 170.0);
                     match name.as_slice() {
                         [one] => {
                             batch.text_styled(atlas, one, cx, cy + 5.0, u32::MAX, true);
@@ -542,7 +542,7 @@ impl RulesScreen {
                                 true,
                                 hover,
                                 |rect| {
-                                    bool_narration(r, value, rect)
+                                    bool_narration(&r, value, rect)
                                         .key(crate::widgets::key_of(&("game_rules", r.name)))
                                         .child_of(list, i)
                                 },
@@ -555,8 +555,11 @@ impl RulesScreen {
                                 // IntegerRuleEntry's box: the rule's name, its
                                 // description and default, a line each.
                                 if crate::widgets::narrating() {
-                                    b.message =
-                                        format!("{}\n{}\n", lang::get(&name_key(r)), narration(r));
+                                    b.message = format!(
+                                        "{}\n{}\n",
+                                        lang::get(&name_key(&r)),
+                                        narration(&r)
+                                    );
                                 }
                                 b.draw(batch, atlas, None);
                                 crate::widgets::last_narratable(|n| {
@@ -630,9 +633,9 @@ impl RulesScreen {
         }
         // The hovered rule's tooltip: its id, description and default.
         if let Some(Row::Rule(id)) = hovered.map(|i| &rows[i]) {
-            let r = self.values.rule(id).expect("row rule exists");
+            let r = self.values.rule(id).expect("row rule exists").clone();
             let mut tip = vec![Text::literal(r.name).with_color(yellow())];
-            let description = format!("{}.description", name_key(r));
+            let description = format!("{}.description", name_key(&r));
             if lang::has(&description) {
                 tip.extend(lines(
                     &atlas.font,
