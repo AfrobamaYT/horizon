@@ -913,7 +913,7 @@ mod tests {
                 // A resource read may not accidentally open a mixed service during reload.
                 let mut mixed = crate::catalog::Catalog::load(&root).unwrap();
                 mixed.helpers.iter_mut().find(|helper| helper.name == "client_server").unwrap().service = Some("render_assets".into());
-                let (host, implementation) = crate::host::generate(&root, &mixed, &generated.hooks).unwrap();
+                let (host, implementation, _) = crate::host::generate(&root, &mixed, &generated.hooks).unwrap();
                 for source in [host, implementation] {
                     assert!(source.contains("check_access(\"render_assets\", mod_api::__private::LoadAccess::WorldOnly)"));
                 }
