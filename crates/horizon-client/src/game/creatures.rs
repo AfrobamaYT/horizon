@@ -8805,7 +8805,7 @@ mod local_sound_event_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            horizon_assets::resource_source::ResourceRoot::directory(&root),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             Vec::new(),
             None,
             &root,
@@ -8829,7 +8829,7 @@ mod local_sound_event_tests {
             options,
             settings,
             Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                &root,
+                root.clone(),
             )),
             None,
         )
