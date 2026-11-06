@@ -9,7 +9,11 @@ struct Server;
 
 impl mod_api::Host for Server {}
 
+mod_api::impl_host_areas!(Server);
+
 impl mod_api::ServerHost for Server {}
+
+mod_api::impl_server_host_areas!(Server);
 
 /// A native mod appending `N` at the same point.
 struct NativeTail;

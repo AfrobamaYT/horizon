@@ -537,16 +537,22 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for PipeWorld {
+    impl mod_api::prelude::LevelReadsBackend for PipeWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsBackend for PipeWorld {
         fn block_entity_kind(
             &self,
             BlockEntityRef { position: pos, .. }: BlockEntityRef,
         ) -> Option<BlockEntityTypeKey> {
             (pos == PIPE).then(|| type_key("test:pipe"))
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::ItemCapabilityBackend for PipeWorld {
         fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             (pos == CHEST).then_some(1)
         }
@@ -559,7 +565,14 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for PipeWorld {
+    impl Backend for PipeWorld {}
+    #[cfg(test)]
+    mod_api::impl_backend_areas!(
+        PipeWorld,
+        except(level_reads, block_entity_refs, item_capability)
+    );
+    #[cfg(test)]
+    impl mod_api::prelude::ItemCapabilityBackendMut for PipeWorld {
         fn container_insert(
             &mut self,
             BlockSide { pos, .. }: BlockSide,
@@ -575,26 +588,40 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Host for PipeWorld {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
+    impl BackendMut for PipeWorld {}
+    #[cfg(test)]
+    mod_api::impl_backend_mut_areas!(PipeWorld, except(item_capability));
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsHost for PipeWorld {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
     }
     #[cfg(test)]
-    impl ServerHost for PipeWorld {
+    impl Host for PipeWorld {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+    }
+    #[cfg(test)]
+    mod_api::impl_host_areas!(PipeWorld, except(block_entity_refs));
+    #[cfg(test)]
+    impl mod_api::prelude::TransactionsServerHost for PipeWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
+    }
+    #[cfg(test)]
+    impl ServerHost for PipeWorld {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
+    mod_api::impl_server_host_areas!(PipeWorld, except(transactions));
 
     fn stick() -> ItemStack {
         stack("minecraft:stick", 1, 0)
@@ -840,10 +867,13 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for Player {
+    impl mod_api::prelude::LevelReadsBackend for Player {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::EntityHandlesBackend for Player {
         // Entity 1 is the player, 2 a pig, 3 a mod's robot, 4 a player in another level.
         fn entity_kind(&self, entity: EntityRef) -> Option<String> {
             let kind = [
@@ -861,6 +891,9 @@ pub mod tests {
                 _ => here(),
             })
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::ItemPlacesBackend for Player {
         fn entity_container_size(&self, _: u32) -> Option<usize> {
             None
         }
@@ -871,15 +904,28 @@ pub mod tests {
         fn player_selected_slot(&self, _: PlayerRef) -> Option<usize> {
             Some(5)
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::ItemContainerBackend for Player {
         fn item_container_slots(&self, _: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
             None
         }
     }
     #[cfg(test)]
-    impl BackendMut for Player {
+    impl Backend for Player {}
+    #[cfg(test)]
+    mod_api::impl_backend_areas!(
+        Player,
+        except(level_reads, entity_handles, item_places, item_container)
+    );
+    #[cfg(test)]
+    impl mod_api::prelude::EntityHandlesBackendMut for Player {
         fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
             Some(u128::from(entity.id()))
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::ItemPlacesBackendMut for Player {
         fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
             match place {
                 ItemPlace::PlayerHand { player: 1, .. } => self.main_hand.clone(),
@@ -922,11 +968,18 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Host for Player {
+    impl BackendMut for Player {}
+    #[cfg(test)]
+    mod_api::impl_backend_mut_areas!(Player, except(entity_handles, item_places));
+    #[cfg(test)]
+    impl mod_api::prelude::PlayerReadHost for Player {
         fn player(&self, uuid: u128) -> Option<PlayerRef> {
             let entity = EntityRef::new(NativeWorldEpoch::new(1), u32::try_from(uuid).ok()?);
             Some(PlayerRef { entity, uuid })
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::ItemComponentsHost for Player {
         fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
             let helmet = item == "minecraft:iron_helmet";
             match component {
@@ -939,22 +992,32 @@ pub mod tests {
                 _ => None,
             }
         }
+    }
+    #[cfg(test)]
+    impl Host for Player {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
     }
     #[cfg(test)]
-    impl ServerHost for Player {
+    mod_api::impl_host_areas!(Player, except(player_read, item_components));
+    #[cfg(test)]
+    impl mod_api::prelude::TransactionsServerHost for Player {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
+    }
+    #[cfg(test)]
+    impl ServerHost for Player {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
+    mod_api::impl_server_host_areas!(Player, except(transactions));
     #[cfg(test)]
     impl Player {
         #[cfg(test)]
@@ -1151,13 +1214,19 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for Shelf {
+    impl mod_api::prelude::LevelReadsBackend for Shelf {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsBackend for Shelf {
         fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
             self.overstates.then(|| type_key("test:item_overstates"))
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::ItemCapabilityBackend for Shelf {
         fn container_capacity(&self, _: BlockSide, slot: usize, _: &ItemStack) -> u32 {
             if self.output == Some(slot) {
                 0
@@ -1173,7 +1242,14 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for Shelf {
+    impl Backend for Shelf {}
+    #[cfg(test)]
+    mod_api::impl_backend_areas!(
+        Shelf,
+        except(level_reads, block_entity_refs, item_capability)
+    );
+    #[cfg(test)]
+    impl mod_api::prelude::ItemCapabilityBackendMut for Shelf {
         fn container_insert(
             &mut self,
             _: BlockSide,
@@ -1222,10 +1298,11 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Host for Shelf {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
+    impl BackendMut for Shelf {}
+    #[cfg(test)]
+    mod_api::impl_backend_mut_areas!(Shelf, except(item_capability));
+    #[cfg(test)]
+    impl mod_api::prelude::ItemComponentsHost for Shelf {
         fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
             // An iron sword's, as its item report gives them.
             let default = match component {
@@ -1238,22 +1315,38 @@ pub mod tests {
             };
             (item == "minecraft:iron_sword").then_some(default)
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsHost for Shelf {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
     }
     #[cfg(test)]
-    impl ServerHost for Shelf {
+    impl Host for Shelf {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+    }
+    #[cfg(test)]
+    mod_api::impl_host_areas!(Shelf, except(item_components, block_entity_refs));
+    #[cfg(test)]
+    impl mod_api::prelude::TransactionsServerHost for Shelf {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
+    }
+    #[cfg(test)]
+    impl ServerHost for Shelf {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
+    mod_api::impl_server_host_areas!(Shelf, except(transactions));
     #[cfg(test)]
     impl Shelf {
         #[cfg(test)]
@@ -1513,10 +1606,13 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for TwoChests {
+    impl mod_api::prelude::LevelReadsBackend for TwoChests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::ItemCapabilityBackend for TwoChests {
         fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             [FROM, INTO].contains(&pos).then_some(3)
         }
@@ -1536,7 +1632,11 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for TwoChests {
+    impl Backend for TwoChests {}
+    #[cfg(test)]
+    mod_api::impl_backend_areas!(TwoChests, except(level_reads, item_capability));
+    #[cfg(test)]
+    impl mod_api::prelude::ItemCapabilityBackendMut for TwoChests {
         fn container_insert(
             &mut self,
             BlockSide { pos, .. }: BlockSide,
@@ -1586,26 +1686,40 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Host for TwoChests {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
+    impl BackendMut for TwoChests {}
+    #[cfg(test)]
+    mod_api::impl_backend_mut_areas!(TwoChests, except(item_capability));
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsHost for TwoChests {
         fn block_entity(&self, _: LevelRef, _: [i32; 3]) -> Option<BlockEntityRef> {
             None
         }
     }
     #[cfg(test)]
-    impl ServerHost for TwoChests {
+    impl Host for TwoChests {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+    }
+    #[cfg(test)]
+    mod_api::impl_host_areas!(TwoChests, except(block_entity_refs));
+    #[cfg(test)]
+    impl mod_api::prelude::TransactionsServerHost for TwoChests {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
+    }
+    #[cfg(test)]
+    impl ServerHost for TwoChests {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
+    mod_api::impl_server_host_areas!(TwoChests, except(transactions));
 
     #[cfg(test)]
     /// A target that answers one more than it was given, and keeps nothing.
@@ -1785,7 +1899,7 @@ pub mod tests {
     fn a_component_set_keeps_a_change_its_codec_reads_and_raw_nbt_keeps_its_types() {
         /// A stick's report: `custom_data` `{x: 1}`, a huge `max_damage` and a mod's `test:long`.
         struct Report;
-        impl Host for Report {
+        impl mod_api::prelude::ItemComponentsHost for Report {
             fn item_default_component(&self, _: &str, id: &str) -> Option<Tag> {
                 let x = || Tag::Compound([("x".into(), Tag::Int(1))].into_iter().collect());
                 match id {
@@ -1795,6 +1909,8 @@ pub mod tests {
                 }
             }
         }
+        impl Host for Report {}
+        mod_api::impl_host_areas!(Report, except(item_components));
         let stick = ItemResource::of(&stick());
         let set = |id, value: Tag| {
             let id = ComponentId::new(id).unwrap();
@@ -2274,17 +2390,25 @@ pub mod tests {
     /// its damage is 1.
     struct HeldItem(ItemStack);
     #[cfg(test)]
-    impl Backend for HeldItem {
+    impl mod_api::prelude::ItemContainerBackend for HeldItem {
         fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
             (stack.damage == 1).then(|| vec![None; 27])
         }
     }
     #[cfg(test)]
-    impl BackendMut for HeldItem {
+    impl Backend for HeldItem {}
+    #[cfg(test)]
+    mod_api::impl_backend_areas!(HeldItem, except(item_container));
+    #[cfg(test)]
+    impl mod_api::prelude::ItemPlacesBackendMut for HeldItem {
         fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
             (*place == HAND).then(|| self.0.clone())
         }
     }
+    #[cfg(test)]
+    impl BackendMut for HeldItem {}
+    #[cfg(test)]
+    mod_api::impl_backend_mut_areas!(HeldItem, except(item_places));
     #[cfg(test)]
     impl Host for HeldItem {
         fn backend(&self) -> Option<BackendRef<'_>> {
@@ -2292,9 +2416,13 @@ pub mod tests {
         }
     }
     #[cfg(test)]
+    mod_api::impl_host_areas!(HeldItem);
+    #[cfg(test)]
     impl ServerHost for HeldItem {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
+    mod_api::impl_server_host_areas!(HeldItem);
 }
