@@ -7614,6 +7614,39 @@ mod tests {
     }
 
     #[test]
+    fn level_save_rule_files_round_trip_without_byte_changes() {
+        for absent_mod in [false, true] {
+            let dir = std::env::temp_dir().join(format!(
+                "horizon-rule-file-roundtrip-{}-{absent_mod}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let mut level = super::Level::default();
+            level.write(&dir).unwrap();
+            if absent_mod {
+                let mut data = super::read_saved_data(&dir, "game_rules").unwrap();
+                super::put(&mut data, "absent:rule", super::Tag::Long(42));
+                super::write_saved_data(&dir, "game_rules", data).unwrap();
+            }
+            let mut before_level = super::read_dat(&dir.join("level.dat")).unwrap();
+            let path = super::saved_data_path(&dir, "game_rules");
+            let before_rules = std::fs::read(&path).unwrap();
+            super::Level::read(&dir).unwrap().write(&dir).unwrap();
+            let mut after_level = super::read_dat(&dir.join("level.dat")).unwrap();
+            for level in [&mut before_level, &mut after_level] {
+                if let super::Tag::Compound(root) = level
+                    && let Some(super::Tag::Compound(data)) = root.get_mut(&"Data".into())
+                {
+                    data.remove(&"LastPlayed".into());
+                }
+            }
+            assert_eq!(after_level, before_level);
+            assert_eq!(std::fs::read(path).unwrap(), before_rules);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
     fn level_save_preserves_absent_mod_rules() {
         let dir =
             std::env::temp_dir().join(format!("horizon-gamerules-unknown-{}", std::process::id()));
