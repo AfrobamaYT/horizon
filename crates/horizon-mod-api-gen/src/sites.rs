@@ -163,6 +163,7 @@ pub(crate) struct Site {
 
 pub(crate) mod analysis;
 pub(crate) mod resolve;
+pub(crate) mod rewrite;
 
 #[cfg(test)]
 mod tests;

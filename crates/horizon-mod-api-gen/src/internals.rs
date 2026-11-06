@@ -51,11 +51,7 @@ struct Source {
 
 impl Source {
     fn offset(&self, position: proc_macro2::LineColumn) -> usize {
-        let line = self.lines[position.line - 1];
-        self.text[line..]
-            .char_indices()
-            .nth(position.column)
-            .map_or(self.text.len(), |(i, _)| line + i)
+        crate::points::offset(&self.text, &self.lines, position)
     }
 
     fn annotate(&mut self, attrs: &[syn::Attribute], start: Span, kind: &str, path: &str) {
