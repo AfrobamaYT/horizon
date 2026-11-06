@@ -83,7 +83,9 @@ mod tests {
     fn a_trigger_without_a_game_refuses_without_testing() {
         struct TestHost;
         impl Host for TestHost {}
+        mod_api::impl_host_areas!(TestHost);
         impl ServerHost for TestHost {}
+        mod_api::impl_server_host_areas!(TestHost);
         struct Never;
         impl CriterionTest for Never {
             fn test(&self, _: &dyn CriterionContext) -> Result<bool, CriterionTestError> {

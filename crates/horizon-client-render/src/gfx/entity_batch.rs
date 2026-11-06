@@ -59,6 +59,21 @@ pub const WORLD_TEXT_POLYGON_OFFSET_OVERLAY: u32 = 40;
 
 /// The material of a quad by its overlay (`MATERIALS` order): the overlay is the layer's low 16
 /// bits, as entity.wgsl reads it; HDR output's tier rides in the high ones.
+/// Vertices of ordinary material before `cut` in the pre-batch stream.
+///
+/// `EntityBatch::update` packs that material first and draws the rest in later passes,
+/// so a prepared cut recorded in the original stream has to skip what moved.
+pub(super) fn ordinary_vertices_before(vertices: &[Vertex], cut: u32, oit: bool) -> u32 {
+    let cut = (cut as usize).min(vertices.len()) / 4 * 4;
+    let mut ordinary = 0u32;
+    for quad in vertices[..cut].as_chunks::<4>().0 {
+        if material(quad[0].layer, oit) == 0 {
+            ordinary += 4;
+        }
+    }
+    ordinary
+}
+
 fn material(layer: u32, oit: bool) -> usize {
     if oit && layer & OIT_ENTITY != 0 {
         return 9;
@@ -188,6 +203,41 @@ impl EntityBatch {
 mod tests {
     use super::*;
     use std::{hint::black_box, time::Instant};
+
+    #[test]
+    fn ordinary_cuts_skip_shadows_and_text() {
+        let mut stream = Vec::new();
+        for (layer, x) in [(14, 1.0), (0, 2.0)] {
+            stream.extend(std::iter::repeat_n(
+                Vertex {
+                    layer,
+                    pos: [x, 0.0, 0.0],
+                    ..geometry(1, false)[0]
+                },
+                4,
+            ));
+        }
+        let cut = stream.len() as u32;
+        stream.extend(std::iter::repeat_n(
+            Vertex {
+                layer: 0,
+                pos: [3.0, 0.0, 0.0],
+                ..geometry(1, false)[0]
+            },
+            4,
+        ));
+        assert_eq!(ordinary_vertices_before(&stream, cut, false), 4);
+        assert_ne!(cut, 4, "the raw cut still counts the shadow");
+        let tagged = vec![
+            Vertex {
+                layer: OIT_ENTITY,
+                ..geometry(1, false)[0]
+            };
+            4
+        ];
+        assert_eq!(ordinary_vertices_before(&tagged, 4, true), 0);
+        assert_eq!(ordinary_vertices_before(&tagged, 4, false), 4);
+    }
     #[test]
     fn world_canvas_sorts_after_oit_eyes_before_frame_tails() {
         let quad = |layer, x| {

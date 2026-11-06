@@ -1,16 +1,16 @@
-//! Declarations of the mod API's hooks, helpers and draw contexts: the catalog.
+//! Declarations of the mod API's hooks and draw contexts: the catalog.
 //!
 //! This module is never compiled (`#[cfg(any())]` in `lib.rs`): `horizon-mod-api-gen` reads these
-//! files with `syn` and builds the `Hooks` trait, its dispatch, the `Host` traits, the game's entry
-//! points and the rustdoc from them. Lint checks these files directly with `rustfmt`.
+//! files with `syn` and builds the `Hooks` trait, its dispatch, the game's entry points and the
+//! rustdoc from them. Lint checks these files directly with `rustfmt`. What the game does for a mod, the host
+//! methods and the handles', is not declared here but written by hand, one file per area, in `../host/<area>.rs`.
 //!
 //! Each area file holds up to three traits, each declaration a bodiless `fn name();` with its rustdoc:
 //!
 //! - `Hooks`: `#[hook(side = "...", contract = "...", ...)]`, one per moment the game tells mods about.
-//! - `Helpers`: `#[helper(side = "...", ...)]`, a game function mods reach through the `Host` or a handle.
-//! - `DrawContexts`: `#[draw_context(surface = "...", name = "...", prefix = "...")]`, a drawing surface.
-//! - `Notes`: `#[notes = "..."]`, prose for the hook-notes page that belongs to no one hook or helper.
-//!   A hook or helper's own prose is a `#[notes]` beside its declaration.
+//! - `DrawContexts`: `#[draw_context(surface = "...", name = "...")]`, a drawing surface hooks draw on.
+//! - `Notes`: `#[notes = "..."]`, prose for the hook-notes page that belongs to no one hook.
+//!   A hook's own prose is a `#[notes]` beside its declaration; a host method's, a `Notes` entry.
 //!
 //! A hook's arguments:
 //!
@@ -26,10 +26,6 @@
 //! | `cancellable` | whether the NeoForge counterpart event is cancellable (documentation, not the contract) |
 //! | `version` | the contract version an injection's `hook_version` names; left out when it is 1 |
 //! | `target` | the game function that fires it; left out when it is `Game::native_<name>` in `native_hooks/<area>.rs` |
-//!
-//! A helper's arguments are `side`, `target` (left out when it is `Game::native_<name>`),
-//! `client_target` (a both-side helper whose client implementation differs), `receiver` (the handle it
-//! is also a method of) and `backend = true`.
 //!
 //! Every hook needs `///` lines: they are the rustdoc of its trait method, and a hook without them
 //! is refused. The generator reads the files in name order, `base.rs` first, and each file in declaration

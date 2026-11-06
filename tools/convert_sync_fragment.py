@@ -60,32 +60,22 @@ def hook_attr(h):
     return "#[hook(" + ", ".join(parts) + ")]"
 
 
-def helper_attr(h):
-    parts = [f'side = {lit(h["side"])}']
-    if "client_target" in h:
-        parts.append(f'client_target = {lit(h["client_target"])}')
-    if "receiver" in h:
-        parts.append(f'receiver = {lit(h["receiver"])}')
-    if h.get("backend"):
-        parts.append("backend = true")
-    if h["target"] != DEFAULT_TARGET + h["name"]:
-        parts.append(f'target = {lit(h["target"])}')
-    return "#[helper(" + ", ".join(parts) + ")]"
-
-
 HEADER = "//! {title}: declarations the mod API generator reads (see `hooks/mod.rs`).\n\n"
 def convert(path, out):
     src = json.loads(path.read_text())
-    unknown = set(src) - {"hooks", "helpers", "draw_contexts"}
+    unknown = set(src) - {"hooks", "draw_contexts"}
     if unknown or src.get("draw_contexts"):
-        raise ValueError(f"unsupported fragment fields: {sorted(unknown)} or draw contexts")
+        raise ValueError(
+            f"unsupported fragment fields: {sorted(unknown)} or draw contexts; "
+            "helpers are host methods now, written by hand in crates/horizon-mod-api/src/host/<area>.rs"
+        )
     stem = path.stem.replace("-", "_")
     if not re.fullmatch(r"[a-z_][a-z0-9_]*", stem):
         raise ValueError(f"invalid Rust module name: {stem}")
     destination = out / f"{stem}.rs"
     if destination.exists():
         raise ValueError(f"destination already exists: {destination}")
-    text = HEADER.format(title=f"The `{stem}` hooks and helpers")
+    text = HEADER.format(title=f"The `{stem}` hooks")
     if src.get("hooks"):
         text += "pub trait Hooks {\n"
         for h in src["hooks"]:
@@ -98,14 +88,6 @@ def convert(path, out):
                 raise ValueError(f"{h['name']}: documentation cannot round-trip")
             text += "".join("    " + line + "\n" for line in lines)
             text += "    " + hook_attr(h) + "\n    fn " + h["name"] + "();\n"
-        text += "}\n"
-    if src.get("helpers"):
-        text += "\npub trait Helpers {\n"
-        for h in src["helpers"]:
-            unknown = set(h) - {"name", "side", "target", "client_target", "receiver", "backend"}
-            if unknown:
-                raise ValueError(f"{h['name']}: unsupported fields {sorted(unknown)}")
-            text += "    " + helper_attr(h) + "\n    fn " + h["name"] + "();\n"
         text += "}\n"
     destination.write_text(text)
     return stem
