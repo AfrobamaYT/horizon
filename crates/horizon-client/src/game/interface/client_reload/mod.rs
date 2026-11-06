@@ -24,7 +24,9 @@ pub(super) type PreparedClientReload = PreparedStep<()>;
 /// one. The reload itself reads through the game's host.
 pub(super) struct StartupClientHost;
 impl Host for StartupClientHost {}
+mod_api::impl_host_areas!(StartupClientHost);
 impl ClientHost for StartupClientHost {}
+mod_api::impl_client_host_areas!(StartupClientHost);
 
 impl Game<'_> {
     /// Registers a later reload's client listeners through the game

@@ -4,6 +4,9 @@
 //! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/modding/src/how-to/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
+// The generated `impl_*_areas!` macros are exported for test doubles outside the crate, and this crate's
+// own test doubles use them by path too.
+#![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
 extern crate self as mod_api;
 
 /// A saved fluid name retained for the lifetime of the process.
@@ -4592,7 +4595,7 @@ mod tests {
     #[test]
     fn native_host_returns_typed_recipe_rules() {
         struct Recipes(Arc<[Recipe]>);
-        impl Host for Recipes {
+        impl mod_api::prelude::BaseHost for Recipes {
             fn recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
                 if kind == "minecraft:crafting_transmute" {
                     self.0.clone()
@@ -4601,6 +4604,8 @@ mod tests {
                 }
             }
         }
+        impl Host for Recipes {}
+        mod_api::impl_host_areas!(Recipes, except(base));
         let mut recipe = Recipe::new(
             "test:recipe",
             "minecraft:crafting_transmute",
@@ -4642,7 +4647,9 @@ mod tests {
     fn client_menu_click_refuses_a_host_without_its_backend() {
         struct Empty;
         impl Host for Empty {}
+        mod_api::impl_host_areas!(Empty);
         impl ClientHost for Empty {}
+        mod_api::impl_client_host_areas!(Empty);
         let player = __private::game::player_ref(EntityRef::new(NativeWorldEpoch::new(1), 7), 42);
         let menu = __private::game::menu_ref(player, 0, 1);
         assert!(!menu.click(
@@ -4671,11 +4678,13 @@ mod tests {
     #[test]
     fn an_optional_dependency_runs_only_when_built_with_and_installed() {
         struct Installed(&'static str);
-        impl Host for Installed {
+        impl mod_api::prelude::BaseHost for Installed {
             fn is_loaded(&self, id: &str) -> bool {
                 id == self.0
             }
         }
+        impl Host for Installed {}
+        mod_api::impl_host_areas!(Installed, except(base));
         // The `testing` feature stands for a dependency's: without it the block isn't compiled,
         // with it the game is asked.
         let ran = std::cell::Cell::new(0);
@@ -4698,33 +4707,42 @@ mod tests {
         lines: Vec<Text>,
     }
 
-    impl Backend for Reader {
+    impl mod_api::prelude::LevelReadsBackend for Reader {
         fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
             Some(self.block.to_string())
         }
     }
+    impl Backend for Reader {}
+    mod_api::impl_backend_areas!(Reader, except(level_reads));
 
-    impl Host for Reader {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
+    impl mod_api::prelude::EntityHandlesHost for Reader {
         fn level(&self, dimension: &str) -> Option<LevelRef> {
             (dimension == "minecraft:overworld")
                 .then(|| LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD))
         }
     }
+    impl Host for Reader {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+    }
+    mod_api::impl_host_areas!(Reader, except(entity_handles));
     impl ClientHost for Reader {}
-    impl ServerHost for Reader {
+    mod_api::impl_client_host_areas!(Reader);
+    impl mod_api::prelude::ServicesServerHost for Reader {
         fn players(&self) -> &dyn Players {
             self
         }
         fn commands(&mut self) -> &mut dyn Commands {
             self
         }
+    }
+    impl ServerHost for Reader {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
     }
+    mod_api::impl_server_host_areas!(Reader, except(services));
     impl Commands for Reader {}
     impl Players for Reader {
         fn acting_player(&self) -> Option<PlayerRef> {
@@ -4734,13 +4752,15 @@ mod tests {
             ))
         }
     }
-    impl BackendMut for Reader {
+    impl mod_api::prelude::BaseBackendMut for Reader {
         fn player_action_bar(&mut self, player: PlayerRef, line: Text) -> bool {
             assert_eq!(player.uuid(), 7);
             self.lines.push(line);
             true
         }
     }
+    impl BackendMut for Reader {}
+    mod_api::impl_backend_mut_areas!(Reader, except(base));
 
     #[test]
     fn server_services_forward_commands_messages_and_player_identity() {
@@ -4750,7 +4770,8 @@ mod tests {
             lines: RefCell<Vec<String>>,
         }
         impl Host for Server {}
-        impl ServerHost for Server {
+        mod_api::impl_host_areas!(Server);
+        impl mod_api::prelude::ServicesServerHost for Server {
             fn commands(&mut self) -> &mut dyn Commands {
                 self
             }
@@ -4761,6 +4782,8 @@ mod tests {
                 self
             }
         }
+        impl ServerHost for Server {}
+        mod_api::impl_server_host_areas!(Server, except(services));
         impl Commands for Server {
             fn run_command(&mut self, line: &str) -> bool {
                 self.lines.get_mut().push(line.to_owned());

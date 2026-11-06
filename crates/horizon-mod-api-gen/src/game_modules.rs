@@ -21,7 +21,11 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
             ));
         }
         if !path.join(".game-area").is_file() {
-            if path.is_dir() && path.file_name().is_none_or(|name| name != "native_hooks") {
+            if path.is_dir()
+                && path
+                    .file_name()
+                    .is_none_or(|name| name != "native_hooks" && name != "host")
+            {
                 return Err(format!("{}: missing .game-area marker", path.display()));
             }
             continue;
@@ -122,7 +126,12 @@ pub(crate) fn lan_action_modules(directory: &Path) -> Result<String, String> {
 pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
     const NATIVE: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/native_hook_modules.rs\"));";
     const LAN: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));";
-    if !source.contains(INCLUDE) && !source.contains(NATIVE) && !source.contains(LAN) {
+    const HOST: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/game_host_modules.rs\"));";
+    if !source.contains(INCLUDE)
+        && !source.contains(NATIVE)
+        && !source.contains(LAN)
+        && !source.contains(HOST)
+    {
         return Ok(source.to_owned());
     }
     let file = syn::parse_file(source).map_err(|e| e.to_string())?;
@@ -137,6 +146,13 @@ pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
                 LAN => {
                     lan_action_modules(path.parent().ok_or("LAN actions source has no parent")?)?
                 }
+                HOST => crate::build::game_host_modules(
+                    path.canonicalize()
+                        .map_err(|e| e.to_string())?
+                        .ancestors()
+                        .nth(6)
+                        .ok_or("game host source outside the game tree")?,
+                )?,
                 NATIVE => crate::build::native_hook_modules(
                     path.canonicalize()
                         .map_err(|e| e.to_string())?

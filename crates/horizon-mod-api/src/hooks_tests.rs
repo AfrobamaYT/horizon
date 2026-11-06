@@ -6,7 +6,9 @@ fn subscriber_tick_benchmark() {
     use std::{hint::black_box, time::Instant};
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
     impl ClientHost for TestHost {}
+    mod_api::impl_client_host_areas!(TestHost);
     struct Quiet;
     #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
@@ -134,7 +136,9 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
 
     struct HostDouble;
     impl Host for HostDouble {}
+    mod_api::impl_host_areas!(HostDouble);
     impl ClientHost for HostDouble {}
+    mod_api::impl_client_host_areas!(HostDouble);
     struct Counter(Arc<AtomicUsize>);
     #[mod_api::__subscriptions]
     impl Hooks for Counter {
@@ -181,7 +185,9 @@ fn native_switch_skips_and_resumes_subscribed_hooks() {
 
     struct HostDouble;
     impl Host for HostDouble {}
+    mod_api::impl_host_areas!(HostDouble);
     impl ClientHost for HostDouble {}
+    mod_api::impl_client_host_areas!(HostDouble);
     struct Counter(Arc<AtomicUsize>);
     #[mod_api::__subscriptions]
     impl Hooks for Counter {
@@ -209,8 +215,11 @@ fn native_switch_skips_and_resumes_subscribed_hooks() {
 fn movement_input_writes_back_all_fields() {
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
     impl ServerHost for TestHost {}
+    mod_api::impl_server_host_areas!(TestHost);
     impl ClientHost for TestHost {}
+    mod_api::impl_client_host_areas!(TestHost);
     struct Movement;
     #[mod_api::__subscriptions]
     impl Hooks for Movement {
@@ -233,7 +242,9 @@ fn recipe_book_categories_accept_mod_declarations() {
     use mod_api::{RecipeBookCategoriesEvent, RecipeBookCategory, dispatch_recipe_book_categories};
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
     impl ServerHost for TestHost {}
+    mod_api::impl_server_host_areas!(TestHost);
     struct Categories;
     #[mod_api::__subscriptions]
     impl Hooks for Categories {
@@ -266,7 +277,9 @@ fn client_tick_pre_and_post_hear_their_own_moment() {
     use std::sync::Mutex;
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
     impl ClientHost for TestHost {}
+    mod_api::impl_client_host_areas!(TestHost);
     struct Ticks(Arc<Mutex<Vec<&'static str>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Ticks {
@@ -293,7 +306,9 @@ fn render_frame_pre_and_post_hear_their_own_moment_with_the_frames_time() {
     use std::{sync::Mutex, time::Duration};
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
     impl ClientHost for TestHost {}
+    mod_api::impl_client_host_areas!(TestHost);
     struct Frames(Arc<Mutex<Vec<(&'static str, Duration)>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Frames {
@@ -322,7 +337,9 @@ fn render_gui_pre_cancel_reaches_the_game() {
     use std::sync::Mutex;
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
     impl ClientHost for TestHost {}
+    mod_api::impl_client_host_areas!(TestHost);
     struct Gui(Arc<Mutex<Vec<&'static str>>>, bool);
     #[mod_api::__subscriptions]
     impl Hooks for Gui {
@@ -346,7 +363,9 @@ fn window_resize_delivers_physical_and_gui_dimensions() {
     use std::sync::Mutex;
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
     impl ClientHost for TestHost {}
+    mod_api::impl_client_host_areas!(TestHost);
     struct Listener(Arc<Mutex<Vec<(u32, u32, u32, u32)>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
