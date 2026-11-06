@@ -7,8 +7,9 @@ use mod_points::internals::{self, Table, flatten, unflatten};
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use wasmtime::component::{HasData, Linker, Resource};
+use wasmtime::component::{Linker, Resource};
 
+mod imports;
 mod transport;
 
 /// A declared-list entry resolved once at load.
@@ -219,16 +220,14 @@ fn log_refused(
     }
 }
 
+struct Metered;
+
 /// A stateless host adapter: all imports use the innermost call on the current thread.
 pub struct View;
-impl HasData for View {
-    type Data<'a> = View;
-}
 
 /// Adds the internals imports to a group's linker.
 pub fn add_to_linker(linker: &mut Linker<State>) {
-    wire::add_to_linker::<State, View>(linker, |_| View)
-        .expect("the game's internals imports are defined once");
+    imports::add_to_linker(linker).expect("the game's internals imports are defined once");
     transport::add_to_linker(linker).expect("the batch imports match the internals interface");
 }
 
@@ -259,7 +258,7 @@ fn charge(mut host: impl wasmtime::AsContextMut, cost: usize) -> wasmtime::Resul
 }
 
 fn import<T>(
-    host: wasmtime::component::Access<'_, State, View>,
+    host: wasmtime::StoreContextMut<'_, State>,
     cells: usize,
     f: impl FnOnce() -> Result<T, wire::Refusal>,
     output: impl FnOnce(&T) -> usize,
@@ -268,7 +267,7 @@ fn import<T>(
 }
 
 fn metered<T>(
-    mut host: wasmtime::component::Access<'_, State, View>,
+    mut host: wasmtime::StoreContextMut<'_, State>,
     cells: usize,
     f: impl FnOnce() -> T,
     output: impl FnOnce(&T) -> usize,
@@ -316,18 +315,16 @@ fn reached_cells(value: &wire::Reached) -> usize {
     }
 }
 
-impl wire::HostNode for View {}
-impl wire::Host for View {}
-impl wire::HostNodeWithStore<State> for View {
+impl Metered {
     fn field(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
         n: u32,
     ) -> wasmtime::Result<Result<Resource<wire::Node>, wire::Refusal>> {
         import(host, node_cost(&node), || View.field(node, n), |_| 0)
     }
     fn get(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
         n: u32,
     ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
@@ -339,7 +336,7 @@ impl wire::HostNodeWithStore<State> for View {
         )
     }
     fn set(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
         n: u32,
         v: Vec<wire::Cell>,
@@ -352,7 +349,7 @@ impl wire::HostNodeWithStore<State> for View {
         )
     }
     fn index(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
         i: u64,
     ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
@@ -364,7 +361,7 @@ impl wire::HostNodeWithStore<State> for View {
         )
     }
     fn key(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
         k: Vec<wire::Cell>,
     ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
@@ -376,19 +373,19 @@ impl wire::HostNodeWithStore<State> for View {
         )
     }
     fn len(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<Result<u64, wire::Refusal>> {
         import(host, node_cost(&node), || View.len(node), |_| 0)
     }
     fn case(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<Result<u32, wire::Refusal>> {
         import(host, node_cost(&node), || View.case(node), |_| 0)
     }
     fn read(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
         import(
@@ -399,7 +396,7 @@ impl wire::HostNodeWithStore<State> for View {
         )
     }
     fn drop(
-        mut host: wasmtime::component::Access<'_, State, Self>,
+        mut host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<()> {
         contain(|| {
@@ -408,9 +405,9 @@ impl wire::HostNodeWithStore<State> for View {
         })
     }
 }
-impl wire::HostWithStore<State> for View {
+impl Metered {
     fn get_many(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         reads: Vec<(Resource<wire::Node>, u32)>,
     ) -> wasmtime::Result<wire::BatchValues> {
         bounded_batch(reads.len())?;
@@ -452,7 +449,7 @@ impl wire::HostWithStore<State> for View {
         )
     }
     fn set_many(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         writes: Vec<(Resource<wire::Node>, u32, u32)>,
         cells: Vec<wire::Cell>,
     ) -> wasmtime::Result<Vec<Result<(), wire::Refusal>>> {
@@ -478,13 +475,13 @@ impl wire::HostWithStore<State> for View {
         metered(host, cost, || View.set_many(expanded), |_| 0)
     }
     fn root(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         n: u32,
     ) -> wasmtime::Result<Result<Resource<wire::Node>, wire::Refusal>> {
         import(host, 0, || View.root(n), |_| 0)
     }
     fn call(
-        host: wasmtime::component::Access<'_, State, Self>,
+        host: wasmtime::StoreContextMut<'_, State>,
         declared: u32,
         receiver: Option<Resource<wire::Node>>,
         args: Vec<wire::Arg>,
@@ -1167,56 +1164,75 @@ mod tests {
     #[test]
     #[ignore = "needs the internals guest fixture"]
     fn batch_import_fuel_matches_singles_and_exhausts_before_writes() {
-        use wasmtime::{AsContextMut, component::Access};
-        use wire::{HostNodeWithStore, HostWithStore};
+        use wasmtime::AsContextMut;
         let group = fixture_group_with_fuel(true);
         let mut game = world();
         let declared = [Resolved::Member { owner: 0, field: 1 }];
         run(frame(&mut game), &declared, || {
             let root = View.root(0).unwrap();
-            group.exports.load(|store| {
-                macro_rules! invoke {
-                    ($trait:ident::$method:ident $(, $arg:expr)*) => {
-                        <View as $trait<State>>::$method(Access::new(store.as_context_mut(), |_| View) $(, $arg)*)
+            group
+                .exports
+                .load(|store| {
+                    macro_rules! invoke {
+                    ($method:ident $(, $arg:expr)*) => {
+                        Metered::$method(store.as_context_mut() $(, $arg)*)
                     };
                 }
-                let writes = || vec![(borrow(&root), 1, 1), (borrow(&root), 1, 1)];
-                let cells = || vec![wire::Cell::B(true), wire::Cell::B(true)];
-                let initial = 1000;
-                store.set_fuel(initial)?;
-                for _ in 0..2 {
-                    invoke!(HostNodeWithStore::set, borrow(&root), 1, vec![wire::Cell::B(true)])?.unwrap();
-                }
-                let single_set = initial - store.get_fuel()?;
-                store.set_fuel(initial)?;
-                invoke!(HostWithStore::set_many, writes(), cells())?;
-                assert_eq!(
-                    initial - store.get_fuel()?,
-                    single_set,
-                    "every entry pays its base charge, even refusals"
-                );
-                store.set_fuel(initial)?;
-                for _ in 0..2 {
-                    invoke!(HostNodeWithStore::get, borrow(&root), 1)?.unwrap();
-                }
-                let single_get = initial - store.get_fuel()?;
-                store.set_fuel(initial)?;
-                invoke!(HostWithStore::get_many, vec![(borrow(&root), 1), (borrow(&root), 1)])?;
-                assert_eq!(initial - store.get_fuel()?, single_get);
-                let pending = journal_cost();
-                store.set_fuel(1)?;
-                assert!(invoke!(HostWithStore::set_many, writes(), cells()).is_err());
-                let bad = || (Resource::new_borrow(0), 0, 0);
-                assert!(invoke!(HostWithStore::set_many, vec![bad(), bad()], vec![]).is_err());
-                store.set_fuel(initial)?;
-                assert!(invoke!(HostWithStore::set_many, vec![(borrow(&root), 1, 2)], vec![wire::Cell::B(true)]).is_err());
-                assert!(invoke!(HostWithStore::set_many, vec![(borrow(&root), 1, 0)], vec![wire::Cell::B(true)]).is_err());
-                let many = || (0..13).map(|_| (borrow(&root), 1));
-                assert!(invoke!(HostWithStore::get_many, many().collect()).is_err());
-                assert!(invoke!(HostWithStore::set_many, many().map(|(n, f)| (n, f, 1)).collect(), vec![]).is_err());
-                assert_eq!(journal_cost(), pending);
-                Ok(())
-            }).unwrap();
+                    let writes = || vec![(borrow(&root), 1, 1), (borrow(&root), 1, 1)];
+                    let cells = || vec![wire::Cell::B(true), wire::Cell::B(true)];
+                    let initial = 1000;
+                    store.set_fuel(initial)?;
+                    for _ in 0..2 {
+                        invoke!(set, borrow(&root), 1, vec![wire::Cell::B(true)])?.unwrap();
+                    }
+                    let single_set = initial - store.get_fuel()?;
+                    store.set_fuel(initial)?;
+                    invoke!(set_many, writes(), cells())?;
+                    assert_eq!(
+                        initial - store.get_fuel()?,
+                        single_set,
+                        "every entry pays its base charge, even refusals"
+                    );
+                    store.set_fuel(initial)?;
+                    for _ in 0..2 {
+                        invoke!(get, borrow(&root), 1)?.unwrap();
+                    }
+                    let single_get = initial - store.get_fuel()?;
+                    store.set_fuel(initial)?;
+                    invoke!(get_many, vec![(borrow(&root), 1), (borrow(&root), 1)])?;
+                    assert_eq!(initial - store.get_fuel()?, single_get);
+                    let pending = journal_cost();
+                    store.set_fuel(1)?;
+                    assert!(invoke!(set_many, writes(), cells()).is_err());
+                    let bad = || (Resource::new_borrow(0), 0, 0);
+                    assert!(invoke!(set_many, vec![bad(), bad()], vec![]).is_err());
+                    store.set_fuel(initial)?;
+                    assert!(
+                        invoke!(
+                            set_many,
+                            vec![(borrow(&root), 1, 2)],
+                            vec![wire::Cell::B(true)]
+                        )
+                        .is_err()
+                    );
+                    assert!(
+                        invoke!(
+                            set_many,
+                            vec![(borrow(&root), 1, 0)],
+                            vec![wire::Cell::B(true)]
+                        )
+                        .is_err()
+                    );
+                    let many = || (0..13).map(|_| (borrow(&root), 1));
+                    assert!(invoke!(get_many, many().collect()).is_err());
+                    assert!(
+                        invoke!(set_many, many().map(|(n, f)| (n, f, 1)).collect(), vec![])
+                            .is_err()
+                    );
+                    assert_eq!(journal_cost(), pending);
+                    Ok(())
+                })
+                .unwrap();
             Ok(())
         })
         .unwrap();

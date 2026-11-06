@@ -191,7 +191,8 @@ impl Game<'_> {
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         let resources = next_root
             .as_ref()
-            .map_or(self.options.resources.as_path(), |root| root.prepared());
+            .map_or(self.options.resources.as_path(), |root| root.prepared())
+            .to_path_buf();
         let data = next_root
             .as_ref()
             .map_or(&self.pack.data_source, |root| root.data());
@@ -201,7 +202,7 @@ impl Game<'_> {
         let additional = super::pack_finders::data_packs(&self.mods);
         let stack = pack_stack(
             &self.world_root,
-            resources,
+            &resources,
             data,
             changes,
             self.cmds.vanilla_disabled,
@@ -209,12 +210,26 @@ impl Game<'_> {
             &additional,
         );
         let prepared = self.prepare_server_reload(&stack)?;
+        let context = self
+            .prepare_loop_context(&resources)
+            .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
+        let switched = self.mods.data_switched || next_root.is_some();
+        let prepared = self.apply_server_reload_callbacks(prepared);
+        let world = if run_load && self.remote.is_none() {
+            Some(
+                self.prepare_world_reload(&stack, &resources, switched)
+                    .map_err(|error| ReloadStageError::DataSource(error.to_string()))?,
+            )
+        } else {
+            None
+        };
         if let Some(root) = next_root {
             self.options.resources = root.prepared().to_owned();
             self.pack.data_source = root.data().clone();
             self.pack.data_changes = root.data_changes().clone();
             self.mods.data_switched = true;
         }
+        self.install_loop_context(context);
         if !run_load {
             self.fns = Default::default();
         }
@@ -227,8 +242,8 @@ impl Game<'_> {
         // An explicit reload (`/reload`, `/datapack`) also rebuilds the
         // content tables, as `ReloadableServerResources` does; on world open
         // `finish_open_world` builds them right after this.
-        if run_load {
-            self.reload_world_tables(&stack);
+        if let Some(world) = world {
+            self.reload_world_tables(world);
         }
         if self.fns.schedule.is_empty() {
             self.load_schedule();
@@ -1082,13 +1097,36 @@ impl Game<'_> {
                 return Err(Self::reload_failure(error));
             }
         };
+        let root = self.options.resources.clone();
+        let context = match self.prepare_loop_context(&root) {
+            Ok(context) => context,
+            Err(error) => {
+                self.fns.enabled = previous_enabled;
+                self.cmds.vanilla_disabled = previous_vanilla_disabled;
+                return Err(Self::reload_failure(ReloadStageError::DataSource(
+                    error.to_string(),
+                )));
+            }
+        };
+        let prepared = self.apply_server_reload_callbacks(prepared);
+        let world = match self.prepare_world_reload(&stack, &root, self.mods.data_switched) {
+            Ok(world) => world,
+            Err(error) => {
+                self.fns.enabled = previous_enabled;
+                self.cmds.vanilla_disabled = previous_vanilla_disabled;
+                return Err(Self::reload_failure(ReloadStageError::DataSource(
+                    error.to_string(),
+                )));
+            }
+        };
+        self.install_loop_context(context);
         self.fns.packs = stack.packs.clone();
         self.fns.enabled = stack.enabled.clone();
         self.pack.additional_data = additional.into();
         self.save_datapack_settings();
         self.apply_server_reload(prepared, &stack);
         self.fns.load_pending = true;
-        self.reload_world_tables(&stack);
+        self.reload_world_tables(world);
         Ok(())
     }
 
@@ -1129,6 +1167,93 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn refused_item_key_reload_keeps_previous_world_generation() {
+        use mod_api::{Hooks, ModEntry, Registrar, RegistrationContext};
+
+        struct MissingItem;
+        #[mod_api::__subscriptions]
+        impl Hooks for MissingItem {
+            fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                registrar.block_key("minecraft:stone");
+                registrar.item_key("reload_test:missing");
+            }
+        }
+
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let root =
+                std::env::temp_dir().join(format!("reload-atomicity-{}", std::process::id()));
+            let pack = root.join("datapacks/candidate");
+            let tags = pack.join("data/reload_test/tags/block");
+            std::fs::create_dir_all(&tags).unwrap();
+            std::fs::write(pack.join("pack.mcmeta"), serde_json::to_vec(&serde_json::json!({
+                "pack": {"description": "atomic reload", "min_format": horizon_core::version::DATA_PACK_FORMAT, "max_format": horizon_core::version::DATA_PACK_FORMAT}
+            })).unwrap()).unwrap();
+            std::fs::write(
+                tags.join("candidate.json"),
+                br#"{"values":["minecraft:stone"]}"#,
+            )
+            .unwrap();
+            game.world_root = root.clone();
+            mod_api::__private::install_parts(&[ModEntry::new(
+                "reload_test",
+                Box::new(MissingItem),
+            )])
+            .unwrap();
+            let stone = mod_api::__private::part_tests::block_key("minecraft:stone");
+            let registry = game.pack.assets.registry;
+            mod_api::__private::resolve_blocks(|id| {
+                let default = registry.default_state(id)?;
+                Some(mod_api::__private::ResolvedBlock {
+                    default,
+                    states: mod_api::BlockStateRange::new(default, 1),
+                    block: game.res.behaviours().block(default),
+                })
+            })
+            .unwrap();
+            let old_tag =
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate");
+            let old_context = game.loop_context.clone();
+            let old_root = game.options.resources.clone();
+            let old_data = game.pack.data_source.clone();
+            let old_tables = game.world_tables.as_ref().map(|tables| tables as *const _);
+            let old_generation = game.damage_tag_generation;
+            let old_enabled = game.fns.enabled.clone();
+            let error = game.reload_datapacks(true, &[]).err().unwrap();
+            assert!(error.to_string().contains("reload_test:missing"));
+            assert_eq!(game.options.resources, old_root);
+            assert!(game.pack.data_source.same_generation(&old_data));
+            assert!(Arc::ptr_eq(&game.loop_context, &old_context));
+            assert_eq!(
+                old_tables,
+                game.world_tables.as_ref().map(|tables| tables as *const _)
+            );
+            assert_eq!(game.damage_tag_generation, old_generation);
+            assert_eq!(game.fns.enabled, old_enabled);
+            assert_eq!(
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
+                old_tag
+            );
+            struct Valid;
+            #[mod_api::__subscriptions]
+            impl Hooks for Valid {
+                fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                    registrar.block_key("minecraft:stone");
+                }
+            }
+            mod_api::__private::install_parts(&[ModEntry::new("reload_test", Box::new(Valid))])
+                .unwrap();
+            game.reload_datapacks(true, &[]).unwrap();
+            assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
+            assert_eq!(
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
+                Some(true)
+            );
+            let _ = std::fs::remove_dir_all(root);
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -1318,8 +1443,14 @@ mod tests {
                     .tags
                     .contains(&"test:feature_marker".to_owned())
             );
-            (game.world_tables, game.health_resources) =
-                game.build_world_tables(&stack, false).unwrap();
+            (game.world_tables, game.health_resources) = game
+                .build_world_tables(
+                    &stack,
+                    false,
+                    &game.options.resources.clone(),
+                    game.mods.data_switched,
+                )
+                .unwrap();
             assert!(game.items().item_tags["test:sample"].contains("minecraft:diamond"));
         });
         std::fs::remove_dir_all(root).unwrap();
