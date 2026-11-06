@@ -13,7 +13,7 @@ ContextIntProvider.floatToIntSafe	inline	crates/horizon-client/src/game/administ
 ContextIntProvider.longToIntSafe	inline	crates/horizon-client/src/game/administration/commands/compute.rs::Game::provider_int	the long_to_int closure inside provider_int
 ints/Power.getIntUnsafe	port	crates/horizon-client/src/game/administration/commands/compute.rs::Game::provider_int	the "pow" arm uses checked_pow; 0 to the power of 0 and negative exponents are errors
 ResolvableInt.Reference.get	port	crates/horizon-client/src/game/administration/commands/compute.rs::Game::provider_int	gap: minor: a missing registry entry gives 0, not the caller's default
-AABB.of	inline	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::intersects	the max+1 edge is folded into the inclusive compare; the 0.25 deflate and shape joins in JigsawPlacement are not reproduced
+AABB.of	inline	crates/horizon-core/src/bounding_box.rs::BoundingBox::intersects	the max+1 edge is folded into the inclusive compare; the 0.25 deflate and shape joins in JigsawPlacement are not reproduced
 AABB.unitCubeFromLowerCorner	port	crates/horizon-core/src/geometry/mod.rs::Aabb::unit_cube	-
 AABB.encapsulatingFullBlocks	port	crates/horizon-core/src/geometry/mod.rs::Aabb::encapsulating_blocks	-
 AABB.setMinX	port	crates/horizon-core/src/geometry/mod.rs::Aabb::with_min	-

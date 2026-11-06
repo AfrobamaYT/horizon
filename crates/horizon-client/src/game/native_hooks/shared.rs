@@ -355,7 +355,8 @@ impl Game<'_> {
         title.set_rule_registry(Arc::new(mod_api::__private::game_rule_registry()));
         self.show_title_with_registry(title);
     }
-    pub(super) fn show_title_with_registry(&mut self, title: horizon_client::title::Title) {
+    pub(super) fn show_title_with_registry(&mut self, mut title: horizon_client::title::Title) {
+        title.set_additional_data_packs(self.pack.additional_data.clone());
         if !self.screen_hooks_heard() {
             self.title = Some(title);
             return;
@@ -4274,6 +4275,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -4376,6 +4378,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -4485,6 +4488,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,

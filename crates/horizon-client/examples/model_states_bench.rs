@@ -3,14 +3,16 @@
 extern crate horizon_client_lib as horizon_client;
 use horizon_client::{Result, models::StateModels, sprites::Sprites};
 use horizon_core::position::BlockPos;
-use horizon_world::{
-    DATA_VERSION,
-    chunk::BlockState,
-    nbt::Tag,
-    registry::{BlockRegistry, BlockStateId},
-};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs, hint::black_box, path::PathBuf, time::Instant};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        DATA_VERSION,
+        chunk::BlockState,
+        registry::{BlockRegistry, BlockStateId},
+    },
+};
 
 struct Fixture {
     root: PathBuf,

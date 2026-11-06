@@ -26,6 +26,11 @@ receive `&dyn ClientHost`. They do not grant server writes.
 `Hooks::client_disconnecting` runs before an actual connection is discarded,
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases."#]
-    #[hook(side = "client", contract = "listen", cancellable = false)]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        cancellable = false,
+        neoforge = "RenderGuiEvent.Post"
+    )]
     fn gui_render_post();
 }

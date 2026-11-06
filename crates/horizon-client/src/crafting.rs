@@ -9,8 +9,8 @@ use crate::{
     items::{ItemStack, Items},
     particles::{DYE_FIREWORK_COLORS, FireworkExplosion, FireworkShape},
 };
+use horizon_core::nbt::{JavaString, Tag};
 use horizon_world::native_load_context::LoopContext;
-use horizon_world::nbt::{JavaString, Tag};
 use horizon_world::{component_patch::Patch, loot::PackOverlay};
 use mod_api::__private::game::IngredientTest;
 pub use mod_api::crafting::{Ingredient, Shape, native_ingredient, native_ingredient_test};
@@ -2885,7 +2885,7 @@ mod tests {
         let recipes = Recipes::load(
             &root,
             &items,
-            &PackOverlay { files: &packs },
+            &PackOverlay::new(&packs),
             &crate::test_resources::server_load(),
         )
         .unwrap();
@@ -3085,7 +3085,7 @@ mod tests {
         let recipes = Recipes::load(
             &root,
             &items,
-            &PackOverlay { files: &packs },
+            &PackOverlay::new(&packs),
             &crate::test_resources::server_load(),
         )
         .unwrap();
@@ -3125,7 +3125,7 @@ mod tests {
         let recipes = Recipes::load(
             &root,
             &items,
-            &PackOverlay { files: &packs },
+            &PackOverlay::new(&packs),
             &crate::test_resources::server_load(),
         )
         .unwrap();

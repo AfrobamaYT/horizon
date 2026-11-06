@@ -96,6 +96,7 @@ fn injections(manifest: &horizon_mod_package::Manifest, raw: bool) -> Vec<PointI
         .native
         .iter()
         .flat_map(|native| &native.injection)
+        .filter(|injection| injection.selector.is_none())
         .filter_map(|injection| {
             Some(PointInjection {
                 mod_id: manifest.id.clone(),
@@ -137,14 +138,18 @@ pub(super) fn check(
 
 /// A game build's points, from its `points.json`.
 pub(super) fn listed(path: &Path) -> Result<Vec<ListedPoint>, String> {
+    catalog(path).map(|catalog| catalog.points)
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct Catalog {
+    pub points: Vec<ListedPoint>,
+    pub sites: Vec<super::sites::Site>,
+}
+
+pub(super) fn catalog(path: &Path) -> Result<Catalog, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    #[derive(serde::Deserialize)]
-    struct Catalog {
-        points: Vec<ListedPoint>,
-    }
-    serde_json::from_str::<Catalog>(&text)
-        .map(|catalog| catalog.points)
-        .map_err(|e| format!("{}: {e}", path.display()))
+    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The generated `main.rs`'s check, at compile time, that mod `index` overrides each point method

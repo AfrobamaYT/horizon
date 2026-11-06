@@ -4,8 +4,8 @@
 //! falls, swims, flies or sleeps (`ServerPlayer.handleShoulderEntities`).
 use super::Game;
 use horizon_client::mobs::Species;
+use horizon_core::nbt::Tag;
 use horizon_core::{geometry::Vec3, random::RandomSource};
-use horizon_world::nbt::Tag;
 
 const KEYS: [&str; 2] = ["ShoulderEntityLeft", "ShoulderEntityRight"];
 

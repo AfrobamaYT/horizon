@@ -9,6 +9,18 @@ impl Game<'_> {
     pub(in crate::game) fn native_camera(&self) -> Option<NativeCamera> {
         self.native_camera_frame.clone()
     }
+    /// The entity the view follows (`Minecraft.getCameraEntity`): the entity a server attached
+    /// the camera to, else the local player. None outside a client world.
+    pub(in crate::game) fn native_camera_entity(&self) -> Option<EntityRef> {
+        if !self.native_window() || self.title.is_some() {
+            return None;
+        }
+        self.player.as_ref()?;
+        let id = self
+            .remote_camera_id()
+            .unwrap_or_else(|| self.own_entity_id() as u32);
+        Some(EntityRef::new(self.native_lifecycle.epoch()?, id))
+    }
     /// Collision boxes in block-local coordinates with an empty collision context.
     pub(in crate::game) fn native_block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
         self.native_block_collision_in(&self.world, pos)

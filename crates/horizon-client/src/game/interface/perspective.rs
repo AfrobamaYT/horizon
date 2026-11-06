@@ -1176,7 +1176,7 @@ impl Game<'_> {
     }
     /// The entity id the local player has on its server: the one it was
     /// given at login on a client, else the acting player's own.
-    pub(super) fn own_entity_id(&self) -> i32 {
+    pub(in crate::game) fn own_entity_id(&self) -> i32 {
         self.remote.as_ref().map_or_else(
             || self.player.as_ref().map_or(0, |p| p.entity_id),
             |r| r.entity_id,

@@ -15,15 +15,17 @@ use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::{
-    collision_context::{CollisionContext, CollisionEntity, CollisionItem},
-    entity_obstruction::EntityIdentity,
-    java_hash_map::{JavaHashMap, JavaKey},
-    registry::BlockStateId,
-    world_ray::{RayBlockMode, RayFluidMode, RayWorld, clip_world},
-};
 use mod_api::{NativeBlockInteraction, NativeExplosionStart, NativeItemDrop};
 use std::{cmp::Ordering, io};
+use {
+    horizon_core::java_hash_map::{JavaHashMap, JavaKey},
+    horizon_world::{
+        collision_context::{CollisionContext, CollisionEntity, CollisionItem},
+        entity_obstruction::EntityIdentity,
+        registry::BlockStateId,
+        world_ray::{RayBlockMode, RayFluidMode, RayWorld, clip_world},
+    },
+};
 
 /// Keep each block's contribution while vanilla merges stacks across blocks.
 #[derive(Default)]

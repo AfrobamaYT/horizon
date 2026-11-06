@@ -36,6 +36,10 @@ item draws as its `base` model, and the log says so once per type. A mod gets th
 JSON: a `minecraft:model` leaf naming a model file with `elements` and `display` draws cuboids with a
 transformation per display context, `tints` colours them, and `minecraft:select`, `condition` and
 `range_dispatch` on a property the mod answers through `item_model_property` pick between variants."#]
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "RegisterConditionalItemModelPropertyEvent"
+    )]
     fn item_model_property();
 }

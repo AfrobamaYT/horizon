@@ -11,11 +11,11 @@ use horizon_client::{
     snbt,
     text::{self, ClickEvent, InlineObject, Style, Text},
 };
+use horizon_core::nbt::Tag;
 use horizon_protocol::packets::{
     Empty,
     play::{self, Clientbound as C, DialogHolder},
 };
-use horizon_world::nbt::Tag;
 use std::{collections::HashMap, time::Instant};
 
 /// Waypoint.Icon: the locator bar style and colour of a transmitter.
@@ -765,10 +765,10 @@ impl Game<'_> {
             None => Text::translate("multiplayer.disconnect.kicked", &[]),
         };
         let tag = match &reason_raw {
-            Some(_) => horizon_world::nbt::Tag::String(reason.plain().as_str().into()),
-            None => horizon_world::nbt::Tag::compound([(
+            Some(_) => horizon_core::nbt::Tag::String(reason.plain().as_str().into()),
+            None => horizon_core::nbt::Tag::compound([(
                 "translate",
-                horizon_world::nbt::Tag::String("multiplayer.disconnect.kicked".into()),
+                horizon_core::nbt::Tag::String("multiplayer.disconnect.kicked".into()),
             )]),
         };
         let mut count = 0;
@@ -1221,9 +1221,9 @@ impl Game<'_> {
     /// `ServerPlayer.openDialog` for the dialog of a `show_dialog` click
     /// event (a sign's): a registry id or the dialog itself, opened for the
     /// player the game acts for.
-    pub(in crate::game) fn show_click_dialog(&mut self, dialog: &horizon_world::nbt::Tag) {
+    pub(in crate::game) fn show_click_dialog(&mut self, dialog: &horizon_core::nbt::Tag) {
         let holder = match dialog {
-            horizon_world::nbt::Tag::String(id) => self.dialog_holder(&id.to_string_lossy()),
+            horizon_core::nbt::Tag::String(id) => self.dialog_holder(&id.to_string_lossy()),
             direct => Some(DialogHolder::Direct(direct.clone())),
         };
         if let Some(holder) = holder {

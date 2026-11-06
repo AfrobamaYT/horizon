@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "collect",
         out = "distance",
         scope = "block_entity",
-        key = "block"
+        key = "block",
+        neoforge = "none (vanilla BlockEntityRenderer.getViewDistance; NeoForge adds no event or extension for it)"
     )]
     fn block_entity_view_distance();
 }

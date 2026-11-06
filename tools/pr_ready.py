@@ -242,7 +242,8 @@ def dependent_crates(crates, dependencies):
 
 def prepare_key():
     """tools/ci/vanilla-data.sh's preparation key, for a copy without Git history."""
-    listing = git("ls-files", "-s", "crates/horizon-prepare", "mods/horizon/src/test/java", "research-lock.json")
+    listing = git("ls-files", "-s", "crates/horizon-prepare", "mods/horizon/src/test/java", "research-lock.json",
+                  "tools/ci/vanilla-data.sh", "tools/ci/seed_prepared_extras.py", "tools/prepare_output.py")
     return hashlib.sha256(listing.encode()).hexdigest()[:16]
 
 

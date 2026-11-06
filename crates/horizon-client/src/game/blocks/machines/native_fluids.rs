@@ -5,7 +5,7 @@
 use super::Game;
 use horizon_client::containers::{BlockEntity, ModFluidTanks};
 use horizon_core::geometry::Direction;
-use horizon_world::nbt::{Compound, JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 use mod_api::{BlockSide, FluidStack, Transaction};
 use std::sync::Arc;
 

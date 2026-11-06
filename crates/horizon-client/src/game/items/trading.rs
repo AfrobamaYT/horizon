@@ -95,24 +95,24 @@ impl merchant::MapMaker for GameMaps<'_> {
         d.map_id = Some(id);
         d.other.push((
             "minecraft:map_decorations".into(),
-            horizon_world::nbt::Tag::compound([(
+            horizon_core::nbt::Tag::compound([(
                 "+",
-                horizon_world::nbt::Tag::compound([
+                horizon_core::nbt::Tag::compound([
                     (
                         "type",
-                        horizon_world::nbt::Tag::String(map.decoration.as_str().into()),
+                        horizon_core::nbt::Tag::String(map.decoration.as_str().into()),
                     ),
                     (
                         "x",
-                        horizon_world::nbt::Tag::Double(f64::from(at[0]).to_bits()),
+                        horizon_core::nbt::Tag::Double(f64::from(at[0]).to_bits()),
                     ),
                     (
                         "z",
-                        horizon_world::nbt::Tag::Double(f64::from(at[2]).to_bits()),
+                        horizon_core::nbt::Tag::Double(f64::from(at[2]).to_bits()),
                     ),
                     (
                         "rotation",
-                        horizon_world::nbt::Tag::Float(180.0f32.to_bits()),
+                        horizon_core::nbt::Tag::Float(180.0f32.to_bits()),
                     ),
                 ]),
             )]),
@@ -130,11 +130,11 @@ impl Game<'_> {
         if self.remote.is_some() || self.rand_sequences.ids().is_empty() {
             return;
         }
-        let tag = horizon_world::nbt::Tag::compound([
+        let tag = horizon_core::nbt::Tag::compound([
             ("data", self.rand_sequences.to_nbt()),
             (
                 "DataVersion",
-                horizon_world::nbt::Tag::Int(horizon_world::DATA_VERSION),
+                horizon_core::nbt::Tag::Int(horizon_world::DATA_VERSION),
             ),
         ]);
         if let Err(e) = horizon_client::save::write_dat(&self.random_sequences_path(), tag) {

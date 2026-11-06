@@ -14,13 +14,18 @@ use horizon_client::{
 };
 use horizon_core::position::BlockPos;
 use horizon_protocol::packets::play;
-use horizon_world::{
-    compression::Compression,
-    level::{TemplateSettings, flags},
-    nbt::{self, Compound, Limits, NamedTag, Tag},
-    worldgen::structure::{BlockInfo, EntityInfo, StructureTemplate, save_nbt},
-};
 use std::collections::HashSet;
+use {
+    horizon_core::{
+        nbt,
+        nbt::{Compound, Limits, NamedTag, Tag},
+    },
+    horizon_world::{
+        compression::Compression,
+        level::{TemplateSettings, flags},
+        worldgen::structure::{BlockInfo, EntityInfo, StructureTemplate, save_nbt},
+    },
+};
 
 type Pos = (i32, i32, i32);
 
@@ -508,8 +513,8 @@ impl Game<'_> {
             self.with_level(|b, level, ticks| {
                 b.set_block(level, ticks, at, id, flags::UPDATE_CLIENTS)
             });
-            if let Some(entity) = entity {
-                self.world.block_entities.put(pos, entity);
+            if let Some((lease, entity)) = entity {
+                self.world.block_entities.put(lease, entity);
             }
             let _ = self.process_level_events();
         }

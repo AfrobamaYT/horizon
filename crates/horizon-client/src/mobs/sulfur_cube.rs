@@ -1096,8 +1096,8 @@ impl Goal for SearchForItems {
     }
 }
 /// `addAdditionalSaveData`: the cube's size, the timers and the fuse.
-pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn to_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     map.insert("Size".into(), Tag::Int(m.extra.size.max(1) - 1));
     map.insert("wasOnGround".into(), Tag::Byte(i8::from(m.extra.flag2)));
     map.insert("pickup_timer".into(), Tag::Int(m.extra.ints[3]));
@@ -1115,8 +1115,8 @@ pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
     map.entry("ForcedAge".into()).or_insert(Tag::Int(0));
 }
 /// `SulfurCube.readAdditionalSaveData`: size precedes the living health default.
-pub fn from_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
-    use horizon_world::nbt::Tag;
+pub fn from_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
     let int = |k: &str| match tag.get(k) {
         Some(Tag::Int(v)) => Some(*v),
         Some(Tag::Byte(v)) => Some(i32::from(*v)),
