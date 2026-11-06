@@ -234,7 +234,7 @@ pub fn loaded_loot_data(defaults: &ItemDefaults) -> Option<Arc<LootData>> {
 }
 
 /// Let go of the loot data: for a preload no world used
-/// (game/world_loading.rs). The next `loot_data` loads it again.
+/// (game/world/world_loading.rs). The next `loot_data` loads it again.
 pub fn forget_loot_data() {
     *LOOT.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }

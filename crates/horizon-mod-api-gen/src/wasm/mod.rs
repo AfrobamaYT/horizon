@@ -821,6 +821,22 @@ mod tests {
                         .iter()
                         .any(|name| name == "WorldDrawContext::quads")
                 );
+                for name in &wasm.flat_list_imports {
+                    let (owner, method) = name.rsplit_once("::").unwrap();
+                    let interface = if super::exports().contains(&owner) {
+                        format!("held-{}", super::wit::interface(owner))
+                    } else {
+                        super::wit::interface(owner)
+                    };
+                    let registration = format!(
+                        "linker.instance(\"horizon:mod-api/{interface}@0.1.0\")?.func_wrap(\"{}\"",
+                        super::ty::wit_ident(method)
+                    );
+                    assert!(
+                        wasm.host.contains(&registration),
+                        "missing flat-list shadow: {name}"
+                    );
+                }
                 println!(
                     "{} eligible imports:\n{}\n{} owned list positions:\n{}",
                     wasm.flat_list_imports.len(),

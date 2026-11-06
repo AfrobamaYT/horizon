@@ -146,7 +146,7 @@ pub mod ui_theme;
 pub mod vanillagen;
 pub mod voxel_occlusion;
 // Keep the old path for native callers while giving the implementation a name
-// that does not collide with the gameplay adapter in `game/entity_culling.rs`.
+// that does not collide with the gameplay adapter in `game/interface/entity_culling/mod.rs`.
 pub use voxel_occlusion as entity_culling;
 pub mod win_screen;
 pub mod world_primitives;
