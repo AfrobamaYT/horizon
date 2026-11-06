@@ -502,8 +502,14 @@ mod jukebox_play_tests {
         game.world.set(0, 64, 0, jukebox).unwrap();
         let disc = ItemStack::new("minecraft:music_disc_cat", 1);
         crate::game::dispense_fixture::start_recording();
-        assert!(
-            game.use_jukebox([0, 64, 0], Some(&disc)),
+        assert_eq!(
+            game.use_jukebox(
+                [0, 64, 0],
+                jukebox,
+                Some(&disc),
+                horizon_world::level::UseBranch::ItemOn,
+            ),
+            Some(mod_api::NativeInteractionResult::Success),
             "the disc goes in"
         );
         for _ in 0..ticks {
