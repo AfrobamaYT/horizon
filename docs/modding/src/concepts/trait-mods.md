@@ -600,7 +600,7 @@ namespace. Both checks run once, when the mods register.
 
 A `BlockStateId` is a registry value, not a live object, so the facts about one that need no world are a small
 read-only service on any host, both sides: `host.block_states()` (import `HostBlockStates`). Each reads the game's own
-tables and allocates nothing:
+tables. Fact queries and matching allocate nothing; `definition` copies the property data for the caller:
 
 | Method | Vanilla |
 |---|---|
@@ -609,6 +609,8 @@ tables and allocates nothing:
 | `sound(state) -> Option<BlockSoundType>` | `BlockState.getSoundType()`: volume, pitch and the break, step, place, hit and fall events |
 | `has_block_entity(state) -> Option<bool>` | `BlockState.hasBlockEntity()` |
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as the block's consecutive ids |
+| `definition(block)` | Property names and legal serialized values |
+| `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
 
 None for an unknown state or block, and on a host with no game behind it (a mod's test double).
 
