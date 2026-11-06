@@ -1,14 +1,15 @@
 """Focused discovery, published-anchor and relocation regressions for the book."""
 import copy
+import importlib.util
 from pathlib import Path
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import modding_concept_pages as pages
-import split_modding_concepts as move
+with patch.object(sys, "path", [*sys.path, str(Path(__file__).resolve().parents[1] / "tools")]):
+    import modding_concept_pages as pages
+    import split_modding_concepts as move
 
 
 class ConceptPages(unittest.TestCase):
@@ -29,6 +30,13 @@ class ConceptPages(unittest.TestCase):
             (directory / "001-second.md").write_text("<!-- chapter: Second -->\n\n### Second\n\nPayload.\n")
             self.book["sections"].append({"Chapter": dict(name="Original", path=group,
                 content=path.read_text(), number=[1], parent_names=[], sub_items=[])})
+
+    def test_import_does_not_change_discovery_search_paths(self):
+        spec = importlib.util.spec_from_file_location("concept_import_probe", __file__)
+        with patch.object(sys, "path", list(sys.path)):
+            before = list(sys.path)
+            spec.loader.exec_module(importlib.util.module_from_spec(spec))
+            self.assertEqual(sys.path, before)
 
     def test_new_concept_needs_no_shared_list_edit(self):
         directory = (self.src / pages.GROUPS[0]).with_suffix("")
