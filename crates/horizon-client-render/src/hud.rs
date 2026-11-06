@@ -1514,6 +1514,7 @@ fn clip_polygon(poly: &[HudVertex], axis: usize, limit: f32, keep_below: bool) -
 }
 /// The GUI Scale option (0 = auto).
 pub static GUI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub static GUI_UNICODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// One frame of overlay geometry in GUI pixels.
 pub struct HudBatch {
     pub vertices: Vec<HudVertex>,
@@ -1573,19 +1574,16 @@ impl HudBatch {
     /// Window.calculateScale: the largest scale keeping >= 320x240 GUI pixels,
     /// capped by the GUI Scale option (0 = auto).
     pub fn new(window: [u32; 2]) -> Self {
-        let limit = GUI_SCALE.load(std::sync::atomic::Ordering::Relaxed);
-        let mut scale = 1;
-        while (limit == 0 || scale < limit)
-            && window[0] / (scale + 1) >= 320
-            && window[1] / (scale + 1) >= 240
-        {
-            scale += 1;
-        }
+        let gui = horizon_client_input::window::GuiSize::new(
+            window,
+            GUI_SCALE.load(std::sync::atomic::Ordering::Relaxed),
+            GUI_UNICODE.load(std::sync::atomic::Ordering::Relaxed),
+        );
         Self {
             vertices: Vec::new(),
-            scale: scale as f32,
-            width: (window[0] as f32 / scale as f32).ceil(),
-            height: (window[1] as f32 / scale as f32).ceil(),
+            scale: gui.scale as f32,
+            width: gui.size[0] as f32,
+            height: gui.size[1] as f32,
             patches: Vec::new(),
             blends: Vec::new(),
             end_portal: EndPortalFill::default(),

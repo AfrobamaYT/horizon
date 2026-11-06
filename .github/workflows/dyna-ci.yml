@@ -64,6 +64,9 @@ jobs:
             ENABLED=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_SELF_HOSTED" -q .value 2>/dev/null || true)
             LEASE=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_POOL_UNTIL" -q .value 2>/dev/null || true)
           fi
+          # A refused read prints GitHub's error JSON: keep only a well-formed answer, else use the snapshot.
+          case "${LEASE:-}" in '' | *[!0-9]*) LEASE= ;; esac
+          case "${ENABLED:-}" in true | false) ;; *) ENABLED= ;; esac
           echo "pool lease: live=${LEASE:-unreadable} snapshot=${VARS_LEASE:-none}"
           ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - name: The ignored-tests shard matrix
@@ -99,8 +102,8 @@ jobs:
   lint:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # Main seeds the lint cache from cold (two full clippy graphs, about 40 minutes): give it room to finish and save.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 45 || 100 }}
+    # A cold lint (two full clippy graphs) takes 40+ minutes on GitHub runners: room to finish, main to save its cache.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 100 }}
     env:
       # Keep incremental check state too: changed workspace crates can reuse unchanged queries.
       CARGO_INCREMENTAL: 1
@@ -141,11 +144,32 @@ jobs:
           restore-keys: |
             lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
             lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
+      # A restore-key hit can predate a profile or dependency change: a successful download
+      # does not mean Cargo has artifacts for the requested graph (for example, #1190).
+      - name: Report lint cache compatibility
+        if: steps.rust.outputs.required != 'false'
+        env:
+          REQUESTED_KEY: ${{ steps.lint-cache.outputs.cache-primary-key }}
+          MATCHED_KEY: ${{ steps.lint-cache.outputs.cache-matched-key }}
+        run: |
+          if [ -z "$MATCHED_KEY" ]; then
+            STATUS="No lint cache found; this run builds from cold."
+          elif [[ "$MATCHED_KEY" == "${REQUESTED_KEY%-*-*}-"* ]]; then
+            STATUS="Matching manifests and lockfile; unchanged Cargo units can be reused."
+          else
+            STATUS="Fallback cache from different manifests or lockfile; dependency or profile changes can require a full rebuild until main saves a matching snapshot."
+            echo "::notice::$STATUS"
+          fi
+          {
+            echo "### Lint workspace cache"
+            echo "$STATUS"
+            printf '\nRequested: `%s`\n\nRestored: `%s`\n\n' "$REQUESTED_KEY" "${MATCHED_KEY:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
       # A fresh checkout otherwise makes every workspace source newer than the cached artifacts.
       # Only byte-identical Git objects regain their cached mtimes; changed inputs stay new.
       - name: Restore unchanged source timestamps
         if: steps.rust.outputs.required != 'false'
-        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json
+        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check formatting and lint
         if: steps.rust.outputs.required != 'false'
         id: native-lint
@@ -326,7 +350,7 @@ jobs:
 
   verify:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -335,7 +359,7 @@ jobs:
     env:
       VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
       VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
-      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
+      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j4' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -393,8 +417,8 @@ jobs:
         with:
           shared-key: verify
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # A dyna-medium runner has a hard 8 GiB limit and 4 CPUs; four horizon-client rustc processes at about 2.6 GB
-      # each go past it, so Dyna runs build two crates at a time. Formatting and lint run in parallel on GitHub's
+      # A dyna-large runner has a hard 16 GiB limit and 8 CPUs; horizon-client rustc processes take about 2.6 GB
+      # each, so Dyna runs build four crates at a time. Formatting and lint run in parallel on GitHub's
       # runners (the lint job), so this job only tests. A cargo flag, not CARGO_BUILD_JOBS: sccache hashes
       # CARGO_* variables, and that would split the runners' cache from the boxes'.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
@@ -471,7 +495,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
-          python3 tools/ci/ignored_tests.py "$SHARD"
+          python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
   # Aggregate the main-push and dispatch shards: green when each passed or was skipped.
   ignored-tests:
     needs: [changes, ignored-tests-shards]
