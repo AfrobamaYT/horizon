@@ -1,10 +1,15 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
-use crate::{BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, EffectKey};
+use crate::{
+    BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, EffectKey, FluidKey, ItemKey,
+};
 use std::collections::HashMap;
 
 #[derive(Clone, Default)]
 pub(crate) struct Requests {
     pub(crate) blocks: Names,
+    pub(crate) fluids: Names,
+    pub(crate) declared_fluids: HashMap<String, &'static str>,
+    pub(crate) items: Names,
     pub(crate) effects: Names,
     pub(crate) block_entity_types: Names,
 }
@@ -13,6 +18,7 @@ pub(crate) struct Requests {
 pub(crate) struct Names {
     entries: Vec<Request>,
     pub(crate) slots: HashMap<String, u32>,
+    utf16_slots: HashMap<Vec<u16>, u32>,
 }
 
 #[derive(Clone)]
@@ -53,21 +59,17 @@ impl Names {
             .map(|entry| entry.id.as_str())
     }
 
-    fn resolve<T>(
+    pub(crate) fn resolve<T, E>(
         &self,
-        kind: &str,
         mut resolve: impl FnMut(&str) -> Option<T>,
-    ) -> Result<Vec<T>, Vec<String>> {
+        mut unknown: impl FnMut(&'static str, &str) -> E,
+    ) -> Result<Vec<T>, Vec<E>> {
         let mut values = Vec::with_capacity(self.entries.len());
         let mut errors = Vec::new();
         for entry in &self.entries {
             match resolve(&entry.id) {
                 Some(value) => values.push(value),
-                None => {
-                    errors.extend(entry.mods.iter().map(|mod_id| {
-                        format!("mod {mod_id} requested unknown {kind} {}", entry.id)
-                    }))
-                }
+                None => errors.extend(entry.mods.iter().map(|mod_id| unknown(mod_id, &entry.id))),
             }
         }
         if errors.is_empty() {
@@ -87,6 +89,34 @@ impl BlockKey {
                 .blocks
                 .id(slot)
                 .ok_or("unknown BlockKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
+impl FluidKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::part_table::with_registering_keys(|registering| {
+            let names = match registering {
+                Some(requests) => &requests.fluids,
+                None => crate::part_table::resolved_fluids()
+                    .get()
+                    .unwrap_or(&crate::part_table::requested_keys().fluids),
+            };
+            names.id(slot).ok_or("unknown FluidKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
+impl ItemKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::part_table::with_registering_keys(|registering| {
+            registering
+                .unwrap_or(crate::part_table::requested_keys())
+                .items
+                .id(slot)
+                .ok_or("unknown ItemKey slot")?;
             Ok(Self(slot))
         })
     }
@@ -125,6 +155,83 @@ impl BlockEntityTypeKey {
     }
 }
 
+/// A fluid requested by a mod but absent from the completed registry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UnknownFluid {
+    /// Mod that requested the fluid.
+    pub mod_id: &'static str,
+    /// Canonical fluid identifier.
+    pub id: String,
+}
+
+impl std::fmt::Display for UnknownFluid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "mod {} requested unknown fluid {}", self.mod_id, self.id)
+    }
+}
+
+/// Resolve fluid requests against the loaded behavior registry.
+pub fn resolve_fluids(ids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
+    let requests = crate::part_table::requested_keys();
+    let mut names = requests.fluids.clone();
+    let mut errors = Vec::new();
+    for entry in &names.entries {
+        if !ids.contains(&entry.id.as_str()) && !requests.declared_fluids.contains_key(&entry.id) {
+            errors.extend(entry.mods.iter().map(|mod_id| UnknownFluid {
+                mod_id,
+                id: entry.id.clone(),
+            }));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    for id in ids {
+        names
+            .request("horizon", id)
+            .expect("registry owns valid ids");
+    }
+    for (slot, entry) in names.entries.iter().enumerate() {
+        names
+            .utf16_slots
+            .insert(entry.id.encode_utf16().collect(), slot as u32);
+        if let Some(path) = entry.id.strip_prefix("minecraft:") {
+            names
+                .utf16_slots
+                .insert(path.encode_utf16().collect(), slot as u32);
+        }
+    }
+    let _ = crate::part_table::resolved_fluids().set(names);
+    Ok(())
+}
+
+/// Find a fluid key at a data-loading boundary.
+pub fn fluid_key(id: &str) -> Option<FluidKey> {
+    let names = crate::part_table::resolved_fluids().get()?;
+    let slot = if id.contains(':') {
+        names.slots.get(id)
+    } else {
+        names.slots.get(&format!("minecraft:{id}"))
+    };
+    Some(FluidKey(*slot?))
+}
+
+/// Resolve an NBT UTF-16 fluid name without allocating.
+pub fn fluid_key_utf16(id: &[u16]) -> Option<FluidKey> {
+    Some(FluidKey(
+        *crate::part_table::resolved_fluids()
+            .get()?
+            .utf16_slots
+            .get(id)?,
+    ))
+}
+
+/// The canonical registry name of a resolved fluid key.
+pub fn fluid_id(key: FluidKey) -> Option<&'static str> {
+    crate::part_table::resolved_fluids().get()?.id(key.0)
+}
+
 /// Resolve all block entity types after registration and content loading.
 pub fn resolve_block_entity_types(
     types: &horizon_client_core::block_entity_types::BlockEntityTypes,
@@ -132,7 +239,10 @@ pub fn resolve_block_entity_types(
     let mut names = crate::part_table::requested_keys()
         .block_entity_types
         .clone();
-    names.resolve("block entity type", |id| types.key(id))?;
+    names.resolve(
+        |id| types.key(id),
+        |mod_id, id| format!("mod {mod_id} requested unknown block entity type {id}"),
+    )?;
     for id in types.names() {
         names
             .request("horizon", id)
@@ -193,7 +303,9 @@ pub fn resolve_blocks(
 ) -> Result<(), Vec<String>> {
     let result = crate::part_table::requested_keys()
         .blocks
-        .resolve("block", &mut resolve);
+        .resolve(&mut resolve, |mod_id, id| {
+            format!("mod {mod_id} requested unknown block {id}")
+        });
     BLOCKS.with(|blocks| {
         *blocks.borrow_mut() = None;
         match result {
@@ -237,9 +349,10 @@ pub fn resolve_effects() -> Result<(), Vec<String>> {
             .request("horizon", potions::namespaced(def.id))
             .expect("registry owns valid ids");
     }
-    let indices = names.resolve("effect", |id| {
-        all.iter().position(|def| potions::namespaced(def.id) == id)
-    })?;
+    let indices = names.resolve(
+        |id| all.iter().position(|def| potions::namespaced(def.id) == id),
+        |mod_id, id| format!("mod {mod_id} requested unknown effect {id}"),
+    )?;
     let mut keys = vec![EffectKey(u32::MAX); all.len()];
     for (slot, &index) in indices.iter().enumerate() {
         keys[index] = EffectKey(slot as u32);
@@ -271,6 +384,11 @@ pub fn effect_id(key: EffectKey) -> Option<&'static str> {
 /// Canonical diagnostic name of a trusted, load-owned slot, independent of world resolution.
 pub fn block_id(key: BlockKey) -> Option<&'static str> {
     Some(&crate::part_table::requested_keys().blocks.entries[key.0 as usize].id)
+}
+
+/// Canonical diagnostic name retained by an item registration slot.
+pub fn item_id(key: ItemKey) -> Option<&'static str> {
+    crate::part_table::requested_keys().items.id(key.0)
 }
 
 /// The API key for an engine registry index, also for entries not explicitly requested by mods.

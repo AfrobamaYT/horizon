@@ -1139,7 +1139,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn book_click(&mut self, size: [u32; 2]) {
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (w, left) = (b.width, ((b.width - 192.0) / 2.0).floor());
         let (mx, my) = self.cursor;
         // MouseHandler: a click within 250 ms of the last one on this screen is a double click.

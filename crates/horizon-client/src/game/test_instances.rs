@@ -272,7 +272,7 @@ impl Game<'_> {
         let mut patches = Vec::new();
         for (pos, text, color) in markers {
             // A plain colour: the atlas's white pixel at the fill's colour.
-            let mut fill = HudBatch::new([1, 1]);
+            let mut fill = HudBatch::scratch([1, 1]);
             fill.fill(&self.gui.atlas, 0.0, 0.0, 1.0, 1.0, color);
             let Some(v) = fill.vertices.first().copied() else {
                 continue;

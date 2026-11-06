@@ -127,8 +127,7 @@ impl Game<'_> {
         rule: &str,
     ) -> Option<GameRuleValue> {
         self.native_level_world(level)?;
-        let r = horizon_client::gamerules::rule(rule)?;
-        self.ui.rules.get(r.name)
+        self.ui.rules.get(rule)
     }
     /// Every game rule the world has (`GameRules`) with its current value, by `minecraft:` id
     /// (`max_minecart_speed` only with minecart improvements): None for a stale handle and on
@@ -142,7 +141,7 @@ impl Game<'_> {
         Some(
             rules
                 .available_rules()
-                .filter_map(|r| Some((["minecraft:", r.name].concat(), rules.get(r.name)?)))
+                .filter_map(|r| Some((r.name.clone(), rules.get(&r.name)?)))
                 .collect(),
         )
     }
@@ -388,8 +387,11 @@ mod tests {
                         .rules
                         .set("random_tick_speed", GameRuleValue::Int(7))
                 );
-                let keep_inventory = gamerules::rule("keep_inventory").unwrap();
-                game.set_game_rule(keep_inventory, GameRuleValue::Bool(true), None);
+                let keep_inventory = gamerules::rule_registry()
+                    .rule("keep_inventory")
+                    .unwrap()
+                    .clone();
+                game.set_game_rule(&keep_inventory, GameRuleValue::Bool(true), None);
             });
         });
         assert_eq!(

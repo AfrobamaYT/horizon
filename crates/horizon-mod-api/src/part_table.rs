@@ -335,6 +335,7 @@ struct Installed {
     registry_keys: super::registry_keys::Requests,
     effects: OnceLock<super::registry_keys::Effects>,
     resolved_block_entity_types: OnceLock<super::registry_keys::Names>,
+    fluids: OnceLock<super::registry_keys::Names>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
@@ -369,6 +370,11 @@ pub(crate) fn with_registering_keys<T>(
 pub(crate) fn resolved_effects() -> &'static OnceLock<super::registry_keys::Effects> {
     static EMPTY: OnceLock<super::registry_keys::Effects> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.effects)
+}
+
+pub(crate) fn resolved_fluids() -> &'static OnceLock<super::registry_keys::Names> {
+    static EMPTY: OnceLock<super::registry_keys::Names> = OnceLock::new();
+    installed().map_or(&EMPTY, |installed| &installed.fluids)
 }
 
 pub(crate) fn resolved_block_entity_types() -> &'static OnceLock<super::registry_keys::Names> {
@@ -487,6 +493,26 @@ pub fn mark_game_thread() {
     GAME_THREAD.set(true);
 }
 
+/// An item registration request that the loaded item registry cannot resolve.
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ItemKeyError {
+    /// The requesting mod.
+    pub mod_id: &'static str,
+    /// The canonical requested item id.
+    pub id: String,
+}
+
+/// Refusals at the Parts load boundary.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ResolvePartsError {
+    /// An item key names no loaded item.
+    ItemKeys(Vec<ItemKeyError>),
+    /// Legacy block or item Part registration refusals.
+    Parts(Vec<String>),
+}
+
 /// The ids a game knows, which a part's key must name.
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct KnownIds<'a> {
@@ -508,16 +534,25 @@ pub fn resolve_parts(
     block_tags: &HashMap<String, HashSet<String>>,
     item_tags: &HashMap<String, HashSet<String>>,
     known: KnownIds<'_>,
-) -> Result<(), Vec<String>> {
+) -> Result<(), ResolvePartsError> {
     let Some(installed) = installed() else {
         return Ok(());
     };
+    if let Err(errors) = installed.registry_keys.items.resolve(
+        |id| (known.item)(id).then_some(()),
+        |mod_id, id| ItemKeyError {
+            mod_id,
+            id: id.to_owned(),
+        },
+    ) {
+        return Err(ResolvePartsError::ItemKeys(errors));
+    }
     let mut unknown: Vec<String> = unknown_keys(&installed.keys.blocks, known.block, "block")
         .chain(unknown_keys(&installed.keys.items, known.item, "item"))
         .collect();
     if !unknown.is_empty() {
         unknown.sort();
-        return Err(unknown);
+        return Err(ResolvePartsError::Parts(unknown));
     }
     let mut parts = installed.keys.clone();
     add_tagged(
@@ -877,15 +912,21 @@ fn attached<'a, 'k, P: ?Sized>(
 /// declares its block entity types and ticket controllers on. A thing takes one part of each
 /// kind: the same kind twice on one thing refuses the mods at startup, naming both.
 ///
-/// Mods call the generic methods on `dyn Registrar` (`r.item_part("mymod:wrench", Wrench)`);
+/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
 /// they reach the trait's own methods, one implementation for native and wasm mods.
 pub trait Registrar {
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey;
     /// Request a block by canonical registry id. All mods' declarations are checked at load.
     fn block_key(&mut self, id: &str) -> super::BlockKey;
+    /// Request an item by registry id, validated after all declarations.
+    fn item_key(&mut self, id: &str) -> super::ItemKey;
     /// Request an effect by canonical registry id. All mods' declarations are checked at load.
     fn effect_key(&mut self, id: &str) -> super::EffectKey;
+    /// Request a fluid by canonical registry id, checked when the registry loads.
+    fn fluid_key(&mut self, id: &str) -> super::FluidKey;
+    /// Declare a tank-only fluid in this mod's namespace and return its key.
+    fn declare_fluid(&mut self, path: &str) -> super::FluidKey;
     /// Declare block entity type `path` in this mod's namespace, held by `blocks`; mods usually
     /// reach it through `block_entity_type`.
     fn declare_block_entity_type(
@@ -917,7 +958,12 @@ pub trait Registrar {
         part: Arc<dyn BlockEntityPart>,
     ) -> Result<(), super::BlockEntityPartError>;
     /// Attach `part`, of kind `kind`, to item `item`.
-    fn attach_item_part(&mut self, item: &str, kind: &'static str, part: Arc<dyn ItemPart>);
+    fn attach_item_part(
+        &mut self,
+        item: super::ItemKey,
+        kind: &'static str,
+        part: Arc<dyn ItemPart>,
+    );
     /// Attach `part`, of kind `kind`, to the mod menu type `menu`.
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>);
     /// Attach `part`, of kind `kind`, to every block in tag `tag`.
@@ -1003,7 +1049,7 @@ impl dyn Registrar + '_ {
         self.attach_item_part_tag(tag, type_name::<P>(), Arc::new(part));
     }
     /// Attach `part` to item `item` (`mymod:wrench`).
-    pub fn item_part<P: ItemPart>(&mut self, item: &str, part: P) {
+    pub fn item_part<P: ItemPart>(&mut self, item: super::ItemKey, part: P) {
         self.attach_item_part(item, type_name::<P>(), Arc::new(part));
     }
     /// Attach `part` to the mod menu type `menu`.
@@ -1377,6 +1423,21 @@ impl Registrar for PartRegistrar {
         }
     }
 
+    fn item_key(&mut self, id: &str) -> super::ItemKey {
+        match self
+            .registry_keys
+            .borrow_mut()
+            .items
+            .request(self.mod_id, id)
+        {
+            Ok(slot) => super::ItemKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::ItemKey(u32::MAX)
+            }
+        }
+    }
+
     fn effect_key(&mut self, id: &str) -> super::EffectKey {
         match self
             .registry_keys
@@ -1390,6 +1451,44 @@ impl Registrar for PartRegistrar {
                 super::EffectKey(u32::MAX)
             }
         }
+    }
+
+    fn fluid_key(&mut self, id: &str) -> super::FluidKey {
+        match self
+            .registry_keys
+            .borrow_mut()
+            .fluids
+            .request(self.mod_id, id)
+        {
+            Ok(slot) => super::FluidKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::FluidKey(u32::MAX)
+            }
+        }
+    }
+
+    fn declare_fluid(&mut self, path: &str) -> super::FluidKey {
+        let id = format!("{}:{path}", self.mod_id);
+        if path.contains(':') || !horizon_mods::content::namespaced_id(&id) {
+            self.refused.push(format!(
+                "mod {}: invalid fluid declaration {id:?}",
+                self.mod_id
+            ));
+            return super::FluidKey(u32::MAX);
+        }
+        let previous = self
+            .registry_keys
+            .borrow_mut()
+            .declared_fluids
+            .insert(id.clone(), self.mod_id);
+        if let Some(other) = previous {
+            self.refused.push(format!(
+                "fluid {id} declared by both {other} and {}",
+                self.mod_id
+            ));
+        }
+        self.fluid_key(&id)
     }
 
     fn declare_block_entity_type(
@@ -1461,8 +1560,26 @@ impl Registrar for PartRegistrar {
         }
     }
 
-    fn attach_item_part(&mut self, item: &str, kind: &'static str, part: Arc<dyn ItemPart>) {
-        self.attach(|p| &mut p.items, kind, item, part);
+    fn attach_item_part(
+        &mut self,
+        item: super::ItemKey,
+        kind: &'static str,
+        part: Arc<dyn ItemPart>,
+    ) {
+        let id = self
+            .registry_keys
+            .borrow()
+            .items
+            .id(item.0)
+            .map(str::to_owned);
+        let Some(id) = id else {
+            self.refused.push(format!(
+                "mod {}: invalid item key slot {}",
+                self.mod_id, item.0
+            ));
+            return;
+        };
+        self.attach(|p| &mut p.items, kind, &id, part);
     }
 
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>) {
@@ -1617,6 +1734,7 @@ fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
             .into_inner(),
         effects: registrar.effects,
+        fluids: OnceLock::new(),
         controllers: registrar.controllers,
         structure_types: registrar.structure_types,
         hook_bits: Vec::new(),
@@ -1664,6 +1782,14 @@ pub mod tests {
         }
         super::install_registrar(registrar).unwrap();
         crate::registry_keys::resolve_effects().unwrap();
+        crate::registry_keys::resolve_fluids(&[
+            "minecraft:empty",
+            "minecraft:water",
+            "minecraft:flowing_water",
+            "minecraft:lava",
+            "minecraft:flowing_lava",
+        ])
+        .unwrap();
         if let Some(types) = horizon_client_core::block_entity_types::current() {
             crate::registry_keys::resolve_block_entity_types(types).unwrap();
         }
@@ -1728,6 +1854,122 @@ pub mod tests {
         }
         #[cfg_attr(test, cfg(any()))]
         fn should_check_weak_power(&self, _: &dyn LevelHost, _: &mut ShouldCheckWeakPowerEvent) {}
+    }
+
+    #[test]
+    fn invalid_and_duplicate_fluid_declarations_are_refused() {
+        let mut registrar = super::PartRegistrar::new("maker");
+        registrar.declare_fluid("wrong:namespace");
+        registrar.declare_fluid("chocolate");
+        registrar.declare_fluid("chocolate");
+        assert_eq!(registrar.refused.len(), 2);
+        assert!(registrar.refused[0].contains("maker"));
+        assert!(registrar.refused[1].contains("maker:chocolate"));
+    }
+
+    #[test]
+    fn fluid_keys_resolve_declarations_after_requests_and_reject_unknown() {
+        use crate::registry_keys::{fluid_id, fluid_key, resolve_fluids};
+        struct Request;
+        #[mod_api::__subscriptions]
+        impl Hooks for Request {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                assert_eq!(r.fluid_key("water"), r.fluid_key("minecraft:water"));
+                r.fluid_key("maker:chocolate");
+            }
+        }
+        struct Declare;
+        #[mod_api::__subscriptions]
+        impl Hooks for Declare {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.declare_fluid("chocolate");
+            }
+        }
+        let mods: Mods = vec![
+            ModEntry::new("reader", Box::new(Request)),
+            ModEntry::new("maker", Box::new(Declare)),
+        ]
+        .into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        let error = resolve_fluids(&[]).unwrap_err();
+        assert_eq!(
+            error,
+            vec![crate::UnknownFluid {
+                mod_id: "reader",
+                id: "minecraft:water".to_owned()
+            }]
+        );
+        resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
+        let chocolate = fluid_key("maker:chocolate").unwrap();
+        assert_eq!(fluid_id(chocolate), Some("maker:chocolate"));
+        for name in ["minecraft:water", "minecraft:lava", "maker:chocolate"] {
+            let key = fluid_key(name).unwrap();
+            assert_eq!(
+                crate::registry_keys::fluid_key_utf16(&name.encode_utf16().collect::<Vec<_>>()),
+                Some(key)
+            );
+            assert_eq!(fluid_id(key), Some(name));
+        }
+        for path in ["water", "lava"] {
+            assert_eq!(
+                crate::registry_keys::fluid_key_utf16(&path.encode_utf16().collect::<Vec<_>>()),
+                fluid_key(path)
+            );
+        }
+        assert_eq!(FluidKey::from_slot(chocolate.0), Ok(chocolate));
+        assert!(fluid_key("missing:fluid").is_none());
+    }
+
+    #[test]
+    fn item_keys_validate_forward_references_and_reused_slots() {
+        struct Keys(Arc<std::sync::Mutex<Vec<crate::ItemKey>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Keys {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let vanilla = r.item_key("stick");
+                assert_eq!(vanilla, r.item_key("minecraft:stick"));
+                let later = r.item_key("later:widget");
+                assert_eq!(crate::ItemKey::from_slot(vanilla.0), Ok(vanilla));
+                assert!(crate::ItemKey::from_slot(later.0 + 1).is_err());
+                *self.0.lock().unwrap() = vec![vanilla, later];
+            }
+        }
+        let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods: Mods = vec![ModEntry::new("requester", Box::new(Keys(keys.clone())))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        let check = |known: &dyn Fn(&str) -> bool| {
+            resolve_parts(
+                &HashMap::new(),
+                &HashMap::new(),
+                KnownIds {
+                    block: &|_| false,
+                    item: known,
+                    state_count: 0,
+                    state_block: &|_| unreachable!(),
+                },
+            )
+        };
+        check(&|id| ["minecraft:stick", "later:widget"].contains(&id)).unwrap();
+        let keys = keys.lock().unwrap();
+        assert_eq!(
+            crate::registry_keys::item_id(keys[0]),
+            Some("minecraft:stick")
+        );
+        assert_eq!(crate::registry_keys::item_id(keys[1]), Some("later:widget"));
+        let super::ResolvePartsError::ItemKeys(errors) =
+            check(&|id| id == "minecraft:stick").unwrap_err()
+        else {
+            panic!("wrong refusal")
+        };
+        assert_eq!(
+            errors,
+            [super::ItemKeyError {
+                mod_id: "requester",
+                id: "later:widget".into()
+            }]
+        );
     }
 
     #[test]
@@ -3382,8 +3624,12 @@ pub mod tests {
             1
         }
         fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<FluidResource> {
-            (self.amount(host, 0) > 0)
-                .then(|| FluidResource::of(&FluidStack::new("minecraft:water", 1)))
+            (self.amount(host, 0) > 0).then(|| {
+                FluidResource::of(&FluidStack::new(
+                    crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                    1,
+                ))
+            })
         }
         fn amount(&self, host: &mut dyn ServerHost, _: usize) -> u32 {
             ROBOT_FLUID
@@ -3392,7 +3638,12 @@ pub mod tests {
                 .unwrap_or(0)
         }
         fn capacity(&self, _: &mut dyn ServerHost, index: usize, resource: &FluidResource) -> u32 {
-            if index == 0 && resource == &FluidResource::of(&FluidStack::new("minecraft:water", 1))
+            if index == 0
+                && resource
+                    == &FluidResource::of(&FluidStack::new(
+                        crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                        1,
+                    ))
             {
                 1000
             } else {
@@ -3464,6 +3715,7 @@ pub mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            r.declare_fluid("potion");
             for id in CAPABILITY_TYPES {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
@@ -3494,6 +3746,14 @@ pub mod tests {
         .into();
         super::super::install(mods.clone());
         install_parts(&mods).unwrap();
+        crate::registry_keys::resolve_fluids(&[
+            "minecraft:water",
+            "minecraft:lava",
+            "minecraft:flowing_water",
+            "minecraft:flowing_lava",
+            "minecraft:empty",
+        ])
+        .unwrap();
         mark_game_thread();
         mods
     }
@@ -3748,7 +4008,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// Resolve this thread's parts with tag `test:gauged` holding `members`.
-    fn resolve(members: &[&str]) -> Result<(), Vec<String>> {
+    fn resolve(members: &[&str]) -> Result<(), super::ResolvePartsError> {
         let tags = HashMap::from([(
             "test:gauged".to_owned(),
             members.iter().map(|m| m.to_string()).collect(),
@@ -3929,6 +4189,9 @@ pub mod tests {
             },
         )
         .unwrap_err();
+        let super::ResolvePartsError::Parts(refused) = refused else {
+            panic!("wrong refusal")
+        };
         assert_eq!(refused.len(), 1, "{refused:?}");
         assert!(refused[0].starts_with("doubler attached "));
         assert!(refused[0].contains("Gauge to block test:gauge, which this game does not have"));
@@ -5690,7 +5953,10 @@ pub mod tests {
         };
         FluidStack {
             components: Some(Box::new(components)),
-            ..FluidStack::new("test:potion", amount)
+            ..FluidStack::new(
+                crate::registry_keys::fluid_key("test:potion").unwrap(),
+                amount,
+            )
         }
     }
 
@@ -5712,7 +5978,7 @@ pub mod tests {
         // The same fluid with other components, or another fluid, doesn't go in.
         for other in [
             potion(500, "minecraft:poison"),
-            FluidStack::new("test:potion", 500),
+            FluidStack::new(crate::registry_keys::fluid_key("test:potion").unwrap(), 500),
         ] {
             world.tank(SOURCE, Some(other.clone()), true);
             assert_eq!(world.moved((SOURCE, None), (TANK, None), 4000), Ok(0));
@@ -5720,7 +5986,10 @@ pub mod tests {
             assert_eq!(world.held(TANK), Some(potion(600, "minecraft:healing")));
         }
         // A drain-only tank has no capacity, and nothing moves.
-        let water = FluidStack::new("minecraft:water", 1000);
+        let water = FluidStack::new(
+            crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+            1000,
+        );
         world.tank(SOURCE, Some(water.clone()), true);
         world.tank(TANK, None, false);
         let host: &mut dyn ServerHost = &mut world;
@@ -5733,7 +6002,12 @@ pub mod tests {
     #[test]
     fn a_fluid_move_tries_again_with_what_the_target_took_and_loses_nothing() {
         game_thread();
-        let water = |amount| FluidStack::new("minecraft:water", amount);
+        let water = |amount| {
+            FluidStack::new(
+                crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                amount,
+            )
+        };
         type Setup = fn(&mut GameTank, &mut GameTank);
         let cases: [(&str, Setup, u32); 6] = [
             // Half of each offer: no request is ever taken whole, so nothing moves.
@@ -5781,7 +6055,12 @@ pub mod tests {
     #[test]
     fn a_handler_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_fluid() {
         game_thread();
-        let water = |amount| Some(FluidStack::new("minecraft:water", amount));
+        let water = |amount| {
+            Some(FluidStack::new(
+                crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                amount,
+            ))
+        };
         for (liar, at) in [("test:gives_more", SOURCE), ("test:takes_more", TANK)] {
             let mut world = TankWorld::default();
             world.tank(SOURCE, water(1000), true);

@@ -444,7 +444,7 @@ impl Loading {
             renderer.gamma = self.settings.gamma;
             renderer.set_present_mode(self.settings.vsync, self.settings.horizon.present_mode);
         }
-        horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
+
         super::narrator::sync(&self.settings);
         if let Some(gui) = &mut self.gui {
             gui.atlas.font.uniform = self.settings.force_unicode;
@@ -478,7 +478,7 @@ impl Loading {
     }
 
     fn update_menu_cursor(&mut self) {
-        let batch = HudBatch::new(self.menu_size());
+        let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
         self.menu.cursor = (
             self.menu.pointer.0 as f32 / batch.scale,
             self.menu.pointer.1 as f32 / batch.scale,
@@ -708,7 +708,7 @@ impl Loading {
 
     fn menu_options_click(&mut self, drag: bool, right: bool) {
         let size = self.menu_size();
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let Some(gui) = &self.gui else { return };
         self.menu.options.shift = self.menu.modifiers.shift_key();
         let events = self.menu.options.click(
@@ -798,7 +798,7 @@ impl Loading {
 
     /// What the keyboard can focus on the screen last drawn.
     fn menu_key_targets(&self) -> Vec<Target> {
-        let batch = HudBatch::new(self.menu_size());
+        let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
         key_focus::keyboard_targets(
             key_focus::on_screen(key_focus::drawn_targets(), (batch.width, batch.height)),
             false,
@@ -850,7 +850,7 @@ impl Loading {
         } else {
             (false, false)
         };
-        let batch = HudBatch::new(self.menu_size());
+        let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
         let ctx = key_focus::Context {
             slider_edit,
             typing,
@@ -936,7 +936,7 @@ impl Loading {
         match target.kind {
             Kind::Field => self.menu_key_click(event_loop, key_focus::field_click(target.rect)),
             Kind::Row if !self.menu.options_open => {
-                let batch = HudBatch::new(self.menu_size());
+                let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                 if let Some(title) = &mut self.menu.title {
                     title.focus_world_row(target.center(), (batch.width, batch.height));
                 }
@@ -1073,7 +1073,7 @@ impl Loading {
                         .renderer
                         .as_ref()
                         .map_or([1280, 720], |r| [r.config.width, r.config.height]);
-                    let b = HudBatch::new(size);
+                    let b = HudBatch::new(size, self.settings.gui_scale_inputs());
                     title.drag(self.menu.cursor, (b.width, b.height));
                     title.drag_field(&self.gui.as_ref().unwrap().atlas, self.menu.cursor.0);
                 }
@@ -1098,7 +1098,7 @@ impl Loading {
                 button: MouseButton::Left,
                 ..
             } => {
-                let batch = HudBatch::new(self.menu_size());
+                let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                 if let (Some(title), Some(gui)) = (&mut self.menu.title, &self.gui) {
                     if state == ElementState::Released {
                         title.release();
@@ -1131,7 +1131,7 @@ impl Loading {
                 button: MouseButton::Middle,
                 ..
             } => {
-                let batch = HudBatch::new(self.menu_size());
+                let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                 if let Some(title) = &mut self.menu.title {
                     title.select_world_at(
                         self.menu.cursor.0,
@@ -1151,7 +1151,7 @@ impl Loading {
                     raw
                 } * self.settings.mouse_wheel_sensitivity;
                 let size = self.menu_size();
-                let batch = HudBatch::new(size);
+                let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
                 if self.menu.options_open {
                     let events = self.menu.options.wheel(
                         &mut self.settings,
@@ -1188,7 +1188,7 @@ impl Loading {
                         self.menu_option_events(events);
                     }
                 } else {
-                    let batch = HudBatch::new(self.menu_size());
+                    let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                     let action = self.menu.title_key(&event, (batch.width, batch.height));
                     self.menu_action(event_loop, action);
                 }
@@ -1344,6 +1344,35 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn live_gui_scale_uses_the_current_owner() {
+        let (_, receiver) = std::sync::mpsc::channel();
+        let mut first = loading(receiver);
+        let (_, receiver) = std::sync::mpsc::channel();
+        let mut second = loading(receiver);
+        first.settings.gui_scale = 3;
+        second.settings.gui_scale = 3;
+        second.settings.force_unicode = true;
+        let view = |owner: &Loading| {
+            let batch = HudBatch::new([960, 720], owner.settings.gui_scale_inputs());
+            (batch.scale, batch.width, batch.height)
+        };
+        assert_eq!(view(&first), (3.0, 320.0, 240.0));
+        assert_eq!(view(&second), (4.0, 240.0, 180.0));
+        super::super::native_entity_refs::tests::with_game(|server| {
+            server.settings.gui_scale = 1;
+            server.apply_ui_settings();
+            assert_eq!(view(&first), (3.0, 320.0, 240.0));
+            assert_eq!(view(&second), (4.0, 240.0, 180.0));
+        });
+        first.settings.force_unicode = true;
+        first.menu.pointer = (400.0, 200.0);
+        first.apply_menu_settings();
+        assert_eq!(view(&first), (4.0, 240.0, 180.0));
+        assert_eq!(first.menu.cursor, (100.0, 50.0));
+    }
+
+    #[test]
     fn the_world_renderer_waits_for_the_first_title_frame() {
         let (_send, receiver) = std::sync::mpsc::channel();
         let mut loading = loading(receiver);
@@ -1402,7 +1431,7 @@ mod tests {
             name: Some(name), seed: Some(42), creative: true, create: Some(_), ..
         }) if name == "My world")
         );
-        let mut batch = HudBatch::new([1280, 720]);
+        let mut batch = HudBatch::scratch([1280, 720]);
         loading.draw_menu(&mut batch);
         assert!(
             !batch.vertices.is_empty(),

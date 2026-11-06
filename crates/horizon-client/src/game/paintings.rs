@@ -307,7 +307,11 @@ impl Game<'_> {
             (lo[2] + hi[2]) / 2.0,
         ];
         self.world.modified.insert((p.pos[0] >> 4, p.pos[2] >> 4));
-        if !self.ui.rules.bool("entity_drops") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+        {
             return true;
         }
         self.audio

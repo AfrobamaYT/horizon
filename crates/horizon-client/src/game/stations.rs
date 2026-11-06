@@ -1201,7 +1201,7 @@ impl Game<'_> {
         else {
             return true;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (ox, oy) = self.inventory_origin(&batch);
         let local = (self.cursor.0 - ox, self.cursor.1 - oy);
         let shift = self.has_shift_down();
@@ -1357,7 +1357,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let (_, oy) = self.inventory_origin(&HudBatch::new(size));
+        let (_, oy) = self.inventory_origin(&HudBatch::new(size, self.settings.gui_scale_inputs()));
         let y = self.cursor.1 - oy;
         // `StonecutterScreen.mouseDragged`.
         if let Some(s) = self.station.as_mut()
@@ -3344,7 +3344,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.item_part("minecraft:stick", Lore);
+                let item = r.item_key("minecraft:stick");
+                r.item_part(item, Lore);
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
                 let plain: Vec<String> = event.lines.iter().map(|(t, _)| t.plain()).collect();

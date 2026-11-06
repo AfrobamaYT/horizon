@@ -6537,6 +6537,9 @@ impl Game<'_> {
                 // NetherPortalBlock.entityInside on the client's own level:
                 // the portal overlay and its trigger sound (the server moves
                 // the player).
+                horizon_client::motion::MotionEvent::PowderSnowMelt { pos } => {
+                    self.powder_snow_melt(pos);
+                }
                 horizon_client::motion::MotionEvent::InsidePortal { .. } => {
                     self.client_inside_nether_portal();
                 }
@@ -8686,8 +8689,16 @@ impl Game<'_> {
         stack: &ItemStack,
     ) -> (bool, Option<DryChanges>, Vec<DrySound>) {
         // `BucketItem.use`: `level.mayInteract` and `mayUseItemAt`.
+        // `Player.mayUseItemAt` tests the clicked block against `can_place_on`.
         if !self.may_build() {
-            return (false, None, Vec::new());
+            let aim = if &*stack.item == "minecraft:bucket" {
+                self.bucket_hit()
+            } else {
+                self.pick()
+            };
+            if !aim.is_some_and(|hit| self.can_place_on_in_adventure(hit.pos)) {
+                return (false, None, Vec::new());
+            }
         }
         if &*stack.item == "minecraft:bucket" {
             let Some(hit) = self.bucket_hit() else {
@@ -9772,6 +9783,8 @@ impl Game<'_> {
     /// MultiPlayerGameMode.dropItem (key.drop): predict the removal, then send
     /// the action; swing only if a nonempty stack was removed.
     pub(super) fn remote_drop(&mut self, all: bool) {
+        // ensureHasSentCarriedItem: the server drops from the slot just chosen.
+        self.remote_send_carried();
         let dropped =
             horizon_client::items::take_held_drop(&mut self.inventory[self.selected], all, false);
         self.send(S::PlayerAction(play::PlayerAction {
@@ -9833,7 +9846,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let Some(internal) = self.slot_at(&batch, self.cursor.0, self.cursor.1) else {
             return;
         };
@@ -11508,7 +11521,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.item_part("minecraft:bow", Part(self.0.clone()));
+                let item = r.item_key("minecraft:bow");
+                r.item_part(item, Part(self.0.clone()));
             }
         }
         let calls = Arc::new(AtomicUsize::new(0));

@@ -360,7 +360,10 @@ impl Game<'_> {
     /// (`defaults` false), output tracking follows `send_command_feedback` and
     /// the block's own automatic flag; then the block takes the signal around it.
     pub(super) fn command_block_placed(&mut self, pos: Pos, defaults: bool) {
-        let feedback = self.ui.rules.bool("send_command_feedback");
+        let feedback = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
         let Some(name) = self.block_state_at(pos).map(|s| s.name.as_str()) else {
             return;
         };
@@ -430,7 +433,10 @@ impl Game<'_> {
     /// facing on to the next, up to `max_command_sequence_length`.
     fn execute_chain(&mut self, start: Pos, mut step: [i32; 3]) {
         let registry = self.pack.assets.registry;
-        let limit = self.ui.rules.int("max_command_sequence_length");
+        let limit = self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::MAX_COMMAND_SEQUENCE_LENGTH);
         let mut remaining = limit;
         let mut pos = start;
         while remaining > 0 {
@@ -484,7 +490,12 @@ impl Game<'_> {
         }
         c.success_count = 0;
         let command = c.command.clone();
-        if self.ui.rules.bool("command_blocks_work") && !command.is_empty() {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCKS_WORK)
+            && !command.is_empty()
+        {
             if let Some(c) = command_block_mut(&mut self.world, pos) {
                 c.last_output = None;
             }
@@ -556,11 +567,20 @@ impl Game<'_> {
         else {
             return;
         };
-        let feedback = self.ui.rules.bool("send_command_feedback");
+        let feedback = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
         if feedback {
             self.command_block_output(pos, message.clone());
         }
-        if broadcast && feedback && self.ui.rules.bool("command_block_output") {
+        if broadcast
+            && feedback
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCK_OUTPUT)
+        {
             self.broadcast_source_to_admins(name, message);
         }
     }
@@ -760,7 +780,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1, 1], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let hit = CommandBlockScreen::buttons(b.width, b.height, s.cart.is_some())
             .into_iter()
             .find(|(_, x, y, bw)| ui::hovered(self.cursor, *x, *y, *bw, 20.0))
@@ -1014,7 +1034,11 @@ impl Game<'_> {
             self.schedule_command_block_tick(pos);
         }
         if !command.is_empty() {
-            let key = if self.ui.rules.bool("command_blocks_work") {
+            let key = if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCKS_WORK)
+            {
                 "advMode.setCommand.success"
             } else {
                 "advMode.setCommand.disabled"

@@ -474,7 +474,7 @@ mod tests {
     fn the_screen_ends_once_everything_rolled_past() {
         let mut s = screen(false, "", CREDITS, "");
         let atlas = HudAtlas::fonts(Path::new("/nonexistent")).unwrap();
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         let h = batch.height;
         let end = (s.total_scroll_length as f32 + 2.0 * h + 24.0) / 0.75;
         s.draw(&mut batch, &atlas, end - 1.0, EndPortalFill::default());

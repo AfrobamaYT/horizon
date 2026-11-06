@@ -1144,7 +1144,10 @@ mod tests {
             origin: [0.0; 3],
             maps: None,
         };
-        for p in crate::merchant::PROFESSIONS {
+        for p in crate::mobs::villager::PROFESSIONS
+            .iter()
+            .filter_map(|p| p.trade_set)
+        {
             let set = crate::merchant::Trades::set_for(p, 1);
             let mut random = crate::merchant::sequence_random(
                 12345,

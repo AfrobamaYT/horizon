@@ -1029,7 +1029,10 @@ impl Game<'_> {
                 .state(self.world.block(p.x, p.y, p.z))
                 .is_some_and(|s| s.name == "minecraft:turtle_egg");
             if egg
-                && self.ui.rules.bool("mob_griefing")
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
                 && self.world.random.next_int_bound(chance).unwrap_or(1) == 0
             {
                 self.crack_turtle_egg([p.x, p.y, p.z])?;
@@ -1654,8 +1657,8 @@ impl Game<'_> {
                 .extra
                 .as_deref()
                 .and_then(|d| d.other.iter().find(|(k, _)| k == "minecraft:profile"))
-                .map(|(_, t)| horizon_client::scoreboard::tag_to_json(t))
-                .unwrap_or(serde_json::Value::Null);
+                .map(|(_, t)| self.skin_profiles.borrow_mut().head_profile_nbt(t))
+                .unwrap_or_else(|| std::sync::Arc::new(serde_json::Value::Null));
             self.pack.item_renderer.submit_special(
                 &special,
                 &profile,

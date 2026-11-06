@@ -124,7 +124,11 @@ impl Game<'_> {
     /// `LocalPlayer.doLimitedCrafting`: whether limited crafting is active.
     pub fn limited_crafting(&self) -> bool {
         self.remote.as_ref().map_or_else(
-            || self.ui.rules.bool("limited_crafting"),
+            || {
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::LIMITED_CRAFTING)
+            },
             |r| r.do_limited_crafting,
         )
     }

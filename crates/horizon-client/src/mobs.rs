@@ -1113,6 +1113,8 @@ pub struct Extra {
     pub variant: u8,
     /// Secondary variant (horse markings, tropical fish pattern colours, panda hidden gene).
     pub variant2: u8,
+    /// Villager or zombie-villager profession; no numeric mirror is stored.
+    pub profession: villager::ProfessionState,
     pub variant3: u8,
     /// VillagerData.level for villagers and zombie villagers.
     pub villager_level: i32,
@@ -1453,6 +1455,39 @@ impl Extra {
     }
 }
 
+/// How far the boxes of a set of mobs reach from their positions: the widest half width and the
+/// tallest height among them. A box query over many mobs (a vehicle's, against every mob of the
+/// level) tests each mob's position against this first, and works out the box ([`Mob::bounds`],
+/// which reads the mob's whole size) only for the mobs whose position comes close.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BoxReach {
+    half_width: f64,
+    height: f64,
+}
+impl BoxReach {
+    pub fn of(mobs: &[Mob]) -> Self {
+        mobs.iter().fold(Self::default(), |r, m| {
+            let (width, height, _) = m.dims();
+            Self {
+                half_width: r.half_width.max(width / 2.0),
+                height: r.height.max(height),
+            }
+        })
+    }
+    /// Whether the box of `m`, one of the mobs this was worked out for, can meet `area`: a
+    /// superset, the caller still tests the box.
+    #[inline]
+    pub fn may_meet(self, m: &Mob, area: Aabb) -> bool {
+        let (lo, hi, p) = (area.min_position(), area.max_position(), m.position);
+        p.x - self.half_width <= hi.x
+            && p.x + self.half_width >= lo.x
+            && p.z - self.half_width <= hi.z
+            && p.z + self.half_width >= lo.z
+            && p.y <= hi.y
+            && p.y + self.height >= lo.y
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Mob {
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
@@ -1543,6 +1578,9 @@ pub struct Mob {
     /// way it was travelling. None for any other direct entity.
     pub projectile_motion: Option<[f64; 2]>,
     pub climbing: bool,
+    /// `LivingEntity.onClimbable` as of the last mob tick, for `isPushable`
+    /// checks made outside the mob world (minecarts, boats).
+    pub on_climbable: bool,
     pub fire_ticks: i32,
     pub ticks_frozen: i32,
     pub glowing: bool,
@@ -2543,10 +2581,11 @@ pub struct Seen {
     /// A villager's `POTENTIAL_JOB_SITE` and `MEETING_POINT`.
     pub potential_job: Option<[i32; 3]>,
     pub meeting: Option<[i32; 3]>,
-    /// `variant2`: a villager's profession (index into
-    /// `render::PROFESSIONS`), a llama's strength or a horse's markings.
-    /// And a villager's experience.
-    pub profession: u8,
+    /// A villager's vanilla profession projection, absent for unknown IDs.
+    pub profession: Option<u8>,
+    /// A llama's strength or a horse's markings.
+    pub secondary_variant: u8,
+    /// A villager's experience.
     pub xp: i32,
     /// What other villagers read of a villager's state and brain.
     pub villager: Option<Arc<villager::Seen>>,
@@ -2587,8 +2626,7 @@ impl Mob {
         }
         // Villager.getTypeName returns its registered profession's name.
         if self.species() == Species::Villager {
-            let professions = &render::PROFESSIONS;
-            let profession = professions[self.extra.variant2 as usize % professions.len()];
+            let profession = villager::profession(self.extra.profession.index().unwrap_or(0)).id;
             return crate::text::Text::translate(
                 &format!("entity.minecraft.villager.{profession}"),
                 &[],
@@ -2750,7 +2788,8 @@ impl Mob {
             category: m.category(),
             potential_job: villager_brain::potential_job_site(m),
             meeting: villager.then_some(m.extra.meeting).flatten(),
-            profession: m.extra.variant2,
+            profession: villager.then(|| m.extra.profession.index()).flatten(),
+            secondary_variant: m.extra.variant2,
             xp: villager::xp(m),
             villager: villager.then(|| Arc::new(villager::seen(m))),
             stats: [
@@ -3345,6 +3384,7 @@ impl Mob {
             attacker_aim: None,
             projectile_motion: None,
             climbing: false,
+            on_climbable: false,
             fire_ticks: 0,
             ticks_frozen: 0,
             glowing: false,

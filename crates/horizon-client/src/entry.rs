@@ -51,6 +51,7 @@ pub fn main_with(
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     horizon_threads::configure_allocator();
     horizon_client::spans::startup::init(std::time::Instant::now());
+    horizon_client::spans::trace::start_from_env();
     let launch: crate::Result<_> = std::env::current_dir().map_err(Into::into).and_then(|cwd| {
         Ok(LaunchArguments::parse(
             std::env::args().skip(1),

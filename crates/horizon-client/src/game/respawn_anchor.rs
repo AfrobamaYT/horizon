@@ -351,7 +351,8 @@ impl Game<'_> {
         center: [f64; 3],
         water_at: Option<[i32; 3]>,
     ) -> Result<()> {
-        let interaction = self.destroy_type("block_explosion_drop_decay");
+        let interaction =
+            self.destroy_type(horizon_client::gamerules::vanilla::BLOCK_EXPLOSION_DROP_DECAY);
         self.server_explode_as(
             center,
             5.0,
