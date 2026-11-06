@@ -4613,7 +4613,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 .rules
                 .copy_with_features(&options.enabled_features(&self.resources));
             for (name, value) in changes {
-                options.rules.set(name, value);
+                options.rules.set(&name, value);
             }
         }
     }
