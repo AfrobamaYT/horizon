@@ -61,7 +61,11 @@ mod tests {
         }
     }
     fn engine() -> ParticleEngine {
-        let mut e = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut e = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         e.mod_sets.insert("example:orbit".into(), (0, None));
         e.set_sprites.push(vec![0, 1]);
         e.rects = vec![
@@ -143,7 +147,11 @@ mod tests {
         assert!(vertices.is_empty());
         assert_eq!(e.particles[0].age, 2);
         e.push(copy);
-        e.reload(Path::new(""), &HashMap::new(), &HashSet::new());
+        e.reload(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         assert!(e.pending.is_empty());
         vertices.clear();
         e.render(DVec3::ZERO, 0.0, 0.0, 0.5, &|_| 0, &mut vertices);

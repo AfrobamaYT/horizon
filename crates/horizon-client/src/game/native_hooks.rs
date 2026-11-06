@@ -8045,6 +8045,32 @@ impl Game<'_> {
     pub(super) fn native_client_packet(&mut self, packet: &ClientPacket) {
         self.fire_client_packet(packet);
     }
+    /// Whether a mod cancelled `packet` on its way to the server (`client_packet_send`).
+    /// Builds the packet's view only when a mod listens.
+    pub(super) fn client_packet_send_canceled(
+        &self,
+        packet: &horizon_protocol::packets::play::Serverbound,
+    ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::ClientPacketSend) {
+            return false;
+        }
+        let mut canceled = false;
+        self.native_client_packet_send(&serverbound_packet_view(packet), &mut canceled);
+        canceled
+    }
+    /// A play packet the window's game is about to send to the server
+    /// (`Connection.send`): every packet of the play phase it sends, the
+    /// selected slot that goes out before an attack or a use included, in the
+    /// order it sends them. Not heard: what the network thread sends itself
+    /// (keep-alives, pongs, cookies, the configuration phase), the answers the
+    /// connection sends in whichever phase it is in (a resource pack's status, a
+    /// dialog's custom click action), and far terrain requests. Cancel drops the
+    /// packet: the game goes on as if it had been sent. Client-side, on any
+    /// server, single player's own included. Every packet exposes its protocol
+    /// type id; custom payloads also expose their channel and raw bytes.
+    pub(super) fn native_client_packet_send(&self, packet: &ClientPacket, canceled: &mut bool) {
+        self.fire_client_packet_send(packet, canceled);
+    }
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
     /// posted in `MinecraftServer.createLevels`): before any of its chunks
     /// (`native_chunk_load`), so a mod sets up what it keeps for the level
@@ -12443,27 +12469,55 @@ fn client_packet_view(packet: &horizon_protocol::packets::play::Clientbound) -> 
     use mod_api::Identifier;
     use std::sync::LazyLock;
 
-    static TYPES: LazyLock<Vec<Identifier>> = LazyLock::new(|| {
-        horizon_protocol::ids::play::clientbound::NAMES
-            .iter()
-            .map(|name| Identifier::parse(name).expect("protocol packet type identifier"))
-            .collect()
-    });
-    static UNKNOWN: LazyLock<Identifier> =
-        LazyLock::new(|| Identifier::parse("horizon:unknown").unwrap());
-
-    let id = usize::try_from(packet.id())
-        .ok()
-        .and_then(|id| TYPES.get(id))
-        .unwrap_or(&UNKNOWN)
-        .clone();
+    static TYPES: LazyLock<Vec<Identifier>> =
+        LazyLock::new(|| packet_types(horizon_protocol::ids::play::clientbound::NAMES));
     let payload = match packet {
-        Clientbound::CustomPayload(payload) => Some(ClientPayload::new(
-            payload.channel.clone(),
-            payload.data.clone(),
-        )),
+        Clientbound::CustomPayload(payload) => Some(payload),
         _ => None,
     };
+    packet_view(&TYPES, packet.id(), payload)
+}
+
+/// `client_packet_send`'s view of a packet the game sends: as `client_packet_view`.
+fn serverbound_packet_view(packet: &horizon_protocol::packets::play::Serverbound) -> ClientPacket {
+    use horizon_protocol::packets::play::Serverbound;
+    use mod_api::Identifier;
+    use std::sync::LazyLock;
+
+    static TYPES: LazyLock<Vec<Identifier>> =
+        LazyLock::new(|| packet_types(horizon_protocol::ids::play::serverbound::NAMES));
+    let payload = match packet {
+        Serverbound::CustomPayload(payload) => Some(payload),
+        _ => None,
+    };
+    packet_view(&TYPES, packet.id(), payload)
+}
+
+/// One direction's packet type identifiers, by protocol id.
+fn packet_types(names: &[&str]) -> Vec<mod_api::Identifier> {
+    names
+        .iter()
+        .map(|name| mod_api::Identifier::parse(name).expect("protocol packet type identifier"))
+        .collect()
+}
+
+/// A packet's type, `horizon:unknown` outside the protocol's table, and its custom payload.
+fn packet_view(
+    types: &[mod_api::Identifier],
+    id: i32,
+    payload: Option<&horizon_protocol::packets::configuration::CustomPayload>,
+) -> ClientPacket {
+    use mod_api::Identifier;
+    use std::sync::LazyLock;
+
+    static UNKNOWN: LazyLock<Identifier> =
+        LazyLock::new(|| Identifier::parse("horizon:unknown").unwrap());
+    let id = usize::try_from(id)
+        .ok()
+        .and_then(|id| types.get(id))
+        .unwrap_or(&UNKNOWN)
+        .clone();
+    let payload = payload.map(|p| ClientPayload::new(p.channel.clone(), p.data.clone()));
     ClientPacket::new(id, payload)
 }
 
@@ -12495,6 +12549,33 @@ mod tests {
             assert_eq!(unknown.id.to_string(), "horizon:unknown");
             assert_eq!(unknown.custom_payload, None);
         }
+    }
+
+    #[test]
+    fn serverbound_packet_view_names_the_packets_the_game_sends() {
+        use horizon_protocol::packets::{
+            configuration::CustomPayload,
+            play::{Serverbound, SetCarriedItem},
+        };
+        let slot = super::serverbound_packet_view(&Serverbound::SetCarriedItem(SetCarriedItem {
+            slot: 3,
+        }));
+        assert_eq!(slot.id.to_string(), "minecraft:set_carried_item");
+        assert_eq!(slot.custom_payload, None);
+
+        let payload = super::serverbound_packet_view(&Serverbound::CustomPayload(CustomPayload {
+            channel: "example:message".into(),
+            data: vec![1, 2],
+        }));
+        assert_eq!(payload.id.to_string(), "minecraft:custom_payload");
+        let payload = payload.custom_payload.unwrap();
+        assert_eq!(
+            (payload.channel.as_str(), payload.data.as_slice()),
+            ("example:message", &[1, 2][..])
+        );
+
+        let unknown = super::serverbound_packet_view(&Serverbound::Unknown(-1, vec![9]));
+        assert_eq!(unknown.id.to_string(), "horizon:unknown");
     }
 
     #[test]
@@ -12717,7 +12798,7 @@ mod tests {
             return;
         }
         assert_eq!(keys.shared.get(), keys.own.get());
-        with_game_at(root.unwrap(), |game| {
+        with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -13008,7 +13089,7 @@ mod tests {
         .unwrap();
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -13028,7 +13109,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -13108,7 +13191,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -13128,7 +13211,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -13215,7 +13300,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -13234,7 +13319,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -15572,6 +15659,71 @@ mod camera_type_tests {
                 (ThirdPersonBack, ThirdPersonFront)
             ],
             "setting the type is not a cycle"
+        );
+    }
+}
+
+#[cfg(test)]
+mod client_packet_send_tests {
+    use horizon_protocol::packets::{
+        configuration::CustomPayload,
+        play::{Serverbound, SetCarriedItem},
+    };
+    use mod_api::{ClientHost, ClientPacketSendEvent, Flow, Hooks, ModEntry, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    /// Drops payloads on `example:secret`, logging every packet it hears.
+    struct Filter(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Filter {
+        fn client_packet_send(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ClientPacketSendEvent<'_>,
+        ) -> Flow {
+            self.0.lock().unwrap().push(event.packet.id.to_string());
+            match &event.packet.custom_payload {
+                Some(payload) if payload.channel == "example:secret" => Flow::Cancel,
+                _ => Flow::Continue,
+            }
+        }
+    }
+
+    fn payload(channel: &str) -> Serverbound {
+        Serverbound::CustomPayload(CustomPayload {
+            channel: channel.into(),
+            data: vec![7],
+        })
+    }
+
+    /// `Connection.send`: the mod hears each packet the game sends and cancels the one it
+    /// filters; without a listener nothing is cancelled.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_hears_and_cancels_packets_the_game_sends() {
+        let slot = Serverbound::SetCarriedItem(SetCarriedItem { slot: 2 });
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            assert!(!game.client_packet_send_canceled(&payload("example:secret")));
+        });
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("filter", Box::new(Filter(Arc::clone(&seen))))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                assert!(!game.client_packet_send_canceled(&slot));
+                assert!(game.client_packet_send_canceled(&payload("example:secret")));
+                assert!(!game.client_packet_send_canceled(&payload("example:open")));
+            });
+        });
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "minecraft:set_carried_item",
+                "minecraft:custom_payload",
+                "minecraft:custom_payload"
+            ]
         );
     }
 }
