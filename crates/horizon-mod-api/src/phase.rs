@@ -107,19 +107,19 @@ impl PhaseOwner {
         })
     }
     /// Load configs before returning to normal runtime, including on failure.
-    pub fn config(&self) -> Result<ReloadPhase<'_>, PhaseError> {
+    pub fn config(&self) -> Result<PhaseGuard<'_>, PhaseError> {
         self.advance(ModPhase::Config)?;
-        Ok(ReloadPhase {
+        Ok(PhaseGuard {
             owner: self,
             resume: ModPhase::World,
             _thread: std::marker::PhantomData,
         })
     }
     /// Nest a reload in Setup or World; errors and panics restore the caller's phase.
-    pub fn reloading(&self) -> Result<ReloadPhase<'_>, PhaseError> {
+    pub fn reloading(&self) -> Result<PhaseGuard<'_>, PhaseError> {
         let resume = current_phase();
         self.advance(ModPhase::Reloading)?;
-        Ok(ReloadPhase {
+        Ok(PhaseGuard {
             owner: self,
             resume,
             _thread: std::marker::PhantomData,
@@ -148,16 +148,16 @@ impl Drop for PhaseScope {
 
 /// Engine-only phase scope, restored during unwinding too.
 // exhaustive: only the engine constructs it
-pub struct ReloadPhase<'a> {
+pub struct PhaseGuard<'a> {
     owner: &'a PhaseOwner,
     resume: ModPhase,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
-impl Drop for ReloadPhase<'_> {
+impl Drop for PhaseGuard<'_> {
     fn drop(&mut self) {
         self.owner
             .advance(self.resume)
-            .expect("reload returns to its entering phase");
+            .expect("scoped phase returns to its declared destination");
     }
 }
 
@@ -168,16 +168,35 @@ pub fn current_phase() -> ModPhase {
 
 /// One cell read at the generated API boundary, not a tick scan or registry lookup.
 /// A refused mod call panics so a listener cannot ignore a Result and continue.
+#[inline]
 pub fn check_access(operation: &str, setup_read: bool) {
     let phase = current_phase();
+    if phase == ModPhase::World {
+        return;
+    }
     let metadata = matches!(
         operation,
-        "on" | "block_key_id"
+        "on" | "is_loaded"
+            | "block_key_id"
             | "effect_key_id"
             | "block_states_of"
-            | "block_state_default"
             | "block_item"
             | "block_in_tag"
+            | "max_stack_size"
+            | "item_stack_in_tag"
+            | "item_crafting_remainder"
+            | "item_default_component"
+            | "item_burn_time"
+            | "item_compost_chance"
+            | "item_cooldown_group"
+            | "entity_type_in_tag"
+            | "tag_members"
+            | "state_outline"
+            | "state_fluid_state"
+            | "fluid_in_tag"
+            | "fluid_is_same"
+            | "fluid_bucket"
+            | "fluid_pickup_sound"
     ) || operation.starts_with("block_state_");
     let settings = operation == "setting";
     let allowed = match phase {
@@ -541,6 +560,104 @@ mod tests {
     use super::*;
 
     #[test]
+    fn resolved_dispatch_slice_keeps_order_in_registration_config_and_reload() {
+        use crate::*;
+        use horizon_mods::dependencies;
+        use std::sync::Mutex;
+        struct Trace {
+            id: &'static str,
+            calls: Arc<Mutex<Vec<(&'static str, &'static str)>>>,
+        }
+        #[crate::__subscriptions]
+        impl Hooks for Trace {
+            fn register(&self, _: &mut dyn Registrar, _: &RegistrationContext) {
+                assert_eq!(current_phase(), ModPhase::Registration);
+                self.calls.lock().unwrap().push(("register", self.id));
+            }
+            fn config_loading(&self, _: HostSide<'_>, _: &mut ConfigLoadingEvent<'_>) {
+                assert_eq!(current_phase(), ModPhase::Config);
+                self.calls.lock().unwrap().push(("config", self.id));
+            }
+            fn add_server_reload_listeners(
+                &self,
+                _: &dyn Host,
+                _: &mut AddServerReloadListenersEvent<'_>,
+            ) {
+                assert_eq!(current_phase(), ModPhase::Reloading);
+                self.calls.lock().unwrap().push(("reload", self.id));
+            }
+        }
+        struct Server;
+        impl Host for Server {}
+        impl ServerHost for Server {}
+        let declarations: Vec<_> = ["z", "lib", "a"].into_iter().map(|id| {
+            let deps = if id == "lib" { "" } else { "[dependencies]\nlib='^1'" };
+            horizon_mods::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{deps}")).unwrap()
+        }).collect();
+        let declared: Vec<_> = declarations
+            .iter()
+            .map(|m| dependencies::from_manifest(&m.dependencies))
+            .collect();
+        let inputs: Vec<_> = declarations
+            .iter()
+            .zip(&declared)
+            .map(|(m, dependencies)| dependencies::Mod {
+                id: &m.id,
+                version: &m.version,
+                has_api: true,
+                dependencies,
+            })
+            .collect();
+        let order = dependencies::resolve(&inputs).unwrap().order;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let ids = ["z", "lib", "a"];
+        let mods: Mods = order
+            .into_iter()
+            .map(|i| {
+                ModEntry::new(
+                    ids[i],
+                    Box::new(Trace {
+                        id: ids[i],
+                        calls: calls.clone(),
+                    }),
+                )
+            })
+            .collect::<Vec<_>>()
+            .into();
+        crate::install(mods.clone());
+        let owner = PhaseOwner::new(ModPhase::Packages);
+        owner.advance(ModPhase::Registration).unwrap();
+        crate::install_parts(&mods).unwrap();
+        owner.advance(ModPhase::Setup).unwrap();
+        let mut host = Server;
+        for _world in 0..2 {
+            {
+                let _config = owner.config().unwrap();
+                dispatch_config_loading(
+                    HostSide::Server(&mut host),
+                    &NativeConfigFile {
+                        mod_id: "lib".into(),
+                        kind: NativeConfigKind::Server,
+                        file: "lib-server.toml".into(),
+                        text: String::new(),
+                    },
+                );
+            }
+            for _reload in 0..2 {
+                let _reload = owner.reloading().unwrap();
+                dispatch_add_server_reload_listeners(&host, &mut ServerListenerRegistry::new());
+            }
+        }
+        let expected = [
+            "register", "config", "reload", "reload", "config", "reload", "reload",
+        ]
+        .into_iter()
+        .flat_map(|moment| ["lib", "z", "a"].map(|id| (moment, id)))
+        .collect::<Vec<_>>();
+        assert_eq!(*calls.lock().unwrap(), expected);
+    }
+
+    #[test]
     fn phase_edges_are_exhaustive_and_refusal_leaves_state_unchanged() {
         use ModPhase::*;
         let phases = [Packages, Registration, Setup, Config, World, Reloading];
@@ -615,21 +732,18 @@ mod tests {
 
     #[test]
     fn early_world_handle_and_transaction_calls_panic_naming_the_phase() {
-        use crate::{Host, HostTransaction, ServerHost, TransactionSeal};
+        use crate::{Host, HostTransaction, ServerHost};
         struct HostDouble;
         impl Host for HostDouble {}
-        impl ServerHost for HostDouble {
-            fn transaction_open(&mut self, _: TransactionSeal) {
-                panic!("must refuse before opening")
-            }
-        }
+        impl ServerHost for HostDouble {}
         for phase in [
             ModPhase::Registration,
             ModPhase::Config,
             ModPhase::Reloading,
+            ModPhase::Setup,
         ] {
             let _owner = PhaseOwner::new(phase);
-            for action in [0, 1, 2] {
+            for action in [0, 1, 2, 3] {
                 let panic = std::panic::catch_unwind(|| {
                     let mut host = HostDouble;
                     match action {
@@ -638,6 +752,9 @@ mod tests {
                         }
                         1 => {
                             let _ = host.level("minecraft:overworld");
+                        }
+                        2 => {
+                            let _ = host.player(1);
                         }
                         _ => {
                             let _: Result<(), ()> = host.transaction(|_, _| Ok(()));

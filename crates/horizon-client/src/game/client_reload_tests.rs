@@ -64,7 +64,8 @@ fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
-    let prepared = stage_client_reload(&root, listeners).unwrap();
+    let prepared =
+        stage_client_reload(&root, listeners, mod_api::__private::ModPhase::World).unwrap();
     assert_eq!(
         listener.seen.lock().unwrap().as_slice(),
         ["test_mod:top=\"top\""]
@@ -102,7 +103,8 @@ fn a_listener_error_keeps_every_previous_state() {
     listeners
         .add_listener(id("test_mod:failing"), hats(), Arc::new(Failing))
         .unwrap();
-    let Err(error) = stage_client_reload(&root, listeners) else {
+    let Err(error) = stage_client_reload(&root, listeners, mod_api::__private::ModPhase::World)
+    else {
         panic!("a failing listener stops the whole reload")
     };
     assert_eq!(
@@ -123,7 +125,7 @@ fn a_converted_file_outside_the_pack_is_absent_not_empty() {
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
-    stage_client_reload(&root, listeners).unwrap();
+    stage_client_reload(&root, listeners, mod_api::__private::ModPhase::World).unwrap();
     assert_eq!(
         listener.seen.lock().unwrap().as_slice(),
         ["test_mod:top={}"],
@@ -394,8 +396,12 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             // The mod's packaged asset over nothing, with the real root's own
             // assets in the same view.
             let root = merged(&[]);
-            let prepared =
-                stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
+            let prepared = stage_client_reload(
+                &root,
+                game.register_client_reload_listeners(),
+                mod_api::__private::ModPhase::World,
+            )
+            .unwrap();
             assert!(live.lock().unwrap().is_empty(), "nothing published yet");
             apply_client_reload(
                 &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
@@ -413,8 +419,12 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             );
             assert_eq!(packs.len(), 1);
             let root = merged(&packs);
-            let prepared =
-                stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
+            let prepared = stage_client_reload(
+                &root,
+                game.register_client_reload_listeners(),
+                mod_api::__private::ModPhase::World,
+            )
+            .unwrap();
             apply_client_reload(
                 &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
                 prepared,
@@ -423,8 +433,11 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             // A rejected prepare aborts the reload and keeps the previous state.
             reject.store(true, Ordering::Relaxed);
             let root = merged(&[]);
-            let Err(error) = stage_client_reload(&root, game.register_client_reload_listeners())
-            else {
+            let Err(error) = stage_client_reload(
+                &root,
+                game.register_client_reload_listeners(),
+                mod_api::__private::ModPhase::World,
+            ) else {
                 panic!("a failing listener stops the whole reload")
             };
             assert!(error.to_string().contains("client_test:hats"));

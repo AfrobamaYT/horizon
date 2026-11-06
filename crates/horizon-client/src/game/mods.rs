@@ -79,7 +79,11 @@ impl ModsState {
 
 /// Capture load inputs at the resource-generation boundary, before workers share them.
 pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client::Result<ItemData> {
-    let phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Setup);
+    let phase = mod_api::__private::PhaseOwner::scope(if role.is_client() {
+        mod_api::__private::ModPhase::Setup
+    } else {
+        mod_api::__private::ModPhase::World
+    });
     let _reload = phase.reloading()?;
     let mut registries: BTreeMap<_, _> = builtin_registries(root)?
         .registries

@@ -73,7 +73,6 @@ pub fn run_transaction<H: ServerHost + ?Sized, T, E>(
     host: &mut H,
     f: impl FnOnce(&mut H, &Transaction) -> Result<T, E>,
 ) -> Result<T, E> {
-    crate::phase::check_access("transaction_open", false);
     /// Closes its transaction when dropped: committed when `f` gave `Ok`, else aborted, as on
     /// a panic unwinding past it.
     struct Open<'a, H: ServerHost + ?Sized> {

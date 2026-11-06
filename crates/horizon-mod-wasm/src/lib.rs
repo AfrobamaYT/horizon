@@ -7,6 +7,7 @@
 //! trap stops its group. Every refusal names its reason for the Mods page.
 use horizon_mods::dependencies;
 use horizon_mods::manifest::Manifest;
+use mod_api::__private::game::Fields;
 use mod_api::__private::wasm_host::{Budgets, EPOCH, LoadError, Member};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -127,8 +128,11 @@ impl std::error::Error for Refusal {}
 
 /// What loading the installed wasm mods gave: the mods to install, in dependency order, and
 /// each refused mod with its reason.
+#[derive(Default)]
 pub struct Loaded {
     pub mods: Vec<mod_api::ModEntry>,
+    /// Accepted manifests in original bundle order, for the combined code resolver.
+    pub manifests: Vec<Manifest>,
     pub refused: Vec<(String, Refusal)>,
     /// The mods' listeners at points, in the order of `mods`: registered after the native mods'.
     pub listening: Vec<Listening>,
@@ -432,6 +436,7 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
                 mods: Vec::new(),
                 refused,
                 listening: Vec::new(),
+                manifests: Vec::new(),
             };
         }
     };
@@ -512,8 +517,14 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
             Err(why) => refused.extend(ids.iter().map(|id| (id.to_string(), why.clone()))),
         }
     }
+    let manifests = packages
+        .iter()
+        .filter(|p| mods.iter().any(|entry| entry.fields().id == p.manifest.id))
+        .map(|p| p.manifest.clone())
+        .collect();
     Loaded {
         mods,
+        manifests,
         refused,
         listening,
     }
@@ -535,7 +546,7 @@ pub fn load_installed(
     game_dir: &Path,
     dev: &[PathBuf],
     config: &RuntimeConfig,
-) -> (Vec<mod_api::ModEntry>, Vec<Listening>, Vec<Manifest>) {
+) -> Loaded {
     let enabled = horizon_mods::mod_list::ModList::load(game_dir).enabled;
     let mut refused = Vec::new();
     let packages: Vec<WasmPackage> =
@@ -554,32 +565,26 @@ pub fn load_installed(
                 },
             )
             .collect();
-    let mut manifests: Vec<_> = packages.iter().map(|p| p.manifest.clone()).collect();
-    let loaded = if packages.is_empty() {
-        (Vec::new(), Vec::new())
+    let mut loaded = if packages.is_empty() {
+        Loaded::default()
     } else {
         match std::fs::read(executable.with_file_name(STD_MEMBER)) {
-            Ok(std_member) => {
-                let loaded = load(config, &std_member, packages);
-                refused.extend(loaded.refused);
-                (loaded.mods, loaded.listening)
-            }
-            Err(_) => {
-                refused.extend(
-                    packages
-                        .into_iter()
-                        .map(|p| (p.manifest.id, Refusal::NoStd)),
-                );
-                (Vec::new(), Vec::new())
-            }
+            Ok(std_member) => load(config, &std_member, packages),
+            Err(_) => Loaded {
+                refused: packages
+                    .into_iter()
+                    .map(|p| (p.manifest.id, Refusal::NoStd))
+                    .collect(),
+                ..Loaded::default()
+            },
         }
     };
-    for (id, why) in &refused {
+    loaded.refused.extend(refused);
+    for (id, why) in &loaded.refused {
         log::warn!("wasm mod {id} refused: {why}");
     }
-    let _ = REFUSED.set(refused);
-    manifests.retain(|m| loaded.0.iter().any(|entry| entry.id == m.id));
-    (loaded.0, loaded.1, manifests)
+    let _ = REFUSED.set(loaded.refused.clone());
+    loaded
 }
 
 #[cfg(test)]

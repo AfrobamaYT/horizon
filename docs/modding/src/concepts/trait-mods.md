@@ -68,6 +68,37 @@ another mod's hook object is not exposed.
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
 
+### Load phases and access
+
+Native and wasm hooks share the installed dependency-ordered mod slice, including registration,
+config loading and reload-listener registration. The shared resolver keeps bundle-order ties,
+checks present optional dependencies too, and refuses cycles for both build targets. Content-only
+packages stay after code in the loaded-mod inventory; listener-specific edges still use `ReloadOrder`.
+
+Each owning thread progresses through `Packages → Registration → Setup → Config → World`.
+Registration runs once: `register`, `component_types`, `blocks`, `items` and `standalone_models`
+receive only `RegistrationContext`. Client setup runs once after the initial asset apply. Client
+and Common configs load once on their owning side; Server configs load and unload per world.
+A second world does not repeat registration or client setup. Config loading can read settings,
+but world handles, transactions and other game operations panic with `Config` in the diagnostic.
+Config file polling is not a phase transition, and Server config unloading leaves the World phase.
+
+Every data or asset reload enters `Reloading`, including listener registration, prepare, apply and
+the reload completion notice. The initial client asset reload nests in Setup; later reloads and
+server data loads nest in World. Returning, including after a failed prepare, restores the entering
+phase. Server listener registration retains `&dyn Host`, restricted to registry facts, settings
+and mod-list queries; callbacks already taking `DataLoadContext` keep that context. Neither permits
+opening a world handle or transaction. The first client registration and prepare run on the loader
+thread; later registration runs on the render thread, prepare on its worker, and apply on the owning
+game thread. Startup's empty client Host is not an extra permission.
+
+The game alone advances phases. An illegal or wrong-thread advance is refused before dispatch;
+a forbidden mod call panics naming the phase, rather than returning a Result a listener could ignore.
+There is no separate common-setup, load-complete or intermod event: registration and the first server
+reload cover common setup, client setup is `client_setup`, dedicated setup is `server_about_to_start`,
+and dependencies express intermod ordering. Load complete is the edge after initial Config and before
+`server_about_to_start`, not a hook.
+
 The generated executable uses the installed game's `crates/horizon-client/src/native_main.rs.template`.
 The launcher supplies only ordered literal mod IDs and hook factory paths. The template owns entry
 construction, the allocator and the canonical game identity. Source without this template is refused

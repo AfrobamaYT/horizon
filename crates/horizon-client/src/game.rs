@@ -20750,8 +20750,10 @@ impl<'a> Game<'a> {
     ) -> Result<Self> {
         let mod_phase = mod_api::__private::PhaseOwner::new(if cfg!(test) {
             mod_api::__private::ModPhase::World
-        } else {
+        } else if mod_api::__private::current_phase() == mod_api::__private::ModPhase::Packages {
             mod_api::__private::ModPhase::Setup
+        } else {
+            mod_api::__private::current_phase()
         });
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
@@ -22562,6 +22564,7 @@ fn load_resources(
         match client_reload::stage_client_reload(
             &root,
             client_reload::register_startup_client_reload_listeners(),
+            mod_api::__private::ModPhase::Setup,
         ) {
             Ok(steps) => steps,
             Err(error) => {

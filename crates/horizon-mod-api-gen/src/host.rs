@@ -82,18 +82,25 @@ pub(super) fn generate(
         };
         let (declaration, implementation) = host_method(method, name, trait_name, &types.exports)?;
         // The catalog owns all forwarding boundaries, including services and handle backends.
-        let setup_read = side != Side::Server
+        let setup_read = side == Side::Client
             && receiver.is_none()
-            && helper.service.is_none()
-            && !matches!(name, "entity" | "level")
             && !matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
-        let guard = format!("{{ mod_api::__private::check_access({name:?}, {setup_read});");
-        let implementation = implementation.replacen('{', &guard, 1);
-        let declaration = declaration.replacen(
-            '{',
-            &format!("{{ crate::__private::check_access({name:?}, {setup_read});"),
-            1,
-        );
+        let guarded = |source: &str| -> Result<String, String> {
+            let mut method = syn::parse_str::<syn::TraitItemFn>(source)
+                .map_err(|error| format!("{name}: {error}"))?;
+            method
+                .default
+                .as_mut()
+                .expect("generated method has a body")
+                .stmts
+                .insert(
+                    0,
+                    syn::parse_quote!(mod_api::__private::check_access(#name, #setup_read);),
+                );
+            Ok(method.to_token_stream().to_string())
+        };
+        let implementation = guarded(&implementation)?;
+        let declaration = guarded(&declaration)?;
         if let Some(client_target) = &helper.client_target {
             let client = helper_target(&game, name, client_target)?;
             let (_, client_implementation) = host_method(client, name, trait_name, &types.exports)?;
@@ -158,7 +165,7 @@ pub(super) fn generate(
             Side::Client => (&mut client_traits, &mut client_impl),
         };
         traits.push_str(&format!(
-            "/// The server's {name} service.\n/// Not on wasm: a frame resource; its methods are the imports.\nfn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ unimplemented!(\"{trait_name} service\") }}\n"
+            "/// The server's {name} service.\n/// Not on wasm: a frame resource; its methods are the imports.\nfn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ mod_api::__private::check_access(\"{name}\", false); unimplemented!(\"{trait_name} service\") }}\n"
         ));
         implementation.push_str(&format!(
             "fn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ mod_api::__private::check_access(\"{name}\", false); self }}\n"

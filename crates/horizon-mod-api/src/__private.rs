@@ -248,12 +248,14 @@ pub mod game {
     }
 
     pub struct ModEntryFields<'a> {
+        pub id: &'static str,
         pub hooks: &'a dyn Hooks,
     }
     impl Fields for ModEntry {
         type Fields<'a> = ModEntryFields<'a>;
         fn fields(&self) -> ModEntryFields<'_> {
             ModEntryFields {
+                id: self.id,
                 hooks: &*self.hooks,
             }
         }

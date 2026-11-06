@@ -62,8 +62,9 @@ pub(super) fn register_startup_client_reload_listeners() -> mod_api::ClientListe
 pub(super) fn stage_client_reload(
     root: &std::path::Path,
     listeners: mod_api::ClientListenerRegistry,
+    entering: mod_api::__private::ModPhase,
 ) -> Result<Vec<PreparedClientReload>, ReloadStageError> {
-    let phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Setup);
+    let phase = mod_api::__private::PhaseOwner::scope(entering);
     let _reload = phase.reloading().expect("client listener prepare");
     let pack = DataPack::builtin(root);
     let ordered = listeners.finish().map_err(ReloadStageError::Order)?;

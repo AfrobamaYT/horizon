@@ -66,8 +66,8 @@ pub fn main_with(
             std::process::exit(game::exit_code::USAGE);
         }
     };
-    // Wasm mods join the native ones after them, in dependency order, from the same selection
-    // as content mods. Then the mods are installed, before anything below (logging, the crash
+    // Load wasm code from the same selection as content, then resolve one native/wasm
+    // dispatch order before anything below (logging, the crash
     // handler) that a trait injection may call into.
     let mut wasm_listening = Vec::new();
     let mut wasm_manifests = Vec::new();
@@ -88,11 +88,11 @@ pub fn main_with(
             budgets,
         };
         let game_dir = &launch.context.game_dir;
-        let (wasm, listening, manifests) =
+        let loaded =
             horizon_mod_wasm::load_installed(exe, game_dir, &launch.context.dev_mods, &config);
-        mods.extend(wasm);
-        wasm_listening = listening;
-        wasm_manifests = manifests;
+        mods.extend(loaded.mods);
+        wasm_listening = loaded.listening;
+        wasm_manifests = loaded.manifests;
     }
     // One installed dispatch order for both targets; ties retain bundle order.
     let manifests: Vec<_> = native
@@ -100,16 +100,13 @@ pub fn main_with(
         .iter()
         .map(|p| &p.manifest)
         .chain(wasm_manifests.iter())
+        .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
         .collect();
-    let manifests: Vec<_> = mods
-        .iter()
-        .map(|entry| {
-            *manifests
-                .iter()
-                .find(|m| m.id == entry.id)
-                .expect("loaded code has a checked manifest")
-        })
-        .collect();
+    assert_eq!(
+        manifests.len(),
+        mods.len(),
+        "loaded code has checked manifests"
+    );
     let declared: Vec<_> = manifests
         .iter()
         .map(|m| horizon_mods::dependencies::from_manifest(&m.dependencies))
@@ -126,11 +123,14 @@ pub fn main_with(
         .collect();
     let order = horizon_mods::dependencies::resolve(&inputs)
         .unwrap_or_else(|error| panic!("mod load refused: {error}"));
-    let mut entries: Vec<_> = mods.into_iter().map(Some).collect();
+    let mut entries: std::collections::BTreeMap<_, _> = mods
+        .into_iter()
+        .map(|entry| (entry.fields().id, entry))
+        .collect();
     let mods: Vec<_> = order
         .order
         .into_iter()
-        .map(|i| entries[i].take().unwrap())
+        .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
         .collect();
     mod_api::__private::install(mods.into());
     for (id, listeners) in points {
