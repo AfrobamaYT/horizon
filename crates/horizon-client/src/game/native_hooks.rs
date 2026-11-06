@@ -7533,13 +7533,10 @@ impl Game<'_> {
     pub(super) fn native_use_duration(&self, stack: &ItemStack, duration: &mut i32) {
         self.fire_use_duration(stack, duration);
     }
-    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
-    /// `animation` arrives with its consumable's (`eat`, `drink`), else
-    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
-    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
-    /// Asked each frame the hand draws an item in use, for an item with no
-    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
-    /// theirs). Client-side.
+    /// `Item.getUseAnimation` of `stack` in use, with the item's vanilla
+    /// answer as the starting animation. Asked on the client each first-person
+    /// frame and each local or remote player model tick. A spear override is
+    /// refused if the item has no kinetic data.
     pub(super) fn native_use_animation(&self, stack: &ItemStack, animation: &mut UseAnimation) {
         self.fire_use_animation(stack, animation);
     }

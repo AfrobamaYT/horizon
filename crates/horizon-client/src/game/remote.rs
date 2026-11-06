@@ -6954,6 +6954,19 @@ impl Game<'_> {
             if (!running && !player) || driven == Some(id) {
                 continue;
             }
+            let animation = if player && self.mobs[i].extra.using_item > 0 {
+                let extra = &self.mobs[i].extra;
+                let slot = if extra.using_off_hand {
+                    horizon_items::equipment::OFFHAND
+                } else {
+                    horizon_items::equipment::MAINHAND
+                };
+                extra
+                    .slot_stack(slot)
+                    .map_or_else(Default::default, |stack| self.item_use_animation(stack))
+            } else {
+                Default::default()
+            };
             let player_ref = tick_listened
                 .then(|| {
                     self.remote.as_ref().and_then(|r| {
@@ -7094,18 +7107,7 @@ impl Game<'_> {
             if player {
                 // AvatarRenderer.getArmPose: the used item's use animation
                 // poses the arm.
-                let used = if m.extra.using_off_hand {
-                    m.extra.off_hand_id()
-                } else {
-                    m.extra.main_hand_id()
-                };
-                m.extra.use_animation = used
-                    .and_then(|i| world_items!(self).get(i))
-                    .filter(|_| m.extra.using_item > 0)
-                    .map_or_else(
-                        Default::default,
-                        horizon_client::first_person::item_use_animation,
-                    );
+                m.extra.use_animation = animation;
             }
             if m.extra.using_item > 0 {
                 if player {
@@ -11494,6 +11496,68 @@ mod effect_blend_tests;
 
 #[cfg(test)]
 mod tests {
+    /// The remote player animation uses the scoped item answer once per tick.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn remote_player_use_animation_dispatches_once() {
+        use mod_api::{ClientHost, Hooks, ItemPart, ModEntry, Mods, Registrar, UseAnimationEvent};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        #[derive(Clone)]
+        struct Part(Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
+        impl ItemPart for Part {
+            fn use_animation(&self, _: &dyn ClientHost, event: &mut UseAnimationEvent<'_>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                *event.animation = mod_api::UseAnimation::Drink;
+            }
+        }
+        struct Mod(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.item_part("minecraft:bow", Part(self.0.clone()));
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: Mods = vec![ModEntry::new(
+            "remote_animation",
+            Box::new(Mod(calls.clone())),
+        )]
+        .into();
+        mod_api::__private::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let (client, _server) = horizon_protocol::connection::Pipe::pair();
+                game.connect_local(client, "animation-client").unwrap();
+                let remote = game.remote.as_mut().unwrap();
+                remote.entity_id = 42;
+                remote.level_players.insert(66, 789);
+                let kind = remote.player_type.as_ref().unwrap().clone();
+                let mut mob = horizon_client::mobs::Mob::new(
+                    66,
+                    kind,
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                );
+                mob.extra.using_item = 1;
+                mob.extra.set_slot_stack(
+                    horizon_items::equipment::MAINHAND,
+                    Some(horizon_client::items::ItemStack::new("minecraft:bow", 1)),
+                );
+                game.mobs.push(mob);
+                game.tick_remote_entities(false);
+                assert_eq!(
+                    game.mobs[0].extra.use_animation,
+                    mod_api::UseAnimation::Drink
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 1);
+            });
+        });
+    }
+
     /// Sleeping metadata and the local tick use the loaded bed's shape, not
     /// a red-bed constant. Missing client data must not replace a server pose
     /// or decide to wake the player.
