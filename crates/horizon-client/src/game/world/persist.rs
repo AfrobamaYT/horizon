@@ -2294,7 +2294,10 @@ mod tests {
                 .find(|(_, u)| **u == uuid)
                 .map(|(id, _)| *id);
             let id = id.unwrap_or_else(|| panic!("{kind}: loaded without its UUID"));
-            let map = game.attachment_map_quiet(mod_api::Holder::Entity(id));
+            let map = game.attachment_map_quiet(
+                mod_api::Holder::Entity(id),
+                mod_api::AttachmentAccess::Existing,
+            );
             let map = map.unwrap_or_else(|e| panic!("{kind}: not a holder: {e:?}"));
             assert_eq!(
                 MARK.get(map, mod_api::Holder::Level),
