@@ -321,7 +321,17 @@ impl Rule {
             .join("::");
         if let Some(resolved) = self.refs.get(module).and_then(|scope| scope.get(&spelled)) {
             let resolved = resolved.as_ref()?;
-            return self.named.contains_key(resolved).then(|| resolved.clone());
+            return Some(resolved.clone());
+        }
+        if matches!(
+            written
+                .segments
+                .first()
+                .map(|s| s.ident.to_string())
+                .as_deref(),
+            Some("std" | "core" | "alloc")
+        ) {
+            return Some(spelled);
         }
         let mut rest = spelled.as_str();
         let mut scope = module;
@@ -398,6 +408,69 @@ impl Rule {
         }
         if name == "Self" && path.segments.len() == 1 {
             return this.map_or(opaque, |this| self.named_shape(this));
+        }
+        let resolved = self.resolve(module, path);
+        if let Some(found) = &resolved {
+            if self.named.contains_key(found) {
+                return if args.is_empty() {
+                    self.named_shape(found)
+                } else {
+                    opaque
+                };
+            }
+        }
+        let spelled = path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::");
+        if self
+            .refs
+            .get(module)
+            .is_some_and(|scope| scope.get(&spelled) == Some(&None))
+        {
+            return opaque;
+        }
+        // Only prelude names can be inferred without import facts. Qualified and imported
+        // names must identify the actual standard type, not just share its last segment.
+        let prelude = path.segments.len() == 1
+            && (SCALARS.iter().any(|(n, _)| *n == name)
+                || matches!(name.as_str(), "Option" | "Box" | "Vec"));
+        let builtin = resolved.as_deref().map_or(prelude, |p| {
+            let Some((head, tail)) = p.split_once("::") else {
+                return false;
+            };
+            if !matches!(head, "std" | "core" | "alloc") {
+                return false;
+            }
+            matches!(
+                tail,
+                "string::String"
+                    | "option::Option"
+                    | "boxed::Box"
+                    | "sync::Arc"
+                    | "rc::Rc"
+                    | "borrow::Cow"
+                    | "vec::Vec"
+                    | "collections::VecDeque"
+                    | "collections::HashMap"
+                    | "collections::BTreeMap"
+                    | "collections::HashSet"
+                    | "collections::BTreeSet"
+            ) || (tail
+                .strip_prefix("primitive::")
+                .is_some_and(|n| SCALARS.iter().any(|(s, _)| *s == n)))
+        });
+        if !builtin {
+            return opaque;
+        }
+        let name = resolved
+            .as_deref()
+            .and_then(|p| p.rsplit("::").next())
+            .unwrap_or(&name);
+        if matches!(name, "HashSet" | "BTreeSet") {
+            return opaque;
         }
         let single = |args: Vec<Shape>| -> Option<Box<Shape>> {
             let [inner] = <[Shape; 1]>::try_from(args).ok()?;
@@ -673,6 +746,63 @@ pub(crate) mod tests {
                 "{opaque}"
             );
         }
+    }
+
+    #[test]
+    fn sets_are_opaque() {
+        let rule = rule();
+        for ty in [
+            "std::collections::HashSet<u32>",
+            "std::collections::BTreeSet<u32>",
+        ] {
+            assert_eq!(of(&rule, "horizon_client", ty), Crossing::Opaque);
+        }
+    }
+
+    #[test]
+    fn custom_string_and_vec_are_not_standard_builtins() {
+        let mut owner = internal(
+            "horizon_client::Owner",
+            "struct",
+            "struct Owner { value: String }",
+        );
+        owner
+            .refs
+            .insert("String".into(), "horizon_client::custom::String".into());
+        owner
+            .refs
+            .insert("Vec".into(), "horizon_client::custom::Vec".into());
+        let rule = Rule::new(&[
+            owner,
+            internal(
+                "horizon_client::custom::String",
+                "struct",
+                "struct String { x: u8, y: bool }",
+            ),
+            internal(
+                "horizon_client::custom::Vec",
+                "struct",
+                "struct Vec<T> { value: T }",
+            ),
+        ]);
+        assert_eq!(
+            rule.shape("horizon_client", None, &syn::parse_str("String").unwrap()),
+            Shape::Named("horizon_client::custom::String".into(), 0)
+        );
+        assert_eq!(of(&rule, "horizon_client", "String"), Crossing::Copy(2));
+        assert_eq!(of(&rule, "horizon_client", "Vec<u8>"), Crossing::Opaque);
+        assert_eq!(
+            of(&rule, "horizon_client::custom", "String"),
+            Crossing::Copy(2)
+        );
+        assert_eq!(
+            of(&rule, "horizon_client::custom", "Vec<u8>"),
+            Crossing::Opaque
+        );
+        assert_eq!(
+            of(&rule, "horizon_client", "std::string::String"),
+            Crossing::Copy(1)
+        );
     }
 
     #[test]
