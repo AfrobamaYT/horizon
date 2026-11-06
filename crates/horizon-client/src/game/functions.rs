@@ -1153,6 +1153,7 @@ mod tests {
         crate::game::native_entity_refs::tests::with_game(|game| {
             ran = true;
             game.world_root = scratch.0.clone();
+            game.set_allow_commands(true);
             game.reload_datapacks(false, &[]).unwrap();
             let marker = |game: &Game<'_>| {
                 game.read_template_tag("generation_test:probe")
