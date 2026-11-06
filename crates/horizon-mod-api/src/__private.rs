@@ -46,8 +46,8 @@ pub use crate::generated::calls::*;
 pub use crate::part_table::{
     HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, TooltipAppenderPart,
     block_entity_types, block_listens, entity_parts, game_rule_bool_slot, game_rule_registry,
-    has_entity_parts, has_part_hook, has_scoped_hook, install_parts, mark_game_thread, parts,
-    resolve_parts, tooltip_appenders,
+    has_entity_parts, has_part_hook, has_scoped_hook, install_parts, key_mappings,
+    mark_game_thread, parts, resolve_parts, tooltip_appenders,
 };
 /// A read backend wrapper for a host the game builds narrowed: the mob tick's
 /// goal view hands itself out as its own backend (#1077).
