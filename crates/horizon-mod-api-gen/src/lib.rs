@@ -2,6 +2,7 @@
 mod catalog;
 mod dispatch_fixtures;
 mod exports;
+mod game_modules;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 mod host;
@@ -39,21 +40,14 @@ fn game_methods(
     module: &str,
     methods: &mut Vec<(String, syn::ItemFn)>,
 ) -> Result<(), String> {
-    for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default();
-        let inner = if stem == "mod" {
-            module.to_owned()
-        } else {
-            format!("{module}::{stem}")
-        };
-        if path.is_dir() {
-            game_methods(&path, &inner, methods)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            file_game_methods(&path, &inner, methods)?;
+    for file in points::module_files(
+        module.to_owned(),
+        path.with_extension("rs"),
+        path.to_owned(),
+        false,
+    )? {
+        if file.module != module {
+            file_game_methods(&file.path, &file.module, methods)?;
         }
     }
     Ok(())
@@ -1635,6 +1629,7 @@ mod tests {
         let mut inputs: Vec<String> = [
             "crates/horizon-mod-api/src/hooks",
             "crates/horizon-mod-api/src/exports",
+            "crates/horizon-client/src/game.rs",
             "crates/horizon-client/src/game",
             "crates/horizon-mod-api/src/lib.rs",
         ]

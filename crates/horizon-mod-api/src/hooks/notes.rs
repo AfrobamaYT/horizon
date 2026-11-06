@@ -24,7 +24,7 @@ A native server tick hook can call `native_server_block` with its context, a dim
 ### Server commands and players
 
 For mods that run where the world is simulated: a dedicated server, a LAN host, single player's server thread
-(`crates/horizon-client/src/game/native_server.rs`). The SMP mod of the official server is built on them
+(`crates/horizon-client/src/game/modding/native_server.rs`). The SMP mod of the official server is built on them
 ([smp.md](../../../smp.md)).
 
 - **`native_register_commands(commands)`**: push a `NativeCommand` per usage, asked once when a world opens to
@@ -535,7 +535,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 
 ### Mobs
 
-`crates/horizon-client/src/game/native_mobs.rs`: helpers for server mods, for the level in place, on a server only (on a
+`crates/horizon-client/src/game/modding/native_mobs.rs`: helpers for server mods, for the level in place, on a server only (on a
 client they do nothing, and the readers give nothing). Each takes the `dimension` (`minecraft:overworld`) of the level it means, as
 `native_set_block` does, and is refused when another level is in place. The per-level tick hooks run with a defined level in
 place; `native_server_tick` does not define one, so name the dimension and expect a refusal there.
@@ -600,7 +600,7 @@ During a machine's own tick its block entity is out of the world, so it has no c
 
 ### Entities
 
-`crates/horizon-client/src/game/native_entities.rs`: helpers for server mods, for the level in place, on a server only. Each
+`crates/horizon-client/src/game/modding/native_entities.rs`: helpers for server mods, for the level in place, on a server only. Each
 names the level it means by its `dimension` (`minecraft:overworld`), as `native_set_block` does.
 
 - `native_summon(dimension, kind, pos, nbt)` spawns an entity of `kind` from its compound, as `/summon <kind> <pos> <nbt>`
@@ -613,7 +613,7 @@ client, so a call a tick looks smooth.
 
 ### Entity and level handles
 
-`crates/horizon-client/src/game/native_entity_refs.rs` (#7387): an `EntityRef` names one entity of the open world and a
+`crates/horizon-client/src/game/modding/native_entity_refs.rs` (#7387): an `EntityRef` names one entity of the open world and a
 `LevelRef` one level. They are small `Copy` values a mod keeps, and their methods take the host, so a mod can hold
 several at once: `host.entity(id)` makes one from the id an event carries, `host.level("minecraft:the_nether")` one from
 a dimension.
@@ -965,7 +965,7 @@ Diverges from upstream: new helpers.
 
 ### Mob AI goals
 
-`crates/horizon-client/src/game/native_mob_goals.rs` (#29's "movement and goals"): a mob's AI is vanilla's two goal
+`crates/horizon-client/src/game/modding/native_mob_goals.rs` (#29's "movement and goals"): a mob's AI is vanilla's two goal
 selectors, and a `MobRef` reads and changes them. `mob.goals(host)` and `mob.target_goals(host)` list each selector's
 goals as a `NativeMobGoalEntry` — the priority (a lower number preempts a higher one), the kind id (`melee_attack`) and
 whether the goal runs now. `mob.add_goal(host, priority, &goal)` is `GoalSelector.addGoal`: the `NativeGoal` names one of
@@ -999,7 +999,7 @@ no bus event at this moment. The upstream raw-`Mob` `register_goals` interface i
 
 ### Mob AI controls
 
-`crates/horizon-client/src/game/native_mob_refs.rs` and `native_mob_navigation.rs` (#938's mob AI controls): a `MobRef`
+`crates/horizon-client/src/game/modding/native_mob_refs.rs` and `native_mob_navigation.rs` (#938's mob AI controls): a `MobRef`
 steers a mob through the engine's own controls, each a momentary wish the mob's own AI may replace next tick, as
 `move_to`'s path is. Reads take the host by `&dyn Host` and writes by `&mut dyn ServerHost`.
 
@@ -1030,7 +1030,7 @@ steers a mob through the engine's own controls, each a momentary wish the mob's 
 
 ### Mobs drawn by a mod
 
-`crates/horizon-client/src/game/native_mob_draw.rs`: `native_mob_submit(mob, draw, drawn)` (client) is asked once a frame for
+`crates/horizon-client/src/game/modding/native_mob_draw.rs`: `native_mob_submit(mob, draw, drawn)` (client) is asked once a frame for
 every mob in view but players (vanilla's `EntityRenderer.submit`). Set `drawn` and the mob's vanilla model, armour and held
 items are left out (NeoForge's `RenderLivingEvent.Pre`, cancelled); its name tag, shadow, flames and glowing outline still draw.
 
@@ -1055,7 +1055,7 @@ items are left out (NeoForge's `RenderLivingEvent.Pre`, cancelled); its name tag
 
 ### Advancement triggers
 
-`crates/horizon-client/src/game/native_criteria.rs`: a mod's own criteria triggers, as a NeoForge mod registers a
+`crates/horizon-client/src/game/modding/native_criteria.rs`: a mod's own criteria triggers, as a NeoForge mod registers a
 `CriterionTrigger` and calls its `SimpleCriterionTrigger.trigger`. The advancement is an ordinary file of a content mod
 or a world's data pack (`data/mymod/advancement/connect_a_pipe.json`) whose criterion names the mod's trigger and
 whatever conditions the mod reads:
@@ -1099,7 +1099,7 @@ criterion resources; the private advancement world remains solely in the native 
 
 ### Explosions
 
-`crates/horizon-client/src/game/native_explosions.rs`: a helper for server mods, for the level in place, on a server only. It
+`crates/horizon-client/src/game/modding/native_explosions.rs`: a helper for server mods, for the level in place, on a server only. It
 names the level it means by its `dimension` (`minecraft:overworld`), as `native_set_block` does, and is refused when another
 level is in place.
 
@@ -1122,7 +1122,7 @@ it moves only what the player sees, not where they are or aim.
 
 ### A player's motion
 
-`crates/horizon-client/src/game/native_motion.rs`: a push on a client.
+`crates/horizon-client/src/game/modding/native_motion.rs`: a push on a client.
 
 - `native_push_player([x, y, z])` (client) adds a push to the player's own velocity, in blocks a tick, as an
   explosion's knockback does: the player's own game moves them. The server didn't send it, so on a LAN or dedicated
@@ -1142,7 +1142,7 @@ them. The mod's server half can send what happened to each client half with mod 
 
 ### Biome colours
 
-`crates/horizon-client/src/game/native_biome_colors.rs`: the grass, leaf and water colours a client mod changes while the
+`crates/horizon-client/src/game/modding/native_biome_colors.rs`: the grass, leaf and water colours a client mod changes while the
 game runs, for seasons (a golden autumn, a pale winter) or a world that greens as it heals.
 
 - `native_biome_colors(biome, colors)` (client) changes a biome's `BiomeColors`: `grass`, `foliage` (leaves, vines),
@@ -1180,7 +1180,7 @@ an event the resources lack plays nothing. Diverges from upstream: horizon-rust/
 
 ### Falling blocks
 
-`crates/horizon-client/src/game/native_falling.rs`: a helper for server mods, for the level in place, on a server only. It
+`crates/horizon-client/src/game/modding/native_falling.rs`: a helper for server mods, for the level in place, on a server only. It
 names the level it means by its `dimension` (`minecraft:overworld`), as `native_set_block` does.
 
 - `native_spawn_falling_block(dimension, state, pos, velocity, falling)` throws a falling block of `state` from `pos` (its
@@ -1194,7 +1194,7 @@ names the level it means by its `dimension` (`minecraft:overworld`), as `native_
 
 ### Bulk block edits
 
-`crates/horizon-client/src/game/native_world_edit.rs`: a helper for server mods, for the level in place, on a server only.
+`crates/horizon-client/src/game/modding/native_world_edit.rs`: a helper for server mods, for the level in place, on a server only.
 It names the level it means by its `dimension` (`minecraft:overworld`), as `native_set_block` does.
 
 - `native_edit_blocks(dimension, edit)` makes many blocks at once: `NativeBlockEdit` holds a `palette` of block states and
@@ -1214,7 +1214,7 @@ It names the level it means by its `dimension` (`minecraft:overworld`), as `nati
 
 ### Column reads
 
-`crates/horizon-client/src/game/native_world_columns.rs`: helpers for server mods, for the level in place, on a server
+`crates/horizon-client/src/game/modding/native_world_columns.rs`: helpers for server mods, for the level in place, on a server
 only, that read many columns in one call. They name the level they mean by its `dimension` (`minecraft:overworld`), as
 `native_set_block` does, and answer `Err` with the reason, reading nothing, on a client, for another dimension or for
 a read too big, so a mod can tell "ask for less" from "wrong level". They run on the server tick: read a big area in
@@ -1233,7 +1233,7 @@ pieces.
 
 ### Mod messages
 
-`crates/horizon-client/src/game/native_net.rs`: bytes between a mod's server half and its client half, on the
+`crates/horizon-client/src/game/modding/native_net.rs`: bytes between a mod's server half and its client half, on the
 one custom payload channel `horizon:mod_net`. A vanilla client never gets them, and a vanilla server isn't sent any.
 
 - `native_net_send_to_player(player, channel, data)` on the server and `native_net_send_to_server(channel, data)` on the
@@ -1258,7 +1258,7 @@ Hidden blocks chat and commands. The server's own spam limits apply as they do t
 
 ### Server menus
 
-`crates/horizon-client/src/game/native_menus.rs`: menus a server mod builds from ordinary items, which a
+`crates/horizon-client/src/game/modding/native_menus.rs`: menus a server mod builds from ordinary items, which a
 stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is installed on the player's side.
 
 - `native_open_menu(uuid, rows, title, items)` opens one in place of the player's open menu (its window id);
@@ -1300,7 +1300,7 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
 
 ### Block textures
 
-`crates/horizon-client/src/game/native_block_sprites.rs` and `WorldDrawn::block_sprites`: for a client mod drawing
+`crates/horizon-client/src/game/modding/native_block_sprites.rs` and `WorldDrawn::block_sprites`: for a client mod drawing
 blocks in its own pass (flying debris as voxels, say) with the player's own block textures, resource packs included,
 as the terrain samples them.
 
@@ -1589,7 +1589,7 @@ one, where vanilla gives the `by` one.
   tick, after the tick's other sounds; the goat horn and a mod's bound sound ask directly. Two sites keep a difference: dye on a
   sheep and an allay's sounds reach the player who caused them too, since Horizon's client plays them from the packet rather
   than predicting them. The packet stays positional (horizon-rust/horizon#9284). A mod may change the sound, its source, volume and pitch, or cancel it. Every
-  server sound packet but `/playsound`'s goes through `Game::send_level_sound` (`game/level_sounds.rs`), or the native-sound
+  server sound packet but `/playsound`'s goes through `Game::send_level_sound` (`game/interface/level_sounds.rs`), or the native-sound
   flush for a mod's own, so a new sound site asks the mods by calling it. The tick's sounds are asked as they go out, at the end
   of the tick. With no listener, the cost is one `listened` check per sound and nothing is allocated.
 - Chunks a player watches, on the server: `native_chunk_watch(player, chunk)`, `native_chunk_sent(player, chunk)` and

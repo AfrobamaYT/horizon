@@ -57,7 +57,7 @@ pub mod runtime {
             Write {
                 node: self.node,
                 index: self.index,
-                cells: flatten(value.to_value()),
+                value: value.to_value(),
             }
         }
     }
@@ -65,7 +65,7 @@ pub mod runtime {
     pub struct Write<'a> {
         node: &'a Node,
         index: u32,
-        cells: Vec<bindings::horizon::mod_internals::view::Cell>,
+        value: Value,
     }
     /// A tuple of generated field descriptors (up to twelve fields).
     pub trait ReadFields {
@@ -93,8 +93,10 @@ pub mod runtime {
                 type Results = ($(Result<$t, Refusal>,)+);
                 fn get(self) -> Self::Results {
                     let results = bindings::horizon::mod_internals::view::get_many(&[$((self.$i.node, self.$i.index)),+]);
-                    let mut results = results.into_iter();
-                    ($(results.next().expect("one result per field").and_then(|cells| {
+                    let mut entries = results.entries.into_iter();
+                    let mut cells = results.cells.into_iter();
+                    ($(entries.next().expect("one result per field").and_then(|len| {
+                        let cells = cells.by_ref().take(len as usize);
                         $t::from_value(unflatten(cells).map_err(wire_refusal)?)
                     }),)+)
                 }
@@ -102,7 +104,14 @@ pub mod runtime {
             impl WriteFields for ($(batches!(@write $t),)+) {
                 type Results = ($(batches!(@result $t),)+);
                 fn set(self) -> Self::Results {
-                    let results = bindings::horizon::mod_internals::view::set_many(&[$((self.$i.node, self.$i.index, self.$i.cells)),+]);
+                    let mut cells = Vec::new();
+                    let mut pending = Vec::new();
+                    let writes = [$({
+                        let start = cells.len();
+                        mod_points::internals::flatten_into(self.$i.value, &mut cells, &mut pending);
+                        (self.$i.node, self.$i.index, (cells.len() - start) as u32)
+                    }),+];
+                    let results = bindings::horizon::mod_internals::view::set_many(&writes, &cells);
                     let mut results = results.into_iter();
                     ($(batches!(@next results $t),)+)
                 }
