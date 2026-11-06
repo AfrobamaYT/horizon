@@ -111,7 +111,17 @@ A function returning `Result<T, E>` (including a written `Result<T>` alias) can 
 `T` even when its error is opaque. Its view method returns `Result<Result<T, GameError>, Refusal>`:
 `GameError` means the game function failed, without copying its native error into the mod.
 A function returning `Option<&T>` or `Option<&mut T>` for handle-typed state returns an optional
-call-scoped node. That node, like a directly returned reference, expires at the next game call.
+call-scoped node. Like a directly returned reference, it expires after the next declared function
+that actually runs, even when that function returns an error. With no pending writes it can be
+that next function's receiver. Pending writes apply first and expire returned references before
+the function's receiver and arguments are resolved.
+
+A function that writes through a node requires that node to be separate from every other node
+argument, including a shared one. Distinct fields, sequence indices or map keys can prove that;
+an object and its child cannot. A returned-reference root is conservatively treated as overlapping
+any other root. Unproved separation returns `NotHere("arguments overlap")` before applying writes.
+Calls into the game cannot reenter a listener in the same wasm group. A native callback that needs
+that synchronous reentry must stay native rather than silently deferring its work.
 
 The listener sees its own journaled writes immediately. A declared function applies that journal
 before running, and listener return applies the remaining writes. A trap drops writes since the
