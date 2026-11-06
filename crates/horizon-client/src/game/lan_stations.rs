@@ -79,6 +79,7 @@ impl Game<'_> {
             return true;
         };
         let mut menu = Box::new(Menu::new(kind));
+        menu.set_registry_id(Some(menu_type));
         // Without a mod the take runs AnvilMenu.onTake's order in the click itself.
         let hooked = !mod_api::__private::mods().is_empty();
         menu.anvil_hook = kind == Kind::Anvil && hooked;

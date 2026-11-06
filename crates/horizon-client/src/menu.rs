@@ -387,6 +387,7 @@ const OFFHAND: usize = 40;
 
 pub struct Menu {
     kind: Kind,
+    registry_id: Option<Box<str>>,
     slots: Vec<Slot>,
     containers: [Vec<Option<ItemStack>>; 4],
     grid_size: usize,
@@ -885,6 +886,7 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             kind,
+            registry_id: None,
             slots,
             containers,
             grid_size,
@@ -942,6 +944,17 @@ impl Menu {
 
     pub fn kind(&self) -> Kind {
         self.kind
+    }
+
+    /// Registry identity of this menu, or the mount sentinel for a mount menu.
+    /// Player inventory and the creative picker have no registered menu type.
+    pub fn registry_id(&self) -> Option<&str> {
+        self.registry_id.as_deref()
+    }
+
+    /// Set the identity obtained from the open window's menu registry.
+    pub fn set_registry_id(&mut self, id: Option<&str>) {
+        self.registry_id = id.map(Into::into);
     }
 
     /// `clickMenuButton`: the loom's pattern buttons and the stonecutter's
@@ -3696,6 +3709,18 @@ pub(crate) mod tests {
         let mut menu = Menu::new(kind);
         menu.creative = true;
         test(&env, &mut menu);
+    }
+
+    #[test]
+    fn menu_keeps_the_open_window_registry_identity() {
+        let mut menu = Menu::new(Kind::Chest(3));
+        assert_eq!(menu.registry_id(), None);
+        menu.set_registry_id(Some("minecraft:generic_9x3"));
+        assert_eq!(menu.registry_id(), Some("minecraft:generic_9x3"));
+        menu.set_registry_id(Some("example:chest"));
+        assert_eq!(menu.registry_id(), Some("example:chest"));
+        menu.set_registry_id(None);
+        assert_eq!(menu.registry_id(), None);
     }
 
     /// The Mouse Tweaks wheel's targets: vanilla's routing of one item.
