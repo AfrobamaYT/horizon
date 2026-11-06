@@ -163,6 +163,12 @@ pub enum NoSlotReason {
     KindHasNoSlot,
     NativeOnly,
     WasmSitesPending,
+    LocalSlotsPending,
+    ExtensionSlotsPending,
+    ApiPointsPending,
+    ApiSitesPending,
+    SourcePending,
+    ReplacePending,
 }
 
 impl fmt::Display for NoSlotReason {
@@ -172,6 +178,12 @@ impl fmt::Display for NoSlotReason {
             Self::KindHasNoSlot => "kind has no slot",
             Self::NativeOnly => "native-only place",
             Self::WasmSitesPending => "wasm sites pending",
+            Self::LocalSlotsPending => "local slots pending (I5)",
+            Self::ExtensionSlotsPending => "extension slots pending (I6)",
+            Self::ApiPointsPending => "API point listeners pending (U4b)",
+            Self::ApiSitesPending => "API site listeners pending (U4c)",
+            Self::SourcePending => "source injects pending (U5)",
+            Self::ReplacePending => "replace listeners pending (U9)",
         })
     }
 }
@@ -264,6 +276,26 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
             at: inject.at.clone(),
             old: inject.hash.clone(),
             new: place.hash.clone(),
+        });
+    }
+    if let Some(reason) = match inject.kind {
+        Kind::ModifyLocal => Some(NoSlotReason::LocalSlotsPending),
+        Kind::Field => Some(NoSlotReason::ExtensionSlotsPending),
+        _ => None,
+    } {
+        return Err(InjectError::NoSlot {
+            id,
+            reason,
+            declaration: format!(
+                "slots/{}.txt: {}{}",
+                entry.mod_id,
+                if inject.kind == Kind::Field {
+                    "type "
+                } else {
+                    ""
+                },
+                inject.at
+            ),
         });
     }
     let available = if inject.kind.needs_call() {
@@ -434,6 +466,18 @@ mod tests {
                     if !listed {
                         p.slots.clear();
                         p.calls[0].slots.clear();
+                    }
+                    if let Some(pending) = match kind {
+                        Kind::ModifyLocal => Some(NoSlotReason::LocalSlotsPending),
+                        Kind::Field => Some(NoSlotReason::ExtensionSlotsPending),
+                        _ => None,
+                    } {
+                        for target in [Target::Native, Target::Wasm] {
+                            assert!(
+                                matches!(run(&i, target, &[p.clone()]), Err(InjectError::NoSlot { reason, .. }) if reason == pending)
+                            );
+                        }
+                        continue;
                     }
                     let reason = match expected {
                         None => Some(NoSlotReason::KindHasNoSlot),
