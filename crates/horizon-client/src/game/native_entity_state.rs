@@ -468,6 +468,62 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fire_ticks_reads_supported_entities_and_refuses_others() {
+        use horizon_client::entities::ArmorStand;
+        use horizon_core::geometry::Vec3;
+        use mod_api::{ItemStack, NativeWorldEpoch};
+
+        with_player(|game, player| {
+            assert_eq!(player.fire_ticks(game), Some(0));
+            game.player.as_mut().unwrap().fire_ticks = -12;
+            assert_eq!(player.fire_ticks(game), Some(-12));
+
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(42, kind, Vec3::ZERO, 0.0));
+            game.mobs[0].fire_ticks = 37;
+            let mob = game.native_entity(42).unwrap();
+            assert_eq!(mob.fire_ticks(game), Some(37));
+
+            game.armor_stands.push(ArmorStand::new(43, Vec3::ZERO, 0.0));
+            game.armor_stands[0].fire_ticks = 23;
+            let stand = game.native_entity(43).unwrap();
+            assert_eq!(stand.fire_ticks(game), Some(23));
+
+            game.spawn_item(
+                ItemStack {
+                    item: "minecraft:stone".into(),
+                    count: 1,
+                    damage: 0,
+                    extra: None,
+                },
+                [0.0; 3],
+                [0.0; 3],
+                0,
+            );
+            game.dropped[0].fire_ticks = 19;
+            let item = game.native_entity(game.dropped[0].id).unwrap();
+            assert_eq!(item.fire_ticks(game), Some(19));
+
+            game.boats.push(super::super::boats::Boat::new(
+                44,
+                "oak".into(),
+                Vec3::ZERO,
+                0.0,
+            ));
+            let boat = game.native_entity(44).unwrap();
+            assert_eq!(boat.fire_ticks(game), None);
+            let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
+            assert_eq!(stale.fire_ticks(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn player_invisibility_write_is_refused() {
         with_player(|game, player| assert!(!player.set_invisible(game, true)));
     }

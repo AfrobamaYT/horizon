@@ -41,6 +41,9 @@ pub trait Helpers {
         target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_fire_immune"
     )]
     fn entity_fire_immune();
+    /// Remaining fire ticks for players, mobs, armor stands and item entities.
+    /// Returns `None` for other kinds and unavailable or stale handles; zero is a
+    /// valid value. Negative values retain the entity's fire immunity countdown.
     #[helper(
         side = "server",
         receiver = "entity",
