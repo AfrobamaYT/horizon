@@ -1,10 +1,10 @@
 use super::*;
 use horizon_world::attachments::{
-    AttachmentType, index::AttachmentIndex, observer::IndexedAttachmentObserver,
+    AttachmentType, Holder, index::AttachmentIndex, observer::IndexedAttachmentObserver,
 };
 use std::sync::{Mutex, Weak};
 
-type Index = Arc<Mutex<AttachmentIndex<Pos>>>;
+type Index = Arc<Mutex<AttachmentIndex<BlockEntityIdentity>>>;
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "be_test",
     name: "value",
@@ -15,12 +15,7 @@ static VALUE: AttachmentType<i32> = AttachmentType {
 };
 fn observe(entities: &mut BlockEntities) -> Index {
     let index = Index::default();
-    entities.observe_attachments(Arc::new(IndexedAttachmentObserver::new(&index, |holder| {
-        match holder {
-            Holder::BlockEntity([x, y, z]) => Some((x, y, z)),
-            _ => None,
-        }
-    })));
+    entities.observe_attachments(Arc::new(IndexedAttachmentObserver::new(&index, Some)));
     index
 }
 fn values(index: &Index) -> Vec<i32> {
@@ -141,10 +136,48 @@ fn taken_maps_restore_and_retire_without_reviving_removed_residency() {
 }
 
 #[test]
+fn held_replacements_retire_the_exact_identity_before_a_late_put() {
+    let replacements: [fn(&mut BlockEntities); 2] = [
+        |b| {
+            b.insert((1, 64, 1), BlockEntity::Chest(vec![]));
+        },
+        |b| {
+            b.get_or_insert_with((1, 64, 1), || BlockEntity::Chest(vec![]));
+        },
+    ];
+    for replace in replacements {
+        let mut entities = BlockEntities::default();
+        let index = observe(&mut entities);
+        let p = (1, 64, 1);
+        entities.insert(p, BlockEntity::Chest(vec![]));
+        VALUE
+            .set(entities.attachments_mut(p).unwrap(), Holder::Level, 1)
+            .unwrap();
+        let key = ("be_test".into(), "value".into());
+        let old = index.lock().unwrap().snapshot(&key);
+        let (lease, held) = entities.take(&p).unwrap();
+        replace(&mut entities);
+        assert!(values(&index).is_empty());
+        assert_ne!(entities.generation(&p), Some(old[0].holder.generation));
+        VALUE
+            .set(entities.attachments_mut(p).unwrap(), Holder::Level, 2)
+            .unwrap();
+        let (new_lease, new) = entities.take(&p).unwrap();
+        assert!(!entities.put(lease, held));
+        assert_eq!(values(&index), [2]);
+        let current = index.lock().unwrap().snapshot(&key);
+        assert_eq!(Some(current[0].holder.generation), entities.generation(&p));
+        assert_eq!(old[0].entry.read(&VALUE), Ok(&1));
+        assert!(entities.put(new_lease, new));
+        assert_eq!(entities.generation(&p), Some(current[0].holder.generation));
+    }
+}
+
+#[test]
 fn all_retirement_paths_drop_payloads_after_the_index_guard() {
     #[derive(Clone)]
     struct Probe {
-        index: Weak<Mutex<AttachmentIndex<Pos>>>,
+        index: Weak<Mutex<AttachmentIndex<BlockEntityIdentity>>>,
         drops: Arc<Mutex<Vec<bool>>>,
     }
     impl Drop for Probe {

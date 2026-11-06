@@ -29,9 +29,9 @@ ordinary behavior; an aborted outer transaction restores the vector that existed
 before its first write, including writes committed by children. The normal menu
 broadcast delivers committed changes to viewers.
 
-The public handle still resolves a level and position. Removal makes it
-unavailable; replacement at that position is followed, as with the other handle
-methods. This is not an instance-token or borrowed-payload API.
+The public handle resolves one entity's lifecycle generation as well as its level
+and position. Removal, replacement and chunk reload make it stale; in-place data
+edits preserve it. It is not a borrowed-payload API.
 
 ## Internal items versus automation
 
@@ -49,5 +49,12 @@ return `Ok(false)`, and real changes send Changed at root commit. Nested abort
 restores ordinary before-images, including committed-child writes. Invalid
 indices, unknown/air/zero-count stacks and counts above the registered or
 component-overridden maximum return `BlockEntityItemError`, never a partial write
-or silent count clamp. A positional handle follows a replacement and validates
-its current container; this is distinct from an identity-strict automatic restore.
+or silent count clamp. A stale handle refuses a replacement rather than accessing
+its container; acquire a new handle for the replacement.
+
+## Retaining a handle
+
+A `BlockEntityRef` names one live entity, not every entity later placed at its position. Removal,
+replacement and chunk reload invalidate it; reacquire with `host.block_entity(level, position)`.
+In-place data edits and temporary tick storage preserve identity. Option reads return `None` for
+stale handles; item and menu-data Result methods return `Stale`, never writing to a replacement.

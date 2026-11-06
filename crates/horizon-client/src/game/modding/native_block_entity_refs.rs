@@ -19,7 +19,16 @@ use mod_api::{
 impl Game<'_> {
     fn native_block_entity_target(&self, entity: BlockEntityRef) -> Option<(&World, &BlockEntity)> {
         let world = self.native_level_read_world(entity.fields().level)?;
-        Some((world, loaded_block_entity(world, entity.fields().position)?))
+        let fields = entity.fields();
+        if world.block_entities.generation(&(
+            fields.position[0],
+            fields.position[1],
+            fields.position[2],
+        )) != Some(fields.generation)
+        {
+            return None;
+        }
+        Some((world, loaded_block_entity(world, fields.position)?))
     }
 
     /// Find a block entity in a loaded chunk of an open level, or on a client in
@@ -29,8 +38,12 @@ impl Game<'_> {
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<BlockEntityRef> {
-        let entity = mod_api::__private::game::block_entity_ref(level, pos);
-        self.native_block_entity_target(entity).map(|_| entity)
+        let world = self.native_level_read_world(level)?;
+        loaded_block_entity(world, pos)?;
+        let generation = world.block_entities.generation(&(pos[0], pos[1], pos[2]))?;
+        Some(mod_api::__private::game::block_entity_ref(
+            level, pos, generation,
+        ))
     }
 
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
@@ -152,7 +165,7 @@ impl Game<'_> {
             return None;
         }
         let pos = entity.fields().position;
-        loaded_block_entity(&self.world, pos)?;
+        self.native_block_entity_target(entity)?;
         Some((pos[0], pos[1], pos[2]))
     }
 
@@ -193,7 +206,10 @@ impl Game<'_> {
         slot: u32,
         value: i32,
     ) -> bool {
-        let Some((key, block_entity)) = self.mod_block_entity_write_target(entity) else {
+        let Some(key) = self.native_block_entity_write_key(entity) else {
+            return false;
+        };
+        let Some(block_entity) = self.mod_block_entity_write_target(key) else {
             return false;
         };
         let index = slot as usize;
@@ -222,8 +238,11 @@ impl Game<'_> {
                 limit: limit as u64,
             });
         }
-        let (key, block_entity) = self
-            .mod_block_entity_write_target(entity)
+        let key = self
+            .native_block_entity_write_key(entity)
+            .ok_or(BlockEntityDataError::Stale)?;
+        let block_entity = self
+            .mod_block_entity_write_target(key)
             .ok_or(BlockEntityDataError::Unavailable)?;
         if block_entity.data == values {
             return Ok(false);
@@ -232,15 +251,11 @@ impl Game<'_> {
         Ok(true)
     }
 
-    fn mod_block_entity_write_target(
-        &self,
-        entity: BlockEntityRef,
-    ) -> Option<((i32, i32, i32), &ModBlockEntity)> {
-        let key = self.native_block_entity_write_key(entity)?;
+    fn mod_block_entity_write_target(&self, key: (i32, i32, i32)) -> Option<&ModBlockEntity> {
         let BlockEntity::Mod(block_entity) = self.world.block_entities.get(&key)? else {
             return None;
         };
-        Some((key, block_entity))
+        Some(block_entity)
     }
 
     // The target was resolved above, and journaling invokes no listener that could replace it.
@@ -266,7 +281,7 @@ impl Game<'_> {
     ) -> Result<Option<ItemStack>, BlockEntityItemError> {
         let (world, BlockEntity::Mod(block_entity)) = self
             .native_block_entity_target(entity)
-            .ok_or(BlockEntityItemError::Unavailable)?
+            .ok_or(BlockEntityItemError::Stale)?
         else {
             return Err(BlockEntityItemError::Unavailable);
         };
@@ -284,8 +299,11 @@ impl Game<'_> {
         stack: Option<ItemStack>,
     ) -> Result<bool, BlockEntityItemError> {
         let _ = tx;
-        let (key, block_entity) = self
-            .mod_block_entity_write_target(entity)
+        let key = self
+            .native_block_entity_write_key(entity)
+            .ok_or(BlockEntityItemError::Stale)?;
+        let block_entity = self
+            .mod_block_entity_write_target(key)
             .ok_or(BlockEntityItemError::Unavailable)?;
         let slots = mod_item_slots(&self.world, key, slot)?;
         if let Some(stack) = &stack {
@@ -618,6 +636,64 @@ mod tests {
             assert!(!data.contains_key(&key.into()));
         }
         assert!(data.contains_key(&"Items".into()));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn retained_handles_reject_replacements_and_rollback_restores_identity() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let pos = (1, 64, 1);
+            let holder = || {
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                    "test:holder".into(),
+                    Default::default(),
+                )))
+            };
+            game.world.block_entities.insert(pos, holder());
+            let original = game.native_block_entity_ref(level, [1, 64, 1]).unwrap();
+            assert_eq!(original.set_data_slots(game, vec![7]), Ok(true));
+            let mut tentative = None;
+            let _: Result<(), ()> = game.transaction(|game, _| {
+                game.journal_block_entity(pos);
+                game.world
+                    .block_entities
+                    .insert(pos, BlockEntity::Chest(vec![]));
+                assert_eq!(original.data_slots(game), None);
+                tentative = game.native_block_entity_ref(level, [1, 64, 1]);
+                Err(())
+            });
+            assert_eq!(original.data_slots(game), Some(vec![7]));
+            assert_eq!(tentative.unwrap().data(game), None);
+            let (lease, taken) = game.world.block_entities.take(&pos).unwrap();
+            assert_eq!(original.data_slots(game), None);
+            assert!(game.world.block_entities.put(lease, taken));
+            assert_eq!(original.data_slots(game), Some(vec![7]));
+            game.world.block_entities.remove(&pos);
+            game.world.block_entities.insert(pos, holder());
+            let replacement = game.native_block_entity_ref(level, [1, 64, 1]).unwrap();
+            assert_ne!(original, replacement);
+            assert_eq!(
+                original.set_data_slots(game, vec![99]),
+                Err(BlockEntityDataError::Stale)
+            );
+            assert_eq!(
+                original.item_slot(game, 0),
+                Err(BlockEntityItemError::Stale)
+            );
+            assert_eq!(replacement.data_slots(game), Some(vec![]));
+            assert_eq!(replacement.set_data_slots(game, vec![8]), Ok(true));
+            game.world.block_entities.load_chunk(vec![(pos, holder())]);
+            assert_eq!(
+                replacement.set_data_slots(game, vec![99]),
+                Err(BlockEntityDataError::Stale)
+            );
+        });
     }
 
     #[test]

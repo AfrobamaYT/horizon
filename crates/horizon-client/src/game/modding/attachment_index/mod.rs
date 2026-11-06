@@ -56,18 +56,29 @@ impl Game<'_> {
         self.world
             .attachments
             .bind_index(index, AttachmentHolder::Level(level));
-        let observer = Arc::new(IndexedAttachmentObserver::new(
-            index,
-            move |holder| match holder {
-                Holder::Chunk(pos) => Some(AttachmentHolder::Chunk(ChunkRef::new(level, pos))),
-                Holder::BlockEntity(pos) => Some(AttachmentHolder::BlockEntity(
-                    mod_api::__private::game::block_entity_ref(level, pos),
-                )),
-                _ => None,
-            },
-        ));
-        self.world.chunks.observe_attachments(observer.clone());
-        self.world.block_entities.observe_attachments(observer);
+        self.world
+            .chunks
+            .observe_attachments(Arc::new(IndexedAttachmentObserver::new(
+                index,
+                move |holder| match holder {
+                    Holder::Chunk(pos) => Some(AttachmentHolder::Chunk(ChunkRef::new(level, pos))),
+                    _ => None,
+                },
+            )));
+        self.world
+            .block_entities
+            .observe_attachments(Arc::new(IndexedAttachmentObserver::new(
+                index,
+                move |identity: horizon_client::block_entities::BlockEntityIdentity| {
+                    Some(AttachmentHolder::BlockEntity(
+                        mod_api::__private::game::block_entity_ref(
+                            level,
+                            identity.position,
+                            identity.generation,
+                        ),
+                    ))
+                },
+            )));
     }
 }
 
