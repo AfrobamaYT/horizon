@@ -295,6 +295,7 @@ mod native_living_effects;
 mod native_living_flags;
 mod native_living_refs;
 mod native_living_writes;
+mod native_local_sounds;
 mod native_menu_refs;
 mod native_menus;
 mod native_merchant_refs;
@@ -3048,9 +3049,9 @@ struct Game<'a> {
     skin_frame: std::cell::RefCell<horizon_client::gfx::entity_skin::SkinFrame>,
     /// The glowing entities' silhouettes this frame (game/glowing.rs).
     glowing_vertices: std::cell::RefCell<Vec<Vertex>>,
-    /// Client mods' sounds (`native_play_local_sound`), with the ticks each waits, until the
-    /// next audio update plays them (`tick_sound_engine`).
-    mod_sounds: std::cell::RefCell<Vec<(mod_api::SoundPlay, u32)>>,
+    /// Client mods' sounds (`native_play_local_sound`): those waiting for the next audio update
+    /// (`tick_sound_engine`), the stops and fades asked of them, and their handles.
+    mod_sounds: native_local_sounds::ModSounds,
     /// A client mod asked to clear the particles (`native_clear_particles`), done before
     /// the next frame or particle tick (`apply_mod_particle_clear`).
     mod_clear_particles: std::cell::Cell<bool>,

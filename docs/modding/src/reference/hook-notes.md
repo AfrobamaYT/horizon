@@ -868,7 +868,7 @@ or transactions. Declarations still go on each event or registrar.
 - Client sounds: `ClientHost::play_local_sound(sound, after)` plays a `SoundPlay`, vanilla's event or the mod's own
   from its `assets/<id>/sounds.json`, for this player only: an interface sound (`SoundPlay::ui`) or one at a place
   (`SoundPlay::at`), now or up to a minute later, so a client mod can click its own buttons or time a blast's sound
-  to its shock wave.
+  to its shock wave. Its `SoundRef` answers whether it plays, and stops or fades it.
 
 - Values for a mod's own shader pack: `native_shader_params(partial, params)` asks each frame for eight `vec4`s that
   every stage of a Horizon shader pack reads as `frame.mods`, so a mod can tell the pack it bundles where and when
@@ -2958,10 +2958,30 @@ It's the same record the `play_sound` hook edits, and it goes through the same m
 vanilla's (`minecraft:entity.generic.explode`) or the mod's own: a content mod's `assets/<id>/sounds.json` and
 `assets/<id>/sounds/*.ogg` load with the rest of its assets. A client half that hears from its server half (mod
 messages) where something happened can time the sound to the distance, such as a blast heard when its shock wave reaches
-the player: `after = distance / speed`. It answers false on a server and for a value out of range (an event id that
+the player: `after = distance / speed`. It answers `None` on a server and for a value out of range (an event id that
 isn't namespaced, a position or volume that isn't finite, a negative volume, pitch or repeat gap, `after` past 1200);
 an event the resources lack plays nothing. Diverges from upstream: horizon-rust/horizon's `native_play_local_sound` takes
 `(sound, at, volume, pitch, delay)`.
+
+Otherwise it answers a `SoundRef`, a handle on this one play, never reused. Its methods take the `&dyn ClientHost`, so
+any client hook can call them. Like the play, the writes are queued for the next audio update, while the answers are
+computed at the call:
+- `sound.state(host)` is `Some(SoundState)`: `Waiting` (queued, waiting out `after`, or between a looping sound's
+  repeats), `Playing` (`SoundEngine.isActive`) or `Stopped`. It is `None` on a server.
+- `sound.stop(host)` stops it for good: a waiting sound never starts and a looping one never repeats. A stop asked
+  since the last update already reads `Stopped`.
+- `sound.fade(host, volume, ticks)` moves its volume to `volume` (at or above 0) in equal steps over the next `ticks`
+  ticks it plays, or at once for 0. A fade to 0 stops it when the fade ends, as `LoopSoundInstance.fadeOut` does. A
+  `SoundPlay` at volume 0 faded up fades in, and a later fade replaces one in progress.
+
+`stop` and `fade` answer false, changing nothing, once the sound is over. Once it ends, is stopped or faded out, or is
+cleared (leaving or changing levels stops every sound), the handle reads `Stopped` and its writes do nothing. It stays
+valid across a change of output device, which reopens the output on the same mixer and keeps the sounds playing.
+
+`ClientHost::sound_events()` lists every sound event the client's resources have (`SoundManager.getAvailableSounds`).
+`audio_devices()` lists the output devices by name (`SoundEngine.getAvailableSoundDevices`), and `audio_device()` names
+the one the options ask for, empty for the system's default. Both lists are built anew at each call, and listing the
+devices probes each one: ask from setup or a settings screen, not every frame.
 
 ### Falling blocks
 

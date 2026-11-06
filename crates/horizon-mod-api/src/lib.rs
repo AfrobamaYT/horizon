@@ -808,6 +808,30 @@ impl SoundPlay {
     }
 }
 
+/// A sound a client mod started with `play_local_sound`, to follow and control: `state`, `stop`
+/// and `fade`. Each handle names one play and is never reused. Once the sound has ended, been
+/// stopped or been cleared (leaving or changing levels stops every sound), the handle is stale: it
+/// reads [`SoundState::Stopped`] and its writes do nothing. It stays valid across a change of
+/// output device, which keeps the sounds playing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so mods cannot build or destructure it
+pub struct SoundRef {
+    pub(crate) id: u64,
+}
+
+/// Where a mod's sound is ([`SoundRef`]'s `state`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SoundState {
+    /// Not started yet: queued for the next audio update, waiting out `play_local_sound`'s
+    /// `after` ticks, or between a looping sound's repeats (`SoundPlay::looping`'s `delay`).
+    Waiting,
+    /// Playing (`SoundEngine.isActive`).
+    Playing,
+    /// Over: it ended, was stopped, faded to 0 or was cleared. It never plays again.
+    Stopped,
+}
+
 /// A playing sound's channel, for `play_sound_source` and
 /// `play_streaming_source`: an id only, to tell sounds apart across the two
 /// hooks. It gives no control over the channel.

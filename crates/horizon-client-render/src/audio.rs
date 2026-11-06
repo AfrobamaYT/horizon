@@ -1394,7 +1394,7 @@ impl Audio {
     }
     /// A client mod's sound (`ClientHost::play_local_sound`), as its `SoundPlay` gives it,
     /// starting `after` sound-engine ticks from now (`SoundEngine.playDelayed`) or at once.
-    pub fn play_mod_sound(&mut self, sound: &mod_api::SoundPlay, after: u32) {
+    pub fn play_mod_sound(&mut self, sound: &mod_api::SoundPlay, after: u32) -> InstanceId {
         let seed = self.random.next_long();
         if let Some(capture) = self.capture.as_mut().filter(|_| !sound.relative) {
             capture.push(CapturedSound {
@@ -1410,12 +1410,38 @@ impl Audio {
         *self.heard.entry(sound.identifier.clone()).or_default() += 1;
         let mut instance = SoundInstance::from_play(sound, LegacyRandom::new(seed));
         instance.identifier = crate::sound_events::normalize(&sound.identifier);
+        // Tickable, so the engine applies a fade's volume each tick it plays.
+        instance.ticking = crate::sound_engine::Ticking::Mod { fade: None };
         if after == 0 {
-            self.play_instance(instance, false);
+            self.play_instance(instance, false).0
         } else {
             self.sync_volumes();
             let id = self.engine.add(instance, false);
             self.engine.play_delayed(id, after as i32);
+            id
+        }
+    }
+    /// Where a client mod's sound (`SoundRef`) is: gone from the engine once it ended or was
+    /// stopped, playing while it holds a channel, waiting before that.
+    pub fn mod_sound_state(&self, id: InstanceId) -> mod_api::SoundState {
+        if self.engine.instance(id).is_none() {
+            mod_api::SoundState::Stopped
+        } else if self.engine.is_active(id) {
+            mod_api::SoundState::Playing
+        } else {
+            mod_api::SoundState::Waiting
+        }
+    }
+    /// A client mod's `SoundRef::stop`.
+    pub fn stop_mod_sound(&mut self, id: InstanceId) {
+        self.engine.stop_for_good(id, &mut self.backend);
+    }
+    /// A client mod's `SoundRef::fade`; a fade to 0 at once stops it as `stop_mod_sound` does.
+    pub fn fade_mod_sound(&mut self, id: InstanceId, volume: f32, ticks: u32) {
+        if ticks == 0 && volume <= 0.0 {
+            self.stop_mod_sound(id);
+        } else if let Some(instance) = self.engine.instance_mut(id) {
+            instance.fade_to(volume, ticks);
         }
     }
     /// `play` for this client only: a sound a packet's handler plays
@@ -2294,5 +2320,92 @@ mod tests {
         // The same cards list the same devices; a card added or removed does not.
         assert!(!cards_changed(Some("0 [PCH ]"), Some("0 [PCH ]")));
         assert!(cards_changed(Some("0 [PCH ]"), Some("0 [PCH ]\n 1 [USB ]")));
+    }
+
+    /// The mixer live without an output device, and the button click's event: a sound
+    /// holds a channel, and a stopped channel is let go at the next update.
+    fn live_audio() -> Audio {
+        let mut audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_path_buf(),
+        ));
+        audio.engine.registry.add_file(
+            "minecraft",
+            br#"{"ui.button.click":{"sounds":["gui/button"]}}"#,
+            &|_, _| true,
+        );
+        audio.engine.loaded = true;
+        audio.backend.live = true;
+        audio
+    }
+
+    #[test]
+    fn a_mod_sound_waits_out_its_delay_plays_and_stops_for_good() {
+        use mod_api::SoundState::*;
+        let mut audio = live_audio();
+        let ctx = TickContext::default();
+        let click = mod_api::SoundPlay::ui("minecraft:ui.button.click");
+        let sound = audio.play_mod_sound(&click, 2);
+        assert_eq!(audio.mod_sound_state(sound), Waiting);
+        audio.tick(false, &ctx);
+        assert_eq!(audio.mod_sound_state(sound), Waiting, "one tick of two");
+        audio.tick(false, &ctx);
+        assert_eq!(audio.mod_sound_state(sound), Playing);
+        audio.stop_mod_sound(sound);
+        audio.tick(false, &ctx);
+        audio.tick(false, &ctx);
+        assert_eq!(audio.mod_sound_state(sound), Stopped);
+        // Stopped while it waits, it never starts; a looping one never repeats.
+        let never = audio.play_mod_sound(&click.clone().looping(0), 3);
+        audio.stop_mod_sound(never);
+        assert_eq!(audio.mod_sound_state(never), Stopped);
+        for _ in 0..5 {
+            audio.tick(false, &ctx);
+            assert_eq!(audio.mod_sound_state(never), Stopped);
+        }
+    }
+
+    #[test]
+    fn a_mod_sound_fades_to_its_volume_and_a_fade_to_zero_stops_it() {
+        use mod_api::SoundState::*;
+        let mut audio = live_audio();
+        let ctx = TickContext::default();
+        let sound = audio.play_mod_sound(&mod_api::SoundPlay::ui("minecraft:ui.button.click"), 0);
+        assert_eq!(audio.mod_sound_state(sound), Playing);
+        let volume = |audio: &Audio| audio.engine.instance(sound).map(|i| i.volume);
+        audio.fade_mod_sound(sound, 0.5, 2);
+        let mut volumes = Vec::new();
+        for _ in 0..3 {
+            audio.tick(false, &ctx);
+            volumes.push(volume(&audio));
+        }
+        assert_eq!(
+            volumes,
+            [Some(0.75), Some(0.5), Some(0.5)],
+            "two equal steps, then held"
+        );
+        // Paused, a fade waits.
+        audio.fade_mod_sound(sound, 0.0, 2);
+        audio.tick(true, &ctx);
+        assert_eq!(volume(&audio), Some(0.5));
+        audio.tick(false, &ctx);
+        assert_eq!(volume(&audio), Some(0.25));
+        assert_eq!(audio.mod_sound_state(sound), Playing);
+        for _ in 0..4 {
+            audio.tick(false, &ctx);
+        }
+        assert_eq!(audio.mod_sound_state(sound), Stopped, "faded out");
+        // A fade at once: to a volume sets it, to 0 stops it.
+        let other = audio.play_mod_sound(&mod_api::SoundPlay::ui("minecraft:ui.button.click"), 0);
+        audio.fade_mod_sound(other, 0.3, 0);
+        assert_eq!(volume_of(&audio, other), Some(0.3));
+        audio.fade_mod_sound(other, 0.0, 0);
+        for _ in 0..2 {
+            audio.tick(false, &ctx);
+        }
+        assert_eq!(audio.mod_sound_state(other), Stopped);
+    }
+
+    fn volume_of(audio: &Audio, id: InstanceId) -> Option<f32> {
+        audio.engine.instance(id).map(|i| i.volume)
     }
 }

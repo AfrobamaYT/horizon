@@ -114,7 +114,19 @@ pub enum Ticking {
     /// A native mod's music layer (`MusicLayers`), whose volume its owner
     /// sets each tick.
     MusicLayer,
+    /// A client mod's sound (`play_local_sound`), which its `SoundRef` fades.
+    Mod { fade: Option<Fade> },
 }
+/// A mod sound's fade in progress: `step` added to the volume each tick it plays, until
+/// `left` reaches 0 and the volume is `target`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fade {
+    pub step: f32,
+    pub target: f32,
+    pub left: u32,
+}
+// The volumes are finite (checked where a mod asks for the fade), so equality is total.
+impl Eq for Fade {}
 /// What a minecart's sound instances read about it.
 #[derive(Clone, Copy, Debug)]
 pub struct CartSound {
@@ -614,10 +626,47 @@ impl SoundInstance {
         self.stopped = true;
         self.looping = false;
     }
+    /// A mod's `SoundRef::fade`: the volume moves to `volume` in equal steps over the next
+    /// `ticks` ticks the sound plays, or at once for 0. A fade to 0 stops the sound when it ends,
+    /// as `LoopSoundInstance.fadeOut` does. Only a mod's sound fades.
+    pub fn fade_to(&mut self, volume: f32, ticks: u32) {
+        let Ticking::Mod { fade } = &mut self.ticking else {
+            return;
+        };
+        if ticks == 0 {
+            *fade = None;
+            self.volume = volume;
+            if volume <= 0.0 {
+                self.stop();
+            }
+        } else {
+            *fade = Some(Fade {
+                step: (volume - self.volume) / ticks as f32,
+                target: volume,
+                left: ticks,
+            });
+        }
+    }
     /// `TickableSoundInstance.tick`.
     pub fn tick(&mut self, ctx: &TickContext) {
+        if let Ticking::Mod { fade } = &mut self.ticking {
+            if let Some(mut f) = *fade {
+                f.left -= 1;
+                if f.left == 0 {
+                    *fade = None;
+                    self.volume = f.target;
+                    if f.target <= 0.0 {
+                        self.stop();
+                    }
+                } else {
+                    *fade = Some(f);
+                    self.volume += f.step;
+                }
+            }
+            return;
+        }
         match &mut self.ticking {
-            Ticking::No | Ticking::Native | Ticking::MusicLayer => {}
+            Ticking::No | Ticking::Native | Ticking::MusicLayer | Ticking::Mod { .. } => {}
             Ticking::EntityBound => {
                 let entity = self
                     .bound_entity
@@ -1066,6 +1115,17 @@ impl SoundEngine {
         {
             backend.stop(c);
         }
+    }
+    /// A mod's `SoundRef::stop`: `stop`, and for good. A waiting instance leaves the queue and
+    /// never starts, and a looping one never repeats; it is gone once its channel ends.
+    pub fn stop_for_good(&mut self, id: InstanceId, backend: &mut impl Backend) {
+        if let Some(instance) = self.instances.get_mut(&id) {
+            instance.stop();
+        }
+        self.queued.retain(|(queued, _)| *queued != id);
+        self.queued_tickable.retain(|queued| *queued != id);
+        self.stop(id, backend);
+        self.collect(id);
     }
     /// `ChannelHandle.release`.
     fn release_handle(&mut self, handle: u64, backend: &mut impl Backend) {

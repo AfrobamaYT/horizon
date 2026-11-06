@@ -135,6 +135,10 @@ pub mod game {
     pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
         BlockEntityRef { level, position }
     }
+    /// A client mod's sound handle the game names.
+    pub fn sound_ref(id: u64) -> SoundRef {
+        SoundRef { id }
+    }
     /// A boss bar handle the game names.
     pub fn boss_bar_ref(epoch: NativeWorldEpoch, uuid: u128) -> BossBarRef {
         BossBarRef { epoch, uuid }
@@ -210,6 +214,16 @@ pub mod game {
                 level: self.level,
                 position: self.position,
             }
+        }
+    }
+
+    pub struct SoundRefFields {
+        pub id: u64,
+    }
+    impl Fields for SoundRef {
+        type Fields<'a> = SoundRefFields;
+        fn fields(&self) -> SoundRefFields {
+            SoundRefFields { id: self.id }
         }
     }
 

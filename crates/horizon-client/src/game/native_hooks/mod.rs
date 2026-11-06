@@ -1031,7 +1031,7 @@ use mod_api::{
 use mod_api::{BlockKey, DebugEntry, EffectKey};
 use mod_api::{
     CameraType, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason,
-    Recipe, SoundPlay,
+    Recipe, SoundPlay, SoundRef,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
@@ -10352,15 +10352,19 @@ impl Game<'_> {
     /// `after` ticks counted from then (0 to 1200, a minute; `SoundEngine.playDelayed`). `SoundPlay::ui` plays it at the listener as an interface sound
     /// (`SimpleSoundInstance.forUI`); `SoundPlay::at` at a position in the client's level,
     /// fading with distance (`volume` past 1 carries farther, 16 blocks times the volume), as
-    /// thunder heard after the flash or a blast heard when its shock wave arrives. False,
-    /// with nothing played, on a server or for a value out of range; an event the resources
-    /// don't have plays nothing, as vanilla's.
-    pub(super) fn native_play_local_sound(&self, sound: &SoundPlay, after: u32) -> bool {
+    /// thunder heard after the flash or a blast heard when its shock wave arrives. Its
+    /// `SoundRef` follows and controls this play: `state`, `stop` and `fade`. None, with nothing
+    /// played, on a server or for a value out of range; an event the resources don't have plays
+    /// nothing, as vanilla's, and its handle reads `Stopped` once the update has tried it.
+    pub(super) fn native_play_local_sound(
+        &self,
+        sound: &SoundPlay,
+        after: u32,
+    ) -> Option<SoundRef> {
         if !self.native_window() || !local_sound_ok(sound, after) {
-            return false;
+            return None;
         }
-        self.mod_sounds.borrow_mut().push((sound.clone(), after));
-        true
+        Some(self.mod_sounds.queue(sound, after))
     }
     /// The particles alive in the client's level (`ParticleEngine.countParticles`): 0 once
     /// a clear is asked, and on a server.
@@ -14889,7 +14893,10 @@ mod local_sound_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn render_gui_pre(&self, host: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
-            assert!(host.play_local_sound(&SoundPlay::ui("minecraft:ui.button.click"), 0));
+            assert!(
+                host.play_local_sound(&SoundPlay::ui("minecraft:ui.button.click"), 0)
+                    .is_some()
+            );
             Flow::Continue
         }
     }
@@ -14906,13 +14913,13 @@ mod local_sound_tests {
                 game.audio.heard.clear();
                 game.native_render_gui_pre(&mut false);
                 assert_eq!(
-                    game.mod_sounds.borrow().len(),
+                    game.mod_sounds.queued.borrow().len(),
                     1,
                     "held for the audio update"
                 );
                 assert!(!game.audio.heard.contains_key("minecraft:ui.button.click"));
                 game.tick_sound_engine();
-                assert!(game.mod_sounds.borrow().is_empty());
+                assert!(game.mod_sounds.queued.borrow().is_empty());
                 assert_eq!(game.audio.heard.get("minecraft:ui.button.click"), Some(&1));
             });
         });

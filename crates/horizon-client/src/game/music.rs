@@ -204,10 +204,9 @@ impl Game<'_> {
         };
         self.audio
             .set_listener_reserve(self.settings.extras.ui_sound_reserve);
-        // Client mods' sounds asked for since the last update start with it.
-        for (sound, after) in self.mod_sounds.get_mut().drain(..) {
-            self.audio.play_mod_sound(&sound, after);
-        }
+        // Client mods' sounds asked for since the last update start with it, then their stops
+        // and fades apply.
+        self.apply_mod_sounds();
         self.audio.tick(self.pause, &ctx);
     }
     /// `Minecraft.setLevel` -> `updateLevelInEngines`: `SoundManager.stop()`.
