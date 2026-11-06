@@ -3626,6 +3626,23 @@ impl Game<'_> {
         self.fire_render_item_in_frame(entity_id, pos, stack, canceled);
     }
 
+    /// Before one of the first-person view's block overlays (`ScreenEffectRenderer`) is drawn,
+    /// once a frame each is shown: `Block` with the view-blocking `state` at `pos` the camera is
+    /// inside, `Water` with the `state` at the eye's block `pos` while the eye is under water, and
+    /// `Fire` with fire's default `state` at the player's block `pos` while they burn. Never for a
+    /// spectator; `Fire` only in first person. Set `canceled` to leave that overlay out; the
+    /// frame, the other block overlays and the HUD's camera overlays are drawn as before.
+    /// Client-side.
+    pub(super) fn native_extract_block_screen_effect(
+        &self,
+        effect: mod_api::BlockScreenEffect,
+        state: BlockStateId,
+        pos: BlockPos,
+        canceled: &mut bool,
+    ) {
+        self.fire_extract_block_screen_effect(effect, state, pos, canceled);
+    }
+
     /// The camera this frame is drawn from, `partial` ticks past the last tick, after vanilla
     /// placed it (`Camera.setup`): its position, and its yaw and pitch in degrees. Set them to
     /// draw the world from anywhere: a cinematic or replay camera. Only the picture, the sound's
