@@ -635,7 +635,7 @@ pub struct DataStore {
 }
 /// `<kind-dir>/<ns>:<path>` for a pack file the content tables read:
 /// `recipe/`, `recipe_filter/`, `loot_table/`, `advancement/`, `trade_set/`,
-/// `villager_trade/`, `dialog/`, `damage_type/`, `data_maps/`, enchantments, songs,
+/// `villager_trade/`, `dialog/`, `damage_type/`, `dimension_type/`, `data_maps/`, enchantments, songs,
 /// instruments, predicates, item modifiers or `tags/<sub>/`, where the id keeps the sub
 /// path so a nested tag kind stays addressable.
 fn content_id(file: &str) -> Option<String> {
@@ -644,8 +644,8 @@ fn content_id(file: &str) -> Option<String> {
     let (kind, rest) = rest.split_once('/')?;
     let kind = match kind {
         "recipe" | "recipe_filter" | "loot_table" | "advancement" | "trade_set"
-        | "villager_trade" | "dialog" | "damage_type" | "data_maps" | "enchantment"
-        | "jukebox_song" | "instrument" | "predicate" | "item_modifier" => kind,
+        | "villager_trade" | "dialog" | "damage_type" | "dimension_type" | "data_maps"
+        | "enchantment" | "jukebox_song" | "instrument" | "predicate" | "item_modifier" => kind,
         // A tag id is `{ns}:{path-under-tags}` (`tags/worldgen/biome/
         // test:sub/mytag`), the whole path after the namespace, so nested
         // registries keep their directory (`TagLoader`'s id shape).
@@ -693,6 +693,7 @@ impl DataStore {
                 "damage_type",
                 "data_maps",
                 "dialog",
+                "dimension_type",
                 "enchantment",
                 "function",
                 "instrument",
@@ -937,11 +938,17 @@ pub fn dimension_stems(packs: &[&DataPack]) -> BTreeMap<String, serde_json::Valu
             else {
                 continue;
             };
+            // An id that is no safe folder name (`..`, an empty segment) would open a level
+            // outside the world's `dimensions` folder.
+            let id = format!("{namespace}:{path}");
+            if !overrides::valid_level_id(&id) {
+                continue;
+            }
             if let Some(json) = pack
                 .read(&file)
                 .and_then(|b| serde_json::from_slice(&b).ok())
             {
-                out.insert(format!("{namespace}:{path}"), json);
+                out.insert(id, json);
             }
         }
     }
@@ -990,6 +997,34 @@ pub fn worldgen_overrides(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pack_level_outside_the_worlds_folder_is_not_a_level() {
+        let dir = std::env::temp_dir().join(format!("horizon-pack-ids-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let pack = dir.join("datapacks/p");
+        for path in [
+            "data/test/dimension/pocket.json",
+            "data/test/dimension/a/b.json",
+            "data/test/dimension/my pocket.json",
+            "data/test/dimension/Pocket.json",
+            "data/Test/dimension/pocket.json",
+        ] {
+            let file = pack.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "{}").unwrap();
+        }
+        std::fs::write(
+            pack.join("pack.mcmeta"),
+            r#"{"pack":{"description":"","pack_format":15}}"#,
+        )
+        .unwrap();
+        let packs = discover(&dir);
+        let refs: Vec<&DataPack> = packs.iter().collect();
+        let ids: Vec<String> = dimension_stems(&refs).into_keys().collect();
+        assert_eq!(ids, ["test:a/b", "test:pocket"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn structure_templates_read_archive_generations_without_extraction() {
@@ -1308,6 +1343,7 @@ mod tests {
             "data/mine/dialog/config/points.json",
             "{\"type\":\"minecraft:notice\",\"title\":\"Points\"}",
         );
+        write("data/mine/dimension_type/pocket.json", "{\"min_y\":-128}");
         let packs = discover(&dir);
         assert_eq!(packs.len(), 1);
         assert_eq!(packs[0].id, "file/mypack");
@@ -1324,6 +1360,11 @@ mod tests {
         assert_eq!(
             store.files["dialog/mine:config/points"],
             [b"{\"type\":\"minecraft:notice\",\"title\":\"Points\"}".to_vec()]
+        );
+        // So do dimension types: a client takes a level's build height from them.
+        assert_eq!(
+            store.files["dimension_type/mine:pocket"],
+            [b"{\"min_y\":-128}".to_vec()]
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

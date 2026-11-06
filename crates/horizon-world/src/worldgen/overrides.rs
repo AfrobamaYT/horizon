@@ -52,6 +52,30 @@ pub const PACK_KINDS: [&str; 5] = [
     "worldgen",
 ];
 
+/// Whether `namespace` is a resource location namespace (`[a-z0-9_.-]`) that is also one safe
+/// folder name: not empty, not `.` or `..`.
+pub fn valid_level_namespace(namespace: &str) -> bool {
+    !matches!(namespace, "" | "." | "..")
+        && namespace
+            .bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-'))
+}
+
+/// Whether `path` is a resource location path (`[a-z0-9_.-/]`) a level can be stored under:
+/// every `/`-separated segment is a safe folder name, so no empty segment (a leading, trailing
+/// or doubled `/`) and no `.` or `..`.
+pub fn valid_level_path(path: &str) -> bool {
+    !path.is_empty() && path.split('/').all(valid_level_namespace)
+}
+
+/// Whether `id` (`namespace:path`) names a level whose folder stays inside the world's
+/// `dimensions` folder. Vanilla keeps a level's folder under it through
+/// `Identifier.resolveAgainst`.
+pub fn valid_level_id(id: &str) -> bool {
+    id.split_once(':')
+        .is_some_and(|(namespace, path)| valid_level_namespace(namespace) && valid_level_path(path))
+}
+
 /// `ns:path` for a pack file `data/<ns>/<kind>/<path>.json`.
 fn resource_id(file: &str, kind: &str) -> Option<String> {
     let (ns, rest) = file.strip_prefix("data/")?.split_once('/')?;
@@ -344,6 +368,42 @@ impl WorldgenOverrides {
 
 #[cfg(test)]
 mod tests {
+
+    /// A level's id is a folder under the world: nothing may climb out of it or name nothing.
+    #[test]
+    fn level_ids_must_be_safe_folder_names() {
+        for id in [
+            "test:pocket",
+            "test:a/b",
+            "test:deep/pocket-1.x",
+            "my_mod.2:a_b/c-d",
+        ] {
+            assert!(valid_level_id(id), "{id}");
+        }
+        for id in [
+            "test:../minecraft/overworld",
+            "test:a/../../b",
+            "test:a/../b",
+            "test:/abs",
+            "test:trailing/",
+            "test:a//b",
+            "test:.",
+            "test:..",
+            "test:./a",
+            "test:",
+            ":pocket",
+            "..:pocket",
+            ".:pocket",
+            "pocket",
+            "test:Pocket",
+            "test:my pocket",
+            "test:a\\b",
+            "te st:pocket",
+            "test:a:b",
+        ] {
+            assert!(!valid_level_id(id), "{id}");
+        }
+    }
     use super::*;
     #[test]
     fn a_template_id_comes_from_a_structure_nbt_file_only() {
