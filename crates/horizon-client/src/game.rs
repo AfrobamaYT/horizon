@@ -4041,13 +4041,7 @@ impl Game<'_> {
     }
     /// `LivingEntity.getUsedItemHand`: the hand of the item in use.
     fn used_hand(&self) -> Option<Hand> {
-        self.using.map(|(slot, _)| {
-            if slot == shield::OFFHAND_SLOT {
-                Hand::Off
-            } else {
-                Hand::Main
-            }
-        })
+        item_use::hand_of(self.using)
     }
     /// Run `f` with `hand` acting (`held`, `consume_held`, `swing_arm`).
     fn with_hand<T>(&mut self, hand: Hand, f: impl FnOnce(&mut Self) -> T) -> T {
@@ -7871,8 +7865,7 @@ impl Game<'_> {
             self.using = None;
             return;
         };
-        // Switching hotbar slots only ends a main-hand use.
-        let hand_changed = slot != self.selected && slot != shield::OFFHAND_SLOT;
+        let hand_changed = self.use_hand_changed(slot);
         if !self.right || hand_changed || self.screen != Screen::Playing {
             self.using = None;
             self.release_used_item(&stack, ticks, hand_changed);
@@ -7884,9 +7877,14 @@ impl Game<'_> {
             self.using = None;
             return;
         };
+        let going_on = self.use_item_ticked(&stack, ticks);
+        // A mod's tick released it: nothing of this use is left to run.
+        if self.using != Some((slot, ticks)) {
+            return;
+        }
         // a mod's tick ran the use out: finished now, or frozen until let go
         // for an item used on release (CrossbowItem.useOnRelease).
-        if !self.use_item_ticked(&stack, ticks) {
+        if !going_on {
             if &*stack.item != "minecraft:crossbow" {
                 self.complete_using_item(slot, &stack, &info);
             }
@@ -7894,14 +7892,12 @@ impl Game<'_> {
         }
         if self.blocks_attacks(&stack).is_some() {
             // ShieldItem: used for 72000 ticks, i.e. until released.
-            self.item_on_use_tick(&stack, ticks);
-            self.using = Some((slot, ticks + 1));
+            if self.item_on_use_tick(&stack, ticks) {
+                self.using = Some((slot, ticks + 1));
+            }
             return;
         }
         if self.tick_drinking(slot, ticks, &stack) {
-            if self.using.is_none() {
-                self.use_item_finished(&stack);
-            }
             return;
         }
         if &*stack.item == "minecraft:bow" {
@@ -7967,7 +7963,9 @@ impl Game<'_> {
         if consumable.should_emit(remaining) {
             self.emit_consume(consumable, &stack, 5);
         }
-        self.item_on_use_tick(&stack, ticks);
+        if !self.item_on_use_tick(&stack, ticks) {
+            return;
+        }
         match item_use::count_down(ticks, self.use_duration) {
             Some(ticks) => self.using = Some((slot, ticks)),
             None => self.complete_using_item(slot, &stack, &info),
@@ -8047,16 +8045,18 @@ impl Game<'_> {
         self.using = None;
         self.use_vibration(stack, "minecraft:item_interact_finish");
     }
+    /// Whether the use effects of `stack` ask for interaction vibrations.
+    pub(super) fn use_vibrates(&self, stack: &ItemStack) -> bool {
+        self.items()
+            .get(&stack.item)
+            .is_some_and(|i| i.interact_vibrations)
+    }
     /// `ItemStack.causeUseVibration` for `stack` used by the player: the
     /// `event` game event (`ITEM_INTERACT_START` when the use begins,
     /// `ITEM_INTERACT_FINISH` when it ends) from the player, at its feet, when
     /// the stack's use effects ask for interaction vibrations (the default).
     pub(super) fn use_vibration(&mut self, stack: &ItemStack, event: &'static str) {
-        if !self
-            .items()
-            .get(&stack.item)
-            .is_some_and(|i| i.interact_vibrations)
-        {
+        if !self.use_vibrates(stack) {
             return;
         }
         let Some(p) = self.player.as_ref().map(|p| p.position) else {
