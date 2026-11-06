@@ -161,8 +161,7 @@ impl Game<'_> {
                 Target::Guest(conn) => self
                     .lan
                     .as_mut()
-                    .and_then(|host| host.hub.guest_mut(conn))
-                    .and_then(|g| g.motion.as_deref_mut()),
+                    .and_then(|host| host.hub.guests.motion_mut(conn)),
                 _ => None,
             };
             let Some(motion) = motion else {
@@ -262,10 +261,11 @@ mod tests {
         use horizon_client::mobs::Mob;
         fn fake_fall<'a>(game: &'a mut super::super::Game<'_>) -> &'a mut f64 {
             let host = game.lan.as_mut().unwrap();
-            let g = host.hub.guests.iter_mut().find(|g| g.uuid == 2).unwrap();
-            &mut g
-                .motion
-                .as_deref_mut()
+            let conn = host.hub.guests.iter().find(|g| g.uuid == 2).unwrap().conn;
+            &mut host
+                .hub
+                .guests
+                .motion_mut(conn)
                 .expect("a fake has a motion")
                 .fall_distance
         }

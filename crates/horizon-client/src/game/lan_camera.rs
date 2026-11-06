@@ -256,9 +256,10 @@ impl Game<'_> {
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
-                let g = &mut host.hub.guests[gi];
-                g.position = at;
-                (g.yaw, g.pitch) = (yaw, pitch);
+                host.hub.guests.update(gi, |g| {
+                    g.position = at;
+                    (g.yaw, g.pitch) = (yaw, pitch);
+                });
             }
         }
     }

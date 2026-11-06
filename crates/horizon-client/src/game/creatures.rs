@@ -8834,19 +8834,36 @@ mod tests {
                 wolf.extra.owner = Some(horizon_client::lan::playerdata::uuid_ints(12));
                 game.mobs.push(wolf);
                 game.mobs.push(Mob::new(101, pig_type, Vec3::ZERO, 0.0));
-                game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+                {
+                    let value = false;
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.placed = value);
+                }
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
                 let credit = *game.last_hurt_by_player.get(&101).unwrap();
                 assert!(game.resolve_player_credit(credit).is_none());
-                game.lan.as_mut().unwrap().hub.guests[0].placed = true;
+                {
+                    let value = true;
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.placed = value);
+                }
                 assert_eq!(game.resolve_player_credit(credit), Some(Some(12)));
                 let victim = game.mobs[1].clone();
                 game.mob_died(&victim);
                 let stats = &game.lan.as_ref().unwrap().play.get(&12).unwrap().stats;
                 assert_eq!(stats.get("custom", "minecraft:mob_kills"), 1);
-                let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-                assert!(guest.advancements.has("test:catalyst", "kill"));
-                guest.advancements = Default::default();
+                game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                    assert!(guest.advancements.has("test:catalyst", "kill"));
+                    guest.advancements = Default::default();
+                });
                 let mut second = victim.clone();
                 second.id = 102;
                 game.last_hurt_by_player
@@ -8855,7 +8872,15 @@ mod tests {
                 let host = game.lan.as_ref().unwrap();
                 assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 2);
                 assert!(host.hub.guests[0].advancements.has("test:catalyst", "kill"));
-                game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+                {
+                    let value = "minecraft:the_nether".into();
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.dimension = value);
+                }
                 let mut third = victim.clone();
                 third.id = 103;
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));

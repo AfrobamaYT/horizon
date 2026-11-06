@@ -2433,7 +2433,8 @@ mod tests {
             assert_eq!(game.online_player("GUEST12").unwrap().id, 12);
             // A fake with the same name must not hide a real player later in join order.
             let guests = &mut game.lan.as_mut().unwrap().hub.guests;
-            guests.iter_mut().find(|g| g.uuid == 12).unwrap().name = "robot".into();
+            let index = guests.iter().position(|g| g.uuid == 12).unwrap();
+            guests.update(index, |g| g.name = "robot".into());
             guests.reverse();
             assert_eq!(game.online_player("ROBOT").unwrap().id, 12);
         });

@@ -875,12 +875,36 @@ mod tests {
             assert!(mob.set_target(game, Some(player)));
             assert_eq!(mob.target(game), Some(player));
             assert_eq!(game.lan.as_ref().unwrap().mob_players.get(&12), Some(&1));
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 1;
+            {
+                let value = 1;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
             assert!(!mob.set_target(game, Some(player)));
             assert_eq!(mob.target(game), None);
             assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 0;
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            {
+                let value = 0;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             assert!(!mob.set_target(game, Some(player)));
             assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
             game.lan.as_mut().unwrap().mob_players.clear();

@@ -306,19 +306,16 @@ impl Game<'_> {
         slot: usize,
     ) -> Option<&mut Option<ItemStack>> {
         let backing = self.native_menu_slot_backing(menu, slot)?;
-        let mut guests = self
-            .lan
-            .iter_mut()
-            .flat_map(|host| host.hub.guests.iter_mut());
-        let g = guests.find(|g| {
+        let guests = &mut self.lan.as_mut()?.hub.guests;
+        let index = guests.iter().position(|g| {
             g.placed
                 && g.uuid == menu.fields().player.uuid()
                 && g.entity_id as u32 == menu.fields().player.entity().id()
         })?;
         match backing {
-            MenuSlotBacking::Ender(n) => g.ender_items.get_mut(n),
-            MenuSlotBacking::CraftGrid(n) => g.craft_grid.get_mut(n),
-            MenuSlotBacking::Native(n) => g.native_menu.get_mut(n),
+            MenuSlotBacking::Ender(n) => guests.ender_items_mut(index)?.get_mut(n),
+            MenuSlotBacking::CraftGrid(n) => guests.craft_grid_mut(index)?.get_mut(n),
+            MenuSlotBacking::Native(n) => guests.native_menu_mut(index)?.get_mut(n),
             _ => None,
         }
     }
@@ -586,7 +583,10 @@ mod tests {
             assert_eq!(inventory.slot(game, 46), None);
             let stone = ItemStack::new("minecraft:stone", 4);
             let host = game.lan.as_mut().unwrap();
-            host.hub.guests[0].inventory[9] = Some(stone.clone());
+            {
+                let value = Some(stone.clone());
+                host.hub.guests.update(0, |g| g.inventory[9] = value);
+            }
             {
                 let value = Some(stone.clone());
                 host.hub.guests.update(0, |guest| guest.carried = value);

@@ -313,10 +313,8 @@ fn progress_events_capture_each_players_full_mutation_state() {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(13)
-                .unwrap()
-                .advancements
-                .grant(ID, "gamma", DATE);
+                .update_guest(13, |guest| guest.advancements.grant(ID, "gamma", DATE))
+                .unwrap();
             game.as_guest(12, |game| {
                 game.adv.progress.grant(ID, "alpha", DATE);
                 let index = game.adv.tree.by_id[ID];
@@ -383,10 +381,8 @@ fn progress_events_capture_each_players_full_mutation_state() {
                 guest.advancements_loaded = reload;
             });
             host.hub
-                .guest_mut(13)
-                .unwrap()
-                .advancements
-                .grant(ID, "gamma", DATE);
+                .update_guest(13, |guest| guest.advancements.grant(ID, "gamma", DATE))
+                .unwrap();
             host.hub.mods_loaded = reload;
             game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners));
             if reload {

@@ -304,17 +304,19 @@ impl Game<'_> {
                 .then(|| self.eye_position().unwrap_or_default())
         } else {
             let acting = self.lan_acting;
-            let Some(guest) = self.lan.as_mut().and_then(|h| {
-                h.hub.guests.iter_mut().find(|g| {
-                    horizon_client::lan::playerdata::uuid_ints(g.uuid) == uuid
-                        && Some(g.conn) != acting
-                })
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
+            let Some(index) = host.hub.guests.iter().position(|g| {
+                horizon_client::lan::playerdata::uuid_ints(g.uuid) == uuid && Some(g.conn) != acting
             }) else {
                 return;
             };
-            let [x, y, z] = guest.position;
-            let eye = [x, y + guest.eye_height(), z];
-            transform_bad_omen(&mut guest.effects).then_some(eye)
+            host.hub.guests.update(index, |guest| {
+                let [x, y, z] = guest.position;
+                let eye = [x, y + guest.eye_height(), z];
+                transform_bad_omen(&mut guest.effects).then_some(eye)
+            })
         };
         if let Some(eye) = eye {
             self.audio

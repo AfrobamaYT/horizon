@@ -433,16 +433,14 @@ impl Game<'_> {
                 e.stack = kept;
             }
         }
-        let guests = self
-            .lan
-            .iter_mut()
-            .flat_map(|host| host.hub.guests.iter_mut());
-        for g in guests {
-            if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
-                g.ender_items.clone_from(&kept.ender_items);
-                g.craft_grid.clone_from(&kept.craft_grid);
-                g.native_menu.clone_from(&kept.native_menu);
-            }
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.guests.update_all(|g| {
+                if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
+                    g.ender_items.clone_from(&kept.ender_items);
+                    g.craft_grid.clone_from(&kept.craft_grid);
+                    g.native_menu.clone_from(&kept.native_menu);
+                }
+            });
         }
         for (holder, kept) in level.attachments {
             if let Ok(map) = self.attachment_slot(holder) {

@@ -388,9 +388,15 @@ fn nested_guest_turns_restore_each_equipment_store() {
                 "minecraft:leather_horse_armor",
             ),
         ] {
-            let guest = game.lan.as_mut().unwrap().hub.guest_mut(conn).unwrap();
-            guest.equipment[BODY] = stack(body);
-            guest.equipment[SADDLE] = stack(saddle);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(conn, |guest| {
+                    guest.equipment[BODY] = stack(body);
+                    guest.equipment[SADDLE] = stack(saddle);
+                })
+                .unwrap();
         }
         game.as_guest(12, |game| {
             assert_eq!(game.equipment[BODY], stack("minecraft:golden_horse_armor"));
@@ -580,11 +586,15 @@ fn server_services_preserve_identity_and_message_delivery() {
     use mod_api::{ServerHost, Text};
     with_guests(|game| {
         let guests = &mut game.lan.as_mut().unwrap().hub.guests;
-        guests[0].permission = 3;
-        guests[0].game_mode = 1;
-        guests[0].address = "192.0.2.12:25565".parse().unwrap();
-        guests[1].permission = 1;
-        guests[1].address = "[2001:db8::13]:25566".parse().unwrap();
+        guests.update(0, |g| {
+            g.permission = 3;
+            g.game_mode = 1;
+            g.address = "192.0.2.12:25565".parse().unwrap();
+        });
+        guests.update(1, |g| {
+            g.permission = 1;
+            g.address = "[2001:db8::13]:25566".parse().unwrap();
+        });
         let players = game.players().server_players();
         assert_eq!(
             players.iter().map(|p| p.uuid()).collect::<Vec<_>>(),

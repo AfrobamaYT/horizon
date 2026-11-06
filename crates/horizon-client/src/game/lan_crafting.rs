@@ -267,10 +267,13 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some(g) = host.hub.guest_mut(conn) else {
+        if host
+            .hub
+            .update_guest(conn, |g| g.craft_result.clone_from(&result))
+            .is_none()
+        {
             return;
-        };
-        g.craft_result.clone_from(&result);
+        }
         let menu = host
             .play
             .get_mut(&conn)
@@ -803,7 +806,7 @@ impl Game<'_> {
                 carried,
             }),
         );
-        host.hub.guests[gi].inventory_told();
+        host.hub.guests.update(gi, |g| g.inventory_told());
     }
 
     /// `AbstractContainerMenu.removed` of a crafting menu: the closed window

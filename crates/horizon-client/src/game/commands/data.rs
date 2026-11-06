@@ -470,9 +470,8 @@ impl Game<'_> {
                 .as_mut()?
                 .hub
                 .guests
-                .iter_mut()
-                .find(|g| g.conn == conn)
-                .map(|g| g.saved.get_or_insert_with(empty)),
+                .saved_data_mut(conn)
+                .map(|saved| saved.get_or_insert_with(empty)),
             Target::Mob(id)
             | Target::Item(id)
             | Target::Stand(id)

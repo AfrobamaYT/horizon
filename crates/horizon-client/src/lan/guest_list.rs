@@ -72,6 +72,36 @@ impl GuestList {
             .collect()
     }
 
+    /// Borrow saved data without exposing indexed identity fields.
+    pub fn saved_data_mut(&mut self, conn: u32) -> Option<&mut Option<horizon_world::nbt::Tag>> {
+        let index = self.connection_index(conn)?;
+        Some(&mut self.rows[index].saved)
+    }
+
+    /// Borrow only the stored menu items at this collection index.
+    pub fn ender_items_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<&mut [Option<crate::items::ItemStack>]> {
+        Some(&mut self.rows.get_mut(index)?.ender_items)
+    }
+
+    /// Borrow only the stored menu items at this collection index.
+    pub fn craft_grid_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<&mut [Option<crate::items::ItemStack>]> {
+        Some(&mut self.rows.get_mut(index)?.craft_grid)
+    }
+
+    /// Borrow only the stored menu items at this collection index.
+    pub fn native_menu_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<&mut [Option<crate::items::ItemStack>]> {
+        Some(&mut self.rows.get_mut(index)?.native_menu)
+    }
+
     /// Borrow a body without exposing the guest's indexed fields or row replacement.
     pub fn motion_mut(&mut self, conn: u32) -> Option<&mut crate::motion::PlayerMotion> {
         let index = self.connection_index(conn)?;

@@ -100,17 +100,11 @@ impl Game<'_> {
                 p.fall_flying = false;
                 true
             }
-            Some(Target::Guest(conn)) => {
-                let Some(g) = self
-                    .lan
-                    .as_mut()
-                    .and_then(|h| h.hub.guests.iter_mut().find(|g| g.conn == conn))
-                else {
-                    return false;
-                };
-                g.fall_flying = false;
-                true
-            }
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|h| h.hub.update_guest(conn, |g| g.fall_flying = false))
+                .is_some(),
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;

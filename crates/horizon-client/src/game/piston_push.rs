@@ -515,8 +515,7 @@ impl Game<'_> {
             }
             Target::Guest(conn) => {
                 let host = self.lan.as_mut()?;
-                let g = host.hub.guests.iter_mut().find(|g| g.conn == conn)?;
-                limit(&mut g.motion.as_deref_mut()?.piston)
+                limit(&mut host.hub.guests.motion_mut(conn)?.piston)
             }
             Target::Entity(EntityHandle::Mob(i)) => limit(&mut self.mobs[i].piston),
             _ => limit(accumulators.entry(target).or_default()),
@@ -531,17 +530,17 @@ impl Game<'_> {
                 }
             }
             Target::Guest(conn) => {
-                if let Some(host) = self.lan.as_mut()
-                    && let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
-                {
-                    // The body and the hub's copy of its position move together:
-                    // `leave_guest` writes the body back over the hub's.
-                    for (slot, delta) in g.position.iter_mut().zip(movement.components()) {
-                        *slot += delta;
-                    }
-                    if let Some(m) = g.motion.as_deref_mut() {
-                        m.position = m.position.add_vector(movement);
-                    }
+                if let Some(host) = self.lan.as_mut() {
+                    let _ = host.hub.update_guest(conn, |g| {
+                        // The body and the hub's copy of its position move together:
+                        // `leave_guest` writes the body back over the hub's.
+                        for (slot, delta) in g.position.iter_mut().zip(movement.components()) {
+                            *slot += delta;
+                        }
+                        if let Some(m) = g.motion.as_deref_mut() {
+                            m.position = m.position.add_vector(movement);
+                        }
+                    });
                 }
             }
             Target::Entity(handle) => {
@@ -560,8 +559,7 @@ impl Game<'_> {
             }
             Target::Guest(conn) => {
                 if let Some(host) = self.lan.as_mut()
-                    && let Some(guest) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
-                    && let Some(motion) = guest.motion.as_deref_mut()
+                    && let Some(motion) = host.hub.guests.motion_mut(conn)
                 {
                     motion.velocity = piston_push::bounce_velocity(movement, motion.velocity);
                 }

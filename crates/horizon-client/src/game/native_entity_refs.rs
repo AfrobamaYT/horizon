@@ -1755,18 +1755,27 @@ pub(super) mod tests {
             // default mode (survival) they get its abilities.
             let root = std::env::temp_dir().join(format!("abilities-force-{}", std::process::id()));
             game.world_root = root.clone();
-            let g = game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap();
-            g.game_mode = 1;
-            g.abilities.update_for_mode(1);
-            assert!(g.abilities.may_fly && g.abilities.instabuild);
-            horizon_client::lan::playerdata::save(g, &root);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |g| {
+                    g.game_mode = 1;
+                    g.abilities.update_for_mode(1);
+                    assert!(g.abilities.may_fly && g.abilities.instabuild);
+                    horizon_client::lan::playerdata::save(g, &root);
+                })
+                .unwrap();
             let joined = |game: &mut super::super::Game<'_>, force| {
                 let host = game.lan.as_mut().unwrap();
                 host.hub.config.default_game_mode = 0;
                 host.hub.config.force_game_mode = force;
-                let g = host.hub.guest_mut(13).unwrap();
-                g.game_mode = 0;
-                g.abilities = Default::default();
+                host.hub
+                    .update_guest(13, |g| {
+                        g.game_mode = 0;
+                        g.abilities = Default::default();
+                    })
+                    .unwrap();
                 game.lan_guest_joined(13, &[], [0.0, 64.0, 0.0]);
                 let g = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
                 (
@@ -2193,12 +2202,36 @@ pub(super) mod tests {
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid(), 1);
             // A fake record in the Nether does not keep that level ticking.
-            game.lan.as_mut().unwrap().hub.guests[1].dimension = "minecraft:the_nether".into();
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(1, |guest| guest.dimension = value);
+            }
             let ticking = game.levels_to_tick();
             assert!(!ticking.contains(&super::super::Dim::Nether));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             assert!(game.levels_to_tick().contains(&super::super::Dim::Nether));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:overworld".into();
+            {
+                let value = "minecraft:overworld".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             game.lan_acting = Some(real_id);
             let selector = horizon_client::command::args::Selector {
                 kind: 'a',

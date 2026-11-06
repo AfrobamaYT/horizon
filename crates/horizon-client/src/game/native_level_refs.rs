@@ -526,7 +526,15 @@ mod tests {
                     .unwrap();
                 game.world.set(pos[0], pos[1], pos[2], log).unwrap();
                 let tool = ItemStack::new("minecraft:iron_axe", 1);
-                game.lan.as_mut().unwrap().hub.guests[0].inventory[0] = Some(tool.clone());
+                {
+                    let value = Some(tool.clone());
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |g| g.inventory[0] = value);
+                }
                 let player = game.native_player_ref(12).unwrap();
                 let level = game.native_level(game.dim.id()).unwrap();
                 let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
