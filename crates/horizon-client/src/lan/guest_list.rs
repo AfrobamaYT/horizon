@@ -72,6 +72,16 @@ impl GuestList {
             .collect()
     }
 
+    /// Borrow only queued packets, without exposing the guest's indexed fields.
+    pub fn inbox_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<
+        &mut std::collections::VecDeque<(horizon_protocol::packets::play::Serverbound, usize)>,
+    > {
+        Some(&mut self.rows.get_mut(index)?.inbox)
+    }
+
     /// Borrow saved data without exposing indexed identity fields.
     pub fn saved_data_mut(&mut self, conn: u32) -> Option<&mut Option<horizon_world::nbt::Tag>> {
         let index = self.connection_index(conn)?;

@@ -5506,7 +5506,7 @@ mod tests {
         );
         let (mut hub, rx) = hub_with_sync(sync);
         let own = hub.guests[0].entity_id;
-        hub.guests[0].sent_chunks.insert((0, 0));
+        hub.guests.update(0, |g| g.sent_chunks.insert((0, 0)));
         let near = EntityState {
             id: 37,
             uuid: 37,
@@ -5600,7 +5600,7 @@ mod tests {
 
     /// One tick of the hub that handles a single packet from the guest.
     fn tick_packet(hub: &mut Hub, world: &mut World, packet: S) {
-        hub.guests[0].inbox.push_back((packet, 0));
+        hub.guests.inbox_mut(0).unwrap().push_back((packet, 0));
         let mut next_entity = 2;
         let border = crate::worldborder::WorldBorder::default();
         let mut ctx = TickCtx {
@@ -5624,7 +5624,10 @@ mod tests {
     /// One tick of the hub that handles a single position move from the guest.
     fn tick_guest_move(hub: &mut Hub, world: &mut World, to: [f64; 3], flags: u8) {
         // One position move per client tick (receivedPositionThisTick).
-        hub.guests[0].position_this_tick = false;
+        {
+            let value = false;
+            hub.guests.update(0, |g| g.position_this_tick = value);
+        }
         tick_packet(
             hub,
             world,
@@ -5646,9 +5649,15 @@ mod tests {
         // Block state 1 is stone in the vanilla registry order.
         const STONE: u32 = 1;
         let (mut hub, rx) = hub_with_a_guest();
-        hub.guests[0].load_timeout = 0;
+        {
+            let value = 0;
+            hub.guests.update(0, |g| g.load_timeout = value);
+        }
         // Across a block corner: the box's four corners are four different blocks.
-        hub.guests[0].position = [0.0, 64.0, 0.0];
+        {
+            let value = [0.0, 64.0, 0.0];
+            hub.guests.update(0, |g| g.position = value);
+        }
         let mut world = floor_at(STONE);
         // The connection's 200th tick is the first that may send: vanilla starts the count at 0.
         hub.ticks = 199;
@@ -5677,7 +5686,10 @@ mod tests {
             "no more than once every 200 ticks"
         );
         // The last move the server resolved came down onto something: it stands on its own.
-        hub.guests[0].rests_on_ground = true;
+        {
+            let value = true;
+            hub.guests.update(0, |g| g.rests_on_ground = value);
+        }
         hub.ticks = 500;
         tick_guest_move(&mut hub, &mut world, [0.0, 64.0, 0.0], 1);
         assert!(
@@ -5685,7 +5697,10 @@ mod tests {
             "a player the server saw land is not resent the blocks"
         );
         // A client that does not claim the ground is not helped either.
-        hub.guests[0].rests_on_ground = false;
+        {
+            let value = false;
+            hub.guests.update(0, |g| g.rests_on_ground = value);
+        }
         hub.ticks = 800;
         tick_guest_move(&mut hub, &mut world, [0.0, 64.0, 0.0], 0);
         assert!(
@@ -5694,7 +5709,10 @@ mod tests {
         );
         // A box over one block gets that block once (the corners are the same cell).
         hub.ticks = 1100;
-        hub.guests[0].position = [0.5, 64.0, 0.5];
+        {
+            let value = [0.5, 64.0, 0.5];
+            hub.guests.update(0, |g| g.position = value);
+        }
         tick_guest_move(&mut hub, &mut world, [0.5, 64.0, 0.5], 1);
         assert_eq!(
             sent_block_updates(&rx),
@@ -5706,8 +5724,14 @@ mod tests {
     #[test]
     fn held_network_guests_keep_level_updates_without_including_fake_actors() {
         let (mut hub, rx) = hub_with_a_guest();
-        hub.guests[0].placed = false;
-        hub.guests[0].held = true;
+        {
+            let value = false;
+            hub.guests.update(0, |g| g.placed = value);
+        }
+        {
+            let value = true;
+            hub.guests.update(0, |g| g.held = value);
+        }
         let (mut other, fake_rx) = hub_with_a_guest();
         let mut fake = other.guests.remove(0);
         fake.kind = super::super::guest::GuestKind::Fake;
@@ -5767,7 +5791,7 @@ mod tests {
         };
         assert_eq!(args[0], Tag::Int(1));
         assert_eq!(args[2], display_name(&hub.loop_context, 1, "Bob"));
-        hub.guests[0].sent_chunks.insert((2, 0));
+        hub.guests.update(0, |g| g.sent_chunks.insert((2, 0)));
         let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
         let mut next_entity = 100;
         let border = crate::worldborder::WorldBorder::default();
@@ -5789,7 +5813,10 @@ mod tests {
         hub.track_entities(&mut ctx);
         assert!(!hub.guests[0].tracker.is_tracking(2));
         assert!(hub.guests[1].tracker.ids().is_empty());
-        hub.guests[0].placed = false;
+        {
+            let value = false;
+            hub.guests.update(0, |g| g.placed = value);
+        }
         hub.place_new_player(2, &mut ctx);
         assert!(rx.try_recv().is_err());
         hub.place_new_player(1, &mut ctx);
@@ -5850,7 +5877,7 @@ mod tests {
         ann.equipment[BODY] = Some(ItemStack::new("minecraft:white_carpet", 1));
         ann.equipment[SADDLE] = Some(ItemStack::new("minecraft:saddle", 1));
         hub.guests.push(ann);
-        hub.guests[0].sent_chunks.insert((0, 0));
+        hub.guests.update(0, |g| g.sent_chunks.insert((0, 0)));
         // The test hub syncs no entity type registry.
         hub.entity_types.insert("minecraft:player".into(), 1);
         let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
@@ -5998,7 +6025,10 @@ mod tests {
             "the fixture's root is selectable"
         );
         let (mut hub, rx) = hub_with_sync(sync);
-        hub.guests[0].load_timeout = 0;
+        {
+            let value = 0;
+            hub.guests.update(0, |g| g.load_timeout = value);
+        }
         let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
         let open = |tab: &str| {
             S::SeenAdvancements(play::SeenAdvancements {
@@ -6058,7 +6088,10 @@ mod tests {
     fn a_guests_riding_jump_reaches_the_game() {
         let (mut hub, _rx) = hub_with_a_guest();
         // hasClientLoaded: the handlers ignore a player's actions until then.
-        hub.guests[0].load_timeout = 0;
+        {
+            let value = 0;
+            hub.guests.update(0, |g| g.load_timeout = value);
+        }
         let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
         let mut next_entity = 100;
         let border = crate::worldborder::WorldBorder::default();
@@ -6078,7 +6111,7 @@ mod tests {
             streaming: None,
         };
         for action in [3, 4] {
-            hub.guests[0].inbox.push_back((
+            hub.guests.inbox_mut(0).unwrap().push_back((
                 S::PlayerCommand(play::PlayerCommand {
                     id: 1,
                     action,
@@ -6086,7 +6119,7 @@ mod tests {
                 }),
                 4,
             ));
-            hub.guests[0].inbox_bytes += 4;
+            hub.guests.update(0, |g| g.inbox_bytes += 4);
             let events = hub.tick(&mut ctx);
             let reached = events.iter().any(|event| {
                 matches!(event, HostEvent::Packet(1, packet) if matches!(&**packet, S::PlayerCommand(c) if c.action == action && c.data == 75))
@@ -6149,12 +6182,16 @@ mod tests {
                 .unwrap();
         body.ticks_frozen = 140;
         let (mut hub, rx) = hub_with_a_guest();
-        hub.guests[0].motion = Some(Box::new(body));
+        {
+            let value = Some(Box::new(body));
+            hub.guests.update(0, |g| g.motion = value);
+        }
         hub.sync_player_state(0);
         assert_eq!(sent_frozen(&rx), vec![140]);
         hub.sync_player_state(0);
         assert_eq!(sent_frozen(&rx), Vec::<i32>::new());
-        hub.guests[0].motion.as_mut().unwrap().ticks_frozen = 0;
+        hub.guests
+            .update(0, |g| g.motion.as_mut().unwrap().ticks_frozen = 0);
         hub.sync_player_state(0);
         assert_eq!(sent_frozen(&rx), vec![0]);
     }
@@ -6233,25 +6270,25 @@ mod tests {
     #[test]
     fn an_effect_synced_after_its_command_is_sent_once_at_its_full_duration() {
         let (mut hub, rx) = hub_with_a_guest();
-        hub.guests[0]
-            .effects
-            .add(EffectInstance::new("speed", 30 * 20, 1));
+        hub.guests.update(0, |g| {
+            g.effects.add(EffectInstance::new("speed", 30 * 20, 1));
+        });
         // The console's command, then its sync.
         hub.sync_all_effects();
         // The next tick: the guests' effects count down (`tick_guests`), then
         // the hub syncs them (`tick_level`).
-        hub.guests[0].effects.tick();
+        hub.guests.update(0, |g| g.effects.tick());
         hub.sync_all_effects();
-        hub.guests[0].effects.tick();
+        hub.guests.update(0, |g| g.effects.tick());
         hub.sync_all_effects();
         assert_eq!(sent_durations(&rx), vec![600]);
         // Without the sync after the command, the first sync comes after the
         // tick has counted it down: what #7115's transcript shows.
         let (mut late, rx) = hub_with_a_guest();
-        late.guests[0]
-            .effects
-            .add(EffectInstance::new("speed", 30 * 20, 1));
-        late.guests[0].effects.tick();
+        late.guests.update(0, |g| {
+            g.effects.add(EffectInstance::new("speed", 30 * 20, 1));
+        });
+        late.guests.update(0, |g| g.effects.tick());
         late.sync_all_effects();
         assert_eq!(sent_durations(&rx), vec![599]);
     }
@@ -6263,8 +6300,11 @@ mod tests {
     #[test]
     fn an_attacks_swing_goes_with_it_past_the_move_behind() {
         let (mut hub, _rx) = hub_with_a_guest();
-        hub.guests[0].load_timeout = 0;
-        let inbox = &mut hub.guests[0].inbox;
+        {
+            let value = 0;
+            hub.guests.update(0, |g| g.load_timeout = value);
+        }
+        let inbox = hub.guests.inbox_mut(0).unwrap();
         inbox.push_back((S::Attack(play::Attack { id: 7 }), 0));
         inbox.push_back((S::Punch(horizon_protocol::packets::Empty), 0));
         inbox.push_back((
@@ -6598,7 +6638,10 @@ mod tests {
         };
         for _ in 0..3 {
             hub.ticks += 10;
-            hub.guests[0].unacknowledged = 0;
+            {
+                let value = 0;
+                hub.guests.update(0, |g| g.unacknowledged = value);
+            }
             hub.update_chunks(&ctx);
         }
     }
@@ -6641,7 +6684,10 @@ mod tests {
         // No listener: chunks go out, nothing is recorded or kept.
         let (mut hub, _rx) = hub_with_a_guest();
         let mut world = floor_at(1);
-        hub.guests[0].view_distance = 2;
+        {
+            let value = 2;
+            hub.guests.update(0, |g| g.view_distance = value);
+        }
         send_chunks(&mut hub, &mut world);
         assert_eq!(hub.guests[0].sent_chunks.len(), 4);
         assert!(hub.chunk_watches.is_empty() && hub.guests[0].watched.is_empty());
@@ -6649,20 +6695,29 @@ mod tests {
         let mods = vec![mod_api::ModEntry::new("watch", Box::new(Watcher))].into();
         mod_api::testing::with_mods(mods, || {
             let (mut hub, _rx) = hub_with_a_guest();
-            hub.guests[0].view_distance = 2;
+            {
+                let value = 2;
+                hub.guests.update(0, |g| g.view_distance = value);
+            }
             send_chunks(&mut hub, &mut world);
             let got = watches(&mut hub);
             // The batch's watches come before its sends.
             assert_eq!(sorted(got[..4].to_vec()), run(Watch, &overworld()));
             assert_eq!(sorted(got[4..].to_vec()), run(Sent, &overworld()));
             // A chunk crossing that leaves the four behind.
-            hub.guests[0].position = [400.5, 64.0, 0.5];
+            {
+                let value = [400.5, 64.0, 0.5];
+                hub.guests.update(0, |g| g.position = value);
+            }
             send_chunks(&mut hub, &mut world);
             assert_eq!(sorted(watches(&mut hub)), run(Unwatch, &overworld()));
             assert!(hub.guests[0].watched.is_empty());
             // Back, then through a portal: unwatched in the level left, in
             // vanilla's view order.
-            hub.guests[0].position = [0.5, 64.0, 0.5];
+            {
+                let value = [0.5, 64.0, 0.5];
+                hub.guests.update(0, |g| g.position = value);
+            }
             send_chunks(&mut hub, &mut world);
             assert_eq!(watches(&mut hub).len(), 8);
             hub.set_dimension("minecraft:the_nether");
