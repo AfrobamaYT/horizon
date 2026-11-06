@@ -11116,30 +11116,6 @@ impl Game<'_> {
     pub(super) fn native_place_recipe(&mut self, book_id: i32, all: bool) -> Result<(), String> {
         self.recipe_place(book_id, all)
     }
-    /// Presses button `button` of the open menu, as a click on one of its
-    /// buttons does (`MultiPlayerGameMode.handleInventoryButtonClick`,
-    /// `ServerboundContainerButtonClickPacket`): the server's menu decides
-    /// what it does (`AbstractContainerMenu.clickMenuButton`, and
-    /// `native_menu_button` there for a mod's menu). For a client mod's own
-    /// input on a menu's screen where `native_screen_click` doesn't come — a
-    /// key, the wheel. No sound: that is the screen's. Err while no menu the
-    /// server opened is open.
-    pub(super) fn native_click_menu_button(&self, button: i32) -> Result<(), String> {
-        let Some(container) = self
-            .remote
-            .as_ref()
-            .and_then(|r| r.menu.as_ref())
-            .map(|(w, _)| *w)
-        else {
-            return Err("no menu is open".to_owned());
-        };
-        self.send(
-            horizon_protocol::packets::play::Serverbound::ContainerButtonClick(
-                horizon_protocol::packets::play::ContainerButtonClick { container, button },
-            ),
-        );
-        Ok(())
-    }
     /// Creative mode only: gives the player `count` of `item`
     /// (`minecraft:diamond`) as taking it from the creative inventory does
     /// (`ServerboundSetCreativeModeSlot`): the selected slot first, then the
@@ -12181,7 +12157,7 @@ impl Game<'_> {
             return false;
         };
         // No menu open: the click still sounds.
-        let _ = self.native_click_menu_button(button);
+        let _ = self.remote_button_click(button);
         self.audio.play_button_click();
         true
     }
