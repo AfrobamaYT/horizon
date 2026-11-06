@@ -267,8 +267,10 @@ mod tests {
     #[test]
     fn scaled_draw_and_click_agree() {
         let screen = NoResources::new(std::path::Path::new("."));
-        let atlas =
-            HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            std::path::PathBuf::from("/nonexistent/horizon-test-assets"),
+        ))
+        .unwrap();
         for unicode in [false, true] {
             let settings = crate::hud::GuiScale {
                 requested: 3,
