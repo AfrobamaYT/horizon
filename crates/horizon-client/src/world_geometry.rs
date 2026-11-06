@@ -1,4 +1,3 @@
-//! Fixed-capacity output for a view's custom geometry; the GPU consumer owns drawing.
 use crate::gfx::world_primitives::{Batch, DEFAULT_CAPACITY as CAPACITY};
 use crate::{gizmos, mesher::Vertex};
 use glam::Mat4;
@@ -41,7 +40,6 @@ impl WorldGeometry {
             CAPACITY,
         )
     }
-    /// Validate once at the submission boundary, before any output is appended.
     fn validate_positions(&self, points: impl Iterator<Item = [f64; 3]>) -> Result<(), DrawError> {
         if points
             .flatten()
