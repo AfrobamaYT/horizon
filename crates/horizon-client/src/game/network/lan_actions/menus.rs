@@ -46,7 +46,7 @@ impl Game<'_> {
             // The click is spent, but no menu took ownership of the use's opener.
             self.container_openers_changed(pos, false);
         }
-        !matches!(opened, MenuOpen::Refused)
+        !matches!(opened, MenuOpen::Refused | MenuOpen::Stale)
     }
 
     pub(in crate::game) fn open_block_menu(&mut self, conn: u32, pos: (i32, i32, i32)) -> MenuOpen {
@@ -246,7 +246,7 @@ impl Game<'_> {
             _ => None,
         };
         if self.world.block_entities.generation(&pos) != generation {
-            return MenuOpen::Refused;
+            return MenuOpen::Stale;
         }
         let Some(host) = self.lan.as_mut() else {
             return MenuOpen::Refused;

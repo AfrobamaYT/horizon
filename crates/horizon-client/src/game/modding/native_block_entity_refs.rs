@@ -75,10 +75,10 @@ impl Game<'_> {
             return Ok(false);
         };
         let [x, y, z] = entity.fields().position;
-        Ok(matches!(
-            self.open_block_menu(conn, (x, y, z)),
-            super::lan_actions::MenuOpen::Opened
-        ))
+        match self.open_block_menu(conn, (x, y, z)) {
+            super::lan_actions::MenuOpen::Stale => Err(BlockEntityError::Stale),
+            opened => Ok(opened == super::lan_actions::MenuOpen::Opened),
+        }
     }
 
     /// The block entity's type (`BlockEntity.getType`).
@@ -682,24 +682,13 @@ mod tests {
             game.world.block_entities.insert(pos, holder());
             let replacement = game.native_block_entity_ref(level, [1, 64, 1]).unwrap();
             assert_ne!(original, replacement);
-            assert_eq!(original.set_lock(game, None), Err(BlockEntityError::Stale));
-            assert_eq!(
-                original.set_name(game, Some("stale")),
-                Err(BlockEntityError::Stale)
-            );
-            assert_eq!(
-                original.merge_data(game, Compound::new()),
-                Err(BlockEntityError::Stale)
-            );
-            assert_eq!(
-                original.replace_data(game, Compound::new()),
-                Err(BlockEntityError::Stale)
-            );
-            assert_eq!(original.set_changed(game), Err(BlockEntityError::Stale));
-            assert_eq!(
-                original.set_data_slot(game, 0, 99),
-                Err(BlockEntityError::Stale)
-            );
+            let stale = Err(BlockEntityError::Stale);
+            assert_eq!(original.set_lock(game, None), stale);
+            assert_eq!(original.set_name(game, Some("stale")), stale);
+            assert_eq!(original.merge_data(game, Compound::new()), stale);
+            assert_eq!(original.replace_data(game, Compound::new()), stale);
+            assert_eq!(original.set_changed(game), stale);
+            assert_eq!(original.set_data_slot(game, 0, 99), stale);
             assert_eq!(
                 original.set_data_slots(game, vec![99]),
                 Err(BlockEntityDataError::Stale)
@@ -755,7 +744,44 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn player_opens_provider_and_refuses_non_provider() {
-        use mod_api::NativeBlockUpdateFlags;
+        use mod_api::*;
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            concat!(
+                module_path!(),
+                "::player_opens_provider_and_refuses_non_provider"
+            ),
+            "HORIZON_BE_MENU_CASE",
+            &["provider", "replacement"],
+        ) {
+            return;
+        }
+        struct ReplaceDuringOpen;
+        #[mod_api::__subscriptions]
+        impl Hooks for ReplaceDuringOpen {
+            fn inventory_block_start(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut InventoryBlockStartEvent<'_>,
+            ) -> Flow {
+                let level = host.level("minecraft:overworld").unwrap();
+                for block in ["minecraft:stone", "minecraft:chest"] {
+                    let state = host.block_state_id(block).unwrap();
+                    assert!(level.set_block(
+                        host,
+                        event.pos,
+                        state,
+                        NativeBlockUpdateFlags::NEIGHBORS
+                    ));
+                }
+                Flow::Continue
+            }
+        }
+        let replacing = std::env::var("HORIZON_BE_MENU_CASE").unwrap() == "replacement";
+        if replacing {
+            let mods: Mods = vec![ModEntry::new("replace", Box::new(ReplaceDuringOpen))].into();
+            mod_api::__private::install(mods.clone());
+            mod_api::__private::install_parts(&mods).unwrap();
+        }
         super::super::native_guest_turn_tests::with_guests(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -777,6 +803,23 @@ mod tests {
             }
             let player = game.native_player_ref(12).unwrap();
             let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+            if replacing {
+                assert_eq!(player.open_menu(game, chest), Err(BlockEntityError::Stale));
+                let replacement = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+                assert_ne!(chest, replacement);
+                assert_eq!(chest.position(game), None);
+                assert!(
+                    game.lan
+                        .as_ref()
+                        .unwrap()
+                        .hub
+                        .guest(12)
+                        .unwrap()
+                        .menu
+                        .is_none()
+                );
+                return;
+            }
             let furnace = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
             let sign = game.native_block_entity_ref(level, [4, 64, 0]).unwrap();
             use super::super::lan_actions::MenuOpen;
@@ -1136,19 +1179,11 @@ mod tests {
 
             // A removed block entity is a stale handle.
             game.world.block_entities.remove(&(0, 64, 0));
-            assert_eq!(
-                chest.replace_data(game, compound("{}")),
-                Err(BlockEntityError::Stale)
-            );
-            assert_eq!(chest.set_changed(game), Err(BlockEntityError::Stale));
-            assert_eq!(
-                chest.merge_data(game, compound(stick)),
-                Err(BlockEntityError::Stale)
-            );
-            assert_eq!(
-                chest.set_name(game, Some("x")),
-                Err(BlockEntityError::Stale)
-            );
+            let stale = Err(BlockEntityError::Stale);
+            assert_eq!(chest.replace_data(game, compound("{}")), stale);
+            assert_eq!(chest.set_changed(game), stale);
+            assert_eq!(chest.merge_data(game, compound(stick)), stale);
+            assert_eq!(chest.set_name(game, Some("x")), stale);
             assert_eq!(chest.name(game), None);
         });
     }

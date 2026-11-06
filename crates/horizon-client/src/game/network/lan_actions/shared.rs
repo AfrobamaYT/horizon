@@ -4,6 +4,7 @@ pub(super) enum MenuOpen {
     Opened,
     Cancelled,
     Refused,
+    Stale,
 }
 
 /// Per-guest state of the gameplay code that lives outside `Guest`.
