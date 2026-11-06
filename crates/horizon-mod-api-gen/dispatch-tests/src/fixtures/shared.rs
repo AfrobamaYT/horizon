@@ -459,7 +459,6 @@ mod stubs {
     pub(super) struct NativeScreenView<'a>(pub &'a ());
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(super) struct EffectKey(pub(super) u32);
-    pub(super) struct ParticleOptions;
     #[derive(Debug, PartialEq)]
     pub(super) enum ScreenOpening {
         Cancel,
