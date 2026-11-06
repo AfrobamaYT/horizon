@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WRAPPER = ROOT / "tools/ci/clippy-cache.sh"
 
 
+@unittest.skipIf(os.name == "nt", "executes a shell wrapper and fake compilers through their shebang lines")
 class ClippyCacheTests(unittest.TestCase):
     def test_compiler_routing_preserves_arguments_environment_and_exit_status(self):
         with tempfile.TemporaryDirectory() as directory:

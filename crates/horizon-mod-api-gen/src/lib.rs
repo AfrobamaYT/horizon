@@ -6,6 +6,7 @@ mod exports;
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 mod host;
 mod layout;
+mod part_table;
 pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
