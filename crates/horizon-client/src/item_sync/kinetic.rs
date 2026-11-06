@@ -35,6 +35,9 @@ pub(super) fn decode(bytes: &[u8], builtin: &Builtin) -> Option<Tag> {
     for key in ["sound", "hit_sound"] {
         if r.bool().ok()? {
             let id = r.varint().ok()?;
+            if id < 0 {
+                return None;
+            }
             let sound = if id == 0 {
                 let mut sound = vec![(
                     "sound_id",
@@ -99,4 +102,22 @@ pub(crate) fn encode(tag: &Tag, id: &dyn Fn(&str, &str) -> Option<i32>) -> Optio
         }
     }
     Some(Component::Raw(w.data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn negative_sound_holders_are_refused() {
+        for id in [-1, i32::MIN] {
+            let mut w = Writer::new();
+            // Default kinetic fields followed by a present sound holder.
+            w.data
+                .extend([10, 0, 0, 0, 0, 0, 0, 0, 0, 63, 128, 0, 0, 1]);
+            w.varint(id);
+            w.bool(false);
+            assert!(decode(&w.data, &Builtin::default()).is_none());
+        }
+    }
 }

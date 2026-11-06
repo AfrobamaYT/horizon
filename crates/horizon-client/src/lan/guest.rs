@@ -1109,19 +1109,23 @@ fn network_stack(
                 horizon_protocol::item::Component::Unit,
             ));
         }
+        if let Some(component) = d
+            .other("minecraft:kinetic_weapon")
+            .and_then(|value| crate::item_sync::kinetic::encode(value, synced_id))
+        {
+            stack
+                .added
+                .push((horizon_protocol::item::component::KINETIC_WEAPON, component));
+        }
         for (name, value) in &d.other {
             let (removed, kind) = match name.strip_prefix('!') {
                 Some(kind) => (true, kind),
                 None => (false, name.as_str()),
             };
-            if kind == "minecraft:kinetic_weapon" {
-                let id = horizon_protocol::item::component::KINETIC_WEAPON;
-                if removed {
-                    stack.removed.push(id);
-                } else if let Some(component) = crate::item_sync::kinetic::encode(value, synced_id)
-                {
-                    stack.added.push((id, component));
-                }
+            if removed && kind == "minecraft:kinetic_weapon" {
+                stack
+                    .removed
+                    .push(horizon_protocol::item::component::KINETIC_WEAPON);
             } else if horizon_protocol::item::custom::id(kind).is_some() {
                 if let Some(id) = synced_id("minecraft:data_component_type", kind) {
                     if removed {
