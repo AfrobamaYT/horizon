@@ -1966,11 +1966,11 @@ mod tests {
             game.world.set(1, 64, 1, state).unwrap();
             game.world.block_entities.insert(
                 (1, 64, 1),
-                BlockEntity::CommandBlock(CommandBlock {
+                BlockEntity::CommandBlock(Box::new(CommandBlock {
                     command: "origin".into(),
                     condition_met: true,
                     ..Default::default()
-                }),
+                })),
             );
             let mut cart = super::super::minecarts::Minecart::new(
                 99,
