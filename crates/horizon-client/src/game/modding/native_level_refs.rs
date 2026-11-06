@@ -479,7 +479,7 @@ impl Game<'_> {
     }
     /// `Level.isInWorldBounds`: `pos` within 30,000,000 blocks on x and z and inside the level's
     /// build height. None as for `native_level_height`. Does not load chunks.
-    pub(super) fn native_level_in_world_bounds(
+    pub(in crate::game) fn native_level_in_world_bounds(
         &self,
         level: LevelRef,
         pos: [i32; 3],
@@ -489,7 +489,7 @@ impl Game<'_> {
     }
     /// `Level.isInSpawnableBounds`: 30,000,000 blocks on x and z, 20,000,000 on y. None as for
     /// `native_level_height`. Does not load chunks.
-    pub(super) fn native_level_in_spawnable_bounds(
+    pub(in crate::game) fn native_level_in_spawnable_bounds(
         &self,
         level: LevelRef,
         pos: [i32; 3],
@@ -526,6 +526,7 @@ fn horizontal_in_bounds(pos: [i32; 3]) -> bool {
 mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
+    use mod_api::prelude::*;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
 
     #[test]
@@ -733,8 +734,6 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn bounds_reads_follow_the_level_without_loading_chunks() {
-        use mod_api::Host;
-
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
             let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);

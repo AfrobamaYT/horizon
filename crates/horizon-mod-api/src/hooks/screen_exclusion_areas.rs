@@ -16,8 +16,3 @@ pub trait Hooks {
     )]
     fn screen_exclusion_areas();
 }
-
-pub trait Helpers {
-    #[helper(side = "client")]
-    fn screen_exclusion();
-}
