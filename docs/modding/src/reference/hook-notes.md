@@ -19,6 +19,14 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Custom world geometry
+
+`Hooks::submit_custom_geometry` runs on the client after particles, before rendering. Its
+`WorldRenderView` holds camera, partial tick and game time; `WorldDrawContext::lines` and `quads`
+accept unlit world-space ARGB geometry with depth testing or through walls. Batches fail atomically
+for invalid inputs or overflow. `usage()` reports shared limits (4,096 of each by default);
+output clears every view. Submit extracted state, without world writes or resource loading.
+
 ## Transparent screen backgrounds and landing changes
 
 `Hooks::screen_transparent_background` runs immediately before an in-game screen's
@@ -1367,6 +1375,13 @@ registration path.
 
 - The in-world HUD's two moments, as NeoForge's `RenderGuiEvent.Pre` and `.Post`: `render_gui_pre(host, event)` runs once a frame in a world, before any vanilla HUD layer, and a mod that returns `Flow::Cancel` hides the whole HUD as F1 does (no layer, no `gui_layer_pre` or `gui_layer_post`, no `render_gui_post`, no chat or toasts); it is not heard under F1 or while a server dialog or the connection screen covers the window. `render_gui_post(host, draw, corners)` is the old `hud` hook, unchanged: it draws after the minimap, so a mod that implemented `hud` implements `render_gui_post`. Client side; a frame with no listener costs one branch each.
 - Lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1.
+- The camera type F5 cycles to: `camera_type_cycle(host, event)` runs when `key.togglePerspective` cycles the window's
+  camera type (`Minecraft.handleKeybinds`), with `previous` and vanilla's `next` (first person, third person behind, third
+  person in front); a mod may set `next` to skip or keep a type, and the camera entity's post effect follows the answer.
+  `camera_type()` reads the type and `set_camera_type(type)` sets it as F5 does, without a cycle, for a freelook mod that
+  switches to third person and back; with `camera_pose` moving the drawn camera, that is a camera independent of the
+  player. The game's two copies of `CameraType` are now one, `mod_api::CameraType`. Client side.
+
 - A client tick's two moments, as NeoForge's `ClientTickEvent.Pre` and `.Post`: `client_tick_pre(host, event)` runs at the start of every client tick (`Minecraft.tick`), paused or not and on the title screen too, and `client_tick_post` at its end. They replace the single `tick` hook, which also fired on a server's own `Game`: the server's tick is `server_tick` (`ServerTickEvent`), so a mod that implemented `tick` implements `client_tick_pre` and, for a server, `server_tick`. Window only, client side; a tick with no listener costs one branch.
 - How long a client tick lasts, a "timer": `tick_target_millis(host, event)` gets the milliseconds the window's
   `DeltaTracker.Timer` divides each frame's time by (`Minecraft.getTickTargetMillis`), vanilla's 50 at 20 ticks a

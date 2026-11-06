@@ -142,6 +142,47 @@ impl Game<'_> {
             Body::Other(_) => None,
         }
     }
+    /// `Entity.getPortalCooldown`: a player's own portal state, the falling
+    /// block's, a pearl's End gateway state, or the level's for the other
+    /// kinds its portal walk carries (zero when it keeps no state for one).
+    pub(super) fn native_entity_portal_cooldown(&self, entity: EntityRef) -> Option<i32> {
+        let id = match self.native_entity_target(entity)? {
+            // The acting guest's state is in place for its turn (`enter_guest`).
+            Target::Player => return Some(self.portals.player.cooldown),
+            Target::Guest(conn) => {
+                let play = self.lan.as_ref()?.play.get(&conn);
+                return Some(play.map_or(0, |p| p.portal.cooldown));
+            }
+            Target::Falling(id) => {
+                return Some(self.falling.iter().find(|f| f.id == id)?.portal.cooldown);
+            }
+            Target::Projectile(id) => {
+                let p = self.creatures.projectiles.iter().find(|p| p.id == id)?;
+                if matches!(
+                    p.kind,
+                    horizon_client::projectiles::ProjectileKind::EnderPearl
+                ) {
+                    return Some(self.pearl_portal_cooldown(id));
+                }
+                if !super::nether_portal::is_arrow(p)
+                    && !super::nether_portal::is_portal_projectile(p)
+                {
+                    return None;
+                }
+                id
+            }
+            Target::Mob(id)
+            | Target::Item(id)
+            | Target::Orb(id)
+            | Target::Boat(id)
+            | Target::Cart(id)
+            | Target::Tnt(id)
+            | Target::Rocket(id)
+            | Target::Trident(id) => id,
+            _ => return None,
+        };
+        Some(self.portals.entities.get(&id).map_or(0, |p| p.cooldown))
+    }
     /// Sets the remaining fire ticks (`Entity.setRemainingFireTicks`).
     pub(super) fn native_entity_set_remaining_fire_ticks(
         &mut self,
@@ -517,6 +558,161 @@ mod tests {
             assert_eq!(boat.fire_ticks(game), None);
             let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
             assert_eq!(stale.fire_ticks(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_reads_simulated_kinds_and_refuses_others() {
+        use super::super::native_guest_turn_tests::with_guests;
+        use super::super::{
+            Dim, FallingBlock, boats::Boat, fireworks::Rocket, minecarts::CartKind,
+            minecarts::Minecart, trident::ThrownTrident,
+        };
+        use horizon_client::entities::{ArmorStand, ExperienceOrb};
+        use horizon_client::projectiles::{Projectile, ProjectileKind};
+        use horizon_core::{geometry::Vec3, position::BlockPos};
+        use mod_api::{ItemStack, NativeWorldEpoch};
+
+        with_guests(|game| {
+            // Players keep their own state: in place during their turn, beside the hub otherwise.
+            let host = game.lan.as_mut().unwrap();
+            host.play.entry(12).or_default().portal.cooldown = 7;
+            host.play.entry(13).or_default().portal.cooldown = 4;
+            game.portals.player.cooldown = 99;
+            let (acting, other) = (
+                game.native_entity(12).unwrap(),
+                game.native_entity(13).unwrap(),
+            );
+            assert_eq!(acting.portal_cooldown(game), Some(7));
+            game.as_guest(12, |game| {
+                assert_eq!(acting.portal_cooldown(game), Some(7));
+                assert_eq!(other.portal_cooldown(game), Some(4));
+            })
+            .unwrap();
+            assert_eq!(acting.portal_cooldown(game), Some(7));
+            assert_eq!(other.portal_cooldown(game), Some(4));
+
+            // A mob counts down from `setPortalCooldown`'s 300 as the level ticks.
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            game.mobs.push(Mob::new(40, kind, Vec3::ZERO, 0.0));
+            let mob = game.native_entity(40).unwrap();
+            assert_eq!(mob.portal_cooldown(game), Some(0));
+            game.set_portal_cooldown(40);
+            assert_eq!(mob.portal_cooldown(game), Some(300));
+            game.handle_entity_portals();
+            assert_eq!(mob.portal_cooldown(game), Some(299));
+
+            // The other kinds the level carries through portals.
+            game.spawn_item(
+                ItemStack {
+                    item: "minecraft:stone".into(),
+                    count: 1,
+                    damage: 0,
+                    extra: None,
+                },
+                [0.0; 3],
+                [0.0; 3],
+                0,
+            );
+            let item = game.dropped[0].id;
+            game.orbs.push(ExperienceOrb {
+                rotation: [0.0, 0.0],
+                join: Default::default(),
+                no_gravity: false,
+                id: 41,
+                position: Vec3::ZERO,
+                previous: Vec3::ZERO,
+                velocity: Vec3::ZERO,
+                value: 1,
+                age: 0,
+                on_ground: false,
+                count: 1,
+                ticks: 0,
+                health: 5,
+            });
+            game.boats
+                .push(Boat::new(42, "oak".into(), Vec3::ZERO, 0.0));
+            game.carts
+                .push(Minecart::new(43, CartKind::Rideable, Vec3::ZERO));
+            game.add_primed_tnt(BlockPos::new(0, 64, 0), 0.0, 80, None, None);
+            let tnt = game.tnts[0].id;
+            let arrow = Projectile::new(
+                ProjectileKind::Arrow {
+                    base_damage: 2.0,
+                    critical: false,
+                    effect: None,
+                },
+                Vec3::ZERO,
+                None,
+            );
+            game.add_projectile(arrow);
+            let arrow = game.creatures.projectiles[0].id;
+            game.add_projectile(Projectile::new(ProjectileKind::Snowball, Vec3::ZERO, None));
+            let snowball = game.creatures.projectiles[1].id;
+            game.rockets
+                .push(Rocket::remote(44, Vec3::ZERO, Vec3::ZERO));
+            game.tridents
+                .push(ThrownTrident::remote(45, Vec3::ZERO, 0.0, 0.0));
+            for id in [item, 41, 42, 43, tnt, arrow, snowball, 44, 45] {
+                let entity = game.native_entity(id).unwrap();
+                assert_eq!(entity.portal_cooldown(game), Some(0), "entity {id}");
+                game.set_portal_cooldown(id);
+                assert_eq!(entity.portal_cooldown(game), Some(300), "entity {id}");
+            }
+
+            // A falling block keeps its own, as its save does.
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:sand")
+                .unwrap();
+            game.next_entity += 1;
+            let falling = game.next_entity;
+            game.falling.push(FallingBlock {
+                rotation: [0.0, 0.0],
+                join: Default::default(),
+                id: falling,
+                state,
+                start_pos: BlockPos::default(),
+                position: Vec3::ZERO,
+                previous: Vec3::ZERO,
+                velocity: Vec3::ZERO,
+                age: 0,
+                no_gravity: false,
+                portal: horizon_client::nether_portal::PortalState {
+                    cooldown: 25,
+                    process: None,
+                },
+                drop_item: false,
+                fall_distance: 0.0,
+                stuck: Vec3::ZERO,
+                damage: horizon_client::falling_block::Damage::falling("minecraft:sand"),
+                saved: None,
+            });
+            let falling = game.native_entity(falling).unwrap();
+            assert_eq!(falling.portal_cooldown(game), Some(25));
+
+            // No portal cooldown: an armor stand, a wind charge, a stale handle, a parked level.
+            game.armor_stands.push(ArmorStand::new(46, Vec3::ZERO, 0.0));
+            let stand = game.native_entity(46).unwrap();
+            assert_eq!(stand.portal_cooldown(game), None);
+            game.add_projectile(Projectile::new(
+                ProjectileKind::WindCharge,
+                Vec3::ZERO,
+                None,
+            ));
+            let charge = game
+                .native_entity(game.creatures.projectiles[2].id)
+                .unwrap();
+            assert_eq!(charge.portal_cooldown(game), None);
+            let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
+            assert_eq!(stale.portal_cooldown(game), None);
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(mob.portal_cooldown(game), None);
+            game.enter_level(Dim::Overworld).unwrap();
+            assert_eq!(mob.portal_cooldown(game), Some(299));
         });
     }
 

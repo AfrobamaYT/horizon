@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = Path("crates/horizon-client/src/game/native_hooks")
@@ -22,9 +23,8 @@ def run(*args, source=None):
     return subprocess.check_output(args, cwd=ROOT, input=source, text=True)
 
 
-def layout(source):
-    return json.loads(run("cargo", "run", "-q", "-p", "horizon-mod-api-gen",
-                          "--bin", "native-hook-layout", source=source))
+def layout(source, binary):
+    return json.loads(run(str(binary), source=source))
 
 
 def formatted(source):
@@ -116,7 +116,7 @@ def split(source, manifest):
             for name, text in sorted(outputs.items())}
 
 
-def payload(files):
+def payload(files, binary):
     """Exclude only added module/use/impl wrappers, using syn's own line ranges."""
     result = Counter()
     for name, source in files.items():
@@ -124,7 +124,7 @@ def payload(files):
             continue  # Original docs/imports are checked byte-for-byte separately below.
         lines = source.splitlines()
         excluded = set()
-        for item in layout(source)["items"]:
+        for item in layout(source, binary)["items"]:
             if "methods" in item:
                 first = item["methods"][0]["start"] - 1
                 excluded.update(range(item["start"] - 1, first))
@@ -139,16 +139,20 @@ def main():
     parser.add_argument("--verify", metavar="B1_REVISION")
     parser.add_argument("--base", metavar="B1_REVISION", help="reproduce the split from git")
     args = parser.parse_args()
+    metadata = json.loads(run("cargo", "metadata", "--no-deps", "--format-version", "1"))
+    run("cargo", "build", "-q", "-p", "horizon-mod-api-gen", "--bin", "native-hook-layout")
+    executable = "native-hook-layout.exe" if sys.platform == "win32" else "native-hook-layout"
+    binary = Path(metadata["target_directory"]) / "debug" / executable
     path = DIRECTORY / "mod.rs"
     base = args.verify or args.base
     source = run("git", "show", f"{base}:{path}") if base else (ROOT / path).read_text()
-    manifest = layout(source)
+    manifest = layout(source, binary)
     expected = split(source, manifest)
     if args.verify:
         actual = {p.name: p.read_text() for p in (ROOT / DIRECTORY).glob("*.rs") if p.name != "fire.rs"}
         assert actual.keys() == expected.keys(), "unexpected or missing area files"
         assert actual["mod.rs"] == expected["mod.rs"], "module imports/wrappers differ"
-        before, after = payload(expected), payload(actual)
+        before, after = payload(expected, binary), payload(actual, binary)
         assert before == after, f"payload lines differ: removed {before - after}; added {after - before}"
         assert actual == expected, "item contents/order differ from the deterministic move"
         moved = sum(method["name"] in manifest["areas"] for item in manifest["items"]
