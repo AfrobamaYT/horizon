@@ -4,7 +4,7 @@
 //! and all of them save through it.
 use crate::item_nbt::{item_from_nbt, item_to_nbt};
 use crate::items::ItemStack;
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 
 /// The slot names of the compound, by `EquipmentSlot` ordinal.
 pub const SLOT_NAMES: [&str; 8] = [

@@ -573,7 +573,7 @@ mod tests {
         assert!(beef.food.is_some());
 
         // Consumables without food, their style and their remainders.
-        use horizon_world::consumable::UseAnimation;
+        use horizon_core::use_animation::UseAnimation;
         let milk = items.get("minecraft:milk_bucket").expect("milk bucket");
         let drink = milk.consumable.as_ref().unwrap();
         assert!(milk.food.is_none());

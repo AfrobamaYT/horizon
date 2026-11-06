@@ -31,7 +31,7 @@ pub struct SpawnerKey(Arc<str>);
 impl SpawnerKey {
     /// `id` as a spawner key, or None where it isn't a namespaced identifier.
     pub fn new(id: &str) -> Option<Self> {
-        horizon_world::identifier::Identifier::parse_namespaced(id)?;
+        horizon_core::identifier::Identifier::parse_namespaced(id)?;
         Some(Self(id.into()))
     }
     /// The id, as given (`mymod:rat_swarm`).

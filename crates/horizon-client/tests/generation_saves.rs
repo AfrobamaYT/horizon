@@ -414,10 +414,10 @@ fn saved_proto_chunks_restore_exactly() {
     let extras = Arc::make_mut(extras);
     extras
         .root
-        .insert("example:unknown".into(), horizon_world::nbt::Tag::Int(42));
-    let attachment = horizon_world::nbt::Compound::from_iter([(
+        .insert("example:unknown".into(), horizon_core::nbt::Tag::Int(42));
+    let attachment = horizon_core::nbt::Compound::from_iter([(
         "example:data".into(),
-        horizon_world::nbt::Tag::Int(9),
+        horizon_core::nbt::Tag::Int(9),
     )]);
     extras.attachments = horizon_world::attachments::Attachments::from_nbt(attachment.clone());
     save.save_protos(&[seeded], assets.registry, &generator.biomes)
@@ -443,7 +443,7 @@ fn saved_proto_chunks_restore_exactly() {
             .unwrap()
             .root
             .get(&"example:unknown".into()),
-        Some(&horizon_world::nbt::Tag::Int(42))
+        Some(&horizon_core::nbt::Tag::Int(42))
     );
     assert_eq!(
         proto.column.saved.as_ref().unwrap().attachments.to_nbt(),
@@ -460,7 +460,7 @@ fn saved_proto_chunks_restore_exactly() {
             let extras = loaded.saved.unwrap();
             assert_eq!(
                 extras.root.get(&"example:unknown".into()),
-                Some(&horizon_world::nbt::Tag::Int(42))
+                Some(&horizon_core::nbt::Tag::Int(42))
             );
             assert_eq!(extras.attachments.to_nbt(), attachment);
         }
@@ -503,9 +503,9 @@ fn saved_proto_block_entities_keep_their_id() {
         save::{Persistent, SaveDir},
         vanillagen::VanillaTerrain,
     };
-    use horizon_world::{
-        nbt::{Limits, Tag},
-        region::RegionFile,
+    use {
+        horizon_core::nbt::{Limits, Tag},
+        horizon_world::region::RegionFile,
     };
     let Some(root) = resources() else {
         return;

@@ -7,7 +7,7 @@ use super::args::{
 use super::codec::{either, is_number, not_map, snbt};
 use super::packrat::{Grammar, Reason, State, Sugg, Term, Value, alt, ch, opt, seq};
 use super::{CmdResult, CommandError, Reader, SuggestionsBuilder};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::rc::Rc;
 
 fn int_of(t: &Tag) -> Option<i64> {
@@ -634,7 +634,7 @@ mod tests {
     use super::decode_component;
 
     fn check(snbt: &str) -> Result<(), String> {
-        let tag = horizon_world::nbt::parse_snbt(snbt).expect("snbt").0;
+        let tag = horizon_core::nbt::parse_snbt(snbt).expect("snbt").0;
         decode_component("minecraft:block_entity_data", &tag)
     }
 

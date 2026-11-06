@@ -5,7 +5,10 @@
 //! The launcher only adds and removes entries: every other field of every entry is written back
 //! as it was read.
 use base64::Engine;
-use horizon_world::nbt::{self, Compound, JavaString, Limits, NamedTag, Tag};
+use horizon_core::{
+    nbt,
+    nbt::{Compound, JavaString, Limits, NamedTag, Tag},
+};
 use std::fs;
 use std::path::Path;
 

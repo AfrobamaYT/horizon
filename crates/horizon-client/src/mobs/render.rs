@@ -2758,7 +2758,7 @@ mod tests {
         use crate::items::ItemStack;
         let mut extra = super::super::Extra::default();
         let mut main = ItemStack::new("minecraft:crossbow", 1);
-        main.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Main hand".into()));
+        main.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Main hand".into()));
         extra.set_main_hand_stack(Some(main));
         extra.set_slot_id(
             horizon_items::equipment::OFFHAND,

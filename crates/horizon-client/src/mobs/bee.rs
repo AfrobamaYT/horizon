@@ -1203,8 +1203,8 @@ pub fn stable_destination(w: &MobWorld, p: [i32; 3]) -> bool {
     !w.facts.is_air(w.world.block(p[0], p[1] - 1, p[2]))
 }
 /// `Bee.addAdditionalSaveData` (and NeutralMob's `anger_end_time`).
-pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn to_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     let b = get(m).cloned().unwrap_or_default();
     for (key, pos) in [("hive_pos", b.hive), ("flower_pos", b.flower)] {
         match pos {
@@ -1227,8 +1227,8 @@ pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
     map.insert("anger_end_time".into(), Tag::Long(b.anger_end));
 }
 /// `Bee.readAdditionalSaveData`.
-pub fn from_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
-    use horizon_world::nbt::Tag;
+pub fn from_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
     let int = |k: &str| match tag.get(k) {
         Some(Tag::Int(v)) => Some(*v),
         Some(Tag::Byte(v)) => Some(i32::from(*v)),

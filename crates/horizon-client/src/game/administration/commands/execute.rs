@@ -3,7 +3,7 @@
 //! reporting each result to the `store` callbacks of its source.
 use super::{Arg, Context, Dim, Game, R, Target, data::DataRef, err};
 use horizon_client::{command::CommandError, nbt_path::NbtPath, text::Text};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `CommandSourceStack` fields Horizon models: the executing entity (None for
 /// the server), position, rotation, anchor, whether feedback is suppressed

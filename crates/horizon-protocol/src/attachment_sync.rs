@@ -6,9 +6,9 @@
 //! client's copy of the holder is replaced, then each change: the attachment's
 //! namespace and name and its value as an NBT compound, or no tag for a
 //! removal.
-use horizon_world::{
-    attachments::{AttachmentSync, Holder},
-    nbt::{self, Tag},
+use {
+    horizon_core::{nbt, nbt::Tag},
+    horizon_world::attachments::{AttachmentSync, Holder},
 };
 
 use crate::{

@@ -14,11 +14,11 @@ use super::{
     copper_golem as cg,
 };
 use crate::{containers::BlockEntity, items::ItemStack};
+use horizon_core::java_hash_map::{JavaHashMap, JavaKey};
 use horizon_core::{
     geometry::{Aabb, Vec3},
     random::RandomSource,
 };
-use horizon_world::java_hash_map::{JavaHashMap, JavaKey};
 
 /// `TransportItemState`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

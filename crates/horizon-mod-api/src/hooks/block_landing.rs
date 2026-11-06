@@ -9,7 +9,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "level",
-        target = "horizon_client::game::native_hooks::block_landing::HitLevel<'_>::native_fall_on"
+        target = "horizon_client::game::native_hooks::block_landing::HitLevel<'_>::native_fall_on",
+        neoforge = "LivingFallEvent"
     )]
     fn fall_on(
         dimension: &str,
@@ -29,7 +30,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "level",
-        target = "horizon_client::game::native_hooks::block_landing::HitLevel<'_>::native_bounce_on"
+        target = "horizon_client::game::native_hooks::block_landing::HitLevel<'_>::native_bounce_on",
+        neoforge = "none (vanilla Block.bounceOn; IBlockExtension.getBounceRestitution only returns a factor)"
     )]
     fn bounce_on(
         dimension: &str,
