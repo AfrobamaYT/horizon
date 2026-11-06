@@ -221,7 +221,7 @@ pub trait CapabilityProviders {
     fn block_entity_provider(
         &self,
         name: &str,
-        kind: BlockEntityTypeKey,
+        kind: super::BlockEntityTypeKey,
         index: &mut u32,
     ) -> Option<(BlockProviderOf, &'static str, bool)>;
     /// The next enabled provider of item capability `name` for item `item`, advancing `index`.
