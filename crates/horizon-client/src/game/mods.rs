@@ -170,6 +170,16 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
     Game::native_standalone_models(&RegistrationContext::new(), &mut names);
     Some(names)
 }
+/// The native mods' entity model layers (`native_layer_definitions`), kept
+/// once at start for `native_bake_layer`.
+pub(super) fn register_layer_definitions(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut layers = Vec::new();
+    Game::native_layer_definitions(&RegistrationContext::new(), &mut layers);
+    horizon_client::mobs::model_layers::register(layers);
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at

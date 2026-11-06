@@ -1016,8 +1016,8 @@ use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientInputOptions, ClientModifiers, ClientReloadListeners,
-    CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LivingRef,
-    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
+    CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LayerDefinition,
+    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
     NativeLifecycleContext, NativeNoteBlockChange, NativeServerPlayer, PathComputationType,
     Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
     ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
@@ -3661,6 +3661,20 @@ impl Game<'_> {
         models: &mut Vec<String>,
     ) {
         Self::fire_standalone_models(context, models);
+    }
+    /// Entity model layers built in code (NeoForge's
+    /// `EntityRenderersEvent.RegisterLayerDefinitions`): push each one's id,
+    /// `<mod id>:<model>#<layer>` as a `ModelLayerLocation` names it
+    /// (`mymod:golem#main`), and its `LayerDefinition`, as the mod's
+    /// `createBodyLayer()` builds it. `native_bake_layer` bakes one into the
+    /// `ModelPart` tree `native_draw_model_part` draws. Asked once at start,
+    /// on the client. An id in vanilla's namespace, not of that form, or
+    /// registered already is logged and left out. API @API:model_layers@.
+    pub(super) fn native_layer_definitions(
+        context: &mod_api::RegistrationContext,
+        layers: &mut Vec<(String, LayerDefinition)>,
+    ) {
+        Self::fire_layer_definitions(context, layers);
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
