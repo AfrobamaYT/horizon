@@ -9,6 +9,7 @@ pub trait HostFluidStates {
 }
 
 /// Read-only fluid-state facts, implemented by the game and reached through the service.
+// hidden: the game implements this backend; mods use the owning host's FluidStates service.
 #[doc(hidden)]
 pub trait FluidStatesBackend {
     /// Side: both.
