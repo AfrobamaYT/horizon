@@ -278,6 +278,7 @@ mod native_level_effects;
 mod native_level_events;
 mod native_level_items;
 mod native_level_refs;
+mod native_level_signals;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_effects;
@@ -1732,12 +1733,11 @@ impl LevelAccess for GameLevel<'_> {
         direct: bool,
         vanilla: i32,
     ) -> i32 {
-        let mut signal = vanilla;
-        if self.native_authoritative {
-            let face = direction.opposite();
-            self.native_block_signal(self.dimension, pos, state, face, direct, &mut signal);
-        }
-        signal.clamp(0, 15)
+        native_level_signals::adjust_signal(direction, vanilla, |face, signal| {
+            if self.native_authoritative {
+                self.native_block_signal(self.dimension, pos, state, face, direct, signal);
+            }
+        })
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         let mut output = vanilla;
@@ -1967,17 +1967,7 @@ impl LevelAccess for GameLevel<'_> {
         _state: BlockStateId,
         _direction: Direction,
     ) -> i32 {
-        // TestBlock.ownSignal.
-        if let Some(BlockEntity::TestBlock(b)) =
-            self.world.block_entities.get(&(pos.x, pos.y, pos.z))
-        {
-            return b.own_signal();
-        }
-        // TrappedChestBlock.getSignal: the players with it open, at most 15.
-        if let Some(count) = self.lid_openers.get(&(pos.x, pos.y, pos.z)) {
-            return (*count).clamp(0, 15);
-        }
-        jukebox::jukebox_signals(self.world, self.items, pos).map_or(0, |(signal, _)| signal)
+        native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)
     }
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
         let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
