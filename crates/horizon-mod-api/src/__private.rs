@@ -435,7 +435,6 @@ pub mod game {
 }
 
 // hidden: load-owned key resolution, used by the game at the registry boundaries
-pub use crate::registry_keys::effect_key;
 pub use crate::registry_keys::{
     ResolvedBlock, block as resolved_block, effect as resolved_effect, resolve_blocks,
     resolve_effects,
@@ -444,3 +443,4 @@ pub use crate::registry_keys::{
     block_entity_type_key, block_entity_type_name, block_id as block_key_id,
     effect_id as effect_key_id,
 };
+pub use crate::registry_keys::{effect_key, fluid_id, fluid_key, resolve_fluids};

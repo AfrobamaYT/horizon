@@ -355,12 +355,17 @@ impl Game<'_> {
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return false;
         };
-        let Some((pos, mod_type, hidden)) = host.hub.guests[gi]
+        let Some((pos, mod_type, hidden, menu_id)) = host.hub.guests[gi]
             .menu
             .as_ref()
             .filter(|m| p.container != 0 && m.window == p.container)
             .and_then(|m| match m.slots {
-                Slots::Block(pos) => Some((pos, m.mod_type, m.hidden.clone())),
+                Slots::Block(pos) => Some((
+                    pos,
+                    m.mod_type,
+                    m.hidden.clone(),
+                    host.hub.registry_name("minecraft:menu", m.kind)?.to_owned(),
+                )),
                 _ => None,
             })
         else {
@@ -395,6 +400,7 @@ impl Game<'_> {
             .take()
             .filter(|(window, m)| *window == p.container && m.kind() == kind)
             .map_or_else(|| Box::new(Menu::new(kind)), |(_, m)| m);
+        menu.set_registry_id(Some(&menu_id));
         for &slot in &hidden {
             menu.hide_slot(slot);
         }
@@ -640,7 +646,8 @@ impl Game<'_> {
         let Some(window) = host.hub.open_window(conn, "minecraft:crafting", title) else {
             return;
         };
-        let menu = Box::new(Menu::new(Kind::Crafting));
+        let mut menu = Box::new(Menu::new(Kind::Crafting));
+        menu.set_registry_id(Some("minecraft:crafting"));
         host.play.entry(conn).or_default().crafting.table = Some((window, 0, menu, pos));
         self.lan_send_table_content(conn);
     }

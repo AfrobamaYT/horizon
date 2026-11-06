@@ -1513,9 +1513,7 @@ impl Game<'_> {
         }
         let mut commands = Vec::new();
         self.native_register_commands(&mut commands);
-        let vanilla = horizon_client::command::vanilla::game_dispatcher_with_features(
-            &self.level.enabled_features,
-        );
+        let vanilla = self.ui.dispatcher.0.clone();
         let Some(host) = self.lan.as_ref() else {
             return;
         };

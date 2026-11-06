@@ -66,6 +66,22 @@ struct Kept {
     extras: BlockEntityExtras,
 }
 
+impl Kept {
+    fn capture(
+        world: &horizon_client::world::World,
+        hoppers: &HashMap<Pos, HopperState>,
+        pos: Pos,
+    ) -> Self {
+        Self {
+            entity: world.block_entities.get(&pos).cloned(),
+            attachments: world.block_entities.attachments(pos).cloned(),
+            hopper: hoppers.get(&pos).copied(),
+            name: world.block_names.get(&pos).cloned(),
+            extras: world.block_entity_extras(pos),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct KeptPlayer {
     inventory: Vec<Option<ItemStack>>,
@@ -188,13 +204,10 @@ impl Game<'_> {
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
-        level.block_entities.entry(pos).or_insert_with(|| Kept {
-            entity: self.world.block_entities.get(&pos).cloned(),
-            attachments: self.world.block_entities.attachments(pos).cloned(),
-            hopper: self.hoppers.get(&pos).copied(),
-            name: self.world.block_names.get(&pos).cloned(),
-            extras: self.world.block_entity_extras(pos),
-        });
+        level
+            .block_entities
+            .entry(pos)
+            .or_insert_with(|| Kept::capture(&self.world, &self.hoppers, pos));
     }
     /// Keeps `holder`'s attachment map as it is, if a transaction is open and hasn't yet: a
     /// block entity's with the rest of it, any other's alone.

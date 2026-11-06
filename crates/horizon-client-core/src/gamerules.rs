@@ -6,7 +6,12 @@ use horizon_world::{
     compression::Compression,
     nbt::{self, Limits, NamedTag, Tag},
 };
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::Path,
+    sync::{Arc, OnceLock},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
@@ -21,15 +26,34 @@ impl std::fmt::Display for Value {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq)]
 pub struct Rule {
-    pub name: &'static str,
-    pub category: &'static str,
+    pub name: String,
+    pub category: String,
     pub default: Value,
     pub min: i32,
     pub max: i32,
 }
-const fn b(name: &'static str, category: &'static str, default: bool) -> Rule {
-    Rule {
+struct VanillaRule {
+    name: &'static str,
+    category: &'static str,
+    default: Value,
+    min: i32,
+    max: i32,
+}
+impl From<&VanillaRule> for Rule {
+    fn from(rule: &VanillaRule) -> Self {
+        Self {
+            name: rule.name.into(),
+            category: rule.category.into(),
+            default: rule.default,
+            min: rule.min,
+            max: rule.max,
+        }
+    }
+}
+const fn b(name: &'static str, category: &'static str, default: bool) -> VanillaRule {
+    VanillaRule {
         name,
         category,
         default: Value::Bool(default),
@@ -37,8 +61,14 @@ const fn b(name: &'static str, category: &'static str, default: bool) -> Rule {
         max: 0,
     }
 }
-const fn i(name: &'static str, category: &'static str, default: i32, min: i32, max: i32) -> Rule {
-    Rule {
+const fn i(
+    name: &'static str,
+    category: &'static str,
+    default: i32,
+    min: i32,
+    max: i32,
+) -> VanillaRule {
+    VanillaRule {
         name,
         category,
         default: Value::Int(default),
@@ -47,7 +77,7 @@ const fn i(name: &'static str, category: &'static str, default: i32, min: i32, m
     }
 }
 /// Every rule available without experimental features, in registration order.
-pub const RULES: &[Rule] = &[
+const RULES: &[VanillaRule] = &[
     b("advance_time", "updates", true),
     b("advance_weather", "updates", true),
     b("allow_entering_nether_using_portals", "misc", true),
@@ -126,20 +156,49 @@ pub const RULES: &[Rule] = &[
     b("water_source_conversion", "updates", true),
 ];
 /// GameRules.MAX_MINECART_SPEED (26.3), available with minecart improvements.
-pub const MAX_MINECART_SPEED: Rule = i("max_minecart_speed", "misc", 8, 1, 1000);
+const MAX_MINECART_SPEED: VanillaRule = i("max_minecart_speed", "misc", 8, 1, 1000);
 pub const MINECART_IMPROVEMENTS: &str = "minecraft:minecart_improvements";
 
-pub fn available_rules(minecart_improvements: bool) -> impl Iterator<Item = &'static Rule> {
-    RULES
-        .iter()
-        .chain(minecart_improvements.then_some(&MAX_MINECART_SPEED))
+/// Immutable, ordered rule definitions shared by game-rule consumers.
+#[derive(Debug, PartialEq)]
+pub struct RuleRegistry {
+    rules: Vec<Rule>,
 }
-
-pub fn rule(name: &str) -> Option<&'static Rule> {
-    let name = name.strip_prefix("minecraft:").unwrap_or(name);
-    available_rules(true).find(|r| r.name == name)
+impl Default for RuleRegistry {
+    fn default() -> Self {
+        Self::vanilla()
+    }
 }
-
+impl RuleRegistry {
+    /// Create a fresh vanilla-backed registry for a session.
+    pub fn vanilla() -> Self {
+        Self {
+            rules: RULES
+                .iter()
+                .chain(std::iter::once(&MAX_MINECART_SPEED))
+                .map(Rule::from)
+                .collect(),
+        }
+    }
+    pub fn available_rules(&self, minecart_improvements: bool) -> impl Iterator<Item = &Rule> {
+        self.rules
+            .iter()
+            .enumerate()
+            .filter(move |(index, _)| minecart_improvements || *index != RULES.len())
+            .map(|(_, rule)| rule)
+    }
+    pub fn rule(&self, name: &str) -> Option<&Rule> {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        self.available_rules(true).find(|r| r.name == name)
+    }
+}
+/// The vanilla-backed registry, shared by all existing consumers.
+pub fn rule_registry() -> Arc<RuleRegistry> {
+    static REGISTRY: OnceLock<Arc<RuleRegistry>> = OnceLock::new();
+    REGISTRY
+        .get_or_init(|| Arc::new(RuleRegistry::vanilla()))
+        .clone()
+}
 /// A vanilla rule's resolved position in the registration order.
 #[derive(Clone, Copy, Debug)]
 pub struct RuleIndex(usize);
@@ -294,6 +353,7 @@ pub mod vanilla {
 /// Current values (defaults unless set).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameRules {
+    registry: Arc<RuleRegistry>,
     values: Vec<Value>,
     // Keep entries that cannot be interpreted by the current registry verbatim.
     // A temporarily absent mod must not lose its saved rule values.
@@ -302,36 +362,54 @@ pub struct GameRules {
 }
 impl Default for GameRules {
     fn default() -> Self {
-        Self {
-            values: available_rules(true).map(|rule| rule.default).collect(),
-            unknown: nbt::Compound::new(),
-            minecart_improvements: false,
-        }
+        Self::with_registry(rule_registry(), &[])
     }
 }
 impl GameRules {
     pub fn with_features(features: &[String]) -> Self {
+        Self::with_registry(rule_registry(), features)
+    }
+    /// Build a rule set from a session's immutable definitions.
+    pub fn with_registry(registry: Arc<RuleRegistry>, features: &[String]) -> Self {
         Self {
+            values: registry
+                .available_rules(true)
+                .map(|rule| rule.default)
+                .collect(),
+            registry,
+            unknown: nbt::Compound::new(),
             minecart_improvements: features.iter().any(|f| f == MINECART_IMPROVEMENTS),
-            ..Self::default()
         }
     }
     /// GameRules.copy(enabledFeatures): keep available values, add defaults for
     /// newly enabled rules and discard rules absent from the target feature set.
     pub fn copy_with_features(&self, features: &[String]) -> Self {
-        let mut rules = Self::with_features(features);
+        let mut rules = Self::with_registry(self.registry.clone(), features);
         rules.unknown = self.unknown.clone();
-        for (rule, &value) in available_rules(true).zip(&self.values) {
-            rules.set(rule.name, value);
+        for (rule, &value) in self.registry.available_rules(true).zip(&self.values) {
+            rules.set(&rule.name, value);
         }
         rules
     }
-    pub fn available_rules(&self) -> impl Iterator<Item = &'static Rule> + use<> {
-        available_rules(self.minecart_improvements)
+    pub fn available_rules(&self) -> impl Iterator<Item = &Rule> {
+        self.registry.available_rules(self.minecart_improvements)
+    }
+    /// Look up a definition in this rule set's registry.
+    pub fn rule(&self, name: &str) -> Option<&Rule> {
+        self.available_rules()
+            .find(|rule| rule.name == name.strip_prefix("minecraft:").unwrap_or(name))
     }
     pub fn get(&self, name: &str) -> Option<Value> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
-        let index = self.available_rules().position(|rule| rule.name == name)?;
+        let index = self
+            .registry
+            .rules
+            .iter()
+            .enumerate()
+            .find_map(|(index, rule)| {
+                (rule.name == name && (index != RULES.len() || self.minecart_improvements))
+                    .then_some(index)
+            })?;
         Some(self.values[index])
     }
     /// Read a resolved vanilla boolean rule without a name lookup.
@@ -357,11 +435,9 @@ impl GameRules {
     /// Set a rule; false if the name or value type is wrong.
     pub fn set(&mut self, name: &str, value: Value) -> bool {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
-        let Some((index, r)) = self
-            .available_rules()
-            .enumerate()
-            .find(|(_, r)| r.name == name)
-        else {
+        let Some((index, r)) = self.registry.rules.iter().enumerate().find(|(index, r)| {
+            (*index != RULES.len() || self.minecart_improvements) && r.name == name
+        }) else {
             return false;
         };
         let ok = match (r.default, value) {
@@ -377,8 +453,11 @@ impl GameRules {
     /// Every rule's value by name without namespace, as `save::Level` holds
     /// them (booleans as 0 or 1).
     pub fn by_name(&self) -> BTreeMap<String, i32> {
-        self.available_rules()
+        self.registry
+            .rules
+            .iter()
             .enumerate()
+            .filter(|(index, _)| *index != RULES.len() || self.minecart_improvements)
             .map(|(index, r)| {
                 let v = match self.values[index] {
                     Value::Bool(b) => i32::from(b),
@@ -391,17 +470,26 @@ impl GameRules {
     /// GameRuleMap codec: `{data: {"minecraft:<rule>": value...}, DataVersion}`.
     pub fn to_nbt(&self) -> NamedTag {
         let mut data = self.unknown.clone();
-        data.extend(self.available_rules().enumerate().map(|(index, r)| {
-            let v = self.values[index];
-            let tag = match v {
-                Value::Bool(b) => Tag::Byte(i8::from(b)),
-                Value::Int(i) => Tag::Int(i),
-            };
-            (
-                horizon_world::nbt::JavaString::from(format!("minecraft:{}", r.name).as_str()),
-                tag,
-            )
-        }));
+        data.extend(
+            self.registry
+                .rules
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != RULES.len() || self.minecart_improvements)
+                .map(|(index, r)| {
+                    let v = self.values[index];
+                    let tag = match v {
+                        Value::Bool(b) => Tag::Byte(i8::from(b)),
+                        Value::Int(i) => Tag::Int(i),
+                    };
+                    (
+                        horizon_world::nbt::JavaString::from(
+                            format!("minecraft:{}", r.name).as_str(),
+                        ),
+                        tag,
+                    )
+                }),
+        );
         NamedTag {
             name: "".into(),
             tag: Tag::compound([
@@ -414,27 +502,36 @@ impl GameRules {
         Self::from_nbt_with_features(root, &[])
     }
     pub fn from_nbt_with_features(root: &Tag, features: &[String]) -> Self {
-        let mut rules = Self::with_features(features);
+        Self::from_nbt_with_registry(root, features, rule_registry())
+    }
+    /// Decode saved values against session definitions.
+    pub fn from_nbt_with_registry(
+        root: &Tag,
+        features: &[String],
+        registry: Arc<RuleRegistry>,
+    ) -> Self {
+        let mut rules = Self::with_registry(registry, features);
         let Some(Tag::Compound(data)) = root.get("data") else {
             return rules;
         };
         rules.unknown = data.clone();
-        for r in rules.available_rules() {
+        let registry = rules.registry.clone();
+        for r in registry.available_rules(rules.minecart_improvements) {
             let key = format!("minecraft:{}", r.name);
             let value = data
                 .get(&key.as_str().into())
-                .or_else(|| data.get(&r.name.into()));
+                .or_else(|| data.get(&r.name.as_str().into()));
             match (r.default, value) {
                 (Value::Bool(_), Some(Tag::Byte(v))) => {
-                    rules.set(r.name, Value::Bool(*v != 0));
+                    rules.set(&r.name, Value::Bool(*v != 0));
                 }
                 (Value::Int(_), Some(Tag::Int(v))) => {
-                    rules.set(r.name, Value::Int(*v));
+                    rules.set(&r.name, Value::Int(*v));
                 }
                 _ => {}
             }
             rules.unknown.remove(&key.as_str().into());
-            rules.unknown.remove(&r.name.into());
+            rules.unknown.remove(&r.name.as_str().into());
         }
         rules
     }
@@ -442,15 +539,23 @@ impl GameRules {
         Self::load_with_features(world, &[])
     }
     pub fn load_with_features(world: &Path, features: &[String]) -> Self {
+        Self::load_with_registry(world, features, rule_registry())
+    }
+    /// Load saved values with the session registry.
+    pub fn load_with_registry(
+        world: &Path,
+        features: &[String],
+        registry: Arc<RuleRegistry>,
+    ) -> Self {
         let Ok(bytes) = fs::read(world.join("data/minecraft/game_rules.dat")) else {
-            return Self::with_features(features);
+            return Self::with_registry(registry, features);
         };
         let Ok(raw) = Compression::Gzip.decode(&bytes, 16 << 20) else {
-            return Self::with_features(features);
+            return Self::with_registry(registry, features);
         };
         match nbt::read_named(&raw, Limits::default()) {
-            Ok((root, _)) => Self::from_nbt_with_features(&root.tag, features),
-            Err(_) => Self::with_features(features),
+            Ok((root, _)) => Self::from_nbt_with_registry(&root.tag, features, registry),
+            Err(_) => Self::with_registry(registry, features),
         }
     }
     pub fn save(&self, world: &Path) -> crate::Result<()> {
@@ -490,6 +595,53 @@ mod tests {
                 .get("missing:example"),
             Some(&Tag::Long(123))
         );
+    }
+
+    #[test]
+    fn vanilla_registry_is_shared_with_rule_consumers() {
+        let registry = rule_registry();
+        let rules = GameRules::default();
+        assert!(Arc::ptr_eq(&registry, &rules.registry));
+        assert!(std::ptr::eq(
+            registry.rule("minecraft:keep_inventory").unwrap(),
+            rules.rule("keep_inventory").unwrap()
+        ));
+        assert_eq!(
+            registry.available_rules(false).count() + 1,
+            registry.available_rules(true).count()
+        );
+    }
+
+    #[test]
+    fn session_registry_survives_load_and_feature_copy() {
+        let first = Arc::new(RuleRegistry::vanilla());
+        let second = Arc::new(RuleRegistry::vanilla());
+        let rules = GameRules::with_registry(first.clone(), &[]);
+        let loaded = GameRules::from_nbt_with_registry(&rules.to_nbt().tag, &[], first.clone());
+        let copied = loaded.copy_with_features(&[MINECART_IMPROVEMENTS.to_owned()]);
+        assert!(Arc::ptr_eq(&copied.registry, &first));
+        assert!(!Arc::ptr_eq(&copied.registry, &second));
+    }
+
+    #[test]
+    fn disabled_feature_does_not_shift_later_dense_positions() {
+        let mut registry = RuleRegistry::vanilla();
+        registry.rules.push(Rule {
+            name: "later".into(),
+            category: "misc".into(),
+            default: Value::Int(4),
+            min: 0,
+            max: 9,
+        });
+        let registry = Arc::new(registry);
+        let mut rules = GameRules::with_registry(registry, &[]);
+        assert_eq!(rules.get("later"), Some(Value::Int(4)));
+        assert!(rules.set("later", Value::Int(7)));
+        assert_eq!(rules.get("later"), Some(Value::Int(7)));
+        assert_eq!(rules.get("max_minecart_speed"), None);
+        let enabled = rules.copy_with_features(&[MINECART_IMPROVEMENTS.to_owned()]);
+        assert_eq!(enabled.get("later"), Some(Value::Int(7)));
+        assert_eq!(enabled.int_at(vanilla::MAX_MINECART_SPEED), 8);
     }
 
     #[test]

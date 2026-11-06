@@ -767,7 +767,9 @@ impl Game<'_> {
     /// A saved item frame.
     pub(super) fn load_item_frame(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.next_entity += 1;
-        if let Some(f) = entity_nbt::item_frame_from_nbt(&tag, self.next_entity) {
+        if let Some(mut f) = entity_nbt::item_frame_from_nbt(&tag, self.next_entity) {
+            let item = f.item.take();
+            f.set_item(item);
             self.remember(f.id, uuid, tag);
             self.item_frames.push(f);
         }
