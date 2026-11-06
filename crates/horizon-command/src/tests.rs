@@ -228,6 +228,30 @@ fn reader_matches_brigadier() {
     assert_eq!(e.context().unwrap(), "<--[HERE]");
 }
 #[test]
+fn session_dispatchers_respect_feature_flags() {
+    let first = horizon_client_core::gamerules::RuleRegistry::vanilla();
+    let second = horizon_client_core::gamerules::RuleRegistry::vanilla();
+    let plain = vanilla::session_dispatcher(&first, &[]);
+    let enabled = vanilla::session_dispatcher(
+        &second,
+        &[horizon_client_core::gamerules::MINECART_IMPROVEMENTS.to_owned()],
+    );
+    let registries = reg();
+    assert!(
+        plain
+            .parse("gamerule max_minecart_speed 8", &registries)
+            .executable()
+            .is_err()
+    );
+    assert!(
+        enabled
+            .parse("gamerule max_minecart_speed 8", &registries)
+            .executable()
+            .is_ok()
+    );
+}
+
+#[test]
 fn parses_vanilla_commands() {
     assert_eq!(run("gamemode creative").unwrap().0, "gamemode");
     assert_eq!(

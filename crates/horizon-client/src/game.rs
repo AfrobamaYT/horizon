@@ -14142,6 +14142,7 @@ impl Game<'_> {
             return self.leave_server(None);
         }
         // The save screen has finished every write before releasing storage.
+        self.ui.dispatcher = Default::default();
         self.server_loot.set(None);
         self.server_items = None;
         self.session_lock = None;
