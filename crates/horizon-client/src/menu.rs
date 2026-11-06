@@ -891,7 +891,10 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             kind,
-            registry_id: None,
+            registry_id: match kind {
+                Kind::Mod(kind) => Some(kind.id.into()),
+                _ => None,
+            },
             slots,
             containers,
             grid_size,
@@ -1775,12 +1778,8 @@ impl Menu {
         partial
     }
 
-    // Enable registered vanilla menus here when the guest engine uses the same rules.
     fn dispatch_id(&self) -> Option<&str> {
-        match self.kind {
-            Kind::Mod(kind) => Some(kind.id),
-            _ => None,
-        }
+        self.registry_id()
     }
 
     fn slot_rules(
