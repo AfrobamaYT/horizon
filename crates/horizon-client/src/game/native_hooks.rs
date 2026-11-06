@@ -1018,9 +1018,9 @@ use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, CommandInvocation, EnchantmentInfo,
     EntityRef, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
     NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
-    NativeNoteBlockChange, NativeProgressType, NativeServerPlayer, PathComputationType, Placement,
-    PlayerRef, RecipeBookCategory, ScreenOpening, ScreenshotImage, ServerReloadListeners,
-    ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    NativeNoteBlockChange, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase,
+    TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
