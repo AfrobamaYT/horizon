@@ -1178,9 +1178,7 @@ mod tests {
 
     /// The result `/forceload query` gives: the chunks listed, or 0 when it reports none.
     fn query_result(game: &mut super::super::Game<'_>, command: &str) -> Option<i32> {
-        let d = horizon_client::command::vanilla::game_dispatcher_with_features(
-            &game.level.enabled_features,
-        );
+        let d = game.ui.dispatcher.0.clone();
         let parse = d.parse(command, &game.ui.registries);
         let (ctx, _) = parse.executable().ok()?;
         let (ctx, root) = (ctx.clone(), parse.context.clone());

@@ -10,6 +10,7 @@ pub(super) struct WorldRequest {
     pub seed: Option<i64>,
     pub creative: bool,
     pub create: Option<horizon_client::title::WorldOptions>,
+    pub rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
 }
 
 pub(super) struct PreparedWorld {
@@ -41,6 +42,7 @@ impl WorldRequest {
             seed,
             creative,
             create: create.cloned(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         })
     }
 
@@ -101,6 +103,7 @@ impl WorldRequest {
             seed,
             creative,
             create,
+            rule_registry,
         } = self;
         let name = name.as_deref();
         let create = create.as_ref();
@@ -150,7 +153,7 @@ impl WorldRequest {
                 .and_then(|t| t.get("data").cloned())
                 .map(|d| horizon_client::random_sequences::RandomSequences::from_nbt(&d))
                 .unwrap_or_default();
-        let existing = Level::read(&save_root);
+        let existing = Level::read_with_registry(&save_root, rule_registry.clone());
         let created = existing.is_none();
         let level = existing.unwrap_or_else(|| Level {
             name: name.unwrap_or(&folder).to_owned(),
@@ -166,6 +169,7 @@ impl WorldRequest {
             health: 20.0,
             food: 20,
             saturation: 5.0,
+            rule_registry,
             ..Level::default()
         });
         let mut level = level;

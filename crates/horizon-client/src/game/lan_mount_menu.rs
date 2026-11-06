@@ -57,6 +57,7 @@ impl Game<'_> {
     fn mount_engine_menu(&self, index: usize, columns: usize) -> Menu {
         let env = self.menu_env();
         let mut menu = Menu::new(Kind::Mount(columns));
+        menu.set_registry_id(Some("horizon:mount_inventory"));
         menu.mount = Some(self.mobs[index].kind.id.to_string());
         let (saddle, body, items) = self.mount_contents(index);
         menu.load_slot(0, saddle);

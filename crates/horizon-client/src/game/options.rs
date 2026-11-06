@@ -110,7 +110,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1280, 720], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         (b.width, b.height)
     }
     /// Open the options screens (OptionsScreen) from the title or pause menu.
@@ -522,14 +522,6 @@ impl Game<'_> {
     }
     /// Settings that Horizon applies beyond render distance, volume and GUI scale.
     pub(super) fn apply_ui_settings(&mut self) {
-        horizon_client::hud::GUI_SCALE.store(
-            self.settings.gui_scale,
-            std::sync::atomic::Ordering::Relaxed,
-        );
-        horizon_client::hud::GUI_UNICODE.store(
-            self.settings.force_unicode,
-            std::sync::atomic::Ordering::Relaxed,
-        );
         if horizon_client_render::mipmap::set_dither_cutouts(
             self.settings.horizon.dither_cutout_mips,
         ) {

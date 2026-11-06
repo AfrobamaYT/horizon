@@ -79,6 +79,7 @@ impl Game<'_> {
             return true;
         };
         let mut menu = Box::new(Menu::new(kind));
+        menu.set_registry_id(Some(menu_type));
         // Without a mod the take runs AnvilMenu.onTake's order in the click itself.
         let hooked = !mod_api::__private::mods().is_empty();
         menu.anvil_hook = kind == Kind::Anvil && hooked;
@@ -684,9 +685,9 @@ impl Game<'_> {
         }
         gs.last_sound = self.ticks;
         let at = gs.pos.map(|v| f64::from(v) + 0.5);
-        for sound in sounds {
-            self.audio.play(sound, Some(at), 1.0, 1.0);
-        }
+        // The menu's `lastSoundTime` lets one sound through per tick, however
+        // many results a shift-click took.
+        self.audio.play(sounds[0], Some(at), 1.0, 1.0);
     }
 
     /// A click on the guest's station window; false for other windows.

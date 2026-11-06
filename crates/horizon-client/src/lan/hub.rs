@@ -340,6 +340,8 @@ pub struct Hub {
     pub encoder: ChunkEncoder,
     pub guests: super::guest_list::GuestList,
     pub(super) sync: Arc<SyncData>,
+    /// The active world session rule definitions.
+    pub rule_registry: Arc<crate::gamerules::RuleRegistry>,
     pub ticks: u64,
     /// The next `Guest.vehicle_order`: a rider that boards later sits behind.
     pub seat_order: u64,
@@ -725,6 +727,7 @@ impl Hub {
             encoder,
             guests: Default::default(),
             sync,
+            rule_registry: crate::gamerules::rule_registry(),
             ticks: 0,
             seat_order: 0,
             sound_seeds: Mutex::new(LegacyRandom::new(crate::sound_engine::unique_seed())),
@@ -1991,6 +1994,7 @@ impl Hub {
                     &self.sync.builtin,
                     &self.mod_commands.0,
                     &self.sync.features,
+                    &self.rule_registry,
                 )
             }
             None => play::Commands {
@@ -5390,6 +5394,131 @@ mod tests {
             horizon_protocol::registry::Ids::from_names(vec!["minecraft:speed".to_string()]),
         );
         hub_with_sync(sync)
+    }
+
+    #[test]
+    fn guest_rule_tree_comes_from_session_registry() {
+        let mut sync = SyncData::empty();
+        sync.commands = Some(crate::lan::commands::CommandTree {
+            root: serde_json::json!({"type":"root", "children": {
+                "gamerule": {"type":"literal", "permissions":{"permission":{"level":"gamemasters"}},
+                    "children":{"stale_rule":{"type":"literal"}}}
+            }}),
+        });
+        sync.builtin.registries.insert(
+            "minecraft:command_argument_type".into(),
+            horizon_protocol::registry::Ids::from_names(
+                play::ARGUMENT_TYPES
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect(),
+            ),
+        );
+        let (mut hub, rx) = hub_with_sync(sync);
+        hub.rule_registry = Arc::new(crate::gamerules::RuleRegistry::vanilla());
+        hub.guests.update(0, |g| g.permission = 2);
+        hub.send_commands(0);
+        let crate::lan::Out::Packet(body) = rx.try_recv().unwrap() else {
+            panic!("expected packet")
+        };
+        let mut reader = horizon_protocol::buf::Reader::new(&body);
+        let id = reader.varint().unwrap();
+        let play::Clientbound::Commands(packet) =
+            play::Clientbound::decode(id, &body[reader.position()..]).unwrap()
+        else {
+            panic!("expected commands")
+        };
+        let root = packet.nodes.iter().find(|n| n.name == "gamerule").unwrap();
+        let names: Vec<_> = root
+            .children
+            .iter()
+            .map(|i| packet.nodes[*i as usize].name.clone())
+            .collect();
+        let mut expected: Vec<_> = hub
+            .rule_registry
+            .available_rules(false)
+            .flat_map(|r| [r.name.to_owned(), format!("minecraft:{}", r.name)])
+            .collect();
+        expected.sort();
+        assert_eq!(names, expected);
+        let client =
+            crate::command::network::from_packet(&packet, &crate::command::Dispatcher::new());
+        let regs = crate::command::Registries {
+            permission: 2,
+            ..Default::default()
+        };
+        let suggestions = |line: &str| {
+            client
+                .client_suggestions(&client.parse(line, &regs), line.len(), &regs)
+                .1
+                .into_iter()
+                .map(|s| s.text)
+                .collect::<Vec<_>>()
+        };
+        for (name, report_bounds) in [
+            ("random_tick_speed", serde_json::json!({"min": 0})),
+            (
+                "max_snow_accumulation_height",
+                serde_json::json!({"min": 0, "max": 8}),
+            ),
+        ] {
+            let rule = packet.nodes.iter().find(|n| n.name == name).unwrap();
+            let value = &packet.nodes[rule.children[0] as usize];
+            assert_eq!(
+                value.parser.as_ref().unwrap().1,
+                match report_bounds.get("max") {
+                    None => vec![1, 0, 0, 0, 0],
+                    Some(_) => vec![3, 0, 0, 0, 0, 0, 0, 0, 8],
+                }
+            );
+        }
+        assert!(suggestions("gamerule keep_").contains(&"keep_inventory".to_owned()));
+        assert_eq!(suggestions("gamerule keep_inventory "), ["false", "true"]);
+        assert!(suggestions("gamerule max_snow_accumulation_height ").is_empty());
+        assert!(
+            client
+                .parse("gamerule max_snow_accumulation_height 8", &regs)
+                .executable()
+                .is_ok()
+        );
+        assert!(
+            client
+                .parse("gamerule max_snow_accumulation_height 9", &regs)
+                .executable()
+                .is_err()
+        );
+        assert!(!names.iter().any(|n| n.contains("max_minecart_speed")));
+        let tree = hub.sync.commands.as_ref().unwrap();
+        let enabled = tree.packet_with_features(
+            2,
+            false,
+            &hub.sync.builtin,
+            &serde_json::Value::Null,
+            &[crate::gamerules::MINECART_IMPROVEMENTS.to_owned()],
+            &hub.rule_registry,
+        );
+        let root = enabled.nodes.iter().find(|n| n.name == "gamerule").unwrap();
+        let names: Vec<_> = root
+            .children
+            .iter()
+            .map(|i| enabled.nodes[*i as usize].name.clone())
+            .collect();
+        let mut expected: Vec<_> = hub
+            .rule_registry
+            .available_rules(true)
+            .flat_map(|r| [r.name.to_owned(), format!("minecraft:{}", r.name)])
+            .collect();
+        expected.sort();
+        assert_eq!(names, expected);
+        assert!(
+            !hub.commands_packet(0)
+                .nodes
+                .iter()
+                .any(|n| n.name == "gamerule")
+        );
+        let registry = hub.rule_registry.clone();
+        hub.reload_resources(hub.sync.clone(), &mut Default::default());
+        assert!(Arc::ptr_eq(&registry, &hub.rule_registry));
     }
 
     /// [`hub_with_a_guest`] over a sync the test built.

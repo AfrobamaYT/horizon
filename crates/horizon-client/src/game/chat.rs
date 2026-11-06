@@ -154,6 +154,16 @@ pub(super) enum ChatExit {
 fn should_discard_draft(reason: ChatExit, save_chat_drafts: bool) -> bool {
     reason != ChatExit::Interrupted && (reason != ChatExit::Intentional || !save_chat_drafts)
 }
+/// An owned command tree, initialized even before a world is opened.
+pub struct SessionDispatcher(pub Arc<horizon_client::command::Dispatcher>);
+impl Default for SessionDispatcher {
+    fn default() -> Self {
+        let registry = horizon_client::gamerules::RuleRegistry::vanilla();
+        Self(Arc::new(
+            horizon_client::command::vanilla::session_dispatcher(&registry, &[]),
+        ))
+    }
+}
 /// UI and command state that lives beside the game.
 #[derive(Default)]
 pub struct UiState {
@@ -169,6 +179,8 @@ pub struct UiState {
     pub in_bed_chat: bool,
     pub registries: Registries,
     pub rules: GameRules,
+    /// The server session command tree.
+    pub dispatcher: SessionDispatcher,
     pub clock: WorldClock,
     /// Command state for registered clocks other than Overworld. Overworld's
     /// canonical ticks stay in World.day_time and its state stays in clock.
@@ -739,7 +751,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1280, 720], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
             dispatcher: chat_tree(&self.remote),
@@ -1108,7 +1120,11 @@ impl Game<'_> {
     pub(super) fn chat_scroll(&mut self, amount: f32) {
         let cursor = self.cursor;
         let height = self.renderer.as_ref().map_or(720.0, |r| {
-            HudBatch::new([r.config.width, r.config.height]).height
+            HudBatch::new(
+                [r.config.width, r.config.height],
+                self.settings.gui_scale_inputs(),
+            )
+            .height
         });
         let _ = height;
         let mouse = (cursor.0.floor() as i32, cursor.1.floor() as i32);
@@ -1125,7 +1141,11 @@ impl Game<'_> {
     pub(super) fn chat_click(&mut self) {
         let cursor = self.cursor;
         let height = self.renderer.as_ref().map_or(720.0, |r| {
-            HudBatch::new([r.config.width, r.config.height]).height
+            HudBatch::new(
+                [r.config.width, r.config.height],
+                self.settings.gui_scale_inputs(),
+            )
+            .height
         });
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
@@ -1134,7 +1154,11 @@ impl Game<'_> {
         };
         if self.ui.in_bed_chat && self.sleeping.is_some() {
             let width = self.renderer.as_ref().map_or(1280.0, |r| {
-                HudBatch::new([r.config.width, r.config.height]).width
+                HudBatch::new(
+                    [r.config.width, r.config.height],
+                    self.settings.gui_scale_inputs(),
+                )
+                .width
             });
             let (x, y, w, h) = Self::leave_bed_button(width, height);
             if horizon_client::screen_draw::inside((cursor.0 as i32, cursor.1 as i32), x, y, w, h) {
@@ -1589,8 +1613,17 @@ impl Game<'_> {
     /// `ServerClockManager.ServerClockInstance.loadFrom`: restore the existing
     /// Overworld state when a world opens; clear the other command-state cache.
     pub(super) fn load_world_state(&mut self) {
-        self.ui.rules =
-            GameRules::load_with_features(&self.world_root, &self.level.enabled_features);
+        self.ui.rules = GameRules::load_with_registry(
+            &self.world_root,
+            &self.level.enabled_features,
+            self.level.rule_registry.clone(),
+        );
+        self.ui.dispatcher = SessionDispatcher(Arc::new(
+            horizon_client::command::vanilla::session_dispatcher(
+                &self.level.rule_registry,
+                &self.level.enabled_features,
+            ),
+        ));
         self.ui.clock = WorldClock::default();
         self.ui.command_clocks.clear();
         // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.

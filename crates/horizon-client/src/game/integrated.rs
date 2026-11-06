@@ -105,8 +105,11 @@ impl Integrated {
     fn queue_pregen_option(&self, enabled: bool) {
         let _ = self.tasks.send(Box::new(move |g| {
             use horizon_client::command::vanilla;
-            if vanilla::game_dispatcher().find("pregen").is_some() != enabled {
+            if g.ui.dispatcher.0.find("pregen").is_some() != enabled {
                 vanilla::set_horizon_commands(enabled);
+                g.ui.dispatcher = super::chat::SessionDispatcher(std::sync::Arc::new(
+                    vanilla::session_dispatcher(&g.level.rule_registry, &g.level.enabled_features),
+                ));
                 g.resend_commands_filtered();
             }
         }));
