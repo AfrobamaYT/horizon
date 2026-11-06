@@ -1072,14 +1072,26 @@ mod tests {
 
             // A failed resource build never publishes a replacement, so the handle remains valid.
             let missing = game.options.resources.join("absent-model-test-root");
-            assert!(game.pack.assets.reload(&missing).is_err());
+            assert!(
+                game.pack
+                    .assets
+                    .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                        missing
+                    ))
+                    .is_err()
+            );
             assert_eq!(
                 game.native_draw_model(&mut surface, model, 0x123456),
                 Ok(())
             );
             let before = bytes(&surface.vertices);
             // Identical texture bytes still produce a new model generation.
-            let replacement = game.pack.assets.reload(&game.options.resources).unwrap();
+            let resources = horizon_assets::resource_source::ResourceRoot::new(
+                game.options.resources.clone(),
+                game.options.resources.clone(),
+                game.pack.source.clone(),
+            );
+            let replacement = game.pack.assets.reload(&resources).unwrap();
             assert_ne!(replacement.generation, game.pack.render.generation);
             game.pack.render = std::sync::Arc::new(replacement);
             assert_eq!(
