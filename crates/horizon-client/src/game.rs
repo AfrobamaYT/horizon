@@ -22032,6 +22032,7 @@ impl Game<'_> {
             mod_api::__private::ResolvePartsError::Parts(errors) => {
                 format!("Mod parts refused:\n{}", errors.join("\n"))
             }
+            _ => "Mod parts refused".to_owned(),
         })?;
         self.resolve_pathfindable();
         Ok(())

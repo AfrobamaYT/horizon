@@ -495,6 +495,7 @@ pub fn mark_game_thread() {
 
 /// An item registration request that the loaded item registry cannot resolve.
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ItemKeyError {
     /// The requesting mod.
     pub mod_id: &'static str,
@@ -504,6 +505,7 @@ pub struct ItemKeyError {
 
 /// Refusals at the Parts load boundary.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ResolvePartsError {
     /// An item key names no loaded item.
     ItemKeys(Vec<ItemKeyError>),
@@ -536,9 +538,14 @@ pub fn resolve_parts(
     let Some(installed) = installed() else {
         return Ok(());
     };
-    let item_errors = installed.registry_keys.items.unknown_items(known.item);
-    if !item_errors.is_empty() {
-        return Err(ResolvePartsError::ItemKeys(item_errors));
+    if let Err(errors) = installed.registry_keys.items.resolve(
+        |id| (known.item)(id).then_some(()),
+        |mod_id, id| ItemKeyError {
+            mod_id,
+            id: id.to_owned(),
+        },
+    ) {
+        return Err(ResolvePartsError::ItemKeys(errors));
     }
     let mut unknown: Vec<String> = unknown_keys(&installed.keys.blocks, known.block, "block")
         .chain(unknown_keys(&installed.keys.items, known.item, "item"))

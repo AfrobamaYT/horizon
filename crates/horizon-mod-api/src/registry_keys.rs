@@ -58,40 +58,17 @@ impl Names {
             .map(|entry| entry.id.as_str())
     }
 
-    pub(crate) fn unknown_items(
+    pub(crate) fn resolve<T, E>(
         &self,
-        known: &dyn Fn(&str) -> bool,
-    ) -> Vec<super::part_table::ItemKeyError> {
-        self.entries
-            .iter()
-            .filter(|entry| !known(&entry.id))
-            .flat_map(|entry| {
-                entry
-                    .mods
-                    .iter()
-                    .map(|mod_id| super::part_table::ItemKeyError {
-                        mod_id,
-                        id: entry.id.clone(),
-                    })
-            })
-            .collect()
-    }
-
-    fn resolve<T>(
-        &self,
-        kind: &str,
         mut resolve: impl FnMut(&str) -> Option<T>,
-    ) -> Result<Vec<T>, Vec<String>> {
+        mut unknown: impl FnMut(&'static str, &str) -> E,
+    ) -> Result<Vec<T>, Vec<E>> {
         let mut values = Vec::with_capacity(self.entries.len());
         let mut errors = Vec::new();
         for entry in &self.entries {
             match resolve(&entry.id) {
                 Some(value) => values.push(value),
-                None => {
-                    errors.extend(entry.mods.iter().map(|mod_id| {
-                        format!("mod {mod_id} requested unknown {kind} {}", entry.id)
-                    }))
-                }
+                None => errors.extend(entry.mods.iter().map(|mod_id| unknown(mod_id, &entry.id))),
             }
         }
         if errors.is_empty() {
@@ -242,7 +219,10 @@ pub fn resolve_block_entity_types(
     let mut names = crate::part_table::requested_keys()
         .block_entity_types
         .clone();
-    names.resolve("block entity type", |id| types.key(id))?;
+    names.resolve(
+        |id| types.key(id),
+        |mod_id, id| format!("mod {mod_id} requested unknown block entity type {id}"),
+    )?;
     for id in types.names() {
         names
             .request("horizon", id)
@@ -303,7 +283,9 @@ pub fn resolve_blocks(
 ) -> Result<(), Vec<String>> {
     let result = crate::part_table::requested_keys()
         .blocks
-        .resolve("block", &mut resolve);
+        .resolve(&mut resolve, |mod_id, id| {
+            format!("mod {mod_id} requested unknown block {id}")
+        });
     BLOCKS.with(|blocks| {
         *blocks.borrow_mut() = None;
         match result {
@@ -347,9 +329,10 @@ pub fn resolve_effects() -> Result<(), Vec<String>> {
             .request("horizon", potions::namespaced(def.id))
             .expect("registry owns valid ids");
     }
-    let indices = names.resolve("effect", |id| {
-        all.iter().position(|def| potions::namespaced(def.id) == id)
-    })?;
+    let indices = names.resolve(
+        |id| all.iter().position(|def| potions::namespaced(def.id) == id),
+        |mod_id, id| format!("mod {mod_id} requested unknown effect {id}"),
+    )?;
     let mut keys = vec![EffectKey(u32::MAX); all.len()];
     for (slot, &index) in indices.iter().enumerate() {
         keys[index] = EffectKey(slot as u32);
