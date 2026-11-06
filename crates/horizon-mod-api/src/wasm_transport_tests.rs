@@ -79,16 +79,21 @@ fn resource_list_transport_reuses_host_buffers() {
           (func (export "run") (param "node" (borrow $node)) (param "values" $list) (result $list)
             (canon lift (core func $run) (memory $memory) (realloc $realloc))))
     "#).unwrap()).unwrap();
-    for reuse in [false, true] {
+    let mut counts = [0; 3];
+    for route in 0..3 {
         let mut linker = Linker::<State>::new(&engine);
         let mut host = linker.instance("test").unwrap();
         host.resource("node", ResourceType::host::<Node>(), |_, _| Ok(()))
             .unwrap();
-        if reuse {
+        if route != 0 {
+            let empty = Arc::new(Vec::<u32>::new());
             host.func_wrap(
                 "[method]node.echo",
-                |store, (node, values): (Resource<Node>, WasmList<u32>)| {
+                move |store, (node, values): (Resource<Node>, WasmList<u32>)| {
                     assert_eq!(node.rep(), 7);
+                    if route == 1 {
+                        return Ok((empty.clone(),));
+                    }
                     State::with_buffer::<Arc<Vec<u32>>, _>(store, |buffer, store| {
                         let output = Arc::get_mut(buffer).unwrap();
                         output.clear();
@@ -121,8 +126,10 @@ fn resource_list_transport_reuses_host_buffers() {
             let (result,) = call
                 .call(&mut store, (Resource::new_borrow(7), &values))
                 .unwrap();
-            for (i, value) in result.iter(store.as_context_mut()).unwrap().enumerate() {
-                assert_eq!(value.unwrap(), i as u32 + 1);
+            if route != 1 {
+                for (i, value) in result.iter(store.as_context_mut()).unwrap().enumerate() {
+                    assert_eq!(value.unwrap(), i as u32 + 1);
+                }
             }
         };
         for _ in 0..10 {
@@ -136,16 +143,21 @@ fn resource_list_transport_reuses_host_buffers() {
         }
         let elapsed = start.elapsed();
         let allocations = COUNT.replace(None).unwrap();
-        assert_eq!(
-            allocations,
-            if reuse { 0 } else { 2 * CALLS },
-            "warmed canonical resource/list transport"
-        );
+        counts[route] = allocations;
         eprintln!(
-            "1,000 values each direction (reuse = {reuse}): {} ns/call, {allocations} host allocations / {CALLS} calls; guest fixture uses two fixed-buffer canonical realloc calls per round trip",
+            "1,000 values each direction (route = {route}): {} ns/call, {allocations} host allocations / {CALLS} calls; guest fixture uses two fixed-buffer canonical realloc calls per round trip",
             elapsed.as_nanos() / CALLS as u128
         );
     }
+    assert_eq!(
+        counts[0] - counts[1],
+        2 * 100_000,
+        "owned list transport allocations"
+    );
+    assert_eq!(
+        counts[2], counts[1],
+        "reused list transport adds no allocations"
+    );
 }
 
 #[test]
