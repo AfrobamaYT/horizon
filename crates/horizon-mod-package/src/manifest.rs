@@ -431,7 +431,7 @@ impl Manifest {
                 m.id
             ));
         }
-        inject::Inject::check_all(&m.inject, m.native.is_some() || m.wasm.is_some())
+        inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
             Internal::check_all(&native.internals)?;
