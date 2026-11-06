@@ -1940,7 +1940,7 @@ pub(crate) mod tests {
             internal(
                 "horizon_client::Pair",
                 "struct",
-                "struct Pair { value: u32 }",
+                "struct Pair { value: u32, padding: [u8; 17] }",
             ),
             internal(
                 "horizon_client::Choice",
@@ -1961,9 +1961,10 @@ pub(crate) mod tests {
         let (code, _) = all_table(&entries);
         run_fixture(
             &code,
-            "#[derive(Clone, Copy)] struct Pair { value: u32 } enum Choice { Values(Vec<Pair>) } struct Bag { array: [Pair; 17], items: Vec<Pair>, choice: Choice, boxed: Box<[Pair; 17]>, shared: std::sync::Arc<Vec<Pair>> } fn heal(a: &mut Pair, b: &mut Pair) { a.value = 20; b.value = 21; }",
+            // The node-borrow test needs a handle-kind Pair, not a mutable copy local.
+            "#[derive(Clone, Copy)] struct Pair { value: u32, padding: [u8; 17] } enum Choice { Values(Vec<Pair>) } struct Bag { array: [Pair; 17], items: Vec<Pair>, choice: Choice, boxed: Box<[Pair; 17]>, shared: std::sync::Arc<Vec<Pair>> } fn heal(a: &mut Pair, b: &mut Pair) { a.value = 20; b.value = 21; }",
             r#"
-            let mut bag = Bag { array: [Pair { value: 1 }; 17], items: vec![Pair { value: 2 }, Pair { value: 3 }], choice: Choice::Values(vec![Pair { value: 4 }]), boxed: Box::new([Pair { value: 5 }; 17]), shared: std::sync::Arc::new(vec![Pair { value: 6 }]) };
+            let mut bag = Bag { array: [Pair { value: 1, padding: [0; 17] }; 17], items: vec![Pair { value: 2, padding: [0; 17] }, Pair { value: 3, padding: [0; 17] }], choice: Choice::Values(vec![Pair { value: 4, padding: [0; 17] }]), boxed: Box::new([Pair { value: 5, padding: [0; 17] }; 17]), shared: std::sync::Arc::new(vec![Pair { value: 6, padding: [0; 17] }]) };
             let table = &__internals::TABLE;
             let bag_ty = table.types.iter().find(|t| t.path.ends_with("Bag")).unwrap();
             assert_eq!(bag_ty.raw_fields, &[0, 1, 2, 3]);
