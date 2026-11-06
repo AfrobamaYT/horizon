@@ -18,7 +18,7 @@ use horizon_core::{
     random::RandomSource,
 };
 
-fn steering_item(species: Species, main: Option<&str>, offhand: Option<&str>) -> bool {
+pub(super) fn steering_item(species: Species, main: Option<&str>, offhand: Option<&str>) -> bool {
     let item = match species {
         Species::Pig => "minecraft:carrot_on_a_stick",
         Species::Strider => "minecraft:warped_fungus_on_a_stick",
