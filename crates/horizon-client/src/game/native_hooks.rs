@@ -10743,7 +10743,10 @@ impl Game<'_> {
     /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
     /// the content mods (`.hmod`) and the world's data packs, in file order: each
-    /// one typed (`Recipe`: its ingredients, results, group and cooking time and experience) with its file as JSON for a mod's own type. These are the
+    /// one typed (`Recipe`: its ingredients, results, group, cooking time and
+    /// experience, or its stonecutting, smithing or special crafting rule),
+    /// with its file as JSON for a mod's own type. Dynamic rules are not fixed
+    /// outputs; use `LevelRef::craft` to assemble a crafting grid. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
     /// load conditions held, so a pack's override or removal shows. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty

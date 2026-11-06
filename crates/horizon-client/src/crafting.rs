@@ -2365,6 +2365,91 @@ mod tests {
         assert_eq!(listed[0].results[0].count, 2);
     }
 
+    #[test]
+    fn recipe_rule_views_share_station_and_crafting_parses() {
+        let named = |name: &str, json: &str| {
+            let file = Arc::new(serde_json::from_str::<Value>(json).unwrap());
+            ResolvedRecipe {
+                name: name.into(),
+                resolved: file.clone(),
+                file,
+            }
+        };
+        let sources = ResolvedSources {
+            recipes: vec![
+                named(
+                    "cut",
+                    r#"{"type":"minecraft:stonecutting","ingredient":"minecraft:stone","result":{"id":"minecraft:stick","count":2}}"#,
+                ),
+                named(
+                    "invalid",
+                    r#"{"type":"minecraft:stonecutting","ingredient":"minecraft:stone","result":{"id":"minecraft:stick","count":100}}"#,
+                ),
+                named(
+                    "smith",
+                    r#"{"type":"minecraft:smithing_transform","template":"minecraft:stick","base":"minecraft:stone","addition":"minecraft:iron_ingot","result":{"id":"minecraft:diamond"}}"#,
+                ),
+                named(
+                    "transmute",
+                    r#"{"type":"minecraft:crafting_transmute","input":"minecraft:stone","material":"minecraft:stick","material_count":{"min":2,"max":4},"add_material_count_to_result":true,"result":{"id":"minecraft:diamond","count":2}}"#,
+                ),
+                named("custom", r#"{"type":"example:machine","value":42}"#),
+            ],
+            ..ResolvedSources::default()
+        };
+        let items = Items::for_tests(HashMap::new());
+        let root = std::env::temp_dir();
+        let recipes = Recipes::from_resolved(&root, &items, &PackOverlay::NONE, &sources).unwrap();
+        let stations = crate::stations::StationRecipes::from_sources(&root, &items, &sources);
+        let cuts = &recipes.by_type["minecraft:stonecutting"];
+        assert_eq!(cuts.len(), 1);
+        let Some(mod_api::RecipeRule::Stonecutting { input, result }) = &cuts[0].rule else {
+            panic!("missing stonecutting rule")
+        };
+        assert_eq!(input.order, ["minecraft:stone"]);
+        assert_eq!(result.count, 2);
+        assert_eq!(stations.stonecutting[0].result, *result);
+        let smith = &recipes.by_type["minecraft:smithing_transform"][0];
+        let Some(mod_api::RecipeRule::SmithingTransform { base, result, .. }) = &smith.rule else {
+            panic!("missing smithing rule")
+        };
+        assert_eq!(base.order, ["minecraft:stone"]);
+        assert_eq!(result, "minecraft:diamond");
+        assert!(
+            smith.results.is_empty(),
+            "smithing output inherits components"
+        );
+        let transmute = &recipes.by_type["minecraft:crafting_transmute"][0];
+        let Some(mod_api::RecipeRule::Transmute {
+            min,
+            max,
+            add_count,
+            result,
+            ..
+        }) = &transmute.rule
+        else {
+            panic!("missing transmute rule")
+        };
+        assert_eq!((*min, *max, *add_count), (2, 4, true));
+        assert_eq!(result.item.as_deref(), Some("minecraft:diamond"));
+        assert!(
+            transmute.results.is_empty(),
+            "grid-dependent output is not fixed"
+        );
+        let grid = [
+            Some(ItemStack::new("minecraft:stone", 1)),
+            Some(ItemStack::new("minecraft:stick", 1)),
+            Some(ItemStack::new("minecraft:stick", 1)),
+            None,
+        ];
+        let output = recipes.craft(lc(), &grid, 2).expect("transmute matches");
+        assert_eq!(output.item.as_ref(), "minecraft:diamond");
+        assert_eq!(output.count, 4);
+        let custom = &recipes.by_type["example:machine"][0];
+        assert!(custom.rule.is_none());
+        assert_eq!(custom.json["value"], 42);
+    }
+
     /// NeoForge's standard ingredient shapes resolve to their flat item
     /// lists; a kind the loader doesn't know still fails the file.
     #[test]

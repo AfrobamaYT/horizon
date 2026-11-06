@@ -299,6 +299,17 @@ and the content mods that are on. `neoforge:true`, `not`, `and` and `or` combine
 does not know leaves the file out, so a future shape fails closed. Tags, loot tables and advancements
 do not answer the gate yet.
 
+### Reading recipe rules
+
+`recipes_of_type` returns the loaded recipes after pack overrides. Shaped,
+shapeless and cooking recipes expose their resolved ingredients and fixed
+results. Stonecutting, smithing and special crafting recipes expose a typed
+`RecipeRule` instead, including resolved ingredient roles. A smithing or
+special rule's result depends on its inputs: its template is not a fixed
+stack. Use `LevelRef::craft` for the actual output and remainders of a
+crafting grid. A mod-defined recipe type retains its original `json`.
+Look up recipes again after a data reload.
+
 ### Recipe filters
 
 A content mod or a data pack can remove recipes, or swap one of their inputs or outputs, without knowing
