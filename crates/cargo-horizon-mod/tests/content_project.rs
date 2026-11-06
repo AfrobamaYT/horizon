@@ -27,7 +27,7 @@ fn git_project_build_checks_only_the_files_it_packages() {
     run(Command::new(binary).current_dir(&project).arg("build"));
     run(Command::new(binary).current_dir(&project).arg("build"));
     let path = project.join("target/horizon-mod/ruby.hmod");
-    let package = horizon_mods::Package::read(&path).unwrap();
+    let package = horizon_mod_package::Package::read(&path).unwrap();
     assert_eq!(package.manifest.id, "ruby");
     let zip = zip::ZipArchive::new(fs::File::open(&path).unwrap()).unwrap();
     assert!(zip.file_names().all(|name| {

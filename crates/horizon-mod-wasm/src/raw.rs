@@ -3,7 +3,7 @@
 use crate::Refusal;
 use crate::frame::{Frame, Root};
 use crate::view::{self, Resolved};
-use horizon_mods::manifest::{Internal, Manifest};
+use horizon_mod_package::manifest::{Internal, Manifest};
 use mod_api::__private::wasm_host::{CallHost, Exports};
 use mod_points::__private::{RawListener, register_raw};
 use mod_points::internals::bindings::exports::horizon::mod_internals::raw_listeners::HostKind;
@@ -95,7 +95,7 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
     }
     let interface = format!(
         "{}-raw-listeners",
-        horizon_mods::manifest::export_prefix(&manifest.id)
+        horizon_mod_package::manifest::export_prefix(&manifest.id)
     );
     let declared: Listed = exports
         .func(&interface, "declared")

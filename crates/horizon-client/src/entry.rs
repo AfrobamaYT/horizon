@@ -1,6 +1,6 @@
 //! Startup shared by the gameplay library and its executable.
 use crate::{crash, game, logging};
-use horizon_mods::selection::{Argument, LaunchArguments};
+use horizon_mod_package::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
@@ -34,13 +34,15 @@ pub fn main_with(
     mut mods: Vec<mod_api::ModEntry>,
     points: &[NativePoints],
     raw: &[NativeRaw],
-    built: &'static [horizon_mods::runtime::BuiltMod],
+    built: &'static [horizon_mod_package::runtime::BuiltMod],
 ) {
     let exe = std::env::current_exe();
     let native: crate::Result<_> = exe
         .as_ref()
         .map_err(|e| e.to_string().into())
-        .and_then(|exe| horizon_mods::runtime::Runtime::load(exe, built).map_err(Into::into));
+        .and_then(|exe| {
+            horizon_mod_package::runtime::Runtime::load(exe, built).map_err(Into::into)
+        });
     let native = match native {
         Ok(native) => native,
         Err(error) => {
@@ -111,19 +113,19 @@ pub fn main_with(
     );
     let declared: Vec<_> = manifests
         .iter()
-        .map(|m| horizon_mods::dependencies::from_manifest(&m.dependencies))
+        .map(|m| horizon_mod_package::dependencies::from_manifest(&m.dependencies))
         .collect();
     let inputs: Vec<_> = manifests
         .iter()
         .zip(&declared)
-        .map(|(m, dependencies)| horizon_mods::dependencies::Mod {
+        .map(|(m, dependencies)| horizon_mod_package::dependencies::Mod {
             id: &m.id,
             version: &m.version,
             has_api: true,
             dependencies,
         })
         .collect();
-    let order = horizon_mods::dependencies::resolve(&inputs)
+    let order = horizon_mod_package::dependencies::resolve(&inputs)
         .unwrap_or_else(|error| panic!("mod load refused: {error}"));
     let mut entries: std::collections::BTreeMap<_, _> = mods
         .into_iter()

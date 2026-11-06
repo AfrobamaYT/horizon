@@ -1,5 +1,5 @@
 use super::*;
-use horizon_mods::{enabled::EnabledMods, selection::SelectedPackage};
+use horizon_mod_package::{enabled::EnabledMods, selection::SelectedPackage};
 use mod_api::{Hooks, ModEntry, testing::with_mods};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -12,7 +12,7 @@ fn selected(fixture: &Fixture, id: &str, code: bool, side: &str) -> SelectedPack
     let wasm = if code {
         format!(
             "\n[wasm]\nsha512='{}'\ntoolchain='fixture'\n",
-            horizon_mods::manifest::sha512_of(module)
+            horizon_mod_package::manifest::sha512_of(module)
         )
     } else {
         String::new()
@@ -35,11 +35,11 @@ fn selected(fixture: &Fixture, id: &str, code: bool, side: &str) -> SelectedPack
     let path = fixture.0.join(format!("{id}.hmod"));
     std::fs::write(
         &path,
-        horizon_mods::Package::write_files(&manifest, &files).unwrap(),
+        horizon_mod_package::Package::write_files(&manifest, &files).unwrap(),
     )
     .unwrap();
     SelectedPackage {
-        package: horizon_mods::Package::read(&path).unwrap(),
+        package: horizon_mod_package::Package::read(&path).unwrap(),
         path,
     }
 }
