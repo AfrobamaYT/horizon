@@ -256,7 +256,7 @@ impl CapabilityProviders for InstalledProviders {
     fn block_entity_provider(
         &self,
         name: &str,
-        kind: BlockEntityTypeKey,
+        kind: super::BlockEntityTypeKey,
         index: &mut u32,
     ) -> Option<(BlockProviderOf, &'static str, bool)> {
         let kind = crate::registry_keys::block_entity_type_name(kind)?;
