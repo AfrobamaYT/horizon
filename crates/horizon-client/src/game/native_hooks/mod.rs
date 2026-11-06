@@ -11120,30 +11120,6 @@ impl Game<'_> {
     pub(super) fn native_place_recipe(&mut self, book_id: i32, all: bool) -> Result<(), String> {
         self.recipe_place(book_id, all)
     }
-    /// Presses button `button` of the open menu, as a click on one of its
-    /// buttons does (`MultiPlayerGameMode.handleInventoryButtonClick`,
-    /// `ServerboundContainerButtonClickPacket`): the server's menu decides
-    /// what it does (`AbstractContainerMenu.clickMenuButton`, and
-    /// `native_menu_button` there for a mod's menu). For a client mod's own
-    /// input on a menu's screen where `native_screen_click` doesn't come — a
-    /// key, the wheel. No sound: that is the screen's. Err while no menu the
-    /// server opened is open.
-    pub(super) fn native_click_menu_button(&self, button: i32) -> Result<(), String> {
-        let Some(container) = self
-            .remote
-            .as_ref()
-            .and_then(|r| r.menu.as_ref())
-            .map(|(w, _)| *w)
-        else {
-            return Err("no menu is open".to_owned());
-        };
-        self.send(
-            horizon_protocol::packets::play::Serverbound::ContainerButtonClick(
-                horizon_protocol::packets::play::ContainerButtonClick { container, button },
-            ),
-        );
-        Ok(())
-    }
     /// Creative mode only: gives the player `count` of `item`
     /// (`minecraft:diamond`) as taking it from the creative inventory does
     /// (`ServerboundSetCreativeModeSlot`): the selected slot first, then the
@@ -12185,7 +12161,7 @@ impl Game<'_> {
             return false;
         };
         // No menu open: the click still sounds.
-        let _ = self.native_click_menu_button(button);
+        let _ = self.remote_button_click(button);
         self.audio.play_button_click();
         true
     }
@@ -13617,7 +13593,7 @@ mod tests {
     #[test]
     fn property_setters_refuse_no_change() {
         // A Windows checkout has CRLF line ends: the searches below look for "\n".
-        let source = include_str!("native_hooks.rs").replace("\r\n", "\n");
+        let source = include_str!("mod.rs").replace("\r\n", "\n");
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for head in [
             "    pub(super) fn native_set_block_property(\n        &mut self,\n        ticks:",
@@ -13649,7 +13625,7 @@ mod tests {
 
     #[test]
     fn hook_points_stay_hookable() {
-        let source = include_str!("native_hooks.rs");
+        let source = include_str!("mod.rs");
         let code = source
             .split("\nmod tests {")
             .next()
@@ -13668,7 +13644,7 @@ mod tests {
 
     #[test]
     fn native_breathing_stays_hookable() {
-        let source = include_str!("../breathing.rs").replace("\r\n", "\n");
+        let source = include_str!("../../breathing.rs").replace("\r\n", "\n");
         let hook = source.find("pub fn native_living_breathe(").unwrap();
         // From its doc comment's first line, so an attribute above it counts.
         let start = source[..hook].find("/// An entity's breathing").unwrap();
@@ -13684,7 +13660,7 @@ mod tests {
 
     #[test]
     fn native_loot_kinds_stay_hookable() {
-        let source = include_str!("../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
+        let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         for hook in [
             "pub fn native_loot_function(",
             "pub fn native_loot_condition(",
@@ -13705,7 +13681,8 @@ mod tests {
 
     #[test]
     fn native_ingredient_stays_hookable() {
-        let source = include_str!("../../../horizon-mod-api/src/crafting.rs").replace("\r\n", "\n");
+        let source =
+            include_str!("../../../../horizon-mod-api/src/crafting.rs").replace("\r\n", "\n");
         let at = source.find("pub fn native_ingredient(").unwrap();
         let start = source[..at].rfind("///").unwrap();
         let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
@@ -13722,7 +13699,7 @@ mod tests {
 
     #[test]
     fn loot_table_load_stays_hookable() {
-        let source = include_str!("../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
+        let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         // From its doc comment's last line, so an attribute above it counts.
         let hook = source.find("pub fn native_loot_table_load(").unwrap();
         let start = source[..hook].rfind("///").unwrap();
@@ -13747,7 +13724,7 @@ mod tests {
 
     #[test]
     fn lifecycle_source_stays_hookable() {
-        let source = include_str!("native_lifecycle.rs");
+        let source = include_str!("../native_lifecycle.rs");
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
             assert!(!line.contains("cfg"), "a cfg in lifecycle source: {line}");

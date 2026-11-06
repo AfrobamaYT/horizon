@@ -326,11 +326,11 @@ requires a farmer at work and `mob_griefing` enabled.
   (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `LevelRef::block`,
   `LevelRef::block_property` and `native_cursor`. A mod inserts items through the block's item capability,
   `level.capability(host, &ITEMS, pos, side)`.
-- `click_menu_button(button)`, a client helper, presses button `button` of the open menu as a click on one of its buttons does
+- `menu.click_button(host, button)`, on a client `MenuRef`, presses button `button` of the open menu as a click on one of its buttons does
   (`MultiPlayerGameMode.handleInventoryButtonClick`, `ServerboundContainerButtonClickPacket`); the server's menu decides what it does
   (`clickMenuButton`, and `menu_button` for a mod's menu). It is for a client mod's own input on a menu's screen where `screen_click`
-  doesn't come, such as a key or the wheel (`screen_key_pressed_pre`, `screen_mouse_scrolled_pre`). It is refused while no menu the
-  server opened is open.
+  doesn't come, such as a key or the wheel (`screen_key_pressed_pre`, `screen_mouse_scrolled_pre`). It returns `false` for a stale
+  handle and for the inventory menu, which no server opened.
 
 - What a server mod needs to guard land and move players. `native_right_click_block` hears a player's right
   click on a block before the block's own use (a chest, a door, a lever) and the item's, and may cancel it
@@ -2718,8 +2718,12 @@ to a complete gesture. All actions are validated before the first is predicted o
 normal `ContainerClick` path. A stale handle, invalid slot/hotbar index, creative-only action in survival,
 spectator, non-client host or creative inventory screen returns `false` without side effects.
 `true` is submission, not server acceptance; authoritative slot/cursor corrections still win.
+`menu.close(host)` closes the menu's open screen as Escape does (`AbstractContainerScreen.onClose`,
+`LocalPlayer.closeContainer`, which sends `ServerboundContainerClosePacket`), and `menu.click_button(host, button)`
+sends `ServerboundContainerButtonClickPacket`. Both return `false` for a stale handle or a non-client host; `close` also
+while the menu's screen is not open, and `click_button` for the inventory menu.
 See [A menu's slots](../concepts/trait-mods.md#a-menus-slots) for actions and an example.
-Diverges from upstream: new helper.
+Diverges from upstream: new helpers.
 
 ### Mob AI goals
 
