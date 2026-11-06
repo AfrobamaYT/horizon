@@ -13,6 +13,31 @@ pub const LOOK: u8 = 2;
 pub const JUMP: u8 = 4;
 pub const TARGET: u8 = 8;
 
+/// The facts of a target one mob may take, as far as [`Mob::valid_target`]
+/// reads them (#1175): another mob — what a tick's snapshot carries, or the
+/// game's own state — or a player. One rule set; both the write handle and a
+/// goal tick's view fill these from where they stand.
+pub enum TargetFacts {
+    /// A mob target: `asValidTarget`'s facts of it.
+    Mob {
+        id: u32,
+        species: Species,
+        alive: bool,
+        /// `invulnerable_flag`, the flag `asValidTarget` refuses.
+        invulnerable: bool,
+        baby: bool,
+    },
+    /// A player target: its survival liveness, its `invulnerable` ability,
+    /// the modes that cannot be attacked (creative, spectator) and its uuid.
+    Player {
+        alive: bool,
+        invulnerable: bool,
+        creative: bool,
+        spectator: bool,
+        uuid: [i32; 4],
+    },
+}
+
 /// What goals may read and emit during a tick.
 pub struct Cx<'a, 'w, 'l> {
     pub w: &'a MobWorld<'w>,
@@ -812,6 +837,80 @@ impl Mob {
             Who::Mob(id) => {
                 self.species() == Species::IronGolem
                     && w.seen(id).is_some_and(|s| s.species == Species::Creeper)
+            }
+        }
+    }
+    /// The setter's own refusals (#1175), one rule both the write handle and
+    /// a goal tick's `set_target` ask: a brain-backed species' target is its
+    /// brain's to write (`getTarget` overrides it), and the three whose
+    /// setter side effects are not modeled. The read path does not ask this
+    /// — it reads a brain's own target back.
+    pub fn refuses_set_target(&self) -> bool {
+        super::ai::brain_target(self).is_some()
+            || matches!(
+                self.species(),
+                Species::Fox | Species::Enderman | Species::ZombifiedPiglin
+            )
+    }
+    /// `Mob.asValidTarget` and the modeled `canAttack` overrides over the
+    /// target's facts (#1175): one rule set both the write handle and a goal
+    /// tick's view ask — the facts of the target, not where they were read.
+    /// The warden's own override (`Warden.canTargetEntity`) reads the
+    /// scoreboard and the world border, so the write handle answers it around
+    /// this; a goal tick refuses the brain-backed warden before it.
+    pub fn valid_target(&self, w: &MobWorld, target: &TargetFacts) -> bool {
+        match target {
+            TargetFacts::Mob {
+                id,
+                species,
+                alive,
+                invulnerable,
+                baby,
+            } => {
+                // `asValidTarget`: dead, invulnerable and ghast targets never
+                // store.
+                if !*alive || *invulnerable || *species == Species::Ghast {
+                    return false;
+                }
+                // Breeze.canAttack names only an iron golem.
+                if self.species() == Species::Breeze && *species != Species::IronGolem {
+                    return false;
+                }
+                // Illager.canAttack spares a baby villager or trader.
+                if matches!(
+                    self.species(),
+                    Species::Evoker | Species::Vindicator | Species::Illusioner | Species::Pillager
+                ) && matches!(*species, Species::Villager | Species::WanderingTrader)
+                    && *baby
+                {
+                    return false;
+                }
+                // Creeper.canAttack never names a goat.
+                if self.species() == Species::Creeper && *species == Species::Goat {
+                    return false;
+                }
+                !self.spares_target(w, Who::Mob(*id))
+            }
+            TargetFacts::Player {
+                alive,
+                invulnerable,
+                creative,
+                spectator,
+                uuid,
+            } => {
+                // The player rules the write handle always asked: a target
+                // that cannot fight, Peaceful, a player-built golem, and a
+                // pet never attacking its owner.
+                *alive
+                    && !*invulnerable
+                    && !*creative
+                    && !*spectator
+                    && w.difficulty.base != 0
+                    && !self.built_by_player()
+                    && !(self.is_tamable_animal()
+                        && self.extra.tame
+                        && super::tame::owned_by(self.extra.owner, *uuid))
+                    && !(self.species() == Species::Dolphin && self.is_baby())
             }
         }
     }
@@ -3062,6 +3161,7 @@ mod breeding_variant_tests {
             let partner = [mate.seen(None)];
             for asks_baby_spawn in [false, true] {
                 let w = MobWorld {
+                    goal_host: None,
                     asks_baby_spawn,
                     mob_drops: false,
                     others: &partner,
@@ -3123,6 +3223,7 @@ mod breeding_variant_tests {
                     [(false, true), (false, false), (true, true), (true, false)]
                 {
                     let world = MobWorld {
+                        goal_host: None,
                         asks_baby_spawn: ask_mods,
                         mob_drops,
                         others: &partner,
