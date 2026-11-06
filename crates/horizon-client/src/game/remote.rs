@@ -262,6 +262,24 @@ struct Tracked {
     kind: String,
     position: [f64; 3],
     silent: bool,
+    /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever
+    /// either one's type.
+    vehicle: Option<u32>,
+}
+
+/// `Entity.startRiding` / `removePassenger` for a `SetPassengers` packet: the
+/// listed entities ride `vehicle`, the ones that rode it and are no longer
+/// listed got off. Every tracked entity counts, whatever its type, so a
+/// server's item display or marker on a player hides that player's name tag
+/// as vanilla's `isVehicle` does (#5666).
+fn seat_passengers(entities: &mut HashMap<i32, Tracked>, vehicle: u32, passengers: &[i32]) {
+    for (id, t) in entities.iter_mut() {
+        if passengers.contains(id) {
+            t.vehicle = Some(vehicle);
+        } else if t.vehicle == Some(vehicle) {
+            t.vehicle = None;
+        }
+    }
 }
 /// Smooth an entity toward a new position over three ticks (InterpolationHandler).
 #[derive(Clone, Copy)]
@@ -2306,7 +2324,8 @@ impl Game<'_> {
         // startWaitingForNewLevel: `LevelLoadTracker.startClientLoad` and the
         // `LevelLoadingScreen`.
         r.level_load.start_client_load(client_millis(), reason);
-        // A replacement LocalPlayer has a fresh sendPosition baseline.
+        // A replacement LocalPlayer has a fresh ambient mood and sendPosition baseline.
+        self.ambience.moodiness = 0.0;
         r.position_sender = Default::default();
         r.predictions.clear();
         self.set_mode_id(spawn.game_type);
@@ -2722,6 +2741,18 @@ impl Game<'_> {
             }
         }
     }
+    /// `Entity.isVehicle` on a client: the entities a tracked entity rides.
+    pub(super) fn remote_vehicle_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.remote
+            .iter()
+            .flat_map(|r| r.entities.values().filter_map(|t| t.vehicle))
+    }
+    /// The `SetPassengers` bookkeeping of the tracked entities.
+    pub(super) fn remote_seat_passengers(&mut self, vehicle: u32, passengers: &[i32]) {
+        if let Some(r) = self.remote.as_mut() {
+            seat_passengers(&mut r.entities, vehicle, passengers);
+        }
+    }
     /// `recreateFromPacket`: yRot and xRot from the packet, the body and head
     /// both at its head yaw (LivingEntity).
     fn spawn_entity(&mut self, id: i32, kind: &str, position: [f64; 3], rotation: [f32; 3]) {
@@ -2776,6 +2807,7 @@ impl Game<'_> {
                     kind: kind.to_owned(),
                     position,
                     silent: false,
+                    vehicle: None,
                 },
             );
         }
@@ -12597,13 +12629,18 @@ mod tests {
             }))
             .unwrap();
 
-            // Same-level respawn keeps the epoch and the connection's clocks.
-            game.handle_packet(C::Respawn(play::Respawn {
-                spawn: spawn.clone(),
-                keep: 0,
-            }))
-            .unwrap();
-            assert_eq!(end.day_time(game), Some(60_004));
+            // Same-level respawn keeps the epoch and clocks, but replaces the
+            // local player and its mood handler, with or without entity data.
+            for keep in [0, 2] {
+                game.ambience.moodiness = 0.375;
+                game.handle_packet(C::Respawn(play::Respawn {
+                    spawn: spawn.clone(),
+                    keep,
+                }))
+                .unwrap();
+                assert_eq!(game.ambience.moodiness, 0.0);
+                assert_eq!(end.day_time(game), Some(60_004));
+            }
             spawn.dimension_type = 0;
             spawn.dimension = "minecraft:overworld".into();
             game.handle_packet(C::Respawn(play::Respawn {
@@ -13591,6 +13628,42 @@ mod tests {
             "minecraft:entity.player.hurt"
         );
     }
+    /// `ClientPacketListener.handleSetEntityPassengersPacket`: the vehicle
+    /// ejects its passengers, then each listed entity `startRiding`s it, so
+    /// `isVehicle` holds while the list is not empty, whatever the passenger's
+    /// type: a server's item display riding a player hides that player's name
+    /// tag like a text display does (#5666).
+    #[test]
+    fn any_tracked_passenger_makes_its_vehicle_a_vehicle() {
+        use std::collections::{HashMap, HashSet};
+        let tracked = |kind: &str| super::Tracked {
+            kind: kind.to_owned(),
+            position: [0.0, 64.0, 0.0],
+            silent: false,
+            vehicle: None,
+        };
+        let mut entities = HashMap::from([
+            (42, tracked("minecraft:player")),
+            (43, tracked("minecraft:player")),
+            (9, tracked("minecraft:item_display")),
+            (10, tracked("minecraft:block_display")),
+        ]);
+        let vehicles = |e: &HashMap<i32, super::Tracked>| -> HashSet<u32> {
+            e.values().filter_map(|t| t.vehicle).collect()
+        };
+        super::seat_passengers(&mut entities, 42, &[9, 10]);
+        assert_eq!(vehicles(&entities), HashSet::from([42]));
+        // The list replaces the old one: 10 got off, 9 still rides.
+        super::seat_passengers(&mut entities, 42, &[9]);
+        assert_eq!(entities[&10].vehicle, None);
+        assert_eq!(entities[&9].vehicle, Some(42));
+        // startRiding leaves the old vehicle first.
+        super::seat_passengers(&mut entities, 43, &[9]);
+        assert_eq!(vehicles(&entities), HashSet::from([43]));
+        // An empty list: nobody rides 43 any more.
+        super::seat_passengers(&mut entities, 43, &[]);
+        assert!(vehicles(&entities).is_empty());
+    }
     /// `ClientboundSoundEntityPacket`: the sound is heard where the entity it
     /// names is — the local player included, which is no tracked entity — and
     /// an id this level doesn't have plays nothing at all.
@@ -13604,6 +13677,7 @@ mod tests {
                 kind: "minecraft:cow".to_owned(),
                 position: [8.5, 64.0, -3.5],
                 silent: false,
+                vehicle: None,
             },
         );
         let player = Some((2, [0.5, 70.0, 0.5], false));
@@ -13646,6 +13720,7 @@ mod tests {
                 kind: "minecraft:arrow".to_owned(),
                 position: [8.5, 64.0, -3.5],
                 silent: true,
+                vehicle: None,
             },
         );
         let state = super::entity_sound_state(7, None, None, &tracked, None).unwrap();

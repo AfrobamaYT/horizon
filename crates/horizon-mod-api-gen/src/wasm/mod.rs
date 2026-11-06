@@ -30,6 +30,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "Commands",
     "Messages",
     "Players",
+    "ClientSession",
     "menu::SlotView",
     "Registrar",
     "CapabilityProviders",
@@ -52,6 +53,7 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("Commands", "server_host_mut", "Ok(h.commands())"),
     ("Messages", "server_host", "Ok(h.messages())"),
     ("Players", "server_host", "Ok(h.players())"),
+    ("ClientSession", "client_host", "Ok(h.client_session())"),
     // A level hook's host first: inside a level write it is the one the call hands over.
     (
         "AttachmentStore",
@@ -745,7 +747,7 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn server_services_use_native_forwards_and_frame_resources() {
+    fn services_use_native_forwards_and_frame_resources() {
         std::thread::Builder::new()
             .stack_size(64 << 20)
             .spawn(|| {
@@ -778,6 +780,17 @@ mod tests {
                     for method in methods {
                         assert!(!host.functions.contains_key(*method));
                     }
+                }
+                let client = &resolve.interfaces[package.interfaces["client-host"]];
+                let session = &resolve.interfaces[package.interfaces["client-session"]];
+                assert!(!client.functions.contains_key("client-session"));
+                for method in ["client-server", "client-language", "client-frame-stats"] {
+                    assert!(session.functions.contains_key(method), "missing {method}");
+                    assert!(!client.functions.contains_key(method));
+                }
+                let reads = &resolve.interfaces[package.interfaces["backend"]];
+                for method in ["player-block-breaking", "player-ambient-mood"] {
+                    assert!(reads.functions.contains_key(method), "missing {method}");
                 }
                 let backend = &resolve.interfaces[package.interfaces["backend-mut"]];
                 for method in [
@@ -822,7 +835,8 @@ mod tests {
                     ("Commands", &["run_command", "feedback"][..]),
                     ("Messages", &["broadcast", "text_allowed"][..]),
                     ("Players", &["acting_player", "server_players"][..]),
-                    ("Backend", &["player_address", "player_permission_level"][..]),
+                    ("ClientSession", &["client_server", "client_language", "client_frame_stats"][..]),
+                    ("Backend", &["player_address", "player_permission_level", "player_block_breaking", "player_ambient_mood"][..]),
                 ] {
                     let item = implementation
                         .items
@@ -859,6 +873,7 @@ mod tests {
                 assert!(wasm.host.contains("Ok(h.commands())"));
                 assert!(wasm.host.contains("Ok(h.messages())"));
                 assert!(wasm.host.contains("Ok(h.players())"));
+                assert!(wasm.host.contains("Ok(h.client_session())"));
                 assert!(
                     !wasm
                         .unbound
@@ -866,6 +881,37 @@ mod tests {
                         .any(|name| name.starts_with("Commands::")
                             || name.starts_with("Messages::")
                             || name.starts_with("Players::"))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn client_modifiers_have_a_generated_wasm_binding() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let client =
+                    &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
+                assert!(client.functions.contains_key("modifiers"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name == "ClientHost::modifiers")
                 );
             })
             .unwrap()

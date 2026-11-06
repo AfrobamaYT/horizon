@@ -21,6 +21,13 @@ when edited (`native_config_loading`, `native_config_reloading`, as NeoForge's `
 keep its own server config in `serverconfig/` ([native mods](native-mods.md)). Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
 8c838a6b381b93150deaeed2057acd1
 
+For a client HUD's session information, use the read-only
+`ClientHost::client_session()` service and the local `PlayerRef`'s
+`block_breaking` and `ambient_mood` reads rather than raw injections. Missing
+sessions, external display names and memory addresses remain explicit optional
+values; all counters stay local. See [client session and local-player status](../reference/hook-notes.md#client-session-and-local-player-status)
+for their exact availability and frame-time semantics.
+
 `native_compute_fov_modifier(player, base, modifier)` runs on the client each tick for the local player's FOV scale, after vanilla effects and before zoom and camera easing. `player` contains the calculation inputs and `base` is the original scale. Non-finite modifiers or values outside 0.01..=10 fall back to `base`. It does not affect a spectator camera on a mob.
 
 The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visible, text)` runs at player and mob, armor stand, and item frame name decisions before shared geometry. Set `visible` to override vanilla and `text` to `Some` literal replacement text (NeoForge `RenderNameTagEvent`). Distance and entity availability still apply; the local player's tag is considered only when its own camera and settings gates allow it.
@@ -307,6 +314,14 @@ must already be in Horizon's lock file in a matching version. The launcher check
 package in the staged lock against Horizon's: name, version, source and checksum. Only the staged
 workspace packages are added. A missing crate or a feature that introduces an unlocked dependency
 stops the build; the game still builds with `--locked`.
+
+Crates included only for mods are listed as optional dependencies in
+`crates/horizon-mod-deps/Cargo.toml`: `mysql` 27 (blocking MariaDB/MySQL, with
+`minimal-rust` and `rustls-tls-ring`, no default features), `redis` 1 (blocking,
+no default features), `tungstenite` 0.30 (websockets over a stream the mod opens,
+no default features), and `rusty-opus` 1 (Opus encoder and decoder). These entries
+add their dependencies to the lock without building them into the game. A feature
+that introduces a dependency not listed there is refused.
 
 ### Conditional data
 
