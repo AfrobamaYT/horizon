@@ -2315,11 +2315,9 @@ mod tests {
                             "typed data console 3 true dirt ~1 ~2 ~3"
                         )
                     );
-                    assert!(
-                        game.perform_native_console_command(
-                            "typed data console 3 true dirt ^0 ^0 ^1"
-                        )
-                    );
+                    assert!(game.perform_native_console_command(
+                        "typed data console 3 true dirt ^0.5 ^0.5 ^0.5"
+                    ));
                     assert!(game.perform_native_console_command("typed repeat guest13 3"));
                     assert!(game.command_source.is_none(), "console source restored");
                     let heard = heard.lock().unwrap();
@@ -2363,7 +2361,7 @@ mod tests {
                     );
                     assert_eq!(
                         heard[8].1.argument("pos"),
-                        Some(&Value::BlockPos([10, 70, -2]))
+                        Some(&Value::BlockPos([10, 70, -3]))
                     );
                     assert_eq!(heard[9].1.arguments[0].value, Value::Player(other));
                     assert_eq!(heard[9].1.argument("value"), Some(&Value::Integer(3)));
