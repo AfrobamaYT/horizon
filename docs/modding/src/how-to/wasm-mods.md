@@ -107,6 +107,12 @@ runtime types. Functions taking a mutable reference to a copy argument are not g
 the host exposes copy fields as values, not as nodes that could supply that argument. The
 generated file records the omitted function and this reason in a comment.
 
+A function returning `Result<T, E>` (including a written `Result<T>` alias) can expose a copyable
+`T` even when its error is opaque. Its view method returns `Result<Result<T, GameError>, Refusal>`:
+`GameError` means the game function failed, without copying its native error into the mod.
+A function returning `Option<&T>` or `Option<&mut T>` for handle-typed state returns an optional
+call-scoped node. That node, like a directly returned reference, expires at the next game call.
+
 The listener sees its own journaled writes immediately. A declared function applies that journal
 before running, and listener return applies the remaining writes. A trap drops writes since the
 last function call and stops the dependency group; it does not undo calls that already ran.

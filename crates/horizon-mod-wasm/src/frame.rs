@@ -322,8 +322,11 @@ impl<'t> Frame<'t> {
         }
         // The writes go first, as if the function ran after the listener's code before it; then
         // every node resolves again, since a write may have moved what it points into.
+        let wrote = !self.journal.is_empty();
         let refused = self.apply();
-        self.generation += 1;
+        if wrote {
+            self.generation += 1;
+        }
         let check = |node: &Node, ty: u32, written: bool| -> Result<*mut (), Refusal> {
             let at = self.resolve(node)?;
             if at.ty != ty {
@@ -369,8 +372,9 @@ impl<'t> Frame<'t> {
         }
         // SAFETY: each node was resolved in this generation to a live value of the thunk's
         // parameter type, writable where the thunk writes, and no two written ones alias.
-        let reply = unsafe { (thunk.call)(this, lowered) }?;
+        let reply = unsafe { (thunk.call)(this, lowered) };
         self.generation += 1;
+        let reply = reply?;
         let reached = match reply {
             Reply::Node(ptr, ty, writable) => {
                 self.roots.push(Root {
@@ -663,6 +667,45 @@ pub(crate) mod tests {
         assert!(matches!(frame.get(&first, 0), Err(Refusal::Gone(_))));
         drop(frame);
         assert_eq!(game.players[0].health, 7);
+    }
+
+    #[test]
+    fn a_returned_reference_can_be_the_next_calls_receiver_or_argument() {
+        let mut game = world();
+        let mut frame = frame(&mut game);
+        let root = frame.root(0).unwrap();
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        frame.call(3, Some(&first), Vec::new()).unwrap();
+        assert!(matches!(frame.get(&first, 0), Err(Refusal::Gone(_))));
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        let players = frame.field(&root, 0).unwrap();
+        let second = node(frame.index(&players, 1).unwrap());
+        frame
+            .call(2, None, vec![Call::Node(&first), Call::Node(&second)])
+            .unwrap();
+        assert!(matches!(frame.get(&first, 0), Err(Refusal::Gone(_))));
+        drop(frame);
+        assert_eq!(game.players[0].health, 20);
+        assert_eq!(game.players[1].health, 20);
+    }
+
+    #[test]
+    fn pending_writes_expire_a_returned_reference_before_the_next_call() {
+        let mut game = world();
+        let mut frame = frame(&mut game);
+        let root = frame.root(0).unwrap();
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        frame.set(&root, 1, Value::B(true)).unwrap();
+        assert!(matches!(
+            frame.call(3, Some(&first), Vec::new()),
+            Err(Refusal::Gone(_))
+        ));
+        drop(frame);
+        assert!(
+            game.flag,
+            "the pending journal still applies before the refused call"
+        );
+        assert_eq!(game.players[0].health, 10, "the thunk did not run");
     }
 
     #[test]

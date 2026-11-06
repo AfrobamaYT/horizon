@@ -160,6 +160,7 @@ pub fn catalog(text: &str) -> Result<Vec<Internal>, String> {
                     "static" => "static",
                     "type" => "type",
                     "trait" => "trait",
+                    "mod" => "mod",
                     _ => return Err(format!("unknown internal kind {}", e.kind)),
                 },
                 signature: e.signature,
@@ -275,9 +276,14 @@ pub fn generate(
         if rule.crossing_of(shape) == Crossing::Opaque {
             return;
         }
-        copies
-            .entry(spell(shape, rule).to_string())
-            .or_insert_with(|| shape.clone());
+        // Handle wrappers can have the same guest spelling as their tuple referent. Keep
+        // the tuple itself so its node wrapper is emitted, rather than an Arc/Ref shadow.
+        if matches!(rule.crossing_of(shape), Crossing::Copy(_)) || matches!(shape, Shape::Tuple(_))
+        {
+            copies
+                .entry(spell(shape, rule).to_string())
+                .or_insert_with(|| shape.clone());
+        }
         match shape {
             Shape::Named(path, _) if matches!(rule.crossing_of(shape), Crossing::Copy(_)) => {
                 let named = rule.named(path).unwrap();
@@ -820,7 +826,7 @@ mod tests {
             entry(
                 "horizon_client::Owner",
                 "struct",
-                "struct Owner { first: u8, second: i64, hidden: Vec<u8> }",
+                "struct Owner { first: u8, second: i64, hidden: Vec<u8>, wrapped: Arc<(Vec<u8>, bool)> }",
             ),
             entry("horizon_client::Owner::second", "field", "second: i64"),
             entry(
