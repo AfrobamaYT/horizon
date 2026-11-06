@@ -1125,11 +1125,13 @@ mod tests {
     /// 26.3 sent the client a cart arriving with motion (0.4, 0, 0).
     #[test]
     fn a_minecart_a_player_rides_keeps_its_clamped_motion_through_a_portal() {
-        let mut carts = vec![minecarts::Minecart::new(
+        let mut carts: horizon_client::join_seq::JoinList<_> = [minecarts::Minecart::new(
             3,
             minecarts::CartKind::Rideable,
             Vec3::new(9.9, 100.0, 4.5),
-        )];
+        )]
+        .into_iter()
+        .collect();
         let at = Vec3::new(1.5, 100.0, 0.5);
         let cart = take_vehicle(&mut carts, 3, at, 0.0, Vec3::new(1.6, -0.1, -0.7))
             .expect("the cart travels");

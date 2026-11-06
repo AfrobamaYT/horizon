@@ -174,6 +174,11 @@ impl<T> Deref for JoinList<T> {
         &self.0
     }
 }
+impl<T> AsRef<[T]> for JoinList<T> {
+    fn as_ref(&self) -> &[T] {
+        self
+    }
+}
 impl<T, I: SliceIndex<[T]>> Index<I> for JoinList<T> {
     type Output = I::Output;
     fn index(&self, index: I) -> &Self::Output {

@@ -1080,13 +1080,15 @@ impl ItemCells {
 /// stack or gives it its own, the smaller into the larger
 /// (`ItemEntity.tryToMerge`), until this item is used up. An emptied item is
 /// marked in `removed`.
-pub fn merge_with_neighbours(
-    items: &mut [ItemEntity],
+pub fn merge_with_neighbours<I>(
+    items: &mut I,
     removed: &mut [bool],
     cells: &mut ItemCells,
     i: usize,
     max_stack: &dyn Fn(&ItemStack) -> u32,
-) {
+) where
+    I: AsRef<[ItemEntity]> + std::ops::IndexMut<usize, Output = ItemEntity> + ?Sized,
+{
     let age = |items: &[ItemEntity], j: usize| {
         if j == i && items[j].age != i16::MIN as i32 {
             items[j].age - 1
@@ -1094,7 +1096,7 @@ pub fn merge_with_neighbours(
             items[j].age
         }
     };
-    if removed[i] || !items[i].mergeable(age(items, i), max_stack(&items[i].stack)) {
+    if removed[i] || !items[i].mergeable(age(items.as_ref(), i), max_stack(&items[i].stack)) {
         return;
     }
     let area = items[i].bounds().inflate(Vec3::new(0.5, 0.0, 0.5));
@@ -1105,7 +1107,7 @@ pub fn merge_with_neighbours(
         if j == i
             || removed[j]
             || !items[j].bounds().intersects(area)
-            || !items[j].mergeable(age(items, j), max_stack(&items[j].stack))
+            || !items[j].mergeable(age(items.as_ref(), j), max_stack(&items[j].stack))
         {
             continue;
         }
@@ -1130,8 +1132,11 @@ pub fn merge_with_neighbours(
         let moved = room.min(i64::from(items[from].stack.count));
         items[to].stack.count = (i64::from(items[to].stack.count) + moved) as u32;
         items[from].stack.count = (i64::from(items[from].stack.count) - moved) as u32;
-        let (delay, from_age, to_age) =
-            (items[from].pickup_delay, age(items, from), age(items, to));
+        let (delay, from_age, to_age) = (
+            items[from].pickup_delay,
+            age(items.as_ref(), from),
+            age(items.as_ref(), to),
+        );
         let to_item = &mut items[to];
         to_item.pickup_delay = to_item.pickup_delay.max(delay);
         // This item's age goes up once its tick ends.
