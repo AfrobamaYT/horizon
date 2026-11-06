@@ -130,7 +130,7 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
 }
 
 #[test]
-fn site_fingerprint_changes_when_an_identical_call_is_inserted_earlier() {
+fn site_fingerprint_ignores_formatting_but_duplicate_contexts_are_lost() {
     let hash = |source: &str| {
         rewrite(
             source,
@@ -144,10 +144,14 @@ fn site_fingerprint_changes_when_an_identical_call_is_inserted_earlier() {
         .hash
     };
     let original = hash("impl Game { fn run(&mut self) { self.step(1); } }");
-    assert_ne!(
-        original,
-        hash("impl Game { fn run(&mut self) { self.step(1); self.step(1); } }")
-    );
+    let error = rewrite(
+        "impl Game { fn run(&mut self) { self.step(1); self.step(1); } }",
+        "horizon_client::game",
+        &entries(),
+        &[declaration(".step", Some(0))],
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("E_INJECT_LOST"));
     assert_eq!(
         original,
         hash("impl Game { fn run(&mut self) { let ready = true; self.step(1); } }")
@@ -194,7 +198,7 @@ fn site_rewrite_ordinals_hashes_and_refusals() {
         )
         .unwrap_err()
         .to_string()
-        .contains("overlap")
+        .contains("E_INJECT_LOST")
     );
     let bad = "impl Game { fn run(&mut self) { self.step(self.value); } }";
     assert!(

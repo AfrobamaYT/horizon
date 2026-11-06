@@ -1,3 +1,4 @@
+use super::identity::{CallIdentity, Refusal, Selection, select};
 use super::resolve::{Resolved, resolve};
 use super::*;
 use crate::{crossing::Rule, internals::Internal, points::file_points};
@@ -23,7 +24,12 @@ fn call_context(body: &syn::Block, expr: &Expr) -> String {
             if !covers(stmt.span(), expr) {
                 continue;
             }
-            if let syn::Stmt::Expr(inner, _) = stmt
+            let inner = match stmt {
+                syn::Stmt::Expr(inner, _) => Some(inner),
+                syn::Stmt::Local(local) => local.init.as_ref().map(|init| &*init.expr),
+                _ => None,
+            };
+            if let Some(inner) = inner
                 && let Some(found) = nested(inner, expr, path)
             {
                 return Some(found);
@@ -44,17 +50,16 @@ fn call_context(body: &syn::Block, expr: &Expr) -> String {
                         })
                 })
             }
-            Expr::Match(item) => {
-                item.arms
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, arm)| match arm.body.as_ref() {
-                        Expr::Block(item) => {
-                            block(&item.block, target, &format!("{path}/a{index}"))
-                        }
-                        other => nested(other, target, &format!("{path}/a{index}")),
-                    })
-            }
+            Expr::Match(item) => item
+                .arms
+                .iter()
+                .enumerate()
+                .filter(|(_, arm)| covers(arm.body.span(), target))
+                .find_map(|(index, arm)| match arm.body.as_ref() {
+                    Expr::Block(item) => block(&item.block, target, &format!("{path}/a{index}")),
+                    other => nested(other, target, &format!("{path}/a{index}"))
+                        .or_else(|| Some(format!("{path}/a{index}|{}", other.to_token_stream()))),
+                }),
             Expr::Block(item) => block(&item.block, target, &format!("{path}/b")),
             Expr::Unsafe(item) => block(&item.block, target, &format!("{path}/b")),
             Expr::Loop(item) => block(&item.body, target, &format!("{path}/b")),
@@ -101,18 +106,7 @@ pub fn rewrite(
             .filter(|f| plain_path(&f.target()) == declaration.target)
         {
             let build = || -> Result<_, Error> {
-                let calls = super::analysis::calls(found.body, &declaration.selector);
                 let mut lexical = super::analysis::Scope::scan(found.sig, Some(found.body));
-                if calls.is_empty() {
-                    return Err(Cause::Missing("selector matched no call").into());
-                }
-                if calls.len() > 1 && declaration.ordinal.is_none() {
-                    return Err(Cause::Ambiguous("ambiguous selector: supply an ordinal").into());
-                }
-                let ordinal = declaration.ordinal.unwrap_or(0);
-                let expr = *calls
-                    .get(ordinal)
-                    .ok_or(Cause::Missing("ordinal matched no call"))?;
                 let enclosing = entries
                     .iter()
                     .find(|e| {
@@ -123,6 +117,66 @@ pub fn rewrite(
                     .ok_or(Cause::Missing(
                         "enclosing function is not in the internals catalog",
                     ))?;
+                let written = super::analysis::calls(found.body, &declaration.selector);
+                let paths = written
+                    .iter()
+                    .map(|expr| {
+                        super::resolve::callee(expr, enclosing, found.sig, &lexical, entries, &rule)
+                            .map(|c| plain_path(&c.callee.path))
+                    })
+                    .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+                if paths.len() > 1 {
+                    return Err(Cause::Ambiguous("selector resolves to several callees").into());
+                }
+                let path = paths
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| declaration.selector.clone());
+                let calls = super::analysis::calls(found.body, "")
+                    .into_iter()
+                    .filter(|expr| {
+                        super::resolve::callee(expr, enclosing, found.sig, &lexical, entries, &rule)
+                            .is_ok_and(|c| plain_path(&c.callee.path) == path)
+                    })
+                    .collect::<Vec<_>>();
+                if calls.is_empty() && declaration.ctx.is_empty() {
+                    return Err(Cause::Missing("selector matched no call").into());
+                }
+                if calls.len() > 1 && declaration.ordinal.is_none() {
+                    return Err(Cause::Ambiguous("ambiguous selector: supply an ordinal").into());
+                }
+                let ordinal = declaration.ordinal.unwrap_or(0);
+                let contexts = calls
+                    .iter()
+                    .map(|expr| digest(call_context(found.body, expr)))
+                    .collect::<Vec<_>>();
+                // Empty contexts are only for tool discovery; committed seeds are pinned below.
+                let ctx = if declaration.ctx.is_empty() {
+                    contexts
+                        .get(ordinal)
+                        .ok_or(Cause::Missing("ordinal matched no call"))?
+                } else {
+                    &declaration.ctx
+                };
+                let identities = contexts
+                    .iter()
+                    .enumerate()
+                    .map(|(nth, ctx)| CallIdentity {
+                        call: &path,
+                        nth,
+                        ctx,
+                    })
+                    .collect::<Vec<_>>();
+                let index = match select(&identities, &path, ordinal, ctx) {
+                    Selection::Selected(index) => index,
+                    Selection::Moved(nth) => {
+                        return Err(Cause::Identity(Refusal::Moved(nth)).into());
+                    }
+                    Selection::Lost | Selection::Ambiguous => {
+                        return Err(Cause::Identity(Refusal::Lost).into());
+                    }
+                };
+                let expr = calls[index];
                 let Resolved {
                     callee,
                     signature,
@@ -200,24 +254,8 @@ pub fn rewrite(
                         ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #record| #original)
                     } else { #expr }
                 };
-                // `nth` is this call's index among the same resolved callee. Identical
-                // statements share a context, so the callee's call count is part of the
-                // fingerprint: an earlier clone moves ordinal 0 without changing its context.
-                let mut nth = 0;
-                let mut same = 0;
-                for call in &calls {
-                    let Ok(other) = resolve(call, enclosing, found.sig, &lexical, entries, &rule)
-                    else {
-                        continue;
-                    };
-                    if plain_path(&other.callee.path) != plain_path(&callee.path) {
-                        continue;
-                    }
-                    if std::ptr::eq(*call, expr) {
-                        nth = same;
-                    }
-                    same += 1;
-                }
+                let nth = ordinal;
+                let same = calls.len();
                 let site = Site {
                     name,
                     target: declaration.target.clone(),
@@ -230,6 +268,8 @@ pub fn rewrite(
                         expr.to_token_stream(),
                         call_context(found.body, expr)
                     )),
+                    call: plain_path(&callee.path),
+                    ctx: contexts[index].clone(),
                     listener: format!("{}::{listener}", found.module),
                     record: format!("{}::{record}", found.module),
                     receiver: receiver_type.to_string(),

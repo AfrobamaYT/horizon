@@ -93,7 +93,7 @@ pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, Error> {
                 && Some(s.ordinal) == d.ordinal.or(Some(0))
         }) {
             return Err(Error::from(Cause::Missing(
-                "no eligible function matched the site target",
+                "E_INJECT_MISSING: no eligible function matched the site target",
             ))
             .at(format!("{}: {}", d.origin, d.target)));
         }
