@@ -7,7 +7,8 @@ pub struct Mod;
 #[mod_api::horizon_mod]
 impl mod_api::Hooks for Mod {}
 
-fn count(raw: HandleChatInputRaw, game: Option<Game>) {
+// The name also verifies that runtime imports do not shadow a raw listener.
+fn call(raw: HandleChatInputRaw, game: Option<Game>) {
     let game = game.expect("a method receiver");
     game.set_left(game.left().unwrap() + 2).unwrap();
     game.set_right(game.right().unwrap() + 3).unwrap();
@@ -18,4 +19,4 @@ fn count(raw: HandleChatInputRaw, game: Option<Game>) {
     raw.set_cancel(true).unwrap();
 }
 
-mod_internals::raw_listeners!(count);
+mod_internals::raw_listeners!(call);

@@ -17,4 +17,4 @@ internals = [
 id = "counter"
 target = "horizon_client::game::chat::Game<'_>::handle_chat_input"
 kind = "HEAD"
-raw = "count"
+raw = "call"
