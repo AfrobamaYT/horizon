@@ -853,14 +853,6 @@ impl Game<'_> {
         let tasks = std::mem::take(&mut host.hub.native_advancement_grants);
         for task in tasks {
             let mut fresh = Vec::new();
-            // Other players finish their tick criteria in their own ordinary turn.
-            // Their complete reward path requires their full player state.
-            if self.lan_acting != Some(task.conn) {
-                self.with_advancement_hub(|hub, owners| {
-                    hub.finish_native_first_tick(&task, &fresh, owners);
-                });
-                continue;
-            }
             for grant in &task.grants {
                 let Some(was_done) = self
                     .with_advancement_hub(|hub, owners| hub.grant_native_tick(&task, grant, owners))
@@ -908,8 +900,14 @@ impl Game<'_> {
                     })
                     .flatten()
                     .unwrap_or(false);
-                if !was_done && done {
-                    self.award_definition(definition);
+                if self.lan_acting == Some(task.conn) {
+                    if !was_done && done {
+                        self.award_definition(definition);
+                    }
+                } else {
+                    self.with_advancement_hub(|hub, owners| {
+                        hub.reward_native_tick(&task, grant, was_done, owners);
+                    });
                 }
             }
             self.with_advancement_hub(|hub, owners| {

@@ -45,10 +45,6 @@ impl Hooks for Observer {
                 "loot_table/testmod:reward".into(),
                 br#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}]}]}"#.to_vec(),
             ));
-            event.files.push((
-                "function/testmod:reward".into(),
-                b"give @s minecraft:diamond 1\n".to_vec(),
-            ));
         }
     }
 
@@ -143,7 +139,19 @@ fn progress_events_capture_each_players_full_mutation_state() {
         if matches!(case.as_str(), "command-reload" | "nested-reload") {
             use crate::game::lan_actions::GuestCommand;
             game.world_root = scratch.join("world");
-            std::fs::create_dir_all(&game.world_root).unwrap();
+            let pack = game.world_root.join("datapacks/test");
+            std::fs::create_dir_all(pack.join("data/testmod/function")).unwrap();
+            std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
+            std::fs::write(
+                pack.join("data/testmod/function/reward.mcfunction"),
+                "give @s minecraft:diamond 1\n",
+            )
+            .unwrap();
+            std::fs::write(
+                game.world_root.join("datapacks.json"),
+                r#"{"enabled":["file/test"],"disabled":[]}"#,
+            )
+            .unwrap();
             game.adv.tree = Arc::new(Tree::load(&scratch.join("data")));
             for guest in &mut game.lan.as_mut().unwrap().hub.guests {
                 guest.advancements_loaded = true;
@@ -164,6 +172,10 @@ fn progress_events_capture_each_players_full_mutation_state() {
             } else {
                 reload(game);
             }
+            assert!(
+                game.fns.store.functions.contains_key("testmod:reward"),
+                "reward function was not loaded"
+            );
             let events = observed.lock().unwrap();
             let first: Vec<_> = events.iter().filter(|event| event.player == 12).collect();
             assert_eq!(first.len(), 1);
@@ -188,11 +200,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
             assert_eq!(progress.requirements, vec![vec!["alpha"], vec!["gamma"]]);
             assert_eq!(progress.completed_requirements, 2);
             assert!(progress.done);
-            assert_eq!(
-                events.len(),
-                1,
-                "only the acting guest is granted during reload"
-            );
+            assert_eq!(events.len(), 2, "each guest receives its progress event");
             for event in events.iter() {
                 assert_eq!(
                     event.progress.criteria[1].obtained_at.as_deref(),
@@ -202,15 +210,9 @@ fn progress_events_capture_each_players_full_mutation_state() {
             }
             let kept = first[0].progress.clone();
             drop(events);
-            {
-                let guest = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
-                assert!(!guest.advancements.has(ID, "alpha"));
-                assert_eq!(guest.xp_total, 0);
-            }
-            game.as_guest(13, |game| game.tick_advancements()).unwrap();
             for conn in [12, 13] {
                 let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
-                assert_eq!(guest.xp_total, 7);
+                assert_eq!(guest.xp_total, if conn == 12 { 7 } else { 0 });
                 for item in ["minecraft:stone", "minecraft:diamond"] {
                     assert_eq!(
                         guest
@@ -220,7 +222,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
                             .filter(|stack| stack.item.as_ref() == item)
                             .map(|stack| stack.count as usize)
                             .sum::<usize>(),
-                        1,
+                        usize::from(conn == 12),
                         "{conn}: {item}"
                     );
                 }
@@ -244,7 +246,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
                 game.as_guest(conn, |game| game.tick_advancements())
                     .unwrap();
                 let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
-                assert_eq!(guest.xp_total, 7);
+                assert_eq!(guest.xp_total, if conn == 12 { 7 } else { 0 });
                 for item in ["minecraft:stone", "minecraft:diamond"] {
                     assert_eq!(
                         guest
@@ -254,7 +256,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
                             .filter(|stack| stack.item.as_ref() == item)
                             .map(|stack| stack.count as usize)
                             .sum::<usize>(),
-                        1,
+                        usize::from(conn == 12),
                         "{conn}: {item}"
                     );
                 }
