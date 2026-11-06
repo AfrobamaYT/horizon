@@ -1098,7 +1098,12 @@ impl Game<'_> {
                     last_changed: 0,
                 });
             }
-            if d.announce && self.ui.rules.bool("show_advancement_messages") {
+            if d.announce
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::SHOW_ADVANCEMENT_MESSAGES)
+            {
                 let key = match d.frame {
                     Frame::Task => "chat.type.advancement.task",
                     Frame::Goal => "chat.type.advancement.goal",

@@ -1351,7 +1351,8 @@ impl Game<'_> {
             // remembers them before the blast can kill it.
             self.fight.blast_by = by;
             // EndCrystal.hurtServer: ExplosionInteraction.BLOCK.
-            let interaction = self.destroy_type("block_explosion_drop_decay");
+            let interaction =
+                self.destroy_type(horizon_client::gamerules::vanilla::BLOCK_EXPLOSION_DROP_DECAY);
             // EndCrystal is 2 by 2 blocks: its box decides `isInWater`.
             let (x, y, z) = (c.position.x, c.position.y, c.position.z);
             self.combat.explosion_in_water = self.bounds_in_water(Aabb::new(
@@ -4071,7 +4072,8 @@ impl Game<'_> {
             }
         }
         // DragonRespawnStage.SUMMONING_PILLARS: ExplosionInteraction.BLOCK.
-        let interaction = self.destroy_type("block_explosion_drop_decay");
+        let interaction =
+            self.destroy_type(horizon_client::gamerules::vanilla::BLOCK_EXPLOSION_DROP_DECAY);
         let _ = self.server_explode(
             [f64::from(cx) + 0.5, f64::from(h), f64::from(cz) + 0.5],
             5.0,

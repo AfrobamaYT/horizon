@@ -219,6 +219,24 @@ pub mod vanilla {
     pub const MAX_COMMAND_SEQUENCE_LENGTH: RuleIndex = vanilla_index("max_command_sequence_length");
     /// The `send_command_feedback` rule.
     pub const SEND_COMMAND_FEEDBACK: RuleIndex = vanilla_index("send_command_feedback");
+    /// The feature-gated `max_minecart_speed` rule.
+    pub const MAX_MINECART_SPEED: RuleIndex = RuleIndex(super::RULES.len());
+    /// The `reduced_debug_info` rule.
+    pub const REDUCED_DEBUG_INFO: RuleIndex = vanilla_index("reduced_debug_info");
+    /// The `show_advancement_messages` rule.
+    pub const SHOW_ADVANCEMENT_MESSAGES: RuleIndex = vanilla_index("show_advancement_messages");
+    /// The `players_nether_portal_creative_delay` rule.
+    pub const PLAYERS_NETHER_PORTAL_CREATIVE_DELAY: RuleIndex =
+        vanilla_index("players_nether_portal_creative_delay");
+    /// The `players_nether_portal_default_delay` rule.
+    pub const PLAYERS_NETHER_PORTAL_DEFAULT_DELAY: RuleIndex =
+        vanilla_index("players_nether_portal_default_delay");
+    /// The `mob_explosion_drop_decay` rule.
+    pub const MOB_EXPLOSION_DROP_DECAY: RuleIndex = vanilla_index("mob_explosion_drop_decay");
+    /// The `tnt_explosion_drop_decay` rule.
+    pub const TNT_EXPLOSION_DROP_DECAY: RuleIndex = vanilla_index("tnt_explosion_drop_decay");
+    /// The `block_explosion_drop_decay` rule.
+    pub const BLOCK_EXPLOSION_DROP_DECAY: RuleIndex = vanilla_index("block_explosion_drop_decay");
     /// The `advance_time` rule.
     pub const ADVANCE_TIME: RuleIndex = vanilla_index("advance_time");
     /// The `water_source_conversion` rule.
@@ -322,13 +340,10 @@ impl GameRules {
     }
     /// Read a resolved vanilla integer rule without a name lookup.
     pub fn int_at(&self, index: RuleIndex) -> i32 {
-        match self.values[index.0] {
-            Value::Int(value) => value,
+        match self.values.get(index.0) {
+            Some(Value::Int(value)) => *value,
             _ => 0,
         }
-    }
-    pub fn bool(&self, name: &str) -> bool {
-        matches!(self.get(name), Some(Value::Bool(true)))
     }
     /// Parse a network rule value, retaining type and range validation.
     pub fn set_string(&mut self, name: &str, text: &str) -> bool {
@@ -338,12 +353,6 @@ impl GameRules {
             None => None,
         };
         value.is_some_and(|v| self.set(name, v))
-    }
-    pub fn int(&self, name: &str) -> i32 {
-        match self.get(name) {
-            Some(Value::Int(v)) => v,
-            _ => 0,
-        }
     }
     /// Set a rule; false if the name or value type is wrong.
     pub fn set(&mut self, name: &str, value: Value) -> bool {
@@ -498,29 +507,29 @@ mod tests {
     fn network_values_validate_rule_names_types_and_bounds() {
         let mut rules = GameRules::default();
         assert!(rules.set_string("minecraft:keep_inventory", "true"));
-        assert!(rules.bool("keep_inventory"));
+        assert!(rules.bool_at(vanilla::KEEP_INVENTORY));
         assert!(!rules.set_string("minecraft:keep_inventory", "1"));
-        assert!(rules.bool("keep_inventory"));
+        assert!(rules.bool_at(vanilla::KEEP_INVENTORY));
         assert!(rules.set_string("minecraft:random_tick_speed", "7"));
-        assert_eq!(rules.int("random_tick_speed"), 7);
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 7);
         assert!(!rules.set_string("minecraft:random_tick_speed", "-1"));
         assert!(!rules.set_string("minecraft:random_tick_speed", "999999999999"));
         assert!(!rules.set_string("minecraft:unknown", "true"));
         assert!(!rules.set_string("other:keep_inventory", "false"));
-        assert_eq!(rules.int("random_tick_speed"), 7);
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 7);
     }
     #[test]
     fn defaults_bounds_and_round_trip() {
         let mut rules = GameRules::default();
-        assert!(rules.bool("advance_time"));
-        assert_eq!(rules.int("random_tick_speed"), 3);
+        assert!(rules.bool_at(vanilla::ADVANCE_TIME));
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 3);
         assert!(!rules.set("random_tick_speed", Value::Bool(true)));
         assert!(!rules.set("max_snow_accumulation_height", Value::Int(9)));
         assert!(rules.set("keep_inventory", Value::Bool(true)));
         assert!(rules.set("minecraft:random_tick_speed", Value::Int(10)));
         let back = GameRules::from_nbt(&rules.to_nbt().tag);
         assert_eq!(back, rules);
-        assert!(back.bool("keep_inventory"));
+        assert!(back.bool_at(vanilla::KEEP_INVENTORY));
         let dir = std::env::temp_dir().join(format!("horizon-gamerules-{}", std::process::id()));
         rules.save(&dir).unwrap();
         assert_eq!(GameRules::load(&dir), rules);

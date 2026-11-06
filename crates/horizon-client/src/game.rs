@@ -13471,7 +13471,7 @@ impl Game<'_> {
         let interaction = if !self.can_entity_grief(source) {
             explosion::BlockInteraction::Keep
         } else {
-            self.destroy_type("mob_explosion_drop_decay")
+            self.destroy_type(horizon_client::gamerules::vanilla::MOB_EXPLOSION_DROP_DECAY)
         };
         self.server_explode(center, radius, interaction, fire)
     }
@@ -13486,7 +13486,7 @@ impl Game<'_> {
         let interaction = if !self.can_entity_grief(source) {
             explosion::BlockInteraction::Keep
         } else {
-            self.destroy_type("tnt_explosion_drop_decay")
+            self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY)
         };
         self.server_explode(center, radius, interaction, false)
     }

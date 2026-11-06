@@ -920,8 +920,11 @@ impl Game<'_> {
     }
     /// `ServerLevel.getDestroyType`: a drop decay rule picks between decaying
     /// and plain destruction.
-    pub(super) fn destroy_type(&self, rule: &str) -> BlockInteraction {
-        if self.ui.rules.bool(rule) {
+    pub(super) fn destroy_type(
+        &self,
+        rule: horizon_client::gamerules::RuleIndex,
+    ) -> BlockInteraction {
+        if self.ui.rules.bool_at(rule) {
             BlockInteraction::DestroyWithDecay
         } else {
             BlockInteraction::Destroy
