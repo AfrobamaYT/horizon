@@ -23,46 +23,38 @@ pub const NITWIT: u8 = 11;
 #[derive(Debug)]
 pub struct Profession {
     pub id: &'static str,
-    pub job_sites: &'static [&'static str],
     pub trade_set: Option<&'static str>,
     pub render_index: u8,
 }
 
-// Generate the match from the same data as the table: no hash or scan on the
-// per-villager job-site search, and no second list of workstation mappings.
+// Vanilla profession metadata, independent of POI block-state definitions.
 macro_rules! professions {
-    ($(($id:literal, $index:literal, [$($site:literal),*], $trades:expr)),* $(,)?) => {
+    ($(($id:literal, $index:literal, $trades:expr)),* $(,)?) => {
         /// Built-in professions in their existing render and storage order.
         pub static PROFESSIONS: [Profession; 15] = [
-            $(Profession { id: $id, job_sites: &[$($site),*], trade_set: $trades, render_index: $index }),*
+            $(Profession { id: $id, trade_set: $trades, render_index: $index }),*
         ];
 
-        /// `PoiTypes`: the profession for a job-site block.
-        pub fn job_site_profession(block: &str) -> Option<u8> {
-            match block.trim_start_matches("minecraft:") {
-                $($($site => Some($index),)*)*
-                _ => None,
-            }
-        }
+
     };
 }
 
 professions! {
-    ("none", 0, [], None),
-    ("armorer", 1, ["blast_furnace"], Some("armorer")),
-    ("butcher", 2, ["smoker"], Some("butcher")),
-    ("cartographer", 3, ["cartography_table"], Some("cartographer")),
-    ("cleric", 4, ["brewing_stand"], Some("cleric")),
-    ("farmer", 5, ["composter"], Some("farmer")),
-    ("fisherman", 6, ["barrel"], Some("fisherman")),
-    ("fletcher", 7, ["fletching_table"], Some("fletcher")),
-    ("leatherworker", 8, ["cauldron", "water_cauldron", "lava_cauldron", "powder_snow_cauldron"], Some("leatherworker")),
-    ("librarian", 9, ["lectern"], Some("librarian")),
-    ("mason", 10, ["stonecutter"], Some("mason")),
-    ("nitwit", 11, [], None),
-    ("shepherd", 12, ["loom"], Some("shepherd")),
-    ("toolsmith", 13, ["smithing_table"], Some("toolsmith")),
-    ("weaponsmith", 14, ["grindstone"], Some("weaponsmith")),
+    ("none", 0, None),
+    ("armorer", 1, Some("armorer")),
+    ("butcher", 2, Some("butcher")),
+    ("cartographer", 3, Some("cartographer")),
+    ("cleric", 4, Some("cleric")),
+    ("farmer", 5, Some("farmer")),
+    ("fisherman", 6, Some("fisherman")),
+    ("fletcher", 7, Some("fletcher")),
+    ("leatherworker", 8, Some("leatherworker")),
+    ("librarian", 9, Some("librarian")),
+    ("mason", 10, Some("mason")),
+    ("nitwit", 11, None),
+    ("shepherd", 12, Some("shepherd")),
+    ("toolsmith", 13, Some("toolsmith")),
+    ("weaponsmith", 14, Some("weaponsmith")),
 }
 
 /// Existing u8 adapter; invalid values retain the historic wrapping behavior.
@@ -120,6 +112,36 @@ pub fn profession_index(name: &str) -> Option<u8> {
         .iter()
         .find(|p| p.id == name)
         .map(|p| p.render_index)
+}
+
+/// Resolve the frozen vanilla POI-to-profession mapping once, not per scan.
+pub(super) fn poi_profession(poi: horizon_world::poi::PoiType) -> Option<u8> {
+    use horizon_world::poi::PoiType;
+    const JOBS: [PoiType; 13] = [
+        PoiType::Armorer,
+        PoiType::Butcher,
+        PoiType::Cartographer,
+        PoiType::Cleric,
+        PoiType::Farmer,
+        PoiType::Fisherman,
+        PoiType::Fletcher,
+        PoiType::Leatherworker,
+        PoiType::Librarian,
+        PoiType::Mason,
+        PoiType::Shepherd,
+        PoiType::Toolsmith,
+        PoiType::Weaponsmith,
+    ];
+    static INDEX: std::sync::OnceLock<[u8; 13]> = std::sync::OnceLock::new();
+    let index = poi.job_index()?;
+    Some(
+        INDEX.get_or_init(|| {
+            JOBS.map(|p| {
+                profession_index(p.id().trim_start_matches("minecraft:"))
+                    .expect("vanilla POI profession")
+            })
+        })[index],
+    )
 }
 
 pub fn register(m: &mut Mob) {
@@ -1010,13 +1032,13 @@ mod tests {
             assert_eq!(profession(index).id, *name);
             assert_eq!(profession_index(name), Some(index));
             assert_eq!(profession(index).render_index, index);
-            assert_eq!(profession(index).job_sites, *sites);
             for site in *sites {
-                assert_eq!(job_site_profession(site), Some(index));
-                assert_eq!(
-                    job_site_profession(&format!("minecraft:{site}")),
-                    Some(index)
-                );
+                let state = horizon_world::chunk::BlockState {
+                    name: format!("minecraft:{site}"),
+                    properties: Default::default(),
+                };
+                let poi = horizon_world::poi::saved_poi(&state).unwrap();
+                assert_eq!(poi.id(), format!("minecraft:{name}"));
             }
             for level in 1..=5 {
                 assert_eq!(
@@ -1026,8 +1048,6 @@ mod tests {
             }
         }
         assert_eq!(profession(255).id, "none");
-        assert_eq!(job_site_profession("other:composter"), None);
-        assert_eq!(job_site_profession("stone"), None);
         assert_eq!(profession_index("other:farmer"), None);
         assert_eq!(
             crate::merchant::Trades::set_for("other:farmer", 2),
