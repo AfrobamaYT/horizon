@@ -1,6 +1,9 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
 mod catalog;
+mod dispatch_fixtures;
 mod exports;
+#[doc(hidden)]
+pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 mod host;
 mod layout;
 mod part_table;
@@ -1017,6 +1020,8 @@ pub mod points;
 pub(crate) mod sites;
 pub mod staging;
 mod wasm;
+/// Shared registration emitter for component-model WIT worlds.
+pub mod wasm_imports;
 pub use build::{generate, generate_points};
 pub use wasm::{Wasm, generate as generate_wasm};
 
@@ -1024,6 +1029,7 @@ pub use wasm::{Wasm, generate as generate_wasm};
 #[doc(hidden)]
 pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
     build::track(root)?;
+    dispatch_fixtures::generate(root, out_dir)?;
     let code = sources(root, FillMode::Ignore)?.hooks;
     fs::write(out_dir.join("mod_api_generated.rs"), code).map_err(|e| e.to_string())
 }

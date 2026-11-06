@@ -25,14 +25,13 @@ use horizon_client::{
 use horizon_world::registry::BlockStateId;
 use mod_api::{Identifier, ModelError, ModelPart, ModelRef};
 
-/// Atlas placements for standalone faces, indexed by their existing model slot.
-/// Geometry remains in the generation's baked catalog and is not duplicated.
-pub(super) struct StandaloneSprites {
+/// Atlas-resolved standalone geometry, indexed by model slot and resource generation.
+pub(super) struct StandaloneGeometry {
     generation: u64,
-    slots: Vec<Option<Vec<Option<Rect>>>>,
+    slots: Vec<Option<Vec<super::minecarts::PreparedModelFace>>>,
 }
 
-impl StandaloneSprites {
+impl StandaloneGeometry {
     pub(super) fn new(pack: &super::PackResources, gui: &super::UiResources) -> Self {
         let catalog = &pack.render.model_catalog;
         let mut slots = Vec::new();
@@ -46,16 +45,19 @@ impl StandaloneSprites {
                 .model_by_slot(slot)
                 .expect("standalone slot exists")
                 .faces;
-            let sprites = faces
+            let prepared = faces
                 .iter()
-                .map(|face| {
-                    pack.layer_names
+                .filter_map(|face| {
+                    let sprite = pack
+                        .layer_names
                         .get(&face.layer)
-                        .and_then(|name| gui.atlas.sprites.get(name))
-                        .copied()
+                        .and_then(|name| gui.atlas.sprites.get(name))?;
+                    Some(super::minecarts::PreparedModelFace::new(
+                        &face.quad, *sprite,
+                    ))
                 })
                 .collect();
-            slots[index] = Some(sprites);
+            slots[index] = Some(prepared);
         }
         Self {
             generation: pack.render.generation,
@@ -870,27 +872,20 @@ impl Game<'_> {
         tint: u32,
     ) -> Result<(), ModelError> {
         use mod_api::__private::game::Fields;
-        let baked = self.pack.render.resolve_model(model)?;
         let fields = model.fields();
-        if fields.generation != self.standalone_sprites.generation {
+        if fields.generation != self.standalone_geometry.generation {
             return Err(ModelError::StaleModel);
         }
-        let sprites = self
-            .standalone_sprites
+        let faces = self
+            .standalone_geometry
             .slots
             .get(fields.slot as usize)
             .and_then(Option::as_ref)
             .ok_or(ModelError::UnknownModel)?;
-        let faces = baked
-            .faces
-            .iter()
-            .zip(sprites)
-            .filter_map(|(face, sprite)| sprite.map(|sprite| (&face.quad, sprite)));
         let light = draw.light;
         super::minecarts::emit_model_faces(
-            faces,
+            faces.iter().copied().map(|face| (face, light)),
             draw.pose(),
-            |_| light,
             true,
             |index| (index >= 0).then_some(tint & 0xFF_FFFF),
             &mut draw.vertices,
@@ -1073,6 +1068,64 @@ mod tests {
     }
 
     #[test]
+    fn prepared_faces_transform_and_preserve_tint_and_emission() {
+        use super::super::minecarts::{PreparedModelFace, emit_model_faces};
+        let mut quad = bake_flat_face(
+            [0.0; 3],
+            [16.0; 3],
+            [0.0, 0.0, 16.0, 16.0],
+            Direction::Up,
+            Material {
+                sprite: String::new(),
+                force_translucent: false,
+            },
+            0,
+        )
+        .unwrap();
+        quad.positions = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
+        quad.uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        quad.light_emission = 12;
+        let tinted = PreparedModelFace::new(&quad, sprite());
+        quad.tint_index = -1;
+        let plain = PreparedModelFace::new(&quad, sprite());
+        let pose = Mat4::from_scale_rotation_translation(
+            Vec3::new(2.0, 3.0, 4.0),
+            Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+            Vec3::new(10.0, 20.0, 30.0),
+        );
+        let mut out = Vec::new();
+        emit_model_faces(
+            [(tinted, 0x2030), (plain, 0x2030)],
+            pose,
+            true,
+            |index| (index >= 0).then_some(0x123456),
+            &mut out,
+        );
+        let positions = [
+            [10.0, 20.0, 30.0],
+            [10.0, 22.0, 30.0],
+            [7.0, 22.0, 30.0],
+            [7.0, 20.0, 30.0],
+        ];
+        let uvs = [[0.5, 0.25], [0.75, 0.25], [0.75, 0.5], [0.5, 0.5]];
+        for (i, v) in out.iter().enumerate() {
+            for axis in 0..3 {
+                assert!((v.pos[axis] - positions[i % 4][axis]).abs() < 0.00001);
+            }
+            assert_eq!(v.uv, uvs[i % 4]);
+            assert_eq!(v.normal, [-127, 0, 0, 127]);
+            assert_eq!(v.light, 0xC030);
+            assert_eq!(v.color, if i < 4 { 0xFF563412 } else { u32::MAX });
+        }
+        assert_eq!(out.len(), 8);
+    }
+
+    #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn prepared_model_entity_pixels() {
         use mod_api::{__private::game::Fields, ClientHost};
@@ -1082,11 +1135,12 @@ mod tests {
                 .render_assets()
                 .model(&Identifier::parse("minecraft:block/grass_block").unwrap())
                 .unwrap();
-            let source = game.pack.render.resolve_model(model).unwrap();
-            let face_index = source
-                .faces
+            let prepared = game.standalone_geometry.slots[model.fields().slot as usize]
+                .as_ref()
+                .unwrap();
+            let face_index = prepared
                 .iter()
-                .position(|face| face.quad.facing == Direction::South && face.quad.tint_index >= 0)
+                .position(|face| face.facing == Direction::South && face.tint_index >= 0)
                 .unwrap();
             let mut surface = draw();
             surface.poses = vec![Mat4::from_rotation_z(0.25)];
@@ -1097,9 +1151,19 @@ mod tests {
             assert!(vertices.iter().all(|v| v.light == 0x7030));
             let atlas = &game.gui.atlas;
             let mut pixels = vec![255; (atlas.width * atlas.height * 4) as usize];
-            let sprite = game.standalone_sprites.slots[model.fields().slot as usize]
-                .as_ref()
-                .unwrap()[face_index]
+            // Prepared indices exclude baked faces without an atlas sprite.
+            let source = game.pack.render.resolve_model(model).unwrap();
+            let sprite = source
+                .faces
+                .iter()
+                .filter_map(|face| {
+                    game.pack
+                        .layer_names
+                        .get(&face.layer)
+                        .and_then(|name| atlas.sprites.get(name))
+                        .copied()
+                })
+                .nth(face_index)
                 .unwrap();
             let x0 = (sprite.u0 * atlas.width as f32).round() as u32;
             let x1 = (sprite.u1 * atlas.width as f32).round() as u32;
@@ -1208,9 +1272,17 @@ mod tests {
             plain.tint_index = -1;
             let mut emitted = Vec::new();
             super::super::minecarts::emit_model_faces(
-                [(&tinted, sprite), (&plain, sprite)],
+                [
+                    (
+                        super::super::minecarts::PreparedModelFace::new(&tinted, sprite),
+                        0x2030,
+                    ),
+                    (
+                        super::super::minecarts::PreparedModelFace::new(&plain, sprite),
+                        0x2030,
+                    ),
+                ],
                 Mat4::IDENTITY,
-                |_| 0x2030,
                 true,
                 |index| (index >= 0).then_some(0x123456),
                 &mut emitted,
