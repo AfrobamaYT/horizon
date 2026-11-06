@@ -39,6 +39,18 @@ pub trait Helpers {
     #[helper(
         side = "server",
         receiver = "projectile",
+        target = "horizon_client::game::native_projectile_refs::Game<'_>::native_projectile_pierce_level"
+    )]
+    fn projectile_pierce_level();
+    #[helper(
+        side = "server",
+        receiver = "projectile",
+        target = "horizon_client::game::native_projectile_refs::Game<'_>::native_projectile_set_pierce_level"
+    )]
+    fn projectile_set_pierce_level();
+    #[helper(
+        side = "server",
+        receiver = "projectile",
         target = "horizon_client::game::native_projectile_refs::Game<'_>::native_projectile_base_damage"
     )]
     fn projectile_base_damage();

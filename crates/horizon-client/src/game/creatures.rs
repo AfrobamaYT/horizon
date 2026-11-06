@@ -5364,7 +5364,7 @@ impl Game<'_> {
                         );
                         // AbstractArrow.onHitEntity: a hit that hurt leaves a
                         // non-piercing arrow stuck in the body.
-                        if hurt && p.arrow.as_ref().is_some_and(|a| a.pierce == 0) {
+                        if hurt && p.arrow.as_ref().is_some_and(|a| (a.pierce as i8) <= 0) {
                             self.combat.stuck.add_arrow();
                         }
                         hurt
@@ -9648,6 +9648,47 @@ mod breeding_tests {
 #[cfg(test)]
 mod breeze_random_tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn projectile_handle_pierce_level_changes_real_hits() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            for (id, x) in [(11, 1.0), (12, 2.0), (13, 3.0)] {
+                game.mobs
+                    .push(Mob::new(id, zombie.clone(), Vec3::new(x, 64.0, 0.0), 0.0));
+            }
+            let mut shot = Projectile::new(
+                ProjectileKind::Arrow {
+                    base_damage: 2.0,
+                    critical: false,
+                    effect: None,
+                },
+                Vec3::new(0.0, 64.5, 0.0),
+                None,
+            );
+            shot.velocity = Vec3::new(4.0, 0.0, 0.0);
+            game.add_projectile(shot);
+            let id = game.creatures.projectiles[0].id;
+            let handle = game
+                .native_projectile_ref(game.native_entity(id).unwrap())
+                .unwrap();
+            assert_eq!(handle.pierce_level(game), Ok(0));
+            assert_eq!(handle.set_pierce_level(game, 1), Ok(()));
+            let health: Vec<_> = game.mobs.iter().map(|m| m.health).collect();
+            game.tick_projectiles().unwrap();
+            assert!(game.mobs[0].health < health[0]);
+            game.tick_projectiles().unwrap();
+            assert!(game.mobs[1].health < health[1]);
+            assert_eq!(game.mobs[2].health, health[2]);
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources"]
