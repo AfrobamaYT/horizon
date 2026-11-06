@@ -1344,6 +1344,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn live_gui_scale_uses_the_current_owner() {
         let (_, receiver) = std::sync::mpsc::channel();
         let mut first = loading(receiver);
