@@ -63,7 +63,7 @@ impl Hooks for Mod {
                 fluid.is_source(),
                 fluid.is_empty()
             ),
-            (8, true, true, false)
+            (0, false, false, true)
         );
         *event.message = Text::literal(format!("{} (via mod.wasm)", event.raw_text));
         Flow::Continue
