@@ -1454,7 +1454,7 @@ impl Registrar for PartRegistrar {
             Ok(())
         } else {
             Err(super::BlockEntityPartError::Duplicate {
-                kind: key.clone(),
+                kind: *key,
                 part: kind,
             })
         }
@@ -5311,7 +5311,7 @@ pub mod tests {
             side: None,
         };
         assert!(block_entity_providers(&ITEMS, &TypeOf(None), at).is_none());
-        assert!(block_entity_providers(&ITEMS, &TypeOf(Some("test:unregistered")), at).is_none());
+        assert!(block_entity_providers(&ITEMS, &TypeOf(Some("test:tank")), at).is_none());
 
         // Item providers in the same order, for the item in a player's hand: with no game slots
         // (damage 0), the first mod's that answers; with them (damage 1), the game's; for two
@@ -5992,7 +5992,7 @@ pub mod tests {
         assert_eq!(
             (&mut r as &mut dyn Registrar).block_entity_part(&kind, Press),
             Err(BlockEntityPartError::Duplicate {
-                kind: kind.clone(),
+                kind,
                 part: type_name::<Press>()
             }),
         );
