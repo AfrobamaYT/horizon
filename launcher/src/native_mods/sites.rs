@@ -111,7 +111,7 @@ impl Site {
         injection: &Injection,
     ) -> String {
         let f = format!("mod_{index}::{}", injection.raw.as_ref().expect("raw site"));
-        use horizon_mods::manifest::inject::Kind;
+        use horizon_mod_package::manifest::inject::Kind;
         let kind = match injection.kind {
             InjectionKind::BeforeCall => Kind::BeforeCall,
             InjectionKind::ModifyArg => Kind::ModifyCallArg,
@@ -132,8 +132,8 @@ impl Site {
     }
 }
 
-pub(super) fn adapter(kind: horizon_mods::manifest::inject::Kind, f: &str) -> String {
-    use horizon_mods::manifest::inject::Kind;
+pub(super) fn adapter(kind: horizon_mod_package::manifest::inject::Kind, f: &str) -> String {
+    use horizon_mod_package::manifest::inject::Kind;
     match kind {
         Kind::BeforeCall | Kind::ModifyCallArg => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
         Kind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
