@@ -707,8 +707,9 @@ list was taken out — so a read the snapshot does not carry (a mob's gear or ef
 answers `None`, and the handle docs mark the reads that carry the snapshot rule. Writes apply to the
 mob itself through the engine's own paths: `move_to(pos, speed)` and `stop_navigation()`
 (`PathNavigation`), `look_at(pos)` (`LookControl`), `jump()`, and `set_target(Option<LivingRef>)`
-(`Mob.setTarget`, with the write handle's rules: a brain-backed species refuses, as do foxes,
-endermen and zombified piglins, whose setter side effects are not modeled). Writes to other entities
+(`Mob.setTarget`, with the write handle's rules: a fox, an enderman or a zombified piglin stores it
+with its setter's side effects, and a brain-backed species refuses, since its target is a brain
+memory that `MobRef::set_brain_target` writes from a server host). Writes to other entities
 are not part of a goal; the write handles a `ServerHost` takes do not exist in a goal tick.
 
 Entity parts are a native mod's for now: the goal surface does not cross to wasm (see the
