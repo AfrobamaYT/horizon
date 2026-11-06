@@ -786,7 +786,7 @@ impl Game<'_> {
         let saved = Box::new(self.level.clone());
         // IntegratedServer runs the server mods; the window the client mods.
         startup::time("server.start_mods", || self.start_mods());
-        self.refresh_loop_context();
+        self.refresh_loop_context()?;
         // Math.max(2, options.renderDistance): past vanilla's 32 when the
         // window's render distance is (Horizon's options go to 64).
         let view_distance = self.settings.render_distance.max(2);
@@ -1300,8 +1300,8 @@ fn server_game(
     options: Options,
     settings: Settings,
 ) -> Result<Game<'_>> {
-    let gui = UiResources::server(&options.resources)?;
-    let audio = Audio::silent(&options.resources);
+    let gui = UiResources::server(&pack.source)?;
+    let audio = Audio::silent(&pack.source);
     Game::new(res, pack, gui, options, settings, audio, None)
 }
 

@@ -7,6 +7,9 @@
 use super::Vertex;
 use glam::Mat4;
 
+/// Initial per-view line and quad limits, shared by CPU submission and GPU setup.
+pub const DEFAULT_CAPACITY: u32 = 4096;
+
 /// A frame's primitives, camera-relative, as the game tessellated them: quads of 4 vertices
 /// from the shared atlas (plain colours on its white texel, text on its glyphs, beams on the
 /// beacon beam sprite) and lines as `gizmos::camera_relative` gives them. `*_through` ones are
@@ -228,7 +231,7 @@ impl WorldPrimitives {
 
     /// Reserves CPU and GPU geometry storage for `quads` and `lines`, total across both depth
     /// modes. Call before preparing a frame, at setup to avoid growth during submission. Only
-    /// newly needed indices upload; geometry must be prepared again after buffer growth.
+    /// index growth uploads the full index array; prepare geometry again after buffer growth.
     pub fn reserve(&mut self, device: &wgpu::Device, upload: Upload<'_>, quads: u32, lines: u32) {
         self.quad_vertices
             .reserve((quads as usize * 4).saturating_sub(self.quad_vertices.len()));

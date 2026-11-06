@@ -22,6 +22,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "ClientBackendMut",
     "DrawContext",
     "BlockEntityDrawContext",
+    "WorldDrawContext",
     "LevelHost",
     "LevelRandomHost",
     "LevelTicksHost",
@@ -750,9 +751,11 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    /// Builds the generated wasm interface and hands its `client-host` interface and the unbound
-    /// method names to `check`.
-    fn with_client_host(check: impl FnOnce(&wit_parser::Interface, &[String]) + Send + 'static) {
+    /// Builds the generated wasm interface and hands the named interface and unbound methods to `check`.
+    fn with_interface(
+        name: &'static str,
+        check: impl FnOnce(&wit_parser::Interface, &[String]) + Send + 'static,
+    ) {
         std::thread::Builder::new()
             .stack_size(64 << 20)
             .spawn(move || {
@@ -767,9 +770,8 @@ mod tests {
                 let wasm = super::generate(&root, &included).unwrap();
                 let mut resolve = wit_parser::Resolve::default();
                 let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
-                let client =
-                    &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
-                check(client, &wasm.unbound);
+                let interface = &resolve.interfaces[resolve.packages[package].interfaces[name]];
+                check(interface, &wasm.unbound);
             })
             .unwrap()
             .join()
@@ -777,8 +779,20 @@ mod tests {
     }
 
     #[test]
+    fn world_geometry_has_generated_wasm_bindings() {
+        with_interface("world-draw-context", |draw, _| {
+            for method in ["lines", "quads", "usage"] {
+                assert!(draw.functions.contains_key(method));
+            }
+        });
+        with_interface("hooks", |hooks, _| {
+            assert!(hooks.functions.contains_key("submit-custom-geometry"));
+        });
+    }
+
+    #[test]
     fn client_gui_state_has_generated_wasm_bindings() {
-        with_client_host(|client, unbound| {
+        with_interface("client-host", |client, unbound| {
             for method in ["window-focused", "observed-screen-id"] {
                 assert!(client.functions.contains_key(method));
             }
@@ -793,7 +807,7 @@ mod tests {
 
     #[test]
     fn client_input_options_have_a_generated_wasm_binding() {
-        with_client_host(|client, unbound| {
+        with_interface("client-host", |client, unbound| {
             assert!(client.functions.contains_key("input-options"));
             assert!(
                 !unbound
@@ -913,7 +927,7 @@ mod tests {
                 // A resource read may not accidentally open a mixed service during reload.
                 let mut mixed = crate::catalog::Catalog::load(&root).unwrap();
                 mixed.helpers.iter_mut().find(|helper| helper.name == "client_server").unwrap().service = Some("render_assets".into());
-                let (host, implementation) = crate::host::generate(&root, &mixed, &generated.hooks).unwrap();
+                let (host, implementation, _) = crate::host::generate(&root, &mixed, &generated.hooks).unwrap();
                 for source in [host, implementation] {
                     assert!(source.contains("check_access(\"render_assets\", mod_api::__private::LoadAccess::WorldOnly)"));
                 }

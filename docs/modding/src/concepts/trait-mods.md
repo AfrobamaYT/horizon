@@ -534,6 +534,12 @@ Inventory reads and direct server-side item transactions keep their existing con
 not expose direct client inventory writes or enforce a mod's locked-slot policy. Call from an explicit
 input action rather than submitting every render/tick. Diverges from upstream: new helper.
 
+`menu.close(host)` closes the menu's screen as Escape does and tells the server (`ContainerClose`);
+it returns `false` while that screen is not open, so the inventory menu closes only while the inventory
+screen shows. `menu.click_button(host, button)` presses one of the open menu's buttons
+(`ContainerButtonClick`, as a loom's pattern list does), for input the screen's own
+buttons don't take; the server's menu decides what it does, and the inventory menu has none.
+
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
@@ -667,6 +673,47 @@ each other's handlers. So the game refuses that at startup, naming both mods and
 `CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
 namespace. Both checks run once, when the mods register.
 
+### Entity parts and mob goals
+
+`r.entity_part("minecraft:zombie", ZombieGoals)` attaches an `EntityPart` to one entity type, a mod's
+own or vanilla's. Its single method `register_goals` runs at every `Mob` construction of that type —
+spawned or loaded, the moment vanilla's `registerGoals` fan-out ends — and the goals it adds join the
+mob's two selectors beside the species' own, with the same priorities, flag locks and interruption:
+
+```rust
+struct ZombieGoals;
+#[mod_api::horizon_part]
+impl EntityPart for ZombieGoals {
+    fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+        // goals.mob().id() is "minecraft:zombie": branch as per-species code does.
+        goals.add_goal(7, Stare::default());
+        goals.add_target_goal(3, Remember::default());
+    }
+}
+```
+
+`goals.add_goal(priority, goal)` and `goals.add_target_goal(priority, goal)` are `GoalSelector.addGoal`
+on the mob's two selectors; `GoalFlags` claims MOVE, LOOK, JUMP and TARGET as vanilla's `Goal.Flag`
+does, and a higher priority (a lower number) interrupts a running goal holding the same flag. A goal
+object is per mob, built fresh at every construction, and its state is never saved: a goal that needs
+memory across loads keeps it in attachments. A mob whose type has no part, or a game with no entity
+parts at all, pays nothing — the wrapper and the tick's read view exist only where a mod goal runs.
+
+A `Goal` reads and writes through its `GoalContext`: `mob()` is a fresh handle of the mob it runs on,
+`host()` the tick's read view, `random()` the mob's own random (`mob.getRandom()`, so a mod's draws
+keep the mob's stream in shape). The read view answers the ticking mob itself directly, the player the
+tick sees, and every other entity from the tick's snapshot — a `getEntities` of the moment the mob
+list was taken out — so a read the snapshot does not carry (a mob's gear or effects, its species id)
+answers `None`, and the handle docs mark the reads that carry the snapshot rule. Writes apply to the
+mob itself through the engine's own paths: `move_to(pos, speed)` and `stop_navigation()`
+(`PathNavigation`), `look_at(pos)` (`LookControl`), `jump()`, and `set_target(Option<LivingRef>)`
+(`Mob.setTarget`, with the write handle's rules: a brain-backed species refuses, as do foxes,
+endermen and zombified piglins, whose setter side effects are not modeled). Writes to other entities
+are not part of a goal; the write handles a `ServerHost` takes do not exist in a goal tick.
+
+Entity parts are a native mod's for now: the goal surface does not cross to wasm (see the
+`attach_entity_part` note), so `r.entity_part` is absent from a wasm build.
+
 ### Block-state facts
 
 A `BlockStateId` is a registry value, not a live object, so the facts about one that need no world are a small
@@ -787,7 +834,7 @@ hosts are small enough to implement whole. NeoForge's GameTest is the in-game co
 A new hook needs its declaration in the area file of `crates/horizon-mod-api/src/hooks/` (`///` lines and
 `#[hook(side = "server", contract = "cancel", out = "cancel")]` on `fn name();`; the argument list is in that folder's `mod.rs`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
-That command only replaces the placeholder in `native_hooks.rs` with the `dispatch_<hook>` call; commit
+That command only replaces the placeholder in `native_hooks/` with the `dispatch_<hook>` call; commit
 that source change and the declaration. The `horizon-mod-api-gen` build dependency generates the hook traits,
 `Host` methods and dispatch code into Cargo's `OUT_DIR` when the game and renderer build, including release
 builds. These generated Rust files are not kept in the source tree or committed, and no manual regeneration

@@ -420,7 +420,10 @@ mod tests {
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
         let registry = assets.registry;
-        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let terrain = |biome, features, layers: &[(&str, i32)]| {
             FlatTerrain::from_settings(
                 &flat_world(biome, features, layers),
