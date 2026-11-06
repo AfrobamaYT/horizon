@@ -15142,7 +15142,7 @@ mod tick_target_millis_tests {
                 check(game);
             });
         });
-        Arc::try_unwrap(seen).unwrap().into_inner().unwrap()
+        seen.lock().unwrap().clone()
     }
 
     /// `Minecraft.getTickTargetMillis`: the mod gets the clock's tick length, the `/tick rate`
