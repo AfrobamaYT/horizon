@@ -3862,7 +3862,10 @@ mod within_home_tests {
     #[test]
     fn within_home_matches_vanilla_at_the_edges() {
         assert!(within_home([10, 64, -5], 6, [12, 64, -2]));
-        assert!(!within_home([10, 64, -5], 6, [16, 64, -5]), "the radius itself is out");
+        assert!(
+            !within_home([10, 64, -5], 6, [16, 64, -5]),
+            "the radius itself is out"
+        );
         assert!(!within_home([i32::MIN, 0, 0], 6, [i32::MAX, 0, 0]));
         assert!(!within_home([i32::MIN; 3], i32::MAX, [i32::MAX; 3]));
         // 65 536² wraps to 0; 46 341² wraps negative.
