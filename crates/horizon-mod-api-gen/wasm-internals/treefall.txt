@@ -81,8 +81,5 @@ horizon_world::registry::BlockRegistry::default_state
 horizon_client_lib::lan::playerdata::uuid_ints
 horizon_client_lib::lan::hub::Hub::guest
 
-# Treefall tool wear uses the existing held-stack write path (avoids aliasing a Game child).
-horizon_client::game::Game<'_>::damage_held
-
 # Non-generic property read; BlockProperties::get itself is generic.
 horizon_client::game::native_block_entity_draw::Game<'_>::native_block_state_property
