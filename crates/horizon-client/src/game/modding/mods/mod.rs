@@ -1084,6 +1084,25 @@ mod tests {
         }
     }
 
+    /// Runs `test` again in a child process whose working directory is its own
+    /// empty folder: the overlay's `.horizon-cache` lives under the working
+    /// directory, so children sharing one (the temp dir) race on that cache.
+    fn run_in_child(test: &str, mode: &str) {
+        let cwd = std::env::temp_dir().join(format!(
+            "horizon-game-mods-cwd-{}-{mode}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .current_dir(&cwd)
+            .args(["--exact", test, "--nocapture"])
+            .env(mode, "1")
+            .status()
+            .unwrap();
+        std::fs::remove_dir_all(&cwd).unwrap();
+        assert!(status.success());
+    }
+
     /// A content mod's living type is a mob of its template's species under
     /// its own id, with its own attributes: it saves its id with every field
     /// its template's class saves, loads back as itself, and rolls its own
@@ -1256,17 +1275,10 @@ mod tests {
     fn content_overlay_validates_dependencies_and_orders_layers() {
         const MODE: &str = "HORIZON_CONTENT_DEPENDENCY_TEST";
         if std::env::var_os(MODE).is_none() {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .current_dir(std::env::temp_dir())
-                .args([
-                    "--exact",
-                    "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
-                    "--nocapture",
-                ])
-                .env(MODE, "1")
-                .status()
-                .unwrap();
-            assert!(status.success());
+            run_in_child(
+                "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
+                MODE,
+            );
             return;
         }
         let f = Fixture::new("content-dependencies");
@@ -1403,11 +1415,10 @@ mod tests {
         const MODE: &str = "HORIZON_JAR_REFUSAL_TEST";
         if std::env::var_os(MODE).is_none() {
             // Native declarations, like the real startup, belong to one process.
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .current_dir(std::env::temp_dir())
-                .args(["--exact", "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row", "--nocapture"])
-                .env(MODE, "1").status().unwrap();
-            assert!(status.success());
+            run_in_child(
+                "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row",
+                MODE,
+            );
             return;
         }
         let f = Fixture::new("shared-jar-refusal");
