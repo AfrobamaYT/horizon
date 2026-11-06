@@ -390,6 +390,8 @@ impl Game<'_> {
             language,
         } = staged;
         let context = self.prepare_loop_context(&root)?;
+        let standalone_sprites =
+            super::native_block_entity_draw::StandaloneSprites::new(&pack, &gui);
         // Keep the working GPU resources, and hand its window surface over.
         if let Some(renderer) = &mut self.renderer {
             renderer.release_surface();
@@ -443,6 +445,7 @@ impl Game<'_> {
         self.options.resources = root.clone();
         self.pack = pack;
         self.gui = gui;
+        self.standalone_sprites = standalone_sprites;
         // The new atlas's skin and map slots are blank: players and maps
         // upload into it again instead of naming sprites it does not have.
         self.skin_slots.forget();
