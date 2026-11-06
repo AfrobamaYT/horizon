@@ -417,6 +417,10 @@ mod tests {
                     UseAnimation::Drink
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 7);
+                game.visible_hands[0].1 = game.inventory[game.selected].clone();
+                game.use_duration = 72_000;
+                game.hand_geometry(0.0);
+                assert_eq!(calls.load(Ordering::Relaxed), 8);
             });
         });
     }
