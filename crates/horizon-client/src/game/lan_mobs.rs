@@ -237,7 +237,7 @@ impl Game<'_> {
         };
         host.hub
             .guests
-            .iter()
+            .simulation_iter()
             .filter(|g| host.hub.here(g) && g.loaded && !g.dead && !g.spectator())
             .map(|g| {
                 let b = g.bounds();
@@ -254,7 +254,7 @@ impl Game<'_> {
         out.extend(
             host.hub
                 .guests
-                .iter()
+                .simulation_iter()
                 .filter(|g| host.hub.here(g) && g.loaded && !g.dead && !g.spectator())
                 .filter_map(|g| host.play.get(&g.conn)?.hook.as_ref())
                 .map(|hook| (hook.bounds(), hook.applies_block_effects())),
@@ -391,7 +391,7 @@ impl Game<'_> {
         let guests = self
             .lan
             .iter()
-            .flat_map(|h| h.hub.guests.iter().filter(|g| h.hub.here(g)));
+            .flat_map(|h| h.hub.guests.simulation_iter().filter(|g| h.hub.here(g)));
         guests
             .filter(|g| g.loaded)
             .map(|g| {

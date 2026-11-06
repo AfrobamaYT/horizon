@@ -338,7 +338,7 @@ pub struct Hub {
     /// game replaces it on each reload.
     pub loop_context: Arc<LoopContext>,
     pub encoder: ChunkEncoder,
-    pub guests: Vec<Guest>,
+    pub guests: super::guest_list::GuestList,
     pub(super) sync: Arc<SyncData>,
     pub ticks: u64,
     /// The next `Guest.vehicle_order`: a rider that boards later sits behind.
@@ -723,7 +723,7 @@ impl Hub {
             config,
             loop_context,
             encoder,
-            guests: Vec::new(),
+            guests: Default::default(),
             sync,
             ticks: 0,
             seat_order: 0,
@@ -781,10 +781,11 @@ impl Hub {
     }
 
     pub fn guest(&self, conn: u32) -> Option<&Guest> {
-        self.guests.iter().find(|g| g.conn == conn)
+        self.guests.get(self.guests.connection_index(conn)?)
     }
     pub fn guest_mut(&mut self, conn: u32) -> Option<&mut Guest> {
-        self.guests.iter_mut().find(|g| g.conn == conn)
+        let index = self.guests.connection_index(conn)?;
+        self.guests.get_mut(index)
     }
 
     /// The network id of a name in a built-in or synchronized registry.
@@ -838,7 +839,7 @@ impl Hub {
         self.broadcast_to(
             packet,
             self.guests
-                .iter()
+                .simulation_iter()
                 .filter(|g| g.participates_online() && (g.placed || g.held)),
         );
     }
@@ -949,13 +950,13 @@ impl Hub {
     /// Placed network players in join order.
     pub fn online_players(&self) -> impl Iterator<Item = &Guest> {
         self.guests
-            .iter()
+            .simulation_iter()
             .filter(|g| g.placed && g.participates_online())
     }
     /// The number of network guests, including those still joining.
     pub fn online_count(&self) -> usize {
         self.guests
-            .iter()
+            .simulation_iter()
             .filter(|g| g.participates_online())
             .count()
     }
@@ -984,7 +985,7 @@ impl Hub {
         loads: impl Fn(&Guest) -> bool,
     ) -> impl Iterator<Item = (i32, i32)> {
         self.guests
-            .iter()
+            .simulation_iter()
             .filter(move |g| self.watches(g) && loads(g))
             .map(Guest::chunk)
     }
@@ -992,7 +993,7 @@ impl Hub {
     /// level in place.
     pub fn broadcast_level(&self, packet: &C) {
         let mut body = None;
-        for g in self.guests.iter().filter(|g| self.watches(g)) {
+        for g in self.guests.simulation_iter().filter(|g| self.watches(g)) {
             g.sender
                 .send(body.get_or_insert_with(|| packet.encode()).clone());
         }
@@ -1009,7 +1010,7 @@ impl Hub {
         let mut body = None;
         for g in self
             .guests
-            .iter()
+            .simulation_iter()
             .filter(|g| g.placed && g.conn != conn && g.participates_online())
         {
             g.sender
@@ -2381,7 +2382,7 @@ impl Hub {
     /// earlier (`drain_packets`) so scheduled ticks see what they placed.
     pub fn tick_level(&mut self, ctx: &mut TickCtx) -> Vec<HostEvent> {
         let events = Vec::new();
-        if !self.guests.iter().any(|g| self.watches(g)) {
+        if !self.guests.simulation_iter().any(|g| self.watches(g)) {
             // ServerTickRateManager broadcasts a change to the players there
             // are; one who joins later is sent the state as it is then
             // (`updateJoiningPlayer`).
@@ -2932,7 +2933,7 @@ impl Hub {
             .iter()
             .filter_map(|key| Some((*key, self.encoder.biome_data(world.chunks.get(key)?))))
             .collect();
-        for g in self.guests.iter().filter(|g| self.watches(g)) {
+        for g in self.guests.simulation_iter().filter(|g| self.watches(g)) {
             let chunks: Vec<_> = data
                 .iter()
                 .filter(|(key, _)| g.sent_chunks.contains(key))
@@ -5611,6 +5612,39 @@ mod tests {
             vec![([0, 63, 0], STONE as i32)],
             "one block under a box that sits across a block"
         );
+    }
+
+    #[test]
+    fn held_network_guests_keep_level_updates_without_including_fake_actors() {
+        let (mut hub, rx) = hub_with_a_guest();
+        hub.guests[0].placed = false;
+        hub.guests[0].held = true;
+        let (mut other, fake_rx) = hub_with_a_guest();
+        let mut fake = other.guests.remove(0);
+        fake.kind = super::super::guest::GuestKind::Fake;
+        fake.conn = 2;
+        fake.uuid = 2;
+        fake.entity_id = 2;
+        fake.position = [64.5, 64.0, 0.5];
+        fake.held = true;
+        hub.guests.push(fake);
+        assert!(!hub.here(&hub.guests[0]));
+        assert!(hub.watches(&hub.guests[0]));
+        assert!(!hub.watches(&hub.guests[1]));
+        assert_eq!(hub.loading_chunks(|_| true).collect::<Vec<_>>(), [(0, 0)]);
+        let packet = C::GameEvent(play::GameEvent {
+            event: game_event::IMMEDIATE_RESPAWN,
+            param: 1.0,
+        });
+        hub.broadcast_level(&packet);
+        hub.broadcast_watching(&packet);
+        hub.broadcast(&packet);
+        assert_eq!(
+            rx.try_iter().count(),
+            2,
+            "held guests watch but are not placed online players"
+        );
+        assert_eq!(fake_rx.try_iter().count(), 0);
     }
 
     #[test]

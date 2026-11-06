@@ -395,8 +395,6 @@ impl Game<'_> {
         creative: bool,
         create: Option<&WorldOptions>,
     ) -> Result<()> {
-        // The window's mod configs before the server's, as on NeoForge.
-        self.native_configs_client_start();
         self.client_logging_out();
         horizon_client::command::vanilla::set_horizon_commands(
             self.options.pregen || self.settings.extras.pregen,
@@ -1267,6 +1265,14 @@ impl Game<'_> {
             .spawn(move || {
                 let run = || -> Result<()> {
                     let mut server = server_game(&res, pack, options, settings)?;
+                    // The oracle supplies an already-open synthetic world rather
+                    // than running the normal config and startup lifecycle.
+                    server
+                        .mod_phase
+                        .advance(mod_api::__private::ModPhase::Config)?;
+                    server
+                        .mod_phase
+                        .advance(mod_api::__private::ModPhase::World)?;
                     match fixture {
                         ComponentHarness::Dispenser(spec) => server.dispense_fixture(&spec),
                         ComponentHarness::Sculk(spec) => server.sculk_fixture(&spec),

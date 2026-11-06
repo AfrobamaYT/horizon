@@ -1016,10 +1016,10 @@ use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientInputOptions, ClientModifiers, ClientReloadListeners,
-    CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LivingRef,
-    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
+    CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LayerDefinition,
+    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
     NativeLifecycleContext, NativeNoteBlockChange, NativeServerPlayer, PathComputationType,
-    Placement, PlayerRef, RecipeBookCategory, ScreenOpening, ScreenshotImage,
+    Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
     ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
@@ -1141,6 +1141,18 @@ impl Game<'_> {
                 partial_tick: self.clock.fraction() as f32,
             },
         ))
+    }
+
+    /// The last window focus state reported by the window system.
+    pub(super) fn native_window_focused(&self) -> bool {
+        self.focused
+    }
+
+    /// The same screen identifier provided to screen hooks.
+    pub(super) fn native_observed_screen_id(&self) -> Option<ScreenId> {
+        self.observed_screen_view().map(|view| ScreenId {
+            id: view.id.to_owned(),
+        })
     }
 
     /// Opens `screen` (`Gui.setScreen`; `Screen::Playing` is vanilla's null):
@@ -2687,6 +2699,10 @@ impl Game<'_> {
     /// Selection/F3+T and server-pack reloads share this point; initial startup does not
     /// (`client_setup` is the once-only moment after the initial load).
     pub(super) fn native_client_resources_reloaded(&mut self) {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("client reload notice on its owning thread");
         self.fire_client_resources_reloaded();
     }
     /// NeoForge's `FMLClientSetupEvent`: the client started. Fires once per game process,
@@ -2975,6 +2991,10 @@ impl Game<'_> {
     /// Server-side (the single player's integrated server included); a client
     /// connected to a server never fires it.
     pub(super) fn native_server_data_loaded(&mut self, reload: bool) {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("server data notice on its owning thread");
         self.fire_server_data_loaded(reload);
     }
     /// The folders of JSON files native mods read from the data
@@ -3646,6 +3666,20 @@ impl Game<'_> {
         models: &mut Vec<String>,
     ) {
         Self::fire_standalone_models(context, models);
+    }
+    /// Entity model layers built in code (NeoForge's
+    /// `EntityRenderersEvent.RegisterLayerDefinitions`): push each one's id,
+    /// `<mod id>:<model>#<layer>` as a `ModelLayerLocation` names it
+    /// (`mymod:golem#main`), and its `LayerDefinition`, as the mod's
+    /// `createBodyLayer()` builds it. `native_bake_layer` bakes one into the
+    /// `ModelPart` tree `native_draw_model_part` draws. Asked once at start,
+    /// on the client. An id in vanilla's namespace, not of that form, or
+    /// registered already is logged and left out. API @API:model_layers@.
+    pub(super) fn native_layer_definitions(
+        context: &mod_api::RegistrationContext,
+        layers: &mut Vec<(String, LayerDefinition)>,
+    ) {
+        Self::fire_layer_definitions(context, layers);
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
@@ -6859,8 +6893,13 @@ impl Game<'_> {
     }
 
     /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`).
-    pub(super) fn native_raid_state_change(&mut self, raid: i32, pos: [i32; 3], state: &str) {
+    /// `stopped`). The handle identifies its owning level, even if parked.
+    pub(super) fn native_raid_state_change(
+        &mut self,
+        raid: mod_api::RaidRef,
+        pos: [i32; 3],
+        state: &str,
+    ) {
         self.fire_raid_state_change(raid, pos, state);
     }
 
@@ -13978,6 +14017,86 @@ mod screen_open_tests {
         with_game_of(mods, |game| {
             game.open_sign_editor((0, 64, 0), true);
             assert_eq!(take(&log), ["opening sign_editor", "init sign_editor"]);
+        });
+    }
+
+    /// The read and the hook see the same live screen, including overlays.
+    #[test]
+    #[ignore = "needs prepared resources and an X11 display"]
+    fn client_gui_state_matches_screen_init_hook() {
+        use mod_api::ScreenInitPostEvent;
+        struct Observe(Arc<Mutex<Vec<(String, Option<String>)>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Observe {
+            fn screen_opening(
+                &self,
+                _host: &dyn ClientHost,
+                _event: &mut ScreenOpeningEvent<'_>,
+            ) -> Option<ScreenOpening> {
+                None
+            }
+            fn screen_init_post(&self, host: &dyn ClientHost, event: &mut ScreenInitPostEvent<'_>) {
+                self.0.lock().unwrap().push((
+                    event.screen.id.to_owned(),
+                    host.observed_screen_id().map(|id| id.id),
+                ));
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new("observe", Box::new(Observe(seen.clone())))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                game.focused = false;
+                assert!(!ClientHost::window_focused(game));
+                game.focused = true;
+                assert!(ClientHost::window_focused(game));
+                game.title = None;
+                game.screen = Screen::Playing;
+                assert!(ClientHost::observed_screen_id(game).is_none());
+                game.screen = Screen::Inventory;
+                assert!(ClientHost::observed_screen_id(game).is_none());
+                let mut builder = winit::event_loop::EventLoop::builder();
+                #[cfg(target_os = "linux")]
+                {
+                    use winit::platform::x11::EventLoopBuilderExtX11;
+                    builder.with_x11().with_any_thread(true);
+                }
+                let event_loop = builder.build().unwrap();
+                #[allow(deprecated)]
+                let window = Arc::new(
+                    event_loop
+                        .create_window(
+                            winit::window::Window::default_attributes()
+                                .with_visible(false)
+                                .with_inner_size(winit::dpi::PhysicalSize::new(320, 240)),
+                        )
+                        .unwrap(),
+                );
+                game.options.offscreen = true;
+                game.renderer = Some(game.new_renderer(window).unwrap());
+                game.screen = Screen::Playing;
+                assert!(ClientHost::observed_screen_id(game).is_none());
+                game.set_screen(Screen::Inventory);
+                game.observe_screen();
+                assert_eq!(
+                    ClientHost::observed_screen_id(game).unwrap().id,
+                    "inventory"
+                );
+                game.open_screen_overlay("link_prompt", |game| {
+                    game.link_prompt = Some("https://example.com".into());
+                });
+                assert_eq!(
+                    ClientHost::observed_screen_id(game).unwrap().id,
+                    "link_prompt"
+                );
+                let seen = seen.lock().unwrap();
+                assert!(
+                    seen.iter().any(|(event, read)| event == "inventory"
+                        && read.as_deref() == Some("inventory"))
+                );
+                assert!(seen.iter().any(|(event, read)| event == "link_prompt"
+                    && read.as_deref() == Some("link_prompt")));
+            });
         });
     }
 

@@ -19,6 +19,12 @@ pub struct BlockKey(u32);
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct EffectKey(u32);
 
+/// A block entity type requested at registration. Its slot remains stable for the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only the load-owned table creates keys
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct BlockEntityTypeKey(u32);
+
 // Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
 #[cfg(any())]
 mod hooks;
@@ -107,6 +113,11 @@ use std::sync::{Arc, OnceLock};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod __private;
+mod model_layers;
+pub use model_layers::{
+    CubeDefinition, CubeDeformation, CubeListBuilder, LayerDefinition, MeshDefinition, ModelPart,
+    ModelPolygon, ModelVertex, PartId, PartPose,
+};
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{
@@ -1021,6 +1032,14 @@ pub enum ScreenOpening {
     /// the title screen, a book, a prompt or while a world loads; the
     /// screen that was about to open does then).
     ModScreen,
+}
+
+/// The stable identifier reported by screen hooks for an observed screen.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ScreenId {
+    /// The same identifier as [`NativeScreenView::id`], such as `inventory` or `paused`.
+    pub id: String,
 }
 
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
@@ -2346,6 +2365,24 @@ pub enum NativeArrowPickup {
     Allowed,
     /// Creative only.
     CreativeOnly,
+}
+
+/// Why a projectile's pierce level is unavailable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PierceLevelError {
+    /// The host is not a logical server.
+    WrongSide,
+    /// The projectile handle is stale or unavailable.
+    Stale,
+    /// The projectile has no arrow state.
+    NotArrow,
+}
+
+impl NoBackend for PierceLevelError {
+    fn no_backend() -> Self {
+        Self::Stale
+    }
 }
 
 /// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
@@ -4582,7 +4619,7 @@ pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transac
 mod custom_spawners;
 pub use custom_spawners::{CustomSpawners, SpawnerEntry, SpawnerError, SpawnerKey, SpawnerKind};
 mod block_entity_type;
-pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
+pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod structure_template;

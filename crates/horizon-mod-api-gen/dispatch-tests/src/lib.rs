@@ -137,6 +137,8 @@ mod tests {
         pub(super) struct NativeTriState;
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
+        pub(super) struct LayerDefinition;
+        pub(super) struct ModelPart;
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
         pub(super) struct HurtSource<'a> {
@@ -356,6 +358,8 @@ mod tests {
                 pub struct FovPlayer;
             }
             pub struct NativeClientInfo;
+            #[derive(Clone, Copy)]
+            pub struct RaidRef;
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum ToastKind {
                 Advancement,

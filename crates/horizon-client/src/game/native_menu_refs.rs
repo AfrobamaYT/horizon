@@ -641,7 +641,7 @@ mod tests {
             assert_eq!(inventory.slot_count(game), None);
             let host = game.lan.as_mut().unwrap();
             host.play.clear();
-            host.hub.guests[0] = guest();
+            host.hub.guests.replace(0, guest());
             assert_eq!(inventory.slot_count(game), None);
 
             use horizon_client::{containers::BlockEntity, lan::menu::Slots};

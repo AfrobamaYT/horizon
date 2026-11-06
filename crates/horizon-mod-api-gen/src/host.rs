@@ -44,8 +44,10 @@ pub(super) fn generate(
         if let Some((index, declaration, implementation)) =
             draw_method(method, name, contexts, &types.exports)?
         {
-            if helper.service.is_some() {
-                return Err(format!("{name}: a service helper cannot draw"));
+            if helper.service.is_some() || helper.resource_read {
+                return Err(format!(
+                    "{name}: a service or published resource helper cannot draw"
+                ));
             }
             if side != Side::Client {
                 return Err(format!("{name}: drawing is client-side"));
@@ -81,6 +83,40 @@ pub(super) fn generate(
             }
         };
         let (declaration, implementation) = host_method(method, name, trait_name, &types.exports)?;
+        // The catalog owns all forwarding boundaries, including services and handle backends.
+        let access = if helper.resource_read {
+            quote::quote!(mod_api::__private::LoadAccess::PublishedResources)
+        } else if side == Side::Client
+            && receiver.is_none()
+            && !matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some())
+        {
+            quote::quote!(mod_api::__private::LoadAccess::ClientSetup)
+        } else {
+            quote::quote!(mod_api::__private::LoadAccess::WorldOnly)
+        };
+        let guarded = |source: &str| -> Result<String, String> {
+            let mut method = syn::parse_str::<syn::TraitItemFn>(source)
+                .map_err(|error| format!("{name}: {error}"))?;
+            method
+                .default
+                .as_mut()
+                .expect("generated method has a body")
+                .stmts
+                .insert(
+                    0,
+                    syn::parse_quote!(mod_api::__private::check_access(#name, #access);),
+                );
+            Ok(method.to_token_stream().to_string())
+        };
+        let implementation = guarded(&implementation)?;
+        let declaration = guarded(&declaration)?;
+        let declaration = if helper.resource_read {
+            format!(
+                "/// Published asset/data read: available in Setup, Reloading and World.\n{declaration}"
+            )
+        } else {
+            declaration
+        };
         if let Some(client_target) = &helper.client_target {
             let client = helper_target(&game, name, client_target)?;
             let (_, client_implementation) = host_method(client, name, trait_name, &types.exports)?;
@@ -145,10 +181,10 @@ pub(super) fn generate(
             Side::Client => (&mut client_traits, &mut client_impl),
         };
         traits.push_str(&format!(
-            "/// The {name} service.\n/// Not on wasm: a frame resource; its methods are the imports.\nfn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ unimplemented!(\"{trait_name} service\") }}\n"
+            "/// The {name} service.\n/// Not on wasm: a frame resource; its methods are the imports.\nfn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ mod_api::__private::check_access(\"{name}\", mod_api::__private::LoadAccess::WorldOnly); unimplemented!(\"{trait_name} service\") }}\n"
         ));
         implementation.push_str(&format!(
-            "fn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ self }}\n"
+            "fn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ mod_api::__private::check_access(\"{name}\", mod_api::__private::LoadAccess::WorldOnly); self }}\n"
         ));
         service_traits.push_str(&format!(
             "/// The {name} service, reached through its host.\npub trait {trait_name} {{\n{} }}\n",
