@@ -1563,7 +1563,7 @@ impl Menu {
 
     /// `ItemStack.isStackable`.
     fn stackable(env: &Env, stack: &ItemStack) -> bool {
-        Self::max_stack(env, stack) > 1 && !(Self::damageable(env, stack) && stack.damage > 0)
+        stackable(env.items, stack)
     }
 
     fn is_bucket(stack: &ItemStack) -> bool {
@@ -2296,17 +2296,7 @@ impl Menu {
 
     /// `Inventory.getSlotWithRemainingSpace` (selected slot 0, offhand, rest).
     fn slot_with_space(&self, env: &Env, stack: &ItemStack) -> Option<usize> {
-        let inv = &self.containers[PLAYER];
-        [self.selected, OFFHAND]
-            .into_iter()
-            .chain(0..36)
-            .find(|&i| {
-                inv[i].as_ref().is_some_and(|have| {
-                    have.same_item_same_components(stack)
-                        && Self::stackable(env, have)
-                        && have.count < Self::max_stack(env, have)
-                })
-            })
+        slot_with_space(&self.containers[PLAYER], self.selected, env.items, stack)
     }
 
     /// `Inventory.add(stack)`: the leftover stays in `stack`.
@@ -2321,6 +2311,8 @@ impl Menu {
     }
 }
 
+/// `ItemStack.getMaxStackSize`: the stack's component, else the item's; a removed
+/// component (`!minecraft:max_stack_size`) falls back to the item.
 pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
     let patched = stack.data().and_then(|d| {
         if d.other("!minecraft:max_stack_size").is_some() {
@@ -2334,6 +2326,29 @@ pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
     patched.unwrap_or_else(|| items.get(&stack.item).map_or(64, |i| i.max_stack))
 }
 
+/// Whether a stack can merge in the player's inventory.
+fn stackable(items: &Items, stack: &ItemStack) -> bool {
+    item_max_stack(items, stack) > 1
+        && !(stack.damage > 0 && items.get(&stack.item).is_some_and(|i| i.max_damage > 0))
+}
+
+/// `Inventory.getSlotWithRemainingSpace`, preferring selected and offhand slots.
+fn slot_with_space(
+    inventory: &[Option<ItemStack>],
+    selected: usize,
+    items: &Items,
+    stack: &ItemStack,
+) -> Option<usize> {
+    [selected, OFFHAND].into_iter().chain(0..36).find(|&i| {
+        inventory[i].as_ref().is_some_and(|have| {
+            have.same_item_same_components(stack)
+                && stackable(items, have)
+                && have.count < item_max_stack(items, have)
+        })
+    })
+}
+
+/// `Inventory.add`; leaves any remainder in `stack`.
 pub(crate) fn inventory_add(
     inventory: &mut [Option<ItemStack>],
     selected: usize,
@@ -2358,18 +2373,7 @@ pub(crate) fn inventory_add(
     }
     loop {
         let last = stack.count;
-        let slot = [selected, OFFHAND]
-            .into_iter()
-            .chain(0..36)
-            .find(|&i| {
-                inventory[i].as_ref().is_some_and(|have| {
-                    have.same_item_same_components(stack)
-                        && item_max_stack(items, have) > 1
-                        && !(have.damage > 0
-                            && items.get(&have.item).is_some_and(|i| i.max_damage > 0))
-                        && have.count < item_max_stack(items, have)
-                })
-            })
+        let slot = slot_with_space(inventory, selected, items, stack)
             .or_else(|| inventory[..36].iter().position(Option::is_none));
         if let Some(slot) = slot {
             let cell = inventory[slot].get_or_insert_with(|| {
