@@ -585,6 +585,7 @@ mod tests {
 
     use super::*;
     use crate::frame::Root;
+    use crate::frame::tests::{TABLE, frame, world};
 
     thread_local! {
         // Observe actual store debits, excluding fuel spent executing guest instructions.
@@ -594,7 +595,6 @@ mod tests {
     fn take_debits() -> Vec<u64> {
         FUEL_DEBITS.with_borrow_mut(std::mem::take)
     }
-    use crate::frame::tests::{TABLE, frame, world};
 
     #[test]
     fn journal_cost_counts_pending_entries_and_resets_after_a_call_flushes_them() {
@@ -815,10 +815,9 @@ mod tests {
         }
     }
 
-    fn assert_healthy_group_runs() {
-        let healthy = fixture_group_with_fuel(true);
+    fn assert_healthy_group_runs(healthy: &FixtureGroup) {
         let mut other = fixture_game();
-        assert_eq!(fixture_call(&healthy, &mut other, "before"), Some(()));
+        assert_eq!(fixture_call(healthy, &mut other, "before"), Some(()));
         assert!(!healthy.exports.stopped());
         assert_eq!((other.left, other.right), (8, 13));
     }
@@ -860,6 +859,7 @@ mod tests {
     fn reused_large_string_exhausts_fuel_without_stopping_another_group() {
         let large = fixture_group_with_fuel(true);
         let small = fixture_group_with_fuel(true);
+        let healthy = fixture_group_with_fuel(true);
         let mut large_game = fixture_game();
         let mut small_game = fixture_game();
         take_debits();
@@ -883,7 +883,7 @@ mod tests {
         assert_eq!(small_game.refused_sets, 2000);
         assert_eq!((large_game.left, large_game.right), (1, 10));
         assert!(large.exports.stopped());
-        assert_healthy_group_runs();
+        assert_healthy_group_runs(&healthy);
     }
 
     #[test]
@@ -891,6 +891,7 @@ mod tests {
     fn full_journal_get_charges_scans_and_exhausts_only_its_groups_fuel() {
         let full = fixture_group_with_fuel(true);
         let empty = fixture_group_with_fuel(true);
+        let healthy = fixture_group_with_fuel(true);
         let mut full_game = fixture_game();
         let mut empty_game = fixture_game();
         take_debits();
@@ -925,7 +926,7 @@ mod tests {
             "trapping discards the filled journal"
         );
         assert!(full.exports.stopped());
-        assert_healthy_group_runs();
+        assert_healthy_group_runs(&healthy);
     }
 
     fn borrow(node: &Resource<wire::Node>) -> Resource<wire::Node> {
