@@ -699,7 +699,7 @@ static SHARED_DATA: std::sync::Mutex<Vec<SharedEntry>> = std::sync::Mutex::new(V
 /// share one, and returning to a world finds it.
 const SHARED_WITH_PACKS: usize = 2;
 /// Let go of the bundles `shared_data` loaded: for a preload no world used
-/// (game/world_loading.rs). A generator that holds one keeps it.
+/// (game/world/world_loading.rs). A generator that holds one keeps it.
 pub fn forget_shared_data() {
     SHARED_DATA
         .lock()

@@ -33,7 +33,7 @@ pub struct Entry {
     pub side: Side,
 }
 
-/// The mods this game has on, set once when they load (`game/mods.rs`), like
+/// The mods this game has on, set once when they load (`game/modding/mods/mod.rs`), like
 /// the registries they fill, and read when a connection is set up, whatever
 /// side of it this game is.
 static LOCAL: OnceLock<Vec<Entry>> = OnceLock::new();

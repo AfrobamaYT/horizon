@@ -1,6 +1,8 @@
 //! The two sides' code: the guest's `Guest` (every imported trait) and exports, and the game's
 //! imports and proxies (every exported trait).
-use super::glue::{InPlace, conversions, lift, lower, rust_path, unpack};
+use super::glue::{
+    InPlace, conversions, flat_element, flat_method, lift, lower, lower_owned, rust_path, unpack,
+};
 use super::ty::{Kind, List, Str, Ty, Types, bound_ident, wit_ident};
 use super::wit::{self, Signature, interface, signature};
 use super::{Method, exports};
@@ -569,6 +571,7 @@ pub(super) fn host(
         }
         code.push_str("}\n");
     }
+    code.push_str(&flat_imports(types, methods, wit_text)?);
     // Proxies: the mod's traits, each method calling its export.
     for owner in owners.iter().filter(|o| exports().contains(o)) {
         let iface = bound_ident(&interface(owner));
@@ -835,6 +838,156 @@ fn host_import(
             )
             .unwrap();
     Ok(code)
+}
+
+fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Result<String, String> {
+    let mut registrations = std::collections::BTreeMap::new();
+    for method in methods.iter().filter(|m| {
+        (!exports().contains(&m.owner) || super::held(m.owner)) && flat_method(types, m)
+    }) {
+        let held = exports().contains(&method.owner);
+        let interface = if held {
+            format!("held-{}", interface(method.owner))
+        } else {
+            interface(method.owner)
+        };
+        let receiver = if held {
+            format!(
+                "&*super::held::<dyn {}>(handler)?",
+                trait_path(method.owner)
+            )
+        } else {
+            format!(
+                "frame::{}{}()?",
+                method.owner.rsplit("::").next().unwrap().to_snake_case(),
+                if method.receiver == Some(true) {
+                    "_mut"
+                } else {
+                    ""
+                }
+            )
+        };
+        let object = |name: &str, mutable: bool| {
+            format!(
+                "frame::{}{}()?",
+                name.rsplit("::").next().unwrap().to_snake_case(),
+                if mutable { "_mut" } else { "" }
+            )
+        };
+        let place = InPlace::new(types, &object);
+        let mut params = Vec::new();
+        let mut args = Vec::new();
+        let mut scratch = Vec::new();
+        let mut prep = String::from("let keep = super::Keep::default();");
+        if held {
+            params.push("handler: u32".to_string());
+        }
+        for (name, ty) in &method.params {
+            let wire = wit::wit(types, ty)?;
+            let source = if wire.is_some() {
+                bound_ident(&wit_ident(name))
+            } else {
+                "()".into()
+            };
+            if let Ty::List(item, List::Slice) = ty
+                && flat_element(types, item, &mut Default::default())
+            {
+                params.push(format!(
+                    "{source}: wasmtime::component::WasmList<{}>",
+                    wire_type(types, item)
+                ));
+                let var = format!("b{}", scratch.len());
+                scratch.push((
+                    var.clone(),
+                    format!("super::FlatInput<{}>", rust_ty(types, item, false)),
+                ));
+                writeln!(prep, "let {var} = super::FlatInputGuard(&mut {var}.0); {var}.0.clear(); for value in {source}.iter(wasmtime::AsContextMut::as_context_mut(&mut store))? {{ let value = value?; {var}.0.push({}); }}", lift(types, item, "value")).unwrap();
+                args.push(format!("{var}.0.as_slice()"));
+            } else {
+                if wire.is_some() {
+                    params.push(format!("{source}: {}", wire_type(types, ty)));
+                }
+                args.push(place.value(ty, &source)?);
+            }
+        }
+        let mut output = lower_owned(types, &method.ret, "r");
+        if let Ty::List(item, List::Vec) = &method.ret
+            && flat_element(types, item, &mut Default::default())
+        {
+            let var = format!("b{}", scratch.len());
+            scratch.push((
+                var.clone(),
+                format!("std::sync::Arc<Vec<{}>>", wire_type(types, item)),
+            ));
+            output = format!(
+                "{{ let values = std::sync::Arc::get_mut({var}).unwrap(); values.clear(); for value in &r {{ values.push({}); }} {var}.clone() }}",
+                lower(types, item, "value")
+            );
+        }
+        let mut body = format!(
+            "{prep} let r = <_ as {}>::{}({receiver}, {}); Ok(({output},))",
+            trait_path(method.owner),
+            method.name,
+            args.join(", ")
+        );
+        for (var, ty) in scratch.iter().rev() {
+            body = format!(
+                "super::State::with_buffer::<{ty}, _>(store, |{var}, mut store| {{ {body} }})"
+            );
+        }
+        let (names, types): (Vec<_>, Vec<_>) =
+            params.iter().map(|p| p.split_once(": ").unwrap()).unzip();
+        let pattern = if names.is_empty() {
+            "()".to_string()
+        } else {
+            format!("({},)", names.join(", "))
+        };
+        let param_types = if types.is_empty() {
+            "()".to_string()
+        } else {
+            format!("({},)", types.join(", "))
+        };
+        let key = (interface, wit_ident(&method.name));
+        if registrations
+            .insert(
+                key.clone(),
+                crate::wasm_imports::Registration {
+                    parameters: format!("{pattern}: {param_types}"),
+                    body,
+                    shadow: true,
+                },
+            )
+            .is_some()
+        {
+            return Err(format!("duplicate flat-list import {key:?}"));
+        }
+    }
+    let mut resolve = wit_parser::Resolve::default();
+    let package = resolve
+        .push_str("mod-api.wit", wit_text)
+        .map_err(|e| e.to_string())?;
+    let world = resolve
+        .select_world(&[package], Some("mod"))
+        .map_err(|e| e.to_string())?;
+    let emitted = crate::wasm_imports::emit(&resolve, world, |interface, function| {
+        let short = interface
+            .split('/')
+            .next_back()
+            .unwrap()
+            .split('@')
+            .next()
+            .unwrap();
+        Ok(registrations.remove(&(short.to_string(), function.name.clone())))
+    })?;
+    if !registrations.is_empty() {
+        return Err(format!(
+            "flat-list imports missing from WIT: {:?}",
+            registrations.keys().collect::<Vec<_>>()
+        ));
+    }
+    Ok(format!(
+        "pub(super) fn add_flat_lists(linker: &mut wasmtime::component::Linker<super::State>) -> wasmtime::Result<()> {{ {emitted} Ok(()) }}\n"
+    ))
 }
 
 /// The Rust type of an import's results.

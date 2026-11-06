@@ -82,7 +82,7 @@ pub struct EntityState {
     /// which `Leashable` sends at once).
     pub idle: bool,
     /// Where it is, and none of its data: an idle entity no client can pair
-    /// with this tick, whose data the tracker then never reads (game/lan_idle.rs).
+    /// with this tick, whose data the tracker then never reads (game/network/lan_idle.rs).
     /// It is never paired.
     pub bare: bool,
     /// `Leashable.getLeashHolder`: the entity holding its lead.
