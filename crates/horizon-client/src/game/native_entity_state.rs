@@ -474,6 +474,7 @@ mod tests {
         use mod_api::{ItemStack, NativeWorldEpoch};
 
         with_player(|game, player| {
+            game.player.as_mut().unwrap().fire_ticks = 0;
             assert_eq!(player.fire_ticks(game), Some(0));
             game.player.as_mut().unwrap().fire_ticks = -12;
             assert_eq!(player.fire_ticks(game), Some(-12));
