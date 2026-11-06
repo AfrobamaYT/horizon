@@ -688,6 +688,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn bounds_reads_follow_the_level_without_loading_chunks() {
+        use mod_api::Host;
+
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
             let nether = LevelRef::new(level.epoch(), "minecraft:the_nether");
