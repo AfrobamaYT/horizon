@@ -1,7 +1,7 @@
 //! Named entries a native mod adds to the F3 debug screen (NeoForge's `RegisterDebugEntriesEvent`).
 
 /// A debug entry a native mod registers: its id and the vanilla group its lines are drawn in.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DebugEntry {
     /// `<namespace>:<path>` in a namespace other than vanilla's, like `mymod:tick_cost`.
     pub id: String,
