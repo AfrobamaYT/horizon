@@ -191,7 +191,7 @@ a content package cannot shadow a compiled mod's id.
 Move the executable, prepared resources and canonical package directory together. The copied
 projects retain their flat manifest, crate, assets and data. The game's mod list and crash details
 use its embedded inventory, including code-only mods. Display names and descriptions come from the
-validated manifests; `NativeMod.title` and `NativeMod.description` are removed.
+validated manifests; Controls bindings are declared through `Registrar::register_key_mapping`, not a separate `NativeMod` metadata hook.
 
 `native-mods.json` is provenance and rebuild status, not game identity, authentication, announcements
 or startup input. The launcher retains it for build/status displays. The separate `horizon-server`
@@ -279,7 +279,7 @@ contract is never changed, its `mod_api` entry (the trait method's contract) inc
 a version. New parameters before the out-parameter, with the old ones kept in name and order, keep the version: a
 binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
-catalog and the hook points' sources (`native_hooks.rs`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
+catalog and the hook points' sources (`native_hooks/`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
 
 ### State flags on the living handles
 
@@ -723,7 +723,7 @@ trusting native code is the player's decision, never an agent's.
    the prebuilt game, a hammer for a full game build (its menu names the reason), a check when the game already has
    the mod. A build under way shows its stage and can be cancelled.
 
-   With Developer, an edit to a function the machine sample's mixin injects into `game/native_hooks.rs` compiled
+   With Developer, an edit to a function the machine sample's mixin injects into `game/native_hooks/` compiled
    about 6× faster than with Balanced, and a tick took up to about twice as long. `dev` lowers only `horizon-client`, so an edit in another workspace
    crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with Balanced. The
    launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay
