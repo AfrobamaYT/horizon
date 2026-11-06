@@ -2,7 +2,7 @@
 //! load key and press a hotbar key (`Minecraft.handleKeybinds`).
 use super::Game;
 use horizon_client::{hotbar, items::ItemStack, keybinds, text::Text};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 impl Game<'_> {
     /// Whether the key bound to `mapping` is held, or the controller button bound to it.

@@ -7,8 +7,8 @@ use horizon_client::{
     items::ItemStack,
     particles::{self, ParticleOptions, ParticleType},
 };
+use horizon_core::equipment_slot::EquipmentSlot;
 use horizon_core::random::RandomSource;
-use horizon_world::player_inventory::EquipmentSlot;
 use serde_json::Value;
 
 impl Game<'_> {

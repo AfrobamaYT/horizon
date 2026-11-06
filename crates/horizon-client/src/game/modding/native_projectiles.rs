@@ -12,6 +12,7 @@ use super::{
 };
 use horizon_client::{
     arrows::ArrowEvent,
+    join_seq::JoinList,
     mobs::Who,
     projectiles::{Hit, Projectile},
 };
@@ -204,16 +205,16 @@ impl Game<'_> {
     /// projectiles. One a mod removed in its hook stays removed.
     pub(super) fn native_settle_impacts(
         &mut self,
-        projectiles: &mut Vec<Projectile>,
+        projectiles: &mut JoinList<Projectile>,
         listed: &[bool],
         impacts: Vec<Impact>,
         hits: &mut Vec<(Projectile, Hit)>,
         arrow_events: &mut Vec<(Vec3, ArrowEvent)>,
     ) {
         // The mods see the projectiles where they will be, as `projectile_hit` does.
-        self.creatures.projectiles = std::mem::take(projectiles).into();
+        self.creatures.projectiles = std::mem::take(projectiles);
         let canceled = self.native_projectile_impacts(&impacts);
-        *projectiles = std::mem::take(&mut self.creatures.projectiles).into();
+        *projectiles = std::mem::take(&mut self.creatures.projectiles);
         if !canceled.contains(&true) {
             return;
         }

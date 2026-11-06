@@ -99,12 +99,9 @@ fn build_mod_resources(
     jar_store: &Path,
     mods: &[horizon_client::mod_content::ContentMod],
     prepared: &Path,
+    inventory: &horizon_mods::enabled::EnabledMods,
 ) -> horizon_assets::resource_source::ResourceRoot {
-    let inventory = horizon_mods::enabled::EnabledMods::new(
-        mods.iter()
-            .map(|m| (m.id.clone(), horizon_mods::Side::Both)),
-    );
-    horizon_client::mod_content::build(base, jar_store, mods, prepared, &inventory).unwrap();
+    horizon_client::mod_content::build(base, jar_store, mods, prepared, inventory).unwrap();
     let resolved = horizon_client::mod_content::resolved_resources(
         base,
         prepared.to_owned(),
@@ -124,11 +121,20 @@ fn build_mod_resources(
 fn install_mod_resources(
     game: &mut crate::game::Game<'_>,
     root: &horizon_assets::resource_source::ResourceRoot,
+    package: &Path,
 ) {
+    // The real loader publishes admission and resource views together. An
+    // inventory reload must see the package that supplied this fixture root.
+    game.mods.selected = vec![horizon_mods::selection::SelectedPackage {
+        path: package.to_owned(),
+        package: horizon_mods::Package::read(package).unwrap(),
+    }]
+    .into();
     game.options.resources = root.prepared().to_owned();
     game.pack.source = root.source().clone();
     game.pack.data_source = root.data().clone();
     game.pack.data_changes = root.data_changes().clone();
+    assert!(game.stage_enabled_inventory().unwrap().is_none());
 }
 
 #[test]
@@ -279,7 +285,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
     zip.finish().unwrap();
     let original = std::fs::read(&jar_file).unwrap();
     let manifest = format!(
-        "id='reload_test'\nname='Reload Test'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n[[jar]]\nid='original'\nversion='1'\nsha512='{}'\n",
+        "id='reload_test'\nname='Reload Test'\nversion='1'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[[jar]]\nid='original'\nversion='1'\nsha512='{}'\n",
         jar.sha512()
     );
     let package = root.join("reload_test.hmod");
@@ -300,6 +306,10 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
             jars: vec![jar.clone()],
         }],
         &resources,
+        &horizon_mods::enabled::EnabledMods::new([(
+            "reload_test".into(),
+            horizon_mods::Side::Both,
+        )]),
     );
     let world = root.join("world");
     let function = world.join("datapacks/test/data/reload_test/function/keep.mcfunction");
@@ -310,7 +320,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
         r#"{"enabled":["file/test"],"disabled":[]}"#,
     );
     with_game(|game| {
-        install_mod_resources(game, &resources);
+        install_mod_resources(game, &resources, &package);
         game.load_world(request(&world)).unwrap();
         let previous = game.fns.store.functions["reload_test:keep"].clone();
         let enabled = game.fns.enabled().to_vec();
@@ -373,6 +383,10 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
             jars: Vec::new(),
         }],
         &resources,
+        &horizon_mods::enabled::EnabledMods::new([(
+            "reload_test".into(),
+            horizon_mods::Side::Both,
+        )]),
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
@@ -400,7 +414,7 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
     .into();
     mod_api::testing::with_mods(mods, || {
         with_game(|game| {
-            install_mod_resources(game, &resources);
+            install_mod_resources(game, &resources, &package);
             game.load_world(request(&world)).unwrap();
             assert_eq!(
                 *live.lock().unwrap(),
@@ -546,6 +560,10 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
             jars: Vec::new(),
         }],
         &resources,
+        &horizon_mods::enabled::EnabledMods::new([(
+            "reload_test".into(),
+            horizon_mods::Side::Both,
+        )]),
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
@@ -569,7 +587,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
         .into(),
         || {
             with_game(|game| {
-                install_mod_resources(game, &resources);
+                install_mod_resources(game, &resources, &package);
                 game.load_world(request(&world)).unwrap();
                 assert_eq!(
                     *live.lock().unwrap(),
@@ -741,6 +759,10 @@ fn server_reload_retains_listeners_for_other_hooks() {
             jars: Vec::new(),
         }],
         &resources,
+        &horizon_mods::enabled::EnabledMods::new([(
+            "reload_test".into(),
+            horizon_mods::Side::Both,
+        )]),
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
@@ -767,7 +789,7 @@ fn server_reload_retains_listeners_for_other_hooks() {
     mod_api::testing::with_mods(mods, || {
         with_game(|game| {
             assert!(game.native_reload_resources().listener(&key).is_none());
-            install_mod_resources(game, &resources);
+            install_mod_resources(game, &resources, &package);
             game.load_world(request(&world)).unwrap();
             let kept = game.native_reload_resources().listener(&key).unwrap();
             assert_eq!(*kept.live.lock().unwrap(), 2);

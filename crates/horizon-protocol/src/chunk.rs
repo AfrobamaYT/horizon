@@ -6,7 +6,7 @@ use crate::{
     buf::{BitSet, Bytes, Codec, Longs, Reader, VarInt, Writer},
     packet,
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// Blocks: 16^3 entries; biomes: 4^3 entries per section.
 pub const BLOCKS: usize = 4096;

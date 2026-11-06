@@ -1,7 +1,7 @@
 //! Text components from commands: `ComponentArgument` reads an SNBT (or JSON)
 //! value, `ComponentSerialization` turns it into styled text.
 use crate::text::{InlineObject, Style, Text, named_color};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use serde_json::{Map, Value};
 
 /// `SnbtGrammar`, enough for components: compounds, lists, quoted and
@@ -720,7 +720,7 @@ mod tests {
     #[test]
     fn custom_click_events_keep_payloads_and_inherit_to_inline_objects() {
         use crate::text::ClickEvent;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
 
         for (payload, expected) in [
             (None, None),

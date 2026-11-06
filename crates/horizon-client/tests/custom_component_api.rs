@@ -4,11 +4,11 @@ use horizon_client::{
     content_identity,
     mod_content::{ContentMod, accept_mod, build, known_components},
 };
+use horizon_core::nbt::Tag;
 use horizon_protocol::{
     buf::NBT_QUOTA,
     item::custom::{self, InstallError},
 };
-use horizon_world::nbt::Tag;
 use std::fs;
 use std::path::Path;
 

@@ -20,14 +20,16 @@ use std::sync::Arc;
 /// full stacks with their components compared, as the tick's pass and a write
 /// both run it. The map is taken out so the seed can read the mob.
 fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
+    horizon_client::mobs::armor::prepare(m, catalog);
     let mut live = std::mem::take(&mut m.extra.live);
+    let seed = || {
+        horizon_client::entity_nbt::attribute_entries(m)
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect()
+    };
     let changed =
-        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, || {
-            horizon_client::entity_nbt::attribute_entries(m)
-                .into_iter()
-                .map(|(_, e)| e)
-                .collect()
-        });
+        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, seed);
     warn_failed(m.id, &m.kind.id, changed);
     m.extra.live = live;
 }
@@ -436,7 +438,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_changed_held_stack_hits_by_its_own_modifiers() {
         use horizon_client::mobs::gear;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         use mod_api::EquipmentSlot;
         with_game(|game| {
             spawn(game);
@@ -482,7 +484,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_mob_attribute_packet_is_the_live_maps_instances() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         use mod_api::EquipmentSlot;
         with_game(|game| {
             spawn(game);
@@ -541,6 +543,74 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_base_write_preserves_covered_for_damage_and_attribute_sync() {
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:shulker")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let catalog = game.motion.attributes.clone();
+            let m = &mut game.mobs[0];
+            // The permanent row installed by Shulker.setRawPeekAmount(0).
+            m.extra
+                .live
+                .edit(
+                    &catalog,
+                    &m.kind.id,
+                    "minecraft:armor",
+                    true,
+                    Vec::new,
+                    |value, observer| {
+                        value.add_permanent(
+                            Modifier::new("minecraft:covered", 20.0, Operation::AddValue).unwrap(),
+                            observer,
+                        )
+                    },
+                )
+                .unwrap();
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            let loaded_id = game.load_mob(saved.clone(), None).unwrap();
+            let loaded = game.mobs.iter().find(|m| m.id == loaded_id).unwrap();
+            assert_eq!(horizon_client::mobs::armor::values(loaded), (20.0, 0.0));
+            game.apply_entity_nbt(Target::Mob(12), saved).unwrap();
+            assert_eq!(
+                horizon_client::mobs::armor::values(&game.mobs[0]),
+                (20.0, 0.0)
+            );
+            let shulker = living(game, 12);
+            assert!(shulker.set_attribute_base(game, "minecraft:max_health", 40.0));
+            // No handle read in between: damage must not need a read to restore the map.
+            assert_eq!(
+                horizon_client::mobs::armor::values(&game.mobs[0]),
+                (20.0, 0.0)
+            );
+            let mut synced = Vec::new();
+            let m = game.mobs[0].clone();
+            game.mob_attributes(
+                &m,
+                &mut crate::game::lan_attributes::SpeedByType::default(),
+                &mut synced,
+            );
+            let armor_id = catalog.id("minecraft:armor").unwrap().registry_id();
+            let armor = synced.iter().find(|row| row.attribute == armor_id).unwrap();
+            assert_eq!(armor.base, 0.0);
+            assert_eq!(
+                armor.modifiers,
+                [horizon_protocol::packets::play::AttributeModifier {
+                    id: "minecraft:covered".into(),
+                    amount: 20.0,
+                    operation: 0,
+                }]
+            );
+        });
+    }
+
     /// The armor a hit reads follows the live map at once (#941): a stack a
     /// mod or `/item` changed protects by its own `attribute_modifiers`, a
     /// `/attribute` write takes effect without a tick, a horse's body piece
@@ -552,7 +622,7 @@ mod tests {
         use AttributeOperation::*;
         use ModifierLifetime::*;
         use horizon_client::mobs::{Damage, DamageKind, armor};
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         use mod_api::EquipmentSlot;
         with_game(|game| {
             spawn(game);
@@ -741,7 +811,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_saved_base_and_modifier_are_read_and_saved_again() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             spawn(game);
             let saved = Tag::List(vec![Tag::compound([
@@ -772,7 +842,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_stacks_own_modifiers_replace_its_items() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             spawn(game);
             let damage = "minecraft:attack_damage";
@@ -803,7 +873,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn gear_knockback_is_read_again_only_when_the_gear_changes() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             spawn(game);
             let read_at = |game: &Game<'_>| {
@@ -848,9 +918,9 @@ mod tests {
     }
 
     /// The ids of the modifiers a saved `attributes` list holds.
-    fn saved_ids<'a>(list: impl IntoIterator<Item = &'a horizon_world::nbt::Tag>) -> Vec<String> {
+    fn saved_ids<'a>(list: impl IntoIterator<Item = &'a horizon_core::nbt::Tag>) -> Vec<String> {
         use horizon_client_core::nbt_value::text;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         list.into_iter()
             .flat_map(|entry| match entry.get("modifiers") {
                 Some(Tag::List(l)) => l.iter().filter_map(|m| text(m.get("id"))).collect(),

@@ -10,7 +10,7 @@ use horizon_core::{
     geometry::{Aabb, Axis, Direction, Vec3, sweep_intersected_blocks},
     position::BlockPos,
 };
-use horizon_world::{chunk::BlockState, nbt::Tag};
+use {horizon_core::nbt::Tag, horizon_world::chunk::BlockState};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Damage {

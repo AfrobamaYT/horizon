@@ -123,7 +123,7 @@ pub fn default_name_key(block: &str) -> Option<&'static str> {
 /// `BaseContainerBlockEntity.getDisplayName` (`getName`), the title of the
 /// `ClientboundOpenScreenPacket` that opens it: the block entity's custom
 /// name (`CustomName`, a literal), else its default name.
-pub fn display_name(custom: Option<&str>, default_key: &str) -> horizon_world::nbt::Tag {
+pub fn display_name(custom: Option<&str>, default_key: &str) -> horizon_core::nbt::Tag {
     match custom {
         Some(name) => horizon_protocol::text::literal(name),
         None => horizon_protocol::text::translatable(default_key, &[]),
@@ -133,15 +133,15 @@ pub fn display_name(custom: Option<&str>, default_key: &str) -> horizon_world::n
 /// `ChestBlock.MENU_PROVIDER_COMBINER`'s `getDisplayName` for a double chest:
 /// the first half's custom name (the right half, `DoubleBlockCombiner`'s
 /// `FIRST`), else the second's, else `container.chestDouble`.
-pub fn double_chest_name(first: Option<&str>, second: Option<&str>) -> horizon_world::nbt::Tag {
+pub fn double_chest_name(first: Option<&str>, second: Option<&str>) -> horizon_core::nbt::Tag {
     display_name(first.or(second), "container.chestDouble")
 }
 
 /// `BaseContainerBlockEntity.sendChestLockedNotifications`: the action bar
 /// message of a container that refuses to open, `container.isLocked` naming it
 /// by its display name.
-pub fn locked_message(title: &horizon_world::nbt::Tag) -> horizon_world::nbt::Tag {
-    use horizon_world::nbt::Tag;
+pub fn locked_message(title: &horizon_core::nbt::Tag) -> horizon_core::nbt::Tag {
+    use horizon_core::nbt::Tag;
     Tag::compound([
         ("translate", Tag::String("container.isLocked".into())),
         ("with", Tag::List(vec![title.clone()])),
@@ -226,9 +226,9 @@ impl Campfire {
 }
 impl Skull {
     pub fn new(
-        profile: Option<horizon_world::nbt::Tag>,
+        profile: Option<horizon_core::nbt::Tag>,
         note_block_sound: Option<String>,
-        custom_name: Option<horizon_world::nbt::Tag>,
+        custom_name: Option<horizon_core::nbt::Tag>,
     ) -> Self {
         let skin = profile.as_ref().map(SkullSkin::of);
         Self {
@@ -240,7 +240,7 @@ impl Skull {
     }
 }
 impl SkullSkin {
-    pub fn of(profile: &horizon_world::nbt::Tag) -> Self {
+    pub fn of(profile: &horizon_core::nbt::Tag) -> Self {
         let download = crate::skins::profile_skin_url_nbt(profile).and_then(|url| {
             let location = crate::skins::skin_location(&crate::skins::texture_hash(&url)?);
             Some((url, location))

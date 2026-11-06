@@ -194,7 +194,7 @@ fn leak<T>(part: T) -> &'static T {
 fn has_part_hook(_: HookId) -> bool {
     true
 }
-fn parts(_: &'static str) -> &'static Parts {
+fn parts(_: HookId, _: &'static str) -> &'static Parts {
     PARTS.get()
 }
 impl Parts {

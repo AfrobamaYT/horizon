@@ -318,7 +318,7 @@ mod tests {
         let mut source = mob(1, "minecraft:villager");
         let mut armor = horizon_client::items::ItemStack::new("minecraft:wolf_armor", 1);
         armor.damage = 7;
-        armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+        armor.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
         source.extra.set_body_stack(Some(armor));
         let mut zombie = mob(2, "minecraft:zombie_villager");
         convert_to_zombie_villager(&source, &mut zombie);

@@ -1,14 +1,5 @@
 //! Structures, structure sets and their placements, structure starts,
 //! references, terrain adaptation and per-chunk piece placement.
-use super::{
-    BoundingBox, StructureResources,
-    jigsaw::{
-        JigsawConfig, JigsawContext, PlaceFeature, PoolPiece, Pools, Projection, lay_out_children,
-        place_start,
-    },
-    legacy::{LegacyPiece, PieceContext},
-    mod_types::{ModStructureType, ModStructureTypes},
-};
 use crate::{
     heightmap::HeightmapType,
     worldgen::{
@@ -31,6 +22,18 @@ use serde_json::{Value, value::RawValue};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
+};
+use {
+    super::{
+        StructureResources,
+        jigsaw::{
+            JigsawConfig, JigsawContext, PlaceFeature, PoolPiece, Pools, Projection,
+            lay_out_children, place_start,
+        },
+        legacy::{LegacyPiece, PieceContext},
+        mod_types::{ModStructureType, ModStructureTypes},
+    },
+    horizon_core::bounding_box::BoundingBox,
 };
 
 pub const STEPS: [&str; 11] = [
@@ -823,7 +826,7 @@ impl Piece {
         }
     }
     /// `StructurePiece.createTag`; None for a type Horizon cannot save yet.
-    pub fn save(&self) -> Option<crate::nbt::Compound> {
+    pub fn save(&self) -> Option<horizon_core::nbt::Compound> {
         match self {
             Self::Pool(p) => Some(p.save()),
             Self::Legacy(p) => p.save(),
@@ -874,8 +877,8 @@ impl StructureStart {
     /// `StructureStart.createTag` in its own chunk; None while one of its
     /// pieces cannot be saved. `references` counts `addReference` calls,
     /// which only locating structures makes: 0 in a freshly made world.
-    pub fn save(&self) -> Option<crate::nbt::Tag> {
-        use crate::nbt::Tag;
+    pub fn save(&self) -> Option<horizon_core::nbt::Tag> {
+        use horizon_core::nbt::Tag;
         let children: Option<Vec<Tag>> = self
             .pieces
             .iter()

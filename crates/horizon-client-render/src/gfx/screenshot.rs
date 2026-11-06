@@ -60,8 +60,12 @@ impl PendingScreenshot {
     pub fn save_in(&mut self, root: &Path, file_name: &str) -> Result<[u32; 2]> {
         let path = screenshot_destination(root, file_name)?;
         if self.hdr.is_some() {
+            // A `Path` puts the sibling's name after the OS's separator; the name stays portable.
             let hdr_name = hdr_screenshot_path(Path::new(file_name));
-            screenshot_destination(root, &hdr_name.to_string_lossy())?;
+            let hdr_name = hdr_name
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            screenshot_destination(root, &hdr_name)?;
         }
         self.rgba()?;
         std::fs::create_dir_all(path.parent().expect("destination has a parent"))?;

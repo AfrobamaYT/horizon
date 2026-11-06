@@ -61,7 +61,7 @@ impl Game<'_> {
             random: horizon_client::mobs::entity_random(id, Vec3::new(at[0], at[1], at[2])),
         });
     }
-    pub(super) fn fangs_to_nbt(&self, f: &Fangs, uuid: [i32; 4]) -> horizon_world::nbt::Tag {
+    pub(super) fn fangs_to_nbt(&self, f: &Fangs, uuid: [i32; 4]) -> horizon_core::nbt::Tag {
         horizon_client::entity_nbt::evoker_fangs_to_nbt(
             Vec3::new(f.pos[0], f.pos[1], f.pos[2]),
             f.yaw,
@@ -71,9 +71,9 @@ impl Game<'_> {
             self.persist.raw.get(&f.id),
         )
     }
-    pub(super) fn loaded_fangs_owner(&self, tag: &horizon_world::nbt::Tag) -> u32 {
+    pub(super) fn loaded_fangs_owner(&self, tag: &horizon_core::nbt::Tag) -> u32 {
         match tag.get("Owner") {
-            Some(horizon_world::nbt::Tag::IntArray(v)) => v.as_slice().try_into().ok(),
+            Some(horizon_core::nbt::Tag::IntArray(v)) => v.as_slice().try_into().ok(),
             _ => None,
         }
         .and_then(|u| self.mob_by_uuid(u))

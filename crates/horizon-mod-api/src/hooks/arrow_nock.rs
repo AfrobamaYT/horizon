@@ -8,7 +8,7 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "net.neoforged.neoforge.event.entity.player.ArrowNockEvent (NeoForge.EVENT_BUS, ICancellableEvent)",
+        neoforge = "ArrowNockEvent",
         cancellable = true
     )]
     fn arrow_nock();

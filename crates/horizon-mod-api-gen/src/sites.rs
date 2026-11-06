@@ -1,4 +1,4 @@
-//! List-driven call-expression slots. The staging coordinator activates these after widening.
+//! Unified slot lists and call-expression staging, activated after widening.
 use crate::points::plain_path;
 use std::{
     collections::BTreeMap,
@@ -79,21 +79,33 @@ pub(crate) struct Declaration {
     pub target: String,
     pub selector: String,
     pub ordinal: Option<usize>,
+    pub ctx: String,
     pub origin: String,
 }
 
-/// Read the sorted union of per-mod site files. Missing directories mean no sites.
-pub(crate) fn listed(directory: &Path) -> Result<Vec<Declaration>, Error> {
+pub(crate) const DIRECTORY: &str = "crates/horizon-mod-api-gen/slots";
+
+/// The union of per-mod slot lists, with declaration locations for diagnostics.
+#[derive(Default, Debug)]
+pub(crate) struct Slots {
+    pub functions: BTreeMap<String, String>,
+    pub calls: Vec<Declaration>,
+    pub types: BTreeMap<String, String>,
+}
+
+/// Read function, call and type slots with one parser. An absent directory has no listed slots.
+pub(crate) fn slots(directory: &Path) -> Result<Slots, Error> {
     let contents = match fs::read_dir(directory) {
         Ok(files) => files,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Slots::default()),
         Err(e) => return Err(Error::from(e).at(directory.display().to_string())),
     };
     let mut files = contents
         .map(|e| e.map(|e| e.path()))
         .collect::<Result<Vec<PathBuf>, _>>()?;
     files.sort();
-    let mut union = BTreeMap::new();
+    let mut slots = Slots::default();
+    let mut union: BTreeMap<_, Declaration> = BTreeMap::new();
     for file in files
         .into_iter()
         .filter(|p| p.extension().is_some_and(|e| e == "txt"))
@@ -106,12 +118,30 @@ pub(crate) fn listed(directory: &Path) -> Result<Vec<Declaration>, Error> {
                 continue;
             }
             let origin = format!("{}:{}", file.display(), i + 1);
-            let parse = || -> Result<_, Error> {
+            let mut parse = || -> Result<_, Error> {
                 let parts: Vec<_> = line.split('|').map(str::trim).collect();
-                let [target, selector, ordinal] = parts.as_slice() else {
-                    return Err(Cause::Format("expected target | selector | ordinal").into());
-                };
+                let type_path = parts[0].strip_prefix("type ");
+                let target = type_path.unwrap_or(parts[0]).trim();
                 syn::parse_str::<syn::Path>(target)?;
+                let target = plain_path(target);
+                if parts.len() == 1 {
+                    let entries = if type_path.is_some() {
+                        &mut slots.types
+                    } else {
+                        &mut slots.functions
+                    };
+                    entries.entry(target).or_insert(origin.clone());
+                    return Ok(None);
+                }
+                let [_, selector, ordinal, ctx] = parts.as_slice() else {
+                    return Err(Cause::Format(
+                        "expected at, type <path>, or at | call | nth | ctx",
+                    )
+                    .into());
+                };
+                if type_path.is_some() {
+                    return Err(Cause::Format("type slots cannot select calls").into());
+                }
                 let call = if selector.starts_with('.') {
                     format!("__receiver{selector}()")
                 } else {
@@ -132,20 +162,32 @@ pub(crate) fn listed(directory: &Path) -> Result<Vec<Declaration>, Error> {
                             .map_err(|_| Cause::Format("ordinal must be a nonnegative integer"))?,
                     )
                 };
-                Ok((plain_path(target), selector.replace(' ', ""), ordinal))
-            };
-            let (target, selector, ordinal) = parse().map_err(|e| e.at(origin.clone()))?;
-            union
-                .entry((target.clone(), selector.clone(), ordinal))
-                .or_insert(Declaration {
+                Ok(Some(Declaration {
                     target,
-                    selector,
+                    selector: selector.replace(' ', ""),
                     ordinal,
-                    origin,
-                });
+                    ctx: (*ctx).to_owned(),
+                    origin: origin.clone(),
+                }))
+            };
+            if let Some(declaration) = parse().map_err(|e| e.at(origin.clone()))? {
+                let key = (
+                    declaration.target.clone(),
+                    declaration.selector.clone(),
+                    declaration.ordinal,
+                );
+                if let Some(other) = union.get(&key) {
+                    if other.ctx != declaration.ctx {
+                        return Err(Error::from(Cause::Conflict(other.origin.clone())).at(origin));
+                    }
+                } else {
+                    union.insert(key, declaration);
+                }
+            }
         }
     }
-    Ok(union.into_values().collect())
+    slots.calls = union.into_values().collect();
+    Ok(slots)
 }
 
 /// A compiled call site's raw form, written to `points.json` beside the head/return points.

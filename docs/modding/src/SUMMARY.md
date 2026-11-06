@@ -33,8 +33,11 @@
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
+- [Legacy native hook API history (frozen)](reference/native-api-history.md)
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()
+<!-- The counterparts preprocessor renders the current declarations at the published URL. -->
+- [NeoForge counterparts]()
 
 # For agents
 

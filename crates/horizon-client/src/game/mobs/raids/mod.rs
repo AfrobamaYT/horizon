@@ -14,8 +14,8 @@ use horizon_client::{
     patrol::{GameplayAttributes, Member, PatrolLevel, PatrolSpawner},
     raid::{self, Action, BarName, RaidLevel, RaidPlayer, RaiderInfo, RaiderType, Raids, Spawn},
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{geometry::Vec3, random::RandomSource};
-use horizon_world::nbt::Tag;
 use std::collections::{HashMap, HashSet};
 
 /// Patrol and raid state owned by the game.
@@ -331,11 +331,11 @@ impl Game<'_> {
         if !self.raiding.raids.dirty || self.remote.is_some() {
             return;
         }
-        let tag = horizon_world::nbt::Tag::compound([
+        let tag = horizon_core::nbt::Tag::compound([
             ("data", self.raiding.raids.to_nbt()),
             (
                 "DataVersion",
-                horizon_world::nbt::Tag::Int(horizon_world::DATA_VERSION),
+                horizon_core::nbt::Tag::Int(horizon_world::DATA_VERSION),
             ),
         ]);
         if horizon_client::save::write_dat(&self.raids_path(dim), tag).is_ok() {
@@ -355,7 +355,7 @@ impl Game<'_> {
             .as_ref()
             .and_then(|p| p.get("raid_omen_position"))
         {
-            Some(horizon_world::nbt::Tag::IntArray(v)) if v.len() == 3 => Some([v[0], v[1], v[2]]),
+            Some(horizon_core::nbt::Tag::IntArray(v)) if v.len() == 3 => Some([v[0], v[1], v[2]]),
             _ => None,
         };
     }
@@ -367,13 +367,13 @@ impl Game<'_> {
         let extra = self
             .level
             .player_extra
-            .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-        if let horizon_world::nbt::Tag::Compound(map) = extra {
+            .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+        if let horizon_core::nbt::Tag::Compound(map) = extra {
             match self.raiding.omen_position {
                 Some(p) => {
                     map.insert(
                         "raid_omen_position".into(),
-                        horizon_world::nbt::Tag::IntArray(p.to_vec()),
+                        horizon_core::nbt::Tag::IntArray(p.to_vec()),
                     );
                 }
                 None => {

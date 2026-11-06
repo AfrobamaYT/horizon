@@ -35,6 +35,11 @@ the packet, and the game goes on as if it had been sent. Packets the network thr
 (keep-alives, pongs, cookies, configuration), the phase-dependent answers (resource pack status,
 a dialog's custom click action) and far terrain requests do not fire it. With no listener the
 send path checks one flag and builds nothing."#]
-    #[hook(side = "client", contract = "listen", cancellable = false)]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        cancellable = false,
+        neoforge = "none (NeoForge has no raw play-packet receive event)"
+    )]
     fn client_packet();
 }

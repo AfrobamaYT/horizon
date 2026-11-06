@@ -60,7 +60,11 @@ pub fn startup_root(
     server: &[Pack],
     mod_sources: &super::mods::ModsState,
 ) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
-    let all = packs::discover(vanilla, &packs_dir());
+    let mut all = packs::discover(vanilla, &packs_dir());
+    all.extend(super::pack_finders::discover(
+        mod_api::PackType::ClientResources,
+        mod_sources,
+    ));
     let mut enabled = packs::enabled(&all, selected);
     enabled.extend_from_slice(server);
     let base = super::mods::content_root(vanilla, mod_sources)?;
@@ -73,6 +77,9 @@ pub fn startup_root(
     .with_data(base.data().clone(), base.data_changes().clone()))
 }
 fn info(p: &Pack) -> PackInfo {
+    if let Some(info) = &p.selection {
+        return info.clone();
+    }
     let built_in = !p.id.starts_with("file/");
     PackInfo {
         id: p.id.clone(),
@@ -136,16 +143,21 @@ fn vanilla_info(vanilla: &Path) -> PackInfo {
 }
 /// Packs the Resource Packs screen lists: folder and built-in packs, then any
 /// active downloaded server (or world) packs, then vanilla.
-pub(super) fn pack_infos(vanilla: &Path, server: &[Pack]) -> Vec<PackInfo> {
+pub(super) fn pack_infos(vanilla: &Path, server: &[Pack], additional: &[Pack]) -> Vec<PackInfo> {
     let mut infos: Vec<PackInfo> = packs::discover(vanilla, &packs_dir())
         .iter()
         .map(info)
         .collect();
+    infos.extend(additional.iter().map(info));
     infos.extend(server.iter().map(downloaded_info));
     infos.push(vanilla_info(vanilla));
     infos
 }
 impl Game<'_> {
+    pub(super) fn resource_pack_infos(&mut self) -> Vec<PackInfo> {
+        let additional = self.discover_mod_packs(mod_api::PackType::ClientResources);
+        pack_infos(&self.vanilla_root(), &self.server_packs.active, &additional)
+    }
     pub(super) fn vanilla_root(&self) -> PathBuf {
         if self.ui.vanilla_root.as_os_str().is_empty() {
             self.options.resources.clone()
@@ -173,7 +185,7 @@ impl Game<'_> {
     /// The packs the pack screen offers and the current selection
     /// (`PackSelectionScreen` makes its `PackSelectionModel` from them).
     pub(super) fn refresh_pack_lists(&mut self) {
-        let infos = pack_infos(&self.vanilla_root(), &self.server_packs.active);
+        let infos = self.resource_pack_infos();
         let browsing = self.settings.extras.pack_browser;
         let o = &mut self.ui.options;
         o.pack_browser = browsing;
@@ -219,7 +231,7 @@ impl Game<'_> {
             // Rebuilding the screen would shut the list; keep it and only
             // refresh what the lists read.
             let selection = self.settings.resource_packs.clone();
-            let infos = pack_infos(&self.vanilla_root(), &self.server_packs.active);
+            let infos = self.resource_pack_infos();
             self.ui.options.pack_infos = infos;
             self.ui.options.pack_selection = selection;
             self.ui.options.pack_screen = None;
@@ -244,7 +256,8 @@ impl Game<'_> {
     /// screen again, with the error.
     fn selection_reload_failed(&mut self, error: &str) {
         log::warn!("Horizon: resource reload failed: {error}");
-        let all = packs::discover(&self.vanilla_root(), &packs_dir());
+        let mut all = packs::discover(&self.vanilla_root(), &packs_dir());
+        all.extend(self.discover_mod_packs(mod_api::PackType::ClientResources));
         if packs::able_to_clear_any_pack(&all, &self.settings.resource_packs) {
             // clearResourcePacksOnError.
             log::info!("Caught error loading resourcepacks, removing all selected resourcepacks");
@@ -389,6 +402,7 @@ impl Game<'_> {
             ui_metadata,
             language,
         } = staged;
+        let loop_context = self.prepare_loop_context(&root)?;
         let standalone_geometry =
             super::native_block_entity_draw::StandaloneGeometry::new(&pack, &gui);
         // Keep the working GPU resources, and hand its window surface over.
@@ -542,7 +556,7 @@ impl Game<'_> {
         // The creative screen survives the reload; item names may not.
         self.creative_screen.forget_items();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
-        self.refresh_loop_context()?;
+        self.install_loop_context(loop_context);
         self.texture_atlases_stitched();
         self.native_client_resources_reloaded();
         Ok(())
@@ -614,7 +628,7 @@ pub(super) fn stage_pack(
         panorama: Arc::new(panorama.unwrap_or_else(|p| std::panic::resume_unwind(p))),
     };
     progress.set(2);
-    let pack = PackResources::load(
+    let mut pack = PackResources::load(
         &resource_root,
         assets.clone(),
         render,
@@ -623,6 +637,7 @@ pub(super) fn stage_pack(
         context.light.clone(),
         &res.core.item_data,
     )?;
+    pack.additional_data = super::pack_finders::data_packs(mod_sources).into();
     let textures = prepare_renderer_textures(&pack);
     let cem = Arc::new(horizon_client::mobs::cem::CemModels::load(
         &source,

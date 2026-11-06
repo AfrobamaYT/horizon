@@ -678,8 +678,8 @@ fn mushroom_pos(log: [i32; 3], facing: Direction) -> [i32; 3] {
 
 /// The nest's block entity after `BeehiveDecorator` stored its bees
 /// (`Occupant.create(ticks)`: a bee, with 600 minimum ticks in the hive).
-pub(crate) fn beehive_occupants(ticks_in_hive: &[i32]) -> crate::nbt::Compound {
-    use crate::nbt::{Compound, Tag};
+pub(crate) fn beehive_occupants(ticks_in_hive: &[i32]) -> horizon_core::nbt::Compound {
+    use horizon_core::nbt::{Compound, Tag};
     let bees = ticks_in_hive
         .iter()
         .map(|&ticks| {

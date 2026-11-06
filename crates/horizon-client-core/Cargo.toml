@@ -8,6 +8,7 @@ description = "The client's lowest layer: chat text and translations, SNBT and N
 
 [dependencies]
 horizon-assets = { path = "../horizon-assets" }
+horizon-core = { path = "../horizon-core" }
 horizon-world = { path = "../horizon-world" }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 

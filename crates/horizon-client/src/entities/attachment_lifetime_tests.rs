@@ -5,14 +5,14 @@ use crate::{
     mobs::Mob,
     projectiles::{Projectile, ProjectileKind},
 };
-use horizon_world::{
-    attachments::{
+use std::sync::{Arc, Mutex};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::attachments::{
         AttachmentLifetime, AttachmentType, Attachments, HasAttachmentLifetime, Holder,
         index::AttachmentIndex,
     },
-    nbt::Tag,
 };
-use std::sync::{Arc, Mutex};
 
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "test",

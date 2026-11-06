@@ -40,11 +40,13 @@ impl Clone for Box<dyn Controller> {
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use horizon_world::{
-        DATA_VERSION,
-        collision::CachedCollisionRegistry,
-        nbt::Tag,
-        registry::{BlockRegistry, BlockStateId},
+    use {
+        horizon_core::nbt::Tag,
+        horizon_world::{
+            DATA_VERSION,
+            collision::CachedCollisionRegistry,
+            registry::{BlockRegistry, BlockStateId},
+        },
     };
     #[derive(Clone, Debug)]
     struct Moving(u32);

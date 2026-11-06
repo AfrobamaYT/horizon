@@ -178,7 +178,7 @@ mod tests {
         use super::super::{commands::OtherEntity, native_entity_refs::tests::with_game};
         use horizon_client::{chunk::Chunk, save::SaveDir};
         use horizon_core::geometry::Vec3;
-        use horizon_world::nbt::{Compound, Tag};
+        use horizon_core::nbt::{Compound, Tag};
         use std::sync::Arc;
 
         with_game(|game| {
@@ -355,7 +355,7 @@ mod tests {
     fn kill_command_forgets_other_entity_data() {
         use super::super::{commands::OtherEntity, native_entity_refs::tests::with_game};
         use horizon_core::geometry::Vec3;
-        use horizon_world::nbt::{Compound, Tag};
+        use horizon_core::nbt::{Compound, Tag};
 
         with_game(|game| {
             game.others.push(OtherEntity {

@@ -1,7 +1,7 @@
 //! Item stacks in NBT (`ItemStack.CODEC`): id, count and components, alone or in
 //! slot lists.
 use horizon_client_core::nbt_value::{number, string, text};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::sync::Arc;
 
 pub fn encode_item(stack: &crate::items::ItemStack) -> Vec<(&'static str, Tag)> {

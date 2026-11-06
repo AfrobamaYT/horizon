@@ -172,7 +172,7 @@ mod tests {
             );
             let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
             armor.damage = 7;
-            armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+            armor.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
             s.extra.set_body_stack(Some(armor));
             s.extra.leash = Some(crate::mobs::leash::Holder::Knot([3, 71, -3]));
             s.extra.mount = Some(7);

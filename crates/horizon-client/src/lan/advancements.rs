@@ -973,7 +973,7 @@ mod tests {
             )]
         });
         let overlay = match &packs {
-            Some(p) => horizon_world::loot::PackOverlay { files: p },
+            Some(p) => horizon_world::loot::PackOverlay::new(p),
             None => horizon_world::loot::PackOverlay::NONE,
         };
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
@@ -1155,7 +1155,7 @@ mod tests {
             "recipe/pack:a_cut".to_owned(),
             vec![cut("minecraft:redstone").into_bytes()],
         )];
-        let overlay = horizon_world::loot::PackOverlay { files: &packs };
+        let overlay = horizon_world::loot::PackOverlay::new(&packs);
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let sync = SyncData::load(
             &root,
@@ -1314,7 +1314,7 @@ mod tests {
                     .to_vec(),
             ],
         )];
-        let overlay = horizon_world::loot::PackOverlay { files: &packs };
+        let overlay = horizon_world::loot::PackOverlay::new(&packs);
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let sync = SyncData::load(
             &root,

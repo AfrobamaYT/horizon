@@ -611,8 +611,8 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses, animations: &HashMap<String, Anim
 }
 /// `TamableAnimal.addAdditionalSaveData`: owner and ordered Sitting, plus
 /// the saddle, the zombie's variant and the brain's attack cooldown.
-pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn to_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     if let Some(owner) = m.extra.owner {
         map.insert("Owner".into(), Tag::IntArray(owner.to_vec()));
     } else {
@@ -638,8 +638,8 @@ pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
     );
 }
 /// `TamableAnimal.readAdditionalSaveData`: Sitting is independent of Owner.
-pub fn from_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
-    use horizon_world::nbt::Tag;
+pub fn from_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
     m.extra.owner = crate::save::uuid_from_tag(tag.get("Owner"));
     m.extra.tame = m.extra.owner.is_some();
     m.extra.sitting = crate::entity_nbt::flag(tag, "Sitting");
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn saved_sitting_is_independent_of_owner_and_raw_nbt_for_both_species() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         for (id, species) in [
             ("minecraft:nautilus", Species::Nautilus),
             ("minecraft:zombie_nautilus", Species::ZombieNautilus),

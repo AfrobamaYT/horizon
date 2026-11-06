@@ -6,6 +6,10 @@ pub trait Hooks {
     /// on it picks a branch. Set value only for a property your mod owns; unanswered it stays 0.
     /// The model's `scale` is applied afterwards. The borrowed stack is the one being resolved,
     /// including nested bundle items.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "RegisterRangeSelectItemModelPropertyEvent"
+    )]
     fn item_model_range_property();
 }

@@ -4,10 +4,10 @@
 //! what its server sends, a server for a creative client's
 //! `SetCreativeModeSlot`. The other direction is `lan::guest::stack_to_network`.
 use crate::items::ItemStack;
+use horizon_core::nbt::Tag;
 use horizon_protocol::buf::{Codec, Reader};
 use horizon_protocol::item::{Component, Profile, Stack, Template, component};
 use horizon_protocol::registry::{Builtin, Dynamic};
-use horizon_world::nbt::Tag;
 use std::sync::Arc;
 
 pub(crate) mod kinetic;
@@ -837,7 +837,7 @@ mod tests {
                 -1544992499,
             ),
         ] {
-            let component = horizon_world::nbt::parse_snbt(patch).unwrap().0;
+            let component = horizon_core::nbt::parse_snbt(patch).unwrap().0;
             for removed in [false, true] {
                 let key = if removed {
                     "!minecraft:kinetic_weapon"

@@ -11,11 +11,14 @@ use horizon_client::{
 use horizon_core::{
     geometry::Vec3, position::BlockPos, random::LegacyRandom, random::RandomSource,
 };
-use horizon_world::{
-    consumable::{Consumable, EmissionWorld, UseAnimation},
-    teleport_consume::{TeleportConsume, TeleportConsumeWorld},
-};
 use std::convert::Infallible;
+use {
+    horizon_core::use_animation::UseAnimation,
+    horizon_world::{
+        consumable::{Consumable, EmissionWorld},
+        teleport_consume::{TeleportConsume, TeleportConsumeWorld},
+    },
+};
 
 type ItemConsumable = Consumable<String, ConsumeEffect>;
 
@@ -338,7 +341,9 @@ impl EmissionWorld for Emitter<'_, '_> {
     /// a guest's server turn leaves the guest out.
     fn play_sound(&mut self, sound: String, volume: f32, pitch: f32) -> Result<(), Infallible> {
         let at = self.0.feet();
-        if self.0.lan_acting.is_some() {
+        if !self.0.is_logical_server() {
+            self.0.play_client_player_sound(&sound, volume, pitch);
+        } else if self.0.lan_acting.is_some() {
             self.0.audio.play_unshared(&sound, at, volume, pitch);
             if let Some(at) = at {
                 self.0.guest_player_sounds.push((sound, at, volume, pitch));

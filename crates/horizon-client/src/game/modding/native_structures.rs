@@ -106,8 +106,8 @@ fn placements(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_core::nbt::{Compound, Tag};
     use horizon_core::version::DATA_VERSION;
-    use horizon_world::nbt::{Compound, Tag};
     use horizon_world::registry::BlockRegistry;
     use horizon_world::registry::BlockStateId;
 

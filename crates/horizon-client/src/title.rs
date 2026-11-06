@@ -413,6 +413,7 @@ pub struct Title {
     pub saves: PathBuf,
     /// The prepared resource root: the flat preset list and block registry.
     resources: PathBuf,
+    additional_data_packs: std::sync::Arc<[std::sync::Arc<crate::datapack::DataPack>]>,
     pub started: std::time::Instant,
     search: String,
     search_focused: bool,
@@ -574,7 +575,7 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
             };
             let data = root.get("Data")?;
             let modified = match data.get("LastPlayed") {
-                Some(horizon_world::nbt::Tag::Long(millis)) if *millis >= 0 => std::time::UNIX_EPOCH + std::time::Duration::from_millis(*millis as u64),
+                Some(horizon_core::nbt::Tag::Long(millis)) if *millis >= 0 => std::time::UNIX_EPOCH + std::time::Duration::from_millis(*millis as u64),
                 _ => modified,
             };
             Some(WorldEntry {
@@ -583,9 +584,9 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
                 game_mode: level.game_mode,
                 hardcore: level.hardcore,
                 modified,
-                commands: matches!(data.get("allowCommands"), Some(horizon_world::nbt::Tag::Byte(v)) if *v != 0),
+                commands: matches!(data.get("allowCommands"), Some(horizon_core::nbt::Tag::Byte(v)) if *v != 0),
                 version: data.get("Version").and_then(|v| v.get("Name"))
-                    .and_then(|v| match v { horizon_world::nbt::Tag::String(s) => Some(s.to_string_lossy()), _ => None })
+                    .and_then(|v| match v { horizon_core::nbt::Tag::String(s) => Some(s.to_string_lossy()), _ => None })
                     .unwrap_or_else(|| lang::get_or("selectWorld.versionUnknown", "Unknown")),
                 locked: crate::save::SessionLock::is_locked(&path),
                 corrupted: false,
@@ -757,7 +758,10 @@ impl Title {
     /// Opens `mode` (`Minecraft.setScreen`). While `gated`, a screen with a
     /// different id waits in `requested` for the game; the same screen again
     /// (its id unchanged) is applied at once.
-    pub fn set_mode(&mut self, mode: Mode) {
+    pub fn set_mode(&mut self, mut mode: Mode) {
+        if let Mode::Create { options, .. } = &mut mode {
+            options.set_additional_data_packs(self.additional_data_packs.clone());
+        }
         if self.gated && mode.id() != self.mode.id() {
             self.requested = Some(mode);
         } else {
@@ -824,6 +828,7 @@ impl Title {
             skip_multiplayer_warning: false,
             saves,
             resources: resources.to_owned(),
+            additional_data_packs: std::sync::Arc::from([]),
             started: now,
             search: String::new(),
             search_focused: false,
@@ -858,6 +863,16 @@ impl Title {
             confirm_experiments: RefCell::new(None),
             preparing: false,
             reopen_data_packs: false,
+        }
+    }
+    /// Retain additional repository sources across world-creation screens.
+    pub fn set_additional_data_packs(
+        &mut self,
+        packs: std::sync::Arc<[std::sync::Arc<crate::datapack::DataPack>]>,
+    ) {
+        self.additional_data_packs = packs.clone();
+        if let Mode::Create { options, .. } = &mut self.mode {
+            options.set_additional_data_packs(packs);
         }
     }
     /// Vanilla bypasses the selector when there are no saves.
@@ -1100,13 +1115,17 @@ impl Title {
     /// screen comes up first; anything else applies at once and the data
     /// is read again.
     pub fn offer_data_packs(&mut self, resources: &std::path::Path, ids: Vec<String>) {
-        let experimental = crate::datapack::feature_packs(resources)
-            .into_iter()
-            .any(|p| ids.contains(&p.id));
+        let experimental =
+            crate::datapack::feature_repository(resources, &self.additional_data_packs)
+                .into_iter()
+                .any(|p| ids.contains(&p.id));
         if experimental {
-            *self.confirm_experiments.get_mut() = Some(
-                confirm_experiments::ConfirmExperimentsScreen::new(resources, &ids),
-            );
+            *self.confirm_experiments.get_mut() =
+                Some(confirm_experiments::ConfirmExperimentsScreen::new(
+                    resources,
+                    &ids,
+                    &self.additional_data_packs,
+                ));
         } else {
             self.set_data_packs(ids);
             self.preparing = true;
@@ -3755,6 +3774,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                             &self.saves.join(&world.folder),
                             self.rule_registry.clone(),
                         );
+                        options.set_additional_data_packs(self.additional_data_packs.clone());
                         options.restore_feature_packs(&self.resources, &level);
                         self.set_mode(Mode::Create {
                             name: level.name,
@@ -3945,7 +3965,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             // CreateWorldScreen.openExperimentsScreen: the feature packs the
             // jar ships, switched on or off.
             (Mode::Create { options, .. }, Some(30)) => {
-                let flags = experiments::repository_flags(&self.resources, &options.data_packs);
+                let flags = experiments::repository_flags(
+                    &self.resources,
+                    &options.data_packs,
+                    &options.additional_data_packs,
+                );
                 *self.experiments.get_mut() = Some(experiments::ExperimentsScreen::new(flags));
                 Action::None
             }

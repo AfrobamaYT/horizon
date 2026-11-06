@@ -16,7 +16,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
-use crate::nbt::{Compound, JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 
 /// An attachment operation could not be completed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

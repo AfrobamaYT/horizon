@@ -9,7 +9,7 @@ use horizon_client::{
     scoreboard_cmd::{Holder, Tracker},
     text::Text,
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 mod contents;
 use contents::Component;
@@ -231,7 +231,7 @@ impl Game<'_> {
     /// the accessor's live owner. Named ranges retain their existing adapter.
     fn command_slots(&mut self, owner: &Owner, raw: &str) -> Vec<Slot> {
         if raw.starts_with('{') || raw.starts_with('[') {
-            let Ok((tag, _)) = horizon_world::nbt::parse_snbt(raw) else {
+            let Ok((tag, _)) = horizon_core::nbt::parse_snbt(raw) else {
                 return Vec::new();
             };
             self.inline_slots(owner, &horizon_client::scoreboard::tag_to_json(&tag))
@@ -297,7 +297,7 @@ impl Game<'_> {
     /// count across owners and group terms, and count selected empty slots
     /// only for replacement (not modification).
     fn command_slot_candidates(&mut self, owner: &Owner, raw: &str) -> Vec<SlotCandidate> {
-        let source = horizon_world::nbt::parse_snbt(raw)
+        let source = horizon_core::nbt::parse_snbt(raw)
             .ok()
             .map(|(tag, _)| horizon_client::scoreboard::tag_to_json(&tag));
         if raw.starts_with('{') || raw.starts_with('[') {
@@ -912,7 +912,7 @@ impl Game<'_> {
                     }
                     "minecraft:set_custom_data" => {
                         let tag = match &m["tag"] {
-                            Value::String(snbt) => horizon_world::nbt::parse_snbt(snbt)
+                            Value::String(snbt) => horizon_core::nbt::parse_snbt(snbt)
                                 .map(|(t, _)| t)
                                 .unwrap_or(Tag::Compound(Default::default())),
                             v => horizon_client::scoreboard::json_to_tag(v),
@@ -1040,7 +1040,7 @@ impl Game<'_> {
             _ => return Err(err("command.failed", &[])),
         };
         if raw.starts_with('{') || raw.starts_with('[') {
-            let (tag, _) = horizon_world::nbt::parse_snbt(&raw)
+            let (tag, _) = horizon_core::nbt::parse_snbt(&raw)
                 .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
             return Ok(horizon_client::scoreboard::tag_to_json(&tag));
         }
@@ -1414,10 +1414,10 @@ impl Game<'_> {
 }
 
 /// Edit a stack's components as their saved compound.
-fn edit_components(stack: &mut ItemStack, f: impl FnOnce(&mut horizon_world::nbt::Compound)) {
+fn edit_components(stack: &mut ItemStack, f: impl FnOnce(&mut horizon_core::nbt::Compound)) {
     let mut c = match horizon_client::item_data::encode_components(stack) {
         Some(Tag::Compound(c)) => c,
-        _ => horizon_world::nbt::Compound::new(),
+        _ => horizon_core::nbt::Compound::new(),
     };
     f(&mut c);
     let tag = Tag::Compound(c);
@@ -1493,6 +1493,7 @@ mod stand_equip_event_tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,

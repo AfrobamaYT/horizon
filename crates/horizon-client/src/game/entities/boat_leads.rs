@@ -15,7 +15,7 @@ use super::{Game, boats::Boat};
 use horizon_client::actions::Action;
 use horizon_client::mobs::leash::{self, Holder, HolderState, Pending};
 use horizon_core::geometry::Vec3;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `AbstractBoat`'s `getBbWidth` and `getBbHeight`.
 const WIDTH: f32 = 1.375;

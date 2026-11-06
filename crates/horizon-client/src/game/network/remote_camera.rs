@@ -90,7 +90,7 @@ impl Game<'_> {
             .and_then(|m| entity_post_effect(&m.kind.id));
     }
     /// The entity a server attached the view to, when it is not the player.
-    pub(super) fn remote_camera_id(&self) -> Option<u32> {
+    pub(in crate::game) fn remote_camera_id(&self) -> Option<u32> {
         self.remote.as_ref()?.camera.map(|id| id as u32)
     }
     /// `LocalPlayer.isControlledCamera`: the view is the player's own.

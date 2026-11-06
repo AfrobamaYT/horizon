@@ -802,7 +802,7 @@ pub struct ProtoChunk {
     decorated: bool,
     /// Block-entity data placed by structures and template features, in
     /// placement order (positions are absolute block coordinates).
-    pub block_entities: Vec<([i32; 3], crate::nbt::Compound)>,
+    pub block_entities: Vec<([i32; 3], horizon_core::nbt::Compound)>,
     /// Structure starts referencing this chunk (STRUCTURE_REFERENCES).
     pub(super) structure_starts: Vec<Arc<super::structure::start::StructureStart>>,
     /// The starts made in this chunk (STRUCTURE_STARTS), also those none of
@@ -810,9 +810,9 @@ pub struct ProtoChunk {
     own_starts: Starts,
     /// Entities placed by structures (`ProtoChunk.addEntity`), as NBT with
     /// absolute `Pos`.
-    pub entities: Vec<crate::nbt::Compound>,
+    pub entities: Vec<horizon_core::nbt::Compound>,
     /// Unmodelled root keys retained from a saved proto chunk.
-    pub saved_root: crate::nbt::Compound,
+    pub saved_root: horizon_core::nbt::Compound,
 }
 impl ProtoChunk {
     /// Its own heap bytes by part (`horizon-ctl memory`): packed blocks,
@@ -828,9 +828,9 @@ impl ProtoChunk {
             self.biomes.heap_bytes(),
             std::mem::size_of::<Self>()
                 + self.block_entities.capacity()
-                    * std::mem::size_of::<([i32; 3], crate::nbt::Compound)>()
+                    * std::mem::size_of::<([i32; 3], horizon_core::nbt::Compound)>()
                 + self.structure_starts.capacity() * std::mem::size_of::<usize>()
-                + self.entities.capacity() * std::mem::size_of::<crate::nbt::Compound>(),
+                + self.entities.capacity() * std::mem::size_of::<horizon_core::nbt::Compound>(),
         ]
     }
     pub fn position(&self) -> ChunkPos {
@@ -2403,7 +2403,7 @@ pub trait StructureMobs: Send + Sync {
     /// keeps its `horizon:finalize` for the game to finish on load.
     fn finalize(
         &self,
-        nbt: &mut crate::nbt::Compound,
+        nbt: &mut horizon_core::nbt::Compound,
         biome: &str,
         structures: &[String],
         random: &mut dyn super::structure::legacy::PieceRandom,

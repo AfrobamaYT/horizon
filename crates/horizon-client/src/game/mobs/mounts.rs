@@ -215,7 +215,7 @@ impl Game<'_> {
                 self.inventory[self.selected] = updated;
                 if let Some(broken) = broken {
                     self.player_equipment_broke(
-                        horizon_world::player_inventory::EquipmentSlot::MainHand,
+                        horizon_core::equipment_slot::EquipmentSlot::MainHand,
                         &broken,
                     );
                     self.award_stat("broken", &broken.item, 1);
@@ -1114,7 +1114,7 @@ mod tests {
             game.riding = Some(21);
             let mut stick = ItemStack::new("minecraft:carrot_on_a_stick", 1);
             let max = game.items().get(&stick.item).unwrap().max_damage;
-            stick.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Old Nag".into()));
+            stick.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Old Nag".into()));
             // One point short of breaking: the shared durability path adds wear.
             stick.damage = max - 8;
             let (updated, broken) = game.damage_stack(&stick, 7, true);
@@ -1125,7 +1125,7 @@ mod tests {
             let mut undamageable = stick.clone();
             undamageable.data_mut().set_other(
                 "!minecraft:max_damage",
-                Some(horizon_world::nbt::Tag::Byte(1)),
+                Some(horizon_core::nbt::Tag::Byte(1)),
             );
             assert!(
                 game.damage_stack(&undamageable, max as i32, true)
