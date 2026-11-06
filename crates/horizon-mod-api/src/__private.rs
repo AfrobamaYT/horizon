@@ -45,8 +45,9 @@ pub fn listened(hook: HookId) -> bool {
 pub use crate::generated::calls::*;
 pub use crate::part_table::{
     HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, block_entity_types,
-    block_listens, entity_parts, game_rule_registry, has_entity_parts, has_part_hook,
-    has_scoped_hook, install_parts, key_mappings, mark_game_thread, parts, resolve_parts,
+    block_listens, entity_parts, game_rule_bool_slot, game_rule_registry, has_entity_parts,
+    has_part_hook, has_scoped_hook, install_parts, key_mappings, mark_game_thread, parts,
+    resolve_parts,
 };
 /// A read backend wrapper for a host the game builds narrowed: the mob tick's
 /// goal view hands itself out as its own backend (#1077).
@@ -84,6 +85,12 @@ pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 /// The trait mods installed, in dispatch order: the game's own list, not part of the mod surface.
 pub fn mods() -> &'static [ModEntry] {
     crate::mods()
+}
+
+/// Actual installed code identities, including mods with no hook subscriptions.
+/// The engine uses this dispatch inventory to apply its saved code switches.
+pub fn installed_code_ids() -> impl Iterator<Item = &'static str> {
+    crate::mods().iter().map(|entry| entry.id)
 }
 
 /// The startup package inventory at an owning engine load boundary.
