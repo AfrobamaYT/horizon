@@ -1236,7 +1236,7 @@ mod tests {
             let view = stack_view(&stack);
             for index in 0..3 {
                 let mut models = ItemModels::default();
-                models.prototypes.insert(
+                Arc::make_mut(&mut models.prototypes).insert(
                     "minecraft:diamond".into(),
                     BTreeMap::from([(
                         "minecraft:item_model".into(),
@@ -1463,7 +1463,7 @@ mod tests {
             .unwrap(),
         );
         for default in [false, true] {
-            models.prototypes.insert(
+            Arc::make_mut(&mut models.prototypes).insert(
                 "minecraft:diamond".into(),
                 BTreeMap::from([
                     (

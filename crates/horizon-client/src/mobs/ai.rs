@@ -5358,8 +5358,13 @@ mod flight_effect_fall_tests {
                             if let Some(effect) = effect {
                                 mob.add_effect(effect, 100, 0);
                             }
-                            let mut random = LegacyRandom::new(0);
-                            assert!(tick(&mut mob, world, &mut random, &mut Vec::new()));
+                            let mut test_level = crate::health::TestLevel::new(0);
+                            assert!(tick(
+                                &mut mob,
+                                world,
+                                &mut test_level.level(),
+                                &mut Vec::new()
+                            ));
                             // The pinned Java aiStep resets before travel. A
                             // downward move then adds 0.2F of NEW fall distance;
                             // NoAI skips movement but must still erase the old fall.

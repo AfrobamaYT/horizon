@@ -702,10 +702,10 @@ mod tests {
                 golem.ai.last_hurt_by_time = 10;
                 let mut goal = ResetUniversalAnger::default();
                 let mut events = Vec::new();
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 assert_eq!(goal.can_use(&mut golem, &mut cx), rule);

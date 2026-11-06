@@ -692,19 +692,25 @@ mod underwater_sky_tests {
                 );
                 let mut random = LegacyRandom::new(1);
                 assert!(
-                    check_spawn_rules(Species::Guardian, w, Reason::Natural, &mut random, 0, 50, 0),
+                    check_spawn_rules(
+                        "minecraft:guardian",
+                        Species::Guardian,
+                        w,
+                        Reason::Natural,
+                        &mut random,
+                        [0, 50, 0]
+                    ),
                     "kelp between the guardian and the sea hides the sky"
                 );
                 let mut random = LegacyRandom::new(1);
                 assert!(
                     !check_spawn_rules(
+                        "minecraft:guardian",
                         Species::Guardian,
                         w,
                         Reason::Natural,
                         &mut random,
-                        1,
-                        50,
-                        0
+                        [1, 50, 0]
                     ),
                     "a bubble column is liquid(), so the sky still shows"
                 );
