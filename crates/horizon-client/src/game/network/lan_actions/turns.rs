@@ -183,12 +183,10 @@ impl Game<'_> {
             host.play.insert(conn, play);
             return Err(TurnRefused::Gone);
         };
-        let attachments = host.hub.guests.update(i, |g| {
-            std::mem::replace(
-                &mut self.player_attachments,
-                std::mem::take(&mut g.attachments),
-            )
-        });
+        let attachments = std::mem::replace(
+            &mut self.player_attachments,
+            std::mem::take(host.hub.guests.attachments_mut(conn).unwrap()),
+        );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
         // A new body starts with no record of the last one.
