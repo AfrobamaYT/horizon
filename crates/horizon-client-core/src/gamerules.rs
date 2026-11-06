@@ -144,6 +144,9 @@ pub fn rule(name: &str) -> Option<&'static Rule> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GameRules {
     values: BTreeMap<&'static str, Value>,
+    // Keep entries that cannot be interpreted by the current registry verbatim.
+    // A temporarily absent mod must not lose its saved rule values.
+    unknown: nbt::Compound,
     minecart_improvements: bool,
 }
 impl GameRules {
@@ -157,6 +160,7 @@ impl GameRules {
     /// newly enabled rules and discard rules absent from the target feature set.
     pub fn copy_with_features(&self, features: &[String]) -> Self {
         let mut rules = Self::with_features(features);
+        rules.unknown = self.unknown.clone();
         for (&name, &value) in &self.values {
             rules.set(name, value);
         }
@@ -222,24 +226,22 @@ impl GameRules {
     }
     /// GameRuleMap codec: `{data: {"minecraft:<rule>": value...}, DataVersion}`.
     pub fn to_nbt(&self) -> NamedTag {
-        let data: Vec<(horizon_world::nbt::JavaString, Tag)> = self
-            .available_rules()
-            .map(|r| {
-                let v = self.values.get(r.name).copied().unwrap_or(r.default);
-                let tag = match v {
-                    Value::Bool(b) => Tag::Byte(i8::from(b)),
-                    Value::Int(i) => Tag::Int(i),
-                };
-                (
-                    horizon_world::nbt::JavaString::from(format!("minecraft:{}", r.name).as_str()),
-                    tag,
-                )
-            })
-            .collect();
+        let mut data = self.unknown.clone();
+        data.extend(self.available_rules().map(|r| {
+            let v = self.values.get(r.name).copied().unwrap_or(r.default);
+            let tag = match v {
+                Value::Bool(b) => Tag::Byte(i8::from(b)),
+                Value::Int(i) => Tag::Int(i),
+            };
+            (
+                horizon_world::nbt::JavaString::from(format!("minecraft:{}", r.name).as_str()),
+                tag,
+            )
+        }));
         NamedTag {
             name: "".into(),
             tag: Tag::compound([
-                ("data", Tag::compound(data)),
+                ("data", Tag::Compound(data)),
                 ("DataVersion", Tag::Int(DATA_VERSION)),
             ]),
         }
@@ -249,12 +251,15 @@ impl GameRules {
     }
     pub fn from_nbt_with_features(root: &Tag, features: &[String]) -> Self {
         let mut rules = Self::with_features(features);
-        let Some(data) = root.get("data") else {
+        let Some(Tag::Compound(data)) = root.get("data") else {
             return rules;
         };
+        rules.unknown = data.clone();
         for r in rules.available_rules() {
             let key = format!("minecraft:{}", r.name);
-            let value = data.get(&key).or_else(|| data.get(r.name));
+            let value = data
+                .get(&key.as_str().into())
+                .or_else(|| data.get(&r.name.into()));
             match (r.default, value) {
                 (Value::Bool(_), Some(Tag::Byte(v))) => {
                     rules.set(r.name, Value::Bool(*v != 0));
@@ -264,6 +269,8 @@ impl GameRules {
                 }
                 _ => {}
             }
+            rules.unknown.remove(&key.as_str().into());
+            rules.unknown.remove(&r.name.into());
         }
         rules
     }
@@ -298,6 +305,28 @@ impl GameRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_rules_survive_save_and_feature_copy() {
+        let source = Tag::compound([(
+            "data",
+            Tag::compound([
+                ("missing:example", Tag::Long(123)),
+                ("minecraft:keep_inventory", Tag::Byte(1)),
+            ]),
+        )]);
+        let rules = GameRules::from_nbt(&source).copy_with_features(&[]);
+        assert_eq!(rules.get("keep_inventory"), Some(Value::Bool(true)));
+        assert_eq!(
+            rules
+                .to_nbt()
+                .tag
+                .get("data")
+                .unwrap()
+                .get("missing:example"),
+            Some(&Tag::Long(123))
+        );
+    }
 
     #[test]
     fn network_values_validate_rule_names_types_and_bounds() {
