@@ -31,6 +31,8 @@ pub mod block_sprites;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod camera;
+mod command;
+pub use command::{CommandArgument, CommandArgumentValue, CommandInvocation};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod containers;

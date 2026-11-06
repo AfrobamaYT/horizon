@@ -1725,6 +1725,14 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   the permissions of accepted usages. When argument alternatives consume the same input without errors, an
   executable alternative takes precedence over a denied one; equally valid alternatives keep registration order.
   A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
+
+- **`perform_command` / `perform_console_command`**: `event.command` is an owned `CommandInvocation`
+  with its literal path and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean
+  values retain the dispatcher's types; word and greedy text are strings. Player selectors resolve to a single live
+  `PlayerRef`, items become component-bearing stacks of one, and block positions resolve source-relative/local
+  coordinates without requiring loaded chunks. Missing optional arguments are absent. Parsing, permission and
+  resolution failures produce feedback without calling listeners. The console resolves from the Overworld spawn's
+  block corner with zero rotation and no source entity (`@s` fails). Return `Flow::Cancel` when handled.
 - **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
   `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's
