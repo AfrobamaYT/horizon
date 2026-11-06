@@ -206,7 +206,7 @@ def smoke(out: Path) -> None:
 
 
 # Warns here, ahead of Windows' hard 65,535 (the linker's own failure), so a growing export list is seen first.
-EXPORT_WARNING = 60_000
+EXPORT_WARNING = 49_000
 
 
 def export_count(library: Path) -> int:
