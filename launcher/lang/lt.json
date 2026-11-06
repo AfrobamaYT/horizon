@@ -1153,6 +1153,5 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Atsisiuntimai, prisijungimai ir naujinimai vyksta per šį tarpinį serverį (http://host:port, socks5://host:port). Tuščia reiškia, kad nėra: vietoj to naudojamas HTTPS_PROXY, kai paleidimo priemonė buvo paleista naudojant vieną.",
   "{name} was left out: made for another Horizon version": "{name} praleistas: sukurtas kitai Horizon versijai",
   "{name} was left out: clashes with {other}": "{name} praleistas: konfliktuoja su {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} praleistas: jam reikia {other}, kuris praleistas",
-  "Doesn't build on the Horizon you play ({code}): a build leaves it out until its author updates it": "Nesukompiliuojamas tavo žaidžiamame Horizon ({code}): kompiliavimas jį praleidžia, kol autorius jo neatnaujins"
+  "{name} was left out: it needs {other}, which was left out": "{name} praleistas: jam reikia {other}, kuris praleistas"
 }
