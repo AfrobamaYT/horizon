@@ -584,6 +584,24 @@ pub fn apply_menu_slot_rules(
     (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
 }
 
+/// Vanilla quick-craft count for one slot, based on the original carried stack.
+pub(crate) fn quick_craft_count(
+    kind: u8,
+    source: u32,
+    slots: usize,
+    have: u32,
+    max: u32,
+    item_max: u32,
+) -> u32 {
+    let each = match kind {
+        0 => (source as f32 / slots as f32).floor() as u32,
+        1 => 1,
+        2 => item_max,
+        _ => source,
+    };
+    (each + have).min(max)
+}
+
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
 pub const OUT_OF_BOUNDS: &str = "IndexOutOfBoundsException";
 
@@ -3115,14 +3133,14 @@ impl Menu {
                             let have = self.slot(s).map_or(0, |c| c.count);
                             let max =
                                 Self::max_stack(env, &source).min(self.slot_max(env, s, &source));
-                            let each = match self.quick_type {
-                                0 => (source.count as f32 / self.quick_slots.len() as f32).floor()
-                                    as u32,
-                                1 => 1,
-                                2 => Self::max_stack(env, &source),
-                                _ => source.count,
-                            };
-                            let new_count = (each + have).min(max);
+                            let new_count = quick_craft_count(
+                                self.quick_type as u8,
+                                source.count,
+                                self.quick_slots.len(),
+                                have,
+                                max,
+                                Self::max_stack(env, &source),
+                            );
                             remaining -= i64::from(new_count) - i64::from(have);
                             let mut placed = source.clone();
                             placed.count = new_count;
