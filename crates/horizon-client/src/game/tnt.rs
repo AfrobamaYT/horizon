@@ -302,7 +302,8 @@ impl Game<'_> {
                 return Ok(());
             }
             // ExplosionInteraction.TNT: the tnt_explosion_drop_decay rule.
-            let interaction = self.destroy_type("tnt_explosion_drop_decay");
+            let interaction =
+                self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY);
             self.combat.explosion_in_water = in_water;
             // `Explosion.getIndirectSourceEntity`: a player-lit TNT names
             // its igniter, which `blast_attacker` and the damage type read.

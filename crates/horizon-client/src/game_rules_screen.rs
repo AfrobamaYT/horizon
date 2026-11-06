@@ -159,7 +159,13 @@ impl RulesScreen {
             .map(|r| {
                 let mut b = EditBox::new(0.0, 0.0, 44.0, 20.0);
                 b.focused = false;
-                b.set_value(&rules.int(r.name).to_string());
+                b.set_value(
+                    &match rules.get(r.name) {
+                        Some(Value::Int(value)) => value,
+                        _ => 0,
+                    }
+                    .to_string(),
+                );
                 b.text_color = VALID;
                 (r.name, b)
             })
@@ -385,7 +391,7 @@ impl RulesScreen {
         self.unfocus();
         match r.default {
             Value::Bool(_) => {
-                let on = self.values.bool(r.name);
+                let on = matches!(self.values.get(r.name), Some(Value::Bool(true)));
                 self.values.set(r.name, Value::Bool(!on));
             }
             Value::Int(_) => {
@@ -512,13 +518,14 @@ impl RulesScreen {
                     let hover = hovered == Some(i) && ui::hovered(cursor, x, cy, 44.0, 20.0);
                     match r.default {
                         Value::Bool(_) => {
-                            let key = if self.values.bool(r.name) {
+                            let key = if matches!(self.values.get(r.name), Some(Value::Bool(true)))
+                            {
                                 "options.on"
                             } else {
                                 "options.off"
                             };
                             let label = Text::translate(key, &[]);
-                            let value = self.values.bool(r.name);
+                            let value = matches!(self.values.get(r.name), Some(Value::Bool(true)));
                             ui::button_as(
                                 batch,
                                 atlas,
