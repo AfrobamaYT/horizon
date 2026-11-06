@@ -204,8 +204,9 @@ impl World {
         )>,
     ) {
         if self.chunks.contains_key(&chunk) {
+            let incoming: FxHashSet<_> = entities.iter().map(|(pos, _)| *pos).collect();
             self.block_entities
-                .unload(|p| (p.0 >> 4, p.2 >> 4) == chunk);
+                .unload(|p| (p.0 >> 4, p.2 >> 4) == chunk && !incoming.contains(p));
         }
         self.block_entities.load_chunk(entities);
     }

@@ -35,6 +35,38 @@ fn values(index: &Index) -> Vec<i32> {
 }
 
 #[test]
+fn replacement_columns_keep_surviving_ticker_slots_in_order() {
+    use crate::{chunk::Chunk, world::World};
+    let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+    world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+    world.block_entities.set_states(vec![Ticking::Yes]);
+    let [kept, omitted, other, added] = [(1, 64, 1), (2, 64, 1), (17, 64, 1), (3, 64, 1)];
+    for pos in [kept, omitted, other] {
+        world.block_entities.insert(pos, BlockEntity::Chest(vec![]));
+    }
+    let before = world.block_entities.tickers(|_| 0);
+    assert_eq!(
+        before.iter().map(|(p, _)| *p).collect::<Vec<_>>(),
+        [kept, omitted, other]
+    );
+    world.load_chunk_block_entities(
+        (0, 0),
+        vec![
+            (kept, BlockEntity::Chest(vec![])),
+            (added, BlockEntity::Chest(vec![])),
+        ],
+    );
+    let after = world.block_entities.tickers(|_| 0);
+    assert_eq!(
+        after.iter().map(|(p, _)| *p).collect::<Vec<_>>(),
+        [kept, other, added]
+    );
+    assert_eq!(after[0], before[0]);
+    assert_eq!(after[1], before[2]);
+    assert!(!world.block_entities.contains_key(&omitted));
+}
+
+#[test]
 fn scope_installation_binds_existing_maps_and_retires_the_old_scope() {
     let mut entities = BlockEntities::default();
     let p = (1, 64, 1);
