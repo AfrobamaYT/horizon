@@ -12,7 +12,7 @@ use horizon_client::{
     raid::{self, RaiderType},
 };
 use horizon_core::random::RandomSource;
-use horizon_world::{loot::EntityLootParams, nbt::Tag};
+use {horizon_core::nbt::Tag, horizon_world::loot::EntityLootParams};
 
 /// `EnchantmentsByCostWithDifficulty` of `mob_spawn_equipment`.
 const MIN_COST: i32 = 5;

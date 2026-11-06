@@ -254,7 +254,7 @@ mod tests {
     use super::*;
     use horizon_client::entities::ArmorStand;
     use horizon_core::geometry::Vec3;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     use mod_api::NativeWorldEpoch;
 
     fn spawn(game: &mut Game<'_>, id: u32, kind: CartKind) -> MinecartRef {

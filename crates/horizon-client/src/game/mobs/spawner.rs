@@ -16,11 +16,11 @@ use horizon_client::{
     },
     particles::{ParticleOptions, ParticleType},
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::nbt::Tag;
 use std::collections::{HashMap, HashSet};
 
 type Pos = (i32, i32, i32);
@@ -78,13 +78,14 @@ impl Game<'_> {
     /// the block removes or replaces that entity, so the block is not read
     /// again here.
     pub(super) fn tick_spawner(&mut self, key: Pos) -> Result<()> {
-        let Some(BlockEntity::Spawner(mut spawner)) = self.world.block_entities.take(&key) else {
+        let Some((lease, BlockEntity::Spawner(mut spawner))) = self.world.block_entities.take(&key)
+        else {
             return Ok(());
         };
         let result = self.server_tick_spawner(key, &mut spawner);
         self.world
             .block_entities
-            .put(key, BlockEntity::Spawner(spawner));
+            .put(lease, BlockEntity::Spawner(spawner));
         result
     }
     /// The client ticks of these spawners, then the shown mobs of spawners
@@ -476,7 +477,7 @@ impl Game<'_> {
         &mut self,
         pos: [i32; 3],
         kind: &str,
-        data: Option<&horizon_world::nbt::Compound>,
+        data: Option<&horizon_core::nbt::Compound>,
     ) -> Option<bool> {
         let key = (pos[0], pos[1], pos[2]);
         let trial = match self.world.block_entities.get(&key) {

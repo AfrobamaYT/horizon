@@ -18,7 +18,7 @@ use horizon_client::{
     tab_list::TabPlayer,
     text::Text,
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::collections::{HashMap, HashSet};
 
 /// What `ServerPlayer` last recorded for the criteria that follow the player.
@@ -340,7 +340,7 @@ impl Game<'_> {
                 // NbtPredicate: the entity's saved data contains the pattern.
                 let data = self.entity_nbt(t);
                 for (pattern, negated) in &s.nbt {
-                    let matches = match (&data, horizon_world::nbt::parse_snbt(pattern)) {
+                    let matches = match (&data, horizon_core::nbt::parse_snbt(pattern)) {
                         (Some(d), Ok((p, _))) => horizon_client::nbt_path::compare_nbt(&p, Some(d)),
                         _ => false,
                     };

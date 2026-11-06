@@ -160,7 +160,7 @@ impl Game<'_> {
         let Some(BlockEntity::Brushable(b)) = self.world.block_entities.get(&key) else {
             return;
         };
-        let Some(horizon_world::nbt::Tag::String(table)) = &b.loot_table else {
+        let Some(horizon_core::nbt::Tag::String(table)) = &b.loot_table else {
             return;
         };
         let table = table.to_string_lossy();

@@ -46,10 +46,10 @@ impl Game<'_> {
         if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(level.epoch()) {
             return None;
         }
-        if level.dimension() == self.dim.id() {
+        if level.dimension() == self.dim.key() {
             return Some(&self.world);
         }
-        self.levels.parked_world_of(level.dimension())
+        self.levels.parked_world_of(level.dimension_id())
     }
     /// The world a handle names for a read that works on both sides: the
     /// server's level, or on a client the one it shows (`Minecraft.level`, its
@@ -60,7 +60,7 @@ impl Game<'_> {
         }
         (self.remote.as_ref().is_some_and(|r| r.logged_in)
             && self.native_lifecycle.epoch() == Some(level.epoch())
-            && level.dimension() == self.dim.id())
+            && level.dimension() == self.native_level_key())
         .then_some(&self.world)
     }
     /// Find a loaded chunk in an open server level.
@@ -94,10 +94,10 @@ impl Game<'_> {
     /// foreign one.
     fn native_level_streaming(&self, level: LevelRef) -> Option<&Streaming> {
         self.native_level_world(level)?;
-        if level.dimension() == self.dim.id() {
+        if level.dimension() == self.dim.key() {
             return Some(&self.streaming);
         }
-        self.levels.parked_streaming_of(level.dimension())
+        self.levels.parked_streaming_of(level.dimension_id())
     }
     /// Whether `/forceload` holds the chunk (`ServerLevel.getForcedChunks`),
     /// loaded or not; a mod's own ticket on it does not count. None for a stale handle or on a client.
@@ -124,11 +124,11 @@ impl Game<'_> {
             return false;
         }
         let [x, z] = chunk.pos();
-        let streaming = if chunk.level().dimension() == self.dim.id() {
+        let streaming = if chunk.level().dimension() == self.dim.key() {
             &mut self.streaming
         } else if let Some(streaming) = self
             .levels
-            .parked_streaming_of_mut(chunk.level().dimension())
+            .parked_streaming_of_mut(chunk.level().dimension_id())
         {
             streaming
         } else {
@@ -207,7 +207,7 @@ impl Game<'_> {
             chunk: (x, z),
             natural_spawning,
         };
-        let dimension = chunk.level().dimension();
+        let dimension = chunk.level().dimension_id();
         let streaming = if dimension == self.dim.id() {
             &mut self.streaming
         } else if let Some(streaming) = self.levels.parked_streaming_of_mut(dimension) {
@@ -276,7 +276,7 @@ impl Game<'_> {
     ) -> Option<BlockTransformPreview> {
         use super::native_server::PlayerRead;
         let world = self.native_level_read_world(level)?;
-        if level.dimension() != self.dim.id()
+        if level.dimension() != self.dim.key()
             || !world.is_loaded_at(pos[0], pos[1], pos[2])
             || !matches!(
                 hit.face,
@@ -286,10 +286,10 @@ impl Game<'_> {
             return None;
         }
         let (offhand, sneaking) = match self.player_handle_read(player)? {
-            PlayerRead::Acting { .. } if self.dim.id() == level.dimension() => {
+            PlayerRead::Acting { .. } if self.dim.key() == level.dimension() => {
                 (self.offhand.as_ref(), self.keys.held(super::Mapping::Sneak))
             }
-            PlayerRead::Guest(guest) if guest.dimension == level.dimension() => {
+            PlayerRead::Guest(guest) if guest.dimension == level.dimension_id() => {
                 (guest.offhand.as_ref(), guest.sneaking)
             }
             _ => return None,
@@ -364,7 +364,7 @@ impl Game<'_> {
     pub(super) fn native_level_in_place(&self, level: LevelRef) -> bool {
         self.is_logical_server()
             && self.native_lifecycle.epoch() == Some(level.epoch())
-            && self.dim.id() == level.dimension()
+            && self.dim.key() == level.dimension()
     }
     /// `f` over the game's own `SignalGetter` for the level in place, as the level's blocks
     /// and mods' parts answer it; `None` for another level, a stale handle or a client.
@@ -652,7 +652,7 @@ mod tests {
                 NativeWorldEpoch::new(level.epoch().get() + 1),
                 level.dimension(),
             );
-            let other = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            let other = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             for unavailable in [stale, other] {
                 assert_eq!(unavailable.signal(host, [1, y, 1], Direction::East), None);
                 assert!(!unavailable.has_neighbor_signal(host, [2, y, 1]));
@@ -670,7 +670,7 @@ mod tests {
 
         with_game(|game| {
             let overworld = game.level("minecraft:overworld").unwrap();
-            let nether = LevelRef::new(overworld.epoch(), "minecraft:the_nether");
+            let nether = LevelRef::new(overworld.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(overworld.height(game), Some((-64, 384)));
             assert_eq!(nether.height(game), None, "not opened yet");
             game.enter_level(Dim::Nether).unwrap();
@@ -842,7 +842,7 @@ mod tests {
             } else {
                 Dim::Nether
             };
-            let parked = mod_api::LevelRef::new(level.epoch(), other.id());
+            let parked = mod_api::LevelRef::new(level.epoch(), other.key());
             let chunk = ChunkRef::new(parked, [1, 1]);
             assert_eq!(game.native_chunk_forced(chunk), None);
             assert!(!game.native_chunk_set_forced(chunk, true));
@@ -884,7 +884,7 @@ mod tests {
             } else {
                 Dim::Nether
             };
-            let parked = LevelRef::new(level.epoch(), other.id());
+            let parked = LevelRef::new(level.epoch(), other.key());
             let host: &mut dyn ServerHost = game;
             assert!(parked.random(&*host).is_none(), "not open yet");
             let back = game.dim;
@@ -913,7 +913,7 @@ mod tests {
             // A handle of an earlier open names nothing.
             let stale = LevelRef::new(
                 NativeWorldEpoch::new(level.epoch().get() + 1),
-                game.dim.id(),
+                game.dim.key(),
             );
             let host: &mut dyn ServerHost = game;
             assert!(stale.with_random(&mut *host, |r| r.next_int()).is_none());
@@ -1164,7 +1164,7 @@ mod tests {
             let back = game.dim;
             game.enter_level(other).unwrap();
             game.enter_level(back).unwrap();
-            let parked = mod_api::LevelRef::new(level.epoch(), other.id());
+            let parked = mod_api::LevelRef::new(level.epoch(), other.key());
             let chunk = ChunkRef::new(parked, [2, 2]);
             let _guard = in_mod("machines");
             let owner = mod_api::NativeTicketOwner::Block([32, 64, 32]);
@@ -1495,7 +1495,7 @@ mod tests {
                 game.native_level_brightness(level, LightLayer::Sky, [0, 320, 0]),
                 None
             );
-            let stale = LevelRef::new(NativeWorldEpoch::new(u64::MAX), game.dim.id());
+            let stale = LevelRef::new(NativeWorldEpoch::new(u64::MAX), game.dim.key());
             assert_eq!(
                 game.native_level_brightness(stale, LightLayer::Sky, lit),
                 None

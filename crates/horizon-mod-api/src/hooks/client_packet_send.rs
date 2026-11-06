@@ -15,7 +15,8 @@ pub trait Hooks {
         side = "client",
         contract = "cancel",
         out = "canceled",
-        cancellable = false
+        cancellable = false,
+        neoforge = "none (NeoForge has no raw play-packet send event)"
     )]
     fn client_packet_send();
 }

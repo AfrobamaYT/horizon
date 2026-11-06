@@ -12,25 +12,75 @@ use std::path::Path;
 
 /// The standalone models native mods asked for (`native_standalone_models`).
 static STANDALONE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+/// Test fixture shared with the resource-bake worker. Holders must request the same names.
+static STANDALONE_FIXTURE: std::sync::Mutex<Option<(Vec<String>, usize)>> =
+    std::sync::Mutex::new(None);
 
-/// Sets the models no blockstate names that every resource load bakes
-/// beside the block models ([`StateModels::standalone`]): once, at start,
-/// as vanilla's `ModelEvent.RegisterStandalone` is posted once per model
-/// discovery. Names are sorted and deduplicated; one without a namespace
-/// (`mymod:block/shaft_half`) is dropped. False when already set.
-pub fn register_standalone(mut names: Vec<String>) -> bool {
+fn standalone_names(mut names: Vec<String>) -> Vec<String> {
     names.retain(|n| {
         n.split_once(':')
             .is_some_and(|(ns, path)| !ns.is_empty() && !path.is_empty())
     });
     names.sort();
     names.dedup();
-    STANDALONE.set(names).is_ok()
+    names
 }
 
-/// What [`register_standalone`] set; none before.
-pub fn standalone() -> &'static [String] {
-    STANDALONE.get().map_or(&[], Vec::as_slice)
+/// Sets the models no blockstate names that every resource load bakes
+/// beside the block models ([`StateModels::standalone`]): once, at start,
+/// as vanilla's `ModelEvent.RegisterStandalone` is posted once per model
+/// discovery. Names are sorted and deduplicated; one without a namespace
+/// (`mymod:block/shaft_half`) is dropped. False when already set.
+pub fn register_standalone(names: Vec<String>) -> bool {
+    STANDALONE.set(standalone_names(names)).is_ok()
+}
+
+/// Names baked beside block models. An active test fixture wins over process registration.
+pub fn standalone() -> Vec<String> {
+    if let Some((names, _)) = STANDALONE_FIXTURE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+    {
+        return names.clone();
+    }
+    STANDALONE.get().cloned().unwrap_or_default()
+}
+
+/// Installs standalone names until dropped, including on the bake worker, without sealing
+/// process registration. A second holder must request the same names.
+#[cfg(feature = "test-support")]
+pub struct StandaloneFixture;
+
+#[cfg(feature = "test-support")]
+pub fn standalone_fixture(names: Vec<String>) -> StandaloneFixture {
+    let names = standalone_names(names);
+    let mut fixture = STANDALONE_FIXTURE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match fixture.as_mut() {
+        Some((current, holders)) => {
+            assert_eq!(current, &names, "standalone fixture already set");
+            *holders += 1;
+        }
+        None => *fixture = Some((names, 1)),
+    }
+    StandaloneFixture
+}
+
+#[cfg(feature = "test-support")]
+impl Drop for StandaloneFixture {
+    fn drop(&mut self) {
+        let mut fixture = STANDALONE_FIXTURE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, holders)) = fixture.as_mut() {
+            *holders -= 1;
+            if *holders == 0 {
+                *fixture = None;
+            }
+        }
+    }
 }
 
 type Placement = (&'static str, &'static [(&'static str, &'static str)]);
@@ -112,7 +162,8 @@ pub(crate) fn prepare_with_models(
     };
     {
         let _step = crate::spans::startup::step("core.bake_standalone");
-        catalog.bake_standalone(root.source(), sprites, models, standalone())?;
+        let names = standalone();
+        catalog.bake_standalone(root.source(), sprites, models, &names)?;
     }
     let mut placements = Vec::new();
     let mut states = Vec::new();
@@ -209,8 +260,14 @@ mod tests {
             "lanef:block/b",
         ];
         assert!(super::register_standalone(names.map(str::to_owned).into()));
-        assert_eq!(super::standalone(), ["lanef:block/a", "lanef:block/b"]);
+        assert_eq!(
+            super::standalone(),
+            ["lanef:block/a".to_owned(), "lanef:block/b".to_owned()]
+        );
         assert!(!super::register_standalone(vec!["other:block/c".into()]));
-        assert_eq!(super::standalone(), ["lanef:block/a", "lanef:block/b"]);
+        assert_eq!(
+            super::standalone(),
+            ["lanef:block/a".to_owned(), "lanef:block/b".to_owned()]
+        );
     }
 }

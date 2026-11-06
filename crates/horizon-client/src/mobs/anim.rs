@@ -4,7 +4,7 @@
 use super::{Mob, Part, keyframes::AnimationState, living::wrap};
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use horizon_core::geometry::trig::Mth;
-use horizon_world::consumable::UseAnimation;
+use horizon_core::use_animation::UseAnimation;
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_6, PI};
 

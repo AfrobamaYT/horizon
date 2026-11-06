@@ -5,7 +5,7 @@
 //! eight slots in the same compound, body and saddle too.
 use super::*;
 use crate::mobs::Species;
-use horizon_world::nbt::{Limits, NamedTag, parse_snbt, read_named, write_named};
+use horizon_core::nbt::{Limits, NamedTag, parse_snbt, read_named, write_named};
 
 const UUID: [i32; 4] = [1, 2, 3, 4];
 

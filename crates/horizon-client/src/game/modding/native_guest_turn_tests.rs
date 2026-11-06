@@ -68,6 +68,62 @@ pub(in crate::game) fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn refused_wire_reload_preserves_hub_and_engine_generation() {
+    with_guests(|game| {
+        let before = game.lan.as_ref().unwrap().hub.lan.shared.sync();
+        let old_tables = game.world_tables.as_ref().map(|tables| tables as *const _);
+        let old_context = game.loop_context.clone();
+        let root = std::env::temp_dir().join(format!("reload-wire-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let stack = super::functions::pack_stack(
+            &game.world_root,
+            &root,
+            &game.pack.data_source,
+            &game.pack.data_changes,
+            false,
+            &[],
+            &[],
+        );
+        let error = game
+            .prepare_world_reload(&stack, &root, false)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("wire reload") && error.contains("registries.json"),
+            "{error}"
+        );
+        assert!(Arc::ptr_eq(
+            &before,
+            &game.lan.as_ref().unwrap().hub.lan.shared.sync()
+        ));
+        assert!(Arc::ptr_eq(&old_context, &game.loop_context));
+        assert_eq!(
+            old_tables,
+            game.world_tables.as_ref().map(|tables| tables as *const _)
+        );
+        let good = game.options.resources.clone();
+        let stack = super::functions::pack_stack(
+            &game.world_root,
+            &good,
+            &game.pack.data_source,
+            &game.pack.data_changes,
+            false,
+            &[],
+            &[],
+        );
+        let prepared = game.prepare_world_reload(&stack, &good, false).unwrap();
+        game.reload_world_tables(prepared);
+        assert!(!Arc::ptr_eq(
+            &before,
+            &game.lan.as_ref().unwrap().hub.lan.shared.sync()
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn level_event_excludes_its_source_even_during_another_guests_turn() {
     use horizon_client::lan::PlayerSender;
     use horizon_world::level::{LevelEvent, LevelEventPlayer};

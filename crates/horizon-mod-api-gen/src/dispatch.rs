@@ -529,7 +529,7 @@ pub(super) fn emit(
             Some((_, lookup)) => (
                 // The parts are looked up first: the key may be moved into the event.
                 format!(
-                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}"
+                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = super::parts(HookId::{hook_id}, \"{name}\"); let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}"
                 ),
                 format!(
                     "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",

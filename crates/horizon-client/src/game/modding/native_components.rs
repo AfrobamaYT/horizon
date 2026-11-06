@@ -1,7 +1,7 @@
 //! Native item data component helpers.
 use super::Game;
 use horizon_client::items::ItemStack;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// Failure to access a native item component.
 #[derive(Debug)]
@@ -43,6 +43,11 @@ impl Game<'_> {
     pub(super) fn native_item_compost_chance(&self, item: &str) -> Option<f32> {
         let layers = self.items().get(item)?.compostable.as_ref()?;
         Some(self.res.providers().layer_chance(layers))
+    }
+    /// Whether enchantments `a` and `b` may share an item (`Enchantment.areCompatible`), by the
+    /// world's enchantment definitions. API @API:item_components@.
+    pub(super) fn native_enchantments_compatible(&self, a: &str, b: &str) -> bool {
+        world_stations!(self).enchantments.compatible(a, b)
     }
     /// Whether an enchantment on `stack` has effect component `effect`, by the world's
     /// enchantment definitions (`EnchantmentHelper.has`), behind
@@ -129,5 +134,25 @@ impl Game<'_> {
         data.set_other(&removed, default.then(|| Tag::Compound(Default::default())));
         stack.tidy();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod enchantment_conflict_tests {
+    /// `Enchantment.areCompatible`: the same enchantment twice and the exclusive sets conflict,
+    /// others and unknown ids do not.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn enchantments_compatible_follows_the_exclusive_sets() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            assert!(!game.native_enchantments_compatible("minecraft:sharpness", "minecraft:smite"));
+            assert!(
+                !game.native_enchantments_compatible("minecraft:sharpness", "minecraft:sharpness")
+            );
+            assert!(
+                game.native_enchantments_compatible("minecraft:sharpness", "minecraft:unbreaking")
+            );
+            assert!(game.native_enchantments_compatible("minecraft:sharpness", "mod:unknown"));
+        });
     }
 }

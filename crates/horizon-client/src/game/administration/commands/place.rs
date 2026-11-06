@@ -4,12 +4,17 @@ use super::{Arg, Context, Game, R, err};
 use crate::game::structure_blocks::{load_settings, template_size};
 use horizon_client::text::Text;
 use horizon_core::position::BlockPos;
-use horizon_world::{
-    compression::Compression,
-    nbt::{self, Limits, Tag},
-    worldgen::structure::{Mirror, Rotation, StateTransforms},
-};
 use std::sync::OnceLock;
+use {
+    horizon_core::{
+        nbt,
+        nbt::{Limits, Tag},
+    },
+    horizon_world::{
+        compression::Compression,
+        worldgen::structure::{Mirror, Rotation, StateTransforms},
+    },
+};
 
 fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())

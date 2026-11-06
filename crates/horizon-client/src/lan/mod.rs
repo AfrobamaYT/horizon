@@ -97,13 +97,13 @@ pub enum Out {
     /// Packet bodies held during a tick, in order.
     Packets(Vec<Vec<u8>>),
     /// Send a play disconnect with this component, then close.
-    Disconnect(horizon_world::nbt::Tag),
+    Disconnect(horizon_core::nbt::Tag),
 }
 
 /// PlayerList.canPlayerLogin for a dedicated server: the disconnect reason
 /// (bans, whitelist) for a profile connecting from an address, if refused.
 pub type LoginGate =
-    Arc<dyn Fn(SocketAddr, u128, &str) -> Option<horizon_world::nbt::Tag> + Send + Sync>;
+    Arc<dyn Fn(SocketAddr, u128, &str) -> Option<horizon_core::nbt::Tag> + Send + Sync>;
 
 /// online-mode=true: the key pair the server made at startup
 /// (MinecraftServer.initializeKeyPair) and how players are verified.
@@ -432,7 +432,7 @@ impl Shared {
         address: SocketAddr,
         uuid: u128,
         name: &str,
-    ) -> Option<horizon_world::nbt::Tag> {
+    ) -> Option<horizon_core::nbt::Tag> {
         if let Some(gate) = &self.config.gate
             && let Some(reason) = gate(address, uuid, name)
         {

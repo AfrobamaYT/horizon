@@ -745,7 +745,7 @@ pub(super) mod tests {
             let mut player = guest(1);
             player.carried = Some(ItemStack::new("minecraft:emerald", 9));
             game.lan.as_mut().unwrap().hub.guests.push(player);
-            let title = horizon_world::nbt::Tag::String("chest".into());
+            let title = horizon_core::nbt::Tag::String("chest".into());
             game.lan.as_mut().unwrap().hub.open_container(
                 1,
                 "minecraft:generic_9x3",
@@ -827,7 +827,7 @@ pub(super) mod tests {
             let mut player = guest(1);
             player.inventory[8] = Some(ItemStack::new("minecraft:stick", 4));
             game.lan.as_mut().unwrap().hub.guests.push(player);
-            let title = horizon_world::nbt::Tag::String("chest".into());
+            let title = horizon_core::nbt::Tag::String("chest".into());
             game.lan.as_mut().unwrap().hub.open_container(
                 1,
                 "minecraft:generic_9x3",
@@ -936,7 +936,7 @@ pub(super) mod tests {
         with_game(|game| {
             open_to_lan(game);
             game.lan.as_mut().unwrap().hub.guests.push(guest(1));
-            let title = horizon_world::nbt::Tag::String("shop".into());
+            let title = horizon_core::nbt::Tag::String("shop".into());
             let open = |game: &mut super::Game<'_>| {
                 let hub = &mut game.lan.as_mut().unwrap().hub;
                 hub.open_native_menu(1, 1, title.clone(), vec![]).unwrap();
@@ -985,7 +985,7 @@ pub(super) mod tests {
             game.lan.as_mut().unwrap().hub.open_container(
                 1,
                 "minecraft:furnace",
-                horizon_world::nbt::Tag::String("furnace".into()),
+                horizon_core::nbt::Tag::String("furnace".into()),
                 (0, 64, 0),
                 Slots::Block((0, 64, 0)),
                 vec![None; 3],
@@ -1020,7 +1020,7 @@ pub(super) mod tests {
             open_to_lan(game);
             game.lan.as_mut().unwrap().hub.guests.push(guest(1));
             let stale = menu_of(game);
-            let title = horizon_world::nbt::Tag::String("new".into());
+            let title = horizon_core::nbt::Tag::String("new".into());
             let hub = &mut game.lan.as_mut().unwrap().hub;
             hub.open_native_menu(1, 1, title, vec![]).unwrap();
             {

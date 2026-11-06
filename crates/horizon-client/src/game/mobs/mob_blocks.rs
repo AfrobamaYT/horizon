@@ -234,11 +234,11 @@ impl Game<'_> {
         // CopperGolemRenderer.extractRenderState: blockItemState.apply, one
         // property at a time; a property the block lacks or a value it
         // cannot take leaves the state as it was.
-        if let Some(horizon_world::nbt::Tag::Compound(saved)) =
+        if let Some(horizon_core::nbt::Tag::Compound(saved)) =
             stack.data().and_then(|d| d.other("minecraft:block_state"))
         {
             for (k, v) in saved.iter() {
-                let horizon_world::nbt::Tag::String(v) = v else {
+                let horizon_core::nbt::Tag::String(v) = v else {
                     continue;
                 };
                 let (k, v) = (k.to_string_lossy(), v.to_string_lossy());

@@ -31,11 +31,11 @@ impl Game<'_> {
     /// with nobody in them (`close_idle_levels`).
     pub(in crate::game) fn native_level_random(&self, level: LevelRef) -> Option<LegacyRandom> {
         self.native_level_world(level)?;
-        if level.dimension() == self.dim.id() {
+        if level.dimension() == self.dim.key() {
             Some(self.world.random.clone())
         } else {
             self.levels
-                .parked_world_of(level.dimension())
+                .parked_world_of(level.dimension_id())
                 .map(|world| world.random.clone())
         }
     }
@@ -50,11 +50,11 @@ impl Game<'_> {
         if self.native_level_world(level).is_none() {
             return false;
         }
-        let target = if level.dimension() == self.dim.id() {
+        let target = if level.dimension() == self.dim.key() {
             Some(&mut self.world.random)
         } else {
             self.levels
-                .parked_world_mut_of(level.dimension())
+                .parked_world_mut_of(level.dimension_id())
                 .map(|world| &mut world.random)
         };
         target.map(|target| *target = random).is_some()

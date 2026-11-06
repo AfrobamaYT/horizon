@@ -1,6 +1,5 @@
-//! `ServerLevel.playSeededSound` for the players a server serves: the mods'
-//! `play_level_sound_at_position` and `play_level_sound_at_entity`
-//! (NeoForge's `PlayLevelSoundEvent`), then the sound packet.
+//! Level sound requests on each logical side: the mods' `PlayLevelSoundEvent`,
+//! then server broadcast or client playback.
 
 use std::borrow::Cow;
 
@@ -71,6 +70,49 @@ fn listened() -> bool {
 }
 
 impl Game<'_> {
+    /// `ClientLevel.playSeededSound`: ask this client's mods before playback.
+    /// A packet reaches this independently of the server's level event.
+    pub(super) fn play_client_level_sound(&mut self, mut sound: LevelSound<'_>, seed: i64) {
+        let entity = match sound.emitter {
+            Some(id) => {
+                let Some(state) = self.remote_sound_entity_state(id as i32) else {
+                    return;
+                };
+                sound.at = state.position;
+                let entity = horizon_client::sound_engine::SoundEntity::new(
+                    id,
+                    state.position,
+                    state.silent,
+                );
+                entity.update(state);
+                Some(entity)
+            }
+            None => None,
+        };
+        let at = sound.at;
+        let Some(heard) = self.ask_level_sound(self.dim.id(), sound) else {
+            return;
+        };
+        match entity {
+            Some(entity) => self.audio.play_entity_seeded(
+                &heard.name,
+                heard.source.index(),
+                heard.volume,
+                heard.pitch,
+                seed,
+                entity,
+            ),
+            None => self.audio.play_on_seeded(
+                heard.source.index(),
+                &heard.name,
+                Some(at),
+                heard.volume,
+                heard.pitch,
+                seed,
+            ),
+        }
+    }
+
     /// `ServerLevel.playSeededSound`'s entity overload, `playSound(except,
     /// emitter, ...)`: `sound` plays here and, while the level's sounds are
     /// captured for others, joins the tick's bound sounds. `lan_broadcast_effects` asks
@@ -170,7 +212,12 @@ impl Game<'_> {
         };
         let (mut source_now, mut volume_now, mut pitch_now, mut cancel) =
             (source, volume, pitch, false);
-        match emitter.and_then(|id| self.native_entity(id)) {
+        let entity = emitter.and_then(|id| self.native_entity(id));
+        // A missing client emitter must not become an AtPosition request.
+        if emitter.is_some() && entity.is_none() && !self.is_logical_server() {
+            return None;
+        }
+        match entity {
             Some(entity) => self.native_play_level_sound_at_entity(
                 mod_api::__private::PlayLevelSoundAtEntityCall {
                     entity,
@@ -221,7 +268,7 @@ mod tests {
     use horizon_client::mobs::{Mob, MobEvent};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::packets::play::Clientbound;
-    use mod_api::{ServerHost, SoundSource};
+    use mod_api::{HostSide, SoundSource};
     use std::sync::{Arc, Mutex};
 
     /// Quietens and moves the locked chest, cancels the pig, and turns a
@@ -231,9 +278,10 @@ mod tests {
     impl mod_api::Hooks for Sounds {
         fn play_level_sound_at_position(
             &self,
-            _: &mut dyn ServerHost,
+            host: HostSide<'_>,
             e: &mut mod_api::PlayLevelSoundAtPositionEvent,
         ) -> mod_api::Flow {
+            assert!(matches!(host, HostSide::Server(_)));
             self.0
                 .lock()
                 .unwrap()
@@ -250,9 +298,10 @@ mod tests {
         }
         fn play_level_sound_at_entity(
             &self,
-            _: &mut dyn ServerHost,
+            host: HostSide<'_>,
             e: &mut mod_api::PlayLevelSoundAtEntityEvent,
         ) -> mod_api::Flow {
+            assert!(matches!(host, HostSide::Server(_)));
             self.0
                 .lock()
                 .unwrap()

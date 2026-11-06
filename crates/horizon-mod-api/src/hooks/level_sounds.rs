@@ -2,7 +2,7 @@
 
 pub trait Hooks {
     /// A sound is about to play at `position` in `level` (NeoForge's
-    /// `PlayLevelSoundEvent.AtPosition`, in `ServerLevel.playSeededSound`):
+    /// `PlayLevelSoundEvent.AtPosition`, in `Level.playSeededSound`):
     /// every server sound not bound to an entity, mobs' own sounds included
     /// (`Entity.playSound` plays at the entity's position). A mod may change
     /// `sound`, `source`, `volume` and `pitch`, or set `cancel` and no player
@@ -11,9 +11,12 @@ pub trait Hooks {
     /// is dropped. Sounds the server's level plays during
     /// the tick are asked as they go out, at the end of the tick, with the state
     /// then. `/playsound` sends its packet directly and isn't asked, as in
-    /// vanilla. Server-side.
+    /// vanilla on the server. On the client, incoming sound packets ask before
+    /// playback, including `/playsound`. Server and client requests are separate:
+    /// `HostSide` identifies which one is being edited. UI and sound-engine-only
+    /// playback do not ask this hook. Both sides.
     #[hook(
-        side = "server",
+        side = "both",
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayLevelSoundEvent.AtPosition",
@@ -31,7 +34,7 @@ pub trait Hooks {
         cancel: &mut bool,
     );
     /// A sound bound to `entity` is about to play (NeoForge's
-    /// `PlayLevelSoundEvent.AtEntity`, in `ServerLevel.playSeededSound`'s entity
+    /// `PlayLevelSoundEvent.AtEntity`, in `Level.playSeededSound`'s entity
     /// overload, `playSound(except, sourceEntity, ...)`): a goat horn, a frog's
     /// tongue, eating and spawn, an animal eating (frog, goat, sniffer), a long
     /// jump, a goat's ram, a breeze's charge and deflection, shearing (sheep,
@@ -39,9 +42,11 @@ pub trait Hooks {
     /// copper golem, an allay's item and duplication, a ghastling hatching, a
     /// trident thrown (the trident) or riptide (the player), and a mod's sound
     /// bound to an entity. Asked after the tick's other sounds. The fields and
-    /// their rules are `play_level_sound_at_position`'s. Server-side.
+    /// their rules are `play_level_sound_at_position`'s. Client entity-sound
+    /// packets ask before playback and keep following their emitter; an absent
+    /// emitter plays nothing. Both sides, distinguished by `HostSide`.
     #[hook(
-        side = "server",
+        side = "both",
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayLevelSoundEvent.AtEntity",

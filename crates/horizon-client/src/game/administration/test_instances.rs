@@ -19,9 +19,12 @@ use horizon_client::{
 };
 use horizon_core::{position::BlockPos, ticks::TickArea};
 use horizon_protocol::packets::play::{self, Clientbound as C};
-use horizon_world::{
-    level::{TemplateSettings, flags},
-    worldgen::structure::{BoundingBox, Mirror, Rotation},
+use {
+    horizon_core::bounding_box::BoundingBox,
+    horizon_world::{
+        level::{TemplateSettings, flags},
+        worldgen::structure::{Mirror, Rotation},
+    },
 };
 
 type Pos = (i32, i32, i32);

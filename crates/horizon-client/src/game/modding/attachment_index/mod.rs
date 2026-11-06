@@ -72,9 +72,9 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use crate::game::native_entity_refs::tests::with_game;
-    use horizon_world::{
-        attachments::Attachments,
-        nbt::{Compound, Tag},
+    use {
+        horizon_core::nbt::{Compound, Tag},
+        horizon_world::attachments::Attachments,
     };
 
     fn saved() -> Attachments {

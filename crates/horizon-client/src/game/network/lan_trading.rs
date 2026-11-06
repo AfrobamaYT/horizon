@@ -89,8 +89,8 @@ impl Game<'_> {
     /// `Entity.getDisplayName` of the merchant, the screen's title: its name
     /// (custom, else the profession's) with the show_entity hover event and
     /// its UUID as insertion.
-    fn merchant_display_name(&mut self, state: &MerchantState) -> horizon_world::nbt::Tag {
-        use horizon_world::nbt::Tag;
+    fn merchant_display_name(&mut self, state: &MerchantState) -> horizon_core::nbt::Tag {
+        use horizon_core::nbt::Tag;
         let s = &state.session;
         let (kind, key) = if s.villager {
             let p = s.profession.trim_start_matches("minecraft:");
@@ -122,7 +122,7 @@ impl Game<'_> {
         let mut out = match name.clone() {
             Tag::Compound(c) => c,
             other => {
-                let mut c = horizon_world::nbt::Compound::new();
+                let mut c = horizon_core::nbt::Compound::new();
                 c.insert("text".into(), other);
                 c
             }
@@ -778,7 +778,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn changing_an_open_merchant_to_an_unknown_profession_closes_without_trading() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             let (_villager, rx, mut offer) = open_trade(game, 1);
             offer.uses = 3;
@@ -923,7 +923,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn explicit_nbt_offers_and_xp_override_the_live_trade() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             let (_, _, _) = open_trade(game, 1);
             let session = &mut game

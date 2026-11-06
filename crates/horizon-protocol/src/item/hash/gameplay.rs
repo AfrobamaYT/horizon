@@ -276,7 +276,7 @@ fn block_predicate(r: &mut Reader, names: &dyn Names) -> Option<HashCode> {
     // NbtPredicate: `TagParser.LENIENT_CODEC` encodes with its flattened codec,
     // the tag's SNBT string.
     let nbt = optional(r, |r| match r.nbt().ok()? {
-        tag @ horizon_world::nbt::Tag::Compound(_) => Some(string(&to_snbt(&tag))),
+        tag @ horizon_core::nbt::Tag::Compound(_) => Some(string(&to_snbt(&tag))),
         _ => None,
     })?;
     // DataComponentExactPredicate: the expected components, by type name.

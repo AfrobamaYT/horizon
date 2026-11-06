@@ -1,7 +1,7 @@
 //! NBT paths (`NbtPathArgument`): `foo.bar[0]`, `[]`, `list[{id:1}]`,
 //! `{root:match}`, with get, set, insert and remove on a tag tree, and the
 //! partial NBT comparison (`NbtUtils.compareNbt`) selectors and conditions use.
-use horizon_world::nbt::{Compound, JavaString, Tag, parse_snbt};
+use horizon_core::nbt::{Compound, JavaString, Tag, parse_snbt};
 
 /// An error carrying the translation key and its arguments.
 #[derive(Clone, Debug, PartialEq)]

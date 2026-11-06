@@ -14,7 +14,7 @@ use horizon_assets::{
     model::{Material, TextureSlot},
     resolve::{MISSING_MODEL, ModelLibrary},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex, MutexGuard, PoisonError},

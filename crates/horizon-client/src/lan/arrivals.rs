@@ -314,7 +314,7 @@ pub fn export_record(
     freeze: bool,
     records: Records,
 ) -> Result<serde_json::Value, String> {
-    use horizon_world::nbt::{Limits, NamedTag, write_named};
+    use horizon_core::nbt::{Limits, NamedTag, write_named};
     if let Some(h) = &hub.guests[i].handover {
         return Ok(h.record.clone());
     }
@@ -1493,8 +1493,8 @@ mod hub_tests {
     }
 
     /// Decodes the compound of a record back into its tag.
-    fn compound_of(record: &serde_json::Value) -> horizon_world::nbt::Tag {
-        use horizon_world::nbt::{Limits, read_named};
+    fn compound_of(record: &serde_json::Value) -> horizon_core::nbt::Tag {
+        use horizon_core::nbt::{Limits, read_named};
         let bytes = crate::skins::base64_decode(record["player"].as_str().unwrap()).unwrap();
         read_named(&bytes, Limits::saved()).unwrap().0.tag
     }
@@ -1590,12 +1590,12 @@ mod hub_tests {
         assert_eq!(number(tag.get("foodLevel")), Some(12));
         assert_eq!(number(tag.get("SelectedItemSlot")), Some(3));
         assert_eq!(float(tag.get("Health")), Some(14.0));
-        let horizon_world::nbt::Tag::String(dimension) = tag.get("Dimension").unwrap() else {
+        let horizon_core::nbt::Tag::String(dimension) = tag.get("Dimension").unwrap() else {
             panic!("Dimension is not a string");
         };
         assert_eq!(dimension.to_string_lossy(), "minecraft:overworld");
         // The stone in the first slot, as vanilla writes a stack: Slot, id, count.
-        let horizon_world::nbt::Tag::List(items) = tag.get("Inventory").unwrap() else {
+        let horizon_core::nbt::Tag::List(items) = tag.get("Inventory").unwrap() else {
             panic!("Inventory is not a list");
         };
         let first = &items[0];
@@ -2670,7 +2670,7 @@ mod hub_tests {
     /// The source's guest with a body (air, fire, freezing, food exhaustion and timer, a fall
     /// and a motion), a key Horizon does not model and a vehicle, exported with `freeze`.
     fn record_with_a_body() -> serde_json::Value {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let (mut source, i) = exported_guest();
         source.guests.update(i, |g| {
             g.loaded_body = Some(crate::lan::guest::SavedBody {

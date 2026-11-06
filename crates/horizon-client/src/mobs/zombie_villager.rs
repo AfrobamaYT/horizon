@@ -3,8 +3,8 @@
 //! the saved fields. Turning villagers into zombie villagers and back is done
 //! by the game (`game/mobs/zombie_villagers.rs`), which owns entity creation.
 use super::{Mob, MobEvent, MobWorld, Species, goals::Cx, villager};
+use horizon_core::nbt::{Compound, Tag};
 use horizon_core::random::RandomSource;
-use horizon_world::nbt::{Compound, Tag};
 
 /// `VILLAGER_CONVERSION_WAIT_MIN` and the width of the random range.
 pub const WAIT_MIN: i32 = 3600;

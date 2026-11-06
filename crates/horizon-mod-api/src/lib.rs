@@ -44,6 +44,13 @@ pub enum ModelError {
     StaleModel,
 }
 
+/// A dimension (`minecraft:the_nether`), as the game's table numbers it: a `LevelRef`'s identity.
+/// A key stays the same dimension until the game exits; `key.id(host)` gives the name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so only the game's table creates a key
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct DimensionKey(u32);
+
 /// Why a game rule category declaration was refused.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -393,6 +400,94 @@ pub struct ClientInputOptions {
     pub toggle_sprint: bool,
     /// Whether automatic jumping is enabled.
     pub auto_jump: bool,
+}
+
+/// A snapshot of the client's graphics preferences.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientGraphicsOptions {
+    /// Field of view in degrees, 30 to 110.
+    pub fov: f32,
+    /// Render distance in chunks.
+    pub render_distance: i32,
+    /// Simulation distance in chunks.
+    pub simulation_distance: i32,
+    /// Brightness, 0 to 1.
+    pub brightness: f32,
+    /// Frame rate limit; 260 means unlimited.
+    pub max_fps: u32,
+    /// Whether vertical sync is on.
+    pub vsync: bool,
+    /// Whether the window is fullscreen.
+    pub fullscreen: bool,
+    /// Whether the view bobs while walking.
+    pub view_bobbing: bool,
+    /// Whether smooth lighting is on.
+    pub smooth_lighting: bool,
+    /// Particle setting: 0 all, 1 decreased, 2 minimal.
+    pub particles: u8,
+    /// Entity distance scale.
+    pub entity_distance: f32,
+    /// Biome blend radius.
+    pub biome_blend: i32,
+}
+
+/// A snapshot of the client's GUI and accessibility preferences.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientGuiOptions {
+    /// Requested GUI scale; 0 means automatic.
+    pub gui_scale: u32,
+    /// Attack indicator: 0 off, 1 crosshair, 2 hotbar.
+    pub attack_indicator: u8,
+    /// Whether the main hand is the left one.
+    pub main_hand_left: bool,
+    /// Whether the debug screen shows reduced information.
+    pub reduced_debug_info: bool,
+    /// Whether the high contrast resource pack is on.
+    pub high_contrast: bool,
+    /// Whether subtitles are shown.
+    pub show_subtitles: bool,
+    /// Multiplier for how long subtitles and toasts stay.
+    pub notification_display_time: f32,
+    /// Opacity of the background behind text, 0 to 1.
+    pub text_background_opacity: f32,
+    /// Menu background blur radius.
+    pub menu_blur: i32,
+}
+
+/// A snapshot of the client's chat preferences.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientChatOptions {
+    /// Which chat is shown: 0 all, 1 commands only, 2 hidden.
+    pub visibility: u8,
+    /// Whether colours in chat show.
+    pub colors: bool,
+    /// Whether links in chat are clickable.
+    pub links: bool,
+    /// Opacity of the chat background, 0 to 1.
+    pub opacity: f32,
+    /// Chat scale.
+    pub scale: f32,
+    /// Chat width, 0 to 1 of its range.
+    pub width: f32,
+    /// Chat height while the chat is open, 0 to 1 of its range.
+    pub height_focused: f32,
+    /// Chat height while the chat is closed, 0 to 1 of its range.
+    pub height_unfocused: f32,
+    /// Chat line spacing.
+    pub line_spacing: f32,
+    /// Seconds between player chat messages showing.
+    pub delay: f64,
+}
+
+/// A snapshot of the client's audio preferences.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientAudioOptions {
+    /// Master volume, 0 to 1.
+    pub master_volume: f32,
 }
 
 /// Context and adjustable pose for a first-person hand render.
@@ -2316,19 +2411,25 @@ impl std::hash::Hash for GlobalPos {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LevelRef {
     epoch: NativeWorldEpoch,
-    dimension: &'static str,
+    dimension: DimensionKey,
 }
 
 impl LevelRef {
     /// Create a handle for the game.
     // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
-    pub fn new(epoch: NativeWorldEpoch, dimension: &'static str) -> Self {
+    pub fn new(epoch: NativeWorldEpoch, dimension: DimensionKey) -> Self {
         Self { epoch, dimension }
     }
-    /// The level's dimension (`minecraft:overworld`).
-    pub fn dimension(self) -> &'static str {
+    /// The level's dimension. `level.dimension().id(host)` gives its name.
+    pub fn dimension(self) -> DimensionKey {
         self.dimension
+    }
+    /// The name of the level's dimension, for the game's own tables.
+    // hidden: a game-side helper; mods ask the host
+    #[doc(hidden)]
+    pub fn dimension_id(self) -> &'static str {
+        registry_keys::dimension_id(self.dimension).expect("the game's table made the key")
     }
     /// Draw from the level's own random stream (vanilla's `Level.random`), in vanilla's order:
     /// `draw` gets the stream and the level keeps it after. None where `random` is None.
@@ -4448,6 +4549,21 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
+    fn dimension_keys_name_one_dimension_each() {
+        use crate::registry_keys::{dimension_id, dimension_key};
+        assert_eq!(dimension_key("minecraft:the_nether"), DimensionKey::NETHER);
+        assert_eq!(dimension_id(DimensionKey::END), Some("minecraft:the_end"));
+        let first = dimension_key("test:first");
+        let second = dimension_key("test:second");
+        assert_ne!(first, second);
+        assert_eq!(dimension_key("test:first"), first);
+        assert_eq!(dimension_id(second), Some("test:second"));
+        assert_eq!(DimensionKey::from_slot(first.0), Ok(first));
+        assert!(DimensionKey::from_slot(u32::MAX).is_err());
+        assert_eq!(dimension_id(DimensionKey(u32::MAX)), None);
+    }
+
+    #[test]
     fn native_host_returns_typed_recipe_rules() {
         struct Recipes(Arc<[Recipe]>);
         impl Host for Recipes {
@@ -4568,7 +4684,7 @@ mod tests {
         }
         fn level(&self, dimension: &str) -> Option<LevelRef> {
             (dimension == "minecraft:overworld")
-                .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+                .then(|| LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD))
         }
     }
     impl ClientHost for Reader {}

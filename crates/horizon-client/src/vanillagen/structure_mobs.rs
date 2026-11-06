@@ -17,17 +17,19 @@ use horizon_core::{
     geometry::{Aabb, Vec3},
     random::{LegacyRandom, RandomSource, XoroshiroRandom},
 };
-use horizon_world::{
-    item_defaults::{ItemData, ItemDefaults},
-    nbt::{Compound, Tag},
-    worldgen::{generator::StructureMobs, structure::legacy::PieceRandom},
-};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{
         Arc, OnceLock,
         atomic::{AtomicI64, AtomicU8, Ordering},
+    },
+};
+use {
+    horizon_core::nbt::{Compound, Tag},
+    horizon_world::{
+        item_defaults::{ItemData, ItemDefaults},
+        worldgen::{generator::StructureMobs, structure::legacy::PieceRandom},
     },
 };
 
@@ -372,11 +374,8 @@ mod tests {
             &mut bytes,
         )
         .unwrap();
-        let limits = horizon_world::nbt::Limits::templates();
-        let template = horizon_world::nbt::read_named(&bytes, limits)
-            .unwrap()
-            .0
-            .tag;
+        let limits = horizon_core::nbt::Limits::templates();
+        let template = horizon_core::nbt::read_named(&bytes, limits).unwrap().0.tag;
         let Some(Tag::List(entities)) = template.get("entities") else {
             panic!("no entities");
         };

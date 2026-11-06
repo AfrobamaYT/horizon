@@ -1,11 +1,13 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
-use horizon_world::{
-    attachments::{ATTACHMENTS_KEY, AttachmentCodec, AttachmentError, AttachmentType, Attachments},
-    nbt::{Compound, Tag},
-};
 use mod_api::{EntityRef, HostTransaction};
 use std::collections::HashSet;
+use {
+    horizon_core::nbt::{Compound, Tag},
+    horizon_world::attachments::{
+        ATTACHMENTS_KEY, AttachmentCodec, AttachmentError, AttachmentType, Attachments,
+    },
+};
 
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "test",

@@ -6,13 +6,13 @@ use crate::{
     save::{Level, put, read_dat, uuid_from_tag, write_dat},
 };
 use horizon_protocol::crypto::uuid_string;
-use horizon_world::{
-    attachments::{ATTACHMENTS_KEY, attachment_compound},
-    nbt::Tag,
-};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::attachments::{ATTACHMENTS_KEY, attachment_compound},
 };
 
 /// `PlayerDataStorage`'s player directory (`players/data`), created on first use
@@ -481,9 +481,9 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
         level.food_tick_timer = body.food_tick_timer;
         let extra = level
             .player_extra
-            .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-        if let horizon_world::nbt::Tag::Compound(map) = extra {
-            let short = |v: i32| horizon_world::nbt::Tag::Short(v.clamp(-32768, 32767) as i16);
+            .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+        if let horizon_core::nbt::Tag::Compound(map) = extra {
+            let short = |v: i32| horizon_core::nbt::Tag::Short(v.clamp(-32768, 32767) as i16);
             map.insert("Fire".into(), short(body.fire_ticks));
             map.insert("Air".into(), short(body.air));
             // Entity.saveWithoutId writes TicksFrozen only above 0, so a
@@ -491,7 +491,7 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
             if body.ticks_frozen > 0 {
                 map.insert(
                     "TicksFrozen".into(),
-                    horizon_world::nbt::Tag::Int(body.ticks_frozen),
+                    horizon_core::nbt::Tag::Int(body.ticks_frozen),
                 );
             } else {
                 map.remove(&"TicksFrozen".into());
@@ -510,8 +510,8 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     if let Some(attributes) = attributes {
         let extra = level
             .player_extra
-            .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-        if let horizon_world::nbt::Tag::Compound(map) = extra {
+            .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+        if let horizon_core::nbt::Tag::Compound(map) = extra {
             map.insert("attributes".into(), attributes);
         }
     }
@@ -1078,7 +1078,7 @@ mod tests {
         let tag = read.player_tag();
         assert!(matches!(
             tag.get("post_effects"),
-            Some(horizon_world::nbt::Tag::List(l)) if l.is_empty()
+            Some(horizon_core::nbt::Tag::List(l)) if l.is_empty()
         ));
     }
 

@@ -6,7 +6,7 @@ use horizon_client::{
     scoreboard::comp_text,
     text::Text,
 };
-use horizon_world::identifier::Identifier;
+use horizon_core::identifier::Identifier;
 use mod_api::__private::game::*;
 use mod_api::{BossBarColor, BossBarOverlay, BossBarRef, PlayerRef};
 

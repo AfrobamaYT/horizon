@@ -3424,9 +3424,9 @@ mod tests {
                 let mut hidden = stick.clone();
                 hidden.data_mut().set_other(
                     "minecraft:tooltip_display",
-                    Some(horizon_world::nbt::Tag::compound([(
+                    Some(horizon_core::nbt::Tag::compound([(
                         "hide_tooltip",
-                        horizon_world::nbt::Tag::Byte(1),
+                        horizon_core::nbt::Tag::Byte(1),
                     )])),
                 );
                 let lines: Vec<String> = game

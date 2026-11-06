@@ -304,7 +304,7 @@ fn find_nonempty(items: &[Option<ItemStack>], position: &mut usize, mode: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     #[test]
     fn failed_component_growth_keeps_air_for_the_next_source_term() {

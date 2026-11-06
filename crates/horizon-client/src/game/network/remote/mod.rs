@@ -7,7 +7,7 @@
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
-use super::{Dim, Game, Mining, Screen};
+use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};
 use horizon_client::actions::Action;
 use horizon_client::first_person::{Hand, SwingAnimation};
 use horizon_client::{
@@ -43,13 +43,6 @@ use horizon_protocol::{
     secure_chat::{self, Signature},
     text::{Language, plain},
 };
-use horizon_world::{
-    attachments::{Attachments, Holder},
-    level::InteractionResult,
-    nbt::Tag,
-    registry::BlockStateId,
-    stepped_interpolation::{Path, PosRot, Start, SteppedInterpolation},
-};
 use mod_api::InteractionKey;
 use std::{
     collections::{HashMap, VecDeque},
@@ -57,6 +50,15 @@ use std::{
     time::{Duration, Instant},
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        attachments::{Attachments, Holder},
+        level::InteractionResult,
+        registry::BlockStateId,
+        stepped_interpolation::{Path, PosRot, Start, SteppedInterpolation},
+    },
+};
 
 type BuiltinCache = Vec<(std::path::PathBuf, Arc<Builtin>)>;
 static BUILTIN: std::sync::Mutex<BuiltinCache> = std::sync::Mutex::new(Vec::new());
@@ -532,6 +534,8 @@ pub(super) struct Remote {
     pub(super) dimension: DimensionType,
     /// The level's key (`minecraft:overworld`): where its far terrain is kept.
     pub(super) level: String,
+    /// `level`'s key, as mods' handles name the level.
+    pub(super) level_key: mod_api::DimensionKey,
     /// `ClientPlayerNetworkEvent.LoggingOut` was fired for this connection: every way out
     /// of a world reports it once.
     logged_out: bool,
@@ -1107,6 +1111,7 @@ impl Game<'_> {
             use_item: None,
             dimension: DimensionType::vanilla("minecraft:overworld"),
             level: "minecraft:overworld".into(),
+            level_key: mod_api::DimensionKey::OVERWORLD,
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
                 &DimensionType::vanilla("minecraft:overworld"),
@@ -2338,6 +2343,7 @@ impl Game<'_> {
         r.resolve_clocks();
         self.world.day_time = r.clock_time(r.default_clock);
         r.level = spawn.dimension.clone();
+        r.level_key = mod_api::__private::dimension_key(&spawn.dimension);
         r.hashed_seed = spawn.seed;
         r.game_mode = spawn.game_type;
         r.flat = spawn.flat;
@@ -2511,7 +2517,7 @@ impl Game<'_> {
         horizon_client::chunk::free_columns(freed, gone.len());
         self.world
             .block_entities
-            .retain(|k, _| !gone.contains(&(k.0 >> 4, k.2 >> 4)));
+            .unload(|k| gone.contains(&(k.0 >> 4, k.2 >> 4)));
         if let Some(r) = self.remote.as_mut() {
             r.attachments.retain(|holder, _| match *holder {
                 Holder::Chunk([x, z]) => !gone.contains(&(x, z)),
@@ -3602,36 +3608,27 @@ impl Game<'_> {
                         f64::from(p.y) / 8.0,
                         f64::from(p.z) / 8.0,
                     ];
-                    // ClientPacketListener.handleSoundEvent plays with packet.getSource().
-                    match usize::try_from(p.source)
-                        .ok()
-                        .filter(|s| *s < horizon_client::settings::SOUND_SOURCES.len())
+                    let mut sound = LevelSound::new(&name, at, p.volume, p.pitch);
+                    if let Ok(source) = usize::try_from(p.source)
+                        && let Some(source) = mod_api::SoundSource::ALL.get(source)
                     {
-                        Some(source) => {
-                            self.audio
-                                .play_on(source, &name, Some(at), p.volume, p.pitch)
-                        }
-                        None => self.audio.play(&name, Some(at), p.volume, p.pitch),
+                        sound.source = *source;
                     }
+                    self.play_client_level_sound(sound, p.seed);
                 }
             }
             C::SoundEntity(p) => {
                 if let Some(name) = self.remote_sound_name(&p.sound)
                     && !self.settings.extras.pvp.combat.mutes_sound(&name)
-                    && let Some(state) = self.remote_sound_entity_state(p.id)
                 {
-                    let source = usize::try_from(p.source)
-                        .ok()
-                        .filter(|s| *s < horizon_client::settings::SOUND_SOURCES.len())
-                        .unwrap_or_else(|| horizon_client::settings::sound_source(&name));
-                    let entity = horizon_client::sound_engine::SoundEntity::new(
-                        p.id as u32,
-                        state.position,
-                        state.silent,
-                    );
-                    entity.update(state);
-                    self.audio
-                        .play_entity_seeded(&name, source, p.volume, p.pitch, p.seed, entity);
+                    let mut sound = LevelSound::new(&name, [0.0; 3], p.volume, p.pitch);
+                    sound.emitter = Some(p.id as u32);
+                    if let Ok(source) = usize::try_from(p.source)
+                        && let Some(source) = mod_api::SoundSource::ALL.get(source)
+                    {
+                        sound.source = *source;
+                    }
+                    self.play_client_level_sound(sound, p.seed);
                 }
             }
             C::StopSound(p) => self
@@ -11586,6 +11583,8 @@ mod native_entity_tests;
 
 #[cfg(test)]
 mod effect_blend_tests;
+#[cfg(test)]
+mod level_sound_tests;
 
 #[cfg(test)]
 mod tests {
@@ -11941,11 +11940,11 @@ mod tests {
     fn mods_replace_and_cancel_received_chat() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_client::text::Text;
+        use horizon_core::nbt::Tag;
         use horizon_protocol::{
             connection::Pipe,
             packets::play::{self, Clientbound as C},
         };
-        use horizon_world::nbt::Tag;
 
         struct Censor;
         #[mod_api::__subscriptions]
@@ -12046,11 +12045,11 @@ mod tests {
             Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
         };
         use horizon_client::items::ItemStack;
+        use horizon_core::nbt::Tag;
         use horizon_protocol::{
             connection::Pipe,
             packets::play::{Clientbound as C, MountScreenOpen, OpenScreen},
         };
-        use horizon_world::nbt::Tag;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -12103,7 +12102,7 @@ mod tests {
                 .clone();
             let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
             sword.damage = 40;
-            sword.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Biter".into()));
+            sword.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Biter".into()));
             let mut shield = ItemStack::new("minecraft:shield", 1);
             shield.damage = 12;
             let mut mob = Mob::new(31, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
@@ -12247,12 +12246,12 @@ mod tests {
             Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
         };
         use horizon_client::level_loading::Reason;
+        use horizon_core::nbt::Tag;
         use horizon_protocol::{
             connection::Pipe,
             item::Stack,
             packets::play::{self, Clientbound as C},
         };
-        use horizon_world::nbt::Tag;
 
         with_game(|game| {
             let (mut reader, _writer) = connect_menu_test(game);
@@ -12584,8 +12583,8 @@ mod tests {
         use super::super::{
             Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
         };
+        use horizon_core::nbt::Tag;
         use horizon_protocol::packets::play::{self, Clientbound as C};
-        use horizon_world::nbt::Tag;
 
         with_game(|game| {
             let (mut reader, _writer) = connect_menu_test(game);
@@ -12669,6 +12668,45 @@ mod tests {
             };
             assert_eq!(close.container, 5);
             assert!(sent(&mut reader).is_none());
+        });
+    }
+
+    /// A client names the level it shows by the server's key, even where `Dim` has
+    /// no name for it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_handles_reach_a_custom_level() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+        use mod_api::{DimensionKey, LevelRef};
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "CustomLevelTest").unwrap();
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "test:pocket".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            game.remote.as_mut().unwrap().logged_in = true;
+
+            let level = game.native_level("test:pocket").unwrap();
+            assert_ne!(level.dimension(), DimensionKey::OVERWORLD);
+            assert_eq!(level.dimension().id(game).as_deref(), Some("test:pocket"));
+            assert!(game.native_level("minecraft:overworld").is_none());
+            assert!(level.height(game).is_some());
+            let overworld = LevelRef::new(level.epoch(), DimensionKey::OVERWORLD);
+            assert_eq!(overworld.height(game), None);
         });
     }
 
@@ -12944,7 +12982,7 @@ mod tests {
             };
             game.handle_packet(login(spawn.clone())).unwrap();
             let end = game.native_level("minecraft:the_end").unwrap();
-            let wrong_level = LevelRef::new(end.epoch(), "minecraft:overworld");
+            let wrong_level = LevelRef::new(end.epoch(), mod_api::DimensionKey::OVERWORLD);
             assert_eq!(wrong_level.day_time(game), None);
             game.handle_packet(C::SetTime(play::SetTime {
                 game_time: 100,
@@ -13517,7 +13555,7 @@ mod tests {
         containers::{Beacon, BlockEntity},
         items::ItemStack,
     };
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     /// `ItemFrame.interact`, `AbstractBoat.interact`, and `Minecart.interact`:
     /// interactions that pass leave the click to the held item without swinging;
@@ -13757,7 +13795,7 @@ mod tests {
     #[test]
     fn chat_is_narrated_with_its_chat_types_narration_decoration() {
         use super::{Decoration, chat_type_decorate, play};
-        use horizon_world::nbt::{JavaString, Tag, parse_snbt};
+        use horizon_core::nbt::{JavaString, Tag, parse_snbt};
         use serde_json::json;
         let bound = play::ChatTypeBound {
             chat_type: 0,
@@ -14032,16 +14070,16 @@ mod tests {
         );
         // A server-defined damage type with inline NBT effects needs no entry in
         // the client's built-in catalog.
-        let mut custom = horizon_world::nbt::Compound::new();
+        let mut custom = horizon_core::nbt::Compound::new();
         custom.insert(
             "effects".into(),
-            horizon_world::nbt::Tag::String("burning".into()),
+            horizon_core::nbt::Tag::String("burning".into()),
         );
         registries.add(horizon_protocol::packets::configuration::RegistryData {
             registry: "minecraft:damage_type".into(),
             entries: vec![horizon_protocol::packets::configuration::RegistryEntry {
                 id: "custom:lava_splash".into(),
-                data: Some(horizon_world::nbt::Tag::Compound(custom)),
+                data: Some(horizon_core::nbt::Tag::Compound(custom)),
             }],
         });
         assert_eq!(
@@ -14060,7 +14098,7 @@ mod tests {
             registry: "minecraft:damage_type".into(),
             entries: vec![horizon_protocol::packets::configuration::RegistryEntry {
                 id: "demo:heat".into(),
-                data: Some(horizon_world::nbt::Tag::Compound(Default::default())),
+                data: Some(horizon_core::nbt::Tag::Compound(Default::default())),
             }],
         });
         assert_eq!(

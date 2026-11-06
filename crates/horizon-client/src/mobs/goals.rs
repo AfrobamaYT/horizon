@@ -763,9 +763,9 @@ impl Mob {
         }
         if let Some(range) = patch.and_then(|d| d.other("minecraft:attack_range")) {
             let float = |key: &str, default: f32| match range.get(key) {
-                Some(horizon_world::nbt::Tag::Float(bits)) => f32::from_bits(*bits),
-                Some(horizon_world::nbt::Tag::Double(bits)) => f64::from_bits(*bits) as f32,
-                Some(horizon_world::nbt::Tag::Int(v)) => *v as f32,
+                Some(horizon_core::nbt::Tag::Float(bits)) => f32::from_bits(*bits),
+                Some(horizon_core::nbt::Tag::Double(bits)) => f64::from_bits(*bits) as f32,
+                Some(horizon_core::nbt::Tag::Int(v)) => *v as f32,
                 _ => default,
             };
             let factor = float("mob_factor", 1.0);
@@ -4005,7 +4005,7 @@ mod melee_range_tests {
         let mut m = Mob::new(1, Arc::new(kind), Vec3::new(0.5, 64.0, 0.5), 0.0);
         let mut stack = crate::items::ItemStack::new(item, 1);
         if let Some(text) = components {
-            let tag = horizon_world::nbt::parse_snbt(text).unwrap().0;
+            let tag = horizon_core::nbt::parse_snbt(text).unwrap().0;
             (stack.damage, stack.extra) = crate::item_data::decode_components(Some(&tag));
         }
         m.extra.set_main_hand_stack(Some(stack));

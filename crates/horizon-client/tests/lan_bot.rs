@@ -492,11 +492,11 @@ fn neoforge_shapes_items_reach_two_guests() {
     let sync = Arc::new(
         SyncData::load(
             &resources,
-            &horizon_world::loot::PackOverlay { files: &packs },
+            &horizon_world::loot::PackOverlay::new(&packs),
             &defaults,
             &horizon_client::crafting::ResolvedSources::load_or_empty(
                 &resources,
-                &horizon_world::loot::PackOverlay { files: &packs },
+                &horizon_world::loot::PackOverlay::new(&packs),
                 &server_load(),
             ),
         )
@@ -1595,7 +1595,7 @@ fn the_prediction_records_each_client_tick_and_the_server_ticks_it_had_seen() {
 fn a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick() {
     use horizon_client::block_entity_types::{self, BlockEntityTypes};
     use horizon_client::containers::{BlockEntity, ModBlockEntity};
-    use horizon_world::nbt::{Compound, JavaString, Tag};
+    use horizon_core::nbt::{Compound, JavaString, Tag};
     let Some(resources) = resources() else {
         return;
     };
@@ -1934,7 +1934,7 @@ fn join_as(
             }
             cfg::Clientbound::Disconnect(d) => {
                 return Ok(Err(match d.reason {
-                    horizon_world::nbt::Tag::String(s) => s.to_string_lossy(),
+                    horizon_core::nbt::Tag::String(s) => s.to_string_lossy(),
                     other => format!("{other:?}"),
                 }));
             }
