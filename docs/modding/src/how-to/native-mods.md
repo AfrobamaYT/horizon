@@ -58,6 +58,11 @@ console permission level 4 and the existing console command path, while
 `host.players().acting_player()` returns the optional `PlayerRef` whose state is
 swapped in for this hook. The online list includes connected players even during
 nested player turns; a displaced body's reads still refuse where they did before.
+`host.players().player_by_name(name)` finds a connected real player by account
+name, case-insensitively, or returns `None`; it does not match nicknames or fake
+players. `host.levels().list_levels()` returns loaded server level handles in
+vanilla dimension order, or an empty list before a server world opens. Both
+services are available through `&dyn ServerHost` and do not mutate the world.
 Read identity through `player.uuid()`, `player.name(host)`,
 `player.permission_level(host)` and `player.address(host)`. The address is the
 connection IP without a port (the forwarded address behind a Velocity proxy),

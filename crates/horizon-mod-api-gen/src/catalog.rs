@@ -367,7 +367,10 @@ impl Helper {
             return Err(CatalogError::ClientTargetNeedsBoth(name));
         }
         if let Some(service) = &helper.service {
-            let error = if !matches!(service.as_str(), "commands" | "messages" | "players") {
+            let error = if !matches!(
+                service.as_str(),
+                "commands" | "levels" | "messages" | "players"
+            ) {
                 Some("unknown service")
             } else if helper.receiver.is_some() || helper.backend {
                 Some("a service helper has no receiver or backend")

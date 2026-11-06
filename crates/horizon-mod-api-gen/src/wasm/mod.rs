@@ -28,6 +28,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "LevelWriteHost",
     "ConfigFiles",
     "Commands",
+    "Levels",
     "Messages",
     "Players",
     "menu::SlotView",
@@ -50,6 +51,7 @@ pub(super) const IMPORTS: &[&str] = &[
 pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ConfigFiles", "host", "Ok(h.config_files())"),
     ("Commands", "server_host_mut", "Ok(h.commands())"),
+    ("Levels", "server_host", "Ok(h.levels())"),
     ("Messages", "server_host", "Ok(h.messages())"),
     ("Players", "server_host", "Ok(h.players())"),
     // A level hook's host first: inside a level write it is the one the call hands over.

@@ -4107,8 +4107,8 @@ mod generated_host {
 #[doc(hidden)]
 pub use generated_host::{Backend, BackendMut, ClientBackendMut};
 pub use generated_host::{
-    BlockEntityDrawContext, ClientHost, Commands, DrawContext, Host, HostSide, LevelSide, Messages,
-    Players, ServerHost,
+    BlockEntityDrawContext, ClientHost, Commands, DrawContext, Host, HostSide, LevelSide, Levels,
+    Messages, Players, ServerHost,
 };
 
 /// Result of accessing or decoding an attachment.
