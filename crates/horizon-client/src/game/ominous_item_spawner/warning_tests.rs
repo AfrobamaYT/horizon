@@ -14,7 +14,7 @@ fn warning_dispatch_uses_neutral_at_tick_four() {
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )

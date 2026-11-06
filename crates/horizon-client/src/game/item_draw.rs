@@ -664,7 +664,12 @@ impl Game<'_> {
             // light while it burns. A pickup particle is not an entity and keeps
             // the cell it is drawn in.
             let packed = if entity {
-                let probe = item.light_probe(alpha);
+                // The shared extraction already interpolated the drawn position in f64.
+                let probe = [
+                    at[0],
+                    at[1] + horizon_client::entities::ItemEntity::EYE_HEIGHT,
+                    at[2],
+                ];
                 item.render_light(self.world.light(
                     probe[0].floor() as i32,
                     probe[1].floor() as i32,

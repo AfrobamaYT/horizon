@@ -609,7 +609,6 @@ impl Game<'_> {
             o, lines, text_alpha, background, text_layer, light, unit, out, None,
         )
     }
-    #[allow(clippy::too_many_arguments)]
     fn cached_name_tag_quads(
         &self,
         o: glam::DVec3,

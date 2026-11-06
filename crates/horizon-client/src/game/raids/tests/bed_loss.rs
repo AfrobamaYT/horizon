@@ -16,7 +16,7 @@ fn admitted_raid_loses_removed_loaded_bed_without_erasing_memory() {
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        super::super::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
