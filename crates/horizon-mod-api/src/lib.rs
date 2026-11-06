@@ -107,6 +107,11 @@ use std::sync::{Arc, OnceLock};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod __private;
+mod model_layers;
+pub use model_layers::{
+    CubeDefinition, CubeDeformation, CubeListBuilder, LayerDefinition, MeshDefinition, ModelPart,
+    ModelPolygon, ModelVertex, PartId, PartPose,
+};
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{

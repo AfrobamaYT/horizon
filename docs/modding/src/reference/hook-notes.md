@@ -3141,3 +3141,31 @@ It searches the world's saved templates before data packs and returns the rotate
 in vanilla placement order, with each transformed state and its saved block-entity data. It uses
 the palette selected at `at`; processors and entities are not included. Invalid or missing names
 return `None`. A builder can retain this snapshot and place its blocks over time.
+
+## Entity model layers
+
+`Hooks::layer_definitions` is the client registration-phase counterpart of NeoForge 26.3's
+`EntityRenderersEvent.RegisterLayerDefinitions`. It receives a `RegistrationContext`, once at
+client startup, and collects `(id, LayerDefinition)` entries in dependency order. Dedicated
+and integrated server roles do not fire this client event. IDs are `<mod id>:<model>#<layer>`;
+vanilla-namespace, malformed and duplicate IDs are logged and left out.
+
+A `LayerDefinition` holds a `MeshDefinition` of named parts whose `CubeListBuilder` boxes sit
+at a `PartPose`, on a texture of the given size. Texture offsets, mirroring and
+`CubeDeformation` match vanilla's model builders. This listener is compiled in the API tests:
+
+```rust,ignore
+{{#include ../../../../crates/horizon-client/tests/mod_api_hooks.rs:layer_definitions}}
+```
+
+`ClientHost::bake_layer` bakes a registered layer or a vanilla layer by its
+`entity-models.json` name (`minecraft:zombie#main`) into an owned `ModelPart` tree. Bake once
+and keep it. Before each frame, call `reset_all_poses` and set the parts' positions and
+rotations as `setupAnim` does. A layer unavailable from the cached mob types is read from
+resources for each bake, so do not bake it every frame.
+
+Draw the tree with `BlockEntityDrawContext::model_part`, using the same draw context the mob
+or block entity submit hook received. There is no separate Host drawing helper. Positions
+are texels, +y down and the front towards -z; convert the mob's frame with scale
+`[1.0, -1.0, -1.0]` then translation `[0.0, -1.501, 0.0]`, as `LivingEntityRenderer` does.
+The sprite is the entity texture ID and the tint is `0xRRGGBB`.

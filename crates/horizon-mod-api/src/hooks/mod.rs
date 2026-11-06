@@ -210,6 +210,7 @@ mod mob_refs;
 mod mob_spawn_checks;
 mod mob_split;
 mod mod_configs;
+mod model_layers;
 mod movement_input;
 mod native_block_sprites;
 mod native_note_block_change;

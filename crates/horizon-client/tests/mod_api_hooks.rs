@@ -99,3 +99,52 @@ fn client_packet_hands_a_mod_the_type_and_custom_payload() {
 // Fluid acceptance is scoped to a FLUIDS provider, not a global Hooks method.
 // Its default/refused/accepted writes are covered with a real Game backend in
 // game/machines/native_fluids.rs::tests::a_scoped_tank_can_refuse_a_fluid.
+
+mod model_layers {
+    use mod_api::{
+        CubeListBuilder, Hooks, LayerDefinition, LayerDefinitionsEvent, MeshDefinition, ModEntry,
+        PartPose, RegistrationContext,
+    };
+
+    struct Golem(&'static str);
+    #[mod_api::__subscriptions]
+    impl Hooks for Golem {
+        // ANCHOR: layer_definitions
+        fn layer_definitions(
+            &self,
+            _context: &RegistrationContext,
+            event: &mut LayerDefinitionsEvent<'_>,
+        ) {
+            let mut mesh = MeshDefinition::new();
+            let root = mesh.root();
+            let head = CubeListBuilder::create()
+                .tex_offs(0, 0)
+                .add_box([-4.0, -8.0, -4.0], [8.0, 8.0, 8.0]);
+            mesh.add_or_replace_child(root, "head", head, PartPose::offset(0.0, 6.0, 0.0));
+            event
+                .layers
+                .push((self.0.into(), LayerDefinition::create(mesh, 64, 32)));
+        }
+        // ANCHOR_END: layer_definitions
+    }
+
+    #[test]
+    fn layer_definitions_collect_each_mods_layers_in_order() {
+        mod_api::testing::with_mods(
+            vec![
+                ModEntry::new("first", Box::new(Golem("first:golem#main"))),
+                ModEntry::new("second", Box::new(Golem("second:golem#main"))),
+            ]
+            .into(),
+            || {
+                let mut layers = Vec::new();
+                mod_api::dispatch_layer_definitions(&RegistrationContext::new(), &mut layers);
+                let ids: Vec<_> = layers.iter().map(|(id, _)| id.as_str()).collect();
+                assert_eq!(ids, ["first:golem#main", "second:golem#main"]);
+                let model = layers[0].1.bake_root();
+                let head = model.get_child("head").expect("the head part");
+                assert_eq!((head.y, head.polygons.len()), (6.0, 6));
+            },
+        );
+    }
+}
