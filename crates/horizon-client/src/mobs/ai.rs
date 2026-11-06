@@ -849,6 +849,7 @@ fn effects_from_blocks(
                             events.push(MobEvent::BreakBlock {
                                 pos: p,
                                 drop: false,
+                                by: None,
                             });
                         }
                         m.extinguish_fire();
