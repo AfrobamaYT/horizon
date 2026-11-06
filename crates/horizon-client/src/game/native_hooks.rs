@@ -7385,6 +7385,7 @@ impl Game<'_> {
     /// Set `cancel` and nothing is drawn, and no `tooltip_color` is asked. Client-side.
     pub(super) fn native_render_tooltip_pre(
         &self,
+        batch: &mut HudBatch,
         stack: Option<&ItemStack>,
         screen_width: i32,
         screen_height: i32,
@@ -7392,7 +7393,15 @@ impl Game<'_> {
         place: &mut TooltipPlace,
         cancel: &mut bool,
     ) {
-        self.fire_render_tooltip_pre(stack, screen_width, screen_height, elements, place, cancel);
+        self.fire_render_tooltip_pre(
+            batch,
+            stack,
+            screen_width,
+            screen_height,
+            elements,
+            place,
+            cancel,
+        );
     }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
