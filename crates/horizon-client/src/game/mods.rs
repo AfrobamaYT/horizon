@@ -21,6 +21,10 @@ use std::{
 
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
+    /// The original prepared input is fixed for this engine load, shared by
+    /// the window and its server. A later data reload must not overlay an
+    /// already generated root recursively.
+    pub(super) content_base: Arc<std::sync::OnceLock<PathBuf>>,
     /// `--dev-mod PATH`: content mods always on.
     pub(super) dev: Vec<PathBuf>,
     pub(super) native: std::sync::Arc<horizon_mods::runtime::Runtime>,
@@ -44,6 +48,37 @@ pub(super) struct ModsState {
 }
 
 impl ModsState {
+    /// One admission rule for initial composition and later code-only toggles.
+    /// Content acceptance belongs to the generation; code admission belongs to
+    /// the installed dispatch entries, including their live enabled switches.
+    fn enabled_inventory(
+        &self,
+        accepted_content: impl Fn(&str) -> bool,
+    ) -> horizon_mods::enabled::EnabledMods {
+        let native = self
+            .native
+            .packages()
+            .iter()
+            .map(|package| (&package.manifest, true));
+        let selected = self.selected.iter().map(|selected| {
+            (
+                &selected.package.manifest,
+                selected.package.manifest.wasm.is_some(),
+            )
+        });
+        horizon_mods::enabled::EnabledMods::new(native.chain(selected).filter_map(
+            |(manifest, code)| {
+                let enabled = if code {
+                    mod_api::__private::mod_index(&manifest.id)
+                        .is_some_and(mod_api::__private::mod_index_on)
+                } else {
+                    accepted_content(&manifest.id)
+                };
+                enabled.then(|| (manifest.id.clone(), manifest.side))
+            },
+        ))
+    }
+
     pub(super) fn select(
         &mut self,
         game_dir: &std::path::Path,
@@ -193,6 +228,7 @@ pub(super) fn content_overlay(
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::Content;
     let here = std::env::current_dir().unwrap_or_default();
+    let original_base = root.to_owned();
 
     let requirements = collect_jar_requirements(
         sources
@@ -346,19 +382,10 @@ pub(super) fn content_overlay(
     let cache = here.join(".horizon-cache");
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
-    let inventory = horizon_mods::enabled::EnabledMods::new(packages.iter().filter_map(|source| {
-        let manifest = source.manifest;
-        let code = !source.content_only || manifest.wasm.is_some();
-        let enabled = if code {
-            mod_api::__private::mod_index(&manifest.id)
-                .is_some_and(mod_api::__private::mod_index_on)
-        } else {
-            mods.iter().any(|loaded| loaded.id == manifest.id)
-        };
-        enabled.then(|| (manifest.id.clone(), manifest.side))
-    }));
+    let inventory = sources.enabled_inventory(|id| mods.iter().any(|loaded| loaded.id == id));
     let prepared = mod_content::resource_root(root, jar_store, &mods, &cache, &inventory)?;
     let root = mod_content::resolved_resources(root, prepared, jar_store, &mods, cache)?;
+    let _ = sources.content_base.set(original_base);
     Ok(ContentOverlay {
         root,
         mods,
@@ -586,20 +613,46 @@ impl Game<'_> {
     /// current settings. Called where a resource generation starts or reloads: a
     /// client at window start and after a resource reload, a server when it starts
     /// its mods and on `/reload`. A client hands a second one to its audio.
-    pub(super) fn refresh_loop_context(&mut self) {
+    pub(super) fn refresh_loop_context(&mut self) -> horizon_client::Result<()> {
         let side = self.options.execution_role.loop_side();
+        let inventory = horizon_mods::enabled::EnabledMods::read(&self.options.resources)?;
+        let ids: Vec<_> = if self.is_logical_server() {
+            inventory.server_ids().collect()
+        } else {
+            inventory.client_ids().collect()
+        };
         let item_data = self.res.core.item_data.context();
-        self.loop_context = std::sync::Arc::new(
-            item_data.loop_context(side, mod_api::__private::loaded_mods().ids()),
-        );
+        self.loop_context = Arc::new(item_data.loop_context(side, ids.iter().copied()));
         if let Some(host) = self.lan.as_mut() {
             host.hub.loop_context = self.loop_context.clone();
         }
         if self.options.execution_role.is_client() {
-            self.audio.set_loop_context(
-                item_data.loop_context(side, mod_api::__private::loaded_mods().ids()),
-            );
+            self.audio
+                .set_loop_context(item_data.loop_context(side, ids));
         }
+        Ok(())
+    }
+
+    /// Stage a fresh root only when live code admission changes the inventory.
+    /// The caller publishes it after every server reload listener prepared.
+    pub(super) fn stage_enabled_inventory(
+        &self,
+    ) -> horizon_client::Result<Option<horizon_assets::resource_source::ResourceRoot>> {
+        let previous = horizon_mods::enabled::EnabledMods::read(&self.options.resources)?;
+        let next = self
+            .mods
+            .enabled_inventory(|id| previous.client_ids().any(|loaded| loaded == id));
+        if previous == next {
+            return Ok(None);
+        }
+        let base = self
+            .mods
+            .content_base
+            .get()
+            .cloned()
+            .unwrap_or_else(|| self.vanilla_root());
+        let jars = horizon_client::logging::game_home().join("jars");
+        Ok(Some(content_overlay(&base, &self.mods, &jars)?.root))
     }
 
     /// Lists the installed mods on the Mods page. Content mods load with the resources
@@ -827,6 +880,13 @@ pub(super) fn living_mod_types()
 mod tests {
     use super::*;
     use horizon_mods::runtime::{BuiltMod, Runtime};
+
+    mod inventory {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/game/mod_inventory_tests.rs"
+        ));
+    }
 
     const BUILT: &[BuiltMod] = &[BuiltMod {
         id: "machine_sample",
@@ -1138,6 +1198,7 @@ mod tests {
             "{\"minecraft:block_entity_type\":{\"entries\":{}}}",
         )
         .unwrap();
+        std::fs::write(base.join("horizon-resources.json"), "{}").unwrap();
         std::env::set_current_dir(&here).unwrap();
         let mut sources = ModsState {
             native: std::sync::Arc::new(native),
@@ -1145,7 +1206,15 @@ mod tests {
         };
         let enabled = std::collections::BTreeSet::from(["plain".to_owned()]);
         sources.select(&here, &enabled);
-        assert_eq!(content_root(&base, &sources).unwrap().prepared(), base);
+        let generated = content_root(&base, &sources).unwrap();
+        assert_ne!(generated.prepared(), base);
+        assert_eq!(
+            horizon_mods::enabled::EnabledMods::read(generated.prepared())
+                .unwrap()
+                .server_ids()
+                .collect::<Vec<_>>(),
+            ["plain"],
+        );
         let local = horizon_protocol::mod_list::local();
         let ids: Vec<_> = local.iter().map(|m| m.id.as_str()).collect();
         if mode.as_deref() == Some("compiled") {

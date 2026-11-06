@@ -3296,21 +3296,25 @@ pub fn resource_root(
     cache: &Path,
     inventory: &horizon_mods::enabled::EnabledMods,
 ) -> Result<PathBuf> {
-    if inventory.is_empty()
-        && mods.iter().all(|m| {
-            m.jars.is_empty()
-                && m.content.is_empty()
-                && m.content.blocks.is_empty()
-                && m.content.items.is_empty()
-                && m.content.block_entity_types.is_empty()
-        })
-    {
+    let has_content = mods.iter().any(|m| {
+        !m.jars.is_empty()
+            || !m.content.is_empty()
+            || !m.content.blocks.is_empty()
+            || !m.content.items.is_empty()
+            || !m.content.block_entity_types.is_empty()
+    });
+    if inventory.is_empty() && !has_content {
         return Ok(base.to_owned());
     }
     let stamp = stamp(base, jar_store, mods, inventory)?;
     let roots = cache.join("mod-content");
     let out = roots.join(&stamp[..ROOT_NAME]);
-    if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes()) {
+    if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes())
+        && fs::read(out.join(horizon_mods::enabled::MARKER)).is_ok_and(|bytes| {
+            serde_json::from_slice::<horizon_mods::enabled::EnabledMods>(&bytes)
+                .is_ok_and(|loaded| &loaded == inventory)
+        })
+    {
         // A reused root warns as the build did.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
         warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
@@ -3318,8 +3322,20 @@ pub fn resource_root(
         let _ = fs::write(out.join(STAMP), &stamp);
         return Ok(out);
     }
-    for warning in build(base, jar_store, mods, &out, inventory)? {
-        log::warn!("Horizon: {warning}");
+    if has_content {
+        for warning in build(base, jar_store, mods, &out, inventory)? {
+            log::warn!("Horizon: {warning}");
+        }
+    } else {
+        // Code-only packages still own an inventory generation, but need no
+        // registry-table rewrite or content scan. Existing tables stay linked.
+        let base = std::path::absolute(base)?;
+        let overlay = Overlay::new(&base, &out)?;
+        overlay.write(
+            horizon_mods::enabled::MARKER,
+            &serde_json::to_vec(inventory)?,
+        )?;
+        overlay.write(GENERATED_FILES, b"[]")?;
     }
     fs::write(out.join(STAMP), stamp)?;
     prune_roots(&roots, &out, KEEP_ROOTS);

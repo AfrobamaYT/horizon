@@ -539,7 +539,7 @@ impl Game<'_> {
         // The creative screen survives the reload; item names may not.
         self.creative_screen.forget_items();
         super::client_reload::apply_client_reload(client_applies);
-        self.refresh_loop_context();
+        self.refresh_loop_context()?;
         self.native_client_resources_reloaded();
         Ok(())
     }

@@ -269,6 +269,8 @@ impl<L: ?Sized + 'static> ReloadCore<L> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ReloadStageError {
+    /// The next resource generation or its enabled-package inventory could not be built.
+    DataSource(String),
     /// An accepted root's original jars or input record could not be read.
     OriginalJars(horizon_mods::manifest::JarInputsError),
     /// The listeners could not be ordered.
@@ -284,6 +286,7 @@ pub enum ReloadStageError {
 impl std::fmt::Display for ReloadStageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::DataSource(error) => f.write_str(error),
             Self::OriginalJars(error) => error.fmt(f),
             Self::Order(error) => error.fmt(f),
             Self::Listener { listener, source } => {
@@ -295,6 +298,7 @@ impl std::fmt::Display for ReloadStageError {
 impl std::error::Error for ReloadStageError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(match self {
+            Self::DataSource(_) => return None,
             Self::OriginalJars(error) => error,
             Self::Order(error) => error,
             Self::Listener { source, .. } => source,

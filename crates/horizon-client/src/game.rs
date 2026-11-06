@@ -13709,6 +13709,7 @@ impl Game<'_> {
         // Keep the no-pack preload; a world's packs replace it atomically.
         // A later /reload keeps this session's synchronized registries.
         lan::open_world_sync_data(
+            &self.options.resources,
             &self.res.core.item_data,
             &pack_files(&self.world_tables),
             &self.health_resources.damage,
@@ -21765,10 +21766,11 @@ impl Game<'_> {
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
         let sources = lan::load_sources(
+            root,
             &self.res.core.item_data,
             self.options.execution_role.data_load_origin(),
             &overlay,
-        );
+        )?;
         let recipes = Recipes::from_resolved(root, &items, &overlay, &sources)?;
         let stations = horizon_client::stations::StationData::from_sources(
             root,
@@ -21838,7 +21840,17 @@ impl Game<'_> {
                 self.res.item_defaults(),
             ) {
                 Ok(mut loot) => {
-                    let context = lan::server_data_load(&self.res.core.item_data);
+                    let context = match lan::server_data_load(
+                        &self.options.resources,
+                        &self.res.core.item_data,
+                    ) {
+                        Ok(context) => context,
+                        Err(error) => {
+                            log::warn!("Horizon: server loot inventory unavailable: {error}");
+                            self.server_loot.set(None);
+                            return;
+                        }
+                    };
                     loot.apply_native_table_loads(&context);
                     Some(Arc::new(loot))
                 }
@@ -21923,7 +21935,10 @@ impl Game<'_> {
         // One pass over the recipes for this reload: the tables built next and
         // the players' copy below share it.
         lan::forget_server_sources();
-        self.refresh_loop_context();
+        if let Err(error) = self.refresh_loop_context() {
+            log::warn!("Horizon: data-load inventory could not be refreshed: {error}");
+            return;
+        }
         match self.build_world_tables(stack, true) {
             Ok((tables, health)) => {
                 self.world_tables = tables;
@@ -21949,7 +21964,12 @@ impl Game<'_> {
         let kept = self.lan.as_ref().map(|host| host.hub.lan.shared.sync());
         match kept {
             Some(kept) => {
-                match lan::reload_sync_data(&self.res.core.item_data, &self.pack_files(), &kept) {
+                match lan::reload_sync_data(
+                    &self.options.resources,
+                    &self.res.core.item_data,
+                    &self.pack_files(),
+                    &kept,
+                ) {
                     Ok(sync) => {
                         self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
                         self.run_native_advancement_grants();
@@ -21960,9 +21980,11 @@ impl Game<'_> {
                 }
             }
             None => {
-                if let Err(e) =
-                    lan::reload_cached_sync_data(&self.res.core.item_data, &self.pack_files())
-                {
+                if let Err(e) = lan::reload_cached_sync_data(
+                    &self.options.resources,
+                    &self.res.core.item_data,
+                    &self.pack_files(),
+                ) {
                     log::warn!("Horizon: the cached world data is not reloaded: {e}");
                 }
             }
@@ -22715,11 +22737,12 @@ fn load_world_rest(
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
         let sources = startup::time("rest.recipe_sources", || {
             lan::load_sources(
+                root,
                 &resources.core.item_data,
                 resources.core.item_data.context().origin(),
                 overlay,
             )
-        });
+        })?;
         let recipes = startup::time("rest.recipes", || {
             Recipes::from_resolved(root, &items, overlay, &sources)
         })?;
@@ -23173,7 +23196,7 @@ fn start_game<'a>(
     // The initial load's client reload listeners, registered and staged by
     // the loader thread, publish now that the game owns the assets.
     client_reload::apply_client_reload(client_applies);
-    game.refresh_loop_context();
+    game.refresh_loop_context()?;
     // After the mods: their templates are among the ids it lists.
     game.preload_registries();
     game.start_agent_control()?;
