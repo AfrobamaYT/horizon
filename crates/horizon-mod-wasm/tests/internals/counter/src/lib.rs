@@ -58,6 +58,21 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
             }
         }
     }
+    if message.as_str() == "oversize_cells" {
+        use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
+        let node = game.node();
+        let writes = (0..12)
+            .map(|_| (node, 0, (0..65_537).map(|_| view::Cell::None).collect()))
+            .collect::<Vec<_>>();
+        let results = view::set_many(&writes);
+        assert_eq!(results.len(), 12);
+        assert!(
+            results
+                .iter()
+                .all(|result| matches!(result, Err(view::Refusal::NotHere(_))))
+        );
+        return;
+    }
     if matches!(message.as_str(), "oversize_get" | "oversize_set") {
         use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
         let node = game.node();

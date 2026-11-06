@@ -9,13 +9,14 @@ type Read = (Resource<wire::Node>, u32);
 type Write = (Resource<wire::Node>, u32, WasmList<wire::Cell>);
 
 #[derive(Default)]
-struct Buffers {
+pub(super) struct Buffers {
     cells: Vec<Arc<Vec<wire::Cell>>>,
     pending: Vec<internals::Value>,
     gets: Arc<Vec<Get>>,
     sets: Arc<Vec<Result<(), wire::Refusal>>>,
-    inputs: Vec<Vec<wire::Cell>>,
+    pub(super) inputs: Vec<Vec<wire::Cell>>,
     requests: Vec<Read>,
+    refused: Vec<bool>,
 }
 
 impl Buffers {
@@ -23,6 +24,14 @@ impl Buffers {
         Arc::get_mut(&mut self.gets).unwrap().clear();
         Arc::get_mut(&mut self.sets).unwrap().clear();
         self.requests.clear();
+        self.refused.clear();
+    }
+
+    pub(super) fn clear_inputs(&mut self) {
+        for input in &mut self.inputs {
+            input.clear();
+            input.shrink_to(1024);
+        }
     }
 
     fn encode(&mut self, index: usize, value: internals::Value) -> Get {
@@ -41,16 +50,27 @@ impl Buffers {
         store: &mut StoreContextMut<'_, State>,
         cells: WasmList<wire::Cell>,
         index: usize,
-    ) -> wasmtime::Result<usize> {
+    ) -> wasmtime::Result<Option<usize>> {
         while self.inputs.len() <= index {
             self.inputs.push(Vec::new());
         }
+        if cells.len() > 65_536 {
+            return Ok(None);
+        }
         let input = &mut self.inputs[index];
         input.clear();
+        let mut bytes = 0usize;
         for cell in cells.iter(store.as_context_mut())? {
-            input.push(cell?);
+            let cell = cell?;
+            if let wire::Cell::Str(value) = &cell {
+                bytes = bytes.saturating_add(value.len());
+                if bytes > 1_048_576 {
+                    return Ok(None);
+                }
+            }
+            input.push(cell);
         }
-        Ok(wire_cost(input))
+        Ok(Some(bytes.div_ceil(64)))
     }
 }
 
@@ -94,24 +114,29 @@ fn set_many(
 ) -> wasmtime::Result<Arc<Vec<Result<(), wire::Refusal>>>> {
     bounded_batch(writes.len())?;
     State::with_buffer::<Buffers, _>(store, |buffers, mut store| {
-        contain(|| {
+        let result = contain(|| {
             buffers.begin();
-            let mut cost = writes.len().max(1);
+            charge(&mut store, writes.len().max(1))?;
             for index in 0..writes.len() {
                 let (node, field, cells) = writes.get(store.as_context_mut(), index).unwrap()?;
-                cost = cost
-                    .saturating_add(node_cost(&node))
-                    .saturating_add(buffers.input(&mut store, cells, index)?);
+                charge(&mut store, node_cost(&node).saturating_add(cells.len()))?;
+                let bytes = buffers.input(&mut store, cells, index)?;
+                charge(&mut store, bytes.unwrap_or(0))?;
+                buffers.refused.push(bytes.is_none());
                 buffers.requests.push((node, field));
             }
-            charge(&mut store, cost)?;
-            for ((node, field), cells) in buffers.requests.drain(..).zip(&mut buffers.inputs) {
-                Arc::get_mut(&mut buffers.sets)
-                    .unwrap()
-                    .push(View.set_buffer(&node, field, cells));
+            for (index, (node, field)) in buffers.requests.drain(..).enumerate() {
+                let value = if buffers.refused[index] {
+                    Err(wire::Refusal::NotHere("internals budget".into()))
+                } else {
+                    View.set_buffer(&node, field, &mut buffers.inputs[index])
+                };
+                Arc::get_mut(&mut buffers.sets).unwrap().push(value);
             }
             Ok(buffers.sets.clone())
-        })
+        });
+        buffers.clear_inputs();
+        result
     })
 }
 

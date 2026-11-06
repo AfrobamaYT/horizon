@@ -1069,6 +1069,28 @@ mod tests {
 
     #[test]
     #[ignore = "needs the internals guest fixture"]
+    fn guest_oversized_cell_lists_leave_no_large_scratch() {
+        let group = fixture_group();
+        let mut game = fixture_game();
+        fixture_result(&group, &mut game, "oversize_cells").unwrap();
+        assert_eq!((game.left, game.right), (1, 10));
+        group
+            .exports
+            .load(|store| {
+                State::with_buffer::<transport::Buffers, _>(
+                    wasmtime::AsContextMut::as_context_mut(store),
+                    |buffers, _| {
+                        assert_eq!(buffers.inputs.len(), 12);
+                        assert!(buffers.inputs.iter().all(|input| input.capacity() <= 1024));
+                    },
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
     fn guest_batches_exhaust_fuel_without_committing_writes() {
         for message in ["fuel_get", "fuel_set"] {
             let group = fixture_group_with_fuel(true);
