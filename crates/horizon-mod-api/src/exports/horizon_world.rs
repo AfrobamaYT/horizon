@@ -1,3 +1,5 @@
+/// The structure box a piece's `bounding_box` answers, in world blocks.
+pub use horizon_core::bounding_box::BoundingBox;
 pub use horizon_core::equipment_slot::EquipmentSlot;
 #[horizon_mod_api_macros::wasm(via = String)]
 pub use horizon_core::identifier::Identifier;
@@ -22,7 +24,5 @@ pub use {
     },
 };
 // hidden: the game's maps behind the store, not part of the mod surface
-/// The structure box a piece's `bounding_box` answers, in world blocks.
-pub use horizon_core::bounding_box::BoundingBox;
 #[doc(hidden)]
 pub use horizon_world::attachments::{AttachmentAccess, AttachmentHost, Attachments};

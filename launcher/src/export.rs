@@ -11,7 +11,7 @@
 //! listed by its download (`files`, with its SHA-1 and SHA-512) instead of being copied; the
 //! rest goes under `overrides/`, which a launcher copies into the game folder.
 use crate::browser::installed::{Entry, Installed};
-use crate::browser::{FileRef, GAME, Kind, SourceId};
+use crate::browser::{FileRef, Kind, SourceId, GAME};
 use horizon_core::{
     nbt,
     nbt::{Limits, Tag},
