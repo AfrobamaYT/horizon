@@ -98,6 +98,7 @@ pub(super) struct Integrated {
     tasks: Sender<Task>,
     /// The world's name (`level.dat`'s `LevelName`), for the pause menu.
     pub world_name: String,
+    pub rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
 }
 impl Integrated {
     /// Queue every change, even if the currently published tree still has the requested state:
@@ -342,6 +343,7 @@ pub(super) struct Starting {
 /// The world to open and the player who owns it.
 struct Launch {
     folder: String,
+    rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
     name: Option<String>,
     seed: Option<i64>,
     creative: bool,
@@ -407,7 +409,9 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(|| self.options.player_name(), |a| a.name.clone());
         let new_world = create.is_some();
+        let rule_registry = Arc::new(mod_api::__private::game_rule_registry());
         let launch = Launch {
+            rule_registry: rule_registry.clone(),
             folder: folder.to_owned(),
             name: name.map(str::to_owned),
             seed,
@@ -502,6 +506,7 @@ impl Game<'_> {
             thread: Some(thread),
             tasks,
             world_name: String::new(),
+            rule_registry,
         };
         self.integrated_starting = Some(Starting {
             handle,
@@ -1213,6 +1218,7 @@ fn serve(
         launch.seed,
         launch.creative,
         launch.create.as_ref(),
+        launch.rule_registry.clone(),
     )
     .and_then(|request| {
         WorldLoader::start(
@@ -1341,6 +1347,37 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn integrated_rules_screen_shares_server_session_registry() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let registry = Arc::new(horizon_client::gamerules::RuleRegistry::with_categories(&[
+                "example:machines".into(),
+            ]));
+            let request =
+                WorldRequest::new("test", None, None, true, None, registry.clone()).unwrap();
+            let (tasks, _receiver) = channel();
+            game.integrated = Some(Integrated {
+                flags: Arc::new(Flags::default()),
+                thread: None,
+                tasks,
+                world_name: "test".into(),
+                rule_registry: registry.clone(),
+            });
+            assert!(Arc::ptr_eq(
+                &request.rule_registry,
+                &game.integrated.as_ref().unwrap().rule_registry
+            ));
+            assert!(game.test_open_remote_rules(Vec::new()));
+            assert!(
+                request
+                    .rule_registry
+                    .categories()
+                    .contains(&"example:machines".to_owned())
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_session_identifies_only_its_own_integrated_server() {
         use mod_api::ClientHost;
         super::super::native_entity_refs::tests::with_client_game(|game| {
@@ -1351,6 +1388,7 @@ pub(super) mod tests {
                 thread: None,
                 tasks,
                 world_name: "First world".into(),
+                rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
             });
             let local = game.client_session().client_server().unwrap();
             assert!(local.integrated_local);
@@ -1381,6 +1419,7 @@ pub(super) mod tests {
             thread: None,
             tasks,
             world_name: String::new(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         };
         // The receiver deliberately does not run either task between the updates. In particular,
         // the dispatcher can still show the old value when the owner toggles back.
@@ -1430,6 +1469,7 @@ pub(super) mod tests {
             thread: Some(std::thread::spawn(move || wait.recv().unwrap())),
             tasks,
             world_name: String::new(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         };
         server.request_stop();
         assert!(flags.stop.load(Ordering::Relaxed));
@@ -1450,6 +1490,7 @@ pub(super) mod tests {
             })),
             tasks,
             world_name: String::new(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         };
         assert_eq!(server.stop().unwrap_err().to_string(), "disk write failed");
     }
