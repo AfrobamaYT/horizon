@@ -118,6 +118,8 @@ pub struct Parts {
     entity_capabilities: Capabilities<EntityProviderOf>,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
     place_providers: HashMap<&'static str, PlaceProviderPart>,
+    /// The tooltip appenders, in registration order.
+    tooltip_appenders: Vec<TooltipAppenderPart>,
     /// Only the parts that override each scoped hook, resolved at load or reload.
     hooks: Vec<Option<HookParts>>,
 }
@@ -160,6 +162,58 @@ struct PlaceProviderPart {
     mod_id: &'static str,
     mod_index: usize,
     provider: Arc<dyn PlaceProvider>,
+}
+
+/// A tooltip appender a mod registered, as the game reads it ([`tooltip_appenders`]).
+#[derive(Clone)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct TooltipAppenderPart {
+    mod_id: &'static str,
+    mod_index: usize,
+    component: Box<str>,
+    placement: super::TooltipPlacement,
+    appender: Arc<dyn super::TooltipAppender>,
+}
+
+impl TooltipAppenderPart {
+    /// The data component whose stacks it is asked about.
+    pub fn component(&self) -> &str {
+        &self.component
+    }
+    /// Where its lines go among the other components' lines.
+    pub fn placement(&self) -> &super::TooltipPlacement {
+        &self.placement
+    }
+    /// The appender that adds the lines.
+    pub fn appender(&self) -> &dyn super::TooltipAppender {
+        self
+    }
+    /// Whether its mod is enabled.
+    pub fn enabled(&self) -> bool {
+        super::mod_index_on(self.mod_index)
+    }
+}
+
+impl super::TooltipAppender for TooltipAppenderPart {
+    fn append(
+        &self,
+        host: &dyn super::ClientHost,
+        stack: &super::ItemStack,
+        context: &super::TooltipAppendContext,
+        lines: &mut Vec<(super::Text, u32)>,
+    ) {
+        let _guard = super::crash::enter_native_mod(super::crash::NativeModCall {
+            id: self.mod_id,
+            hook: "tooltip_appender",
+            part: Some(std::any::type_name_of_val(&*self.appender)),
+        });
+        self.appender.append(host, stack, context, lines);
+    }
+}
+
+/// The tooltip appenders the mods registered, in registration order.
+pub fn tooltip_appenders() -> &'static [TooltipAppenderPart] {
+    installed().map_or(&[], |installed| &installed.keys.tooltip_appenders)
 }
 
 /// What answers a capability for a block entity of one type: given the block entity and the
@@ -1108,6 +1162,18 @@ pub trait Registrar {
     /// Register structure type `name` with `ty`; mods reach it through
     /// `register_structure_type`.
     fn add_structure_type(&mut self, name: &str, ty: Arc<dyn super::StructureType>);
+    /// Register `appender` as the lines data component `component` (`mymod:charge`) adds to a
+    /// stack's tooltip, where `placement` puts them (NeoForge's `RegisterTooltipAppendersEvent`).
+    /// Only this mod's appender is asked, for a stack that carries the component and whose
+    /// tooltip shows it, and only while the mod is enabled. A component id that isn't namespaced,
+    /// or a `Before`/`After` anchor the game doesn't list as a component detail, refuses the mods
+    /// at startup, naming the mod.
+    fn register_tooltip_appender(
+        &mut self,
+        component: &str,
+        placement: super::TooltipPlacement,
+        appender: Arc<dyn super::TooltipAppender>,
+    );
 }
 
 impl dyn Registrar + '_ {
@@ -1884,6 +1950,44 @@ impl Registrar for PartRegistrar {
                 provider,
             },
         );
+    }
+
+    fn register_tooltip_appender(
+        &mut self,
+        component: &str,
+        placement: super::TooltipPlacement,
+        appender: Arc<dyn super::TooltipAppender>,
+    ) {
+        let refusal = if !namespaced(component) {
+            Some(format!(
+                "{} registers a tooltip appender for {component:?}, which is not a namespaced data component id",
+                self.mod_id
+            ))
+        } else {
+            match &placement {
+                super::TooltipPlacement::Before(anchor)
+                | super::TooltipPlacement::After(anchor)
+                    if !super::TOOLTIP_DETAILS.contains(&anchor.as_str()) =>
+                {
+                    Some(format!(
+                        "{} anchors a tooltip appender for {component:?} to {anchor:?}, which is not a component detail Horizon lists",
+                        self.mod_id
+                    ))
+                }
+                _ => None,
+            }
+        };
+        if let Some(refusal) = refusal {
+            self.refused.push(refusal);
+            return;
+        }
+        self.parts.tooltip_appenders.push(TooltipAppenderPart {
+            mod_id: self.mod_id,
+            mod_index: self.mod_index,
+            component: component.into(),
+            placement,
+            appender,
+        });
     }
 }
 
@@ -2833,6 +2937,53 @@ pub mod tests {
     impl ServerHost for NoHost {}
     #[cfg(test)]
     impl ClientHost for NoHost {}
+
+    #[test]
+    fn tooltip_appender_restores_owner_even_on_panic() {
+        struct Check(bool);
+        impl TooltipAppender for Check {
+            fn append(
+                &self,
+                _: &dyn ClientHost,
+                _: &ItemStack,
+                _: &TooltipAppendContext,
+                _: &mut Vec<(Text, u32)>,
+            ) {
+                assert_eq!(crate::crash::current_native_mod(), Some("inner"));
+                assert!(!self.0, "test unwind");
+            }
+        }
+        let context = TooltipAppendContext {
+            player: 0,
+            player_entity_id: 0,
+            advanced: false,
+            creative: false,
+            nested: false,
+        };
+        let stack = ItemStack::new("minecraft:stick", 1);
+        let outer = crate::crash::enter_native_mod(crate::crash::NativeModCall {
+            id: "outer",
+            hook: "outer",
+            part: None,
+        });
+        for panic in [false, true] {
+            let part = super::TooltipAppenderPart {
+                mod_id: "inner",
+                mod_index: 0,
+                component: "test:item".into(),
+                placement: TooltipPlacement::AfterAll,
+                appender: std::sync::Arc::new(Check(panic)),
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                part.appender()
+                    .append(&NoHost, &stack, &context, &mut Vec::new())
+            }));
+            assert_eq!(result.is_err(), panic);
+            assert_eq!(crate::crash::current_native_mod(), Some("outer"));
+        }
+        drop(outer);
+        assert_eq!(crate::crash::current_native_mod(), None);
+    }
 
     #[test]
     fn a_host_without_a_backend_refuses_handle_calls() {
