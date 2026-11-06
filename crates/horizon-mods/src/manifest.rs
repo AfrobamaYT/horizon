@@ -285,6 +285,13 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
             ));
         }
     }
+    let source_options = injection.cancellable
+        || !injection.bindings.is_empty()
+        || injection.argument.is_some()
+        || injection.require.is_some()
+        || injection.slice.is_some()
+        || injection.variable.is_some()
+        || injection.result.is_some();
     let site = injection.raw.is_some() && injection.selector.is_some();
     if site {
         if injection.target.is_none()
@@ -297,13 +304,7 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
                     | InjectionKind::WrapOperation
                     | InjectionKind::WrapWithCondition
             )
-            || injection.cancellable
-            || !injection.bindings.is_empty()
-            || injection.argument.is_some()
-            || injection.require.is_some()
-            || injection.slice.is_some()
-            || injection.variable.is_some()
-            || injection.result.is_some()
+            || source_options
         {
             return Err(format!(
                 "{MANIFEST}: injection {}: a raw call-site listener needs target, selector and a call-site kind; no non-local cancellation, bindings, argument, require, slice, variable or result",
@@ -322,15 +323,9 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
     if (injection.trait_method.is_some() || injection.raw.is_some())
         && (injection.hook.is_some()
             || !matches!(injection.kind, InjectionKind::Head | InjectionKind::Return)
-            || injection.cancellable
-            || !injection.bindings.is_empty()
-            || injection.argument.is_some()
+            || source_options
             || injection.selector.is_some()
-            || injection.ordinal.is_some()
-            || injection.require.is_some()
-            || injection.slice.is_some()
-            || injection.variable.is_some()
-            || injection.result.is_some())
+            || injection.ordinal.is_some())
     {
         return Err(format!(
             "{MANIFEST}: injection {}: a trait_method or raw listener listens at the HEAD or RETURN of the point its `target` names, and takes the point's record: no `hook` (a hook is its own Hooks method), bindings, cancellable, argument, selector, ordinal, require, slice, variable or result (cancel through the record's `cancel`); use a helper for the rest",
