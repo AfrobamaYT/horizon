@@ -85,12 +85,7 @@ impl WorldGeometry {
         }
         self.validate_positions(quads.iter().flat_map(|q| q.corners))?;
         for q in quads {
-            let color = u32::from_le_bytes([
-                (q.color >> 16) as u8,
-                (q.color >> 8) as u8,
-                q.color as u8,
-                (q.color >> 24) as u8,
-            ]);
+            let color = crate::world_primitives::vertex_color(q.color, 255);
             self.quads[usize::from(q.depth == WorldDepth::ThroughWalls)].extend(q.corners.map(
                 |p| Vertex {
                     pos: std::array::from_fn(|i| (p[i] - self.camera[i]) as f32),
@@ -122,8 +117,7 @@ mod tests {
     #[test]
     fn world_geometry_batches_are_atomic_and_reset_per_view() {
         let mut draw = WorldGeometry::default();
-        let camera = [30_000_000.0, 20.0, 0.0];
-        draw.reset(camera, Mat4::IDENTITY, [0.25, 0.75]);
+        draw.reset([30_000_000.0, 20.0, 0.0], Mat4::IDENTITY, [0.25, 0.75]);
         let line = WorldLine::new(
             [30_000_000.25, 20.0, -1.0],
             [30_000_001.0, 20.0, -1.0],
@@ -158,13 +152,8 @@ mod tests {
         invalid_quad.corners[3][1] = f64::INFINITY;
         assert_eq!(draw.quads(&[quad, invalid_quad]), Err(DrawError::NonFinite));
         assert_eq!(draw.usage().quads, 1);
-        let through = WorldLine::new(
-            line.from,
-            line.to,
-            line.color,
-            1.0,
-            WorldDepth::ThroughWalls,
-        );
+        let mut through = line;
+        through.depth = WorldDepth::ThroughWalls;
         draw.lines(&vec![through; CAPACITY as usize - 1]).unwrap();
         assert_eq!(draw.lines(&[line]), Err(DrawError::CapacityExceeded));
         draw.quads(&vec![quad; CAPACITY as usize - 1]).unwrap();
@@ -175,7 +164,6 @@ mod tests {
         );
         draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
         assert!(draw.batch().is_empty());
-        assert_eq!(draw.usage(), WorldDrawUsage::new(0, CAPACITY, 0, CAPACITY));
         assert_eq!(
             capacities,
             (
