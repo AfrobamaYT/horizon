@@ -382,13 +382,7 @@ impl crate::menu::SlotView for HostedSlotView<'_, '_> {
         self.view.may_place(self.slot, stack, self.rules)
     }
     fn may_pickup(&self) -> bool {
-        self.view.container.is_some()
-            || !(5..=8).contains(&self.slot)
-            || self.view.guest.creative()
-            || self
-                .view
-                .get(self.slot)
-                .is_none_or(|s| !self.rules.enchantments().prevents_armor_change(&s))
+        self.view.may_pickup(self.slot, self.rules)
     }
     fn allow_modification(&self) -> bool {
         let item = self
@@ -861,7 +855,7 @@ fn bundle_click(view: &mut View, i: usize, right: bool, rules: &dyn Rules) -> bo
                         rules,
                     };
                     if let Some(mut taken) =
-                        crate::menu::SlotView::safe_take(&mut slot, amount, amount)
+                        crate::menu::SlotView::safe_take(&mut slot, other.count, amount)
                     {
                         contents.try_insert(items, &mut taken);
                     }
@@ -1473,6 +1467,43 @@ mod tests {
         click(&mut view, &mut drag, 0, 0, input::PICKUP, &rules);
         assert_eq!(view.guest.carried, None);
         assert_eq!(contents(&view.get(0)), [("minecraft:stone".into(), 5)]);
+    }
+
+    #[test]
+    fn carried_bundle_uses_safe_take_for_refused_and_allowed_slots() {
+        let Some(ItemRules(items)) = rules() else {
+            return;
+        };
+        let mut guest = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 8))];
+        let mut view = View {
+            guest: &mut guest,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+            loop_context: crate::test_resources::server_loop_context(),
+        };
+        let mut bundle = ItemStack::new("minecraft:bundle", 1);
+        bundle.data_mut().bundle_contents = vec![ItemStack::new("minecraft:stone", 60)];
+        view.guest.carried = Some(bundle);
+        let refused = StrictRules {
+            items: items.clone(),
+            refuse: &[0],
+            drops: true,
+        };
+        bundle_click(&mut view, 0, false, &refused);
+        assert_eq!(view.get(0).unwrap().count, 8);
+        assert_eq!(
+            contents(&view.guest.carried),
+            [("minecraft:stone".into(), 60)]
+        );
+        let allowed = ItemRules(items);
+        bundle_click(&mut view, 0, false, &allowed);
+        assert_eq!(view.get(0).unwrap().count, 4);
+        assert_eq!(
+            contents(&view.guest.carried),
+            [("minecraft:stone".into(), 64)]
+        );
     }
 
     /// A mod container saved with more items than its menu has slots: the
