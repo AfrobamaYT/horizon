@@ -6,7 +6,7 @@
 //! (#6509, tick order slice).
 //! REFS: vanilla `EntityLookup` / `EntitySectionStorage` insertion order,
 //! `PersistentEntitySectionManager.addEntity`; issue #6509; PR #7808.
-//! LOGS: none. READS-BY: `game/entity.rs` (the join-order walk, the save order).
+//! LOGS: none. READS-BY: `game/entities/entity.rs` (the join-order walk, the save order).
 //! ENDS-WHEN: kinds share one stored entity list, which is its own order.
 
 use std::ops::{Deref, DerefMut};

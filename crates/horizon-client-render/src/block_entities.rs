@@ -27,7 +27,33 @@ use crate::chunk::block_entity::{BlockEntity, ModContainer, ModEnergyBuffer, Mod
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use horizon_world::attachments::{Attachments, Holder, observer::AttachmentObserver};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+
+static NEXT_LEASE: AtomicU64 = AtomicU64::new(1);
+
+fn next_lease() -> u64 {
+    let mut token = NEXT_LEASE.load(Ordering::Relaxed);
+    loop {
+        let next = token
+            .checked_add(1)
+            .expect("block entity lease space exhausted");
+        match NEXT_LEASE.compare_exchange_weak(token, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return token,
+            Err(current) => token = current,
+        }
+    }
+}
+
+/// Exclusive authority to return one instance taken from a block entity store.
+/// Invalidated by removal, replacement, unloading, or the next ticker sweep.
+/// Dropping it does not restore the instance; it cannot be cloned or forged.
+pub struct BlockEntityLease {
+    pos: Pos,
+    token: u64,
+}
 
 pub type Pos = (i32, i32, i32);
 
@@ -66,7 +92,7 @@ pub struct BlockEntities {
     freed: bool,
     /// Positions whose block entity `take` took and `put` has not brought
     /// back.
-    out: FxHashSet<Pos>,
+    out: FxHashMap<Pos, u64>,
     /// Positions a loaded chunk gave a new block entity over an old one: at
     /// the next tick their slot stays only if their block state ticks
     /// (`updateBlockEntityTicker`: rebind, or remove without a ticker).
@@ -280,7 +306,7 @@ impl BlockEntities {
         &mut self,
         pos: Pos,
     ) -> Option<&mut horizon_world::attachments::Attachments> {
-        if !self.map.contains_key(&pos) && !self.out.contains(&pos) {
+        if !self.map.contains_key(&pos) && !self.out.contains_key(&pos) {
             return None;
         }
         let map = self.attachments.entry(pos).or_default();
@@ -327,7 +353,7 @@ impl BlockEntities {
     }
     /// Restore a loaded block entity's attachment map.
     pub fn restore_attachments(&mut self, pos: Pos, data: horizon_world::attachments::Attachments) {
-        if self.map.contains_key(&pos) || self.out.contains(&pos) {
+        if self.map.contains_key(&pos) || self.out.contains_key(&pos) {
             let map = self.attachments.entry(pos).or_default();
             map.replace_contents(data);
             if let Some(observer) = &self.attachment_observer
@@ -393,6 +419,11 @@ impl BlockEntities {
     pub fn is_asleep(&self, pos: &Pos) -> bool {
         self.asleep.contains(pos)
     }
+    fn replace_taken(&mut self, pos: Pos) {
+        if self.out.remove(&pos).is_some() {
+            self.replaced.insert(pos);
+        }
+    }
     /// `LevelChunk.setBlockEntity` (+ `addAndRegisterBlockEntity`): a new
     /// block entity may get a slot; one replacing another keeps its slot.
     /// One of the same type rewrites it in place (a jukebox taking a disc,
@@ -410,8 +441,8 @@ impl BlockEntities {
                 self.attachment_observer.as_ref(),
                 &pos,
             );
-            self.out.remove(&pos);
         }
+        self.replace_taken(pos);
         let new_box = shows_box(&entity);
         self.asleep.remove(&pos);
         let old = self.map.insert(pos, entity);
@@ -420,12 +451,12 @@ impl BlockEntities {
         }
         if new_box {
             self.boxes.insert(pos);
-        } else if old.as_ref().is_some_and(shows_box) {
+        } else {
             self.boxes.remove(&pos);
         }
         if new_is_mod {
             self.mods.entry(chunk_of(pos)).or_default().insert(pos);
-        } else if matches!(old, Some(BlockEntity::Mod(_))) {
+        } else {
             forget_mod(&mut self.mods, pos);
         }
         old
@@ -438,6 +469,14 @@ impl BlockEntities {
     ) -> &mut BlockEntity {
         let absent = !self.map.contains_key(&pos);
         if absent {
+            self.replace_taken(pos);
+            retire_attachments(
+                &mut self.attachments,
+                self.attachment_observer.as_ref(),
+                &pos,
+            );
+            forget_mod(&mut self.mods, pos);
+            self.boxes.remove(&pos);
             self.add(pos);
         }
         self.asleep.remove(&pos);
@@ -452,12 +491,12 @@ impl BlockEntities {
     }
     /// `LevelChunk.removeBlockEntity`: the block entity and its slot.
     pub fn remove(&mut self, pos: &Pos) -> Option<BlockEntity> {
+        self.out.remove(pos);
         retire_attachments(
             &mut self.attachments,
             self.attachment_observer.as_ref(),
             pos,
         );
-        self.out.remove(pos);
         self.asleep.remove(pos);
         self.cancel(pos);
         let removed = self.map.remove(pos);
@@ -467,16 +506,29 @@ impl BlockEntities {
     }
     /// The block entity at `pos`, out of the map for a while: its slot stays
     /// for `put` to bring it back (a tick working on it).
-    pub fn take(&mut self, pos: &Pos) -> Option<BlockEntity> {
+    pub fn take(&mut self, pos: &Pos) -> Option<(BlockEntityLease, BlockEntity)> {
         self.asleep.remove(pos);
-        let taken = self.map.remove(pos);
-        if taken.is_some() {
-            self.out.insert(*pos);
-        }
-        taken
+        let entity = self.map.remove(pos)?;
+        let token = next_lease();
+        self.out.insert(*pos, token);
+        Some((BlockEntityLease { pos: *pos, token }, entity))
     }
-    /// Brings back what `take` took, in its slot.
-    pub fn put(&mut self, pos: Pos, entity: BlockEntity) {
+    /// Re-key a live lease when an intentional state change keeps the instance.
+    /// Ordinary removal still revokes it; a retired or foreign lease cannot re-key.
+    pub fn rekey(&mut self, pos: &Pos, lease: &mut BlockEntityLease) -> bool {
+        if lease.pos != *pos || self.out.get(pos) != Some(&lease.token) {
+            return false;
+        }
+        lease.token = next_lease();
+        self.out.insert(*pos, lease.token);
+        true
+    }
+    /// Return the taken instance in its slot; false if its lease was retired.
+    pub fn put(&mut self, lease: BlockEntityLease, entity: BlockEntity) -> bool {
+        let pos = lease.pos;
+        if self.out.get(&pos) != Some(&lease.token) {
+            return false;
+        }
         self.out.remove(&pos);
         self.asleep.remove(&pos);
         if matches!(entity, BlockEntity::Mod(_)) {
@@ -489,15 +541,11 @@ impl BlockEntities {
         {
             self.add(pos);
         }
+        true
     }
-    /// [`Self::retain`] for unloading chunks: removes the block entities at
-    /// the positions `gone` names and changes none it keeps, so those that
-    /// sleep stay asleep (a moving player unloads chunks most ticks).
-    pub fn unload(&mut self, mut gone: impl FnMut(&Pos) -> bool) {
-        let asleep = std::mem::take(&mut self.asleep);
-        self.retain(|p, _| !gone(p));
+    fn retire_taken(&mut self, mut gone: impl FnMut(&Pos) -> bool) {
         let mut out = std::mem::take(&mut self.out);
-        out.retain(|pos| {
+        out.retain(|pos, _| {
             if gone(pos) {
                 self.remove(pos);
                 false
@@ -506,6 +554,14 @@ impl BlockEntities {
             }
         });
         self.out = out;
+    }
+    /// [`Self::retain`] for unloading chunks: removes the block entities at
+    /// the positions `gone` names and changes none it keeps, so those that
+    /// sleep stay asleep (a moving player unloads chunks most ticks).
+    pub fn unload(&mut self, mut gone: impl FnMut(&Pos) -> bool) {
+        let asleep = std::mem::take(&mut self.asleep);
+        self.retain(|p, _| !gone(p));
+        self.retire_taken(gone);
         self.asleep = asleep;
         let map = &self.map;
         self.asleep.retain(|p| map.contains_key(p));
@@ -557,8 +613,8 @@ impl BlockEntities {
     pub fn load_chunk(&mut self, entities: Vec<(Pos, BlockEntity)>) {
         let order = chunk_map_order(entities.iter().map(|(p, _)| *p));
         for (p, e) in entities {
+            self.replace_taken(p);
             retire_attachments(&mut self.attachments, self.attachment_observer.as_ref(), &p);
-            self.out.remove(&p);
             self.asleep.remove(&p);
             let new_is_mod = matches!(e, BlockEntity::Mod(_));
             self.note_box(p, Some(&e));
@@ -568,7 +624,7 @@ impl BlockEntities {
             }
             if new_is_mod {
                 self.mods.entry(chunk_of(p)).or_default().insert(p);
-            } else if matches!(old, Some(BlockEntity::Mod(_))) {
+            } else {
                 forget_mod(&mut self.mods, p);
             }
         }
@@ -623,7 +679,8 @@ impl BlockEntities {
         if !std::mem::take(&mut self.freed) && self.out.is_empty() {
             return Arc::clone(&self.tickers);
         }
-        self.out.clear();
+        self.retire_taken(|_| true);
+        self.freed = false;
         let (live, map) = (&mut self.live, &self.map);
         Arc::make_mut(&mut self.tickers).retain(|(p, slot)| {
             let mine = live.get(p) == Some(slot);
@@ -646,6 +703,9 @@ impl BlockEntities {
 
 #[cfg(test)]
 mod attachment_tests;
+
+#[cfg(test)]
+mod lease_tests;
 
 #[cfg(test)]
 mod tests {
@@ -714,8 +774,8 @@ mod tests {
             b.get_or_insert_with(p, hopper);
         }));
         assert!(!asleep(&mut b, &|b| {
-            let held = b.take(&p).unwrap();
-            b.put(p, held);
+            let (lease, held) = b.take(&p).unwrap();
+            b.put(lease, held);
         }));
         assert!(!asleep(&mut b, &|b| b.state_changed(p, 1, 1)));
         assert!(!asleep(&mut b, &|b| b.forget(&p)));
@@ -751,9 +811,9 @@ mod tests {
         );
         assert_eq!(near(&b, 200.0, 0.0, 8.0), [(200, 64, 1)]);
         // Taken out for a tick, still listed; removed or replaced, gone.
-        let taken = b.take(&(1, 64, 1)).unwrap();
+        let (lease, taken) = b.take(&(1, 64, 1)).unwrap();
         assert_eq!(near(&b, 0.0, 0.0, 64.0).len(), 3);
-        b.put((1, 64, 1), taken);
+        b.put(lease, taken);
         b.remove(&(3, 64, 3));
         b.insert((4, 64, 4), hopper());
         assert_eq!(near(&b, 0.0, 0.0, 64.0), [(1, 64, 1)]);
@@ -779,8 +839,8 @@ mod tests {
         entities.insert(p, hopper());
         ty.set(entities.attachments_mut(p).unwrap(), Holder::Level, 4)
             .unwrap();
-        let held = entities.take(&p).unwrap();
-        entities.put(p, held);
+        let (lease, held) = entities.take(&p).unwrap();
+        entities.put(lease, held);
         assert_eq!(
             ty.get(entities.attachments_mut(p).unwrap(), Holder::Level),
             Ok(4)
@@ -846,8 +906,8 @@ mod tests {
         b.insert((1, 0, 0), hopper());
         assert_eq!(order(&mut b, &s), [(0, 0, 0), (2, 0, 0), (1, 0, 0)]);
         // Take and put keep it; an idle state frees it, ticking again appends.
-        let e = b.take(&(0, 0, 0)).unwrap();
-        b.put((0, 0, 0), e);
+        let (lease, e) = b.take(&(0, 0, 0)).unwrap();
+        b.put(lease, e);
         assert_eq!(order(&mut b, &s), [(0, 0, 0), (2, 0, 0), (1, 0, 0)]);
         s.insert((2, 0, 0), 2);
         b.state_changed((2, 0, 0), 1, 2);
@@ -935,14 +995,14 @@ mod tests {
         b.insert(q, test_block());
         b.get_or_insert_with(r, test_block);
         assert_eq!(listed(&b), [q, r]);
-        // Taken out: not shown until put back; put back as another kind: gone.
-        let taken = b.take(&q).unwrap();
+        // Taken out: not shown until put back; replacement during take wins.
+        let (lease, taken) = b.take(&q).unwrap();
         assert_eq!(listed(&b), [r]);
-        b.put(q, taken);
+        b.put(lease, taken);
         assert_eq!(listed(&b), [q, r]);
-        let taken = b.take(&r).unwrap();
-        drop(taken);
-        b.put(r, hopper());
+        let (lease, taken) = b.take(&r).unwrap();
+        b.insert(r, hopper());
+        assert!(!b.put(lease, taken));
         assert_eq!(listed(&b), [q]);
         b.remove(&q);
         assert_eq!(listed(&b), []);

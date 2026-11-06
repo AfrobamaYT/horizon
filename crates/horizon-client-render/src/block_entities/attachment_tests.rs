@@ -107,14 +107,14 @@ fn taken_maps_restore_and_retire_without_reviving_removed_residency() {
         .set(entities.attachments_mut(p).unwrap(), Holder::Level, 1)
         .unwrap();
     let saved = entities.attachments(p).unwrap().clone();
-    let held = entities.take(&p).unwrap();
+    let (lease, held) = entities.take(&p).unwrap();
     VALUE
         .set(entities.attachments_mut(p).unwrap(), Holder::Level, 2)
         .unwrap();
     assert_eq!(values(&index), [2]);
     entities.restore_attachments(p, saved);
     assert_eq!(values(&index), [1]);
-    entities.put(p, held);
+    assert!(entities.put(lease, held));
     entities.insert(p, BlockEntity::Chest(vec![None]));
     assert_eq!(values(&index), [1]);
     entities.insert(p, BlockEntity::Jukebox(Default::default()));
@@ -122,16 +122,20 @@ fn taken_maps_restore_and_retire_without_reviving_removed_residency() {
     VALUE
         .set(entities.attachments_mut(p).unwrap(), Holder::Level, 3)
         .unwrap();
-    let held = entities.take(&p).unwrap();
+    let (lease, held) = entities.take(&p).unwrap();
     entities.unload(|pos| (pos.0 >> 4, pos.2 >> 4) == (0, 0));
     assert!(values(&index).is_empty());
     assert!(entities.attachments_mut(p).is_none());
-    entities.put(p, held);
+    assert!(!entities.put(lease, held));
+    assert!(!entities.contains_key(&p));
     assert!(values(&index).is_empty());
+    entities.insert(p, BlockEntity::Chest(vec![]));
     VALUE
         .set(entities.attachments_mut(p).unwrap(), Holder::Level, 4)
         .unwrap();
+    let (lease, held) = entities.take(&p).unwrap();
     entities.remove(&p);
+    assert!(!entities.put(lease, held));
     assert!(entities.attachments_mut(p).is_none());
     assert!(values(&index).is_empty());
 }

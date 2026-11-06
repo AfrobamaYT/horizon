@@ -35,6 +35,150 @@ fn entity_shader() -> String {
     crate::overlay::wgsl_constants() + include_str!("entity.wgsl")
 }
 
+fn entity_binding_entries() -> [wgpu::BindGroupLayoutEntry; 8] {
+    let vf = wgpu::ShaderStages::VERTEX_FRAGMENT;
+    let entry = |binding, visibility, ty| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty,
+        count: None,
+    };
+    [
+        entry(
+            0,
+            vf,
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+        ),
+        entry(
+            1,
+            vf,
+            wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+        ),
+        entry(
+            2,
+            vf,
+            wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        ),
+        entry(
+            3,
+            vf,
+            wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+        ),
+        entry(
+            4,
+            vf,
+            wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        ),
+        entry(
+            5,
+            vf,
+            wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+        ),
+        entry(
+            6,
+            vf,
+            wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        ),
+        entry(
+            7,
+            vf,
+            wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+        ),
+    ]
+}
+
+const ENTITY_ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Uint32,3=>Unorm8x4,4=>Uint8x4,5=>Snorm8x4,6=>Float32x2];
+
+struct EntityPipelineOptions<'a> {
+    label: &'a str,
+    cull_mode: Option<wgpu::Face>,
+    depth_write: bool,
+    compare: wgpu::CompareFunction,
+    bias: wgpu::DepthBiasState,
+    blend: wgpu::BlendState,
+    clouds: bool,
+    fragment: &'a str,
+    write_mask: wgpu::ColorWrites,
+}
+
+/// Constructs the entity shader pipelines shared by the renderer and its pixel tests.
+fn entity_pipeline_factory<'a>(
+    kept: &'a reuse::On<'a>,
+    entity_layout: &'a wgpu::PipelineLayout,
+    cloud_layout: &'a wgpu::PipelineLayout,
+    entity_shader: &'a wgpu::ShaderModule,
+    entity_vertex: &'a [Option<wgpu::VertexBufferLayout<'a>>],
+    frame_format: wgpu::TextureFormat,
+) -> impl Fn(EntityPipelineOptions<'_>) -> wgpu::RenderPipeline + Copy + 'a {
+    move |options| {
+        let EntityPipelineOptions {
+            label,
+            cull_mode,
+            depth_write,
+            compare,
+            bias,
+            blend,
+            clouds,
+            fragment,
+            write_mask,
+        } = options;
+        kept.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(if clouds { cloud_layout } else { entity_layout }),
+            vertex: wgpu::VertexState {
+                module: entity_shader,
+                entry_point: Some(if clouds { "vs_cloud" } else { "vs_entity" }),
+                compilation_options: Default::default(),
+                buffers: entity_vertex,
+            },
+            primitive: wgpu::PrimitiveState {
+                cull_mode,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(depth_write),
+                depth_compare: Some(compare),
+                stencil: Default::default(),
+                bias,
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: entity_shader,
+                entry_point: Some(fragment),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: frame_format,
+                    blend: Some(blend),
+                    write_mask,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
+}
+
 /// The static block-entity vertex entry point shares entity shading but lives
 /// in its own source file and pipeline.
 fn static_entity_shader() -> String {
@@ -45,6 +189,9 @@ fn static_entity_shader() -> String {
 mod crumbling_tests;
 mod entity_batch;
 mod entity_outline;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod entity_pixel_test;
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
@@ -3330,68 +3477,7 @@ impl Renderer {
         });
         let entity_bindings = kept.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Entity bindings"),
-            entries: &[
-                entry(
-                    0,
-                    vf,
-                    wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                ),
-                entry(
-                    1,
-                    vf,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-                entry(
-                    2,
-                    vf,
-                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                ),
-                entry(
-                    3,
-                    vf,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-                entry(
-                    4,
-                    vf,
-                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                ),
-                entry(
-                    5,
-                    vf,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-                entry(
-                    6,
-                    vf,
-                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                ),
-                entry(
-                    7,
-                    vf,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-            ],
+            entries: &entity_binding_entries(),
         });
         let static_entity_bindings =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -3552,18 +3638,17 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let entity_attributes = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Uint32,3=>Unorm8x4,4=>Uint8x4,5=>Snorm8x4,6=>Float32x2];
         let entity_vertex = [Some(wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &entity_attributes,
+            attributes: &ENTITY_ATTRIBUTES,
         })];
         let static_entity_origin_attributes = wgpu::vertex_attr_array![7=>Sint32x3];
         let static_entity_vertex = [
             Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<Vertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &entity_attributes,
+                attributes: &ENTITY_ATTRIBUTES,
             }),
             Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<[i32; 3]>() as u64,
@@ -3571,57 +3656,16 @@ impl Renderer {
                 attributes: &static_entity_origin_attributes,
             }),
         ];
-        #[allow(clippy::too_many_arguments)]
-        let entity_pipeline_with = |label,
-                                    cull_mode,
-                                    depth_write,
-                                    compare,
-                                    bias,
-                                    blend,
-                                    clouds,
-                                    fragment: &str,
-                                    write_mask| {
-            kept.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(if clouds {
-                    &cloud_layout
-                } else {
-                    &entity_layout
-                }),
-                vertex: wgpu::VertexState {
-                    module: &entity_shader,
-                    entry_point: Some(if clouds { "vs_cloud" } else { "vs_entity" }),
-                    compilation_options: Default::default(),
-                    buffers: &entity_vertex,
-                },
-                primitive: wgpu::PrimitiveState {
-                    cull_mode,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: Some(depth_write),
-                    depth_compare: Some(compare),
-                    stencil: Default::default(),
-                    bias,
-                }),
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &entity_shader,
-                    entry_point: Some(fragment),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: frame_format,
-                        blend: Some(blend),
-                        write_mask,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
+        let entity_pipeline_with = entity_pipeline_factory(
+            &kept,
+            &entity_layout,
+            &cloud_layout,
+            &entity_shader,
+            &entity_vertex,
+            frame_format,
+        );
         let entity_pipeline = |label, cull_mode, depth_write, compare, bias, blend, clouds| {
-            entity_pipeline_with(
+            entity_pipeline_with(EntityPipelineOptions {
                 label,
                 cull_mode,
                 depth_write,
@@ -3629,22 +3673,22 @@ impl Renderer {
                 bias,
                 blend,
                 clouds,
-                "fs_entity",
-                wgpu::ColorWrites::ALL,
-            )
+                fragment: "fs_entity",
+                write_mask: wgpu::ColorWrites::ALL,
+            })
         };
         // RenderPipelines.WATER_MASK: the boat's water patch writes depth only.
-        let water_mask_pipeline = entity_pipeline_with(
-            "Water mask",
-            None,
-            true,
-            wgpu::CompareFunction::GreaterEqual,
-            Default::default(),
-            alpha_blend,
-            false,
-            "fs_water_mask",
-            wgpu::ColorWrites::empty(),
-        );
+        let water_mask_pipeline = entity_pipeline_with(EntityPipelineOptions {
+            label: "Water mask",
+            cull_mode: None,
+            depth_write: true,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            bias: Default::default(),
+            blend: alpha_blend,
+            clouds: false,
+            fragment: "fs_water_mask",
+            write_mask: wgpu::ColorWrites::empty(),
+        });
         let crumbling_pipeline = entity_pipeline(
             "Breaking cracks",
             Some(wgpu::Face::Back),
@@ -3668,21 +3712,21 @@ impl Renderer {
         // ulps covers that spread at any resolution while staying far below
         // the 0.001 a model's feet sit higher, so shadows never bleed onto
         // the feet.
-        let shadow_blob_pipeline = entity_pipeline_with(
-            "Entity shadows",
-            Some(wgpu::Face::Back),
-            false,
-            wgpu::CompareFunction::GreaterEqual,
-            wgpu::DepthBiasState {
+        let shadow_blob_pipeline = entity_pipeline_with(EntityPipelineOptions {
+            label: "Entity shadows",
+            cull_mode: Some(wgpu::Face::Back),
+            depth_write: false,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            bias: wgpu::DepthBiasState {
                 constant: 128,
                 slope_scale: 0.015,
                 clamp: 0.0,
             },
-            alpha_blend,
-            false,
-            "fs_entity_shadow",
-            wgpu::ColorWrites::ALL,
-        );
+            blend: alpha_blend,
+            clouds: false,
+            fragment: "fs_entity_shadow",
+            write_mask: wgpu::ColorWrites::ALL,
+        });
         // RenderPipelines.ITEM_TRANSLUCENT: blended, depth tested and, like
         // every vanilla pipeline that does not turn it off, depth writing.
         // `LevelRenderer.executeClassicTransparency` draws the translucent
@@ -3707,17 +3751,17 @@ impl Renderer {
             alpha_blend,
             true,
         );
-        let hdr_cloud_mark_pipeline = entity_pipeline_with(
-            "HDR cloud mark",
-            Some(wgpu::Face::Back),
-            false,
-            wgpu::CompareFunction::GreaterEqual,
-            Default::default(),
-            wgpu::BlendState::REPLACE,
-            true,
-            "fs_hdr_cloud_mark",
-            wgpu::ColorWrites::ALPHA,
-        );
+        let hdr_cloud_mark_pipeline = entity_pipeline_with(EntityPipelineOptions {
+            label: "HDR cloud mark",
+            cull_mode: Some(wgpu::Face::Back),
+            depth_write: false,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            bias: Default::default(),
+            blend: wgpu::BlendState::REPLACE,
+            clouds: true,
+            fragment: "fs_hdr_cloud_mark",
+            write_mask: wgpu::ColorWrites::ALPHA,
+        });
         // RenderPipelines.TEXT_SEE_THROUGH: translucent, no depth test or
         // writes, culled like every world text pipeline (TEXT_SNIPPET keeps
         // RenderPipeline.Builder's default): a name tag or text display hides
@@ -3815,43 +3859,43 @@ impl Renderer {
             dst_factor: wgpu::BlendFactor::One,
             operation: wgpu::BlendOperation::Add,
         };
-        let energy_swirl_pipeline = entity_pipeline_with(
-            "Energy swirls",
-            None,
-            false,
-            wgpu::CompareFunction::GreaterEqual,
-            Default::default(),
-            wgpu::BlendState {
+        let energy_swirl_pipeline = entity_pipeline_with(EntityPipelineOptions {
+            label: "Energy swirls",
+            cull_mode: None,
+            depth_write: false,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            bias: Default::default(),
+            blend: wgpu::BlendState {
                 color: one_one,
                 alpha: one_one,
             },
-            false,
-            "fs_energy_swirl",
-            wgpu::ColorWrites::ALL,
-        );
+            clouds: false,
+            fragment: "fs_energy_swirl",
+            write_mask: wgpu::ColorWrites::ALL,
+        });
         // HDR output's mark on light-giving particles (entity.wgsl fs_hdr_mark).
-        let hdr_mark_pipeline = entity_pipeline_with(
-            "HDR particle mark",
-            None,
-            false,
-            wgpu::CompareFunction::GreaterEqual,
-            Default::default(),
-            wgpu::BlendState::REPLACE,
-            false,
-            "fs_hdr_mark",
-            wgpu::ColorWrites::ALPHA,
-        );
-        let hdr_hand_unmark_pipeline = entity_pipeline_with(
-            "HDR hand unmark",
-            None,
-            false,
-            wgpu::CompareFunction::GreaterEqual,
-            Default::default(),
-            wgpu::BlendState::REPLACE,
-            false,
-            "fs_hdr_hand_unmark",
-            wgpu::ColorWrites::ALPHA,
-        );
+        let hdr_mark_pipeline = entity_pipeline_with(EntityPipelineOptions {
+            label: "HDR particle mark",
+            cull_mode: None,
+            depth_write: false,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            bias: Default::default(),
+            blend: wgpu::BlendState::REPLACE,
+            clouds: false,
+            fragment: "fs_hdr_mark",
+            write_mask: wgpu::ColorWrites::ALPHA,
+        });
+        let hdr_hand_unmark_pipeline = entity_pipeline_with(EntityPipelineOptions {
+            label: "HDR hand unmark",
+            cull_mode: None,
+            depth_write: false,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            bias: Default::default(),
+            blend: wgpu::BlendState::REPLACE,
+            clouds: false,
+            fragment: "fs_hdr_hand_unmark",
+            write_mask: wgpu::ColorWrites::ALPHA,
+        });
         // Attribute 7: 6 is the entity vertex buffer's glint UV.
         let lightning_attributes = wgpu::vertex_attr_array![7=>Float32x3];
         let lightning_vertex = [

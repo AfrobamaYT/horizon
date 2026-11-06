@@ -6,7 +6,7 @@ mod lifetime;
 pub mod observer;
 
 #[doc(hidden)]
-pub use lifetime::AttachmentLifetime;
+pub use lifetime::{AttachmentLifetime, HasAttachmentLifetime};
 
 use std::{
     any::Any,

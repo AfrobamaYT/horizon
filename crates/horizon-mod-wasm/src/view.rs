@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use wasmtime::component::{HasData, Linker, Resource};
 
+mod transport;
+
 /// A declared-list entry resolved once at load.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Resolved {
@@ -227,6 +229,7 @@ impl HasData for View {
 pub fn add_to_linker(linker: &mut Linker<State>) {
     wire::add_to_linker::<State, View>(linker, |_| View)
         .expect("the game's internals imports are defined once");
+    transport::add_to_linker(linker).expect("the batch imports match the internals interface");
 }
 
 fn contain<T>(f: impl FnOnce() -> wasmtime::Result<T>) -> wasmtime::Result<T> {
@@ -409,8 +412,8 @@ impl wire::HostWithStore<State> for View {
     fn get_many(
         host: wasmtime::component::Access<'_, State, Self>,
         reads: Vec<(Resource<wire::Node>, u32)>,
-    ) -> wasmtime::Result<Vec<Result<Vec<wire::Cell>, wire::Refusal>>> {
-        let reads = bounded_batch(reads)?;
+    ) -> wasmtime::Result<wire::BatchValues> {
+        bounded_batch(reads.len())?;
         let cells = reads
             .iter()
             .map(|(n, _)| node_cost(n).saturating_add(journal_cost()))
@@ -418,26 +421,61 @@ impl wire::HostWithStore<State> for View {
         metered(
             host,
             cells,
-            || View.get_many(reads),
-            |results| {
-                results
+            || {
+                let mut result = wire::BatchValues {
+                    entries: Vec::new(),
+                    cells: Vec::new(),
+                };
+                for value in View.get_many(reads) {
+                    result.entries.push(value.map(|cells| {
+                        let len = cells.len() as u32;
+                        result.cells.extend(cells);
+                        len
+                    }));
+                }
+                result
+            },
+            |result| {
+                let mut start = 0;
+                result
+                    .entries
                     .iter()
-                    .filter_map(|r| r.as_ref().ok())
-                    .map(|v| wire_cost(v))
+                    .filter_map(|entry| entry.as_ref().ok())
+                    .map(|len| {
+                        let end = start + *len as usize;
+                        let cost = wire_cost(&result.cells[start..end]);
+                        start = end;
+                        cost
+                    })
                     .fold(0, usize::saturating_add)
             },
         )
     }
     fn set_many(
         host: wasmtime::component::Access<'_, State, Self>,
-        writes: Vec<(Resource<wire::Node>, u32, Vec<wire::Cell>)>,
+        writes: Vec<(Resource<wire::Node>, u32, u32)>,
+        cells: Vec<wire::Cell>,
     ) -> wasmtime::Result<Vec<Result<(), wire::Refusal>>> {
-        let writes = bounded_batch(writes)?;
-        let cells = writes
+        bounded_batch(writes.len())?;
+        let mut iter = cells.into_iter();
+        let mut expanded = Vec::with_capacity(writes.len());
+        for (node, field, len) in writes {
+            wasmtime::ensure!(
+                len as usize <= iter.len(),
+                "invalid internals batch lengths"
+            );
+            expanded.push((
+                node,
+                field,
+                iter.by_ref().take(len as usize).collect::<Vec<_>>(),
+            ));
+        }
+        wasmtime::ensure!(iter.len() == 0, "invalid internals batch lengths");
+        let cost = expanded
             .iter()
             .map(|(n, _, v)| node_cost(n).saturating_add(wire_cost(v)))
-            .fold(writes.len().saturating_sub(1), usize::saturating_add);
-        metered(host, cells, || View.set_many(writes), |_| 0)
+            .fold(expanded.len().saturating_sub(1), usize::saturating_add);
+        metered(host, cost, || View.set_many(expanded), |_| 0)
     }
     fn root(
         host: wasmtime::component::Access<'_, State, Self>,
@@ -478,9 +516,9 @@ impl wire::HostWithStore<State> for View {
     }
 }
 
-fn bounded_batch<T>(entries: Vec<T>) -> wasmtime::Result<Vec<T>> {
-    wasmtime::ensure!(entries.len() <= 12, "internals batch entry budget");
-    Ok(entries)
+fn bounded_batch(len: usize) -> wasmtime::Result<()> {
+    wasmtime::ensure!(len <= 12, "internals batch entry budget");
+    Ok(())
 }
 
 fn encode(value: internals::Value) -> Result<Vec<wire::Cell>, wire::Refusal> {
@@ -488,7 +526,11 @@ fn encode(value: internals::Value) -> Result<Vec<wire::Cell>, wire::Refusal> {
     Ok(flatten(value))
 }
 
-fn decode(cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
+fn decode(mut cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
+    decode_buffer(&mut cells)
+}
+
+fn decode_buffer(cells: &mut Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
     if cells.len() > 65_536
         || cells
             .iter()
@@ -501,7 +543,7 @@ fn decode(cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
     {
         return Err(wire::Refusal::NotHere("internals budget".into()));
     }
-    unflatten(cells).map_err(Into::into)
+    unflatten(cells.drain(..)).map_err(Into::into)
 }
 
 impl View {
@@ -538,20 +580,37 @@ impl View {
         node: Resource<wire::Node>,
         n: u32,
     ) -> Result<Vec<wire::Cell>, wire::Refusal> {
-        current(|a| encode(a.frame.get(a.node(&node)?, n)?))
+        encode(self.get_value(&node, n)?)
+    }
+    fn get_value(
+        &mut self,
+        node: &Resource<wire::Node>,
+        n: u32,
+    ) -> Result<internals::Value, wire::Refusal> {
+        current(|a| a.frame.get(a.node(node)?, n).map_err(Into::into))
     }
     pub fn set(
         &mut self,
         node: Resource<wire::Node>,
         n: u32,
-        v: Vec<wire::Cell>,
+        mut v: Vec<wire::Cell>,
+    ) -> Result<(), wire::Refusal> {
+        self.set_buffer(&node, n, &mut v)
+    }
+    fn set_buffer(
+        &mut self,
+        node: &Resource<wire::Node>,
+        n: u32,
+        cells: &mut Vec<wire::Cell>,
     ) -> Result<(), wire::Refusal> {
         current(|a| {
             let node = a
                 .nodes
                 .get(&node.rep())
                 .ok_or_else(|| gone("the node's call is over"))?;
-            a.frame.set(&node.node, n, decode(v)?).map_err(Into::into)
+            a.frame
+                .set(&node.node, n, decode_buffer(cells)?)
+                .map_err(Into::into)
         })
     }
     pub fn index(
@@ -1045,6 +1104,68 @@ mod tests {
 
     #[test]
     #[ignore = "needs the internals guest fixture"]
+    fn guest_refused_strings_pay_the_same_fuel_as_single_calls() {
+        let batch = fixture_group_with_fuel(true);
+        let single = fixture_group_with_fuel(true);
+        take_debits();
+        fixture_result(&batch, &mut fixture_game(), "strings_batch").unwrap();
+        let batch_debits = take_debits();
+        fixture_result(&single, &mut fixture_game(), "strings_single").unwrap();
+        let single_debits = take_debits();
+        assert_eq!(
+            batch_debits.iter().sum::<u64>(),
+            single_debits.iter().sum::<u64>()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
+    fn guest_oversized_cell_lists_leave_no_large_scratch() {
+        let group = fixture_group();
+        let mut game = fixture_game();
+        fixture_result(&group, &mut game, "oversize_cells").unwrap();
+        assert_eq!((game.left, game.right), (1, 10));
+        group
+            .exports
+            .load(|store| {
+                State::with_buffer::<transport::Buffers, _>(
+                    wasmtime::AsContextMut::as_context_mut(store),
+                    |buffers, _| {
+                        assert_eq!(buffers.inputs.len(), 12);
+                        assert!(buffers.inputs.iter().all(|input| input.capacity() <= 1024));
+                    },
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
+    fn guest_batches_exhaust_fuel_without_committing_writes() {
+        for message in ["fuel_get", "fuel_set"] {
+            let group = fixture_group_with_fuel(true);
+            let mut game = fixture_game();
+            let error = fixture_result(&group, &mut game, message).unwrap_err();
+            assert!(error.contains("fuel"), "{error}");
+            assert_eq!((game.left, game.right), (1, 10));
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
+    fn guest_oversize_batches_trap_without_writes() {
+        for message in ["oversize_get", "oversize_set"] {
+            let group = fixture_group();
+            let mut game = fixture_game();
+            let error = fixture_result(&group, &mut game, message).unwrap_err();
+            assert!(error.contains("internals batch entry budget"), "{error}");
+            assert_eq!(game, fixture_game());
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
     fn batch_import_fuel_matches_singles_and_exhausts_before_writes() {
         use wasmtime::{AsContextMut, component::Access};
         use wire::{HostNodeWithStore, HostWithStore};
@@ -1059,7 +1180,8 @@ mod tests {
                         <View as $trait<State>>::$method(Access::new(store.as_context_mut(), |_| View) $(, $arg)*)
                     };
                 }
-                let writes = || vec![(borrow(&root), 1, vec![wire::Cell::B(true)]), (borrow(&root), 1, vec![wire::Cell::B(true)])];
+                let writes = || vec![(borrow(&root), 1, 1), (borrow(&root), 1, 1)];
+                let cells = || vec![wire::Cell::B(true), wire::Cell::B(true)];
                 let initial = 1000;
                 store.set_fuel(initial)?;
                 for _ in 0..2 {
@@ -1067,7 +1189,7 @@ mod tests {
                 }
                 let single_set = initial - store.get_fuel()?;
                 store.set_fuel(initial)?;
-                invoke!(HostWithStore::set_many, writes())?;
+                invoke!(HostWithStore::set_many, writes(), cells())?;
                 assert_eq!(
                     initial - store.get_fuel()?,
                     single_set,
@@ -1083,13 +1205,15 @@ mod tests {
                 assert_eq!(initial - store.get_fuel()?, single_get);
                 let pending = journal_cost();
                 store.set_fuel(1)?;
-                assert!(invoke!(HostWithStore::set_many, writes()).is_err());
-                let bad = || (Resource::new_borrow(0), 0, Vec::new());
-                assert!(invoke!(HostWithStore::set_many, vec![bad(), bad()]).is_err());
+                assert!(invoke!(HostWithStore::set_many, writes(), cells()).is_err());
+                let bad = || (Resource::new_borrow(0), 0, 0);
+                assert!(invoke!(HostWithStore::set_many, vec![bad(), bad()], vec![]).is_err());
                 store.set_fuel(initial)?;
+                assert!(invoke!(HostWithStore::set_many, vec![(borrow(&root), 1, 2)], vec![wire::Cell::B(true)]).is_err());
+                assert!(invoke!(HostWithStore::set_many, vec![(borrow(&root), 1, 0)], vec![wire::Cell::B(true)]).is_err());
                 let many = || (0..13).map(|_| (borrow(&root), 1));
                 assert!(invoke!(HostWithStore::get_many, many().collect()).is_err());
-                assert!(invoke!(HostWithStore::set_many, many().map(|(n, f)| (n, f, vec![wire::Cell::B(true)])).collect()).is_err());
+                assert!(invoke!(HostWithStore::set_many, many().map(|(n, f)| (n, f, 1)).collect(), vec![]).is_err());
                 assert_eq!(journal_cost(), pending);
                 Ok(())
             }).unwrap();
