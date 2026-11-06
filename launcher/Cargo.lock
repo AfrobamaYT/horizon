@@ -2869,6 +2869,7 @@ dependencies = [
 name = "horizon-server-launch"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "horizon-anticheat",
  "horizon-chat-filter",
  "horizon-core",
