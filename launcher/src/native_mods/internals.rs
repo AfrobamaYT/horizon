@@ -25,6 +25,7 @@ pub(super) struct Facade {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
+    Inject(horizon_mod_package::manifest::inject::InjectError),
     Missing {
         mod_id: String,
         path: String,
@@ -63,6 +64,7 @@ pub(super) enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
+            Self::Inject(error) => return error.fmt(f),
             Self::Missing { mod_id, path } => trf(
                 "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
                 &[("mod", mod_id), ("path", path)],
@@ -141,6 +143,7 @@ impl Catalog {
     }
 
     pub(super) fn check(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), Error> {
+        super::slots::check(self, manifest).map_err(Error::Inject)?;
         let Some(native) = &manifest.native else {
             return Ok(());
         };
@@ -152,7 +155,7 @@ impl Catalog {
         }
         for injection in inject::raw_of(manifest) {
             if !self.points.iter().any(|point| {
-                point.target == injection.target
+                plain_path(&point.target) == plain_path(&injection.target)
                     && point.raw
                     && point.listener.is_some()
                     && point.return_listener.is_some()
@@ -184,11 +187,14 @@ impl Catalog {
     }
 
     pub(super) fn log_raw(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), String> {
+        for decision in super::slots::report(manifest) {
+            super::append_log(&decision)?;
+        }
         for injection in inject::raw_of(manifest) {
             let point = self
                 .points
                 .iter()
-                .find(|point| point.target == injection.target)
+                .find(|point| plain_path(&point.target) == plain_path(&injection.target))
                 .expect("raw target checked");
             let place = point.place(injection.at_return);
             super::append_log(&trf(
@@ -261,7 +267,7 @@ impl Catalog {
             let point = self
                 .points
                 .iter()
-                .find(|point| point.target == injection.target)
+                .find(|point| plain_path(&point.target) == plain_path(&injection.target))
                 .expect("raw target checked");
             let listener = if injection.at_return {
                 &point.return_listener
@@ -299,6 +305,9 @@ impl Catalog {
             sites::find(&self.sites, injection)
                 .expect("site checked")
                 .facade(&mut exports, &mut constructors, &mut crates);
+        }
+        for (_, site) in super::slots::sites(&self.sites, manifest) {
+            site.facade(&mut exports, &mut constructors, &mut crates);
         }
         for export in exports {
             text.push_str(&export);
@@ -416,13 +425,14 @@ impl Module {
 }
 
 pub(super) fn needed(manifest: &horizon_mod_package::Manifest) -> bool {
-    manifest.native.as_ref().is_some_and(|native| {
-        !native.internals.is_empty()
-            || native
-                .injection
-                .iter()
-                .any(|injection| injection.raw.is_some())
-    })
+    !manifest.inject.is_empty()
+        || manifest.native.as_ref().is_some_and(|native| {
+            !native.internals.is_empty()
+                || native
+                    .injection
+                    .iter()
+                    .any(|injection| injection.raw.is_some())
+        })
 }
 
 pub(super) fn package(id: &str) -> String {
@@ -688,7 +698,7 @@ pub mod raw {
 
     #[test]
     fn source_staging_uses_a_per_mod_facade_and_preserves_the_library_name() {
-        let (dir, bundle, catalog) = fixture("stage");
+        let (dir, bundle, mut catalog) = fixture("stage");
         let path = dir.join("Cargo.toml");
         let text = fs::read_to_string(&path).unwrap()
             + "horizon-internals = { git = 'https://example.invalid/horizon', rev = 'pin' }\n";
@@ -735,6 +745,36 @@ pub mod raw {
         assert!(super::super::crates::wanted(&stage, &BTreeMap::new())
             .unwrap()
             .is_empty());
+        super::super::tests::write_bundle(&dir, "example", "pub fn count<T>(_: &mut T) {}\n");
+        let path = dir.join(horizon_mod_package::manifest::MANIFEST);
+        fs::write(&path, fs::read_to_string(&path).unwrap() + "[[inject]]\nid='/* MOD_ENTRIES *//* MOD_POINTS */'\nat='horizon_client::net::receive_brand'\nkind='head'\naccess='internals'\nwith='count'\nhash='5678'\n").unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname='example'\nversion='1.0.0'\n[dependencies]\nhorizon-mod-api='0.1'\n",
+        )
+        .unwrap();
+        let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+        catalog.internals[1].path = "horizon_client::net::receive_brand".into();
+        catalog.internals[1].signature = "fn receive_brand()".into();
+        catalog.points[0].target = catalog.internals[1].path.clone();
+        catalog.points[0].name = "receive_brand".into();
+        catalog.points[0].listener = Some("horizon_client::net::__ReceiveBrandListener".into());
+        let project = api::Project::read(&bundle).unwrap();
+        assert_eq!(super::super::prebuilt::project_refusal(&project), None);
+        api::stage(
+            &stage,
+            &[project],
+            &[vec![]],
+            &super::super::dependencies::Resolution { order: vec![0] },
+            &catalog,
+        )
+        .unwrap();
+        let game = api::read(&stage.join("crates/native-game/Cargo.toml")).unwrap();
+        assert!(game["dependencies"].get("mod_0_internals").is_some());
+        let facade = fs::read_to_string(stage.join("native-internals/example/src/lib.rs")).unwrap();
+        assert!(facade.contains("fn receive_brand("));
+        let main = fs::read_to_string(stage.join("crates/native-game/src/main.rs")).unwrap();
+        assert!(main.contains(".ordered(0, \"/* MOD_ENTRIES *//* MOD_POINTS */\")"));
         fs::remove_dir_all(stage).unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
