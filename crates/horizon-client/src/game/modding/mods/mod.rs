@@ -267,15 +267,14 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
 }
-/// The native mods' debug renderers (`native_register_debug_renderers`), kept once at start,
-/// after the entries they share ids with.
-pub(super) fn register_debug_renderers(role: ExecutionRole) {
-    if !role.is_client() {
-        return;
-    }
+/// The native mods' debug renderers now (`native_register_debug_renderers`), asked at each
+/// refresh of the list (`Game::refresh_debug_renderers`).
+pub(super) fn debug_renderers(role: ExecutionRole) -> Vec<mod_api::DebugRenderer> {
     let mut renderers = Vec::new();
-    Game::native_register_debug_renderers(&RegistrationContext::new(), &mut renderers);
-    horizon_client::debug_entries::register_renderers(renderers);
+    if role.is_client() {
+        Game::native_register_debug_renderers(&RegistrationContext::new(), &mut renderers);
+    }
+    renderers
 }
 /// The native mods' numeric item model properties
 /// (`native_register_range_select_item_model_property`), kept once at start, before

@@ -1,14 +1,33 @@
 //! The typed submission surface; renderer storage is never exposed to mods.
 use super::Game;
 use glam::Mat4;
-use horizon_client::{debug_entries, world_geometry::WorldGeometry};
+use super::mods;
+use horizon_client::world_geometry::WorldGeometry;
 use mod_api::{DrawError, WorldDrawUsage, WorldLine, WorldQuad};
 
 impl Game<'_> {
+    /// `DebugRenderer.refreshRendererList`: the active renderers are replaced by those the mods
+    /// push now whose entries are on. Runs at start, at login and when the selection changes.
+    pub(in crate::game) fn refresh_debug_renderers(&mut self) {
+        let renderers = mods::debug_renderers(self.options.execution_role);
+        let reduced = self.reduced_debug_info();
+        self.debug_renderers = self
+            .debug_entries
+            .active_renderers(renderers, self.debug, reduced);
+    }
+    /// `DebugRenderer.emitGizmos`'s first half: a selection the list has not seen refreshes it.
+    fn follow_debug_selection(&mut self) {
+        let reduced = self.reduced_debug_info();
+        let version = self.debug_entries.enabled_version(self.debug, reduced);
+        if self.debug_renderers_version != Some(version) {
+            self.debug_renderers_version = Some(version);
+            self.refresh_debug_renderers();
+        }
+    }
     /// One view's geometry, the last view's gone first. `title` views draw no world: the
     /// title and connect screens have no mod geometry, so none outlives leaving a world.
     pub(super) fn fill_world_geometry(
-        &self,
+        &mut self,
         title: bool,
         camera: [f64; 3],
         view: Mat4,
@@ -26,11 +45,9 @@ impl Game<'_> {
         }
         let view = mod_api::WorldRenderView::new(camera, alpha as f32, self.world.game_time);
         self.native_submit_custom_geometry(&view, draw);
-        // With no renderer registered, this is all a frame pays.
-        for renderer in debug_entries::registered_renderers() {
-            if self.debug_entry(&renderer.id) {
-                self.native_debug_renderer_draw(&renderer.id, &view, draw);
-            }
+        self.follow_debug_selection();
+        for id in &self.debug_renderers {
+            self.native_debug_renderer_draw(id, &view, draw);
         }
     }
     /// Submit unlit ARGB world lines atomically. Invalid coordinates or widths,

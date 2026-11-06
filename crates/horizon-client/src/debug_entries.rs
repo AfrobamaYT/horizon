@@ -3,6 +3,7 @@
 //! only in the overlay or never, the two built-in profiles, and
 //! `debug-profile.json` beside `options.txt`, which keeps them.
 use mod_api::{DebugEntry, DebugGroup, DebugRenderer, Identifier};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -181,10 +182,7 @@ static REGISTERED: OnceLock<Vec<DebugEntry>> = OnceLock::new();
 /// `<namespace>:<path>` in a namespace other than vanilla's, or that another entry has
 /// already, is logged and left out.
 pub fn register(entries: Vec<DebugEntry>) {
-    if REGISTERED
-        .set(checked(entries, |e| &e.id, |_| false))
-        .is_err()
-    {
+    if REGISTERED.set(checked(entries)).is_err() {
         log::warn!("debug entries were registered already; these are left out");
     }
 }
@@ -197,40 +195,21 @@ pub fn registered() -> &'static [DebugEntry] {
     }
 }
 
-/// The renderers native mods registered (`register_debug_renderers`), kept once at start.
-static REGISTERED_RENDERERS: OnceLock<Vec<DebugRenderer>> = OnceLock::new();
-
-/// Keeps the renderers native mods registered, once at start, after the entries: both are
-/// switched by id. One whose id is not `<namespace>:<path>` in a namespace other than vanilla's,
-/// or that another entry or renderer has already, is logged and left out.
-pub fn register_renderers(renderers: Vec<DebugRenderer>) {
-    let taken = |id: &str| registered().iter().any(|e| e.id == id);
-    if REGISTERED_RENDERERS
-        .set(checked(renderers, |r| &r.id, taken))
-        .is_err()
-    {
-        log::warn!("debug renderers were registered already; these are left out");
-    }
-}
-
-/// The renderers native mods registered, in registration order.
-pub fn registered_renderers() -> &'static [DebugRenderer] {
-    match REGISTERED_RENDERERS.get() {
-        Some(renderers) => renderers.as_slice(),
-        None => &[],
-    }
-}
-
-fn checked<T>(entries: Vec<T>, id: impl Fn(&T) -> &str, taken: impl Fn(&str) -> bool) -> Vec<T> {
-    let mut kept: Vec<T> = Vec::new();
+fn checked(entries: Vec<DebugEntry>) -> Vec<DebugEntry> {
+    let mut kept: Vec<DebugEntry> = Vec::new();
     for entry in entries {
-        let name = id(&entry);
         let own =
-            Identifier::parse_namespaced(name).is_some_and(|id| id.namespace() != "minecraft");
+            Identifier::parse_namespaced(&entry.id).is_some_and(|id| id.namespace() != "minecraft");
         if !own {
-            log::warn!("debug id {name:?} is not <namespace>:<path> in a mod's namespace");
-        } else if taken(name) || kept.iter().any(|k| id(k) == name) {
-            log::warn!("debug id {name} is registered twice; the first is kept");
+            log::warn!(
+                "debug entry {:?} is not <namespace>:<path> in a mod's namespace",
+                entry.id
+            );
+        } else if kept.iter().any(|k| k.id == entry.id) {
+            log::warn!(
+                "debug entry {} is registered twice; the first is kept",
+                entry.id
+            );
         } else {
             kept.push(entry);
         }
@@ -238,32 +217,23 @@ fn checked<T>(entries: Vec<T>, id: impl Fn(&T) -> &str, taken: impl Fn(&str) -> 
     kept
 }
 
-/// A native mod's entry as the list shows it: a text entry, hidden while debug info is
-/// reduced, as the vanilla entries that are not allowed then are.
+/// A native mod's entry as the list shows it: a text entry, or with `DebugGroup::Renderer` a
+/// renderer entry (`DebugEntryNoop`), hidden while debug info is reduced, as the vanilla entries
+/// that are not allowed then are.
 fn as_entry(entry: &'static DebugEntry) -> Entry {
     Entry {
         path: entry.id.as_str(),
-        category: Category::Text,
+        category: match entry.group {
+            DebugGroup::Renderer => Category::Renderer,
+            _ => Category::Text,
+        },
         reduced: false,
     }
 }
 
-/// A native mod's renderer as the list shows it: like vanilla's, hidden while debug info is
-/// reduced.
-fn as_renderer(renderer: &'static DebugRenderer) -> Entry {
-    Entry {
-        path: renderer.id.as_str(),
-        category: Category::Renderer,
-        reduced: false,
-    }
-}
-
-/// Every entry: vanilla's, then the native mods' (`registered`, `registered_renderers`).
+/// Every entry: vanilla's, then the native mods' (`registered`).
 pub fn all() -> impl Iterator<Item = Entry> {
-    ENTRIES
-        .into_iter()
-        .chain(registered().iter().map(as_entry))
-        .chain(registered_renderers().iter().map(as_renderer))
+    ENTRIES.into_iter().chain(registered().iter().map(as_entry))
 }
 
 /// `DebugScreenEntries.getEntry` by path.
@@ -289,19 +259,22 @@ pub fn group_key(group: DebugGroup) -> &'static str {
         DebugGroup::LookingAtEntity => "looking_at_entity",
         DebugGroup::LookingAtFluid => "looking_at_fluid",
         DebugGroup::ChunkGeneration => "chunk_generation",
+        // Has no lines: `mod_lines` leaves it out.
+        DebugGroup::Renderer => "renderer",
     }
 }
 
 /// The lines of the enabled native-mod entries by group, in registration order. `lines` is
 /// asked only for the entries `enabled` names, so a disabled one costs nothing; an entry with
-/// no lines joins no group.
+/// no lines joins no group, and a renderer entry has none.
 pub fn mod_lines(
     entries: &[DebugEntry],
     enabled: impl Fn(&str) -> bool,
     mut lines: impl FnMut(&str, &mut Vec<String>),
 ) -> Vec<(DebugGroup, Vec<String>)> {
     let mut groups = Vec::new();
-    for entry in entries.iter().filter(|e| enabled(&e.id)) {
+    let text = |e: &&DebugEntry| e.group != DebugGroup::Renderer;
+    for entry in entries.iter().filter(text).filter(|e| enabled(&e.id)) {
         let mut text = Vec::new();
         lines(&entry.id, &mut text);
         if !text.is_empty() {
@@ -309,6 +282,15 @@ pub fn mod_lines(
         }
     }
     groups
+}
+
+/// `getCurrentlyEnabledVersion`: differs from an earlier one once the statuses were set or the
+/// overlay or reduced debug info changed, each a `rebuildCurrentList` in vanilla.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EnabledVersion {
+    statuses: u64,
+    overlay: bool,
+    reduced: bool,
 }
 
 /// `DebugScreenEntryList`: every entry's status (by full identifier, as the
@@ -319,6 +301,8 @@ pub struct DebugEntries {
     statuses: BTreeMap<String, Status>,
     profile: Option<Profile>,
     file: Option<PathBuf>,
+    /// How many times the statuses were set.
+    version: u64,
 }
 
 impl Default for DebugEntries {
@@ -327,6 +311,7 @@ impl Default for DebugEntries {
             statuses: BTreeMap::new(),
             profile: None,
             file: None,
+            version: 0,
         };
         entries.reset_to_profile(Profile::Default);
         entries
@@ -334,11 +319,11 @@ impl Default for DebugEntries {
 }
 
 /// `Identifier.CODEC`: a bare path is in the `minecraft` namespace, a native mod's id is its own.
-fn identifier(path: &str) -> String {
+fn identifier(path: &str) -> Cow<'_, str> {
     if path.contains(':') {
-        path.to_owned()
+        Cow::Borrowed(path)
     } else {
-        format!("minecraft:{path}")
+        Cow::Owned(format!("minecraft:{path}"))
     }
 }
 
@@ -388,7 +373,7 @@ impl DebugEntries {
                 let key = if key.contains(':') {
                     key.clone()
                 } else {
-                    identifier(key)
+                    identifier(key).into_owned()
                 };
                 custom.insert(key, Status::parse(status.as_str()?)?);
             }
@@ -428,12 +413,13 @@ impl DebugEntries {
         self.statuses = profile
             .statuses()
             .iter()
-            .map(|(path, status)| (identifier(path), *status))
+            .map(|(path, status)| (identifier(path).into_owned(), *status))
             .collect();
     }
     /// `loadProfile` then `save` (the screen's profile buttons).
     pub fn load_profile(&mut self, profile: Profile) {
         self.reset_to_profile(profile);
+        self.version += 1;
         self.save();
     }
     pub fn is_using_profile(&self, profile: Profile) -> bool {
@@ -442,20 +428,21 @@ impl DebugEntries {
     /// `getStatus`: never for an entry the statuses leave out.
     pub fn status(&self, path: &str) -> Status {
         self.statuses
-            .get(&identifier(path))
+            .get(identifier(path).as_ref())
             .copied()
             .unwrap_or(Status::Never)
     }
     /// `setStatus`: the statuses are custom from now on, and saved.
     pub fn set_status(&mut self, path: &str, status: Status) {
         self.profile = None;
-        self.statuses.insert(identifier(path), status);
+        self.statuses.insert(identifier(path).into_owned(), status);
+        self.version += 1;
         self.save();
     }
     /// `toggleStatus` (F3+B, F3+G) with the overlay open or not: whether the
     /// entry is on afterwards.
     pub fn toggle_status(&mut self, path: &str, overlay: bool) -> bool {
-        let (status, on) = match self.statuses.get(&identifier(path)) {
+        let (status, on) = match self.statuses.get(identifier(path).as_ref()) {
             Some(Status::AlwaysOn) => (Status::Never, false),
             Some(Status::InOverlay) if overlay => (Status::Never, false),
             Some(Status::Never) if overlay => (Status::InOverlay, true),
@@ -473,6 +460,35 @@ impl DebugEntries {
             Status::Never => false,
         };
         shown && entry(path).is_some_and(|e| e.reduced || !reduced)
+    }
+    /// `getCurrentlyEnabledVersion` with the `overlay` and `reduced` debug info of now.
+    pub fn enabled_version(&self, overlay: bool, reduced: bool) -> EnabledVersion {
+        EnabledVersion {
+            statuses: self.version,
+            overlay,
+            reduced,
+        }
+    }
+    /// `DebugRenderer.refreshRendererList`'s new list: the ids of the `renderers` mods pushed
+    /// whose renderer entry is on, in their order. An id with no entry a mod declared as a
+    /// renderer is logged and left out, and an id pushed twice counts once.
+    pub fn active_renderers(
+        &self,
+        renderers: Vec<DebugRenderer>,
+        overlay: bool,
+        reduced: bool,
+    ) -> Vec<String> {
+        let mut active: Vec<String> = Vec::new();
+        for DebugRenderer { id } in renderers {
+            let declared =
+                id.contains(':') && entry(&id).is_some_and(|e| e.category == Category::Renderer);
+            if !declared {
+                log::warn!("debug renderer {id} has no renderer entry; it is left out");
+            } else if self.enabled(&id, overlay, reduced) && !active.contains(&id) {
+                active.push(id);
+            }
+        }
+        active
     }
     /// `getCurrentlyEnabled().isEmpty()` negated: something to draw.
     pub fn any_enabled(&self, overlay: bool, reduced: bool) -> bool {
@@ -643,50 +659,31 @@ mod tests {
 
     #[test]
     fn a_native_mods_entries_need_their_own_namespace_and_a_free_id() {
-        let kept = checked(
-            vec![
-                DebugEntry {
-                    id: "mymod:tick_cost".into(),
-                    group: DebugGroup::Memory,
-                },
-                DebugEntry {
-                    id: "minecraft:fps".into(),
-                    group: DebugGroup::Memory,
-                },
-                DebugEntry {
-                    id: "tick_cost".into(),
-                    group: DebugGroup::Memory,
-                },
-                DebugEntry {
-                    id: "mymod:tick_cost".into(),
-                    group: DebugGroup::Light,
-                },
-                DebugEntry {
-                    id: "other:queue".into(),
-                    group: DebugGroup::Position,
-                },
-            ],
-            |e| &e.id,
-            |_| false,
-        );
+        let kept = checked(vec![
+            DebugEntry {
+                id: "mymod:tick_cost".into(),
+                group: DebugGroup::Memory,
+            },
+            DebugEntry {
+                id: "minecraft:fps".into(),
+                group: DebugGroup::Memory,
+            },
+            DebugEntry {
+                id: "tick_cost".into(),
+                group: DebugGroup::Memory,
+            },
+            DebugEntry {
+                id: "mymod:tick_cost".into(),
+                group: DebugGroup::Light,
+            },
+            DebugEntry {
+                id: "other:queue".into(),
+                group: DebugGroup::Position,
+            },
+        ]);
         let ids: Vec<&str> = kept.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, ["mymod:tick_cost", "other:queue"]);
         assert_eq!(kept[0].group, DebugGroup::Memory);
-    }
-
-    #[test]
-    fn a_native_mods_renderer_cannot_take_an_entrys_id() {
-        let renderer = |id: &str| DebugRenderer { id: id.into() };
-        let kept = checked(
-            vec![
-                renderer("mymod:tick_cost"),
-                renderer("mymod:pipes"),
-                renderer("mymod:pipes"),
-            ],
-            |r| &r.id,
-            |id| id == "mymod:tick_cost",
-        );
-        assert_eq!(kept, [renderer("mymod:pipes")]);
     }
 
     #[test]
@@ -717,6 +714,40 @@ mod tests {
             [(DebugGroup::Memory, vec!["mymod:tick_cost: 3 ms".to_owned()])]
         );
         assert_eq!(group_key(groups[0].0), "memory");
+    }
+
+    #[test]
+    fn a_native_mods_renderer_entry_is_listed_as_a_renderer_and_has_no_lines() {
+        let entry: &'static DebugEntry = Box::leak(Box::new(DebugEntry {
+            id: "mymod:pipes".into(),
+            group: DebugGroup::Renderer,
+        }));
+        assert_eq!(as_entry(entry).category, Category::Renderer);
+        assert!(!as_entry(entry).reduced);
+        let asked = mod_lines(
+            std::slice::from_ref(entry),
+            |_| true,
+            |_, _| panic!("a renderer entry has no lines"),
+        );
+        assert!(asked.is_empty());
+    }
+
+    #[test]
+    fn the_enabled_version_changes_with_every_rebuild_of_the_list() {
+        let mut e = DebugEntries::default();
+        let first = e.enabled_version(false, false);
+        assert_eq!(e.status("mymod:pipes"), Status::Never);
+        assert_eq!(e.enabled_version(false, false), first);
+
+        assert_ne!(e.enabled_version(true, false), first);
+        assert_ne!(e.enabled_version(false, true), first);
+
+        e.set_status("mymod:pipes", Status::AlwaysOn);
+        let set = e.enabled_version(false, false);
+        assert_ne!(set, first);
+
+        e.load_profile(Profile::Performance);
+        assert_ne!(e.enabled_version(false, false), set);
     }
 
     #[test]

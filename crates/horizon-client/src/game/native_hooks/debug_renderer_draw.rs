@@ -2,9 +2,8 @@ use super::*;
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
-    /// Draw one enabled debug renderer a mod registered
-    /// (`native_register_debug_renderers`), asked for each view of a world.
-    /// A disabled renderer is never asked.
+    /// Draw one active debug renderer (`native_register_debug_renderers`), asked for each
+    /// view of a world. A renderer that is not active is never asked.
     pub(in crate::game) fn native_debug_renderer_draw(
         &self,
         id: &str,

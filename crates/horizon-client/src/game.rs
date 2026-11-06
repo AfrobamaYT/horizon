@@ -2711,6 +2711,10 @@ struct Game<'a> {
     /// Prepared block-entity copies for this frame, in entity-stream order.
     prepared_model_draws: std::cell::RefCell<Vec<horizon_client::gfx::PreparedModelDraw>>,
     world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
+    /// `DebugRenderer.renderers`: the ids `debug_renderer_draw` is asked about.
+    debug_renderers: Vec<String>,
+    /// `DebugRenderer.lastDebugEntriesVersion`: none before the first view of a world.
+    debug_renderers_version: Option<horizon_client::debug_entries::EnabledVersion>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
     /// `item_level` for one frame, game time, day time and dimension.
@@ -21089,6 +21093,8 @@ impl<'a> Game<'a> {
             kept_block_entities: Default::default(),
             prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),
+            debug_renderers: Vec::new(),
+            debug_renderers_version: None,
             mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
             world_frames: 0,
@@ -23390,6 +23396,8 @@ fn start_game<'a>(
         settings.render_distance = d;
     }
     let mut game = Game::new(res, pack, gui, options, settings, audio, prepared)?;
+    // `new DebugRenderer()` refreshes its list.
+    game.refresh_debug_renderers();
     game.rest_loader = rest_loader;
     game.ui.vanilla_root = vanilla_root;
     if pack_error.is_some() {
@@ -24225,7 +24233,6 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role);
     mods::register_debug_entries(options.execution_role);
-    mods::register_debug_renderers(options.execution_role);
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
     mods::freeze_declarations();
