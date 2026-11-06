@@ -349,7 +349,7 @@ fn data_load_context(
     origin: horizon_world::native_load_context::DataLoadOrigin,
 ) -> std::io::Result<horizon_world::native_load_context::LoadContext> {
     use horizon_world::native_load_context::DataLoadOrigin;
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let ids: Vec<_> = if origin == DataLoadOrigin::ServerDataLoad {
         inventory.server_ids().collect()
     } else {
@@ -1769,7 +1769,7 @@ impl Game<'_> {
             if !host.hub.guests[i].participates_in_player_simulation() {
                 continue;
             }
-            let mut g = host.hub.guests.remove(i);
+            let mut g = host.hub.guests.take_for_save(i);
             self.take_parent_vehicle(&mut g);
             self.save_guest(&mut g);
             let Some(host) = self.lan.as_mut() else {
@@ -1786,7 +1786,6 @@ impl Game<'_> {
         if !guest.participates_in_player_simulation() {
             return;
         }
-        Self::guest_attachments_into(&self.guest_attachments, guest);
         // A proxy released this record to another server, which now owns saving it.
         if guest.placed && !guest.released {
             let _ = self.finish_player_autosaves(true);
@@ -2550,7 +2549,6 @@ impl Game<'_> {
                     // PlayerList.remove: the vehicle it alone rides goes too.
                     self.take_parent_vehicle(&mut guest);
                     self.save_guest(&mut guest);
-                    self.guest_attachments.remove(&guest.conn);
                     let host = self.lan.as_mut()?;
                     host.play.remove(&guest.conn);
                     self.guest_combat.remove(&guest.conn);
@@ -3244,8 +3242,6 @@ impl Game<'_> {
                 Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
                 None => playerdata::load(g, &root),
             };
-            self.guest_attachments
-                .insert(g.conn, std::mem::take(&mut g.attachments));
             // PlayerEvent.LoadFromFile: the player's data is read and applied,
             // the player not yet placed.
             (known, g.uuid, g.name.clone())

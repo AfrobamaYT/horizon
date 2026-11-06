@@ -4,9 +4,12 @@ pub mod index;
 mod lifetime;
 #[doc(hidden)]
 pub mod observer;
+mod resident;
 
 #[doc(hidden)]
 pub use lifetime::{AttachmentLifetime, HasAttachmentLifetime};
+#[doc(hidden)]
+pub use resident::ResidentAttachments;
 
 use std::{
     any::Any,
@@ -576,6 +579,11 @@ impl AttachmentRegistration {
     /// and subsequent writes through the retired map cannot restore membership.
     pub fn unregister(&self) -> bool {
         self.publisher.unregister()
+    }
+
+    /// Whether two handles refer to the same registration.
+    pub fn same_registration(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.publisher, &other.publisher)
     }
 }
 

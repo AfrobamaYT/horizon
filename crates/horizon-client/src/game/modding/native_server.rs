@@ -491,7 +491,6 @@ impl Game<'_> {
         host.mob_players.retain(|_, conn| *conn != guest.conn);
         self.destroying.remove(&guest.entity_id);
         self.guest_combat.remove(&guest.conn);
-        self.guest_attachments.remove(&guest.conn);
     }
 
     /// Remove a fake without treating it as a disconnect or saving it.
@@ -1514,12 +1513,13 @@ pub(super) struct NativeCommands {
 /// Where the game calls the server hook points.
 impl Game<'_> {
     /// Asks the mods for their commands once per hub, and puts them in every
-    /// player's command tree.
+    /// player's command tree; again when a mod asked (`native_refresh_commands`).
     pub(super) fn register_native_commands(&mut self) {
+        let refresh = std::mem::take(&mut self.native_commands_refresh);
         if self
             .lan
             .as_ref()
-            .is_none_or(|host| host.native_commands.is_some())
+            .is_none_or(|host| host.native_commands.is_some() && !refresh)
         {
             return;
         }
@@ -1553,8 +1553,23 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        host.hub.set_mod_commands(0, tree);
         host.native_commands = Some(NativeCommands { levels, dispatcher });
+        if !refresh {
+            host.hub.set_mod_commands(0, tree);
+            return;
+        }
+        host.hub.store_mod_commands(0, tree);
+        self.resend_commands_filtered();
+    }
+
+    /// A mod changed the commands it registers (`native_register_commands`):
+    /// at the start of the next server tick every mod is asked again, the
+    /// commands players may run are rebuilt, and every player on the server is
+    /// sent their tree again, after `native_player_commands_sent`. Nothing
+    /// happens where no world is open to players, and nothing for a server
+    /// whose mods never call it. API @API:refresh_commands@.
+    pub(super) fn native_refresh_commands(&mut self) {
+        self.native_commands_refresh = true;
     }
 
     /// Asks the mods what root commands each player's tree keeps
@@ -2263,6 +2278,103 @@ mod tests {
                 .parse("toggle maybe", &registries)
                 .executable()
                 .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn command_refresh_rebuilds_the_typed_dispatcher_only_on_request() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        struct ChangingCommands {
+            changed: Arc<AtomicBool>,
+            registrations: Arc<AtomicUsize>,
+        }
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for ChangingCommands {
+            fn register_commands(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RegisterCommandsEvent<'_>,
+            ) {
+                self.registrations.fetch_add(1, Ordering::Relaxed);
+                event.commands.push(NativeCommand::new(
+                    if self.changed.load(Ordering::Relaxed) {
+                        "after <n:integer>"
+                    } else {
+                        "before"
+                    },
+                ));
+            }
+        }
+        let changed = Arc::new(AtomicBool::new(false));
+        let registrations = Arc::new(AtomicUsize::new(0));
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "refresh",
+                Box::new(ChangingCommands {
+                    changed: changed.clone(),
+                    registrations: registrations.clone(),
+                }),
+            )]
+            .into(),
+            || {
+                super::super::native_guest_turn_tests::with_guests(|game| {
+                    game.build_registries();
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 1);
+                    changed.store(true, Ordering::Relaxed);
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 1);
+                    let host = game.lan.as_ref().unwrap();
+                    assert!(
+                        host.native_commands
+                            .as_ref()
+                            .unwrap()
+                            .levels
+                            .contains_key("before")
+                    );
+                    mod_api::Commands::refresh_commands(game);
+                    mod_api::Commands::refresh_commands(game);
+                    assert_eq!(
+                        registrations.load(Ordering::Relaxed),
+                        1,
+                        "requests are deferred"
+                    );
+                    game.register_native_commands();
+                    assert!(!game.native_commands_refresh);
+                    assert_eq!(
+                        registrations.load(Ordering::Relaxed),
+                        2,
+                        "requests coalesce"
+                    );
+                    let commands = game.lan.as_ref().unwrap().native_commands.as_ref().unwrap();
+                    assert!(!commands.levels.contains_key("before"));
+                    assert!(commands.levels.contains_key("after"));
+                    assert!(
+                        commands
+                            .dispatcher
+                            .parse("after 7", &game.ui.registries)
+                            .executable()
+                            .is_ok()
+                    );
+                    assert!(
+                        commands
+                            .dispatcher
+                            .parse("after nope", &game.ui.registries)
+                            .executable()
+                            .is_err()
+                    );
+                    assert!(
+                        commands
+                            .dispatcher
+                            .parse("before", &game.ui.registries)
+                            .executable()
+                            .is_err()
+                    );
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 2);
+                })
+            },
         );
     }
 

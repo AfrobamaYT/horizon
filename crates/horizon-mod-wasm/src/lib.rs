@@ -5,8 +5,8 @@
 //! member), compiled once and cached by its members' hashes, and instantiated with the
 //! mod API as its only imports. A group runs sandboxed from the others and from the game; a
 //! trap stops its group. Every refusal names its reason for the Mods page.
-use horizon_mods::dependencies;
-use horizon_mods::manifest::Manifest;
+use horizon_mod_package::dependencies;
+use horizon_mod_package::manifest::Manifest;
 use mod_api::__private::game::Fields;
 use mod_api::__private::wasm_host::{Budgets, EPOCH, LoadError, Member};
 use std::collections::{BTreeMap, BTreeSet};
@@ -410,7 +410,7 @@ fn component(
                 .expect("a wasm package declares [wasm]");
             key.push_str(wasm.sha512());
         }
-        key.push_str(&horizon_mods::manifest::sha512_of(std_member));
+        key.push_str(&horizon_mod_package::manifest::sha512_of(std_member));
         key.push_str(if config.pulley { "pulley" } else { "native" });
         // Code compiled to count fuel differs from code checking the epoch.
         key.push_str(if config.budgets.fuel.is_some() {
@@ -418,7 +418,7 @@ fn component(
         } else {
             "epoch"
         });
-        horizon_mods::manifest::sha512_of(key.as_bytes())
+        horizon_mod_package::manifest::sha512_of(key.as_bytes())
     };
     let cached = config
         .cache
@@ -495,7 +495,7 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
             .iter()
             .map(|&id| Member {
                 id,
-                exports: horizon_mods::manifest::export_prefix(id),
+                exports: horizon_mod_package::manifest::export_prefix(id),
             })
             .collect();
         let loaded =
@@ -590,7 +590,7 @@ pub fn refused() -> &'static [(String, Refusal)] {
 }
 
 /// Loads the wasm mods the player turned on in `game_dir` (and every `dev` package), once at
-/// startup: the same selection as content mods (`horizon_mods::selection`), so a wasm mod's
+/// startup: the same selection as content mods (`horizon_mod_package::selection`), so a wasm mod's
 /// `assets/` and `data/` load as content beside its code. Refusals are kept for [`refused`]; the
 /// mods, and their listeners at points for the game to register after the native mods'.
 pub fn load_installed(
@@ -599,13 +599,13 @@ pub fn load_installed(
     dev: &[PathBuf],
     config: &RuntimeConfig,
 ) -> Loaded {
-    let enabled = horizon_mods::mod_list::ModList::load(game_dir).enabled;
+    let enabled = horizon_mod_package::mod_list::ModList::load(game_dir).enabled;
     let mut refused = Vec::new();
     let packages: Vec<WasmPackage> =
-        horizon_mods::selection::content_packages(game_dir, &enabled, dev)
+        horizon_mod_package::selection::content_packages(game_dir, &enabled, dev)
             .filter(|selected| selected.package.manifest.wasm.is_some())
             .filter_map(
-                |selected| match horizon_mods::Package::read_wasm(&selected.path) {
+                |selected| match horizon_mod_package::Package::read_wasm(&selected.path) {
                     Ok(module) => Some(WasmPackage {
                         manifest: selected.package.manifest,
                         module,

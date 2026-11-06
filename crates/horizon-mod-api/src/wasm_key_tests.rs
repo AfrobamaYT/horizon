@@ -69,7 +69,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     )
     .unwrap();
     struct Table(Cell<usize>);
-    impl mod_api::prelude::BlockStateIdsBackend for Table {
+    impl mod_api::prelude::KeysBackend for Table {
         fn block_key_id(&self, key: BlockKey) -> String {
             self.0.set(self.0.get() + 1);
             crate::registry_keys::block_id(key).unwrap().to_owned()
@@ -86,13 +86,13 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         }
     }
     impl Backend for Table {}
-    mod_api::impl_backend_areas!(Table, except(block_state_ids));
-    impl mod_api::prelude::TagFluidReadsHost for Table {
+    mod_api::impl_backend_areas!(Table, except(keys));
+    impl mod_api::prelude::TagsHost for Table {
         fn unresolved_fluid_id(&self, fluid: crate::UnresolvedFluid) -> String {
             crate::unresolved_fluid::name(fluid)
         }
     }
-    impl mod_api::prelude::BlockStateIdsHost for Table {
+    impl mod_api::prelude::BlockStatesHost for Table {
         fn block_state_default(&self, block: BlockKey) -> Option<crate::BlockStateId> {
             assert_eq!(block.0, 0);
             self.0.set(self.0.get() + 1);
@@ -104,8 +104,8 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             Some(BackendRef::of(self))
         }
     }
-    mod_api::impl_host_areas!(Table, except(tag_fluid_reads, block_state_ids));
-    impl mod_api::prelude::LivingEffectsBackendMut for Table {
+    mod_api::impl_host_areas!(Table, except(block_states, tags));
+    impl mod_api::prelude::LivingBackendMut for Table {
         fn living_add_effect(
             &mut self,
             _: crate::LivingRef,
@@ -118,7 +118,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         }
     }
     impl crate::BackendMut for Table {}
-    mod_api::impl_backend_mut_areas!(Table, except(living_effects));
+    mod_api::impl_backend_mut_areas!(Table, except(living));
     impl crate::ServerHost for Table {
         fn backend_mut(&mut self) -> Option<crate::BackendMutRef<'_>> {
             Some(crate::BackendMutRef::of(self))

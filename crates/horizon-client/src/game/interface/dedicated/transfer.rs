@@ -147,8 +147,7 @@ impl Game<'_> {
     }
 
     /// What an import brought that the game keeps itself: the advancements (`PlayerAdvancements
-    /// .applyFrom` drops those this server lacks), the statistics, and the attachments of a whole
-    /// import, which saves copy from the game's own map (`guest_attachments_into`).
+    /// .applyFrom` drops those this server lacks) and the statistics.
     fn take_arrival_records(&mut self, uuid: u128, done: &horizon_client::lan::import::Imported) {
         let tree = self.advancement_tree();
         let host = self.lan.as_mut().expect("server host is present");
@@ -163,9 +162,6 @@ impl Game<'_> {
                     .retain(|id, _| tree.by_id.contains_key(id));
                 g.advancements = progress;
                 g.advancements_loaded = true;
-            }
-            if done.attachments {
-                self.guest_attachments.insert(g.conn, g.attachments.clone());
             }
             if let Some(stats) = &done.stats {
                 let play = host.play.entry(g.conn).or_default();
@@ -227,8 +223,7 @@ impl Game<'_> {
         let _ = self.finish_player_autosaves(true);
         let host = self.lan.as_mut().expect("server host is present");
         let i = host.hub.imported_arrival(uuid, id)?;
-        let mut g = host.hub.guests.remove(i);
-        Self::guest_attachments_into(&self.guest_attachments, &mut g);
+        let g = host.hub.guests.take_for_save(i);
         let written =
             horizon_client::lan::playerdata::save_now(&g, &self.world_root).and_then(|()| {
                 self.write_arrival_records(self.lan.as_ref().expect("server host is present"), &g)
@@ -297,10 +292,6 @@ impl Game<'_> {
                 .send_to(conn, &C::ContainerClose(play::ContainerClose { container }));
         }
         host.hub.send_inventory(i);
-        // What a mod attached to the player since it joined, as a save writes it.
-        host.hub.guests.update(i, |g| {
-            Self::guest_attachments_into(&self.guest_attachments, g)
-        });
         let advancements = if self.adv.tree.list.is_empty() {
             Value::Null
         } else {

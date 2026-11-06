@@ -141,7 +141,7 @@ pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
             && item.mac.path.is_ident("include")
         {
             let line = item.mac.path.segments[0].ident.span().start().line - 1;
-            let declarations = match lines[line].trim_end_matches('\n') {
+            let declarations = match lines[line].trim_end_matches(['\r', '\n']) {
                 INCLUDE => declarations(&path.with_extension(""))?,
                 LAN => {
                     lan_action_modules(path.parent().ok_or("LAN actions source has no parent")?)?
@@ -200,6 +200,23 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<syn::File, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Git for Windows checks sources out with CRLF by default.
+    #[test]
+    fn an_include_is_expanded_whatever_ends_its_line() {
+        let directory = std::env::temp_dir().join(format!("lan-line-ends-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let root = directory.join("mod.rs");
+        fs::write(directory.join("turns.rs"), "").unwrap();
+        for end in ["\n", "\r\n"] {
+            let source =
+                format!("include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));{end}");
+            fs::write(&root, &source).unwrap();
+            let code = expand(&root, &source).unwrap();
+            assert!(code.contains("mod turns;"), "{end:?}");
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn lan_actions_are_discovered_without_lists_and_reject_shared_methods() {

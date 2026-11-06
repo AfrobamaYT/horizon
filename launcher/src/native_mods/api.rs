@@ -32,7 +32,7 @@ pub(super) fn template(path: &Path) -> Result<String, String> {
 
 pub(super) fn main_rs(
     template: &str,
-    mods: &[&horizon_mods::Manifest],
+    mods: &[&horizon_mod_package::Manifest],
     listed: &[super::inject::ListedPoint],
     sites: &[super::sites::Site],
 ) -> String {
@@ -42,7 +42,7 @@ pub(super) fn main_rs(
         .map(|(i, m)| format!("        {:?} => mod_{i}::hooks,\n", m.id))
         .collect::<String>();
     let inventory = mods.iter().map(|m| format!(
-        "    horizon_mods::runtime::BuiltMod {{ id: {:?}, version: {:?}, side: horizon_mods::Side::{:?} }},\n",
+        "    horizon_mod_package::runtime::BuiltMod {{ id: {:?}, version: {:?}, side: horizon_mod_package::Side::{:?} }},\n",
         m.id, m.version, m.side,
     )).collect::<String>();
     let checks = mods
@@ -59,9 +59,12 @@ pub(super) fn main_rs(
         .collect::<String>();
     let raw = mods.iter().enumerate().flat_map(|(i, manifest)| {
         super::inject::raw_of(manifest).into_iter().map(move |injection| {
-            let point = listed.iter().find(|point| point.target == injection.target).expect("raw target checked");
+            let point = listed.iter().find(|point| internals::plain_path(&point.target) == internals::plain_path(&injection.target)).expect("raw target checked");
             let place = point.place(injection.at_return);
-            format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}), // injection {:?}\n", manifest.id, injection.method, injection.id)
+            let order = manifest.inject.iter().find(|entry| entry.id == injection.id)
+                .map(|entry| format!(".ordered({}, {:?})", entry.priority, entry.id))
+                .unwrap_or_default();
+            format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}){order}, // injection {:?}\n", manifest.id, injection.method, injection.id)
         })
     }).collect::<String>();
     let raw = raw
@@ -75,12 +78,43 @@ pub(super) fn main_rs(
                         .registration(index, manifest, injection)
                 })
             })
+            .collect::<String>()
+        + &mods
+            .iter()
+            .enumerate()
+            .flat_map(|(index, manifest)| {
+                super::slots::sites(sites, manifest).map(move |(entry, site)| {
+                    let adapter =
+                        super::sites::adapter(entry.kind, &format!("mod_{index}::{}", entry.with));
+                    format!(
+                        "        mod_{index}_internals::raw::{}({:?}, {}, {:?}, {adapter}),\n",
+                        site.constructor(),
+                        manifest.id,
+                        entry.priority,
+                        entry.id
+                    )
+                })
+            })
             .collect::<String>();
+    let markers = [
+        ("/* MOD_RAW */", &raw),
+        ("/* MOD_ENTRIES */", &entries),
+        ("/* MOD_POINTS */", &points),
+        ("/* BUILT_MODS */", &inventory),
+    ];
     template
-        .replace("/* MOD_RAW */", &raw)
-        .replace("/* MOD_ENTRIES */", &entries)
-        .replace("/* MOD_POINTS */", &points)
-        .replace("/* BUILT_MODS */", &inventory)
+        .split_inclusive("*/")
+        .map(|chunk| {
+            markers
+                .iter()
+                .find_map(|(marker, value)| {
+                    chunk
+                        .strip_suffix(*marker)
+                        .map(|prefix| prefix.to_owned() + value)
+                })
+                .unwrap_or_else(|| chunk.to_owned())
+        })
+        .collect::<String>()
         + &checks
 }
 
@@ -318,7 +352,7 @@ pub(super) fn stage(
         "horizon-client",
         "horizon-mod-api",
         "horizon-threads",
-        "horizon-mods",
+        "horizon-mod-package",
     ] {
         let mut dependency = path_dep(&format!("../{name}"));
         if name == "horizon-client" {
@@ -527,7 +561,7 @@ mod tests {
     #[test]
     fn generates_only_tool_contract_tables_without_mutating_package() {
         let dir = fixture();
-        let path = dir.join(horizon_mods::manifest::MANIFEST);
+        let path = dir.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap()
             + "[[native.injection]]\nid='test'\ntarget='horizon_client::game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n";
         fs::write(&path, &text).unwrap();
@@ -547,14 +581,14 @@ mod tests {
     fn generated_main_keeps_mod_order() {
         let template = include_str!("../../../crates/horizon-client/src/native_main.rs.template");
         let dir = fixture();
-        let mut base = horizon_mods::Package::read(&dir).unwrap().manifest;
+        let mut base = horizon_mod_package::Package::read(&dir).unwrap().manifest;
         base.id = "base".into();
         base.version = "1.2.3".into();
-        base.side = horizon_mods::Side::Both;
+        base.side = horizon_mod_package::Side::Both;
         let mut extra = base.clone();
         extra.id = "extra".into();
         extra.version = "2.0.0".into();
-        extra.side = horizon_mods::Side::Client;
+        extra.side = horizon_mod_package::Side::Client;
         let mods = [&base, &extra];
         for count in 0..=2 {
             let text = main_rs(template, &mods[..count], &[], &[]);
@@ -576,8 +610,8 @@ mod tests {
             assert_eq!(
                 inventory,
                 &[
-                    "    horizon_mods::runtime::BuiltMod { id: \"base\", version: \"1.2.3\", side: horizon_mods::Side::Both },",
-                    "    horizon_mods::runtime::BuiltMod { id: \"extra\", version: \"2.0.0\", side: horizon_mods::Side::Client },",
+                    "    horizon_mod_package::runtime::BuiltMod { id: \"base\", version: \"1.2.3\", side: horizon_mod_package::Side::Both },",
+                    "    horizon_mod_package::runtime::BuiltMod { id: \"extra\", version: \"2.0.0\", side: horizon_mod_package::Side::Client },",
                 ][..count]
             );
         }
@@ -657,6 +691,14 @@ mod tests {
         assert_eq!(platform["package"].as_str(), Some("horizon-mod-api"));
         assert_eq!(platform["features"][0].as_str(), Some("testing"));
         let game = read(&stage_dir.join(GAME).join("Cargo.toml")).unwrap();
+        assert_eq!(
+            game["dependencies"]["horizon-mod-package"]["path"].as_str(),
+            Some("../horizon-mod-package")
+        );
+        assert!(!game["dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("horizon-mods"));
         assert_eq!(
             game["dependencies"]["mod_0"]["package"].as_str(),
             Some("example-mod")
