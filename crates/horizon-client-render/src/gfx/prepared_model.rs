@@ -123,6 +123,19 @@ impl PreparedModels {
                 ]
             })
             .collect();
+        // Vertex and index buffers, not storage bindings, so only `max_buffer_size` applies.
+        // Checked before `create_buffer`: an oversized buffer is a fatal wgpu validation
+        // error when no scope is active.
+        let limit = device.limits().max_buffer_size;
+        let vertex_bytes = std::mem::size_of_val(vertices) as u64;
+        let index_bytes = std::mem::size_of_val(indices.as_slice()) as u64;
+        if vertex_bytes > limit || index_bytes > limit {
+            return Err(format!(
+                "prepared model buffer is {vertex_bytes} bytes (indices {index_bytes}), above the {limit}-byte limit"
+            )
+            .into());
+        }
+        let checks = super::GpuChecks::push(device);
         let buffer = |contents: &[u8], usage| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Prepared model geometry"),
@@ -168,7 +181,7 @@ impl PreparedModels {
                 },
             )
         };
-        Ok(Self {
+        let built = Self {
             generation,
             vertices: buffer(bytemuck::cast_slice(vertices), wgpu::BufferUsages::VERTEX),
             indices: buffer(bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX),
@@ -197,7 +210,14 @@ impl PreparedModels {
                 "fs_hdr_mark",
                 wgpu::ColorWrites::ALPHA,
             ),
-        })
+        };
+        // Shader, pipeline layout and both pipelines are created above. No bind group or
+        // texture is. A validation or out-of-memory error returns here, before the caller
+        // replaces `prepared_models`.
+        if let Some(error) = checks.pop() {
+            return Err(error.to_string().into());
+        }
+        Ok(built)
     }
 
     pub fn draw<'a>(
@@ -234,6 +254,7 @@ pub fn fail_next_prepared_upload() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytemuck::Zeroable;
 
     #[test]
     fn camera_translation_keeps_a_fraction_past_f32_precision() {
@@ -247,5 +268,50 @@ mod tests {
         assert!((translation.z + 2.0).abs() < 1.0e-5, "{translation:?}");
         let lost = (origin.as_vec3() - camera.as_vec3()).x;
         assert_eq!(lost, 0.0, "f32 subtraction of this origin is {lost}");
+    }
+
+    #[test]
+    fn oversized_prepared_upload_returns_an_error() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::VULKAN;
+        let instance = wgpu::Instance::new(descriptor);
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            force_fallback_adapter: true,
+            ..Default::default()
+        }))
+        .expect("software Vulkan adapter");
+        assert_eq!(
+            adapter.get_info().device_type,
+            wgpu::DeviceType::Cpu,
+            "no software Vulkan adapter"
+        );
+        let mut limits = wgpu::Limits::default();
+        limits.max_buffer_size = 16_384;
+        let (device, _) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .expect("software Vulkan device");
+        let bindings = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &super::super::entity_binding_entries(),
+        });
+        let vertices = vec![PreparedModelVertex::zeroed(); 260];
+        let Err(error) = PreparedModels::create(
+            &device,
+            &super::super::reuse::Reuse::default(),
+            &bindings,
+            wgpu::TextureFormat::Rgba8Unorm,
+            1,
+            &vertices,
+            vec![Some((0, 6))],
+        ) else {
+            panic!("an oversized prepared upload must return an error");
+        };
+        let message = error.to_string();
+        assert!(
+            message.contains("16_640") || message.contains("16640"),
+            "{message}"
+        );
     }
 }
