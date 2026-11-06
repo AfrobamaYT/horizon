@@ -62,6 +62,13 @@ fn resource_id(file: &str, kind: &str) -> Option<String> {
     Some(format!("{ns}:{path}"))
 }
 
+/// `ns:path` for a pack's structure template `data/<ns>/structure/<path>.nbt`.
+pub fn template_id(file: &str) -> Option<String> {
+    let (ns, rest) = file.strip_prefix("data/")?.split_once('/')?;
+    let path = rest.strip_prefix("structure/")?.strip_suffix(".nbt")?;
+    Some(format!("{ns}:{path}"))
+}
+
 /// What `add_file` made of a pack file.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PackFile {
@@ -338,6 +345,15 @@ impl WorldgenOverrides {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_template_id_comes_from_a_structure_nbt_file_only() {
+        assert_eq!(
+            template_id("data/p/structure/room/a.nbt").as_deref(),
+            Some("p:room/a")
+        );
+        assert_eq!(template_id("data/p/structure/a.json"), None);
+        assert_eq!(template_id("data/p/worldgen/structure/a.nbt"), None);
+    }
 
     #[test]
     fn the_highest_pack_wins_and_others_join() {

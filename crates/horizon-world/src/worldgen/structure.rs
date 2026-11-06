@@ -367,6 +367,21 @@ impl StructureResources {
         self.templates = RwLock::new(HashMap::new());
         self
     }
+    /// In-memory template resources, retaining the same cache invalidation
+    /// as folder and archive sources.
+    pub fn with_pack_templates(self, templates: BTreeMap<String, Arc<[u8]>>) -> Self {
+        self.with_templates(
+            templates
+                .into_iter()
+                .map(|(id, bytes)| {
+                    (
+                        id,
+                        horizon_assets::resource_source::Resource::bytes(bytes.to_vec()),
+                    )
+                })
+                .collect(),
+        )
+    }
     /// StructureTemplateManager.getOrCreate; missing templates are empty.
     pub fn template(&self, id: &str) -> Option<Arc<StructureTemplate>> {
         let id = if id.contains(':') {
