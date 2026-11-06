@@ -99,11 +99,23 @@ pub(crate) fn expand(root: &Path, source: &str) -> Result<String, String> {
         }
         Ok(out)
     }
-    if !source.contains(PREFIX) {
+    let parts = source.contains(super::part_table::OUTPUT);
+    if !source.contains(PREFIX) && !parts {
         return Ok(source.to_owned());
     }
     let mut file = syn::parse_file(source).map_err(|e| e.to_string())?;
-    file.items = items(file.items, &sources(root)?)?;
+    let mut generated = if source.contains(PREFIX) {
+        sources(root)?
+    } else {
+        BTreeMap::new()
+    };
+    if parts {
+        generated.insert(
+            super::part_table::OUTPUT.to_owned(),
+            super::part_table::source(root)?,
+        );
+    }
+    file.items = items(file.items, &generated)?;
     Ok(file.to_token_stream().to_string())
 }
 
