@@ -321,6 +321,8 @@ pub fn resolve<'a>(
 
 mod rewrite;
 pub use rewrite::rewrite;
+mod stage;
+pub use stage::{ids, stage, tracked};
 
 #[cfg(test)]
 mod tests;

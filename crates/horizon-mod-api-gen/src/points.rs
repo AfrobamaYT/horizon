@@ -212,7 +212,7 @@ fn crate_files(root: &Path, krate: &str) -> Result<Vec<GameFile>, String> {
 
 /// The crates the points' own crate is built on (`horizon-mod-points` and everything under it), by
 /// library name: their functions can't be points, since their slots would have to reach up to it.
-fn below_points(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+pub(crate) fn below_points(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
     let mut seen = std::collections::BTreeSet::from(["horizon_mod_points".to_owned()]);
     let mut pending = vec![root.join("crates/horizon-mod-points")];
     while let Some(package) = pending.pop() {
@@ -749,11 +749,18 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             packages.insert(package.clone());
         }
     }
-    // The two dependencies each lower crate gets, also written into the lock file's entry for
-    // it, so a `--locked` build of the staged copy accepts them.
+    dependencies(root, packages)?;
+    Ok(staged)
+}
+
+/// Give listed lower-crate points and sites their staged dependencies, including the lock file.
+pub(crate) fn dependencies(
+    root: &Path,
+    packages: std::collections::BTreeSet<PathBuf>,
+) -> Result<(), String> {
     const ADDED: [&str; 2] = ["horizon-mod-points", "horizon-mod-api-macros"];
     if packages.is_empty() {
-        return Ok(staged);
+        return Ok(());
     }
     let lock_path = root.join("Cargo.lock");
     // A Windows checkout has CRLF line endings; Cargo reads either, and the entries match on LF.
@@ -794,7 +801,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         .map_err(|e| format!("{}: {e}", manifest.display()))?;
     }
     fs::write(&lock_path, lock).map_err(|e| format!("{}: {e}", lock_path.display()))?;
-    Ok(staged)
+    Ok(())
 }
 
 /// `lock` with `added` in the dependency list of the package `name`, kept in the lock file's

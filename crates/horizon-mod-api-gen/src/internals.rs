@@ -1208,6 +1208,13 @@ fn stage(root: &Path, discovery: bool) -> Result<Widened, String> {
             fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
         ));
     }
+    let sites = crate::sites::listed(&root.join("crates/horizon-mod-api-gen/sites"))?;
+    lists.extend(
+        sites
+            .iter()
+            .filter(|d| !d.target.starts_with("horizon_client::"))
+            .map(|d| (d.origin.as_str(), d.target.clone())),
+    );
     widen_mode(root, &lists, discovery)
 }
 

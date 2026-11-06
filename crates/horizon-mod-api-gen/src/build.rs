@@ -56,10 +56,14 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     let src = root.join("crates/horizon-client/src");
     println!("cargo:rerun-if-changed={}", src.join("game.rs").display());
     println!("cargo:rerun-if-changed={}", src.join("game").display());
-    for path in super::points::tracked(root)? {
+    for path in super::points::tracked(root)?
+        .into_iter()
+        .chain(super::sites::tracked(root)?)
+    {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    let code = super::points::records(&super::points::game_points(root)?);
+    let code =
+        super::points::records(&super::points::game_points(root)?) + &super::sites::ids(root)?;
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
     // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
     let mut code = String::new();
