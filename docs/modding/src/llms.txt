@@ -18,6 +18,15 @@ Prefer a hook or Part method; otherwise a `trait_method` injection with a `Host`
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Publishing your mod](how-to/publish.md)
 
+## Per-concept sources
+
+Edit the individual pages in `concepts/trait-mods/` and `how-to/native-mods/`, not their aggregate pages.
+`mdbook build docs/modding` discovers sorted `.md` files there automatically, using the leading
+`<!-- chapter: Title -->` metadata for navigation. Adding a concept needs no SUMMARY edit.
+Existing heading anchors stay unchanged on the aggregate pages; relative links and compiled-example
+includes in a concept page are relative to that page. The build checks their targets and anchors.
+The preprocessor needs only Python 3 and runs automatically in local and CI builds.
+
 ## Reference
 
 - [The manifest and the package](reference/manifest.md)
