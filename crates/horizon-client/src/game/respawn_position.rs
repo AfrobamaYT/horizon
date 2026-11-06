@@ -107,15 +107,13 @@ impl Game<'_> {
         if decision.copy == missing.is_none() {
             return;
         }
-        let Some(g) = self
-            .lan
-            .as_mut()
-            .and_then(|host| host.hub.guests.iter_mut().find(|g| g.conn == conn))
-        else {
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
-        g.spawn = None;
-        g.respawn_elsewhere = missing.filter(|_| decision.copy).map(|c| c.saved());
+        let _ = host.hub.guests.update_connection(conn, |g| {
+            g.spawn = None;
+            g.respawn_elsewhere = missing.filter(|_| decision.copy).map(|c| c.saved());
+        });
     }
 
     /// Sends a guest whose deferred respawn the mods moved into another

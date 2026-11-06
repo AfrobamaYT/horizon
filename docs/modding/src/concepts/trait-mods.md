@@ -186,7 +186,9 @@ None of them loads a chunk. Light above the build height reads as full sky and b
 none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
 so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`,
 `item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
-`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
+`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. Fluid reads return `FluidState` with a
+`FluidKey`, amount, falling flag and engine-derived source flag; `is_empty()` and `is_source()` report
+those states without a registry lookup. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
 `LevelHost` has no random, by design: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
@@ -279,6 +281,10 @@ authoritative context or an unavailable mapping returns `None`, not a stale memb
 `block_state_id`, tag names and existing fluid operation arguments remain strings for now.
 
 Declare a tank-only fluid in your own namespace with `r.declare_fluid("chocolate")`; the returned `FluidKey` identifies it for the mod load. Request vanilla or another mod's declared fluid with `r.fluid_key("minecraft:water")` or `r.fluid_key("other:chocolate")`. Requests resolve after all registrations, so declaration order does not matter; an unknown request stops the load and names the requesting mod. Tank-only fluids have no world simulation or world state. Fluid stacks and recipe ingredients use these keys; remaining fluid operations move to them in subsequent changes.
+A saved tank whose fluid's mod is absent carries an opaque unresolved identity. Its stack's
+`key()` is `None`; `UnresolvedFluid::id(host)` reads its saved name. It can move between
+name-backed mod tanks, but not into vanilla buckets or cauldrons.
+
 `NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
 application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
 uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks
@@ -469,6 +475,10 @@ host.transaction(|host, tx| {
 })
 ```
 
+Cauldron interactions outside a transaction keep vanilla's effect order. Inside an open
+transaction, their statistic award (including `player_stat_award`), sound and overflow
+item toss/spawn wait until the outermost successful commit; an abort emits none of them.
+
 #### Entity energy and fluids
 
 `entity.capability(host, &ENTITY_ENERGY, side)` and `entity.capability(host, &ENTITY_FLUIDS, side)` reach a mod's
@@ -523,6 +533,12 @@ Stale/replaced/respawned menus, spectators, non-client hosts and the creative in
 Inventory reads and direct server-side item transactions keep their existing contracts; a click does
 not expose direct client inventory writes or enforce a mod's locked-slot policy. Call from an explicit
 input action rather than submitting every render/tick. Diverges from upstream: new helper.
+
+`menu.close(host)` closes the menu's screen as Escape does and tells the server (`ContainerClose`);
+it returns `false` while that screen is not open, so the inventory menu closes only while the inventory
+screen shows. `menu.click_button(host, button)` presses one of the open menu's buttons
+(`ContainerButtonClick`, as a loom's pattern list does), for input the screen's own
+buttons don't take; the server's menu decides what it does, and the inventory menu has none.
 
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
@@ -657,6 +673,47 @@ each other's handlers. So the game refuses that at startup, naming both mods and
 `CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
 namespace. Both checks run once, when the mods register.
 
+### Entity parts and mob goals
+
+`r.entity_part("minecraft:zombie", ZombieGoals)` attaches an `EntityPart` to one entity type, a mod's
+own or vanilla's. Its single method `register_goals` runs at every `Mob` construction of that type —
+spawned or loaded, the moment vanilla's `registerGoals` fan-out ends — and the goals it adds join the
+mob's two selectors beside the species' own, with the same priorities, flag locks and interruption:
+
+```rust
+struct ZombieGoals;
+#[mod_api::horizon_part]
+impl EntityPart for ZombieGoals {
+    fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+        // goals.mob().id() is "minecraft:zombie": branch as per-species code does.
+        goals.add_goal(7, Stare::default());
+        goals.add_target_goal(3, Remember::default());
+    }
+}
+```
+
+`goals.add_goal(priority, goal)` and `goals.add_target_goal(priority, goal)` are `GoalSelector.addGoal`
+on the mob's two selectors; `GoalFlags` claims MOVE, LOOK, JUMP and TARGET as vanilla's `Goal.Flag`
+does, and a higher priority (a lower number) interrupts a running goal holding the same flag. A goal
+object is per mob, built fresh at every construction, and its state is never saved: a goal that needs
+memory across loads keeps it in attachments. A mob whose type has no part, or a game with no entity
+parts at all, pays nothing — the wrapper and the tick's read view exist only where a mod goal runs.
+
+A `Goal` reads and writes through its `GoalContext`: `mob()` is a fresh handle of the mob it runs on,
+`host()` the tick's read view, `random()` the mob's own random (`mob.getRandom()`, so a mod's draws
+keep the mob's stream in shape). The read view answers the ticking mob itself directly, the player the
+tick sees, and every other entity from the tick's snapshot — a `getEntities` of the moment the mob
+list was taken out — so a read the snapshot does not carry (a mob's gear or effects, its species id)
+answers `None`, and the handle docs mark the reads that carry the snapshot rule. Writes apply to the
+mob itself through the engine's own paths: `move_to(pos, speed)` and `stop_navigation()`
+(`PathNavigation`), `look_at(pos)` (`LookControl`), `jump()`, and `set_target(Option<LivingRef>)`
+(`Mob.setTarget`, with the write handle's rules: a brain-backed species refuses, as do foxes,
+endermen and zombified piglins, whose setter side effects are not modeled). Writes to other entities
+are not part of a goal; the write handles a `ServerHost` takes do not exist in a goal tick.
+
+Entity parts are a native mod's for now: the goal surface does not cross to wasm (see the
+`attach_entity_part` note), so `r.entity_part` is absent from a wasm build.
+
 ### Block-state facts
 
 A `BlockStateId` is a registry value, not a live object, so the facts about one that need no world are a small
@@ -777,8 +834,11 @@ hosts are small enough to implement whole. NeoForge's GameTest is the in-game co
 A new hook needs its declaration in the area file of `crates/horizon-mod-api/src/hooks/` (`///` lines and
 `#[hook(side = "server", contract = "cancel", out = "cancel")]` on `fn name();`; the argument list is in that folder's `mod.rs`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
-That command only replaces the placeholder in `native_hooks.rs` with the `dispatch_<hook>` call; commit
-that source change and the declaration. The `horizon-mod-api-gen` build dependency generates the hook traits,
+Put that function in `crates/horizon-client/src/game/native_hooks/<area>.rs`, matching the declaration's
+area filename. The build discovers these modules automatically; do not add a module list entry. Shared
+support lives in `shared.rs`; `fire.rs` includes generated dispatch entry points, not hook implementations.
+That command only replaces the placeholder in its owning area file with the `dispatch_<hook>` call; commit
+that source change and the declaration. Fills are idempotent; rerun the command after a failed write. The `horizon-mod-api-gen` build dependency generates the hook traits,
 `Host` methods and dispatch code into Cargo's `OUT_DIR` when the game and renderer build, including release
 builds. These generated Rust files are not kept in the source tree or committed, and no manual regeneration
 is needed after a merge. Every hook needs a `mod_api` entry: the build fails naming any hook without one. A hook that stands in for a
@@ -813,6 +873,11 @@ Every host is an `AttachmentStore` (and `host.attachments()` gives it): the type
 stand on its few erased ones, so they work the same in a native mod and a wasm mod. A
 value keeps its own Rust type, shared: reading one clones it out, and copying a holder's
 data copies no value.
+
+`AttachmentHolder` keeps an existing typed handle when a system needs to store a holder
+identity: `Entity`, `Player`, `BlockEntity`, `Chunk` or `Level`. It is `Copy`, does not keep
+anything loaded, and follows each handle's ordinary stale-world and unload rules. Unlike
+the storage-relative `Holder`, it carries the handle's world scope.
 
 ```rust
 use mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};

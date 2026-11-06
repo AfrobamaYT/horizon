@@ -2,7 +2,10 @@
 //! server threads and the play-state hub, feeds it the world's entities each
 //! tick and turns what the guests do into gameplay. A world that is not open
 //! costs one `Option` check per tick.
+mod event_timings;
+
 use super::{Game, shield::OFFHAND_SLOT};
+use event_timings::EventTimings;
 use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
     Result,
@@ -32,6 +35,7 @@ use std::{
 /// The recipes one server load resolved (the `ingredient` hook asked once per
 /// occurrence), shared by every table and the network copy that reads them.
 struct ServerSources {
+    root: std::path::PathBuf,
     generation: u64,
     overlay: u64,
     sources: Arc<ResolvedSources>,
@@ -53,48 +57,48 @@ fn overlay_key(overlay: &horizon_world::loot::PackOverlay) -> u64 {
 /// set: the first caller builds them and later ones adopt them (`/reload`
 /// forgets them first, so it asks again).
 pub(super) fn server_sources(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
-) -> Arc<ResolvedSources> {
+) -> std::io::Result<Arc<ResolvedSources>> {
     let generation = item_data.defaults().generation();
     let key = overlay_key(overlay);
     let mut slot = SOURCES.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(held) = slot
         .as_ref()
-        .filter(|held| held.generation == generation && held.overlay == key)
+        .filter(|held| held.generation == generation && held.overlay == key && held.root == root)
     {
-        return held.sources.clone();
+        return Ok(held.sources.clone());
     }
     let sources = Arc::new(ResolvedSources::load_or_empty(
-        item_data.root(),
+        root,
         overlay,
-        &server_data_load(item_data),
+        &server_data_load(root, item_data)?,
     ));
     *slot = Some(ServerSources {
+        root: root.to_owned(),
         generation,
         overlay: key,
         sources: sources.clone(),
     });
-    sources
+    Ok(sources)
 }
 
 /// The recipes of a load of `origin`: a server's are shared, a client's own.
 pub(super) fn load_sources(
+    root: &std::path::Path,
     item_data: &ItemData,
     origin: horizon_world::native_load_context::DataLoadOrigin,
     overlay: &horizon_world::loot::PackOverlay,
-) -> Arc<ResolvedSources> {
+) -> std::io::Result<Arc<ResolvedSources>> {
     use horizon_world::native_load_context::DataLoadOrigin;
     match origin {
-        DataLoadOrigin::ServerDataLoad => server_sources(item_data, overlay),
-        DataLoadOrigin::ClientPreload | _ => Arc::new(ResolvedSources::load_or_empty(
-            item_data.root(),
+        DataLoadOrigin::ServerDataLoad => server_sources(root, item_data, overlay),
+        DataLoadOrigin::ClientPreload | _ => Ok(Arc::new(ResolvedSources::load_or_empty(
+            root,
             overlay,
-            &item_data.context().for_load(
-                DataLoadOrigin::ClientPreload,
-                mod_api::__private::loaded_mods().ids(),
-            ),
-        )),
+            &data_load_context(root, item_data, origin)?,
+        ))),
     }
 }
 
@@ -106,6 +110,7 @@ pub(super) fn forget_server_sources() {
 
 /// What `sync_data` loaded from this resource generation.
 struct Synced {
+    root: std::path::PathBuf,
     with_packs: bool,
     generation: u64,
     result: std::result::Result<Arc<SyncData>, String>,
@@ -128,11 +133,12 @@ static SYNC: Mutex<SyncCache> = Mutex::new(SyncCache {
 
 /// Load wire data once, retaining this session's frozen damage definitions.
 pub(super) fn sync_data(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
 ) -> std::result::Result<Arc<SyncData>, String> {
     let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    cached_sync_data(&mut sync, item_data.root(), overlay, item_data)
+    cached_sync_data(&mut sync, root, overlay, item_data)
 }
 
 fn cached_sync_data(
@@ -146,12 +152,13 @@ fn cached_sync_data(
     if sync
         .data
         .as_ref()
-        .is_some_and(|cached| cached.generation != generation)
+        .is_some_and(|cached| cached.generation != generation || cached.root != root)
     {
         sync.data = None;
     }
     let load = || {
-        let sources = server_sources(item_data, overlay);
+        let sources =
+            server_sources(root, item_data, overlay).map_err(|error| error.to_string())?;
         match &sync.damage {
             Some(damage) => SyncData::load_with_frozen_damage(
                 root,
@@ -170,6 +177,7 @@ fn cached_sync_data(
     }
     sync.data
         .get_or_insert_with(|| Synced {
+            root: root.to_owned(),
             with_packs: packs,
             generation,
             result: load(),
@@ -179,12 +187,13 @@ fn cached_sync_data(
 }
 
 pub(super) fn open_world_sync_data(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
     damage: &horizon_world::damage_source::Catalog,
 ) -> std::result::Result<(), String> {
     let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    initialize_world_sync_data(&mut sync, item_data.root(), overlay, damage, item_data)
+    initialize_world_sync_data(&mut sync, root, overlay, damage, item_data)
 }
 
 fn initialize_world_sync_data(
@@ -196,10 +205,9 @@ fn initialize_world_sync_data(
 ) -> std::result::Result<(), String> {
     sync.world_packs = !overlay.files.is_empty();
     if sync.world_packs
-        || sync
-            .data
-            .as_ref()
-            .is_some_and(|cached| cached.generation != item_data.defaults().generation())
+        || sync.data.as_ref().is_some_and(|cached| {
+            cached.generation != item_data.defaults().generation() || cached.root != root
+        })
     {
         sync.data = None;
     }
@@ -219,12 +227,13 @@ pub(super) fn forget_sync_data() {
 /// Without a hub yet, retain this world's frozen registries through `/reload`
 /// too. World entry discards this snapshot before loading another world's.
 pub(super) fn reload_cached_sync_data(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
 ) -> std::result::Result<(), String> {
     let kept = prepare_sync_reload(&mut SYNC.lock().unwrap_or_else(|e| e.into_inner()), overlay);
     if let Some(kept) = kept {
-        reload_sync_data(item_data, overlay, &kept)?;
+        reload_sync_data(root, item_data, overlay, &kept)?;
     }
     Ok(())
 }
@@ -247,11 +256,11 @@ fn prepare_sync_reload(
 /// synchronized registries `kept` (the hub's) as they were, and that becomes
 /// what `sync_data` gives.
 pub(super) fn reload_sync_data(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
     kept: &SyncData,
 ) -> std::result::Result<Arc<SyncData>, String> {
-    let root = item_data.root();
     // Kept pack dialogs count as packs: a world opened without packs after
     // a `/reload` that dropped them must read its own registries again.
     let packs = !overlay.files.is_empty() || kept.has_pack_entries();
@@ -260,13 +269,16 @@ pub(super) fn reload_sync_data(
         overlay,
         kept,
         item_data.defaults(),
-        &server_sources(item_data, overlay),
+        server_sources(root, item_data, overlay)
+            .map_err(|error| error.to_string())?
+            .as_ref(),
     )
     .map(|mut sync| {
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
     });
     SYNC.lock().unwrap_or_else(|e| e.into_inner()).data = Some(Synced {
+        root: root.to_owned(),
         with_packs: packs,
         generation: item_data.defaults().generation(),
         result: sync.clone(),
@@ -295,18 +307,36 @@ impl Game<'_> {
 /// A server's own data load over `item_data`'s registry inputs: the owner of
 /// the data a server reads and sends, whichever window shares the `ItemData`.
 pub(super) fn server_data_load(
+    root: &std::path::Path,
     item_data: &ItemData,
-) -> horizon_world::native_load_context::LoadContext {
-    item_data.context().for_load(
+) -> std::io::Result<horizon_world::native_load_context::LoadContext> {
+    data_load_context(
+        root,
+        item_data,
         horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
-        mod_api::__private::loaded_mods().ids(),
     )
+}
+
+fn data_load_context(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    origin: horizon_world::native_load_context::DataLoadOrigin,
+) -> std::io::Result<horizon_world::native_load_context::LoadContext> {
+    use horizon_world::native_load_context::DataLoadOrigin;
+    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let ids: Vec<_> = if origin == DataLoadOrigin::ServerDataLoad {
+        inventory.server_ids().collect()
+    } else {
+        inventory.client_ids().collect()
+    };
+    Ok(item_data.context().for_load(origin, ids))
 }
 
 /// The registries and tags a server sends without data packs over them, read
 /// on a helper thread while a server's world prepares: most worlds have no
 /// packs, so it is what `sync_data` would load once the world is open.
 pub(super) struct SyncPreload {
+    root: std::path::PathBuf,
     generation: u64,
     worker: std::thread::JoinHandle<std::result::Result<SyncData, String>>,
 }
@@ -324,6 +354,7 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
     }) {
         return None;
     }
+    let root = item_data.root().to_owned();
     let item_data = Arc::clone(item_data);
     std::thread::Builder::new()
         .name("Server data preload".into())
@@ -333,10 +364,16 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
                 item_data.root(),
                 &none,
                 item_data.defaults(),
-                &server_sources(&item_data, &none),
+                server_sources(item_data.root(), &item_data, &none)
+                    .map_err(|error| error.to_string())?
+                    .as_ref(),
             )
         })
-        .map(|worker| SyncPreload { generation, worker })
+        .map(|worker| SyncPreload {
+            root,
+            generation,
+            worker,
+        })
         .ok()
 }
 
@@ -351,6 +388,7 @@ impl SyncPreload {
             let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
             if !sync.world_packs && sync.data.as_ref().is_none_or(|cached| cached.with_packs) {
                 sync.data = Some(Synced {
+                    root: self.root,
                     with_packs: false,
                     generation: self.generation,
                     result: read.map(Arc::new),
@@ -1505,7 +1543,11 @@ impl Game<'_> {
         net: NetConfig,
         config: HubConfig,
     ) -> Result<()> {
-        let mut sync = sync_data(&self.res.core.item_data, &self.pack_files())?;
+        let mut sync = sync_data(
+            &self.options.resources,
+            &self.res.core.item_data,
+            &self.pack_files(),
+        )?;
         let features = if self.level.enabled_features.is_empty() {
             vec!["minecraft:vanilla".to_owned()]
         } else {
@@ -1526,7 +1568,12 @@ impl Game<'_> {
                 packed.as_deref(),
                 Some(&sync),
                 self.res.item_defaults(),
-                &server_sources(&self.res.core.item_data, &self.pack_files()),
+                server_sources(
+                    &self.options.resources,
+                    &self.res.core.item_data,
+                    &self.pack_files(),
+                )?
+                .as_ref(),
             )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);
@@ -1853,15 +1900,16 @@ impl Game<'_> {
             };
             host.hub.seat_order += 1;
             let order = host.hub.seat_order;
-            let g = &mut host.hub.guests[i];
-            if let Some(horizon_world::nbt::Tag::Compound(p)) = &mut g.saved {
-                p.remove(&"RootVehicle".into());
-            }
-            g.vehicle = Some(id);
-            g.vehicle_order = order;
-            g.saved_vehicle = None;
-            // Pair the stationary restored entities before their passenger packet.
-            g.moved = true;
+            host.hub.guests.update(i, |g| {
+                if let Some(horizon_world::nbt::Tag::Compound(p)) = &mut g.saved {
+                    p.remove(&"RootVehicle".into());
+                }
+                g.vehicle = Some(id);
+                g.vehicle_order = order;
+                g.saved_vehicle = None;
+                // Pair the stationary restored entities before their passenger packet.
+                g.moved = true;
+            });
         }
     }
     /// The file name of a player's advancements and statistics: an
@@ -1957,16 +2005,16 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        if let Some(g) = host.hub.guest_mut(conn)
-            && let Some(json) = saved
-        {
-            let mut progress = horizon_client::advancements::Progress::from_json(&json);
-            // PlayerAdvancements.applyFrom: advancements this server lacks are dropped.
-            progress
-                .criteria
-                .retain(|id, _| tree.by_id.contains_key(id));
-            g.advancements = progress;
-            g.advancements_loaded = true;
+        if let Some(json) = saved {
+            let _ = host.hub.update_guest(conn, |g| {
+                let mut progress = horizon_client::advancements::Progress::from_json(&json);
+                // PlayerAdvancements.applyFrom: advancements this server lacks are dropped.
+                progress
+                    .criteria
+                    .retain(|id, _| tree.by_id.contains_key(id));
+                g.advancements = progress;
+                g.advancements_loaded = true;
+            });
         }
         let mut stats =
             super::stats::Stats::read(&super::stats::player_json(&self.world_root, "stats", uuid));
@@ -2253,9 +2301,10 @@ impl Game<'_> {
         // the fork's borrow shape), so the host is put back for the match and taken out
         // again on the way through.
         self.lan = Some(host);
+        let mut timings = EventTimings::new(horizon_client::spans::NOTE_MS);
         for event in events {
             if timed && let Some(host) = self.lan.as_ref() {
-                note_event(host, previous.take());
+                note_event(host, previous.take(), &mut timings);
             }
             if timed {
                 let detail = self
@@ -2617,7 +2666,10 @@ impl Game<'_> {
             }
         }
         if timed && let Some(host) = self.lan.as_ref() {
-            note_event(host, previous);
+            note_event(host, previous, &mut timings);
+            for burst in timings.bursts() {
+                horizon_client::spans::note(burst.ms, || describe_burst(host, &burst));
+            }
         }
         self.lan.take()
     }
@@ -3159,34 +3211,40 @@ impl Game<'_> {
         let root = self.world_root.clone();
         let in_place = host.hub.config.dimension.clone();
         let owner = host.owner.as_mut();
-        let Some(g) = host.hub.guest_mut(conn) else {
+        let Some((known, uuid, name)) = host.hub.update_guest(conn, |g| {
+            // PlayerList.loadPlayerData: the owner gets the world's player file,
+            // everyone else their own.
+            let known = match owner.filter(|o| o.uuid == g.uuid) {
+                Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
+                None => playerdata::load(g, &root),
+            };
+            self.guest_attachments
+                .insert(g.conn, std::mem::take(&mut g.attachments));
+            // PlayerEvent.LoadFromFile: the player's data is read and applied,
+            // the player not yet placed.
+            (known, g.uuid, g.name.clone())
+        }) else {
             return;
         };
-        // PlayerList.loadPlayerData: the owner gets the world's player file,
-        // everyone else their own.
-        let known = match owner.filter(|o| o.uuid == g.uuid) {
-            Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
-            None => playerdata::load(g, &root),
-        };
-        self.guest_attachments
-            .insert(g.conn, std::mem::take(&mut g.attachments));
-        // PlayerEvent.LoadFromFile: the player's data is read and applied,
-        // the player not yet placed.
-        let (uuid, name) = (g.uuid, g.name.clone());
         self.native_player_load_from_file(uuid, &name, &playerdata::directory(&root));
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some(g) = host.hub.guest_mut(conn) else {
+        if host
+            .hub
+            .update_guest(conn, |g| {
+                // PrepareSpawnTask: with no saved rotation the player faces the world
+                // spawn's angle (`/setworldspawn ... <angle>`).
+                playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
+                if !known || force {
+                    g.game_mode = default_mode;
+                    // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
+                    g.abilities.update_for_mode(default_mode);
+                }
+            })
+            .is_none()
+        {
             return;
-        };
-        // PrepareSpawnTask: with no saved rotation the player faces the world
-        // spawn's angle (`/setworldspawn ... <angle>`).
-        playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
-        if !known || force {
-            g.game_mode = default_mode;
-            // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
-            g.abilities.update_for_mode(default_mode);
         }
         if !known {
             // ServerPlayer.adjustSpawnLocation: a player new to the world
@@ -3201,31 +3259,38 @@ impl Game<'_> {
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            let Some(g) = host.hub.guest_mut(conn) else {
+            if host
+                .hub
+                .update_guest(conn, |g| {
+                    g.position = feet;
+                    g.previous_position = feet;
+                    // Ready.spawn uses the world spawn's yaw and pitch.
+                    [g.yaw, g.pitch] = self.level.world_spawn_angle;
+                    g.head_yaw = g.yaw;
+                    g.health = 20.0;
+                    g.food = 20;
+                    g.dimension = super::Dim::Overworld.id().to_owned();
+                })
+                .is_none()
+            {
                 return;
-            };
-            g.position = feet;
-            g.previous_position = feet;
-            // Ready.spawn uses the world spawn's yaw and pitch.
-            [g.yaw, g.pitch] = self.level.world_spawn_angle;
-            g.head_yaw = g.yaw;
-            g.health = 20.0;
-            g.food = 20;
-            g.dimension = super::Dim::Overworld.id().to_owned();
+            }
         }
         // A server places each player in their own level (`PlayerList.placeNewPlayer`).
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some(g) = host.hub.guest_mut(conn) else {
+        let back = self.dim;
+        let Some((level, elsewhere)) = host.hub.update_guest(conn, |g| {
+            let level = super::Dim::from_id(&g.dimension);
+            let elsewhere = level != back;
+            if !elsewhere {
+                g.dimension = in_place;
+            }
+            (level, elsewhere)
+        }) else {
             return;
         };
-        let back = self.dim;
-        let level = super::Dim::from_id(&g.dimension);
-        let elsewhere = level != back;
-        if !elsewhere {
-            g.dimension = in_place;
-        }
         self.load_guest_records(conn);
         // The mods say which commands the newcomer's tree keeps.
         self.native_filter_commands(Some(conn));
@@ -3800,23 +3865,61 @@ fn level_event_except(id: i32, acting: Option<u32>, collateral_break: bool) -> O
 
 /// Notes how long the event that started at `started` took (`spans::note`), with what it
 /// was about when [`Game::event_detail`] said.
-fn note_event(host: &LanHost, started: Option<(Instant, EventKind, Option<UseDetail>)>) {
-    let Some((started, (kind, conn, name), detail)) = started else {
+fn note_event(
+    host: &LanHost,
+    started: Option<(Instant, EventKind, Option<UseDetail>)>,
+    timings: &mut EventTimings<(Option<u32>, Option<String>), UseDetail>,
+) {
+    let Some((started, kind, detail)) = started else {
         return;
     };
-    horizon_client::spans::note(started.elapsed().as_secs_f32() * 1000.0, || {
-        let who = name
-            .or_else(|| conn.and_then(|c| host.hub.guest(c)).map(|g| g.name.clone()))
-            .or_else(|| conn.map(|c| format!("connection {c}")));
-        let line = match who {
-            Some(who) => format!("{kind} of {who}"),
-            None => kind.to_owned(),
-        };
-        match detail {
-            Some(d) => format!("{line} ({d})"),
-            None => line,
-        }
-    });
+    let ms = started.elapsed().as_secs_f32() * 1000.0;
+    horizon_client::spans::note(ms, || describe_event(host, &kind, detail.as_ref()));
+    let (name, conn, player) = kind;
+    timings.add(name, (conn, player), detail, ms);
+}
+
+/// The player an event came from: its name, else its connection.
+fn who(host: &LanHost, conn: Option<u32>, name: Option<String>) -> Option<String> {
+    name.or_else(|| conn.and_then(|c| host.hub.guest(c)).map(|g| g.name.clone()))
+        .or_else(|| conn.map(|c| format!("connection {c}")))
+}
+
+/// A burst's note: `213 x UseItemOn under 10 ms each (…); most from Steve: 140 of them, 710.0 ms`.
+fn describe_burst(
+    host: &LanHost,
+    burst: &event_timings::Burst<(Option<u32>, Option<String>), UseDetail>,
+) -> String {
+    let mut line = format!(
+        "{} x {} under {} ms each",
+        burst.count,
+        burst.kind,
+        horizon_client::spans::NOTE_MS
+    );
+    if let Some(d) = &burst.detail {
+        line.push_str(&format!(" ({d})"));
+    }
+    if let Some(((conn, name), count, ms)) = &burst.top
+        && let Some(who) = who(host, *conn, name.clone())
+    {
+        line.push_str(&format!("; most from {who}: {count} of them, {ms:.1} ms"));
+    }
+    line
+}
+
+fn describe_event(
+    host: &LanHost,
+    (kind, conn, name): &EventKind,
+    detail: Option<&UseDetail>,
+) -> String {
+    let line = match who(host, *conn, name.clone()) {
+        Some(who) => format!("{kind} of {who}"),
+        None => (*kind).to_owned(),
+    };
+    match detail {
+        Some(d) => format!("{line} ({d})"),
+        None => line,
+    }
 }
 
 /// A client's settings as the mod API names them.
@@ -3850,6 +3953,7 @@ fn client_info(
 
 /// What a use packet was about, taken before it ran (the use may consume the item or change
 /// the block): the item in the hand it names and, on a block, that block, where, and the face.
+#[derive(PartialEq)]
 struct UseDetail {
     item: Option<Arc<str>>,
     block: Option<(Arc<str>, [i32; 3], i32)>,
@@ -3896,7 +4000,30 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
+    use super::{EventTimings, OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
+
+    #[test]
+    fn a_burst_of_short_events_still_has_a_slow_tick_note() {
+        use horizon_client::spans;
+        // Thread-local recording avoids changing instrumentation on other test threads.
+        spans::record_here(true);
+        spans::take_notes();
+        let mut timings = EventTimings::new(spans::NOTE_MS);
+        for _ in 0..200 {
+            spans::note(5.0, || "UseItemOn of fixture player".into());
+            timings.add("UseItemOn", "fixture player", None::<()>, 5.0);
+        }
+        assert!(
+            spans::take_notes().is_empty(),
+            "every individual event is below NOTE_MS"
+        );
+        for burst in timings.bursts() {
+            spans::note(burst.ms, || format!("{} x {}", burst.count, burst.kind));
+        }
+        let notes = spans::take_notes();
+        spans::record_here(false);
+        assert_eq!(notes, vec![(1000.0, "200 x UseItemOn".into())]);
+    }
     use horizon_client::mobs::Mob;
     use horizon_protocol::entity_data::{Value, serializer};
 
@@ -3924,12 +4051,13 @@ mod tests {
                 &root,
                 &PackOverlay::NONE,
                 item_data.defaults(),
-                &super::server_sources(&item_data, &PackOverlay::NONE),
+                &super::server_sources(&root, &item_data, &PackOverlay::NONE).unwrap(),
             )
             .unwrap(),
         );
         let mut cache = SyncCache {
             data: Some(super::Synced {
+                root: root.join("no-such-resources"),
                 with_packs: false,
                 generation: item_data.defaults().generation(),
                 result: Ok(preloaded.clone()),
@@ -3969,12 +4097,13 @@ mod tests {
                 &root,
                 &PackOverlay::NONE,
                 item_data.defaults(),
-                &super::server_sources(&item_data, &PackOverlay::NONE),
+                &super::server_sources(&root, &item_data, &PackOverlay::NONE).unwrap(),
             )
             .unwrap(),
         );
         let cache = Arc::new(Mutex::new(SyncCache {
             data: Some(super::Synced {
+                root: root.clone(),
                 with_packs: false,
                 generation: item_data.defaults().generation(),
                 result: Ok(preloaded.clone()),
@@ -4058,7 +4187,7 @@ mod tests {
                 &root,
                 &PackOverlay::NONE,
                 item_data.defaults(),
-                &super::server_sources(&item_data, &PackOverlay::NONE),
+                &super::server_sources(&root, &item_data, &PackOverlay::NONE).unwrap(),
             )
             .unwrap(),
         );
@@ -4068,6 +4197,7 @@ mod tests {
             let files = vec![(key.into(), vec![br#"{"values":[]}"#.to_vec()])];
             let mut cache = SyncCache {
                 data: Some(super::Synced {
+                    root: root.clone(),
                     with_packs: false,
                     generation: item_data.defaults().generation(),
                     result: Ok(preloaded.clone()),

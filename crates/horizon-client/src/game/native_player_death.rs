@@ -133,8 +133,9 @@ mod tests {
             assert_eq!(player.last_death_location(&*game), None);
 
             // A death records the level and block (`ServerPlayer.die`).
-            let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-            guest.last_death = Some(("minecraft:overworld".into(), [4, 70, -9]));
+            game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.last_death = Some(("minecraft:overworld".into(), [4, 70, -9]));
+            });
             assert_eq!(player.last_death_location(&*game), Some(at([4, 70, -9])));
 
             // The setter stores it, and None forgets it.
@@ -156,17 +157,47 @@ mod tests {
                 ),
                 player.uuid(),
             );
-            game.lan.as_mut().unwrap().hub.guests[0].last_death =
-                Some(("minecraft:overworld".into(), [1, 2, 3]));
+            {
+                let value = Some(("minecraft:overworld".into(), [1, 2, 3]));
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.last_death = value);
+            }
             assert_eq!(stale.last_death_location(&*game), None);
             assert!(!stale.set_last_death_location(game, None));
-            game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+            {
+                let value = false;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.placed = value);
+            }
             assert_eq!(player.last_death_location(&*game), None);
-            game.lan.as_mut().unwrap().hub.guests[0].placed = true;
+            {
+                let value = true;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.placed = value);
+            }
 
             // Raw saved data crosses the Identifier boundary only here.
-            game.lan.as_mut().unwrap().hub.guests[0].last_death =
-                Some(("not a dimension key".into(), [1, 2, 3]));
+            {
+                let value = Some(("not a dimension key".into(), [1, 2, 3]));
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.last_death = value);
+            }
             assert_eq!(player.last_death_location(&*game), None);
         });
     }
@@ -176,8 +207,15 @@ mod tests {
     fn the_acting_players_location_reads_and_writes_through_their_turn() {
         with_game(|game| {
             let player = add_guest(game);
-            game.lan.as_mut().unwrap().hub.guests[0].last_death =
-                Some(("minecraft:overworld".into(), [4, 70, -9]));
+            {
+                let value = Some(("minecraft:overworld".into(), [4, 70, -9]));
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.last_death = value);
+            }
             // During the guest's turn the acting player resolves, and the record is the one swapped into the level.
             let seen = game
                 .as_guest(1, |game| {
@@ -234,10 +272,11 @@ mod tests {
             let player = add_guest(game);
             {
                 // Dying in the Nether at a fractional position.
-                let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-                guest.dimension = "minecraft:the_nether".into();
-                guest.position = [-1.2, 64.9, 7.1];
-                guest.health = 0.0;
+                game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                    guest.dimension = "minecraft:the_nether".into();
+                    guest.position = [-1.2, 64.9, 7.1];
+                    guest.health = 0.0;
+                });
             }
             game.guest_die(0, 1);
 

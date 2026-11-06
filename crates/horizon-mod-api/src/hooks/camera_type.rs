@@ -1,0 +1,25 @@
+//! The `camera_type` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
+
+pub trait Hooks {
+    /// `key.togglePerspective` (F5) is cycling the window's camera type (`Minecraft.handleKeybinds`
+    /// calling `Options.setCameraType(getCameraType().cycle())`): `previous` is the type it leaves,
+    /// and `next` comes in as vanilla's next one (first person, third person behind, third person
+    /// in front, then first person again); set `next` to another, to skip a type or keep one.
+    /// Once a press, before the type changes; the post effect of the camera entity follows the
+    /// answer as it follows vanilla's. `camera_type` and `set_camera_type` read and set the type
+    /// at any other moment. Client-side. Beyond NeoForge: there is no counterpart. Diverges from
+    /// upstream: new hook.
+    #[hook(side = "client", contract = "listen", cancellable = false)]
+    fn camera_type_cycle();
+}
+
+pub trait Helpers {
+    /// The window's camera type (`Options.getCameraType`). Client-side.
+    #[helper(side = "client")]
+    fn camera_type();
+    /// Sets the window's camera type (`Options.setCameraType`) as F5 does, without cycling and
+    /// without `camera_type_cycle`: a freelook mod switches to third person while its key is held
+    /// and back after. Client-side.
+    #[helper(side = "client")]
+    fn set_camera_type();
+}

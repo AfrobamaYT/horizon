@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Tidak dapat membaca log binaan: {error}",
   "Could not read the saved sign-in.": "Tidak dapat membaca log masuk yang disimpan.",
   "Could not read the saved sign-in. Sign in again.": "Tidak dapat membaca log masuk yang disimpan. Log masuk semula.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Tidak dapat membaca {name}: {error}",
   "Could not run {program}: {error}": "Tidak dapat dijalankan {program}: {error}",
   "Could not save the renewed sign-in.": "Tidak dapat menyimpan log masuk yang diperbaharui.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Muat turun, log masuk dan kemas kini melalui proksi ini (http://host:port, socks5://host:port). Kosong bermakna tiada: HTTPS_PROXY sebaliknya digunakan apabila pelancar dimulakan dengan satu.",
   "{name} was left out: made for another Horizon version": "{name} ditinggalkan: dibuat untuk versi Horizon lain",
   "{name} was left out: clashes with {other}": "{name} ditinggalkan: bercanggah dengan {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} ditinggalkan: ia memerlukan {other}, yang ditinggalkan"
+  "{name} was left out: it needs {other}, which was left out": "{name} ditinggalkan: ia memerlukan {other}, yang ditinggalkan",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

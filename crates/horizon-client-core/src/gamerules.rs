@@ -168,6 +168,15 @@ pub const MINECART_IMPROVEMENTS: &str = "minecraft:minecart_improvements";
 #[derive(Debug, PartialEq)]
 pub struct RuleRegistry {
     rules: Vec<Rule>,
+    categories: Vec<String>,
+}
+/// Failure while validating declarations collected from all mods.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RuleRegistryError {
+    /// A rule identifier was declared twice.
+    Duplicate(String),
+    /// A referenced category does not exist.
+    UnknownCategory { rule: String, category: String },
 }
 impl Default for RuleRegistry {
     fn default() -> Self {
@@ -178,12 +187,62 @@ impl RuleRegistry {
     /// Create a fresh vanilla-backed registry for a session.
     pub fn vanilla() -> Self {
         Self {
+            categories: [
+                "chat", "drops", "misc", "mobs", "player", "spawning", "updates",
+            ]
+            .into_iter()
+            .map(|s| format!("minecraft:{s}"))
+            .collect(),
             rules: RULES
                 .iter()
                 .chain(std::iter::once(&MAX_MINECART_SPEED))
                 .map(Rule::from)
                 .collect(),
         }
+    }
+    /// Build a fresh session registry from validated category declarations.
+    pub fn with_categories(categories: &[String]) -> Self {
+        let mut registry = Self::vanilla();
+        registry.categories.extend_from_slice(categories);
+        registry
+    }
+    /// The categories in this session.
+    pub fn categories(&self) -> &[String] {
+        &self.categories
+    }
+    /// Add validated bool declarations before the registry is shared.
+    pub fn with_bool_rules(
+        categories: &[String],
+        rules: &[Rule],
+    ) -> Result<Self, Vec<RuleRegistryError>> {
+        let mut registry = Self::with_categories(categories);
+        let mut errors = Vec::new();
+        for rule in rules {
+            if registry.rule(&rule.name).is_some() {
+                errors.push(RuleRegistryError::Duplicate(rule.name.clone()));
+                continue;
+            }
+            if !registry.categories.contains(&rule.category) {
+                errors.push(RuleRegistryError::UnknownCategory {
+                    rule: rule.name.clone(),
+                    category: rule.category.clone(),
+                });
+                continue;
+            }
+            registry.rules.push(rule.clone());
+        }
+        if errors.is_empty() {
+            Ok(registry)
+        } else {
+            Err(errors)
+        }
+    }
+    /// Resolve an identifier once when loading.
+    pub fn position(&self, id: &str) -> Option<u32> {
+        self.rules
+            .iter()
+            .position(|rule| rule.name == id)
+            .and_then(|slot| u32::try_from(slot).ok())
     }
     pub fn available_rules(&self, minecart_improvements: bool) -> impl Iterator<Item = &Rule> {
         self.rules
@@ -385,6 +444,25 @@ impl GameRules {
             minecart_improvements: features.iter().any(|f| f == MINECART_IMPROVEMENTS),
         }
     }
+    /// Reconcile values with installed definitions, retaining matching selections.
+    pub fn rebind_registry(&mut self, registry: Arc<RuleRegistry>) {
+        if Arc::ptr_eq(&self.registry, &registry) {
+            return;
+        }
+        let mut next = Self::with_registry(registry, &[]);
+        next.minecart_improvements = self.minecart_improvements;
+        for rule in self.available_rules() {
+            if let Some(value) = self.get(&rule.name) {
+                next.set(&rule.name, value);
+            }
+        }
+        self.unknown.clone_into(&mut next.unknown);
+        *self = next;
+    }
+    /// The immutable definitions used by these values.
+    pub fn registry(&self) -> &Arc<RuleRegistry> {
+        &self.registry
+    }
     /// GameRules.copy(enabledFeatures): keep available values, add defaults for
     /// newly enabled rules and discard rules absent from the target feature set.
     pub fn copy_with_features(&self, features: &[String]) -> Self {
@@ -413,6 +491,13 @@ impl GameRules {
                     .then_some(index)
             })?;
         Some(self.values[index])
+    }
+    /// Read a prevalidated boolean slot.
+    pub fn bool_slot(&self, slot: u32) -> Option<bool> {
+        match self.values.get(slot as usize)? {
+            Value::Bool(value) => Some(*value),
+            _ => None,
+        }
     }
     /// Read a resolved vanilla boolean rule without a name lookup.
     pub fn bool_at(&self, index: RuleIndex) -> bool {

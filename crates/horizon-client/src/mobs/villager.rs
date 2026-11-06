@@ -11,7 +11,7 @@ use horizon_core::random::RandomSource;
 use std::f32::consts::PI;
 
 // Villager state: `variant` type, `profession` identity (index into
-// `villager::PROFESSIONS`), `villager_level` level, `home` the claimed job site,
+// the frozen profession table), `villager_level` level, `home` the claimed job site,
 // `bed` and `meeting` the claimed bed head and bell, `ints[0]` the unhappy
 // counter, `ints[1]` the bed's facing while asleep (1 north, 2 south,
 // 3 west, 4 east), `trade` the offers, experience and restocks.
@@ -19,55 +19,106 @@ use std::f32::consts::PI;
 pub const NONE: u8 = 0;
 pub const NITWIT: u8 = 11;
 
-/// Vanilla profession metadata. The table order is the existing saved and rendered index.
+/// Vanilla profession metadata in the frozen table.
 #[derive(Debug)]
 pub struct Profession {
     pub id: &'static str,
-    pub job_sites: &'static [&'static str],
     pub trade_set: Option<&'static str>,
     pub render_index: u8,
+    held: Option<horizon_world::poi::PoiType>,
+    acquirable: Option<horizon_world::poi::PoiType>,
 }
 
-// Generate the match from the same data as the table: no hash or scan on the
-// per-villager job-site search, and no second list of workstation mappings.
-macro_rules! professions {
-    ($(($id:literal, $index:literal, [$($site:literal),*], $trades:expr)),* $(,)?) => {
-        /// Built-in professions in their existing render and storage order.
-        pub static PROFESSIONS: [Profession; 15] = [
-            $(Profession { id: $id, job_sites: &[$($site),*], trade_set: $trades, render_index: $index }),*
-        ];
-
-        /// `PoiTypes`: the profession for a job-site block.
-        pub fn job_site_profession(block: &str) -> Option<u8> {
-            match block.trim_start_matches("minecraft:") {
-                $($($site => Some($index),)*)*
-                _ => None,
+/// Immutable vanilla-only generation. A load-owned table replaces this before mod registration.
+pub struct ProfessionTable {
+    entries: Vec<Profession>,
+    by_poi: [Option<u8>; 13],
+}
+impl ProfessionTable {
+    fn vanilla() -> Self {
+        use horizon_world::poi::PoiType as P;
+        let entries = [
+            ("none", None, None),
+            ("armorer", Some("armorer"), Some(P::Armorer)),
+            ("butcher", Some("butcher"), Some(P::Butcher)),
+            ("cartographer", Some("cartographer"), Some(P::Cartographer)),
+            ("cleric", Some("cleric"), Some(P::Cleric)),
+            ("farmer", Some("farmer"), Some(P::Farmer)),
+            ("fisherman", Some("fisherman"), Some(P::Fisherman)),
+            ("fletcher", Some("fletcher"), Some(P::Fletcher)),
+            (
+                "leatherworker",
+                Some("leatherworker"),
+                Some(P::Leatherworker),
+            ),
+            ("librarian", Some("librarian"), Some(P::Librarian)),
+            ("mason", Some("mason"), Some(P::Mason)),
+            ("nitwit", None, None),
+            ("shepherd", Some("shepherd"), Some(P::Shepherd)),
+            ("toolsmith", Some("toolsmith"), Some(P::Toolsmith)),
+            ("weaponsmith", Some("weaponsmith"), Some(P::Weaponsmith)),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (id, trade_set, poi))| Profession {
+            id,
+            trade_set,
+            render_index: i as u8,
+            held: poi,
+            acquirable: poi,
+        })
+        .collect::<Vec<_>>();
+        let mut by_poi = [None; 13];
+        for p in &entries {
+            if let Some(i) = p.acquirable.and_then(P::job_index) {
+                assert!(
+                    by_poi[i].replace(p.render_index).is_none(),
+                    "duplicate vanilla POI"
+                );
             }
         }
-    };
+        Self { entries, by_poi }
+    }
+    pub fn entries(&self) -> &[Profession] {
+        &self.entries
+    }
+    pub fn get(&self, index: u8) -> &Profession {
+        &self.entries[index as usize % self.entries.len()]
+    }
+    pub fn find(&self, name: &str) -> Option<u8> {
+        self.entries
+            .iter()
+            .find(|p| p.id == name)
+            .map(|p| p.render_index)
+    }
+    pub(super) fn by_poi(&self, poi: horizon_world::poi::PoiType) -> Option<u8> {
+        self.by_poi[poi.job_index()?]
+    }
+    pub(super) fn held(&self, index: u8, poi: horizon_world::poi::PoiType) -> bool {
+        self.entries
+            .get(usize::from(index))
+            .is_some_and(|p| p.held == Some(poi))
+    }
+    pub(super) fn acquirable(&self, index: u8, poi: horizon_world::poi::PoiType) -> bool {
+        if index == NONE {
+            poi.is_job()
+        } else {
+            self.entries
+                .get(usize::from(index))
+                .is_some_and(|p| p.acquirable == Some(poi))
+        }
+    }
 }
 
-professions! {
-    ("none", 0, [], None),
-    ("armorer", 1, ["blast_furnace"], Some("armorer")),
-    ("butcher", 2, ["smoker"], Some("butcher")),
-    ("cartographer", 3, ["cartography_table"], Some("cartographer")),
-    ("cleric", 4, ["brewing_stand"], Some("cleric")),
-    ("farmer", 5, ["composter"], Some("farmer")),
-    ("fisherman", 6, ["barrel"], Some("fisherman")),
-    ("fletcher", 7, ["fletching_table"], Some("fletcher")),
-    ("leatherworker", 8, ["cauldron", "water_cauldron", "lava_cauldron", "powder_snow_cauldron"], Some("leatherworker")),
-    ("librarian", 9, ["lectern"], Some("librarian")),
-    ("mason", 10, ["stonecutter"], Some("mason")),
-    ("nitwit", 11, [], None),
-    ("shepherd", 12, ["loom"], Some("shepherd")),
-    ("toolsmith", 13, ["smithing_table"], Some("toolsmith")),
-    ("weaponsmith", 14, ["grindstone"], Some("weaponsmith")),
+/// The frozen vanilla-only generation shared by the existing context-free consumers.
+pub fn profession_table() -> &'static ProfessionTable {
+    static TABLE: std::sync::OnceLock<ProfessionTable> = std::sync::OnceLock::new();
+    TABLE.get_or_init(ProfessionTable::vanilla)
 }
 
 /// Existing u8 adapter; invalid values retain the historic wrapping behavior.
 pub fn profession(index: u8) -> &'static Profession {
-    &PROFESSIONS[index as usize % PROFESSIONS.len()]
+    profession_table().get(index)
 }
 
 /// A vanilla profession or an unresolved saved resource identity.
@@ -116,10 +167,7 @@ impl ProfessionState {
 
 /// Finds the existing storage index for a bare profession name.
 pub fn profession_index(name: &str) -> Option<u8> {
-    PROFESSIONS
-        .iter()
-        .find(|p| p.id == name)
-        .map(|p| p.render_index)
+    profession_table().find(name)
 }
 
 pub fn register(m: &mut Mob) {
@@ -1010,13 +1058,16 @@ mod tests {
             assert_eq!(profession(index).id, *name);
             assert_eq!(profession_index(name), Some(index));
             assert_eq!(profession(index).render_index, index);
-            assert_eq!(profession(index).job_sites, *sites);
             for site in *sites {
-                assert_eq!(job_site_profession(site), Some(index));
-                assert_eq!(
-                    job_site_profession(&format!("minecraft:{site}")),
-                    Some(index)
-                );
+                let state = horizon_world::chunk::BlockState {
+                    name: format!("minecraft:{site}"),
+                    properties: Default::default(),
+                };
+                let poi = horizon_world::poi::saved_poi(&state).unwrap();
+                assert_eq!(poi.id(), format!("minecraft:{name}"));
+                assert_eq!(profession_table().by_poi(poi), Some(index));
+                assert!(profession_table().held(index, poi));
+                assert!(profession_table().acquirable(index, poi));
             }
             for level in 1..=5 {
                 assert_eq!(
@@ -1026,8 +1077,6 @@ mod tests {
             }
         }
         assert_eq!(profession(255).id, "none");
-        assert_eq!(job_site_profession("other:composter"), None);
-        assert_eq!(job_site_profession("stone"), None);
         assert_eq!(profession_index("other:farmer"), None);
         assert_eq!(
             crate::merchant::Trades::set_for("other:farmer", 2),
@@ -1145,7 +1194,7 @@ mod tests {
                 assert_eq!(map.get(&"sleeping_pos".into()), expected.as_ref());
                 assert_eq!(map.get(&"h232_control".into()), Some(&Tag::Int(42)));
             }
-            let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None);
+            let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None, |_| None);
             assert_eq!(saved.get("sleeping_pos"), expected.as_ref());
         }
     }

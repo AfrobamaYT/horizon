@@ -130,8 +130,7 @@ impl Game<'_> {
         ui.open_at(!from_title && self.title.is_none(), page);
         ui.mods_live = mods_live;
         ui.minecart_improvements = minecart_improvements;
-        let root = self.options.resources.clone();
-        ui.languages = lang::available(&[&root]);
+        ui.languages = lang::available(&[&self.pack.source]);
         self.refresh_pack_lists();
     }
     /// While the resource pack screen is open, `resourcepacks/` is looked at once a second
@@ -295,6 +294,7 @@ impl Game<'_> {
         self.ui.options.size = size;
         self.ui.options.framebuffer = framebuffer;
         let mut ui = std::mem::take(&mut self.ui.options);
+        ui.modifiers = self.native_modifiers().bits;
         let events = ui.key_modifiers(&mut self.settings, &self.gui.atlas, key, text, shift);
         self.ui.options = ui;
         self.handle_option_events(events)
@@ -338,6 +338,7 @@ impl Game<'_> {
         self.ui.options.selected_key.is_some()
     }
     pub(super) fn options_bind_mouse(&mut self, button: MouseButton) -> Result<()> {
+        self.ui.options.modifiers = self.native_modifiers().bits;
         let events = self.ui.options.bind_mouse(&mut self.settings, button);
         self.handle_option_events(events)
     }
@@ -481,8 +482,7 @@ impl Game<'_> {
     }
     /// LanguageManager.setSelected + reload: translations, then re-wrap chat.
     pub(super) fn load_language(&mut self, code: &str) {
-        let root = self.options.resources.clone();
-        lang::set(lang::Language::load(&[&root], code));
+        lang::set(lang::Language::load(&[&self.pack.source], code));
         self.refresh_remote_language();
         self.ui.chat.rescale(&self.gui.atlas);
         self.creative_screen.forget_items();

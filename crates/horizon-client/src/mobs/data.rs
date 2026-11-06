@@ -6,6 +6,7 @@
 use super::keyframes::Animation;
 use super::path::PathType;
 use crate::blocks::{BlockFacts, Fluid};
+use horizon_assets::resource_source::ResourceRoot;
 use horizon_world::registry::BlockStateId;
 pub use mod_api::mobs::PathComputationType;
 use serde_json::Value;
@@ -83,13 +84,15 @@ pub struct MobData {
     pub entity_tags: HashMap<String, std::collections::HashSet<String>>,
     /// The villager POI type of every block state (`PoiTypes.forState`),
     /// worked out the first time a villager looks for one.
-    pub pois: std::sync::OnceLock<Vec<Option<super::villager_brain::Poi>>>,
+    pub pois: std::sync::OnceLock<Vec<Option<horizon_world::poi::PoiType>>>,
     /// [`MobData::placement`] of each species' entity type (by `Species as
     /// usize`), worked out the first time a spawn asks.
     pub species_placements: std::sync::OnceLock<Vec<Placement>>,
 }
 impl MobData {
-    pub fn load(root: &Path, facts: &BlockFacts) -> Self {
+    pub fn load(root: &ResourceRoot, facts: &BlockFacts) -> Self {
+        let source = root.source();
+        let root = root.prepared();
         let parsed: Option<Value> = fs::read(root.join("mob-data.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok());
@@ -112,11 +115,12 @@ impl MobData {
         data.entity_tags =
             crate::items::load_tags(root, "entity_type", &horizon_world::loot::PackOverlay::NONE)
                 .unwrap_or_default();
-        data.villager_hats = std::sync::RwLock::new(super::villager_hats::VillagerHats::load(root));
-        let random = horizon_optifine::random_textures::RandomTextures::scan(root);
-        let blinks = horizon_optifine::blink::Blinks::scan(root, &random);
-        let mut emissive = horizon_optifine::emissive::Emissive::scan(root, &random);
-        emissive.pair_beside(root, blinks.files());
+        data.villager_hats =
+            std::sync::RwLock::new(super::villager_hats::VillagerHats::load(source));
+        let random = horizon_optifine::random_textures::RandomTextures::scan(source);
+        let blinks = horizon_optifine::blink::Blinks::scan(source, &random);
+        let mut emissive = horizon_optifine::emissive::Emissive::scan(source, &random);
+        emissive.pair_beside(source, blinks.files());
         data.emissive = std::sync::RwLock::new(std::sync::Arc::new(emissive));
         data.blinks = std::sync::RwLock::new(blinks);
         data.random_textures = std::sync::RwLock::new(random);

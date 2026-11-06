@@ -216,19 +216,8 @@ impl Game<'_> {
                 crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
             Target::Tnt(id) => {
-                let uuid = self.uuid_for(id);
-                let t = self.tnts.iter().find(|t| t.id == id)?;
-                entity_nbt::tnt_to_nbt(
-                    t.position,
-                    t.velocity,
-                    t.on_ground,
-                    t.fuse,
-                    t.power,
-                    t.block_state_nbt(self.pack.assets.registry),
-                    t.rotation,
-                    uuid,
-                    self.persist.raw.get(&id),
-                )
+                let i = self.tnts.iter().position(|t| t.id == id)?;
+                self.tnt_nbt(i)
             }
             Target::Falling(id) => {
                 let f = self.falling.iter().find(|f| f.id == id)?.clone();
@@ -492,9 +481,8 @@ impl Game<'_> {
                 .as_mut()?
                 .hub
                 .guests
-                .iter_mut()
-                .find(|g| g.conn == conn)
-                .map(|g| g.saved.get_or_insert_with(empty)),
+                .saved_data_mut(conn)
+                .map(|saved| saved.get_or_insert_with(empty)),
             Target::Mob(id)
             | Target::Item(id)
             | Target::Stand(id)
@@ -1359,7 +1347,7 @@ mod orb_uuid_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1379,7 +1367,9 @@ mod orb_uuid_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -1437,7 +1427,7 @@ mod wolf_live_anger_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1457,7 +1447,9 @@ mod wolf_live_anger_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -1574,7 +1566,7 @@ mod loot_table_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1594,7 +1586,9 @@ mod loot_table_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();

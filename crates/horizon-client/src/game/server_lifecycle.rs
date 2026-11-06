@@ -103,10 +103,11 @@ impl Game<'_> {
     /// record. If the network tick lost the hub, only world state can be saved.
     fn prepare_server_crash(&mut self) {
         let acting = self.lan_acting;
-        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut())
-            && let Some(guest) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
-        {
-            guest.placed = false;
+        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut()) {
+            let _ = host
+                .hub
+                .guests
+                .update_connection(conn, |guest| guest.placed = false);
         }
         if self.lan.is_none() {
             log::warn!(

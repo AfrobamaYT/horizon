@@ -378,6 +378,18 @@ enum OrbOrder {
 }
 
 impl Game<'_> {
+    /// The game's own player's uuid and entity id — the identity behind
+    /// [`Self::player_view`], so a tick that lends no guest's view names its
+    /// player (#1077). None where the view stands for nobody: no player of
+    /// the game's own, a fake one, or a guest's turn acting in its place.
+    pub(super) fn player_identity(&self) -> Option<([i32; 4], u32)> {
+        if self.lan_acting_fake || self.lan_acting_uuid.is_some() || self.player.is_none() {
+            return None;
+        }
+        let uuid = self.level.player_uuid?;
+        let id = u32::try_from(self.player.as_ref()?.entity_id).ok()?;
+        Some((uuid, id))
+    }
     pub(super) fn player_view(&self) -> Option<PlayerView> {
         if self.lan_acting_fake {
             return None;
@@ -401,6 +413,7 @@ impl Game<'_> {
                 p.position.z,
             ],
             alive: !p.health.dead_or_dying(),
+            invulnerable: p.invulnerable,
             // EntitySelector.NO_CREATIVE_OR_SPECTATOR.
             creative: self.creative || self.spectator(),
             sneaking: self.keys.held(Action::Sneak),
@@ -424,7 +437,7 @@ impl Game<'_> {
             riding: self.riding.is_some(),
             hero: self.potions.effects.get("hero_of_the_village").is_some(),
             effects: self.potions.effects.list.iter().map(|e| e.id).collect(),
-            uuid: self.level.player_uuid.unwrap_or_default(),
+            uuid: self.acting_uuid(),
             allies: std::sync::Arc::new(self.player_allies()),
             remote: false,
             sleeping: self.sleeping.is_some(),
@@ -968,6 +981,7 @@ impl Game<'_> {
             controlling_player_movement: None,
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
             player,
+            player_identity: self.player_identity(),
             others,
             dragon: self.dragon_target(),
             leash_boats: &self.leash_boats,
@@ -1022,6 +1036,8 @@ impl Game<'_> {
                 .into_iter()
                 .any(mod_api::__private::listened))
             .then_some(self as &dyn horizon_client::mobs::MobHooks),
+            goal_host: (self.native_authoritative() && mod_api::__private::has_entity_parts())
+                .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
             asks_animal_tame: self.remote.is_none()
                 && mod_api::__private::listened(mod_api::HookId::AnimalTame),
             asks_living_destroy_block: self.remote.is_none()
@@ -1404,7 +1420,9 @@ impl Game<'_> {
                 let from = events.len();
                 // The guest's view is lent to the mob for its tick, not copied:
                 // the tick only reads it (`&MobWorld`), and it goes back to the
-                // guest's slot straight after.
+                // guest's slot straight after. Its identity is captured with
+                // it, once: the player a goal resolves is the one the tick
+                // sees — a guest on a server, the game's own otherwise (#1077).
                 let lent = seen_guest.and_then(|conn| guests.iter().position(|g| g.0 == conn));
                 let active_player = match (seen_guest, lent) {
                     (None, _) => base.player.take(),
@@ -1412,6 +1430,10 @@ impl Game<'_> {
                         .take()
                         .map(|stand_in| std::mem::replace(&mut guests[k].1, stand_in)),
                     (Some(_), None) => None,
+                };
+                let active_identity = match seen_guest {
+                    None => base.player_identity,
+                    Some(conn) => self.guest_identity(conn),
                 };
                 let mut w = MobWorld {
                     others: &snapshot,
@@ -1421,6 +1443,7 @@ impl Game<'_> {
                     difficulty,
                     nearest_player,
                     player: active_player,
+                    player_identity: active_identity,
                     teams: std::sync::Arc::clone(&base.teams),
                     ..base
                 };
@@ -2505,10 +2528,13 @@ impl Game<'_> {
                     self.particles
                         .send_particles(&options, at, spread, speed, count);
                 }
-                MobEvent::Sound(name, at, volume, pitch)
-                | MobEvent::LocalSound(name, at, volume, pitch) => {
+                MobEvent::Sound(name, at, volume, pitch) => {
                     self.audio
                         .play(&format!("minecraft:{name}"), Some(at), volume, pitch)
+                }
+                MobEvent::LocalSound(name, at, volume, pitch) => {
+                    self.audio
+                        .play_unshared(&format!("minecraft:{name}"), Some(at), volume, pitch)
                 }
                 MobEvent::BoundSound {
                     mob,
@@ -2559,7 +2585,7 @@ impl Game<'_> {
                 // A mob's own `gameEvent(..)` calls: Armadillo.rollUp/rollOut's
                 // ENTITY_ACTION, Creeper.tick's PRIME_FUSE, Mob.ate's EAT, the
                 // shulker's lid (Shulker.setRawPeekAmount), an evoker's vexes
-                // (ENTITY_PLACE).
+                // (ENTITY_PLACE), Enderman.teleport's TELEPORT where it was.
                 MobEvent::GameEvent {
                     event, at, source, ..
                 } if matches!(
@@ -2570,6 +2596,7 @@ impl Game<'_> {
                         | "minecraft:container_open"
                         | "minecraft:container_close"
                         | "minecraft:entity_place"
+                        | "minecraft:teleport"
                 ) =>
                 {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
@@ -5002,8 +5029,11 @@ impl Game<'_> {
                     ArrowSound::TridentHitGround => "minecraft:item.trident.hit_ground",
                     ArrowSound::TridentHit => "minecraft:item.trident.hit",
                 };
+                // Each one is the projectile's own `Entity.playSound`, on `getSoundSource()`:
+                // NEUTRAL, which neither AbstractArrow nor ThrownTrident overrides. The
+                // name-based guess would put `entity.arrow.*` and `item.*` on PLAYERS.
                 self.audio
-                    .play(name, Some([at.x, at.y, at.z]), volume, pitch);
+                    .play_on(6, name, Some([at.x, at.y, at.z]), volume, pitch);
             }
             ArrowEvent::BubbleColumnParticles { pos } => self.bubble_column_particles(pos),
             ArrowEvent::Block {
@@ -7000,10 +7030,7 @@ impl Game<'_> {
                 extra: None,
             };
             if let Some(effects) = give_stew {
-                stack.extra = Some(Box::new(horizon_client::item_data::StackData {
-                    stew_effects: effects,
-                    ..Default::default()
-                }));
+                stack.data_mut().stew_effects = effects;
             }
             if self.stack_in(selected).is_none() {
                 *self.stack_in_mut(selected) = Some(stack);
@@ -7620,9 +7647,9 @@ impl Game<'_> {
             }),
             player_rot: [self.pitch, self.yaw],
             paused: self.pause,
-            first_person: self.camera_type.first_person(),
+            first_person: self.camera_type.is_first_person(),
             third_person_reversed: self.camera_type
-                == super::perspective::CameraType::ThirdPersonFront,
+                == horizon_client::camera::CameraType::ThirdPersonFront,
             ..Default::default()
         });
         for mob in &self.mobs {
@@ -7684,11 +7711,11 @@ impl Game<'_> {
             self.mark_motion(entity_start, (1 << 32) | u64::from(mob.id));
             self.mark_entity(entity_start, &mob.kind.id);
             self.rendered_mobs.set(self.rendered_mobs.get() + 1);
-            let light = self.world.light(
-                mob.position.x.floor() as i32,
-                (mob.position.y + mob.eye_height()).floor() as i32,
-                mob.position.z.floor() as i32,
-            );
+            // `EntityRenderer.getPackedLightCoords`: the block the mob's light
+            // probe (its eye) is in, at the position this frame draws rather
+            // than this tick's.
+            let probe = mob.light_probe(alpha);
+            let light = self.world.light(probe[0], probe[1], probe[2]);
             let mut packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             // EntityRenderer.getBlockLightLevel: a burning mob has 15 block
             // light, and so do the Allay, Blaze, Magma Cube, Vex and Wither
@@ -7935,11 +7962,12 @@ impl Game<'_> {
             let p = glam::DVec3::from_array(at) - camera;
             let c = p.as_vec3();
             // EntityRenderer.getPackedLightCoords: the block its light probe
-            // (the eye) is in, not the one under its feet.
+            // (the eye) is in, at the position this frame draws rather than
+            // this tick's, and not the one under its feet.
             let light = self.world.light(
-                a.position.x.floor() as i32,
-                a.light_probe_y().floor() as i32,
-                a.position.z.floor() as i32,
+                at[0].floor() as i32,
+                a.light_probe_y(alpha).floor() as i32,
+                at[2].floor() as i32,
             );
             let mut packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             // EntityRenderer.getBlockLightLevel: a shulker bullet and anything
@@ -8179,7 +8207,7 @@ impl Game<'_> {
 /// They stay continuous at pitch ±90, and in third-person front view they are
 /// the turned-round camera's, not the player's.
 fn thrown_item_axes(
-    camera_type: super::perspective::CameraType,
+    camera_type: horizon_client::camera::CameraType,
     yaw: f32,
     pitch: f32,
 ) -> (glam::Vec3, glam::Vec3) {
@@ -8790,12 +8818,94 @@ mod enderman_anger_tests {
 }
 
 #[cfg(test)]
+mod local_sound_event_tests {
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use horizon_client::mobs::MobEvent;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn local_mob_events_play_without_entering_the_shared_capture() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir =
+            Some(std::env::temp_dir().join(format!("horizon-h069-unit-{}", std::process::id())));
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.audio.capture = Some(Vec::new());
+        game.handle_mob_events(vec![
+            MobEvent::Sound("entity.cow.hurt", [1.0, 100.0, 2.0], 0.5, 1.0),
+            MobEvent::LocalSound("entity.breeze.whirl", [3.0, 100.0, 4.0], 0.8, 0.7),
+            MobEvent::Sound("entity.zombie.hurt", [5.0, 100.0, 6.0], 1.0, 0.9),
+        ])
+        .unwrap();
+        // A positive LocalSound must still take the playback path. An absent
+        // producer cannot satisfy this actual Game adapter regression.
+        assert_eq!(
+            game.audio.heard.get("minecraft:entity.breeze.whirl"),
+            Some(&1)
+        );
+        assert_eq!(game.audio.heard.get("minecraft:entity.cow.hurt"), Some(&1));
+        assert_eq!(
+            game.audio.heard.get("minecraft:entity.zombie.hurt"),
+            Some(&1)
+        );
+        let shared = game.audio.capture.as_ref().unwrap();
+        assert_eq!(shared.len(), 2, "LocalSound must not become a shared sound");
+        assert_eq!(shared[0].event, "minecraft:entity.cow.hurt");
+        assert_eq!(shared[1].event, "minecraft:entity.zombie.hurt");
+        assert_eq!(
+            (
+                shared[0].position,
+                shared[0].volume,
+                shared[0].pitch,
+                shared[0].source
+            ),
+            ([1.0, 100.0, 2.0], 0.5, 1.0, 6)
+        );
+        assert_eq!(
+            (
+                shared[1].position,
+                shared[1].volume,
+                shared[1].pitch,
+                shared[1].source
+            ),
+            ([5.0, 100.0, 6.0], 1.0, 0.9, 5)
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use super::super::perspective::CameraType;
     use super::mob_effect_instance;
     use super::thrown_item_axes;
     use super::thrown_item_quad;
     use super::{ProjectileKind, is_item_billboard};
+    use horizon_client::camera::CameraType;
 
     #[test]
     #[ignore = "needs prepared resources"]
@@ -8895,19 +9005,36 @@ mod tests {
                 wolf.extra.owner = Some(horizon_client::lan::playerdata::uuid_ints(12));
                 game.mobs.push(wolf);
                 game.mobs.push(Mob::new(101, pig_type, Vec3::ZERO, 0.0));
-                game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+                {
+                    let value = false;
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.placed = value);
+                }
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
                 let credit = *game.last_hurt_by_player.get(&101).unwrap();
                 assert!(game.resolve_player_credit(credit).is_none());
-                game.lan.as_mut().unwrap().hub.guests[0].placed = true;
+                {
+                    let value = true;
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.placed = value);
+                }
                 assert_eq!(game.resolve_player_credit(credit), Some(Some(12)));
                 let victim = game.mobs[1].clone();
                 game.mob_died(&victim);
                 let stats = &game.lan.as_ref().unwrap().play.get(&12).unwrap().stats;
                 assert_eq!(stats.get("custom", "minecraft:mob_kills"), 1);
-                let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-                assert!(guest.advancements.has("test:catalyst", "kill"));
-                guest.advancements = Default::default();
+                game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                    assert!(guest.advancements.has("test:catalyst", "kill"));
+                    guest.advancements = Default::default();
+                });
                 let mut second = victim.clone();
                 second.id = 102;
                 game.last_hurt_by_player
@@ -8916,7 +9043,15 @@ mod tests {
                 let host = game.lan.as_ref().unwrap();
                 assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 2);
                 assert!(host.hub.guests[0].advancements.has("test:catalyst", "kill"));
-                game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+                {
+                    let value = "minecraft:the_nether".into();
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.dimension = value);
+                }
                 let mut third = victim.clone();
                 third.id = 103;
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
@@ -9841,12 +9976,22 @@ mod pearl_tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let registry = assets.registry;
         let facts = horizon_client::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let data = horizon_client::mobs::MobData::load(&root, &facts);
-        let biomes = horizon_client::biome::Biomes::load(&root).unwrap();
+        let data = horizon_client::mobs::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
+        let biomes = horizon_client::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = horizon_client::items::Items::load(
             &root,
@@ -9873,6 +10018,7 @@ mod pearl_tests {
         }
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
+            goal_host: None,
             teams: Default::default(),
             loop_context: &crate::game::test_server_load()
                 .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
@@ -9885,6 +10031,7 @@ mod pearl_tests {
             suffocation: &suffocation,
             data: &data,
             player: None,
+            player_identity: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],
@@ -10516,7 +10663,7 @@ mod conversion_tag_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -10536,7 +10683,9 @@ mod conversion_tag_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

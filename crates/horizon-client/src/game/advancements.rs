@@ -705,7 +705,9 @@ impl Game<'_> {
             let uuid = self.persist.uuids.get(&m.id).copied().unwrap_or_default();
             let raw = self.persist.raw.get(&m.id);
             let registry = Some(self.pack.assets.registry);
-            let mut tag = horizon_client::entity_nbt::mob_to_nbt(m, uuid, raw, registry);
+            let mut tag = horizon_client::entity_nbt::mob_to_nbt(m, uuid, raw, registry, |other| {
+                self.persist.uuid_of(other)
+            });
             let riders = passengers.iter().filter_map(|r| r.nbt.clone()).collect();
             super::persist::add_passengers(&mut tag, riders);
             tag
@@ -2625,7 +2627,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -2645,7 +2647,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -2999,7 +3003,7 @@ mod structure_tag_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -3019,7 +3023,9 @@ mod structure_tag_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -3061,7 +3067,14 @@ mod structure_tag_tests {
         let settings = json!({"enabled": ["file/mypack"], "disabled": []});
         std::fs::write(dir.join("datapacks.json"), settings.to_string()).unwrap();
         game.world_root = dir.clone();
-        let stack = crate::game::functions::pack_stack(&dir, &root, false, &[]);
+        let stack = crate::game::functions::pack_stack(
+            &dir,
+            &root,
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            &Default::default(),
+            false,
+            &[],
+        );
         let (tables, _) = game.build_world_tables(&stack, false).unwrap();
         game.world_tables = tables;
         assert!(game.world_tables.is_some());

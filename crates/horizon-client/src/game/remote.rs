@@ -661,6 +661,8 @@ pub(super) struct Remote {
     own_profile: OwnProfile,
     /// The skin texture each profile's players show, once its download is ready.
     skins: HashMap<u128, String>,
+    skins_revision: u64,
+    published_skins: Option<(usize, u128, u64, u64)>,
     listed: std::collections::HashSet<u128>,
     /// `ClientboundLoginPacket.onlineMode`: the player list shows heads.
     pub(super) online_mode: bool,
@@ -1163,6 +1165,8 @@ impl Game<'_> {
             skin_textures: HashMap::new(),
             own_profile: OwnProfile::Idle,
             skins: HashMap::new(),
+            skins_revision: 0,
+            published_skins: None,
             listed: Default::default(),
             online_mode: false,
             level_players: HashMap::new(),
@@ -1273,7 +1277,7 @@ impl Game<'_> {
             r.session.disconnect();
         }
         super::lan::forget_sync_data();
-        self.gui.atlas.object_skins.clear();
+        self.gui.atlas.clear_object_skins();
         self.server_packs_disconnect();
         self.code_of_conduct = None;
         self.reset_tutorial();
@@ -1358,7 +1362,7 @@ impl Game<'_> {
     }
 
     pub(super) fn send(&self, packet: S) {
-        if let Some(r) = &self.remote {
+        if self.remote.is_some() {
             // MultiPlayerGameMode's attack, interact, useItem, useItemOn, releaseUsingItem, dropItem and
             // piercingAttack run ensureHasSentCarriedItem before their packet: a slot the number keys
             // chose this tick goes out first. A miss, a dig's start or a swap waits for the next tick.
@@ -1369,6 +1373,15 @@ impl Game<'_> {
             {
                 self.remote_send_carried();
             }
+            self.send_play(packet);
+        }
+    }
+    /// `Connection.send` for the game's play packets: a mod may cancel one
+    /// (`client_packet_send`), and the server never hears of it.
+    fn send_play(&self, packet: S) {
+        if let Some(r) = &self.remote
+            && !self.client_packet_send_canceled(&packet)
+        {
             r.session.send(packet);
         }
     }
@@ -2048,9 +2061,12 @@ impl Game<'_> {
                     self.send_chat_acknowledgement();
                     self.close_dialogs();
                     // The server configuring us now (a proxy's next one)
-                    // offers its own far terrain, or none.
+                    // offers its own far terrain, or none, and announces its
+                    // own features again (a Horizon server's quiet commands).
                     if let Some(remote) = &mut self.remote {
                         remote.far_terrain = None;
+                        remote.quiet_commands = false;
+                        remote.mod_net = false;
                     }
                     self.clear_lod();
                     if let Some(remote) = &self.remote {
@@ -2299,6 +2315,9 @@ impl Game<'_> {
             self.forget_all_remote_columns();
         }
         let r = self.remote.as_mut().unwrap();
+        // A Horizon server's bulk edit sends whole columns with the light
+        // from before its relight; any other server's packet light is final.
+        let relight_resent = r.quiet_commands;
         let dimension = r.registries.dimension(spawn.dimension_type);
         // The server's dimension type gives the level's shape, and its
         // chunks the shape's column.
@@ -2404,6 +2423,7 @@ impl Game<'_> {
                 self.native_client_level_unload(&old);
             }
         }
+        self.streaming.relight_resent = relight_resent;
         let has_sky = self
             .remote
             .as_ref()
@@ -2793,7 +2813,9 @@ impl Game<'_> {
             });
         }
         if let Some(t) = mob_type {
-            let mut mob = Mob::new(id as u32, t, at, head);
+            // The window's copy of the server's mob: no mod part goals —
+            // their `register_goals` ran on the authoritative side (#1077).
+            let mut mob = Mob::new_remote(id as u32, t, at, head);
             super::remote_mob_data::client_defaults(&mut mob);
             (mob.yaw, mob.previous_yaw) = (yaw, yaw);
             (mob.head_pitch, mob.previous_head_pitch) = (pitch, pitch);
@@ -5362,10 +5384,50 @@ impl Game<'_> {
     /// The player list's view of the connection: the listed players (with
     /// their downloaded skins once ready), online mode, and which players
     /// are in the level with an upside-down name.
+    pub(super) fn publish_tab_object_skins(&mut self) {
+        let Some(r) = self.remote.as_mut() else {
+            return;
+        };
+        let fingerprint = (
+            r.listed.len(),
+            r.listed.iter().fold(0, |xor, uuid| xor ^ uuid),
+            r.skins_revision,
+            self.gui.atlas.object_skins_revision,
+        );
+        if r.published_skins == Some(fingerprint) {
+            return;
+        }
+        for uuid in &r.listed {
+            let Some(p) = r.tab_players.get(uuid) else {
+                continue;
+            };
+            let skin = r.skins.get(uuid).map_or_else(
+                || horizon_client::tab_list::default_skin(*uuid),
+                String::as_str,
+            );
+            for key in [
+                format!("id:{uuid:032x}"),
+                format!("name:{}", p.name.to_ascii_lowercase()),
+            ] {
+                if object_skin_changed(&self.gui.atlas.object_skins, &key, skin) {
+                    self.gui.atlas.set_object_skin(key, skin.to_owned());
+                }
+            }
+        }
+        // Publication itself mutates the atlas; cache its final revision.
+        r.published_skins = Some((
+            fingerprint.0,
+            fingerprint.1,
+            fingerprint.2,
+            self.gui.atlas.object_skins_revision,
+        ));
+    }
+
     pub(super) fn remote_tab_players(
         &mut self,
     ) -> Option<(Vec<horizon_client::tab_list::TabPlayer>, bool, Vec<u128>)> {
         self.update_remote_skins();
+        self.publish_tab_object_skins();
         let mut players: Vec<_> = {
             let r = self.remote.as_ref()?;
             r.listed
@@ -5379,13 +5441,6 @@ impl Game<'_> {
                 .as_ref()
                 .and_then(|r| r.skins.get(&p.uuid).cloned())
                 .unwrap_or_else(|| horizon_client::tab_list::default_skin(p.uuid).to_owned());
-            self.gui
-                .atlas
-                .set_object_skin(format!("id:{:032x}", p.uuid), p.skin.clone());
-            self.gui.atlas.set_object_skin(
-                format!("name:{}", p.name.to_ascii_lowercase()),
-                p.skin.clone(),
-            );
         }
         let r = self.remote.as_ref()?;
         let upside_down = players
@@ -5595,14 +5650,13 @@ impl Game<'_> {
                 (skin.to_owned(), skin.contains("/slim/"))
             }
         };
-        let Some((level, skins, own)) = self.remote.as_mut().map(|r| {
-            r.skins = resolved.into_iter().collect();
+        let skins: HashMap<_, _> = resolved.into_iter().collect();
+        let Some((level, own)) = self.remote.as_ref().map(|r| {
             (
                 r.level_players
                     .iter()
                     .map(|(id, uuid)| (*id as u32, *uuid))
                     .collect::<Vec<_>>(),
-                r.skins.clone(),
                 r.profile,
             )
         }) else {
@@ -5610,12 +5664,16 @@ impl Game<'_> {
         };
         // Only the skins drawn hold atlas slots: the level's players, not
         // every entry of a busy server's player list.
+        // Build once: resolving each player must not scan every level entity.
+        let players: HashMap<_, _> = self
+            .mobs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| &*m.kind.id == "minecraft:player")
+            .map(|(i, m)| (m.id, i))
+            .collect();
         for (id, uuid) in level {
-            let Some(i) = self
-                .mobs
-                .iter()
-                .position(|m| m.id == id && &*m.kind.id == "minecraft:player")
-            else {
+            let Some(&i) = players.get(&id) else {
                 continue;
             };
             let (skin, is_slim) = self.drawn_skin(uuid, skin_of(&skins, uuid));
@@ -5647,14 +5705,21 @@ impl Game<'_> {
                 mob.cape = cape;
             }
         }
+        if let Some(r) = self.remote.as_mut()
+            && r.skins != skins
+        {
+            r.skins_revision = r.skins_revision.wrapping_add(1);
+            r.skins = skins;
+        }
         // ClientMannequin.updateSkin (PlayerSkinRenderCache.lookup): a
         // mannequin's DATA_PROFILE `textures` property resolves like a
         // player's, never required to be signed.
-        let mannequins: Vec<(u32, horizon_client::skins::Textures)> = self
+        let mannequins: Vec<(usize, horizon_client::skins::Textures)> = self
             .mobs
             .iter()
-            .filter(|m| &*m.kind.id == "minecraft:mannequin" && m.profile.is_some())
-            .map(|m| {
+            .enumerate()
+            .filter(|(_, m)| &*m.kind.id == "minecraft:mannequin" && m.profile.is_some())
+            .map(|(i, m)| {
                 let profile = m.profile.as_ref();
                 let t = profile.and_then(|p| p.properties.iter().find(|p| p.name == "textures"));
                 let textures = if let Some(t) = t {
@@ -5692,10 +5757,10 @@ impl Game<'_> {
                     })
                     .unwrap_or_default()
                 };
-                (m.id, textures)
+                (i, textures)
             })
             .collect();
-        let mut resolved: Vec<(u32, Option<String>, bool)> = Vec::new();
+        let mut resolved: Vec<(usize, Option<String>, bool)> = Vec::new();
         for (id, textures) in mannequins {
             let skin = {
                 let mut downloads = self.skin_downloads.borrow_mut();
@@ -5706,16 +5771,12 @@ impl Game<'_> {
             let slim = skin.is_some() && textures.slim;
             resolved.push((id, skin, slim));
         }
-        for (id, skin, slim) in resolved {
+        for (i, skin, slim) in resolved {
             let skin = skin.filter(|s| !s.starts_with("skins/") || self.again_skin(s));
-            if let Some(mob) = self
-                .mobs
-                .iter_mut()
-                .find(|m| m.id == id && &*m.kind.id == "minecraft:mannequin")
-            {
-                mob.slim = slim && skin.is_some();
-                mob.skin = skin;
-            }
+            // Resolution and atlas uploads do not insert or remove mobs.
+            let mob = &mut self.mobs[i];
+            mob.slim = slim && skin.is_some();
+            mob.skin = skin;
         }
     }
     /// Puts a downloaded skin in an atlas skin slot (`SkinSlots::place`),
@@ -9297,7 +9358,7 @@ impl Game<'_> {
             && r.carried.get() != Some(self.selected)
         {
             r.carried.set(Some(self.selected));
-            r.session.send(S::SetCarriedItem(play::SetCarriedItem {
+            self.send_play(S::SetCarriedItem(play::SetCarriedItem {
                 slot: self.selected as i16,
             }));
         }
@@ -10066,6 +10127,25 @@ impl Game<'_> {
             .unwrap_or(0);
         self.send(S::ContainerClose(play::ContainerClose { container: id }));
         self.remote_close_local();
+    }
+    /// `MultiPlayerGameMode.handleInventoryButtonClick`: button `button` of
+    /// the menu the server opened goes to it (`ContainerButtonClick`), whose
+    /// menu decides what it does (`clickMenuButton`). No sound: that is the
+    /// screen's. False while no such menu is open.
+    pub(super) fn remote_button_click(&self, button: i32) -> bool {
+        let Some(container) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.menu.as_ref())
+            .map(|(w, _)| *w)
+        else {
+            return false;
+        };
+        self.send(S::ContainerButtonClick(play::ContainerButtonClick {
+            container,
+            button,
+        }));
+        true
     }
     fn remote_reject_container(&mut self, container: i32) {
         self.remote_close_local();
@@ -11391,6 +11471,10 @@ impl Remote {
             .or_else(|| self.players.get(uuid))
             .map(String::as_str)
     }
+    /// Listed UUIDs always have a tab entry; removal clears both together.
+    pub(super) fn listed_player_count(&self) -> usize {
+        self.listed.len()
+    }
     /// The local player's profile UUID.
     pub(super) fn profile(&self) -> u128 {
         self.profile
@@ -11406,6 +11490,10 @@ impl Remote {
     pub(super) fn tracked(&self, id: i32) -> Option<(&str, [f64; 3])> {
         self.entities.get(&id).map(|t| (&*t.kind, t.position))
     }
+}
+
+fn object_skin_changed(published: &HashMap<String, String>, key: &str, skin: &str) -> bool {
+    published.get(key).is_none_or(|previous| previous != skin)
 }
 
 /// The textures to resolve skins from: every list entry's, and for a player
@@ -11559,6 +11647,97 @@ mod tests {
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 1);
             });
+        });
+    }
+
+    /// After `ClientboundUpdateAttributes`, the local player's `LivingRef`
+    /// reads its attribute value, base, modifiers and attribute list from the
+    /// client's own copy of the synced instances. A mob the server tracks
+    /// keeps no attribute state of its own on the client, so its reads are
+    /// `None` there.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn update_attributes_answers_the_local_players_living_reads() {
+        use super::super::native_entity_refs::tests::with_client_game;
+        use horizon_client::{mobs::Mob, motion::PlayerMotion};
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{
+            buf::Reader,
+            connection::Pipe,
+            packets::play::{self, Clientbound as C},
+        };
+
+        with_client_game(|game| {
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "attributes-client").unwrap();
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.player.as_mut().unwrap().entity_id = 42;
+            game.mobs.push(Mob::new(60, zombie, Vec3::ZERO, 0.0));
+            let remote = game.remote.as_mut().unwrap();
+            remote.entity_id = 42;
+            remote.logged_in = true;
+            remote.entities.insert(
+                60,
+                super::Tracked {
+                    kind: "minecraft:zombie".into(),
+                    position: [0.0; 3],
+                    silent: false,
+                    vehicle: None,
+                },
+            );
+
+            let health = "minecraft:max_health";
+            let living = game.native_living(game.native_entity(42).unwrap()).unwrap();
+            // Before the server says anything, the client's own map holds the
+            // type's defaults, as a vanilla client's does before its sync.
+            assert_eq!(living.attribute_value(game, health), Some(20.0));
+            assert_eq!(living.attribute_modifiers(game, health), Some(Vec::new()));
+
+            let registry_id = game.motion.attributes.id(health).unwrap().registry_id();
+            let packet = C::UpdateAttributes(play::UpdateAttributes {
+                id: 42,
+                values: vec![play::AttributeSnapshot {
+                    attribute: registry_id,
+                    base: 30.0,
+                    modifiers: vec![play::AttributeModifier {
+                        id: "test:bonus".into(),
+                        amount: 5.0,
+                        operation: 0,
+                    }],
+                }],
+            });
+            let body = packet.encode();
+            let mut reader = Reader::new(&body);
+            let id = reader.varint().unwrap();
+            game.handle_packet(C::decode(id, reader.rest()).unwrap())
+                .unwrap();
+
+            assert_eq!(living.attribute_value(game, health), Some(35.0));
+            assert_eq!(living.attribute_base(game, health), Some(30.0));
+            assert_eq!(
+                living.attribute_modifiers(game, health),
+                Some(vec![mod_api::AttributeModifier::new(
+                    mod_api::Identifier::parse("test:bonus").unwrap(),
+                    5.0,
+                    mod_api::AttributeOperation::AddValue,
+                )])
+            );
+            let listed = living.attributes(game).unwrap();
+            assert!(listed.contains(&mod_api::Identifier::parse(health).unwrap()));
+
+            // The mob's attributes are the server's business: no client state,
+            // no read.
+            let mob = mod_api::LivingRef::new(game.native_entity(60).unwrap());
+            assert_eq!(mob.attribute_value(game, health), None);
+            assert_eq!(mob.attribute_base(game, health), None);
+            assert_eq!(mob.attribute_modifiers(game, health), None);
+            assert_eq!(mob.attributes(game), None);
         });
     }
 
@@ -11981,6 +12160,84 @@ mod tests {
         assert_eq!(super::Game::menu_slot("minecraft:unknown", 0), None);
     }
 
+    /// A client connecting through a local pipe and through configuration, as
+    /// the client menu tests drive it: the server end's reader (what the
+    /// client sends) and writer.
+    fn connect_menu_test(
+        game: &mut super::Game<'_>,
+    ) -> (
+        horizon_protocol::connection::ConnReader,
+        horizon_protocol::connection::ConnWriter,
+    ) {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_protocol::{
+            connection::{Connection, Pipe},
+            packets::{Empty, configuration as cfg, login},
+        };
+        game.options.execution_role = ExecutionRole::Client;
+        let (client, server) = Pipe::pair();
+        game.connect_local(client, "MenuReadTest").unwrap();
+        let (mut reader, mut writer) = Connection::local(server).split();
+        reader
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        reader.recv().unwrap();
+        reader.recv().unwrap();
+        writer
+            .send(
+                &login::Clientbound::LoginFinished(login::LoginFinished {
+                    profile: login::GameProfile {
+                        uuid: 42,
+                        name: "MenuReadTest".into(),
+                        properties: vec![],
+                    },
+                    session: 1,
+                })
+                .encode(),
+            )
+            .unwrap();
+        let (id, body) = reader.recv().unwrap();
+        assert!(matches!(
+            login::Serverbound::decode(id, &body).unwrap(),
+            login::Serverbound::LoginAcknowledged(_)
+        ));
+        reader.recv().unwrap();
+        reader.recv().unwrap();
+        writer
+            .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+            .unwrap();
+        let (id, body) = reader.recv().unwrap();
+        assert!(matches!(
+            cfg::Serverbound::decode(id, &body).unwrap(),
+            cfg::Serverbound::FinishConfiguration(_)
+        ));
+        (reader, writer)
+    }
+
+    /// Spawns the connected client in the overworld as entity 7, profile 42.
+    fn spawn_menu_test(game: &mut super::Game<'_>) -> horizon_protocol::packets::play::SpawnInfo {
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::packets::play::SpawnInfo;
+        let spawn = SpawnInfo {
+            dimension_type: 0,
+            dimension: "minecraft:overworld".into(),
+            seed: 0,
+            game_type: 0,
+            previous_game_type: None,
+            debug: false,
+            flat: true,
+            last_death: None,
+            portal_cooldown: 0,
+            sea_level: 63,
+        };
+        game.enter_remote_dimension(&spawn, false, Reason::Other);
+        let remote = game.remote.as_mut().unwrap();
+        remote.logged_in = true;
+        remote.entity_id = 7;
+        remote.profile = 42;
+        spawn
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_menu_reads_follow_packets_and_lifetimes() {
@@ -11989,75 +12246,20 @@ mod tests {
         };
         use horizon_client::level_loading::Reason;
         use horizon_protocol::{
-            connection::{Connection, Pipe},
+            connection::Pipe,
             item::Stack,
-            packets::{
-                Empty, configuration as cfg, login,
-                play::{self, Clientbound as C, SpawnInfo},
-            },
+            packets::play::{self, Clientbound as C},
         };
         use horizon_world::nbt::Tag;
 
         with_game(|game| {
-            game.options.execution_role = ExecutionRole::Client;
-            let (client, server) = Pipe::pair();
-            game.connect_local(client, "MenuReadTest").unwrap();
-            let (mut reader, mut writer) = Connection::local(server).split();
-            reader
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .unwrap();
-            reader.recv().unwrap();
-            reader.recv().unwrap();
-            writer
-                .send(
-                    &login::Clientbound::LoginFinished(login::LoginFinished {
-                        profile: login::GameProfile {
-                            uuid: 42,
-                            name: "MenuReadTest".into(),
-                            properties: vec![],
-                        },
-                        session: 1,
-                    })
-                    .encode(),
-                )
-                .unwrap();
-            let (id, body) = reader.recv().unwrap();
-            assert!(matches!(
-                login::Serverbound::decode(id, &body).unwrap(),
-                login::Serverbound::LoginAcknowledged(_)
-            ));
-            reader.recv().unwrap();
-            reader.recv().unwrap();
-            writer
-                .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
-                .unwrap();
-            let (id, body) = reader.recv().unwrap();
-            assert!(matches!(
-                cfg::Serverbound::decode(id, &body).unwrap(),
-                cfg::Serverbound::FinishConfiguration(_)
-            ));
+            let (mut reader, _writer) = connect_menu_test(game);
             assert!(
                 game.native_local_player()
                     .and_then(|player| game.native_menu_ref(player))
                     .is_none()
             );
-            let spawn = SpawnInfo {
-                dimension_type: 0,
-                dimension: "minecraft:overworld".into(),
-                seed: 0,
-                game_type: 0,
-                previous_game_type: None,
-                debug: false,
-                flat: true,
-                last_death: None,
-                portal_cooldown: 0,
-                sea_level: 63,
-            };
-            game.enter_remote_dimension(&spawn, false, Reason::Other);
-            let remote = game.remote.as_mut().unwrap();
-            remote.logged_in = true;
-            remote.entity_id = 7;
-            remote.profile = 42;
+            let spawn = spawn_menu_test(game);
             let menu = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
@@ -12369,6 +12571,102 @@ mod tests {
             assert_eq!(game.native_menu_slot_count(before_logout), None);
             assert_eq!(game.native_menu_slot_count(reconnected), Some(46));
             assert_ne!(reconnected, before_logout);
+        });
+    }
+
+    /// `MenuRef::close` and `click_button` go through the screen's own close
+    /// and the button packet, and refuse a menu that is not open or stale.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_menu_close_and_button_click_reach_the_server() {
+        use super::super::{
+            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+        };
+        use horizon_protocol::packets::play::{self, Clientbound as C};
+        use horizon_world::nbt::Tag;
+
+        with_game(|game| {
+            let (mut reader, _writer) = connect_menu_test(game);
+            spawn_menu_test(game);
+            let sent = |reader: &mut horizon_protocol::connection::ConnReader| {
+                (0..32).find_map(|_| {
+                    let (id, body) = reader.recv().ok()?;
+                    match play::Serverbound::decode(id, &body).unwrap() {
+                        p @ (play::Serverbound::ContainerClose(_)
+                        | play::Serverbound::ContainerButtonClick(_)) => Some(p),
+                        _ => None,
+                    }
+                })
+            };
+            // The inventory menu while playing: no screen to close, no buttons.
+            let inventory = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.screen, Screen::Playing);
+            assert!(!inventory.close(game));
+            assert!(!inventory.click_button(game, 0));
+            let loom = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:menu")
+                .unwrap()
+                .id("minecraft:loom")
+                .unwrap();
+            let open = |game: &mut super::Game<'_>| {
+                game.handle_packet(C::OpenScreen(play::OpenScreen {
+                    container: 5,
+                    menu: loom,
+                    title: Tag::String("Loom".into()),
+                }))
+                .unwrap();
+                game.native_local_player()
+                    .and_then(|player| game.native_menu_ref(player))
+                    .unwrap()
+            };
+            let menu = open(game);
+            assert_eq!(game.screen, Screen::Inventory);
+            // The old inventory handle is stale now that the loom replaced it.
+            assert!(!inventory.close(game));
+            assert!(!inventory.click_button(game, 0));
+            game.options.execution_role = ExecutionRole::IntegratedServer;
+            assert!(!menu.click_button(game, 3));
+            assert!(!menu.close(game));
+            game.options.execution_role = ExecutionRole::Client;
+            assert_eq!(game.screen, Screen::Inventory);
+            assert!(menu.click_button(game, 3));
+            let Some(play::Serverbound::ContainerButtonClick(click)) = sent(&mut reader) else {
+                panic!("expected the button click, not a refused request");
+            };
+            assert_eq!((click.container, click.button), (5, 3));
+            assert!(menu.close(game));
+            assert_eq!(game.screen, Screen::Playing);
+            let Some(play::Serverbound::ContainerClose(close)) = sent(&mut reader) else {
+                panic!("expected the close");
+            };
+            assert_eq!(close.container, 5);
+            assert!(game.remote.as_ref().unwrap().menu.as_ref().is_none());
+            // Closed: the handle is stale and nothing more is sent.
+            assert!(!menu.close(game));
+            assert!(!menu.click_button(game, 3));
+            // A server-side close leaves a reopened menu's old handle stale too.
+            let first = open(game);
+            game.handle_packet(C::ContainerClose(play::ContainerClose { container: 5 }))
+                .unwrap();
+            let second = open(game);
+            assert!(!first.close(game));
+            assert!(!first.click_button(game, 3));
+            assert!(second.close(game));
+            reader
+                .set_read_timeout(Some(std::time::Duration::from_millis(20)))
+                .unwrap();
+            let Some(play::Serverbound::ContainerClose(close)) = sent(&mut reader) else {
+                panic!("expected the second close");
+            };
+            assert_eq!(close.container, 5);
+            assert!(sent(&mut reader).is_none());
         });
     }
 
@@ -13542,6 +13840,49 @@ mod tests {
         assert_eq!(super::skin_entries(&players, &listed, &mut kept).len(), 1);
     }
 
+    #[test]
+    fn tab_publication_fingerprint_tracks_all_inputs() {
+        let fingerprint = |ids: &[u128], skins, atlas| {
+            (
+                ids.len(),
+                ids.iter().fold(0, |xor, uuid| xor ^ uuid),
+                skins,
+                atlas,
+            )
+        };
+        let published = fingerprint(&[7, 8], 1, 2);
+        assert_eq!(published, fingerprint(&[8, 7], 1, 2));
+        assert_ne!(published, fingerprint(&[7, 9], 1, 2));
+        assert_ne!(published, fingerprint(&[7, 8], 2, 2));
+        assert_ne!(published, fingerprint(&[7, 8], 1, 3));
+    }
+
+    #[test]
+    fn tab_object_skin_publication_tracks_changes_and_atlas_clear() {
+        let mut published = std::collections::HashMap::new();
+        let mut writes = 0;
+        for skin in ["skins/first", "skins/first", "skins/second"] {
+            for key in ["id:7", "name:player"] {
+                if super::object_skin_changed(&published, key, skin) {
+                    published.insert(key.to_owned(), skin.to_owned());
+                    writes += 1;
+                }
+            }
+        }
+        assert_eq!(writes, 4, "unchanged skins do not publish either entry");
+        published.clear();
+        assert!(super::object_skin_changed(
+            &published,
+            "id:7",
+            "skins/second"
+        ));
+        assert!(super::object_skin_changed(
+            &published,
+            "name:player",
+            "skins/second"
+        ));
+    }
+
     /// An NPC plugin's scale: a base the plugin sets, or a modifier on 1.
     #[test]
     fn attribute_values_add_then_multiply_as_vanilla() {
@@ -14351,9 +14692,10 @@ mod player_tick_tests {
                 heard.lock().unwrap().clear();
                 // A real zero-health death-screen tick still gets both endpoints,
                 // without use/cooldown/pickup work re-enabled.
-                let g = &mut game.lan.as_mut().unwrap().hub.guests[0];
-                g.dead = true;
-                g.health = 0.0;
+                game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                    g.dead = true;
+                    g.health = 0.0;
+                });
                 game.spawn_item(diamond, [0.0; 3], [0.0; 3], 0);
                 assert!(game.native_level_award_experience(level, 0.0, 0.0, 0.0, 7));
                 game.tick_guests();

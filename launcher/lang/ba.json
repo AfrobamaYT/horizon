@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Төҙөү журналын уҡый алманым: {error}",
   "Could not read the saved sign-in.": "Һаҡланған логинды уҡый алманы.",
   "Could not read the saved sign-in. Sign in again.": "Һаҡланған логинды уҡый алманы. Яңынан инергә.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "{name} уҡый алманым: {error}",
   "Could not run {program}: {error}": "Йүгерә алманы {program}: {error}",
   "Could not save the renewed sign-in.": "Яңыртылған инеүҙе һаҡлай алманыҡ.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Скачивания, логин һәм яңыртыуҙар был прокси аша үтә (http://host:port, socks5://host:port). Буш тигәнде аңлата бер ниндәй ҙә: HTTPS_PROXY урынына ҡулланыла, ҡасан стартер бер менән башланды.",
   "{name} was left out: made for another Horizon version": "{name} төшөрөп ҡалдырылды: Horizon-дың башҡа версияһы өсөн эшләнгән",
   "{name} was left out: clashes with {other}": "{name} төшөрөп ҡалдырылды: {other} менән бәрелешә",
-  "{name} was left out: it needs {other}, which was left out": "{name} төшөрөп ҡалдырылды: уға {other} кәрәк, ә ул төшөрөп ҡалдырылды"
+  "{name} was left out: it needs {other}, which was left out": "{name} төшөрөп ҡалдырылды: уға {other} кәрәк, ә ул төшөрөп ҡалдырылды",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

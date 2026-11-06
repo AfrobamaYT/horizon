@@ -45,6 +45,10 @@ pub(super) struct StartupMenu {
     key_synthetic: bool,
     /// The screen the keyboard's focus is on (`key_screen`).
     key_screen: u64,
+    /// The screen (`Self::key_screen`) the title's click focus belongs to:
+    /// another one in front drops it, as `Gui.setScreen` drops the focus of
+    /// the screen it leaves (`Screen.clearFocus`).
+    focus_screen: u64,
     pub pending: Option<PendingWorldEntry>,
     pub reload_packs: bool,
     /// Browse mods' worker (`mod_browser`).
@@ -86,9 +90,13 @@ impl StartupMenu {
     }
 
     pub(super) fn set_root(&mut self, root: PathBuf, settings: &Settings) {
-        horizon_client::ui::load_metadata(&root);
+        horizon_client::ui::load_metadata(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        );
         horizon_client::lang::set(horizon_client::lang::Language::load(
-            &[&root],
+            &[&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )],
             &settings.language,
         ));
         self.root = root;
@@ -108,11 +116,22 @@ impl StartupMenu {
     }
 
     pub(super) fn handoff(&mut self, game: &mut Game<'_>) {
+        let registry = Arc::new(mod_api::__private::game_rule_registry());
+        if let Some(PendingWorldEntry::Local {
+            create: Some(options),
+            ..
+        }) = &mut self.pending
+        {
+            options.rules.rebind_registry(registry.clone());
+        }
+        if let Some(title) = &mut self.title {
+            title.set_rule_registry(registry);
+        }
         // The startup menu's title is the game's from here: its hooks fire now.
         match self.title.take() {
             Some(title) => {
                 let title = title.with_user(|| game.options.player_name());
-                game.show_title(title);
+                game.show_title_with_registry(title);
             }
             None => game.title = None,
         }
@@ -357,7 +376,8 @@ pub(super) fn spawn_loader(
     let (sender, receiver) = std::sync::mpsc::channel();
     let settings = settings.clone();
     let vanilla_root = vanilla_root.to_path_buf();
-    let mod_sources = options.mods.clone();
+    let mut mod_sources = options.mods.clone();
+    mod_sources.capture_code_switches(&settings.mods.disabled);
     let world = launch_world(options).map(str::to_owned);
     let role = options.execution_role;
     let progress = progress.clone();
@@ -517,7 +537,9 @@ impl Loading {
 
     fn open_menu_options(&mut self, page: Page) {
         self.menu.options.open_at(false, page);
-        self.menu.options.languages = horizon_client::lang::available(&[&self.menu.root]);
+        self.menu.options.languages = horizon_client::lang::available(&[
+            &horizon_assets::resource_source::ResourceSource::directory(self.menu.root.clone()),
+        ]);
         self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[]);
         self.menu.options.pack_selection = self.settings.resource_packs.clone();
         self.menu.options.pack_screen = None;
@@ -542,7 +564,9 @@ impl Loading {
                 }
                 Event::Language(code) => {
                     horizon_client::lang::set(horizon_client::lang::Language::load(
-                        &[&self.menu.root],
+                        &[&horizon_assets::resource_source::ResourceSource::directory(
+                            self.menu.root.clone(),
+                        )],
                         &code,
                     ));
                     self.save_menu_settings();
@@ -623,7 +647,9 @@ impl Loading {
                         );
                         let screen = horizon_client::win_screen::WinScreen::new(
                             false,
-                            &self.menu.root,
+                            &horizon_assets::resource_source::ResourceSource::directory(
+                                self.menu.root.clone(),
+                            ),
                             &name,
                             &gui.atlas.font,
                         );
@@ -1080,6 +1106,7 @@ impl Loading {
             }
             WindowEvent::MouseInput { state, button, .. } if self.menu.options_open => {
                 if state == ElementState::Pressed && self.menu.options.selected_key.is_some() {
+                    self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
                     let events = self.menu.options.bind_mouse(&mut self.settings, button);
                     self.menu_option_events(events);
                 } else if matches!(button, MouseButton::Left | MouseButton::Right) {
@@ -1165,6 +1192,15 @@ impl Loading {
                     title.scroll_worlds(amount, self.menu.cursor, (batch.width, batch.height));
                 }
             }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Released && self.menu.options_open =>
+            {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
+                    let events = self.menu.options.key_released(&mut self.settings, key);
+                    self.menu_option_events(events);
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if event.physical_key == PhysicalKey::Code(KeyCode::F11) {
                     self.settings.fullscreen = !self.settings.fullscreen;
@@ -1179,6 +1215,7 @@ impl Loading {
                             .shortcut(atlas, s, &mut self.menu.clipboard)
                     });
                     if !handled && let PhysicalKey::Code(key) = event.physical_key {
+                        self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
                         let events = self.menu.options.key(
                             &mut self.settings,
                             atlas,
@@ -1206,6 +1243,16 @@ impl Loading {
             horizon_client::ui_theme::draw_boot(&self.boot, batch, &logs);
             return;
         };
+        // `Gui.setScreen` clears the focus of the screen it leaves
+        // (`Screen.clearFocus`): the title behind the options, and the one
+        // that comes back, start with no button highlighted.
+        let screen = self.menu.key_screen();
+        if super::pad_menu::another_screen_is_front(&mut self.menu.focus_screen, screen) {
+            self.menu.options.clear_click_focus();
+            if let Some(title) = self.menu.title.as_mut() {
+                title.focused_button = None;
+            }
+        }
         if self.menu.pending.is_some() {
             horizon_client::level_loading::draw_loading_overlay(
                 batch,
@@ -1309,7 +1356,10 @@ mod tests {
 
     fn gui(root: &std::path::Path) -> UiResources {
         UiResources {
-            atlas: HudAtlas::fonts(root).unwrap(),
+            atlas: HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([
                 96, 110, 111, 255,
             ])),
@@ -1341,6 +1391,74 @@ mod tests {
             menu: StartupMenu::default(),
             error: None,
         }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn queued_creation_is_reconciled_at_handoff() {
+        use horizon_client::gamerules::Value;
+        use mod_api::{Hooks, Registrar, RegistrationContext};
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                registrar.game_rule_category("machines").unwrap();
+                registrar
+                    .game_rule_bool("enabled", "example:machines", true)
+                    .unwrap();
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("example", Box::new(Mod))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let saves = std::env::temp_dir()
+                    .join(format!("horizon-startup-rules-{}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&saves);
+                let mut title = Title::new(saves, &game.options.resources);
+                title.enter_singleplayer();
+                let Action::Create { mut options, .. } = title.create_action() else {
+                    panic!("creation")
+                };
+                options.rules.set("keep_inventory", Value::Bool(true));
+                let mut menu = StartupMenu {
+                    title: Some(title),
+                    pending: Some(PendingWorldEntry::Local {
+                        folder: "test".into(),
+                        name: None,
+                        seed: Some(1),
+                        creative: true,
+                        create: Some(Box::new(options)),
+                    }),
+                    ..Default::default()
+                };
+                menu.handoff(game);
+                let Some(PendingWorldEntry::Local {
+                    create: Some(options),
+                    ..
+                }) = &game.pending_entry
+                else {
+                    panic!("pending")
+                };
+                assert_eq!(
+                    options.rules.get("example:enabled"),
+                    Some(Value::Bool(true))
+                );
+                assert_eq!(options.rules.get("keep_inventory"), Some(Value::Bool(true)));
+                let request = super::super::world_loading::WorldRequest::new(
+                    "test",
+                    None,
+                    None,
+                    true,
+                    Some(options),
+                    options.rules.registry().clone(),
+                )
+                .unwrap();
+                assert!(Arc::ptr_eq(
+                    &request.rule_registry,
+                    options.rules.registry()
+                ));
+            })
+        });
     }
 
     #[test]

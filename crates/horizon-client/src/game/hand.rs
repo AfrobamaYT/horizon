@@ -383,7 +383,9 @@ impl Game<'_> {
         }
         Ok(())
     }
-    /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`.
+    /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`, whose
+    /// end asks the mods' `native_player_break_speed`. Every dig's progress comes from
+    /// here: single player's, a host's for each guest, a remote client's own.
     pub(super) fn destroy_progress(&mut self, pos: [i32; 3]) -> f32 {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let facts = self.res.facts().get(state);
@@ -463,8 +465,7 @@ impl Game<'_> {
     /// (`getControlledVehicle`: its first passenger, on a server's client).
     pub(super) fn hands_busy(&self) -> bool {
         self.riding
-            .is_some_and(|id| self.boats.iter().any(|b| b.id == id))
-            && self.remote.as_ref().is_none_or(|r| r.first_passenger)
+            .is_some_and(|id| self.controls_boat(id) && self.boats.iter().any(|b| b.id == id))
             && [
                 winit::keyboard::KeyCode::KeyW,
                 winit::keyboard::KeyCode::KeyS,
@@ -985,10 +986,7 @@ mod tests {
         assert!(shows_held_stack(&sword, &worn, true));
         // Another component (an anvil's repair cost) differs.
         let mut named = worn.clone();
-        named.1.as_mut().unwrap().extra = Some(Box::new(horizon_client::item_data::StackData {
-            repair_cost: 1,
-            ..Default::default()
-        }));
+        named.1.as_mut().unwrap().data_mut().repair_cost = 1;
         assert!(!shows_held_stack(&sword, &named, true));
         // The main hand changing hotbar slot to an equal stack: instant; to
         // a different count: animation.

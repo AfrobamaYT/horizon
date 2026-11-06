@@ -6,8 +6,8 @@
 use mod_api::__private::game::BackendRefOf;
 use mod_api::__private::game::Fields;
 use mod_api::{
-    Backend, BackendRef, BlockEntityRef, BlockEntityTypeKey, Host, LevelRef, NativeWorldEpoch,
-    ServerChatEvent, ServerHost, Text,
+    Backend, BackendRef, BlockEntityRef, BlockEntityTypeKey, BoolGameRuleKey, Host, LevelRef,
+    NativeWorldEpoch, ServerChatEvent, ServerHost, Text,
 };
 
 /// One level with a `test:counter_box` block entity at its origin column.
@@ -20,6 +20,10 @@ fn overworld() -> LevelRef {
 impl Backend for World {
     fn level_in_place(&self, level: LevelRef) -> bool {
         level == overworld()
+    }
+    fn level_game_rule_bool(&self, level: LevelRef, key: BoolGameRuleKey) -> Option<bool> {
+        (level == overworld() && mod_api::__private::game_rule_bool_slot(key).is_some())
+            .then_some(true)
     }
     fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
         (entity.fields().position == [0, 64, 0])
@@ -116,6 +120,11 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     mod_api::__private::install_parts(&loaded.mods).unwrap();
+    assert!(
+        mod_api::__private::game_rule_registry()
+            .categories()
+            .contains(&"alpha:machines".to_owned())
+    );
     mod_api::__private::resolve_block_entity_types(
         &horizon_client_core::block_entity_types::BlockEntityTypes::new(
             Default::default(),
@@ -143,5 +152,5 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
         .filter(|answer| !answer.is_empty())
         .collect();
     answers.sort();
-    assert_eq!(answers, ["alpha: 7", "beta: 7", "gamma: none"]);
+    assert_eq!(answers, ["alpha: 7 true", "beta: 7", "gamma: none"]);
 }

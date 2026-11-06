@@ -833,7 +833,7 @@ pub fn golem_detected(m: &mut Mob, now: i64) {
 
 // ---- Behaviours ---------------------------------------------------------
 
-pub use crate::poi_sections::Poi;
+use horizon_world::poi::PoiType as Poi;
 /// The POI a block state is (`PoiTypes`): job site blocks, bed heads, bells.
 pub fn poi_at(w: &MobWorld, x: i32, y: i32, z: i32) -> Option<Poi> {
     poi_of_state(w, w.world.block(x, y, z))
@@ -863,7 +863,10 @@ fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Opti
             .and_then(|s| s.properties.get("part"));
         return runtime_bed_poi(name, part.map(String::as_str));
     }
-    super::villager::job_site_profession(name).map(Poi::Job)
+    w.registry
+        .state(state)
+        .and_then(horizon_world::poi::saved_poi)
+        .filter(|p| p.is_job())
 }
 fn runtime_bed_poi(name: &str, part: Option<&str>) -> Option<Poi> {
     (name.ends_with("_bed") && part == Some("head")).then_some(Poi::Home)
@@ -887,13 +890,11 @@ fn poi_matches(m: &Mob, f: PoiFilter, p: Poi) -> bool {
     let profession = m.extra.profession.index().unwrap_or(0);
     let employed = profession != super::villager::NONE && profession != super::villager::NITWIT;
     match (f, p) {
-        (PoiFilter::Held, Poi::Job(j)) => employed && j == profession,
-        (PoiFilter::Acquirable, Poi::Job(j)) => {
-            if profession == super::villager::NONE {
-                true
-            } else {
-                employed && j == profession
-            }
+        (PoiFilter::Held, p) if p.is_job() => {
+            employed && super::villager::profession_table().held(profession, p)
+        }
+        (PoiFilter::Acquirable, p) if p.is_job() => {
+            super::villager::profession_table().acquirable(profession, p)
         }
         (PoiFilter::Home, Poi::Home) | (PoiFilter::Meeting, Poi::Meeting) => true,
         _ => false,
@@ -1264,7 +1265,7 @@ enum B {
         running: bool,
         filter: PoiFilter,
         /// The memory filled (and checked absent): job site, home, meeting.
-        poi: Poi,
+        poi: PoiFilter,
         only_adult: bool,
         event: bool,
         next: i64,
@@ -2005,9 +2006,12 @@ impl B {
             } => {
                 let mm = mem(m);
                 let (target_present, validate_present) = match poi {
-                    Poi::Job(_) => (mm.potential_job_site.present(), mm.job_site.present()),
-                    Poi::Home => (mm.home.present(), false),
-                    Poi::Meeting => (mm.meeting_point.present(), false),
+                    PoiFilter::Acquirable => {
+                        (mm.potential_job_site.present(), mm.job_site.present())
+                    }
+                    PoiFilter::Home => (mm.home.present(), false),
+                    PoiFilter::Meeting => (mm.meeting_point.present(), false),
+                    PoiFilter::Held => unreachable!(),
                 };
                 if target_present || validate_present {
                     return false;
@@ -2056,7 +2060,7 @@ impl B {
                     .map(|(_, f)| f)
                     .collect();
                 found.truncate(5);
-                if *poi == Poi::Home {
+                if *poi == PoiFilter::Home {
                     found.retain(|(_, p)| w.prop(p[0], p[1], p[2], "occupied") != Some("true"));
                 }
                 let path = if found.is_empty() {
@@ -2076,9 +2080,10 @@ impl B {
                     if poi_at(w, target[0], target[1], target[2]).is_some() {
                         let mm = mem(m);
                         match poi {
-                            Poi::Job(_) => mm.potential_job_site.set(target),
-                            Poi::Home => mm.home.set(target),
-                            Poi::Meeting => mm.meeting_point.set(target),
+                            PoiFilter::Acquirable => mm.potential_job_site.set(target),
+                            PoiFilter::Home => mm.home.set(target),
+                            PoiFilter::Meeting => mm.meeting_point.set(target),
+                            PoiFilter::Held => unreachable!(),
                         }
                         if *event {
                             happy_particles(m, cx);
@@ -2118,7 +2123,9 @@ impl B {
                         if s.species != Species::Villager || !s.alive || s.potential_job.is_some() {
                             continue;
                         }
-                        let Poi::Job(j) = poi else { continue };
+                        let Some(j) = super::villager::profession_table().by_poi(poi) else {
+                            continue;
+                        };
                         if s.profession != Some(j) {
                             continue;
                         }
@@ -2153,7 +2160,9 @@ impl B {
                 if m.extra.profession.index() != Some(super::villager::NONE) {
                     return true;
                 }
-                if let Some(Poi::Job(j)) = poi_at(cx.w, p[0], p[1], p[2]) {
+                if let Some(j) = poi_at(cx.w, p[0], p[1], p[2])
+                    .and_then(|p| super::villager::profession_table().by_poi(p))
+                {
                     super::villager::set_profession(m, j);
                     cx.refresh = true;
                 }
@@ -4086,7 +4095,7 @@ fn move_to_target_sink(min: i32, max: i32) -> B {
         speed: 0.0,
     }
 }
-fn acquire(filter: PoiFilter, poi: Poi, only_adult: bool, event: bool) -> B {
+fn acquire(filter: PoiFilter, poi: PoiFilter, only_adult: bool, event: bool) -> B {
     B::AcquirePoi {
         running: false,
         filter,
@@ -4226,12 +4235,20 @@ fn packages(baby: bool, seed: i64, farmer: bool) -> Vec<Entry> {
     add(
         6,
         c,
-        acquire(PoiFilter::Acquirable, Poi::Job(0), true, false),
+        acquire(PoiFilter::Acquirable, PoiFilter::Acquirable, true, false),
     );
     add(7, c, B::GoToPotentialJobSite(timed(1200, 1200)));
     add(8, c, B::YieldJobSite(false));
-    add(10, c, acquire(PoiFilter::Home, Poi::Home, false, true));
-    add(10, c, acquire(PoiFilter::Meeting, Poi::Meeting, true, true));
+    add(
+        10,
+        c,
+        acquire(PoiFilter::Home, PoiFilter::Home, false, true),
+    );
+    add(
+        10,
+        c,
+        acquire(PoiFilter::Meeting, PoiFilter::Meeting, true, true),
+    );
     add(10, c, B::AssignProfession(false));
     add(10, c, B::ResetProfession(false));
     // MEET
@@ -4633,10 +4650,30 @@ mod poi_classification_tests {
     fn unresolved_profession_does_not_claim_or_reset_a_job() {
         let mut mob = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
         mob.extra.profession = super::super::villager::ProfessionState::from_id("example:engineer");
-        assert!(!poi_matches(&mob, PoiFilter::Held, Poi::Job(5)));
-        assert!(!poi_matches(&mob, PoiFilter::Acquirable, Poi::Job(5)));
+        assert!(!poi_matches(&mob, PoiFilter::Held, Poi::Farmer));
+        assert!(!poi_matches(&mob, PoiFilter::Acquirable, Poi::Farmer));
         assert!(!can_reset_profession(&mob));
         assert_eq!(mob.extra.profession.id(), "example:engineer");
+    }
+
+    #[test]
+    fn vanilla_job_filters_and_capacity_remain_distinct() {
+        let mut mob = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
+        assert!(!poi_matches(&mob, PoiFilter::Held, Poi::Farmer));
+        assert!(poi_matches(&mob, PoiFilter::Acquirable, Poi::Farmer));
+        mob.extra.profession = super::super::villager::ProfessionState::from_index(5);
+        assert!(poi_matches(&mob, PoiFilter::Held, Poi::Farmer));
+        assert!(poi_matches(&mob, PoiFilter::Acquirable, Poi::Farmer));
+        assert!(!poi_matches(&mob, PoiFilter::Held, Poi::Butcher));
+        mob.extra.profession = super::super::villager::ProfessionState::from_index(11);
+        assert!(!poi_matches(&mob, PoiFilter::Held, Poi::Farmer));
+        assert!(!poi_matches(&mob, PoiFilter::Acquirable, Poi::Farmer));
+        mob.extra.profession = super::super::villager::ProfessionState::from_index(20);
+        assert!(!poi_matches(&mob, PoiFilter::Held, Poi::Farmer));
+        assert!(!poi_matches(&mob, PoiFilter::Acquirable, Poi::Farmer));
+        assert_eq!(Poi::Farmer.max_tickets(), 1);
+        assert_eq!(Poi::Meeting.max_tickets(), 32);
+        assert_eq!(Poi::Meeting.valid_range(), 6);
     }
 
     #[test]

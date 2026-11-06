@@ -79,11 +79,11 @@ fn level_event_excludes_its_source_even_during_another_guests_turn() {
             uuid: 12,
             saved: None,
         });
-        for guest in &mut host.hub.guests {
+        host.hub.guests.update_all(|guest| {
             let (tx, rx) = std::sync::mpsc::channel();
             guest.sender = PlayerSender::new(tx, Arc::default());
             receivers.push(rx);
-        }
+        });
         game.audio.capture = Some(Vec::new());
         game.as_guest(13, |game| {
             game.lan_record_events(&[LevelEvent::LevelEvent {
@@ -165,9 +165,8 @@ fn another_guests_menu_and_push_work_during_a_turn() {
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .inventory[0] = Some(stone.clone());
+            .update_guest(13, |guest| guest.inventory[0] = Some(stone.clone()))
+            .unwrap();
         game.as_guest(12, |game| {
             assert!(game.native_menu_ref(a).is_none());
             assert_eq!(a_menu.slot_count(game), None);
@@ -254,17 +253,16 @@ fn another_guests_services_work_during_a_turn() {
         tree.by_id.insert("turns:probe".into(), 0);
         tree.by_trigger.insert("turns:probe".into(), vec![(0, 0)]);
         game.adv.tree = Arc::new(tree);
-        for guest in &mut game.lan.as_mut().unwrap().hub.guests {
+        game.lan.as_mut().unwrap().hub.guests.update_all(|guest| {
             guest.advancements_loaded = true;
-        }
+        });
         let stone = ItemStack::new("minecraft:stone", 4);
         game.lan
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .inventory[0] = Some(stone.clone());
+            .update_guest(13, |guest| guest.inventory[0] = Some(stone.clone()))
+            .unwrap();
         let a = game.native_player_ref(12).unwrap();
         let b = game.native_player_ref(13).unwrap();
         game.as_guest(12, |game| {
@@ -390,9 +388,15 @@ fn nested_guest_turns_restore_each_equipment_store() {
                 "minecraft:leather_horse_armor",
             ),
         ] {
-            let guest = game.lan.as_mut().unwrap().hub.guest_mut(conn).unwrap();
-            guest.equipment[BODY] = stack(body);
-            guest.equipment[SADDLE] = stack(saddle);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(conn, |guest| {
+                    guest.equipment[BODY] = stack(body);
+                    guest.equipment[SADDLE] = stack(saddle);
+                })
+                .unwrap();
         }
         game.as_guest(12, |game| {
             assert_eq!(game.equipment[BODY], stack("minecraft:golden_horse_armor"));
@@ -469,9 +473,8 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .vehicle = Some(42);
+            .update_guest(13, |guest| guest.vehicle = Some(42))
+            .unwrap();
         let horse = game.res.mob_types().get("minecraft:horse").unwrap().clone();
         game.mobs
             .push(Mob::new(42, horse, Vec3::new(3.0, 64.0, 5.0), 0.0));
@@ -517,15 +520,20 @@ fn a_mounted_guests_turn_publishes_its_teleport_without_dismounting() {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(13)
-                .unwrap()
-                .vehicle = vehicle;
+                .update_guest(13, |guest| guest.vehicle = vehicle)
+                .unwrap();
             if vehicle.is_some() {
                 game.guest_boarded(13, None);
             }
             let (tx, rx) = std::sync::mpsc::channel();
-            game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap().sender =
-                PlayerSender::new(tx, Arc::default());
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |guest| {
+                    guest.sender = PlayerSender::new(tx, Arc::default())
+                })
+                .unwrap();
             game.as_guest(13, |game| {
                 // The body left by a passenger transition, before the guest
                 // turn publishes it back to the hub and the connection.
@@ -578,11 +586,15 @@ fn server_services_preserve_identity_and_message_delivery() {
     use mod_api::{ServerHost, Text};
     with_guests(|game| {
         let guests = &mut game.lan.as_mut().unwrap().hub.guests;
-        guests[0].permission = 3;
-        guests[0].game_mode = 1;
-        guests[0].address = "192.0.2.12:25565".parse().unwrap();
-        guests[1].permission = 1;
-        guests[1].address = "[2001:db8::13]:25566".parse().unwrap();
+        guests.update(0, |g| {
+            g.permission = 3;
+            g.game_mode = 1;
+            g.address = "192.0.2.12:25565".parse().unwrap();
+        });
+        guests.update(1, |g| {
+            g.permission = 1;
+            g.address = "[2001:db8::13]:25566".parse().unwrap();
+        });
         let players = game.players().server_players();
         assert_eq!(
             players.iter().map(|p| p.uuid()).collect::<Vec<_>>(),
@@ -743,6 +755,94 @@ fn canonical_permissions_preserve_owner_and_fake_player_reads() {
     });
 }
 
+/// The UUIDs of the players in the level, checked against the full reader.
+fn level_uuids(game: &super::Game<'_>) -> Vec<u128> {
+    let uuids: Vec<u128> = game.level_player_uuids().collect();
+    let players: Vec<u128> = game.level_players().iter().map(|p| p.uuid).collect();
+    assert_eq!(uuids, players, "both enumerations select the same players");
+    uuids
+}
+
+/// The host in place, with a body and UUID 99.
+fn place_host(game: &mut super::Game<'_>) {
+    let mut body =
+        horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(0.0, 64.0, 0.0)).unwrap();
+    body.entity_id = 99;
+    game.player = Some(body);
+    game.level.player_uuid = Some([0, 0, 0, 99]);
+}
+
+/// A turn lists the acting player once, under their own UUID and with their
+/// live body. The host's body is displaced for the turn, so it is not listed.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn level_players_name_each_body_once_during_turns() {
+    with_guests(|game| {
+        place_host(game);
+        assert_eq!(level_uuids(game), [99, 12, 13]);
+        game.as_guest(12, |game| {
+            assert_eq!(level_uuids(game), [12, 13]);
+            assert_eq!(game.player_view().unwrap().uuid, [0, 0, 0, 12]);
+            game.player.as_mut().unwrap().position.x = 40.0;
+            assert_eq!(game.level_players()[0].position.x, 40.0);
+            game.as_guest(13, |game| {
+                assert_eq!(level_uuids(game), [13, 12]);
+                assert!(game.as_guest(12, |_| ()).is_none());
+            })
+            .unwrap();
+            assert_eq!(level_uuids(game), [12, 13]);
+        })
+        .unwrap();
+        assert_eq!(level_uuids(game), [99, 12, 13]);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn level_players_exclude_guests_in_other_levels() {
+    with_guests(|game| {
+        place_host(game);
+        let host = game.lan.as_mut().unwrap();
+        let elsewhere = host.hub.guests.connection_index(13).unwrap();
+        host.hub.guests.update(elsewhere, |guest| {
+            guest.dimension = "minecraft:the_nether".to_owned();
+        });
+        assert_eq!(level_uuids(game), [99, 12]);
+        game.as_guest(12, |game| assert_eq!(level_uuids(game), [12]))
+            .unwrap();
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn level_players_exclude_fake_players() {
+    with_guests(|game| {
+        let _serving = super::integrated::tests::install_serving(game, false);
+        place_host(game);
+        game.next_entity = 100;
+        let level = game.native_level(game.dim.id()).unwrap();
+        let fake = game.native_fake_player(level, 1234, "machine").unwrap();
+        let conn = game
+            .lan
+            .as_ref()
+            .unwrap()
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == fake.uuid())
+            .unwrap()
+            .conn;
+        assert_eq!(level_uuids(game), [99, 12, 13]);
+        game.as_guest(conn, |game| {
+            assert_eq!(level_uuids(game), [12, 13]);
+            game.as_guest(12, |game| assert_eq!(level_uuids(game), [12, 13]))
+                .unwrap();
+        })
+        .unwrap();
+        assert_eq!(level_uuids(game), [99, 12, 13]);
+    });
+}
+
 /// A listener sees the newly granted criterion before its recipe reward on
 /// both a player's first tick and a resource reload.
 #[test]
@@ -798,9 +898,9 @@ fn tick_advancement_notice_precedes_recipe_reward() {
         );
         let reload = std::env::var("HORIZON_ADVANCEMENT_ORDER_CHILD").as_deref() == Ok("reload");
         let host = game.lan.as_mut().unwrap();
-        for guest in &mut host.hub.guests {
+        host.hub.guests.update_all(|guest| {
             guest.advancements_loaded = reload;
-        }
+        });
         host.hub.mods_loaded = reload;
         game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners));
         if reload {

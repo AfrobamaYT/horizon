@@ -172,9 +172,16 @@ or a cross-release compatibility range.
 
 Hooks are declared in Rust now, not in JSON: a hook or helper author adds a `#[hook(...)]` (or `#[helper(...)]`)
 declaration, with its `///` doc, to a file under `crates/horizon-mod-api/src/hooks/` (a new file for a new area, named
-for it, plus one `mod` line for it in `hooks/mod.rs`, in name order). `native-hooks.json` and
+for it). The generator discovers these files without a shared module list. `native-hooks.json` and
 `tools/native-hook-fragments/` are retired, and a file there fails the build. Collection updates
 the catalog, not a global API number, source comments or documentation histories.
+
+Hand-written API types have a selected public surface in `crates/horizon-mod-api/src/exports/<area>.rs`:
+module declarations and re-exports stay in their source area's fragment. Engine-only re-exports sit in a
+separate section of the same fragment and keep their existing paths. The generator discovers all fragments
+and includes each section at its original scope. A new hand-written area adds one fragment, while
+catalog-generated hook types need no export-list edit. Do not add declarations or re-export lists to
+`lib.rs`.
 
 ## Runtime packages and identity
 
@@ -191,7 +198,7 @@ a content package cannot shadow a compiled mod's id.
 Move the executable, prepared resources and canonical package directory together. The copied
 projects retain their flat manifest, crate, assets and data. The game's mod list and crash details
 use its embedded inventory, including code-only mods. Display names and descriptions come from the
-validated manifests; `NativeMod.title` and `NativeMod.description` are removed.
+validated manifests; Controls bindings are declared through `Registrar::register_key_mapping`, not a separate `NativeMod` metadata hook.
 
 `native-mods.json` is provenance and rebuild status, not game identity, authentication, announcements
 or startup input. The launcher retains it for build/status displays. The separate `horizon-server`
@@ -279,7 +286,7 @@ contract is never changed, its `mod_api` entry (the trait method's contract) inc
 a version. New parameters before the out-parameter, with the old ones kept in name and order, keep the version: a
 binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
-catalog and the hook points' sources (`native_hooks.rs`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
+catalog and the hook points' sources (`native_hooks/`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
 
 ### State flags on the living handles
 
@@ -304,9 +311,12 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
 
-`MobRef::portal_cooldown` reads the current mob portal cooldown in ticks from the server's portal state.
-Zero means no cooldown; `None` means a stale, parked or otherwise unavailable mob, a client, or the separately
-modelled dragon. The read does not load levels.
+`EntityRef::portal_cooldown` takes `&dyn Host` and reads the remaining portal cooldown in ticks from the
+server's portal state: a player's own (the acting player inside its turn and other players outside it), and the
+level's for mobs, items, experience orbs, boats, minecarts, primed TNT, falling blocks, arrows and the thrown items
+and fireballs a chunk saves, fireworks and tridents; an ender pearl's comes from End gateways only. Zero means no
+cooldown; `None` means a kind with no portal cooldown (armor stands, wind charges, the separately modelled dragon and
+others), a client, or a stale, parked or otherwise unavailable handle. The read does not load levels.
 
 `MobRef::can_use_portal` reads the existing server portal decision for a mob in the current level, including mounts and player riders. It takes `&dyn Host`: `Some(false)` means the mob is ineligible, while `None` means a client, stale or unavailable handle, parked mob, or the separately modelled dragon. It does not load a level.
 
@@ -703,7 +713,7 @@ trusting native code is the player's decision, never an agent's.
    the prebuilt game, a hammer for a full game build (its menu names the reason), a check when the game already has
    the mod. A build under way shows its stage and can be cancelled.
 
-   With Developer, an edit to a function the machine sample's mixin injects into `game/native_hooks.rs` compiled
+   With Developer, an edit to a function the machine sample's mixin injects into `game/native_hooks/` compiled
    about 6× faster than with Balanced, and a tick took up to about twice as long. `dev` lowers only `horizon-client`, so an edit in another workspace
    crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with Balanced. The
    launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay

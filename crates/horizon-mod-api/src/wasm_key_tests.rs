@@ -1,8 +1,8 @@
 //! Real generated imports against the canonical load-owned registry tables.
 use super::*;
 use crate::{
-    Backend, BackendRef, BlockEntityTypeKey, BlockKey, EffectKey, FluidKey, Hooks, Host, ItemKey,
-    ModEntry, Registrar,
+    Backend, BackendRef, BlockEntityTypeKey, BlockKey, BoolGameRuleKey, EffectKey, FluidKey, Hooks,
+    Host, ItemKey, ModEntry, Registrar,
 };
 
 #[test]
@@ -11,6 +11,10 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     #[crate::__subscriptions]
     impl Hooks for Requests {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            r.game_rule_category("rules").unwrap();
+            let rule = r.game_rule_bool("enabled", "boundary:rules", true).unwrap();
+            assert_eq!(BoolGameRuleKey::from_slot(rule.0), Ok(rule));
+            assert!(BoolGameRuleKey::from_slot(rule.0 + 1).is_err());
             let block = r.block_key("stone");
             let effect = r.effect_key("speed");
             let item = r.item_key("stick");
@@ -81,6 +85,9 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         }
     }
     impl Host for Table {
+        fn unresolved_fluid_id(&self, fluid: crate::UnresolvedFluid) -> String {
+            crate::unresolved_fluid::name(fluid)
+        }
         fn block_state_default(&self, block: BlockKey) -> Option<crate::BlockStateId> {
             assert_eq!(block.0, 0);
             self.0.set(self.0.get() + 1);
@@ -146,6 +153,13 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         Imports::effect_key_id(&mut state, poison.0).unwrap(),
         "minecraft:poison"
     );
+    let handle = crate::unresolved_fluid::intern("absent:wasm").unwrap();
+    use glue::horizon::mod_api::host::Host as Reads;
+    assert_eq!(
+        Reads::unresolved_fluid_id(&mut state, handle.0).unwrap(),
+        "absent:wasm"
+    );
+    assert!(Reads::unresolved_fluid_id(&mut state, u64::MAX).is_err());
     let calls = table.0.get();
     assert_eq!(calls, 4);
     for slot in [1, u32::MAX] {
