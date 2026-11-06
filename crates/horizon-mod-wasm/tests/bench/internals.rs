@@ -271,7 +271,7 @@ fn internals_accesses_against_native() {
             measure(native, 256, 100)
         ));
     }
-    report.push_str("\n### Batched fields\n\nOne listener reads or journals writes to 10 or 12 distinct i64 fields; includes one apply for sets. Baseline zero-work listener subtracted. Median of 9 batches; ns per field.\n\n| Access | Fields | Single ns/field | Batch ns/field |\n| --- | ---: | ---: | ---: | ---: |\n");
+    report.push_str("\n### Batched fields\n\nOne listener reads or journals writes to 10 or 12 distinct i64 fields; includes one apply for sets. Baseline zero-work listener subtracted. Median of 9 batches; ns per field.\n\n| Access | Fields | Single ns/field | Batch ns/field |\n| --- | ---: | ---: | ---: |\n");
     for fields in [10, 12] {
         for access in ["get", "set"] {
             let mut ns = Vec::new();
