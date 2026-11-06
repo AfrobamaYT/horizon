@@ -1,6 +1,5 @@
 //! The game's side of the `living_writes` area (`horizon-mod-api/src/host/living_writes.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LivingWritesBackend for Game<'_> {
     fn living_item_use_remaining(&self, living: LivingRef) -> Option<i32> {

@@ -1,6 +1,5 @@
 //! The game's side of the `client_options` area (`horizon-mod-api/src/host/client_options.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ClientOptionsClientHost for Game<'_> {
     fn graphics_options(&self) -> ClientGraphicsOptions {

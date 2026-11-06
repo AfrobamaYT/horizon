@@ -2806,6 +2806,7 @@ dependencies = [
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-api-gen",
  "horizon-mods",
  "serde",
  "serde_json",
@@ -2869,6 +2870,7 @@ dependencies = [
 name = "horizon-server-launch"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "horizon-anticheat",
  "horizon-chat-filter",
  "horizon-core",

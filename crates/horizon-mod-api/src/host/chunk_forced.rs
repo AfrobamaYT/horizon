@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `chunk_forced` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait ChunkForcedBackend {
     /// Side: server.
@@ -52,6 +53,7 @@ pub trait ChunkForcedBackend {
     }
 }
 /// The handles' server writes of the `chunk_forced` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait ChunkForcedBackendMut {
     /// Side: server.

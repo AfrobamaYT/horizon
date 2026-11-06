@@ -1,6 +1,5 @@
 //! The game's side of the `projectile_refs` area (`horizon-mod-api/src/host/projectile_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ProjectileRefsServerHost for Game<'_> {
     fn projectile(&self, entity: EntityRef) -> Option<ProjectileRef> {

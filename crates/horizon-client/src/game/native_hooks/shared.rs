@@ -3227,7 +3227,6 @@ impl Game<'_> {
         };
         // An empty id marks its place while the mod has it.
         let mut taken = std::mem::take(&mut **m);
-        let items = taken.items.clone();
         let state = self.world.block(pos.0, pos.1, pos.2).0;
         let slots = self
             .world
@@ -3238,6 +3237,7 @@ impl Game<'_> {
         if taken.items.len() < slots {
             taken.items.resize(slots, None);
         }
+        let items = taken.items.clone();
         // Without a container, an `Items` item list is the mod's own field.
         if slots == 0 && !taken.items.is_empty() {
             let items = horizon_client::save::encode_items(&std::mem::take(&mut taken.items));
@@ -4085,7 +4085,6 @@ mod tests {
     fn client_host_reads_current_pause_state() {
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -4104,7 +4103,7 @@ mod tests {
         use super::super::Screen;
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::ClientHost;
+
         use winit::keyboard::KeyCode;
 
         with_game(|game| {

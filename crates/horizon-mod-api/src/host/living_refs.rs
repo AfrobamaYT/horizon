@@ -19,6 +19,7 @@ pub trait LivingRefsHost {
     }
 }
 /// The handles' reads of the `living_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LivingRefsBackend {
     /// Side: both.
@@ -125,6 +126,7 @@ pub trait LivingRefsBackend {
     }
 }
 /// The handles' server writes of the `living_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LivingRefsBackendMut {
     /// Side: server.

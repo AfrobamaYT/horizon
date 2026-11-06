@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `level_reads` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LevelReadsBackend {
     /// Side: both.
@@ -102,6 +103,26 @@ pub trait LevelReadsBackend {
         crate::phase::unprovided(
             "Backend::level_height",
             "level_height",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// `Level.isInWorldBounds`: `pos` within 30,000,000 blocks on x and z and inside the level's
+    /// build height. None as for `native_level_height`. Does not load chunks.
+    fn level_in_world_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
+        crate::phase::unprovided(
+            "Backend::level_in_world_bounds",
+            "level_in_world_bounds",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// `Level.isInSpawnableBounds`: 30,000,000 blocks on x and z, 20,000,000 on y. None as for
+    /// `native_level_height`. Does not load chunks.
+    fn level_in_spawnable_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
+        crate::phase::unprovided(
+            "Backend::level_in_spawnable_bounds",
+            "level_in_spawnable_bounds",
             crate::phase::LoadAccess::WorldOnly,
         )
     }

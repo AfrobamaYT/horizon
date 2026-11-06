@@ -17,16 +17,26 @@ pub trait EntityHandlesHost {
         )
     }
     /// Side: both.
-    /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
-    /// client, with no world open, or for a dimension the server hasn't
-    /// loaded. API 373.
+    /// The level `dimension` (`minecraft:the_nether`) as a handle: on a client,
+    /// the level it shows, whatever the server calls it. None with no world
+    /// open, or for a dimension the server hasn't loaded. API 373.
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         crate::phase::unprovided("Host::level", "level", crate::phase::LoadAccess::WorldOnly)
     }
 }
 /// The handles' reads of the `entity_handles` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntityHandlesBackend {
+    /// Side: both.
+    /// The name of a dimension's key.
+    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+        crate::phase::unprovided(
+            "Backend::dimension_key_id",
+            "dimension_key_id",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
     /// Side: both.
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame.
@@ -77,17 +87,9 @@ pub trait EntityHandlesBackend {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
-    /// Side: both.
-    /// The name of a dimension's key (`minecraft:the_nether`). None for a key the game never gave out.
-    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
-        crate::phase::unprovided(
-            "Backend::dimension_key_id",
-            "dimension_key_id",
-            crate::phase::LoadAccess::WorldOnly,
-        )
-    }
 }
 /// The handles' server writes of the `entity_handles` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntityHandlesBackendMut {
     /// Side: server.

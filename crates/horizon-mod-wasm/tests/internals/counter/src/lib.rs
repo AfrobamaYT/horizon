@@ -58,6 +58,54 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
             }
         }
     }
+    if message.as_str() == "lazy_wrong_arity" {
+        use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
+        let args = (0..2)
+            .map(|_| view::Arg::Value(vec![view::Cell::Str("x".repeat(2_097_152))]))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            view::call(2, Some(game.node()), &args),
+            Err(view::Refusal::Changed(_))
+        ));
+        return;
+    }
+    if message.as_str() == "lazy_multiple_values" {
+        use mod_internals::runtime::bindings::horizon::mod_internals::view;
+        let args = (0..2)
+            .map(|_| view::Arg::Value(vec![view::Cell::Str("x".repeat(786_432))]))
+            .collect::<Vec<_>>();
+        // mutate_copies has two copy arguments. Their shapes are deliberately
+        // wrong, but both values fit their own budgets and must reach that check.
+        assert!(matches!(
+            view::call(3, None, &args),
+            Err(view::Refusal::Changed(_))
+        ));
+        return;
+    }
+    if let Some(route) = message.strip_prefix("lazy_string_") {
+        use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
+        let node = game.node();
+        let cells = vec![view::Cell::Str("x".repeat(2_097_152))];
+        let refused = |result: Result<(), view::Refusal>| {
+            assert!(
+                matches!(result, Err(view::Refusal::NotHere(why)) if why == "internals budget")
+            );
+        };
+        match route {
+            "set" => refused(node.set(0, &cells)),
+            "key" => refused(node.key(&cells).map(|_| ())),
+            "call" => refused(view::call(2, Some(node), &[view::Arg::Value(cells)]).map(|_| ())),
+            "batch" => {
+                let results = view::set_many(&[(node, 0, 1)], &cells);
+                assert_eq!(results.len(), 1);
+                for result in results {
+                    refused(result);
+                }
+            }
+            _ => panic!("unknown lazy string route"),
+        }
+        return;
+    }
     if matches!(message.as_str(), "strings_batch" | "strings_single") {
         use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
         let node = game.node();

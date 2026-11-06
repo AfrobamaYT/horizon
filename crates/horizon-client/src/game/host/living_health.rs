@@ -1,6 +1,5 @@
 //! The game's side of the `living_health` area (`horizon-mod-api/src/host/living_health.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LivingHealthBackend for Game<'_> {
     fn living_health(&self, living: LivingRef) -> Option<f32> {

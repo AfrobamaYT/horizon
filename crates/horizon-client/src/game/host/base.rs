@@ -1,6 +1,5 @@
 //! The game's side of the `base` area (`horizon-mod-api/src/host/base.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 use std::path::PathBuf;
 use std::sync::Arc;

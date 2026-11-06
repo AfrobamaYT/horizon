@@ -16,6 +16,7 @@ pub trait ProjectileRefsServerHost {
     }
 }
 /// The handles' reads of the `projectile_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait ProjectileRefsBackend {
     /// Side: server.
@@ -66,6 +67,7 @@ pub trait ProjectileRefsBackend {
     }
 }
 /// The handles' server writes of the `projectile_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait ProjectileRefsBackendMut {
     /// Side: server.

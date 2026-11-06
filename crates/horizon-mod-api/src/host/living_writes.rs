@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `living_writes` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LivingWritesBackend {
     /// Side: server.
@@ -16,7 +17,9 @@ pub trait LivingWritesBackend {
         )
     }
     /// Side: both.
-    ///
+    /// `LivingEntity.getUsedItemHand` while `isUsingItem`: the hand of the item
+    /// a player or a mob uses, None when it uses none. On a client, the local
+    /// player's only.
     fn living_used_item_hand(&self, living: LivingRef) -> Option<Hand> {
         crate::phase::unprovided(
             "Backend::living_used_item_hand",
@@ -26,6 +29,7 @@ pub trait LivingWritesBackend {
     }
 }
 /// The handles' server writes of the `living_writes` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LivingWritesBackendMut {
     /// Side: server.
@@ -121,7 +125,20 @@ pub trait LivingWritesBackendMut {
         )
     }
     /// Side: server.
+    /// `LivingEntity.startUsingItem`: starts using the item in `hand`, for its
+    /// `getUseDuration` as a mod's use-item Start hook left it, without the
+    /// item's own `use` (no ammo check, no sound). True when the use started:
+    /// false for an empty hand, a use under way, a refused Start, armor stands
+    /// and the dragon, and a player other than the acting one while another
+    /// player acts.
     ///
+    /// A player's client lets go of a use whose button isn't down, as in
+    /// vanilla (`Minecraft.handleKeybinds`), so that use lasts until its next
+    /// tick, which releases it; an item with no use of its own ends then too.
+    /// A mob's use shows and its goals see it, but it never runs out: only
+    /// `release_using_item` or a goal ends it. False for a piglin with
+    /// something in its off hand and a drinking witch, whose counter is their
+    /// own timer.
     fn living_start_using_item(&mut self, living: LivingRef, hand: Hand) -> bool {
         crate::phase::unprovided(
             "BackendMut::living_start_using_item",
@@ -130,7 +147,13 @@ pub trait LivingWritesBackendMut {
         )
     }
     /// Side: server.
-    ///
+    /// `LivingEntity.releaseUsingItem`: lets go of the item in use as the use
+    /// button does: the use-item Stop hook, the item's own release (a player's
+    /// bow or trident shoots by how long it was held) and a mod's
+    /// `release_using`, then the use is over. True when a use was released:
+    /// false when none runs, for armor stands and the dragon, and for a player
+    /// other than the acting one while another player acts. A mob's bow or
+    /// trident has no release of its own, as in vanilla.
     fn living_release_using_item(&mut self, living: LivingRef) -> bool {
         crate::phase::unprovided(
             "BackendMut::living_release_using_item",

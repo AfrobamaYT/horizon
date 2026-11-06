@@ -1,6 +1,5 @@
 //! The game's side of the `dragon_refs` area (`horizon-mod-api/src/host/dragon_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl DragonRefsServerHost for Game<'_> {
     fn dragon(&self, entity: EntityRef) -> Option<DragonRef> {

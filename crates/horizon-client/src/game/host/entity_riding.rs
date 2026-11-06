@@ -1,6 +1,5 @@
 //! The game's side of the `entity_riding` area (`horizon-mod-api/src/host/entity_riding.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntityRidingBackend for Game<'_> {
     fn entity_vehicle(&self, entity: EntityRef) -> Option<EntityRef> {

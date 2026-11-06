@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `raid_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait RaidRefsBackend {
     /// Side: server.
@@ -178,6 +179,7 @@ pub trait RaidRefsBackend {
     }
 }
 /// The handles' server writes of the `raid_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait RaidRefsBackendMut {
     /// Side: server.

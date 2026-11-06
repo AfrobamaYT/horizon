@@ -1,6 +1,5 @@
 //! The game's side of the `fluid_capability` area (`horizon-mod-api/src/host/fluid_capability.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl FluidCapabilityBackend for Game<'_> {
     fn fluid_tank_count(&self, at: BlockSide) -> Option<usize> {

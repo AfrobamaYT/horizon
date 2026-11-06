@@ -1,6 +1,5 @@
 //! The game's side of the `entity_fall_and_push` area (`horizon-mod-api/src/host/entity_fall_and_push.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntityFallAndPushBackend for Game<'_> {
     fn minecart_push(&self, cart: MinecartRef) -> Option<[f64; 3]> {

@@ -1,6 +1,5 @@
 //! The game's side of the `entity_handles` area (`horizon-mod-api/src/host/entity_handles.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntityHandlesHost for Game<'_> {
     fn entity(&self, id: u32) -> Option<EntityRef> {

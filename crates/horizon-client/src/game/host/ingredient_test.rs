@@ -1,6 +1,5 @@
 //! The game's side of the `ingredient_test` area (`horizon-mod-api/src/host/ingredient_test.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl IngredientTestBackend for Game<'_> {
     fn recipe_ingredient_test(&self, ingredient: &Ingredient, stack: &ItemStack) -> bool {
