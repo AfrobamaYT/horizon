@@ -2479,7 +2479,7 @@ struct Game<'a> {
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
     gui: UiResources,
-    standalone_sprites: native_block_entity_draw::StandaloneSprites,
+    standalone_geometry: native_block_entity_draw::StandaloneGeometry,
     /// `FogRenderer`'s evolving state.
     fog: horizon_client::fog::FogState,
     screen_fx: horizon_client::screen_effects::ScreenEffects,
@@ -20860,7 +20860,7 @@ impl<'a> Game<'a> {
         let mod_phase = mod_api::__private::PhaseOwner::new(phase);
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
-        let standalone_sprites = native_block_entity_draw::StandaloneSprites::new(&pack, &gui);
+        let standalone_geometry = native_block_entity_draw::StandaloneGeometry::new(&pack, &gui);
         let loop_side = options.execution_role.loop_side();
         let root = options.resources.clone();
         let mod_sources = options.mods.clone();
@@ -20923,7 +20923,7 @@ impl<'a> Game<'a> {
             damage_tag_generation: 1,
             pack,
             gui,
-            standalone_sprites,
+            standalone_geometry,
             fog: Default::default(),
             screen_fx: Default::default(),
             item_activation: Default::default(),

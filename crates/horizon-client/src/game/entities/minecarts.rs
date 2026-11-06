@@ -2519,10 +2519,13 @@ impl Game<'_> {
                     .layer_names
                     .get(&face.layer)
                     .and_then(|name| self.gui.atlas.sprites.get(name))?;
-                Some((&face.quad, *sprite))
+                Some((
+                    PreparedModelFace::new(&face.quad, *sprite),
+                    light(&face.quad),
+                ))
             })
         });
-        emit_model_faces(faces, m, light, diffuse, tint, out);
+        emit_model_faces(faces, m, diffuse, tint, out);
     }
 
     /// The block the cart shows: `None` for air (`AbstractMinecartRenderer`
@@ -2953,23 +2956,47 @@ fn furnace_speed(c: &Minecart, base: f64) -> f64 {
     }
 }
 
+/// Local geometry with atlas coordinates resolved for both CPU and GPU consumers.
+#[derive(Clone, Copy)]
+pub(super) struct PreparedModelFace {
+    positions: [[f32; 3]; 4],
+    uv: [[f32; 2]; 4],
+    pub(super) facing: horizon_assets::model::Direction,
+    pub(super) tint_index: i32,
+    light_emission: u8,
+}
+
+impl PreparedModelFace {
+    pub(super) fn new(
+        quad: &horizon_assets::bake::ModelQuad,
+        sprite: horizon_client::hud::Rect,
+    ) -> Self {
+        Self {
+            positions: quad.positions,
+            uv: quad.uv.map(|uv| {
+                [
+                    sprite.u0 + uv[0] * (sprite.u1 - sprite.u0),
+                    sprite.v0 + uv[1] * (sprite.v1 - sprite.v0),
+                ]
+            }),
+            facing: quad.facing,
+            tint_index: quad.tint_index,
+            light_emission: quad.light_emission,
+        }
+    }
+}
+
 /// Shared transform, shading and light path for block-state and prepared standalone faces.
-pub(super) fn emit_model_faces<'a>(
-    faces: impl IntoIterator<
-        Item = (
-            &'a horizon_assets::bake::ModelQuad,
-            horizon_client::hud::Rect,
-        ),
-    >,
+pub(super) fn emit_model_faces(
+    faces: impl IntoIterator<Item = (PreparedModelFace, u32)>,
     m: glam::Mat4,
-    light: impl Fn(&horizon_assets::bake::ModelQuad) -> u32,
     diffuse: bool,
     tint: impl Fn(i32) -> Option<u32>,
     out: &mut Vec<Vertex>,
 ) {
     use horizon_assets::model::Direction as D;
     let mut normals = horizon_client::item_render::FaceNormals::new(m);
-    for (quad, s) in faces {
+    for (quad, light) in faces {
         let shade: u32 = match quad.facing {
             D::Up => 255,
             D::Down => 127,
@@ -2994,7 +3021,6 @@ pub(super) fn emit_model_faces<'a>(
         } else {
             [0; 4]
         };
-        let light = light(quad);
         let light = if diffuse {
             let emission = u32::from(quad.light_emission) * 16;
             (light & 0xFF) | (light >> 8 & 0xFF).max(emission) << 8
@@ -3008,7 +3034,7 @@ pub(super) fn emit_model_faces<'a>(
                 pos: m
                     .transform_point3(glam::Vec3::from_array(quad.positions[k]))
                     .to_array(),
-                uv: [s.u0 + uv[0] * (s.u1 - s.u0), s.v0 + uv[1] * (s.v1 - s.v0)],
+                uv,
                 layer: 0,
                 color,
                 light,
