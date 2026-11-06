@@ -3193,6 +3193,20 @@ pub struct BlockEntityRef {
     pub(crate) generation: u64,
 }
 
+/// Why a block-entity operation could not resolve its target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BlockEntityError {
+    /// The entity was removed, replaced, unloaded or belongs to another level epoch.
+    Stale,
+}
+
+impl NoBackend for BlockEntityError {
+    fn no_backend() -> Self {
+        Self::Stale
+    }
+}
+
 /// Non-paused authoritative server ticks since open (not game or frame time).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it

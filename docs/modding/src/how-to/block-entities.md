@@ -23,7 +23,7 @@ handle cannot reach a writable mod holder in the server level currently in place
 ## Update individual values
 
 After sizing, call `entity.set_data_slot(host, index, value)` for scalar updates.
-This method does not resize: an absent index returns false. Both methods use the
+This method does not resize: an absent index returns `Ok(false)`. Both methods use the
 same write target, journal and `setChanged` path. Nested transactions retain their
 ordinary behavior; an aborted outer transaction restores the vector that existed
 before its first write, including writes committed by children. The normal menu
@@ -57,4 +57,13 @@ its container; acquire a new handle for the replacement.
 A `BlockEntityRef` names one live entity, not every entity later placed at its position. Removal,
 replacement and chunk reload invalidate it; reacquire with `host.block_entity(level, position)`.
 In-place data edits and temporary tick storage preserve identity. Option reads return `None` for
-stale handles; item and menu-data Result methods return `Stale`, never writing to a replacement.
+stale handles; writes return their error's `Stale` variant, never writing to a replacement.
+`set_lock`, `set_name`, `merge_data`, `replace_data`, `set_changed` and `set_data_slot`
+return `Result<bool, BlockEntityError>`: handle `Err(BlockEntityError::Stale)` by dropping
+or reacquiring the handle. `Ok(false)` means unchanged data or an unsupported operation,
+not a stale identity. Existing item and data-vector methods retain their specialized errors.
+
+`player.open_menu(host, entity)` also returns `Result<bool, BlockEntityError>`:
+`Ok(true)` means opened, `Ok(false)` means a non-provider, cancelled open or
+unconnected/wrong-level player, and `Err(BlockEntityError::Stale)` means the entity
+no longer resolves. It never opens a replacement through an old handle.
