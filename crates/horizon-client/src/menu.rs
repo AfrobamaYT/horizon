@@ -3360,6 +3360,10 @@ impl Menu {
     /// The SWAP branch of `doClick`.
     fn swap(&mut self, env: &Env, target: usize, button: usize) {
         let inv_slot = button;
+        let target_slot = self.slots[target];
+        if target_slot.container == PLAYER && target_slot.index == inv_slot {
+            return;
+        }
         let source = self.containers[PLAYER][inv_slot].clone();
         let target_stack = self.slot(target).cloned();
         if source.is_none() && target_stack.is_none() {
@@ -3807,6 +3811,27 @@ pub(crate) mod tests {
             menu.give(env, &mut item);
             assert_eq!(menu.player_item(0).unwrap().count, 16);
             assert_eq!(item.count, 7);
+        });
+    }
+
+    #[test]
+    fn swap_self_does_not_duplicate_and_container_slot_is_distinct() {
+        with_menu(Kind::Crafting, |env, menu| {
+            menu.set_player_item(0, stack("minecraft:stone", 8));
+            menu.click(env, 37, 0, Input::Swap).unwrap();
+            assert_eq!(menu.player_item(0).unwrap().count, 8);
+            let total: u32 = (0..menu.slot_count())
+                .filter_map(|s| menu.slot(s))
+                .map(|s| s.count)
+                .sum();
+            assert_eq!(total, 8);
+        });
+        with_menu(Kind::Chest(3), |env, menu| {
+            menu.set_slot(env, 0, stack("minecraft:dirt", 2));
+            menu.set_player_item(0, stack("minecraft:stone", 8));
+            menu.click(env, 0, 0, Input::Swap).unwrap();
+            assert_eq!(menu.slot(0).unwrap().count, 8);
+            assert_eq!(menu.player_item(0).unwrap().count, 2);
         });
     }
 
