@@ -2,7 +2,12 @@
 //! and `BlockEntity.setChanged` make. A write inside `host.transaction` is journaled
 //! (`transactions.rs`) and tells the world at the root commit.
 use super::{Game, transactions::After};
-use horizon_client::{block_entity_nbt, containers::BlockEntity, save, world::World};
+use horizon_client::{
+    block_entity_nbt,
+    containers::{BlockEntity, ModBlockEntity},
+    save,
+    world::World,
+};
 use horizon_world::nbt::{Compound, Tag};
 use mod_api::__private::game::*;
 use mod_api::{BlockEntityDataError, BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef};
@@ -185,14 +190,16 @@ impl Game<'_> {
         slot: u32,
         value: i32,
     ) -> bool {
-        self.write_block_entity_data_slots(entity, |data| {
-            let Some(current) = data.get_mut(slot as usize) else {
-                return false;
-            };
-            if *current == value {
+        self.write_block_entity_data_slots(entity, |block_entity| {
+            let index = slot as usize;
+            if block_entity
+                .data
+                .get(index)
+                .is_none_or(|current| *current == value)
+            {
                 return false;
             }
-            *current = value;
+            block_entity.data[index] = value;
             true
         })
         .unwrap_or(false)
@@ -212,11 +219,11 @@ impl Game<'_> {
                 limit: limit as u64,
             });
         }
-        self.write_block_entity_data_slots(entity, |data| {
-            if *data == values {
+        self.write_block_entity_data_slots(entity, |block_entity| {
+            if block_entity.data == values {
                 return false;
             }
-            *data = values;
+            block_entity.data = values;
             true
         })
     }
@@ -224,7 +231,7 @@ impl Game<'_> {
     fn write_block_entity_data_slots(
         &mut self,
         entity: BlockEntityRef,
-        edit: impl FnOnce(&mut Vec<i32>) -> bool,
+        edit: impl FnOnce(&mut ModBlockEntity) -> bool,
     ) -> Result<bool, BlockEntityDataError> {
         let key = self
             .native_block_entity_write_key(entity)
@@ -233,7 +240,7 @@ impl Game<'_> {
         let Some(BlockEntity::Mod(block_entity)) = self.world.block_entities.get_mut(&key) else {
             return Err(BlockEntityDataError::Unavailable);
         };
-        if !edit(&mut block_entity.data) {
+        if !edit(block_entity) {
             return Ok(false);
         }
         self.after_commit(After::Changed(key));

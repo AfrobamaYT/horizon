@@ -149,8 +149,22 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
                 "scalar writes cannot declare slots"
             );
             assert_eq!(entity.set_data_slots(game, vec![0]), Ok(true));
-            assert_eq!(entity.set_data_slots(game, vec![0]), Ok(false));
+            let revision = |game: &super::Game<'_>| {
+                let BlockEntity::Mod(entity) = game.world.block_entities.get(&pos).unwrap() else {
+                    panic!("mod holder missing")
+                };
+                entity.revision()
+            };
+            let before_revision = revision(game);
+            game.world.modified.clear();
+            assert!(!entity.set_data_slot(game, 0, 0));
             assert!(!entity.set_data_slot(game, 1, 1));
+            assert_eq!(entity.set_data_slots(game, vec![0]), Ok(false));
+            assert_eq!(revision(game), before_revision);
+            assert!(
+                game.world.modified.is_empty(),
+                "no-op sends no Changed notice"
+            );
             assert_eq!(entity.data_slots(game), Some(vec![0]));
             let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
                 assert_eq!(entity.set_data_slots(host, vec![30, 40]), Ok(true));
@@ -166,6 +180,7 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
             assert_eq!(entity.set_data_slots(game, vec![0; 256]), Ok(true));
             assert!(entity.set_data_slot(game, 255, 7));
             let before = entity.data_slots(game).unwrap();
+            let before_revision = revision(game);
             game.world.modified.clear();
             assert_eq!(
                 entity.set_data_slots(game, vec![0; 257]),
@@ -175,6 +190,7 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
                 })
             );
             assert_eq!(entity.data_slots(game), Some(before));
+            assert_eq!(revision(game), before_revision);
             assert!(
                 game.world.modified.is_empty(),
                 "refusal sends no Changed notice"
