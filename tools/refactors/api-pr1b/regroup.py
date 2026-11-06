@@ -73,6 +73,8 @@ def area_sources(directory, table, assignments):
             old_name = block['trait'] or block['impl']
             tier = tier_of(path.stem, old_name)
             if tier is None:
+                if path.stem not in ('draw', 'services'):
+                    raise ValueError(f'unrecognised area trait: {path.stem}.{old_name}')
                 continue  # draw contexts and service traits are left intact
             rest.append(text[pos:block.start()])
             pos = block.end()
