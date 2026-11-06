@@ -412,7 +412,7 @@ impl wire::HostWithStore<State> for View {
         let cells = reads
             .iter()
             .map(|(n, _)| node_cost(n).saturating_add(journal_cost()))
-            .fold(0, usize::saturating_add);
+            .fold(reads.len().saturating_sub(1), usize::saturating_add);
         metered(
             host,
             cells,
@@ -433,7 +433,7 @@ impl wire::HostWithStore<State> for View {
         let cells = writes
             .iter()
             .map(|(n, _, v)| node_cost(n).saturating_add(wire_cost(v)))
-            .fold(0, usize::saturating_add);
+            .fold(writes.len().saturating_sub(1), usize::saturating_add);
         metered(host, cells, || View.set_many(writes), |_| 0)
     }
     fn root(
@@ -1055,8 +1055,8 @@ mod tests {
                     invoke!(HostWithStore::set_many, writes())?;
                     assert_eq!(
                         initial - store.get_fuel()?,
-                        single_set - 1,
-                        "one base charge per crossing"
+                        single_set,
+                        "every entry pays its base charge, even refusals"
                     );
                     store.set_fuel(initial)?;
                     for _ in 0..2 {
@@ -1065,10 +1065,12 @@ mod tests {
                     let single_get = initial - store.get_fuel()?;
                     store.set_fuel(initial)?;
                     invoke!(HostWithStore::get_many, vec![(borrow(&root), 1), (borrow(&root), 1)])?;
-                    assert_eq!(initial - store.get_fuel()?, single_get - 1);
+                    assert_eq!(initial - store.get_fuel()?, single_get);
                     let pending = journal_cost();
                     store.set_fuel(1)?;
                     assert!(invoke!(HostWithStore::set_many, writes()).is_err());
+                    let bad = || (Resource::new_borrow(0), 0, Vec::new());
+                    assert!(invoke!(HostWithStore::set_many, vec![bad(), bad()]).is_err());
                     assert_eq!(journal_cost(), pending);
                     Ok(())
                 }).unwrap();

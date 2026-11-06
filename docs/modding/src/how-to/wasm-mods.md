@@ -144,8 +144,8 @@ to write a tuple. Both helpers are in `mod_internals::view`.
 
 `set_many` writes join the listener's journal like single writes and are applied when the
 listener returns, not immediately (or before a declared function call). Reads see that journal,
-including the last successful write to a field in a batch. Batches pay one base fuel unit
-per crossing, plus the same per-entry path, journal scan and value costs as single calls.
+including the last successful write to a field in a batch. Batches pay the same per-entry
+base, path, journal scan and value fuel costs as single calls, including refused entries.
 All input costs are charged before any entry runs; read outputs are charged before returning.
 
 ### Internals budgets and trust boundary
