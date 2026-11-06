@@ -162,6 +162,7 @@ pub(crate) struct Site {
 }
 
 pub(crate) mod analysis;
+pub(crate) mod resolve;
 
 #[cfg(test)]
 mod tests;
