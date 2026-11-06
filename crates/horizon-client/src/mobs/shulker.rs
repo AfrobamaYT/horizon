@@ -857,12 +857,12 @@ mod space_tests;
 mod tests {
     use super::*;
     use crate::mobs::sensor_scan_tests::kind;
+    use horizon_core::nbt::Tag;
     use std::sync::Arc;
 
     use horizon_world::{
         attribute_map::ValueKind,
         attributes::{Modifier, Operation, entity::Catalog},
-        nbt::Tag,
     };
 
     fn catalog() -> Arc<Catalog> {
