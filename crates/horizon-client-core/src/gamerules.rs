@@ -335,7 +335,15 @@ pub struct GameRules {
 }
 impl Default for GameRules {
     fn default() -> Self {
-        let registry = rule_registry();
+        Self::with_registry(rule_registry(), &[])
+    }
+}
+impl GameRules {
+    pub fn with_features(features: &[String]) -> Self {
+        Self::with_registry(rule_registry(), features)
+    }
+    /// Build a rule set from a session's immutable definitions.
+    pub fn with_registry(registry: Arc<RuleRegistry>, features: &[String]) -> Self {
         Self {
             values: registry
                 .available_rules(true)
@@ -343,22 +351,17 @@ impl Default for GameRules {
                 .collect(),
             registry,
             unknown: nbt::Compound::new(),
-            minecart_improvements: false,
+            minecart_improvements: features.iter().any(|f| f == MINECART_IMPROVEMENTS),
         }
     }
-}
-impl GameRules {
-    pub fn with_features(features: &[String]) -> Self {
-        Self {
-            minecart_improvements: features.iter().any(|f| f == MINECART_IMPROVEMENTS),
-            ..Self::default()
-        }
+    /// The definitions shared by this rule set's session.
+    pub fn registry(&self) -> &Arc<RuleRegistry> {
+        &self.registry
     }
     /// GameRules.copy(enabledFeatures): keep available values, add defaults for
     /// newly enabled rules and discard rules absent from the target feature set.
     pub fn copy_with_features(&self, features: &[String]) -> Self {
-        let mut rules = Self::with_features(features);
-        rules.registry = self.registry.clone();
+        let mut rules = Self::with_registry(self.registry.clone(), features);
         rules.unknown = self.unknown.clone();
         for (rule, &value) in self.registry.available_rules(true).zip(&self.values) {
             rules.set(rule.name, value);
@@ -458,7 +461,15 @@ impl GameRules {
         Self::from_nbt_with_features(root, &[])
     }
     pub fn from_nbt_with_features(root: &Tag, features: &[String]) -> Self {
-        let mut rules = Self::with_features(features);
+        Self::from_nbt_with_registry(root, features, rule_registry())
+    }
+    /// Decode saved values against session definitions.
+    pub fn from_nbt_with_registry(
+        root: &Tag,
+        features: &[String],
+        registry: Arc<RuleRegistry>,
+    ) -> Self {
+        let mut rules = Self::with_registry(registry, features);
         let Some(Tag::Compound(data)) = root.get("data") else {
             return rules;
         };
@@ -487,15 +498,23 @@ impl GameRules {
         Self::load_with_features(world, &[])
     }
     pub fn load_with_features(world: &Path, features: &[String]) -> Self {
+        Self::load_with_registry(world, features, rule_registry())
+    }
+    /// Load saved values with the session registry.
+    pub fn load_with_registry(
+        world: &Path,
+        features: &[String],
+        registry: Arc<RuleRegistry>,
+    ) -> Self {
         let Ok(bytes) = fs::read(world.join("data/minecraft/game_rules.dat")) else {
-            return Self::with_features(features);
+            return Self::with_registry(registry, features);
         };
         let Ok(raw) = Compression::Gzip.decode(&bytes, 16 << 20) else {
-            return Self::with_features(features);
+            return Self::with_registry(registry, features);
         };
         match nbt::read_named(&raw, Limits::default()) {
-            Ok((root, _)) => Self::from_nbt_with_features(&root.tag, features),
-            Err(_) => Self::with_features(features),
+            Ok((root, _)) => Self::from_nbt_with_registry(&root.tag, features, registry),
+            Err(_) => Self::with_registry(registry, features),
         }
     }
     pub fn save(&self, world: &Path) -> crate::Result<()> {
@@ -550,6 +569,17 @@ mod tests {
             registry.available_rules(false).count() + 1,
             registry.available_rules(true).count()
         );
+    }
+
+    #[test]
+    fn session_registry_survives_load_and_feature_copy() {
+        let first = Arc::new(RuleRegistry::vanilla());
+        let second = Arc::new(RuleRegistry::vanilla());
+        let rules = GameRules::with_registry(first.clone(), &[]);
+        let loaded = GameRules::from_nbt_with_registry(&rules.to_nbt().tag, &[], first.clone());
+        let copied = loaded.copy_with_features(&[MINECART_IMPROVEMENTS.to_owned()]);
+        assert!(Arc::ptr_eq(copied.registry(), &first));
+        assert!(!Arc::ptr_eq(copied.registry(), &second));
     }
 
     #[test]

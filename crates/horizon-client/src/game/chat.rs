@@ -1589,8 +1589,11 @@ impl Game<'_> {
     /// `ServerClockManager.ServerClockInstance.loadFrom`: restore the existing
     /// Overworld state when a world opens; clear the other command-state cache.
     pub(super) fn load_world_state(&mut self) {
-        self.ui.rules =
-            GameRules::load_with_features(&self.world_root, &self.level.enabled_features);
+        self.ui.rules = GameRules::load_with_registry(
+            &self.world_root,
+            &self.level.enabled_features,
+            self.level.rule_registry.clone(),
+        );
         self.ui.clock = WorldClock::default();
         self.ui.command_clocks.clear();
         // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.
