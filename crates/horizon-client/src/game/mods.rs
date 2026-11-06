@@ -395,7 +395,7 @@ pub(super) fn content_root(
     register_mob_effects(&overlay.mods);
     mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
     let behavior: serde_json::Value =
-        horizon_world::json_file::read(&overlay.root.join("block-behaviours.json"))?;
+        horizon_world::json_file::read(&overlay.root.prepared().join("block-behaviours.json"))?;
     let fluids = behavior["fluids"]
         .as_array()
         .ok_or("missing fluid registry")?;
