@@ -10,6 +10,7 @@ fn empty_tag_selectors_follow_actual_tag_edits() {
     let settings = Settings::default();
     let loaded = load_resources(
         horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
