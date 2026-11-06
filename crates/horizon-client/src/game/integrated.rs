@@ -1266,6 +1266,14 @@ impl Game<'_> {
             .spawn(move || {
                 let run = || -> Result<()> {
                     let mut server = server_game(&res, pack, options, settings)?;
+                    // The oracle supplies an already-open synthetic world rather
+                    // than running the normal config and startup lifecycle.
+                    server
+                        .mod_phase
+                        .advance(mod_api::__private::ModPhase::Config)?;
+                    server
+                        .mod_phase
+                        .advance(mod_api::__private::ModPhase::World)?;
                     match fixture {
                         ComponentHarness::Dispenser(spec) => server.dispense_fixture(&spec),
                         ComponentHarness::Sculk(spec) => server.sculk_fixture(&spec),
