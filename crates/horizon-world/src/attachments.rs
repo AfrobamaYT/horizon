@@ -1,6 +1,8 @@
 //! Typed native-mod data attached to server-owned holders.
 #[doc(hidden)]
 pub mod index;
+#[doc(hidden)]
+pub mod observer;
 
 use std::{
     any::Any,

@@ -1412,7 +1412,11 @@ impl Game<'_> {
     /// shows; `screen_init_post` follows. With no world open nothing else can
     /// show, so a mod's `Cancel` or its own screen doesn't keep it shut (a
     /// mod's screen can't open over the title).
-    pub(super) fn show_title(&mut self, title: horizon_client::title::Title) {
+    pub(super) fn show_title(&mut self, mut title: horizon_client::title::Title) {
+        title.set_rule_registry(Arc::new(mod_api::__private::game_rule_registry()));
+        self.show_title_with_registry(title);
+    }
+    pub(super) fn show_title_with_registry(&mut self, title: horizon_client::title::Title) {
         if !self.screen_hooks_heard() {
             self.title = Some(title);
             return;
@@ -3620,6 +3624,23 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         self.fire_render_item_in_frame(entity_id, pos, stack, canceled);
+    }
+
+    /// Before one of the first-person view's block overlays (`ScreenEffectRenderer`) is drawn,
+    /// once a frame each is shown: `Block` with the view-blocking `state` at `pos` the camera is
+    /// inside, `Water` with the `state` at the eye's block `pos` while the eye is under water, and
+    /// `Fire` with fire's default `state` at the player's block `pos` while they burn. Never for a
+    /// spectator; `Fire` only in first person. Set `canceled` to leave that overlay out; the
+    /// frame, the other block overlays and the HUD's camera overlays are drawn as before.
+    /// Client-side.
+    pub(super) fn native_extract_block_screen_effect(
+        &self,
+        effect: mod_api::BlockScreenEffect,
+        state: BlockStateId,
+        pos: BlockPos,
+        canceled: &mut bool,
+    ) {
+        self.fire_extract_block_screen_effect(effect, state, pos, canceled);
     }
 
     /// The camera this frame is drawn from, `partial` ticks past the last tick, after vanilla
