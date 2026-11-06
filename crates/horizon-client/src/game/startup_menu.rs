@@ -90,9 +90,13 @@ impl StartupMenu {
     }
 
     pub(super) fn set_root(&mut self, root: PathBuf, settings: &Settings) {
-        horizon_client::ui::load_metadata(&root);
+        horizon_client::ui::load_metadata(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        );
         horizon_client::lang::set(horizon_client::lang::Language::load(
-            &[&root],
+            &[&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )],
             &settings.language,
         ));
         self.root = root;
@@ -521,7 +525,9 @@ impl Loading {
 
     fn open_menu_options(&mut self, page: Page) {
         self.menu.options.open_at(false, page);
-        self.menu.options.languages = horizon_client::lang::available(&[&self.menu.root]);
+        self.menu.options.languages = horizon_client::lang::available(&[
+            &horizon_assets::resource_source::ResourceSource::directory(self.menu.root.clone()),
+        ]);
         self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[]);
         self.menu.options.pack_selection = self.settings.resource_packs.clone();
         self.menu.options.pack_screen = None;
@@ -546,7 +552,9 @@ impl Loading {
                 }
                 Event::Language(code) => {
                     horizon_client::lang::set(horizon_client::lang::Language::load(
-                        &[&self.menu.root],
+                        &[&horizon_assets::resource_source::ResourceSource::directory(
+                            self.menu.root.clone(),
+                        )],
                         &code,
                     ));
                     self.save_menu_settings();
@@ -627,7 +635,9 @@ impl Loading {
                         );
                         let screen = horizon_client::win_screen::WinScreen::new(
                             false,
-                            &self.menu.root,
+                            &horizon_assets::resource_source::ResourceSource::directory(
+                                self.menu.root.clone(),
+                            ),
                             &name,
                             &gui.atlas.font,
                         );
@@ -1334,7 +1344,10 @@ mod tests {
 
     fn gui(root: &std::path::Path) -> UiResources {
         UiResources {
-            atlas: HudAtlas::fonts(root).unwrap(),
+            atlas: HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([
                 96, 110, 111, 255,
             ])),
