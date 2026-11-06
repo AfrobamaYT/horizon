@@ -491,7 +491,6 @@ impl Game<'_> {
         host.mob_players.retain(|_, conn| *conn != guest.conn);
         self.destroying.remove(&guest.entity_id);
         self.guest_combat.remove(&guest.conn);
-        self.guest_attachments.remove(&guest.conn);
     }
 
     /// Remove a fake without treating it as a disconnect or saving it.
