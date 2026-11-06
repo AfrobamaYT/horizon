@@ -4669,6 +4669,9 @@ pub use structure_type::{
     BiomeId, ChunkPos, FoundStructure, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn,
     PieceContext, StructureError, StructurePiece, StructureRandom, StructureType,
 };
+mod tooltip_appender;
+pub(crate) use tooltip_appender::TOOLTIP_DETAILS;
+pub use tooltip_appender::{TooltipAppendContext, TooltipAppender, TooltipPlacement};
 mod part_table;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use part_table::install_parts;

@@ -20,11 +20,4 @@ pub trait Hooks {
         creative: bool,
         lines: &mut Vec<(Text, u32)>,
     );
-    /// The lines of a data component a mod registered (`register_tooltip_appenders`): added after the
-    /// item's own and the components' lines, before the durability and advanced lines, for each registered
-    /// component `stack` carries that its `tooltip_display` shows. `component` is the registered id
-    /// (`mymod:charge`). Every mod is asked, so add lines only for the components you registered. Lines go
-    /// in `lines` as `item_tooltip` gives them. Client-side.
-    #[hook(side = "client", contract = "listen")]
-    fn tooltip_appender();
 }

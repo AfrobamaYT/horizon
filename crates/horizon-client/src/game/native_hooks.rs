@@ -3715,15 +3715,6 @@ impl Game<'_> {
     ) {
         Self::fire_layer_definitions(context, layers);
     }
-    /// The data components whose tooltip lines a mod adds (NeoForge's
-    /// `RegisterTooltipAppendersEvent`): push each id, which `native_tooltip_appender`
-    /// is asked for. Asked once at start, on the client.
-    pub(super) fn native_register_tooltip_appenders(
-        context: &mod_api::RegistrationContext,
-        appenders: &mut Vec<String>,
-    ) {
-        Self::fire_register_tooltip_appenders(context, appenders);
-    }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
         self.fire_mods(mods);
@@ -7388,16 +7379,6 @@ impl Game<'_> {
     /// stack hides or a crossbow's loaded projectile. Client-side.
     pub(super) fn native_item_tooltip(&self, call: mod_api::__private::ItemTooltipCall<'_>) {
         self.fire_item_tooltip(call);
-    }
-    /// The lines a mod adds for one registered data component `component` that
-    /// `stack` carries (`tooltip_appender`), in `lines` as `item_tooltip` gives them.
-    pub(super) fn native_tooltip_appender(
-        &self,
-        component: &str,
-        stack: &ItemStack,
-        lines: &mut Vec<(Text, u32)>,
-    ) {
-        self.fire_tooltip_appender(component, stack, lines);
     }
     /// `RenderTooltipEvent.GatherComponents`: the elements of `stack`'s
     /// tooltip (`ItemStack.getTooltipLines` as text lines, then the image

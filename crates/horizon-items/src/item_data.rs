@@ -1,7 +1,7 @@
 //! Item stack components beyond count and damage: enchantments, stored
 //! (book) enchantments, `repair_cost`, `custom_name`, `potion_contents` and
 //! `trim`, with their NBT form in vanilla's `components` compound.
-use crate::items::ItemStack;
+use crate::items::{ItemInfo, ItemStack};
 use horizon_world::nbt::{JavaString, Tag};
 
 /// One item attribute modifier, as `ItemAttributeModifiers.Entry` holds it.
@@ -186,6 +186,41 @@ impl StackData {
         }
         self.other.iter().find(|(k, _)| k == id).map(|(_, v)| v)
     }
+    /// Whether the stack's own data sets component `id`, read from the live fields: the same
+    /// components `components_tag` saves, plus the transient ones it leaves out
+    /// (`map_post_processing`), without encoding anything.
+    pub fn sets_component(&self, id: &str) -> bool {
+        match id {
+            "minecraft:enchantments" => !self.enchantments.is_empty(),
+            "minecraft:stored_enchantments" => !self.stored_enchantments.is_empty(),
+            "minecraft:repair_cost" => self.repair_cost > 0,
+            "minecraft:custom_name" => self.custom_name.is_some(),
+            "minecraft:potion_contents" => self.potion.is_some() || !self.potion_extra.is_empty(),
+            "minecraft:trim" => self.trim.is_some(),
+            "minecraft:map_id" => self.map_id.is_some(),
+            "minecraft:banner_patterns" => self.ominous_banner || !self.banner_patterns.is_empty(),
+            "minecraft:base_color" => self.base_color.is_some(),
+            "minecraft:writable_book_content" => !self.writable_pages.is_empty(),
+            "minecraft:written_book_content" => self.written.is_some(),
+            "minecraft:fireworks" => self.fireworks.is_some(),
+            "minecraft:firework_explosion" => self.firework_explosion.is_some(),
+            "minecraft:dyed_color" => self.dyed_color.is_some(),
+            "minecraft:pot_decorations" => self.pot_decorations.is_some(),
+            "minecraft:bundle_contents" => !self.bundle_contents.is_empty(),
+            "minecraft:suspicious_stew_effects" => !self.stew_effects.is_empty(),
+            "minecraft:charged_projectiles" => !self.charged.is_empty(),
+            "minecraft:ominous_bottle_amplifier" => self.ominous_amplifier.is_some(),
+            "minecraft:container" => !self.container.is_empty(),
+            "minecraft:map_post_processing" => self.map_post_processing.is_some(),
+            // An ominous banner's implied components (`components_tag`).
+            "minecraft:item_name" | "minecraft:rarity" | "minecraft:tooltip_display"
+                if self.ominous_banner =>
+            {
+                true
+            }
+            _ => self.other(id).is_some(),
+        }
+    }
     /// `SetNameFunction.run`: retain a loot name as its original component.
     pub fn set_loot_name(&mut self, id: &str, text: &serde_json::Value) {
         let tag = horizon_client_core::scoreboard::json_to_tag(text);
@@ -327,6 +362,24 @@ impl ItemStack {
     }
     pub fn data(&self) -> Option<&StackData> {
         self.extra.as_deref()
+    }
+    /// Whether the stack carries component `id`: its own data sets it, or its item has it by
+    /// default and the stack's changes don't remove it (a `!id` entry). Reads the live
+    /// components, so nothing is encoded.
+    pub fn carries_component(&self, info: Option<&ItemInfo>, id: &str) -> bool {
+        let data = self.data();
+        let own = if id == "minecraft:damage" {
+            self.damage > 0
+        } else {
+            data.is_some_and(|d| d.sets_component(id))
+        };
+        if own {
+            return true;
+        }
+        if data.is_some_and(|d| d.other.iter().any(|(k, _)| k.strip_prefix('!') == Some(id))) {
+            return false;
+        }
+        info.is_some_and(|info| info.components.iter().any(|c| c == id))
     }
     /// The patch the server sent for this stack, while the stack is still what
     /// it decoded to (its count aside); None once anything else changed.
@@ -1994,6 +2047,36 @@ mod tests {
             Some("axis")
         );
         assert_eq!(data.debug_stick_property("minecraft:dirt"), None);
+    }
+}
+
+#[cfg(test)]
+mod carried_component_tests {
+    use super::*;
+
+    /// `map_post_processing` is transient: a stack carries it while `components_tag` saves
+    /// nothing for it, so a presence check reads the live field.
+    #[test]
+    fn a_transient_component_is_carried_but_not_saved() {
+        let mut map = ItemStack::new("minecraft:filled_map", 1);
+        map.data_mut().map_post_processing = Some(1);
+        assert!(map.carries_component(None, "minecraft:map_post_processing"));
+        assert!(!map.carries_component(None, "minecraft:enchantments"));
+        assert!(components_tag(map.damage, map.data()).is_none());
+    }
+
+    /// A removed default is not carried; a stack's own value is.
+    #[test]
+    fn a_removed_component_is_not_carried() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack
+            .data_mut()
+            .set_other("!minecraft:lore", Some(Tag::String("removed".into())));
+        assert!(!stack.carries_component(None, "minecraft:lore"));
+        stack
+            .data_mut()
+            .set_other("minecraft:custom_data", Some(Tag::String("kept".into())));
+        assert!(stack.carries_component(None, "minecraft:custom_data"));
     }
 }
 

@@ -197,13 +197,14 @@ requires a farmer at work and `mob_griefing` enabled.
   and may add, change or remove any line. Horizon's creative search reads vanilla's exported tooltip text, so it
   does not fire with no player while search trees are built, as NeoForge does.
 
-- Data component tooltip lines: `Hooks::register_tooltip_appenders` (NeoForge's `RegisterTooltipAppendersEvent`, client-side,
-  asked once at start) pushes the component ids a mod adds lines for, as `ComponentId::new` reads them (`mymod:charge`).
-  For each registered component a stack carries that its `tooltip_display` doesn't hide, `Hooks::tooltip_appender` gets the
-  component's id, the stack and the tooltip's lines, after the item's own and the components' vanilla lines, before the
-  durability and advanced lines. Every mod is asked, so add lines only for the components you registered. A component
-  belongs to the item's data, so it is the right home for its presentation; a mod that reacts to every item uses
-  `item_tooltip`. The creative search doesn't read these lines, as it doesn't `item_tooltip`.
+- Data component tooltip lines: `Registrar::register_tooltip_appender(component, placement, appender)` (NeoForge's
+  `RegisterTooltipAppendersEvent`) gives one component's `TooltipAppender` a `TooltipPlacement`: `BeforeAll`, `AfterAll`,
+  or `Before(id)` and `After(id)` for a component detail Horizon lists (`minecraft:lore`, `minecraft:enchantments`...), where
+  the lines go among the other components' lines. The game asks only that appender, only for a stack that carries the
+  component (live, transient ones included) and whose `tooltip_display` shows it, and only while its mod is enabled. It gets
+  the stack and a `TooltipAppendContext` (the local player, `advanced`, `creative`, and `nested` for a crossbow's projectile),
+  and adds its lines after the item's own lines and before the durability and advanced lines. The creative search doesn't read
+  these lines, as it doesn't `item_tooltip`. A mod that reacts to every item keeps `item_tooltip`.
 
 - An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
   block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the

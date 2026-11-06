@@ -44,9 +44,9 @@ pub fn listened(hook: HookId) -> bool {
 
 pub use crate::generated::calls::*;
 pub use crate::part_table::{
-    HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, block_entity_types,
-    block_listens, game_rule_registry, has_part_hook, has_scoped_hook, install_parts,
-    mark_game_thread, parts, resolve_parts,
+    HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, TooltipAppenderPart,
+    block_entity_types, block_listens, game_rule_registry, has_part_hook, has_scoped_hook,
+    install_parts, mark_game_thread, parts, resolve_parts, tooltip_appenders,
 };
 pub use crate::phase::{
     LoadAccess, ModPhase, PhaseError, PhaseOwner, check_access, current_phase, install_packages,
