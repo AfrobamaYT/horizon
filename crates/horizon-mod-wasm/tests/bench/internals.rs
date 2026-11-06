@@ -207,22 +207,24 @@ fn internals_accesses_against_native() {
     }
     mod_points::__private::seal();
     let mut report = String::from(
-        "### Internals imports against native\n\nMedian of 9 batches after warm-up. Each call performs 256 accesses; the zero-access call is subtracted before dividing by 256. Set includes the journal apply at return. Handle read includes field then get. Native accesses are black-boxed per iteration.\n\n| Access | Wasm ns | Native ns |\n| --- | ---: | ---: |\n",
+        "### Internals imports against native\n\nMedian of 9 batches after warm-up. Reads and calls use 256 accesses per call, with the zero-access call subtracted before division. Set uses one write and one apply per call (5,000 calls per batch), not coalesced repeated writes. Handle read includes field then get. Native accesses are black-boxed per iteration.\n\n| Access | Wasm ns | Native ns |\n| --- | ---: | ---: |\n",
     );
     for mode in ["get", "handle", "set", "call"] {
+        let count = if mode == "set" { 1 } else { 256 };
+        let calls = if mode == "set" { 5_000 } else { 100 };
         assert_eq!(
-            wasm(mode, 256),
-            native(mode, 256),
+            wasm(mode, count),
+            native(mode, count),
             "{mode}: committed values and result"
         );
         let measure = |call: fn(&str, i64) -> (Game, String)| {
-            let base = super::timed(100, || {
+            let base = super::timed(calls, || {
                 std::hint::black_box(call(mode, 0));
             });
-            let work = super::timed(100, || {
-                std::hint::black_box(call(mode, 256));
+            let work = super::timed(calls, || {
+                std::hint::black_box(call(mode, count));
             });
-            (work.as_secs_f64() - base.as_secs_f64()).max(0.0) * 1e9 / 256.0
+            (work.as_secs_f64() - base.as_secs_f64()).max(0.0) * 1e9 / count as f64
         };
         report.push_str(&format!(
             "| {mode} | {:.2} | {:.2} |\n",
