@@ -745,6 +745,39 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn client_gui_state_has_generated_wasm_bindings() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let client =
+                    &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
+                for method in ["window-focused", "observed-screen-id"] {
+                    assert!(client.functions.contains_key(method));
+                }
+                for name in [
+                    "ClientHost::window_focused",
+                    "ClientHost::observed_screen_id",
+                ] {
+                    assert!(!wasm.unbound.iter().any(|unbound| unbound == name));
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn server_services_use_native_forwards_and_frame_resources() {
         std::thread::Builder::new()
             .stack_size(64 << 20)

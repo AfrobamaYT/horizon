@@ -908,6 +908,14 @@ pub enum ScreenOpening {
     ModScreen,
 }
 
+/// The stable identifier reported by screen hooks for an observed screen.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ScreenId {
+    /// The same identifier as [`NativeScreenView::id`], such as `inventory` or `paused`.
+    pub id: String,
+}
+
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
 /// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
 /// `native_screen_mouse_scrolled_pre`, and the key ones
