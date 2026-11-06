@@ -116,7 +116,7 @@ impl Game<'_> {
     }
     /// `LevelRenderer`: the camera entity is not drawn from its own eyes.
     pub(super) fn hides_as_camera(&self, id: u32) -> bool {
-        self.camera_type.first_person() && self.remote_camera_id() == Some(id)
+        self.camera_type.is_first_person() && self.remote_camera_id() == Some(id)
     }
 }
 

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Default)]
 pub(crate) struct Requests {
+    pub(crate) game_rules: Names,
     pub(crate) blocks: Names,
     pub(crate) fluids: Names,
     pub(crate) declared_fluids: HashMap<String, &'static str>,
@@ -19,6 +20,7 @@ pub(crate) struct Names {
     entries: Vec<Request>,
     pub(crate) slots: HashMap<String, u32>,
     utf16_slots: HashMap<Vec<u16>, u32>,
+    world_fluids: Vec<Option<FluidKey>>,
 }
 
 #[derive(Clone)]
@@ -202,8 +204,22 @@ pub fn resolve_fluids(ids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
                 .insert(path.encode_utf16().collect(), slot as u32);
         }
     }
+    names.world_fluids = horizon_world::fluid::FluidKind::ALL
+        .iter()
+        .map(|kind| names.slots.get(kind.name()).copied().map(FluidKey))
+        .collect();
     let _ = crate::part_table::resolved_fluids().set(names);
     Ok(())
+}
+
+/// Resolve an engine fluid kind through the load-owned mapping.
+pub fn world_fluid_key(kind: horizon_world::fluid::FluidKind) -> Option<FluidKey> {
+    crate::part_table::resolved_fluids()
+        .get()?
+        .world_fluids
+        .get(kind as usize)
+        .copied()
+        .flatten()
 }
 
 /// Find a fluid key at a data-loading boundary.
@@ -398,4 +414,16 @@ pub fn effect_key(index: usize) -> Option<EffectKey> {
         .keys
         .get(index)
         .copied()
+}
+
+impl crate::BoolGameRuleKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::part_table::with_registering_keys(|keys| {
+            keys.unwrap_or(crate::part_table::requested_keys())
+                .game_rules
+                .id(slot)
+                .ok_or("unknown bool rule slot")?;
+            Ok(Self(slot))
+        })
+    }
 }

@@ -84,9 +84,26 @@ pub enum Arg {
     Node(*mut ()),
 }
 
+/// A function's result and the final values of its mutable copy arguments, in parameter order.
+#[derive(Debug, PartialEq)]
+pub struct CallReply<T = Reply> {
+    pub result: T,
+    pub updates: Vec<Value>,
+}
+
+impl<T> CallReply<T> {
+    /// A call without mutable copy arguments.
+    pub fn new(result: T) -> Self {
+        Self {
+            result,
+            updates: Vec::new(),
+        }
+    }
+}
+
 /// A declared function's call: its receiver's node (none for a free function) and its arguments.
 /// A reference it returns comes back as a node, valid until the next call.
-pub type ThunkFn = unsafe fn(Option<*mut ()>, Vec<Arg>) -> Result<Reply, Refusal>;
+pub type ThunkFn = unsafe fn(Option<*mut ()>, Vec<Arg>) -> Result<CallReply, Refusal>;
 
 /// A declared function.
 pub struct Thunk {
@@ -236,9 +253,17 @@ pub use wit_bindgen::rt;
 /// A plain value as pre-order cells. Compound counts count children, not all descendants.
 #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
 pub fn flatten(value: Value) -> Vec<Cell> {
-    let mut pending = vec![value];
     let mut cells = Vec::new();
-    while let Some(value) = pending.pop() {
+    flatten_into(value, &mut cells, &mut Vec::new());
+    cells
+}
+
+/// Appends pre-order cells using caller-owned output and traversal buffers.
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+pub fn flatten_into(value: Value, cells: &mut Vec<Cell>, pending: &mut Vec<Value>) {
+    pending.clear();
+    let mut first = Some(value);
+    while let Some(value) = first.take().or_else(|| pending.pop()) {
         cells.push(match value {
             Value::None => Cell::None,
             Value::B(v) => Cell::B(v),
@@ -264,13 +289,17 @@ pub fn flatten(value: Value) -> Vec<Cell> {
             }
         });
     }
-    cells
 }
 
 /// One value from pre-order cells. Refuses missing children, trailing cells and excessive nesting.
 #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
-pub fn unflatten(cells: Vec<Cell>) -> Result<Value, Refusal> {
-    fn next(cells: &mut std::vec::IntoIter<Cell>, depth: usize) -> Result<Value, Refusal> {
+pub fn unflatten(
+    cells: impl IntoIterator<Item = Cell, IntoIter: ExactSizeIterator>,
+) -> Result<Value, Refusal> {
+    fn next(
+        cells: &mut impl ExactSizeIterator<Item = Cell>,
+        depth: usize,
+    ) -> Result<Value, Refusal> {
         if depth > 128 {
             return Err(changed("a value nested too deeply"));
         }

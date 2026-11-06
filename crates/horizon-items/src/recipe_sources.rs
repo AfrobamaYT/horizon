@@ -28,13 +28,11 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
     // `mod_loaded` asks which mods are loaded, not which namespaces
     // they own: a mod that also owns a namespace doesn't make that
     // namespace another mod.
-    let mods: Vec<String> = {
-        let mut mods = crate::content_namespaces::mod_ids(root);
-        if !mods.iter().any(|m| m == "minecraft") {
-            mods.push("minecraft".to_owned());
-        }
-        mods
-    };
+    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let mods: Vec<&str> = inventory
+        .server_ids()
+        .chain(std::iter::once("minecraft"))
+        .collect();
     for file in &horizon_world::json_folder::read(&root.join("data/minecraft/recipe"))?.files {
         sources.push((file.name.clone(), file.bytes()?.to_vec()));
     }
@@ -78,8 +76,7 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
         };
         // A file whose load conditions don't hold is silently absent,
         // as NeoForge's ICondition leaves it out of the manager.
-        if !horizon_world::conditions::conditions_hold(&v, &|id: &str| mods.iter().any(|m| m == id))
-        {
+        if !horizon_world::conditions::conditions_hold(&v, &|id: &str| mods.contains(&id)) {
             continue;
         }
         // The data's recipe filters, over the final set.

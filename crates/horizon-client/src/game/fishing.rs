@@ -1260,7 +1260,7 @@ impl Game<'_> {
         ));
         let feet = self.previous_position.lerp(p.position, alpha);
         let eye = glam::DVec3::new(feet.x, feet.y + f64::from(p.dimensions.eye_height), feet.z);
-        if self.camera_type.first_person() {
+        if self.camera_type.is_first_person() {
             let fov = self.settings.fov as i32 as f32;
             // Camera.getNearPlane(fov).getPointOnPlane(invert * 0.525, -0.1).
             let aspect = f64::from(size[0]) / f64::from(size[1].max(1));
@@ -1989,6 +1989,7 @@ mod tests {
     #[test]
     fn reeling_an_item_requests_an_immediate_motion_update() {
         let mut item = ItemEntity {
+            attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),

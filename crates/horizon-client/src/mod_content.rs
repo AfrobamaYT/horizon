@@ -2461,9 +2461,7 @@ fn place_in_biomes(
     for (id, text) in changed {
         if let Some((ns, path)) = id.split_once(':') {
             let file = format!("data/{ns}/worldgen/biome/{path}.json");
-            if out_path(overlay, &file).exists() {
-                overlay.write(&file, text.as_bytes())?;
-            }
+            overlay.write(&file, text.as_bytes())?;
         }
     }
     overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
@@ -2475,6 +2473,7 @@ mod biomes;
 /// The overlay being written: `out` mirrors `base` through links, and a
 /// directory becomes real only when something inside it is written.
 struct Overlay<'a> {
+    written: std::sync::Mutex<std::collections::BTreeSet<String>>,
     base: &'a Path,
     out: &'a Path,
 }
@@ -2484,7 +2483,11 @@ impl Overlay<'_> {
             fs::remove_dir_all(out)?;
         }
         fs::create_dir_all(out)?;
-        let overlay = Overlay { base, out };
+        let overlay = Overlay {
+            base,
+            out,
+            written: Default::default(),
+        };
         overlay.link_children(Path::new(""))?;
         Ok(overlay)
     }
@@ -2525,6 +2528,7 @@ impl Overlay<'_> {
         Ok(())
     }
     fn write(&self, rel: &str, bytes: &[u8]) -> Result<()> {
+        let name = rel;
         let rel = Path::new(rel);
         if let Some(parent) = rel.parent() {
             self.dir(parent)?;
@@ -2534,6 +2538,10 @@ impl Overlay<'_> {
             fs::remove_file(&path)?;
         }
         fs::write(path, bytes)?;
+        self.written
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name.to_owned());
         Ok(())
     }
 }
@@ -2806,9 +2814,10 @@ struct ModLayer<'a> {
 
 impl<'a> ModLayer<'a> {
     fn new(id: String, source: crate::packs::Source, jar: Option<&'a JarRef>) -> Result<Self> {
-        let data = crate::datapack::DataPack::mod_layer(id.clone(), &source)?;
+        let source = source.open()?;
+        let data = crate::datapack::DataPack::from_source(id.clone(), source.clone());
         Ok(Self {
-            assets: crate::packs::Pack::mod_layer(id, source),
+            assets: crate::packs::Pack::mod_layer(id, crate::packs::Source::Opened(source)),
             data,
             jar,
         })
@@ -2854,9 +2863,8 @@ fn load_layers<'a>(jar_store: &Path, mods: &'a [ContentMod]) -> Result<Vec<ModLa
     Ok(loaded)
 }
 
-/// Builds the content root for `mods` over `base` in `out`: the tables a
-/// reload rewrites, then every mod's jars and own assets layered over them
-/// in order, the later mod over the earlier, a mod's files over its jars.
+/// Builds generated content tables for `mods` over `base` in `out`.
+/// Asset layers remain in their sources and are resolved by `resolved_resources`.
 /// Each jar's file is `<sha512>.jar` in `jar_store`, where the launcher
 /// puts it. A missing file refuses the load before decoded output is written.
 /// Returns warnings for shared tag replacements and duplicate asset paths.
@@ -2865,6 +2873,7 @@ pub fn build(
     jar_store: &Path,
     mods: &[ContentMod],
     out: &Path,
+    inventory: &horizon_mods::enabled::EnabledMods,
 ) -> Result<Vec<String>> {
     // Two mods owning one namespace would mix their files.
     for (i, a) in mods.iter().enumerate() {
@@ -2882,8 +2891,8 @@ pub fn build(
     let base = &std::path::absolute(base)?;
     let loaded = load_layers(jar_store, mods)?;
     let plan = Plan::new(base, mods)?;
-    // The tables are written beside `out`: the asset layers mirror them as
-    // their base, and `out` is the root over them that the callers read.
+    // Publish the completed tables as one generation. Passive asset layers
+    // retain their original sources instead of being written into this tree.
     let tables_root = out.with_file_name(format!(
         "{}-tables",
         out.file_name().unwrap_or_default().to_string_lossy()
@@ -2922,14 +2931,20 @@ pub fn build(
                 {
                     namespaces.insert(namespace.to_owned());
                 }
+                let is_tag = file.contains("/tags/") && file.ends_with(".json");
+                if !is_tag
+                    && (file.starts_with(&declarations)
+                        || (!biomes::is_modifier(&file) && worldgen_entry(&file).is_none()))
+                {
+                    continue;
+                }
                 let bytes = layer.data.read(&file).ok_or_else(|| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         format!("{}: {file}", layer.assets.id),
                     )
                 })?;
-                let is_tag = file.starts_with("data/") && file.contains("/tags/");
-                if is_tag && file.ends_with(".json") {
+                if is_tag {
                     let doc: J =
                         serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
                     let Some(J::Arr(values)) = doc.get("values") else {
@@ -2941,7 +2956,6 @@ pub fn build(
                     let merge = tags.entry(file.clone()).or_default();
                     warnings.extend(merge.add(&m.id, &file, replace, shared, values));
                 } else if !file.starts_with(&declarations) {
-                    overlay.write(&file, &bytes)?;
                     if biomes::is_modifier(&file) {
                         let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
                         modifiers.extend(biomes::Modifier::read(
@@ -2957,14 +2971,6 @@ pub fn build(
                             Some(addition) => additions.entry(bundle).or_default().push(addition),
                             None => entries.push((id, text)),
                         }
-                    } else if let Some(template) = file
-                        .strip_prefix("data/")
-                        .and_then(|r| r.split_once("/structure/"))
-                        .filter(|(_, path)| path.ends_with(".nbt"))
-                    {
-                        // The worldgen loader's templates: worldgen/structure/<ns>/<path>.nbt.
-                        let (ns, path) = template;
-                        overlay.write(&format!("worldgen/structure/{ns}/{path}"), &bytes)?;
                     }
                 }
             }
@@ -3116,10 +3122,9 @@ pub fn build(
     let requirements =
         collect_jar_requirements(mods.iter().map(|m| (m.id.as_str(), m.jars.as_slice())))?;
     overlay.write(JAR_INPUTS, &serde_json::to_vec(&requirements)?)?;
-    let mod_ids: Vec<&str> = mods.iter().map(|m| m.id.as_str()).collect();
     overlay.write(
-        horizon_items::content_namespaces::MOD_IDS_MARKER,
-        &serde_json::to_vec(&mod_ids)?,
+        horizon_mods::enabled::MARKER,
+        &serde_json::to_vec(inventory)?,
     )?;
     let remainders: BTreeMap<&str, &str> = plan
         .items
@@ -3169,22 +3174,110 @@ pub fn build(
     {
         overlay.write(crate::content_identity::MARKER, b"1")?;
     }
-    // Every mod's jars and own assets as pack layers over the tables, in
-    // mod order: a later mod over an earlier one, a mod's files over its
-    // jars, and the stacked files (atlases, lang, sounds, blockstates)
-    // merged as packs merge them.
-    let layers: Vec<_> = loaded
+    overlay.write(WARNINGS, warnings.join("\n").as_bytes())?;
+    let generated = serde_json::to_vec(
+        &*overlay
+            .written
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )?;
+    overlay.write(GENERATED_FILES, &generated)?;
+    let _ = fs::remove_dir_all(out);
+    fs::rename(&tables_root, out)?;
+    Ok(warnings)
+}
+
+const GENERATED_FILES: &str = "horizon-generated-content-files.json";
+
+/// Open the passive layers for one load. Assets and data retain the same jar
+/// readers; only files the table builder generated override the raw data.
+pub fn resolved_resources(
+    base: &Path,
+    prepared: PathBuf,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    cache: PathBuf,
+) -> Result<horizon_assets::resource_source::ResourceRoot> {
+    use horizon_assets::resource_source::{Resource, ResourceRoot, ResourceSource};
+    let base_source = ResourceSource::directory(base.to_path_buf());
+    let loaded = load_layers(jar_store, mods)?;
+    let mut data = base_source
+        .list("data/")
+        .into_iter()
+        .map(|name| {
+            let resource = Resource::file(base_source.clone(), name.clone());
+            (name, resource)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut changes = BTreeMap::new();
+    for group in &loaded {
+        let declarations = format!("data/{}/horizon/", group.source.id);
+        for layer in &group.layers {
+            for name in layer.data.list("data/") {
+                if !name.starts_with(&declarations) {
+                    changes.insert(
+                        name.clone(),
+                        Resource::file(layer.data.source().clone(), name),
+                    );
+                }
+            }
+        }
+    }
+    let mut assets_base = base_source.clone();
+    if prepared != base {
+        let generated: Vec<String> =
+            serde_json::from_slice(&fs::read(prepared.join(GENERATED_FILES))?)?;
+        let generated_source = ResourceSource::directory(prepared.clone());
+        let mut generated_assets = BTreeMap::new();
+        for name in generated {
+            if !horizon_assets::resource_source::stays_inside(&name) {
+                return Err(format!("invalid generated resource name: {name}").into());
+            }
+            let resource = Resource::file(generated_source.clone(), name.clone());
+            if name.starts_with("data/") {
+                changes.insert(name, resource);
+            } else if name.starts_with("assets/") {
+                generated_assets.insert(name, resource);
+            }
+        }
+        if !generated_assets.is_empty() {
+            let mut files = base_source
+                .list("")
+                .into_iter()
+                .map(|name| {
+                    let resource = Resource::file(base_source.clone(), name.clone());
+                    (name, resource)
+                })
+                .collect::<BTreeMap<_, _>>();
+            files.extend(generated_assets);
+            assets_base = ResourceSource::indexed(files);
+        }
+    }
+    let layers = loaded
         .into_iter()
         .flat_map(|group| group.layers.into_iter().map(|layer| layer.assets))
-        .collect();
-    overlay.write(WARNINGS, warnings.join("\n").as_bytes())?;
-    let _ = fs::remove_dir_all(out);
-    if layers.is_empty() {
-        fs::rename(&tables_root, out)?;
-    } else {
-        crate::packs::build_overlay(&tables_root, &layers, out)?;
+        .collect::<Vec<_>>();
+    // Client resource readers also consume passive registry data (for
+    // example trim materials and dimension effects). Selected asset packs
+    // remain above the asset names without changing the server data source.
+    if !changes.is_empty() {
+        let mut files = assets_base
+            .list("")
+            .into_iter()
+            .map(|name| {
+                let resource = Resource::file(assets_base.clone(), name.clone());
+                (name, resource)
+            })
+            .collect::<BTreeMap<_, _>>();
+        files.extend(changes.clone());
+        assets_base = ResourceSource::indexed(files);
     }
-    Ok(warnings)
+    let assets = crate::packs::resources(assets_base, &layers)?;
+    data.extend(changes.clone());
+    Ok(ResourceRoot::new(prepared, cache, assets).with_data(
+        ResourceSource::indexed(data),
+        ResourceSource::indexed(changes),
+    ))
 }
 
 /// The root to load: `base` itself with no content, else the mods' overlay
@@ -3201,20 +3294,27 @@ pub fn resource_root(
     jar_store: &Path,
     mods: &[ContentMod],
     cache: &Path,
+    inventory: &horizon_mods::enabled::EnabledMods,
 ) -> Result<PathBuf> {
-    if mods.iter().all(|m| {
-        m.jars.is_empty()
-            && m.content.is_empty()
-            && m.content.blocks.is_empty()
-            && m.content.items.is_empty()
-            && m.content.block_entity_types.is_empty()
-    }) {
+    let has_content = mods.iter().any(|m| {
+        !m.jars.is_empty()
+            || !m.content.is_empty()
+            || !m.content.blocks.is_empty()
+            || !m.content.items.is_empty()
+            || !m.content.block_entity_types.is_empty()
+    });
+    if inventory.is_empty() && !has_content {
         return Ok(base.to_owned());
     }
-    let stamp = stamp(base, jar_store, mods)?;
+    let stamp = stamp(base, jar_store, mods, inventory)?;
     let roots = cache.join("mod-content");
     let out = roots.join(&stamp[..ROOT_NAME]);
-    if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes()) {
+    if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes())
+        && fs::read(out.join(horizon_mods::enabled::MARKER)).is_ok_and(|bytes| {
+            serde_json::from_slice::<horizon_mods::enabled::EnabledMods>(&bytes)
+                .is_ok_and(|loaded| &loaded == inventory)
+        })
+    {
         // A reused root warns as the build did.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
         warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
@@ -3222,8 +3322,20 @@ pub fn resource_root(
         let _ = fs::write(out.join(STAMP), &stamp);
         return Ok(out);
     }
-    for warning in build(base, jar_store, mods, &out)? {
-        log::warn!("Horizon: {warning}");
+    if has_content {
+        for warning in build(base, jar_store, mods, &out, inventory)? {
+            log::warn!("Horizon: {warning}");
+        }
+    } else {
+        // Code-only packages still own an inventory generation, but need no
+        // registry-table rewrite or content scan. Existing tables stay linked.
+        let base = std::path::absolute(base)?;
+        let overlay = Overlay::new(&base, &out)?;
+        overlay.write(
+            horizon_mods::enabled::MARKER,
+            &serde_json::to_vec(inventory)?,
+        )?;
+        overlay.write(GENERATED_FILES, b"[]")?;
     }
     fs::write(out.join(STAMP), stamp)?;
     prune_roots(&roots, &out, KEEP_ROOTS);
@@ -3352,7 +3464,12 @@ pub fn check_jars(root: &Path, jar_store: &Path) -> std::result::Result<(), JarI
 /// What a content root is built from: this build of the game, the base's
 /// manifest and the tables [`build`] rewrites, and every file of every mod
 /// in order. Files count by size and modification time, as build tools do.
-fn stamp(base: &Path, jar_store: &Path, mods: &[ContentMod]) -> Result<String> {
+fn stamp(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    inventory: &horizon_mods::enabled::EnabledMods,
+) -> Result<String> {
     use sha2::{Digest, Sha256};
     let meta = |path: &Path| -> Result<String> {
         let m = fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -3367,7 +3484,10 @@ fn stamp(base: &Path, jar_store: &Path, mods: &[ContentMod]) -> Result<String> {
             modified.as_nanos()
         ))
     };
-    let mut parts = vec!["horizon mod content 1".to_owned()];
+    let mut parts = vec![
+        "horizon mod content 6".to_owned(),
+        serde_json::to_string(inventory)?,
+    ];
     parts.push(meta(&std::env::current_exe()?)?);
     let base = std::path::absolute(base)?;
     parts.push(

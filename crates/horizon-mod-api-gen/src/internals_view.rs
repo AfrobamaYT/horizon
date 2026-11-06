@@ -41,6 +41,9 @@ fn short_alias_available(name: &str) -> bool {
         "Arg",
         "Value",
         "CopyValue",
+        "Field",
+        "get_many",
+        "set_many",
         "ViewType",
         "AsNode",
         "Refusal",
@@ -81,24 +84,27 @@ fn accessor_name(field: &str) -> String {
 /// Names depend on the complete catalog layout, never on a mod's selected fields.
 pub(crate) fn method_name(rule: &Rule, owner: &str, func: &str) -> String {
     let named = rule.named(owner).unwrap();
-    let enum_case = func == "case" && matches!(named.item, syn::Item::Enum(_));
-    let field_accessor = rule.fields(owner).iter().any(|field| {
-        let shape = rule.shape(&named.module, Some(owner), field.ty);
-        let crossing = rule.crossing_of(&shape);
-        if crossing == Crossing::Opaque {
-            return false;
-        }
-        let get = accessor_name(&field_name(field));
-        let get = get.trim_start_matches("r#");
-        let getter = func.trim_start_matches("r#") == get;
-        let setter = matches!(crossing, Crossing::Copy(_)) && func == format!("set_{get}");
-        getter || setter
-    });
-    if enum_case || field_accessor {
-        format!("call_{}", func.trim_start_matches("r#"))
-    } else {
-        func.into()
+    let reserved = |func: &str| {
+        (func == "case" && matches!(named.item, syn::Item::Enum(_)))
+            || rule.fields(owner).iter().any(|field| {
+                let crossing = rule.crossing_of(&rule.shape(&named.module, Some(owner), field.ty));
+                if crossing == Crossing::Opaque {
+                    return false;
+                }
+                let field = field_name(field);
+                let get = accessor_name(&field);
+                let get = get.trim_start_matches("r#");
+                func.trim_start_matches("r#") == get
+                    || (matches!(crossing, Crossing::Copy(_))
+                        && (func == format!("set_{get}")
+                            || func == descriptor_name(&field, Some(owner), rule)))
+            })
+    };
+    let mut name = func.to_owned();
+    while reserved(&name) {
+        name = format!("call_{}", name.trim_start_matches("r#"));
     }
+    name
 }
 
 /// Owned guest spelling: native borrows and shared pointers are copies, not guest borrows.
@@ -227,17 +233,6 @@ pub struct Injection {
     pub target: String,
     pub at_return: bool,
     pub listener: String,
-}
-
-/// A callable the host supports but the guest cannot yet express as a typed parameter.
-/// Coverage reports these paths explicitly instead of silently omitting a binding.
-pub fn binding_skip(internal: &Internal, rule: &Rule) -> Option<&'static str> {
-    let sig = signature(&internal.signature)?;
-    let (module, this) = function_scope(rule, internal)?;
-    sig.inputs.iter().any(|a| {
-        let syn::FnArg::Typed(a) = a else { return false; };
-        matches!(rule.shape(&module, this.as_deref(), &a.ty), Shape::Ref { mutable: true, to } if matches!(rule.crossing_of(&to), Crossing::Copy(_)))
-    }).then_some("mutable copy arguments need copy-field node stepping on the host")
 }
 
 /// The generated view and raw-listener export macro. Nothing per game type is handwritten.
@@ -452,7 +447,7 @@ pub fn generate(
                 }
                 copy_shapes(&shape, &rule, &mut copies);
                 let field = field_name(&f);
-                methods.push(accessor(&field, index as u32, &shape, &rule));
+                methods.push(accessor(&field, index as u32, &shape, &rule, Some(path)));
             }
             if matches!(named.item, syn::Item::Enum(_)) {
                 methods.push(quote!(
@@ -484,11 +479,11 @@ pub fn generate(
             let (_, func) = path.rsplit_once("::").unwrap();
             let (module, this) = function_scope(&rule, i).expect("validated function scope");
             let (module, this) = (module.as_str(), this.as_deref());
-            if let Some(reason) = binding_skip(i, &rule) {
-                return Err(format!("{}: Not on wasm: {reason}", i.path));
-            }
             let mut args = Vec::new();
             let mut params = Vec::new();
+            let mut updates = Vec::new();
+            let mut decode_updates = Vec::new();
+            let mut write_back = Vec::new();
             for (n, arg) in sig
                 .inputs
                 .iter()
@@ -500,9 +495,18 @@ pub fn generate(
             {
                 let a = format_ident!("a{n}");
                 let shape = rule.shape(module, this, &arg.ty);
-                if matches!(&shape, Shape::Ref { mutable: true, .. })
-                    || rule.crossing_of(&shape) == Crossing::Handle
+                if let Shape::Ref { mutable: true, to } = &shape
+                    && matches!(rule.crossing_of(to), Crossing::Copy(_))
                 {
+                    copy_shapes(to, &rule, &mut copies);
+                    let ty = spell(to, &rule);
+                    let update = format_ident!("update_{n}");
+                    params.push(quote!(#a: &mut #ty));
+                    args.push(quote!(Arg::Value(flatten(#a.to_value()))));
+                    updates.push(update.clone());
+                    decode_updates.push(quote!(let #update = <#ty as CopyValue>::from_value(unflatten(#update).map_err(wire_refusal)?)?;));
+                    write_back.push(quote!(*#a = #update;));
+                } else if rule.crossing_of(&shape) == Crossing::Handle {
                     let t = if let Shape::Ref { to, .. } = &shape {
                         to.as_ref()
                     } else {
@@ -594,8 +598,13 @@ pub fn generate(
             };
             let self_param = sig.receiver().map(|_| quote!(&self,));
             let f = quote!(pub fn #func(#self_param #(#params),*) -> Result<#result, Refusal> {
-                let answer = call(#index, #receiver, &[#(#args),*])?;
-                #decode
+                let reply = call(#index, #receiver, &[#(#args),*])?;
+                let answer = reply.result;
+                let result: #result = (|| { #decode })()?;
+                let [#(#updates),*] = reply.updates.try_into().map_err(|_| changed("mutable copy outputs"))?;
+                #(#decode_updates)*
+                #(#write_back)*
+                Ok(result)
             });
             if let Some(this) = this {
                 let ty = node_name(this, &rule);
@@ -685,7 +694,7 @@ pub fn generate(
                 continue;
             }
             copy_shapes(s, &rule, &mut copies);
-            methods.push(accessor(field, n as u32, s, &rule));
+            methods.push(accessor(field, n as u32, s, &rule, None));
         }
         items.push(handle(&ty, methods));
         let alias = format_ident!(
@@ -728,7 +737,7 @@ pub fn generate(
                 .iter()
                 .enumerate()
                 .filter(|(_, p)| rule.crossing_of(p) != Crossing::Opaque)
-                .map(|(i, p)| accessor(&i.to_string(), i as u32, p, &rule))
+                .map(|(i, p)| accessor(&i.to_string(), i as u32, p, &rule, None))
                 .collect();
             items.push(handle(&ty, methods));
         }
@@ -746,7 +755,7 @@ pub fn generate(
         #[allow(non_camel_case_types, non_snake_case, dead_code, unused_imports, unused_variables, unused_parens, unreachable_patterns, clippy::all)]
         pub mod view {
             use crate::runtime::*;
-            pub use crate::runtime::{CopyValue, Refusal, Seq, Map, Opt};
+            pub use crate::runtime::{CopyValue, Refusal, Seq, Map, Opt, Field, get_many, set_many};
             use mod_points::internals as I;
             use I::Value as V;
             /// Manifest internals followed by every walked named layout and its hash.
@@ -785,12 +794,36 @@ fn handle(ty: &syn::Ident, methods: Vec<TokenStream>) -> TokenStream {
         }
     }
 }
-fn accessor(field: &str, index: u32, shape: &Shape, rule: &Rule) -> TokenStream {
+fn descriptor_name(field: &str, owner: Option<&str>, rule: &Rule) -> String {
+    let mut name = format!("{}_field", accessor_name(field).trim_start_matches("r#"));
+    if let Some(owner) = owner {
+        let fields = rule.fields(owner);
+        while fields.iter().any(|f| {
+            let get = accessor_name(&field_name(f));
+            name == get.trim_start_matches("r#")
+                || name == format!("set_{}", get.trim_start_matches("r#"))
+        }) {
+            name = format!("call_{name}");
+        }
+    }
+    name
+}
+
+fn accessor(
+    field: &str,
+    index: u32,
+    shape: &Shape,
+    rule: &Rule,
+    owner: Option<&str>,
+) -> TokenStream {
     let get = format_ident!("{}", accessor_name(field));
     let set = format_ident!("set_{}", get.to_string().trim_start_matches("r#"));
     let ty = spell(shape, rule);
     if matches!(rule.crossing_of(shape), Crossing::Copy(_)) {
+        let descriptor = format_ident!("{}", descriptor_name(field, owner, rule));
         quote! {
+            /// Select this field for a typed batched read or write.
+            pub fn #descriptor(&self) -> Field<'_, #ty> { Field::new(&self.0, #index) }
             /// Read this declared field, including this listener's journaled writes.
             pub fn #get(&self) -> Result<#ty, Refusal> { <#ty as CopyValue>::from_value(unflatten(self.0.get(#index)?).map_err(wire_refusal)?) }
             /// Journal a write, applied on listener return or before a declared call.
@@ -876,6 +909,11 @@ mod tests {
                 "method",
                 "fn set_mode(&mut self, mode: u8) -> Result<u32>",
             ),
+            entry(
+                "horizon_client::mutate",
+                "fn",
+                "fn mutate(n: &mut u32, pair: &mut Pair) -> bool",
+            ),
         ];
         let declared = [
             declaration(&entries[2]),
@@ -886,6 +924,7 @@ mod tests {
             declaration(&entries[8]),
             declaration(&entries[9]),
             declaration(&entries[10]),
+            declaration(&entries[11]),
         ];
         let (_, counts) = crate::internals_table::table(&entries, &[entries[10].path.clone()]);
         assert_eq!(counts.renamed_methods[&entries[10].path], "call_set_mode");
@@ -912,16 +951,25 @@ mod tests {
                 pub trait AsNode {{ fn node(&self) -> &Node; }}
                 pub enum Reached {{ Node(Node), Value(Vec<Value>) }}
                 pub enum Arg<'a> {{ Node(&'a Node), Value(Vec<Value>) }}
-                pub fn call(index: u32, _: Option<&Node>, _: &[Arg<'_>]) -> Result<Reached, Refusal> {{
-                    if index == 5 {{ return Ok(Reached::Node(Node)); }}
-                    Ok(Reached::Value(vec![match index {{
+                pub struct CallReply {{ pub result: Reached, pub updates: Vec<Vec<Value>> }}
+                pub fn call(index: u32, _: Option<&Node>, args: &[Arg<'_>]) -> Result<CallReply, Refusal> {{
+                    if index == 8 {{
+                        assert!(matches!(&args[0], Arg::Value(v) if v == &vec![Value::U(7)]));
+                        assert!(matches!(&args[1], Arg::Value(v) if v == &vec![Value::Rec(vec![Value::U(2), Value::S(-3)])]));
+                        return Ok(CallReply {{ result: Reached::Value(vec![Value::B(true)]), updates: vec![vec![Value::U(12)], vec![Value::Rec(vec![Value::U(9), Value::S(-4)])]] }});
+                    }}
+                    if index == 5 {{ return Ok(CallReply {{ result: Reached::Node(Node), updates: vec![] }}); }}
+                    Ok(CallReply {{ result: Reached::Value(vec![match index {{
                         3 | 7 => Value::Var(0, vec![Value::U(37)]),
                         6 => Value::Var(0, vec![]),
                         _ => Value::Var(1, vec![]),
-                    }}]))
+                    }}]), updates: vec![] }})
                 }}
                 pub struct Seq<T>(T); pub struct Map<K,V>(K,V); pub struct Opt<T>(T);
                 impl<T> ViewType for Seq<T> {{ fn from_reached(_: Reached) -> Result<Self, Refusal> {{ unimplemented!() }} }}
+                pub struct Field<'a, T>(&'a Node, std::marker::PhantomData<T>);
+                impl<'a, T> Field<'a, T> {{ pub fn new(n: &'a Node, _: u32) -> Self {{ Self(n, std::marker::PhantomData) }} }}
+                pub fn get_many() {{}} pub fn set_many() {{}}
                 pub struct Node;
                 impl Node {{
                     pub fn get(&self, n: u32) -> Result<Vec<Value>, Refusal> {{ Ok(vec![Value::S(n as i64)]) }}
@@ -953,7 +1001,10 @@ mod tests {
                 assert_eq!(find().unwrap().unwrap().second().unwrap(), 1);
                 assert!(missing().unwrap().is_none());
                 assert_eq!(<Owner as runtime::ViewType>::from_reached(runtime::Reached::Node(runtime::Node)).unwrap().call_set_mode(5).unwrap(), Ok(37));
-                assert_eq!(DECLARED.len(), 11, "eight declarations plus three additional walked layouts");
+                let (mut n, mut pair) = (7, Pair(2, -3));
+                assert!(mutate(&mut n, &mut pair).unwrap());
+                assert_eq!((n, pair), (12, Pair(9, -4)));
+                assert_eq!(DECLARED.len(), 12, "nine declarations plus three additional walked layouts");
             }}
         "#
         );
@@ -992,6 +1043,28 @@ mod tests {
                 "fn set_mode(&mut self, mode: u8)",
             ),
         ];
+        let all = [
+            entry("horizon_client::Mode", "struct", "struct Mode { mode: u8 }"),
+            entry(
+                "horizon_client::Mode::mode_field",
+                "method",
+                "fn mode_field(&self) -> u8",
+            ),
+        ];
+        let (_, counts) = crate::internals_table::table(&all, &[all[1].path.clone()]);
+        assert_eq!(counts.renamed_methods[&all[1].path], "call_mode_field");
+        let rule = Rule::new(&[entry(
+            "horizon_client::Mode",
+            "struct",
+            "struct Mode { mode: u8, mode_field: u8 }",
+        )]);
+        assert_eq!(
+            [
+                descriptor_name("mode", Some("horizon_client::Mode"), &rule),
+                method_name(&rule, "horizon_client::Mode", "mode_field"),
+            ],
+            ["call_mode_field", "call_call_mode_field"]
+        );
         for paths in [
             vec![entries[2].path.clone()],
             vec![entries[2].path.clone(), entries[1].path.clone()],
@@ -1003,7 +1076,7 @@ mod tests {
     }
 
     #[test]
-    fn mutable_copy_arguments_are_explicitly_refused_and_reported() {
+    fn mutable_copy_arguments_are_bound() {
         let entries = [
             entry(
                 "horizon_client::Counter",
@@ -1016,16 +1089,7 @@ mod tests {
                 "fn mutate(&mut self, out: &mut u8)",
             ),
         ];
-        let reason = binding_skip(&entries[1], &Rule::new(&entries)).unwrap();
-        assert_eq!(
-            reason,
-            "mutable copy arguments need copy-field node stepping on the host"
-        );
-        assert!(
-            generate(&entries, &[declaration(&entries[1])], &[], &[])
-                .unwrap_err()
-                .contains(reason)
-        );
+        generate(&entries, &[declaration(&entries[1])], &[], &[]).unwrap();
     }
 
     #[test]

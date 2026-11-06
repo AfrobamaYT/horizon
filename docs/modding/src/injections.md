@@ -434,6 +434,20 @@ listener return applies its remaining writes; a trap discards them and stops the
 no longer resolve are dropped and logged. A trap after a game function call does not undo that call
 or the writes already applied before it.
 
+### Closures and callbacks
+
+A declared function that takes a closure (`impl Fn...`, `dyn Fn...`) has no thunk. A synchronous
+callback would have to re-enter the guest from inside that guest's own import, which the component
+model forbids (the runtime refuses it as `Reentered`); a second instance would not see the guest's
+state. The view therefore refuses a closure argument as opaque and reports it in the stage's skipped
+functions.
+
+Use the game's non-closure helper for the operation instead. For `Game::with_level`'s
+`BlockState.canSurvive`, that is `Game::level_can_survive(pos, state)`: it runs the same level rule
+in the same call frame, and its writes follow the journal rules above. A helper that needs another
+level-scoped operation is an API request; it lands as a declared non-closure method rather than as a
+callback.
+
 ## Reference
 
 - A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after

@@ -138,6 +138,7 @@ mod tests {
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct LayerDefinition;
+        pub(super) struct DebugEntry;
         pub(super) struct ModelPart;
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
@@ -159,7 +160,6 @@ mod tests {
         pub(super) struct NativeBlockRim;
         pub(super) struct NativeColoredLight;
         pub(super) struct NativeMinimap;
-        pub(super) struct NativeMod;
         pub(super) struct NativePanelEvent;
         pub(super) struct NativeScreen;
         #[derive(Default)]
@@ -288,6 +288,7 @@ mod tests {
     trait Host {}
     trait ServerHost: Host {}
     trait ClientHost: Host {}
+    trait WorldDrawContext {}
     trait DrawContext {
         fn mark(&mut self, value: u32);
     }
@@ -357,8 +358,21 @@ mod tests {
                 pub struct FovPlayer;
             }
             pub struct NativeClientInfo;
+            pub struct WorldRenderView;
+            #[derive(Clone, Copy)]
+            pub struct FluidKey;
+            #[derive(Clone, Copy)]
+            #[non_exhaustive]
+            pub struct FluidState {
+                pub fluid: FluidKey,
+                pub amount: u8,
+                pub falling: bool,
+                pub source: bool,
+            }
             #[derive(Clone, Copy)]
             pub struct RaidRef;
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub enum CameraType {}
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum ToastKind {
                 Advancement,
@@ -369,8 +383,12 @@ mod tests {
             #[derive(Clone, Copy)]
             pub enum KeyAction {}
             pub struct NativeArmorHurt;
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub enum TextureAtlas {}
             #[derive(Clone, Copy)]
             pub struct ArmPose;
+            #[derive(Clone, Copy)]
+            pub enum BlockScreenEffect {}
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum EffectApplicable {
                 Allow,
@@ -485,6 +503,12 @@ mod tests {
         }
     }
     trait Registrar {}
+    /// The goal registrar of the generated `EntityPart`, as the fixture sees
+    /// it: no methods, its type is all the generated trait asks of the scope.
+    #[expect(dead_code)]
+    struct GoalRegistrar<'a> {
+        _lifetime: std::marker::PhantomData<&'a ()>,
+    }
     /// The parts every thing in a scope has, whatever its key: a test's own, or none.
     #[derive(Default)]
     struct Parts {
@@ -1162,7 +1186,12 @@ mod tests {
             LevelDimension,
             BlockStateId,
             &PlacementContext,
-            FluidState,
+            generated::mod_api::FluidState {
+                fluid: generated::mod_api::FluidKey,
+                amount: 0,
+                falling: false,
+                source: false,
+            },
             &mut answer,
         );
         assert_eq!(answer, Some(None));
@@ -1172,7 +1201,12 @@ mod tests {
             LevelDimension,
             BlockStateId,
             &PlacementContext,
-            FluidState,
+            generated::mod_api::FluidState {
+                fluid: generated::mod_api::FluidKey,
+                amount: 0,
+                falling: false,
+                source: false,
+            },
             &mut answer,
         );
         assert_eq!(*calls.lock().unwrap(), vec![1]);

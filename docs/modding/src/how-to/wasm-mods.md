@@ -103,10 +103,13 @@ Guest copies own their data: a native borrowed or shared copy is represented by 
 Small named copies are plain structs or enums; their node form, when used as a receiver, has
 `Node` appended to its name. Same-named types retain their fully qualified generated names;
 an unambiguous type also gets a short alias such as `Game` unless it conflicts with the view's
-runtime types. Functions taking a mutable reference to a copy argument are refused at build:
-the host exposes copy fields as values, not as nodes that could supply that argument. The
-catalog coverage job lists these paths and their reason explicitly. Sets are opaque, not indexed
-sequences.
+runtime types. A function's `&mut T` copy argument is also `&mut T` in the guest view: its value
+crosses into a separate host local, and the final value is written back into the guest argument
+after the call, including when the game returns an error. For example, `mutate(&mut count,
+&mut small)?` updates both guest values without making either a node or aliasing game state.
+Mutable node arguments still require the separation described below. Sets are opaque, not indexed
+sequences. A returned node may not borrow a decoded copy local; such signatures are refused.
+Elided return borrows on methods still resolve to `self`, not to copied arguments.
 
 A function returning `Result<T, E>` (including a written `Result<T>` alias) can expose a copyable
 `T` even when its error is opaque. Its view method returns `Result<Result<T, GameError>, Refusal>`:
@@ -133,6 +136,20 @@ the package at load, rather than guessing a new field number. No game rebuild is
 the declared layouts and functions are unchanged.
 
 Native methods that collide with a field accessor use `call_<name>` (for example `call_set_mode`), determined from the full catalog field list, not the mod's declarations.
+
+### Batched fields
+
+Each copy field has an `x_field()` descriptor beside `x()` and `set_x()`.
+Use `get_many((game.copy_field(), other.value_field()))` to read a tuple of up to twelve
+fields in one crossing. It returns the matching tuple of typed `Result`s; a refused entry
+does not stop the others. Use `set_many((game.copy_field().write(7), other.value_field().write(11)))`
+to write a tuple. Both helpers are in `mod_internals::view`.
+
+`set_many` writes join the listener's journal like single writes and are applied on listener return
+or before a declared function call, not immediately at `set_many`. Reads see that journal,
+including the last successful write to a field in a batch. Batches pay the same per-entry
+base, path, journal scan and value fuel costs as single calls, including refused entries.
+Raw batches over twelve entries trap before dispatch; valid inputs are prepaid and read outputs are charged before return.
 
 ### Internals budgets and trust boundary
 

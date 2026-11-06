@@ -2012,6 +2012,95 @@ impl RestitutionWorld for MobRestitution<'_, '_, '_> {
     }
 }
 
+/// `LivingEntity.randomTeleport(x, y, z, true, avoid)` for a mob (#944), the
+/// path an enderman's own teleport takes: the target is clamped into the
+/// world border, then drops to the first block in
+/// `minecraft:entities_can_teleport_to` below it, losing a block of height per
+/// step down. The mob lands there (`checkPositionAndTeleport`) unless that
+/// ground or a block in its new box is in the `avoid` tag, the box collides or
+/// holds a liquid, or the species refuses the spot (`canRandomlyTeleportTo`:
+/// an enderman never lands on ground holding water). On landing the old
+/// position moves along (`snapTo`), the motion stays, the navigation stops
+/// (`PathfinderMob`), and entity event 46 draws the portal particles.
+pub fn random_teleport(
+    m: &mut Mob,
+    w: &MobWorld,
+    target: Vec3,
+    avoid: Option<&str>,
+    events: &mut Vec<MobEvent>,
+) -> bool {
+    // WorldBorder.clampVec3ToBound keeps the target inside the border
+    // (Mth.clamp, 1.0E-5F inside the far edges).
+    let (x, z) = match w.border {
+        Some(border) => {
+            let [min_x, min_z, max_x, max_z] = border.bounds(0.0);
+            let clamp = |v: f64, low: f64, high: f64| if v < low { low } else { v.min(high) };
+            (
+                clamp(target.x, min_x, max_x - f64::from(1.0e-5_f32)),
+                clamp(target.z, min_z, max_z - f64::from(1.0e-5_f32)),
+            )
+        }
+        None => (target.x, target.z),
+    };
+    let (bx, bz) = (x.floor() as i32, z.floor() as i32);
+    if !w.world.loaded(bx, bz) {
+        return false;
+    }
+    let refused = |name: &str| avoid.is_some_and(|tag| w.has_tag(tag, name));
+    let mut by = target.y.floor() as i32;
+    let mut ny = target.y;
+    let ground = loop {
+        if by <= w.world.bottom_y() {
+            return false;
+        }
+        by -= 1;
+        let name = w.block_name(bx, by, bz);
+        if w.has_tag("minecraft:entities_can_teleport_to", name) {
+            break name;
+        }
+        ny -= 1.0;
+    };
+    if refused(ground) {
+        return false;
+    }
+    let half = f64::from(m.width()) / 2.0;
+    let b = Aabb::new(
+        Vec3::new(x - half, ny, z - half),
+        Vec3::new(x + half, ny + f64::from(m.height()), z + half),
+    );
+    if !w.no_collision(b) {
+        return false;
+    }
+    // LevelReader.containsAnyLiquid and findBlocksIn: the same closed range of
+    // cells, from BlockPos.containing(min) to BlockPos.containing(max).
+    let (lo, hi) = (b.min_position(), b.max_position());
+    for cx in lo.x.floor() as i32..=hi.x.floor() as i32 {
+        for cy in lo.y.floor() as i32..=hi.y.floor() as i32 {
+            for cz in lo.z.floor() as i32..=hi.z.floor() as i32 {
+                if w.fluid(cx, cy, cz) != Fluid::None || refused(w.block_name(cx, cy, cz)) {
+                    return false;
+                }
+            }
+        }
+    }
+    // Enderman.canRandomlyTeleportTo: not onto ground that holds water
+    // (a waterlogged slab, leaves or roots).
+    if m.species() == super::Species::Enderman && w.fluid(bx, by, bz) == Fluid::Water {
+        return false;
+    }
+    // Entity.teleportTo -> snapTo: the old position moves too, the motion stays.
+    m.position = Vec3::new(x, ny, z);
+    m.previous = m.position;
+    m.ai.nav.stop();
+    // `randomTeleport(..., true)` broadcasts entity event 46.
+    events.push(MobEvent::EntityEvent {
+        mob: m.id,
+        event: 46,
+        at: [m.position.x, m.position.y, m.position.z],
+    });
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2086,9 +2175,15 @@ mod tests {
         let registry = assets.registry;
         let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
-        let data = super::super::MobData::load(&root, &facts);
+        let data = super::super::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
         let types = super::super::MobTypes::load(&root).unwrap();
-        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::load(
             &root,
@@ -2123,6 +2218,7 @@ mod tests {
                 }
             }
             let w = MobWorld {
+                goal_host: None,
                 teams: Default::default(),
                 loop_context: crate::test_resources::server_loop_context(),
                 world: &world,
@@ -2134,6 +2230,7 @@ mod tests {
                 suffocation: &suffocation,
                 data: &data,
                 player: None,
+                player_identity: None,
                 controlling_player_movement: None,
                 nearest_player: None,
                 others: &[],
@@ -2218,9 +2315,15 @@ mod tests {
         let registry = assets.registry;
         let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
-        let data = super::super::MobData::load(&root, &facts);
+        let data = super::super::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
         let types = super::super::MobTypes::load(&root).unwrap();
-        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::load(
             &root,
@@ -2249,6 +2352,7 @@ mod tests {
             }
         }
         let w = MobWorld {
+            goal_host: None,
             teams: Default::default(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
@@ -2260,6 +2364,7 @@ mod tests {
             suffocation: &suffocation,
             data: &data,
             player: None,
+            player_identity: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],
@@ -2461,6 +2566,7 @@ mod tests {
             let mut east_edge = [0.0; 2];
             for (i, bordered) in [false, true].into_iter().enumerate() {
                 let w = MobWorld {
+                    goal_host: None,
                     border: bordered.then_some(&border),
                     ..w.clone()
                 };

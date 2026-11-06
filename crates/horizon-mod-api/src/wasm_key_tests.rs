@@ -1,8 +1,8 @@
 //! Real generated imports against the canonical load-owned registry tables.
 use super::*;
 use crate::{
-    Backend, BackendRef, BlockEntityTypeKey, BlockKey, EffectKey, FluidKey, Hooks, Host, ItemKey,
-    ModEntry, Registrar,
+    Backend, BackendRef, BlockEntityTypeKey, BlockKey, BoolGameRuleKey, EffectKey, FluidKey, Hooks,
+    Host, ItemKey, ModEntry, Registrar,
 };
 
 #[test]
@@ -11,6 +11,10 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     #[crate::__subscriptions]
     impl Hooks for Requests {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            r.game_rule_category("rules").unwrap();
+            let rule = r.game_rule_bool("enabled", "boundary:rules", true).unwrap();
+            assert_eq!(BoolGameRuleKey::from_slot(rule.0), Ok(rule));
+            assert!(BoolGameRuleKey::from_slot(rule.0 + 1).is_err());
             let block = r.block_key("stone");
             let effect = r.effect_key("speed");
             let item = r.item_key("stick");
@@ -35,6 +39,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             let _restore = Restore(CURRENT.replace(&mut frame));
             let mut state = State {
                 limits: wasmtime::StoreLimitsBuilder::new().build(),
+                buffers: HashMap::new(),
             };
             use glue::horizon::mod_api::host::Host as Reads;
             assert_eq!(
@@ -122,6 +127,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     let _restore = Restore(CURRENT.replace(&mut frame));
     let mut state = State {
         limits: wasmtime::StoreLimitsBuilder::new().build(),
+        buffers: HashMap::new(),
     };
     use glue::horizon::mod_api::backend::Host as Imports;
     assert_eq!(

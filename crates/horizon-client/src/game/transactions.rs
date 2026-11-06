@@ -493,7 +493,7 @@ impl Game<'_> {
         }
         for (holder, kept) in level.attachments {
             if let Ok(map) = self.attachment_slot(holder) {
-                *map = kept;
+                map.replace_contents(kept);
             }
         }
         for (uuid, kept) in level.players {
@@ -872,7 +872,7 @@ mod tests {
         };
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -893,7 +893,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();

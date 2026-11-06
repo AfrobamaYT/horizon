@@ -9,7 +9,7 @@
 //!   before a game function runs and when the listener returns; a trap drops them.
 //! - A reference a game function returns is a root that lasts until the next call.
 use crate::journal::{Journal, Path, Step};
-use mod_points::internals::{Arg, Op, Refusal, Reply, Table, Value};
+use mod_points::internals::{Arg, CallReply, Op, Refusal, Reply, Table, Value};
 use std::{cell::Cell, collections::BTreeSet};
 
 /// Where a root is.
@@ -115,9 +115,9 @@ pub(crate) struct ValueSize {
 
 /// Validates value size at the boundary, before retaining or returning it.
 pub(crate) fn value_size(value: &Value) -> Result<ValueSize, Refusal> {
-    let mut pending = vec![value];
+    let (mut first, mut pending) = (Some(value), Vec::new());
     let mut size = ValueSize { cells: 0, bytes: 0 };
-    while let Some(value) = pending.pop() {
+    while let Some(value) = first.take().or_else(|| pending.pop()) {
         size.cells += 1;
         match value {
             Value::Str(s) => size.bytes += s.capacity(),
@@ -461,7 +461,7 @@ impl<'t> Frame<'t> {
         function: u32,
         receiver: Option<&Node>,
         args: Vec<Call>,
-    ) -> Result<(Reached, Vec<(Path<Value>, u32, Refusal)>), Refusal> {
+    ) -> Result<(CallReply<Reached>, Vec<(Path<Value>, u32, Refusal)>), Refusal> {
         let table = self.table;
         let thunk = table
             .thunks
@@ -550,8 +550,8 @@ impl<'t> Frame<'t> {
         });
         self.generation += 1;
         self.cache_generation.set(self.cache_generation.get() + 1);
-        let reply = reply?;
-        let reached = match reply {
+        let CallReply { result, updates } = reply?;
+        let reached = match result {
             Reply::Node(ptr, ty, writable) => {
                 self.roots.push(Root {
                     ptr,
@@ -571,7 +571,13 @@ impl<'t> Frame<'t> {
             Reply::Value(value) => Reached::Value(value),
             Reply::Done => Reached::Value(Value::None),
         };
-        Ok((reached, refused))
+        Ok((
+            CallReply {
+                result: reached,
+                updates,
+            },
+            refused,
+        ))
     }
 }
 
@@ -667,33 +673,35 @@ pub(crate) mod tests {
         }
     }
     /// `Game::kick(&mut self) -> usize`: drops the last player, answers how many are left.
-    unsafe fn kick(this: Option<*mut ()>, _: Vec<Arg>) -> Result<Reply, Refusal> {
+    unsafe fn kick(this: Option<*mut ()>, _: Vec<Arg>) -> Result<CallReply, Refusal> {
         let game = unsafe { &mut *(this.unwrap() as *mut Game) };
         game.players.pop();
-        Ok(Reply::Value(Value::U(game.players.len() as u64)))
+        Ok(CallReply::new(Reply::Value(Value::U(
+            game.players.len() as u64
+        ))))
     }
     /// `Game::first(&mut self) -> &mut Player`.
-    unsafe fn first(this: Option<*mut ()>, _: Vec<Arg>) -> Result<Reply, Refusal> {
+    unsafe fn first(this: Option<*mut ()>, _: Vec<Arg>) -> Result<CallReply, Refusal> {
         let game = unsafe { &mut *(this.unwrap() as *mut Game) };
-        Ok(Reply::Node(
+        Ok(CallReply::new(Reply::Node(
             &raw mut game.players[0] as *mut (),
             PLAYER,
             true,
-        ))
+        )))
     }
     /// `heal(a: &mut Player, b: &mut Player)`.
-    unsafe fn heal(_: Option<*mut ()>, args: Vec<Arg>) -> Result<Reply, Refusal> {
+    unsafe fn heal(_: Option<*mut ()>, args: Vec<Arg>) -> Result<CallReply, Refusal> {
         for arg in args {
             let Arg::Node(p) = arg else { unreachable!() };
             unsafe { (*(p as *mut Player)).health = 20 };
         }
-        Ok(Reply::Done)
+        Ok(CallReply::new(Reply::Done))
     }
 
-    unsafe fn heal_player(this: Option<*mut ()>, _: Vec<Arg>) -> Result<Reply, Refusal> {
+    unsafe fn heal_player(this: Option<*mut ()>, _: Vec<Arg>) -> Result<CallReply, Refusal> {
         let player = unsafe { &mut *this.unwrap().cast::<Player>() };
         player.health = 20;
-        Ok(Reply::Done)
+        Ok(CallReply::new(Reply::Done))
     }
 
     static TYPES: [Type; 3] = [
@@ -719,7 +727,7 @@ pub(crate) mod tests {
             raw_index: false,
         },
     ];
-    unsafe fn inspect_player(_: Option<*mut ()>, _: Vec<Arg>) -> Result<Reply, Refusal> {
+    unsafe fn inspect_player(_: Option<*mut ()>, _: Vec<Arg>) -> Result<CallReply, Refusal> {
         panic!("an overlapping receiver and argument must be refused before the thunk");
     }
 
@@ -857,7 +865,7 @@ pub(crate) mod tests {
         // The write applies before the call; the call then removes that player.
         let (left, refused) = frame.call(0, Some(&root), Vec::new()).unwrap();
         assert!(refused.is_empty());
-        assert!(matches!(left, Reached::Value(Value::U(2))));
+        assert!(matches!(left.result, Reached::Value(Value::U(2))));
         // The node's path now leads past the end: it is refused, never read out of bounds.
         assert!(matches!(frame.get(&last, 0), Err(Refusal::NotHere(_))));
         assert_eq!(frame.len(&players).unwrap(), 2);
@@ -882,7 +890,7 @@ pub(crate) mod tests {
         let mut frame = frame(&mut game);
         let root = frame.root(0).unwrap();
         let (first, _) = frame.call(1, Some(&root), Vec::new()).unwrap();
-        let first = node(first);
+        let first = node(first.result);
         assert_eq!(frame.get(&first, 0).unwrap(), Value::S(10));
         frame.set(&first, 0, Value::S(7)).unwrap();
         // The next call applies that write first, then the reference is gone.
@@ -897,7 +905,7 @@ pub(crate) mod tests {
         let mut game = world();
         let mut frame = frame(&mut game);
         let root = frame.root(0).unwrap();
-        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0.result);
         frame.call(3, Some(&first), Vec::new()).unwrap();
         assert!(matches!(frame.get(&first, 0), Err(Refusal::Gone(_))));
         drop(frame);
@@ -910,7 +918,7 @@ pub(crate) mod tests {
         let mut game = world();
         let mut frame = frame(&mut game);
         let root = frame.root(0).unwrap();
-        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0.result);
         frame.set(&root, 1, Value::B(true)).unwrap();
         assert!(matches!(
             frame.call(3, Some(&first), Vec::new()),
@@ -974,7 +982,7 @@ pub(crate) mod tests {
         let mut game = world();
         let mut frame = frame(&mut game);
         let root = frame.root(0).unwrap();
-        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0.result);
         assert!(
             matches!(frame.call(4, Some(&root), vec![Call::Node(&first)]),
             Err(Refusal::NotHere(why)) if why == "arguments overlap")
@@ -1269,12 +1277,12 @@ pub(crate) mod tests {
                 _ => Err(not_here("map")),
             }
         }
-        unsafe fn sum(_: Option<*mut ()>, args: Vec<Arg>) -> Result<Reply, Refusal> {
+        unsafe fn sum(_: Option<*mut ()>, args: Vec<Arg>) -> Result<CallReply, Refusal> {
             let [Arg::Node(a), Arg::Node(b)] = mod_points::internals::fields::<_, 2>(args)? else {
                 panic!()
             };
             let (a, b) = unsafe { (&*a.cast::<Player>(), &*b.cast::<Player>()) };
-            Ok(Reply::Value(Value::S(a.health + b.health)))
+            Ok(CallReply::new(Reply::Value(Value::S(a.health + b.health))))
         }
         let table = Table {
             types: Box::leak(Box::new([
@@ -1338,7 +1346,13 @@ pub(crate) mod tests {
         let a = frame.field(&option, 0).unwrap();
         let map = frame.field(&root, 1).unwrap();
         let b = node(frame.key(&map, Value::U(7)).unwrap());
-        let (Reached::Value(value), refused) = frame
+        let (
+            CallReply {
+                result: Reached::Value(value),
+                ..
+            },
+            refused,
+        ) = frame
             .call(0, None, vec![Call::Node(&a), Call::Node(&b)])
             .unwrap()
         else {

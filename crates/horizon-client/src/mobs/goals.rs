@@ -13,6 +13,31 @@ pub const LOOK: u8 = 2;
 pub const JUMP: u8 = 4;
 pub const TARGET: u8 = 8;
 
+/// The facts of a target one mob may take, as far as [`Mob::valid_target`]
+/// reads them (#1175): another mob — what a tick's snapshot carries, or the
+/// game's own state — or a player. One rule set; both the write handle and a
+/// goal tick's view fill these from where they stand.
+pub enum TargetFacts {
+    /// A mob target: `asValidTarget`'s facts of it.
+    Mob {
+        id: u32,
+        species: Species,
+        alive: bool,
+        /// `invulnerable_flag`, the flag `asValidTarget` refuses.
+        invulnerable: bool,
+        baby: bool,
+    },
+    /// A player target: its survival liveness, its `invulnerable` ability,
+    /// the modes that cannot be attacked (creative, spectator) and its uuid.
+    Player {
+        alive: bool,
+        invulnerable: bool,
+        creative: bool,
+        spectator: bool,
+        uuid: [i32; 4],
+    },
+}
+
 /// What goals may read and emit during a tick.
 pub struct Cx<'a, 'w, 'l> {
     pub w: &'a MobWorld<'w>,
@@ -248,11 +273,12 @@ fn move_up_to_above_solid(w: &MobWorld, mut p: [i32; 3], above: i32) -> [i32; 3]
     }
     p
 }
-/// `Mob.isWithinHome(BlockPos)`.
+/// `Mob.isWithinHome(BlockPos)`: `Vec3i.distSqr` in doubles, so no
+/// coordinate pair overflows, against the radius squared as a Java `int`
+/// (which wraps past 46 340, as vanilla's does).
 pub fn within_home(c: [i32; 3], r: i32, p: [i32; 3]) -> bool {
-    let d = |i: usize| i64::from(c[i] - p[i]);
-    let r = i64::from(r);
-    d(0) * d(0) + d(1) * d(1) + d(2) * d(2) < r * r
+    let d = |i: usize| f64::from(c[i]) - f64::from(p[i]);
+    d(0) * d(0) + d(1) * d(1) + d(2) * d(2) < f64::from(r.wrapping_mul(r))
 }
 
 impl Mob {
@@ -812,6 +838,100 @@ impl Mob {
             Who::Mob(id) => {
                 self.species() == Species::IronGolem
                     && w.seen(id).is_some_and(|s| s.species == Species::Creeper)
+            }
+        }
+    }
+    /// The setter's own refusal (#1175), one rule both the write handle and
+    /// a goal tick's `set_target` ask: a brain-backed species' target is its
+    /// brain's to write (`getTarget` overrides it, #934). The read path does
+    /// not ask this — it reads a brain's own target back.
+    pub fn refuses_set_target(&self) -> bool {
+        super::ai::brain_target(self).is_some()
+    }
+    /// `Mob.setTarget` with the species overrides' side effects (#933), for an
+    /// already validated target — what the write handle and a goal tick's
+    /// `set_target` store:
+    /// - `Fox.setTarget`: clearing the target ends its defending.
+    /// - `Enderman.setTarget`: a target opens the mouth (`DATA_CREEPY`) and
+    ///   stamps `targetChangeTime` (the daylight teleport waits 600 ticks from
+    ///   it); none closes the mouth and zeroes it. Its attack speed modifier
+    ///   follows the target itself ([`super::enderman::attacking_speed`]).
+    /// - `ZombifiedPiglin.setTarget`: a first target samples the first-anger
+    ///   sound delay and the alert interval; the AI step samples them, with
+    ///   the anger, on the tick it first sees the target, as for every other
+    ///   way the piglin gains one.
+    pub fn set_target(&mut self, target: Option<Who>) {
+        match self.species() {
+            Species::Fox if target.is_none() => {
+                super::fox::set_flag(self, super::fox::DEFENDING, false);
+            }
+            Species::Enderman => {
+                self.extra.flag = target.is_some();
+                self.extra.counter = if target.is_some() { self.age as i32 } else { 0 };
+            }
+            _ => {}
+        }
+        self.ai.target = target;
+    }
+    /// `Mob.asValidTarget` and the modeled `canAttack` overrides over the
+    /// target's facts (#1175): one rule set both the write handle and a goal
+    /// tick's view ask — the facts of the target, not where they were read.
+    /// The warden's own override (`Warden.canTargetEntity`) reads the
+    /// scoreboard and the world border, so the write handle answers it around
+    /// this; a goal tick refuses the brain-backed warden before it.
+    pub fn valid_target(&self, w: &MobWorld, target: &TargetFacts) -> bool {
+        match target {
+            TargetFacts::Mob {
+                id,
+                species,
+                alive,
+                invulnerable,
+                baby,
+            } => {
+                // `asValidTarget`: dead, invulnerable and ghast targets never
+                // store.
+                if !*alive || *invulnerable || *species == Species::Ghast {
+                    return false;
+                }
+                // Breeze.canAttack names only an iron golem.
+                if self.species() == Species::Breeze && *species != Species::IronGolem {
+                    return false;
+                }
+                // Illager.canAttack spares a baby villager or trader.
+                if matches!(
+                    self.species(),
+                    Species::Evoker | Species::Vindicator | Species::Illusioner | Species::Pillager
+                ) && matches!(*species, Species::Villager | Species::WanderingTrader)
+                    && *baby
+                {
+                    return false;
+                }
+                // Creeper.canAttack never names a goat.
+                if self.species() == Species::Creeper && *species == Species::Goat {
+                    return false;
+                }
+                !self.spares_target(w, Who::Mob(*id))
+            }
+            TargetFacts::Player {
+                alive,
+                invulnerable,
+                creative,
+                spectator,
+                uuid,
+            } => {
+                // The player rules the write handle always asked: a target
+                // that cannot fight, Peaceful, a player-built golem, and a
+                // pet never attacking its owner.
+                *alive
+                    && !*invulnerable
+                    && !*creative
+                    && !*spectator
+                    && w.difficulty.base != 0
+                    && !self.built_by_player()
+                    && !(self.is_tamable_animal()
+                        && self.extra.tame
+                        && super::tame::owned_by(self.extra.owner, *uuid))
+                    && !(self.species() == Species::Dolphin && self.is_baby())
             }
         }
     }
@@ -3062,6 +3182,7 @@ mod breeding_variant_tests {
             let partner = [mate.seen(None)];
             for asks_baby_spawn in [false, true] {
                 let w = MobWorld {
+                    goal_host: None,
                     asks_baby_spawn,
                     mob_drops: false,
                     others: &partner,
@@ -3123,6 +3244,7 @@ mod breeding_variant_tests {
                     [(false, true), (false, false), (true, true), (true, false)]
                 {
                     let world = MobWorld {
+                        goal_host: None,
                         asks_baby_spawn: ask_mods,
                         mob_drops,
                         others: &partner,
@@ -3849,6 +3971,28 @@ mod breed_xp_tests {
                 .any(|e| matches!(e, MobEvent::Breed { parent: 1, .. })),
             "mob_drops off: the pair still breeds"
         );
+    }
+}
+
+#[cfg(test)]
+mod within_home_tests {
+    use super::within_home;
+
+    /// `Mob.isWithinHome`: `Vec3i.distSqr` in doubles against the radius
+    /// squared as a Java `int`.
+    #[test]
+    fn within_home_matches_vanilla_at_the_edges() {
+        assert!(within_home([10, 64, -5], 6, [12, 64, -2]));
+        assert!(
+            !within_home([10, 64, -5], 6, [16, 64, -5]),
+            "the radius itself is out"
+        );
+        assert!(!within_home([i32::MIN, 0, 0], 6, [i32::MAX, 0, 0]));
+        assert!(!within_home([i32::MIN; 3], i32::MAX, [i32::MAX; 3]));
+        // 65 536² wraps to 0; 46 341² wraps negative.
+        assert!(!within_home([0, 0, 0], 65_536, [0, 0, 0]));
+        assert!(!within_home([0, 0, 0], 46_341, [0, 0, 0]));
+        assert!(within_home([0, 0, 0], 46_340, [46_339, 0, 0]));
     }
 }
 

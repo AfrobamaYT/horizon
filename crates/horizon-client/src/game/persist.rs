@@ -801,7 +801,8 @@ impl Game<'_> {
             self.next_entity += 1;
             let id = self.next_entity;
             self.remember(id, uuid, tag);
-            self.paintings.push(horizon_client::entities::Painting {
+            let mut painting = horizon_client::entities::Painting {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id,
                 pos,
@@ -810,7 +811,9 @@ impl Game<'_> {
                 width: v.width,
                 height: v.height,
                 check_interval: 0,
-            });
+            };
+            self.bind_saved_entity_attachments(id, &mut painting.attachment_lifetime);
+            self.paintings.push(painting);
         } else {
             self.persist.unknown.entry(key).or_default().push(tag);
         }
@@ -2193,7 +2196,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -2213,7 +2216,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
