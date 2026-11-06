@@ -746,10 +746,7 @@ mod tests {
     fn player_opens_provider_and_refuses_non_provider() {
         use mod_api::*;
         if super::super::native_entity_refs::tests::run_fresh_cases(
-            concat!(
-                module_path!(),
-                "::player_opens_provider_and_refuses_non_provider"
-            ),
+            "game::native_block_entity_refs::tests::player_opens_provider_and_refuses_non_provider",
             "HORIZON_BE_MENU_CASE",
             &["provider", "replacement"],
         ) {
