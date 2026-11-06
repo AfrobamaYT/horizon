@@ -606,7 +606,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
 }
 
-impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     pub(crate) fn direction_prop(&self, direction: Direction) -> super::states::PropKey {
         let p = &self.b.props;
         match direction {

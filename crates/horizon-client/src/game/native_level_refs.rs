@@ -312,25 +312,27 @@ impl Game<'_> {
     }
     /// `f` over the game's own `SignalGetter` for the level in place, as the level's blocks
     /// and mods' parts answer it; `None` for another level, a stale handle or a client.
-    /// The reads take the server host mutably: the signal path asks mods' `block_signal`,
-    /// `is_signal_source`, `should_check_weak_power` and `should_redstone_wire_connect_to`
-    /// parts, which get the level itself as their host, and only `with_level` builds it.
+    /// A shared borrow also lends Parts their restricted read-only level host. Comparator
+    /// outputs and moving-piston state come from this level's live tick state.
     fn native_level_signals<R>(
-        &mut self,
+        &self,
         level: LevelRef,
-        f: impl FnOnce(&horizon_world::level::Signals<'_, super::GameLevel<'_>>) -> R,
+        f: impl FnOnce(
+            &horizon_world::level::Signals<'_, super::native_level_signals::ReadLevel<'_, '_>>,
+        ) -> R,
     ) -> Option<R> {
         if !self.native_level_in_place(level) {
             return None;
         }
-        Some(self.with_level(|b, level, ticks| f(&b.signals(&*level, &*ticks))))
+        let view = super::native_level_signals::ReadLevel { game: self, level };
+        Some(f(&self.res.behaviours().signals(&view, &self.block_ticks)))
     }
     /// How strongly the block at `pos` powers the block on its `direction` side, power it
     /// conducts included (`SignalGetter.getSignal(pos, direction)`, as a block reads its
     /// neighbour `pos` that lies `direction` from it), 0 to 15. None for another level, a stale
-    /// handle or a client.
+    /// handle or a client. Takes a shared host and opens no transaction.
     pub(super) fn native_level_signal(
-        &mut self,
+        &self,
         level: LevelRef,
         pos: [i32; 3],
         direction: Direction,
@@ -340,7 +342,7 @@ impl Game<'_> {
     /// The strong power alone that the block at `pos` gives that way
     /// (`SignalGetter.getDirectSignal(pos, direction)`), 0 to 15. None as for `signal`.
     pub(super) fn native_level_direct_signal(
-        &mut self,
+        &self,
         level: LevelRef,
         pos: [i32; 3],
         direction: Direction,
@@ -350,7 +352,7 @@ impl Game<'_> {
     /// The strongest strong power reaching the block at `pos` from its six neighbours
     /// (`SignalGetter.getDirectSignalTo`), 0 to 15. None as for `signal`.
     pub(super) fn native_level_direct_signal_to(
-        &mut self,
+        &self,
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<i32> {
@@ -360,7 +362,7 @@ impl Game<'_> {
     /// (`SignalGetter.getBestNeighborSignal`, what a dispenser or a piston reads), 0 to 15.
     /// None as for `signal`.
     pub(super) fn native_level_best_neighbor_signal(
-        &mut self,
+        &self,
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<i32> {
@@ -368,11 +370,7 @@ impl Game<'_> {
     }
     /// Whether any neighbour powers the block at `pos` (`SignalGetter.hasNeighborSignal`),
     /// asking no side past the first that does. False where `signal` is None.
-    pub(super) fn native_level_has_neighbor_signal(
-        &mut self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> bool {
+    pub(super) fn native_level_has_neighbor_signal(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_signals(level, |s| s.has_neighbor_signal(block_pos(pos)))
             .unwrap_or(false)
     }
