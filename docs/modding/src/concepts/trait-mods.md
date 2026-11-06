@@ -664,6 +664,8 @@ tables. Fact queries and matching allocate nothing; `definition` copies the prop
 | `definition(block)` | Property names and legal serialized values |
 | `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
 
+Use `StateConstraint` for each partial constraint; `StateMatchError` identifies an invalid property or value by index. `StateProperty` describes a property's legal values. These types are shared by state-definition services.
+
 None for an unknown state or block, and on a host with no game behind it (a mod's test double).
 
 ### Fake players

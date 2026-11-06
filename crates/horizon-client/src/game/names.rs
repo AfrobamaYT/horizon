@@ -516,7 +516,7 @@ impl Game<'_> {
         let right = forward.cross(glam::DVec3::Y).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
         let away = forward.as_vec3() * 0.002;
-        let mut batch = HudBatch::new([1, 1]);
+        let mut batch = HudBatch::scratch([1, 1]);
         for (text, lift) in lines {
             let o = (o + glam::DVec3::new(0.0, *lift, 0.0)).as_vec3();
             let (r, u) = (right.as_vec3() * unit, up.as_vec3() * unit);

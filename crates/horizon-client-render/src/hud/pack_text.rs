@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn the_gui_projection_maps_gui_pixels_to_the_screen() {
-        let mut batch = HudBatch::new([1920, 1080]);
+        let mut batch = HudBatch::scratch([1920, 1080]);
         batch.scale = 4.0;
         let data: Vec<f32> =
             bytemuck::cast_slice(&uniforms(&batch, [1920, 1080], batch.scale)).to_vec();

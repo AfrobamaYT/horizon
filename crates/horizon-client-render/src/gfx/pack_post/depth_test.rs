@@ -409,7 +409,7 @@ fn check(sampler: &str, stage: Stage, scene: Scene, expected: [u8; 4]) {
             glint_uv: [0.; 2],
         }
     });
-    let hud = HudBatch::new(SIZE);
+    let hud = HudBatch::scratch(SIZE);
     let mut frame = fixture_frame(&hud);
     if hand {
         frame.hand = &quad;
@@ -768,7 +768,7 @@ fn shadow_depth_map_reads(
             contents: bytemuck::cast_slice(&positions),
             usage: wgpu::BufferUsages::VERTEX,
         });
-    let hud = HudBatch::new(SIZE);
+    let hud = HudBatch::scratch(SIZE);
     let frame = fixture_frame(&hud);
     Some(
         gpu.render(&mut post, &color, &depth, &frame, &mut |rp, list, _, _| {
@@ -889,7 +889,7 @@ fn sky_covers_the_horizon_without_writing_depth_or_overpainting_terrain() {
             ..Default::default()
         },
     );
-    let hud = HudBatch::new(SIZE);
+    let hud = HudBatch::scratch(SIZE);
     let mut frame = fixture_frame(&hud);
     frame.title = false;
     frame.skybox = true;

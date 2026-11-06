@@ -30,7 +30,11 @@ impl Game<'_> {
     pub(super) fn tick_custom_spawners(&mut self) {
         self.level_spawners();
         let dim = self.dim;
-        let spawn_enemies = self.ui.rules.bool("spawn_monsters") && self.ui.difficulty != 0;
+        let spawn_enemies = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS)
+            && self.ui.difficulty != 0;
         let mut at = 0;
         while let Some(entry) = self.creatures.custom_spawners[&dim]
             .entries()

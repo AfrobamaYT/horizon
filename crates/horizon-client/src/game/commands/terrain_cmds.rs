@@ -194,7 +194,10 @@ impl Game<'_> {
         let volume = i64::from(hi[0] - lo[0] + 1)
             * i64::from(hi[1] - lo[1] + 1)
             * i64::from(hi[2] - lo[2] + 1);
-        let limit = self.ui.rules.int("max_block_modifications");
+        let limit = self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::MAX_BLOCK_MODIFICATIONS);
         if volume > i64::from(limit) {
             return Err(err("commands.fillbiome.toobig", &[&limit, &volume]));
         }

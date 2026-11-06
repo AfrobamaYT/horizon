@@ -389,11 +389,11 @@ impl Game<'_> {
             }
         }
         let rule = if invulnerable {
-            "players_nether_portal_creative_delay"
+            horizon_client::gamerules::vanilla::PLAYERS_NETHER_PORTAL_CREATIVE_DELAY
         } else {
-            "players_nether_portal_default_delay"
+            horizon_client::gamerules::vanilla::PLAYERS_NETHER_PORTAL_DEFAULT_DELAY
         };
-        let transition = self.ui.rules.int(rule).max(0);
+        let transition = self.ui.rules.int_at(rule).max(0);
         let Some(entry) = self
             .portals
             .player
