@@ -951,9 +951,9 @@ fn particle_fields(id: &str) -> &'static [&'static str] {
     }
 }
 /// The particle type's codec over the options (MapCodec field errors, newest first).
-fn particle_options(id: &str, t: &horizon_world::nbt::Tag) -> Result<(), String> {
+fn particle_options(id: &str, t: &horizon_core::nbt::Tag) -> Result<(), String> {
     use super::codec::{get, no_key, not_map, snbt};
-    let horizon_world::nbt::Tag::Compound(map) = t else {
+    let horizon_core::nbt::Tag::Compound(map) = t else {
         return Err(not_map(t));
     };
     let missing: Vec<String> = particle_fields(id)
@@ -967,11 +967,11 @@ fn particle_options(id: &str, t: &horizon_world::nbt::Tag) -> Result<(), String>
     }
     if particle_fields(id) == ["block_state"]
         && let Some(state) = get(map, "block_state")
-        && !matches!(state, horizon_world::nbt::Tag::String(_))
+        && !matches!(state, horizon_core::nbt::Tag::String(_))
     {
         // withAlternative(BlockState.CODEC, the block id codec).
         let first = match state {
-            horizon_world::nbt::Tag::Compound(_) => {
+            horizon_core::nbt::Tag::Compound(_) => {
                 super::codec::either("Not a string".into(), no_key("id", state))
             }
             _ => not_map(state),
@@ -1560,7 +1560,7 @@ impl ArgType {
                 let options = if reader.can_read() && reader.peek() == '{' {
                     super::snbt::parse_tag_argument(reader)?
                 } else {
-                    horizon_world::nbt::Tag::Compound(Default::default())
+                    horizon_core::nbt::Tag::Compound(Default::default())
                 };
                 if let Err(m) = particle_options(&id, &options) {
                     return Err(CommandError::tr("particle.invalidOptions", &[&m]));

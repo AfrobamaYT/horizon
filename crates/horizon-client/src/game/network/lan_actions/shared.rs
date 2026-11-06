@@ -505,7 +505,7 @@ mod tests {
                     host.hub.open_container(
                         12,
                         "minecraft:generic_9x3",
-                        horizon_world::nbt::Tag::String("test".into()),
+                        horizon_core::nbt::Tag::String("test".into()),
                         pos,
                         Slots::Block(pos),
                         vec![None; 27],
@@ -746,7 +746,7 @@ mod tests {
                     let mut limited = ItemStack::new("minecraft:dirt", 8);
                     limited.data_mut().set_other(
                         "minecraft:max_stack_size",
-                        Some(horizon_world::nbt::Tag::Int(16)),
+                        Some(horizon_core::nbt::Tag::Int(16)),
                     );
                     game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
                         Some(limited.clone());
@@ -1627,7 +1627,7 @@ mod tests {
                 let guest = &game.lan.as_ref().unwrap().hub.guests[0];
                 let picked = guest.inventory[guest.selected].as_ref().unwrap();
                 assert_eq!(&*picked.item, "minecraft:diamond");
-                let Some(horizon_world::nbt::Tag::Compound(components)) =
+                let Some(horizon_core::nbt::Tag::Compound(components)) =
                     horizon_client::item_data::encode_components(picked)
                 else {
                     panic!("the chest's data is on the diamond");
@@ -2396,6 +2396,7 @@ mod respawn_world_point_tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,

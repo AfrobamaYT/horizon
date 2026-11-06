@@ -194,7 +194,7 @@ fn leak<T>(part: T) -> &'static T {
 fn has_part_hook(_: HookId) -> bool {
     true
 }
-fn parts(_: &'static str) -> &'static Parts {
+fn parts(_: HookId, _: &'static str) -> &'static Parts {
     PARTS.get()
 }
 impl Parts {
@@ -459,6 +459,7 @@ mod stubs {
     pub(super) struct NativeScreenView<'a>(pub &'a ());
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(super) struct EffectKey(pub(super) u32);
+    pub(super) struct ParticleOptions;
     #[derive(Debug, PartialEq)]
     pub(super) enum ScreenOpening {
         Cancel,

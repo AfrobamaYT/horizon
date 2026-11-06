@@ -5,7 +5,7 @@
 //! only on the level in place; their writes are kept by the transaction they are given.
 use super::Game;
 use horizon_client::containers::{BlockEntity, ModEnergyBuffer};
-use horizon_world::nbt::{Compound, JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 use mod_api::{BlockSide, Transaction};
 use std::sync::Arc;
 

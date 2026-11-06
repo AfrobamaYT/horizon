@@ -39,6 +39,10 @@ Horizon ticks vanilla's spawners where it always has: the trader, patrol, cat an
     /// spawners are, and only for a key in the list, so a level with no mod spawner pays one
     /// check per tick. Beyond NeoForge: a key and this hook stand in for the `CustomSpawner`
     /// object. Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ModifyCustomSpawnersEvent"
+    )]
     fn custom_spawner_tick();
 }

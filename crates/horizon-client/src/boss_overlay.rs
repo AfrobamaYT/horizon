@@ -163,7 +163,7 @@ impl BossOverlay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     fn add(id: u128, name: &str, progress: f32, darken: bool, fog: bool) -> BossEvent {
         BossEvent {

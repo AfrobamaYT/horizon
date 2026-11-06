@@ -22,7 +22,7 @@ pub(crate) struct LevelFeatureWorld<'s, 'a, L: LevelAccess + ?Sized> {
     pub features: &'s LiveFeatures,
     /// The entities a structure template placed (`add_entity`), for the caller
     /// to spawn.
-    pub entities: Vec<crate::nbt::Compound>,
+    pub entities: Vec<horizon_core::nbt::Compound>,
 }
 
 fn pos([x, y, z]: [i32; 3]) -> BlockPos {
@@ -32,9 +32,9 @@ fn pos([x, y, z]: [i32; 3]) -> BlockPos {
 impl<L: LevelAccess + ?Sized> LevelFeatureWorld<'_, '_, L> {
     fn sea(&self) -> i32 {
         match self.sim.level.dimension() {
-            super::Dimension::Nether => 32,
-            super::Dimension::End => 0,
-            super::Dimension::Overworld => 63,
+            horizon_core::dimension::Dimension::Nether => 32,
+            horizon_core::dimension::Dimension::End => 0,
+            horizon_core::dimension::Dimension::Overworld => 63,
         }
     }
     fn in_tag(&self, state: BlockStateId, tag: &str) -> bool {
@@ -66,12 +66,12 @@ impl<L: LevelAccess + ?Sized> PlacementContext for LevelFeatureWorld<'_, '_, L> 
     fn set_block_entity(
         &mut self,
         position: [i32; 3],
-        nbt: crate::nbt::Compound,
+        nbt: horizon_core::nbt::Compound,
     ) -> Result<(), PlacementQueryError> {
         self.sim.level.load_block_entity(pos(position), nbt);
         Ok(())
     }
-    fn add_entity(&mut self, nbt: crate::nbt::Compound) -> Result<(), PlacementQueryError> {
+    fn add_entity(&mut self, nbt: horizon_core::nbt::Compound) -> Result<(), PlacementQueryError> {
         self.entities.push(nbt);
         Ok(())
     }

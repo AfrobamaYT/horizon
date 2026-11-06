@@ -18,7 +18,7 @@ use horizon_client::{
     ui,
     widgets::{self, ScreenInfo},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::time::Instant;
 use winit::keyboard::KeyCode;
 

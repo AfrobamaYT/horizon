@@ -16,12 +16,15 @@
 //! content mod the root is the base root itself.
 use crate::{Result, blocks::MAP_COLORS};
 use horizon_core::geometry::{Aabb, Axis, ShapeOp, Vec3, VoxelShape};
+use horizon_core::{
+    nbt,
+    nbt::{Compound, JavaString, Limits, Tag},
+};
 use horizon_mods::content::{
     Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, FluidLook, MenuType,
     MobEffect, Rarity, StateProperty,
 };
 use horizon_mods::manifest::{JarInputsError, JarRef, collect_jar_requirements, missing_jars};
-use horizon_world::nbt::{self, Compound, JavaString, Limits, Tag};
 use serde::{Deserialize, Serialize, de};
 use std::{
     collections::{BTreeMap, BTreeSet},

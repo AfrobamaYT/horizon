@@ -17,17 +17,31 @@ pub trait Hooks {
     /// The world frame's local, world-space rim and colored-light sources.
     /// Push requests; Horizon validates and limits them before rendering.
     /// Called only while a world is visible.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart)"
+    )]
     fn visuals();
     /// At most 32 pairs of already-loaded base and transparent overlay sprites.
     /// Per-pixel alpha in the overlay marks full-bright material, without
     /// illuminating the surrounding block or changing gameplay light.
-    #[hook(side = "client", contract = "collect", out = "layers")]
+    #[hook(
+        side = "client",
+        contract = "collect",
+        out = "layers",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart)"
+    )]
     fn emissive();
     /// The world's phases, read-only; `error_text` carries the engine's
     /// own open-failure text, empty otherwise. Server-side. A server loop or final
     /// save failure fires `WorldCloseFailed` with the error text.
-    #[hook(side = "server", contract = "listen", version = 2)]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        version = 2,
+        neoforge = "ServerStartingEvent, ServerStartedEvent, ServerStoppingEvent, ServerStoppedEvent"
+    )]
     fn world_lifecycle();
     /// The server is about to open its worlds: nothing of the world is
     /// loaded yet (NeoForge's `ServerAboutToStartEvent`, "called before the
@@ -102,20 +116,22 @@ pub trait Hooks {
     /// dimension: which level `self.world` holds here is not defined. A paused
     /// pass fires nothing; a frozen world carries `world_running` false except
     /// during a requested step.
-    #[hook(side = "server", contract = "listen", fabric = ["ServerTickEvents.START_SERVER_TICK", "ServerTickEvents.END_SERVER_TICK"])]
+    #[hook(side = "server", contract = "listen", fabric = ["ServerTickEvents.START_SERVER_TICK", "ServerTickEvents.END_SERVER_TICK"], neoforge = "ServerTickEvent.Pre, ServerTickEvent.Post")]
     fn server_tick();
     /// Before an authoritative server level's tick pass. `dimension` is its ID.
     #[hook(
         side = "server",
         contract = "listen",
-        fabric = "ServerTickEvents.START_LEVEL_TICK"
+        fabric = "ServerTickEvents.START_LEVEL_TICK",
+        neoforge = "LevelTickEvent.Pre"
     )]
     fn level_tick_pre();
     /// After a successful authoritative server level tick pass.
     #[hook(
         side = "server",
         contract = "listen",
-        fabric = "ServerTickEvents.END_LEVEL_TICK"
+        fabric = "ServerTickEvents.END_LEVEL_TICK",
+        neoforge = "LevelTickEvent.Post"
     )]
     fn level_tick_post();
     /// An authoritative server committed a changed state through `Level.setBlock`.
@@ -123,7 +139,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_changed"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_changed",
+        neoforge = "none (NeoForge has no set-block event; IBlockExtension.onBlockStateChange runs after the change and may not modify the level)"
     )]
     fn block_changed();
     /// An authoritative server is about to deliver `neighborChanged`.
@@ -137,7 +154,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         version = 2,
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_neighbor_changed"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_neighbor_changed",
+        neoforge = "none (vanilla Block.neighborChanged; NeoForge adds no event or extension for it); BlockEvent.NeighborNotifyEvent is the neighbour broadcast, a different point"
     )]
     fn neighbor_changed();
     /// An authoritative server's `ServerLevel.tickChunk` is about to
@@ -155,7 +173,8 @@ pub trait Hooks {
         out = "handled",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_random_tick"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_random_tick",
+        neoforge = "none (vanilla BlockBehaviour.randomTick; NeoForge adds no event or extension for it)"
     )]
     fn random_tick();
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a
@@ -170,7 +189,8 @@ pub trait Hooks {
         out = "handled",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_tick_block"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_tick_block",
+        neoforge = "none (vanilla BlockBehaviour.tick; NeoForge adds no event or extension for it)"
     )]
     fn tick_block();
     /// An authoritative server is about to compute the state the block
@@ -192,7 +212,8 @@ pub trait Hooks {
         out = "new",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_update_shape"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_update_shape",
+        neoforge = "none (vanilla BlockBehaviour.updateShape; NeoForge adds no event or extension for it)"
     )]
     fn update_shape(
         dimension: LevelDimension,
@@ -207,7 +228,13 @@ pub trait Hooks {
     /// slash, before the server and Horizon's commands see it: set `ran`
     /// when the mod ran it. Client-side: a server never asks, not for
     /// command blocks, guests or the console.
-    #[hook(side = "client", contract = "cancel", out = "ran", version = 2)]
+    #[hook(
+        side = "client",
+        contract = "cancel",
+        out = "ran",
+        version = 2,
+        neoforge = "none (ClientChatEvent is for chat messages; client commands are added by RegisterClientCommandsEvent)"
+    )]
     fn command();
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
     /// `command` runs: push a `NativeCommand` per usage (`x <mode:word>`).
@@ -225,22 +252,45 @@ pub trait Hooks {
     fn register_client_commands();
     /// The zoom a native mod asks for, applied while playing (the spyglass's
     /// own view wins): set `zoom` when it is none yet.
-    #[hook(side = "client", contract = "replace", out = "zoom")]
+    #[hook(
+        side = "client",
+        contract = "replace",
+        out = "zoom",
+        neoforge = "none (Horizon-only; ViewportEvent.ComputeFov is the nearest way to change the view)"
+    )]
     fn zoom();
     /// The minimap a native mod shows: set `minimap` when it is none yet.
-    #[hook(side = "client", contract = "replace", out = "minimap")]
+    #[hook(
+        side = "client",
+        contract = "replace",
+        out = "minimap",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart)"
+    )]
     fn minimap();
     /// The buttons of mod `mod_id`'s settings page: push
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
-    #[hook(side = "both", contract = "collect", out = "buttons")]
+    #[hook(
+        side = "both",
+        contract = "collect",
+        out = "buttons",
+        neoforge = "none (Horizon's own settings page; NeoForge's per-mod screen is IConfigScreenFactory, not an event)"
+    )]
     fn settings();
     /// Button `button` of mod `mod_id`'s settings page was clicked.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "none (Horizon's own settings page; NeoForge's per-mod screen is IConfigScreenFactory, not an event)"
+    )]
     fn settings_click();
     /// The player did `event` on mod `mod_id`'s panel (`native_panel_items`):
     /// act on it when it is yours.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart)"
+    )]
     fn panel_event();
     /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
     /// fired inside the write that creates it (`LevelChunk.setBlockState`), on
@@ -253,7 +303,8 @@ pub trait Hooks {
         out = "entity",
         scope = "block_entity",
         key = "block",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_entity"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_entity",
+        neoforge = "none (vanilla EntityBlock.newBlockEntity; NeoForge adds no event or extension for it)"
     )]
     fn block_entity();
     /// Whether block `block`'s block entity ticks (`EntityBlock.getTicker`):
@@ -265,7 +316,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block_entity",
         key = "block",
-        host = "read"
+        host = "read",
+        neoforge = "none (vanilla EntityBlock.getTicker; NeoForge adds no event or extension for it)"
     )]
     fn block_entity_ticks();
     /// A server tick of the block entity at `pos`, in vanilla's order among
@@ -282,7 +334,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         scope = "block_entity",
-        key = "entity"
+        key = "entity",
+        neoforge = "none (vanilla BlockEntityTicker; NeoForge adds no event or extension for it)"
     )]
     fn block_entity_tick();
     /// What clients get of the block entity at `pos` when its `id` is
@@ -297,7 +350,8 @@ pub trait Hooks {
         contract = "replace",
         out = "tag",
         scope = "block_entity",
-        key = "entity"
+        key = "entity",
+        neoforge = "none (vanilla BlockEntity.getUpdateTag; NeoForge adds no event or extension for it); IBlockEntityExtension.handleUpdateTag is the client half"
     )]
     fn block_entity_update_tag();
     /// Block `block`'s block entity has item slots (a `WorldlyContainer`):
@@ -310,7 +364,13 @@ pub trait Hooks {
     /// slots, opens when the block is used (its template must open a menu, as
     /// a chest or a furnace does); another is left out. A mod menu type shows
     /// on Horizon clients through the mod's `native_screen` only.
-    #[hook(side = "both", contract = "replace", out = "container", host = "read")]
+    #[hook(
+        side = "both",
+        contract = "replace",
+        out = "container",
+        host = "read",
+        neoforge = "RegisterCapabilitiesEvent"
+    )]
     fn block_entity_container();
     /// A menu opens on this client for block `block`, a mod's: set `screen`
     /// when the block is yours, to lay its screen out (`native_screen_draw`
@@ -322,7 +382,8 @@ pub trait Hooks {
         out = "screen",
         scope = "block_entity",
         key = "block",
-        host = "read"
+        host = "read",
+        neoforge = "none (Horizon declares a block's screen through hooks; NeoForge registers a Screen class per menu with RegisterMenuScreensEvent)"
     )]
     fn screen();
     /// Draw block `block`'s screen at `origin` (its top left, GUI pixels),
@@ -336,7 +397,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         scope = "block_entity",
-        key = "block"
+        key = "block",
+        neoforge = "none (see screen)"
     )]
     fn screen_draw();
     /// A left or right (`right`) press at `at` (GUI pixels from the screen's
@@ -349,7 +411,8 @@ pub trait Hooks {
         contract = "replace",
         out = "button",
         scope = "block_entity",
-        key = "block"
+        key = "block",
+        neoforge = "none (see screen)"
     )]
     fn screen_click();
     /// The tooltip at `at` (as in `native_screen_click`) on block `block`'s
@@ -360,7 +423,8 @@ pub trait Hooks {
         contract = "collect",
         out = "lines",
         scope = "block_entity",
-        key = "block"
+        key = "block",
+        neoforge = "none (see screen)"
     )]
     fn screen_tooltip();
     /// A player pressed a mod container's button (`clickMenuButton`), on
@@ -381,7 +445,12 @@ pub trait Hooks {
     /// name vanilla has is left out. Each executable usage keeps its own
     /// permission level; a lower-level child only opens traversal through a
     /// shared prefix, not execution of that prefix.
-    #[hook(side = "server", contract = "collect", out = "commands")]
+    #[hook(
+        side = "server",
+        contract = "collect",
+        out = "commands",
+        neoforge = "RegisterCommandsEvent"
+    )]
     fn register_commands();
     /// A player's command on the server (`Commands.performCommand`),
     /// parsed into `command` with typed, source-resolved arguments, for a command
@@ -392,7 +461,12 @@ pub trait Hooks {
     /// read that player; `host.commands().feedback()` answers them. A single player's
     /// owner console (`horizon-ctl command`) reaches it too, as the owner at
     /// level 4.
-    #[hook(side = "server", contract = "cancel", out = "ran")]
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "ran",
+        neoforge = "none (a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions)"
+    )]
     fn perform_command();
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
@@ -400,11 +474,19 @@ pub trait Hooks {
     /// and the click's `mode` (`ClickType`'s id) of the player `uuid`.
     /// No player's state is swapped in: the menu helpers take the player's
     /// UUID.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (vanilla AbstractContainerMenu.clicked; NeoForge adds no event or extension for it)"
+    )]
     fn menu_clicked();
     /// A menu a mod opened closed: the player closed it, the server or a mod
     /// opened another, or the player left.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "PlayerContainerEvent.Close"
+    )]
     fn menu_closed();
     /// `Item.appendHoverText`: an item's own lines in its tooltip, after its
     /// name and before its components' (enchantments, lore, attributes). Add
@@ -418,7 +500,8 @@ pub trait Hooks {
         contract = "collect",
         out = "lines",
         scope = "item",
-        key = "stack"
+        key = "stack",
+        neoforge = "ItemTooltipEvent"
     )]
     fn tooltip();
     /// A player uses `stack` (right click) with `self.hand` on the block at
@@ -436,7 +519,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "claimed",
         scope = "item",
-        key = "stack"
+        key = "stack",
+        neoforge = "UseItemOnBlockEvent"
     )]
     fn use_on(
         stack: &ItemStack,
@@ -458,7 +542,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "claimed",
         scope = "item",
-        key = "stack"
+        key = "stack",
+        neoforge = "PlayerInteractEvent.RightClickItem"
     )]
     fn use_item();
     /// A player breaks the block `state` at `pos`, once the game allowed it
@@ -471,12 +556,12 @@ pub trait Hooks {
     /// amount afterwards; cancellation or disabled block drops suppresses it.
     /// Server-side, for every player of the world (the
     /// helpers read the acting one). Diverges from upstream: renamed from
-    /// `destroy_block`, to NeoForge's `BlockEvent.BreakEvent`.
+    /// `destroy_block`, to NeoForge's `BreakBlockEvent`.
     #[hook(
         side = "server",
         contract = "cancel",
         out = "canceled",
-        neoforge = "BlockEvent.BreakEvent"
+        neoforge = "BreakBlockEvent"
     )]
     fn break_block();
     /// A player right clicks a block (NeoForge's
@@ -511,7 +596,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_spread"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_spread",
+        neoforge = "none (BlockEvent.FluidPlaceBlockEvent covers only fluids making stone and the like, not flow or fire spread)"
     )]
     fn block_spread();
     /// On an authoritative server, the piston at `piston` is about to push
@@ -557,13 +643,23 @@ pub trait Hooks {
     /// about to break `blocks`: `ServerExplosion.explode` with its `toBlow`,
     /// before any block is hit. Take out the positions to spare; they keep
     /// their block and get no fire. Entities are hurt as before. Server-side.
-    #[hook(side = "server", contract = "collect", out = "blocks")]
+    #[hook(
+        side = "server",
+        contract = "collect",
+        out = "blocks",
+        neoforge = "ExplosionEvent.Detonate"
+    )]
     fn explosion_detonate();
     /// A player fills (`stack` an empty bucket) or empties a bucket at `pos`:
     /// `BucketItem.use`, where it asks `Level.mayInteract`. Set `canceled`
     /// and the bucket does nothing. Server-side, for every player of the
     /// world (`host.players().acting_player()` says who).
-    #[hook(side = "server", contract = "cancel", out = "canceled")]
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "canceled",
+        neoforge = "none (NeoForge 26.3 has no bucket-fill event)"
+    )]
     fn fill_bucket();
     /// A player attacks the entity `entity` (`Entity.getId`) of type `kind`
     /// (`minecraft:item_frame`, `minecraft:cow`, `minecraft:player`) standing
@@ -572,23 +668,36 @@ pub trait Hooks {
     /// does nothing (no damage, no knockback, the frame keeps its item).
     /// Server-side, for every player of the world (`host.players().acting_player()`
     /// says who).
-    #[hook(side = "server", contract = "cancel", out = "canceled")]
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "canceled",
+        neoforge = "AttackEntityEvent"
+    )]
     fn attack_entity();
     /// A message from `player`'s client on `channel` (`mod_id:name`), within
     /// the caps (`native_net.rs`): check `channel`, and treat `data` as the
     /// player's own bytes, checked by nothing. Runs in the tick after it
     /// arrives, with no player's state swapped in. Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "RegisterPayloadHandlersEvent"
+    )]
     fn net_from_client();
     /// A message from the server on `channel` (`mod_id:name`), whose `data`
     /// is the sender's own bytes. The window's game only.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "RegisterPayloadHandlersEvent"
+    )]
     fn net_from_server();
     /// `player` died: where `ServerPlayer.die` starts, with the death
     /// message's key when the game knows it (`death.attack.lava`; none for a
     /// message it builds from the combat). It only hears. Server-side, for
     /// every player of the world, whether death messages are shown or not.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(side = "server", contract = "listen", neoforge = "LivingDeathEvent")]
     fn player_died();
     /// A new mob of `kind` joined `dimension` at `pos`: `natural` when the
     /// world's spawning made it, false when something else did (a breed, a
@@ -597,23 +706,38 @@ pub trait Hooks {
     /// tells each. Not told of a mob loaded with its chunk, leaving a hive or
     /// changing level. It only hears; the mob is already among the game's
     /// mobs. Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "EntityJoinLevelEvent, FinalizeSpawnEvent"
+    )]
     fn mob_spawned();
     /// `player`'s melee blow killed the mob `entity` of `kind` (other deaths
     /// aren't told yet). It only hears, after the blow landed. Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(side = "server", contract = "listen", neoforge = "LivingDeathEvent")]
     fn mob_killed();
     /// `player` is about to take `count` of `item` from the ground
     /// (`ItemEntity.playerTouch`). Set `canceled` to leave it there: the
     /// stack isn't offered again for 10 ticks. Server-side.
-    #[hook(side = "server", contract = "cancel", out = "canceled")]
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "canceled",
+        neoforge = "ItemEntityPickupEvent.Pre"
+    )]
     fn item_picked_up();
     /// A player's hit landed on the mob `entity` of type `kind`
     /// (`minecraft:zombie`), holding `stack`: where `Item.hurtEnemy` is called,
     /// before the post-attack enchantments and the weapon's wear. It only
     /// hears. Another player as the target isn't told yet. Server-side, for
     /// every player of the world (the helpers read the acting one).
-    #[hook(side = "server", contract = "listen", scope = "item", key = "stack")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        scope = "item",
+        key = "stack",
+        neoforge = "none (vanilla Item.hurtEnemy; NeoForge adds no event or extension for it); LivingDamageEvent.Post comes later"
+    )]
     fn hurt_enemy();
     /// A server tick of the stack a player carries in `slot`: where
     /// `Inventory.tick` calls `Item.inventoryTick`, for every stack, each tick,
@@ -625,7 +749,11 @@ pub trait Hooks {
     /// player's client gets the change. This runs often, so check the item
     /// first. Server-side, for every living player of the world (the helpers
     /// read the acting one).
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (vanilla Item.inventoryTick; NeoForge adds no event or extension for it); PlayerTickEvent ticks the player, not each stack"
+    )]
     fn inventory_tick();
     /// A player's equipment slot `slot` (`head`, `chest`, `legs`, `feet`,
     /// `offhand`, and `mainhand` on a swap of the hands or `/item`) took a different
@@ -633,7 +761,11 @@ pub trait Hooks {
     /// before the equip sound. It only hears. Never for a spectator.
     /// Server-side, for every player of the world (the helpers read the
     /// acting one).
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "LivingEquipmentChangeEvent"
+    )]
     fn on_equip();
     /// The redstone signal the block `state` at `pos` gives on its `face`, the
     /// side that touches the block reading it: `BlockState.getDirectSignal`
@@ -650,7 +782,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_signal"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_signal",
+        neoforge = "none (vanilla BlockBehaviour.getSignal and getDirectSignal; NeoForge adds no event or extension for it)"
     )]
     fn block_signal();
     /// `BlockState.isSignalSource`: set `source` for a block of yours that
@@ -661,7 +794,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_signal_source"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_signal_source",
+        neoforge = "none (vanilla BlockBehaviour.isSignalSource; NeoForge adds no event or extension for it)"
     )]
     fn is_signal_source();
     /// The player-health HUD rows, once a frame the HUD draws them
@@ -671,7 +805,12 @@ pub trait Hooks {
     /// hearts, food, air and the heights (`left_height`/`right_height`)
     /// above the hotbar are the answer's to give; `bubble_pop_sound` too.
     /// Nothing set draws Horizon's own.
-    #[hook(side = "client", contract = "replace", out = "draws")]
+    #[hook(
+        side = "client",
+        contract = "replace",
+        out = "draws",
+        neoforge = "RenderGuiLayerEvent.Pre"
+    )]
     fn health_hud();
     /// A player right-clicks the entity `entity` (`Entity.getId`) of type
     /// `kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an
@@ -696,7 +835,12 @@ pub trait Hooks {
     /// broken on the server, and the player's client gets it back (its own
     /// predicted crack still shows to the clicking player). Server-side, for
     /// every player of the world (the helpers read the acting one).
-    #[hook(side = "server", contract = "cancel", out = "canceled")]
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "canceled",
+        neoforge = "PlayerInteractEvent.LeftClickBlock"
+    )]
     fn left_click_block();
     /// Before a player's tick on both logical sides (NeoForge 26.3
     /// `PlayerTickEvent.Pre`). Non-cancellable, including death-screen ticks.
@@ -731,7 +875,12 @@ pub trait Hooks {
     /// tick's end). A mod that cancels one of the others sees it removed
     /// before it ticks again. Not told: the entities Horizon keeps without
     /// simulating (displays, markers, interactions). Server-side.
-    #[hook(side = "server", contract = "cancel", out = "canceled")]
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "canceled",
+        neoforge = "EntityJoinLevelEvent"
+    )]
     fn entity_join_level();
     /// NeoForge's `LivingIncomingDamageEvent`: `LivingEntity.hurtServer`, past its guards (an
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
@@ -777,7 +926,11 @@ pub trait Hooks {
     /// (`kind` is the type), each once, when the game next notices it gone
     /// (the tick or action that removed
     /// it). Check `kind`. Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "EntityLeaveLevelEvent"
+    )]
     fn entity_leave_level();
     /// Block `block`'s block entity has fluid tanks: set `fluids` when the
     /// block is yours, in the container's shape — each tank's capacity in
@@ -787,14 +940,25 @@ pub trait Hooks {
     /// 1..=1 000 000, and tank numbers past the count are left out. The tanks'
     /// contents are kept in the entity's saved compound, under `fluids`, and
     /// the fluid helpers below read and write them.
-    #[hook(side = "server", contract = "replace", out = "fluids", host = "read")]
+    #[hook(
+        side = "server",
+        contract = "replace",
+        out = "fluids",
+        host = "read",
+        neoforge = "RegisterCapabilitiesEvent"
+    )]
     fn block_entity_fluids();
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (an `EffectKey` for `ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
     /// the ticks left (the entity's tick count when infinite). Set `apply`
     /// and `native_apply_effect_tick` follows. Server-side.
-    #[hook(side = "server", contract = "listen", host = "read")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        host = "read",
+        neoforge = "none (vanilla MobEffect.shouldApplyEffectTickThisTick; NeoForge adds no event or extension for it)"
+    )]
     fn should_apply_effect_tick_this_tick();
     /// `MobEffect.applyEffectTick`: the content mod's resolved `EffectKey` `effect` acts on
     /// `entity` in `dimension` (`minecraft:overworld`). Clear `keep` and the
@@ -806,7 +970,12 @@ pub trait Hooks {
     /// reads of a mob holder are unavailable while it is ticking. Queued
     /// changes apply after the hook; clearing `keep` ends the effect.
     /// Server-side.
-    #[hook(side = "server", contract = "listen", host = "read")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        host = "read",
+        neoforge = "none (vanilla MobEffect.applyEffectTick; NeoForge adds no event or extension for it)"
+    )]
     fn apply_effect_tick(
         effect: EffectKey,
         dimension: &str,
@@ -822,13 +991,21 @@ pub trait Hooks {
     /// `MobEffect.onEffectAdded`: `LivingEntity.addEffect` gave `entity`
     /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
     /// which it didn't have. Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (vanilla MobEffect.onEffectAdded; NeoForge adds no event or extension for it)"
+    )]
     fn on_effect_added();
     /// NeoForge's `MobEffectEvent.Added`, vanilla's `MobEffect.onEffectStarted`:
     /// every `LivingEntity.addEffect` of the content mod's effect `effect`,
     /// new or not, changed or not, after `native_on_effect_added`.
     /// Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "MobEffectEvent.Added"
+    )]
     fn mob_effect_added();
     /// Chunk `chunk` (`[x, z]`, in chunks) of `dimension` came into the world
     /// (NeoForge's `ChunkEvent.Load`): `new` when it was just generated, false
@@ -844,7 +1021,7 @@ pub trait Hooks {
     /// save: an edit made here to one of them (a neighbour's block entity, say)
     /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(side = "server", contract = "listen", neoforge = "ChunkEvent.Load")]
     fn chunk_load();
     /// Chunk `chunk` of `dimension` left the world (NeoForge's
     /// `ChunkEvent.Unload`), with a level that closes for being empty too. Don't
@@ -852,13 +1029,17 @@ pub trait Hooks {
     /// this hook aren't saved: as in vanilla, the chunk is saved before it unloads.
     /// Not told when the world closes, which `native_world_lifecycle` tells.
     /// Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(side = "server", contract = "listen", neoforge = "ChunkEvent.Unload")]
     fn chunk_unload();
     /// `player` (`name`) joined the game (NeoForge's
     /// `PlayerLoggedInEvent`): placed in the world and listed in
     /// `host.players().server_players()`, so `native_net_send_to_player` reaches them.
     /// Once a join, with no player's state swapped in. Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "PlayerEvent.PlayerLoggedInEvent"
+    )]
     fn player_logged_in();
     /// `player` (`name`) left the game (NeoForge's `PlayerLoggedOutEvent`), by
     /// any path: a lost connection, a kick, the server stopping or failing.
@@ -866,13 +1047,18 @@ pub trait Hooks {
     /// left `host.players().server_players()`, except when the server stops, which tells
     /// before it saves, with them still listed and able to get a last message.
     /// Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "PlayerEvent.PlayerLoggedOutEvent"
+    )]
     fn player_logged_out();
     /// The world is drawn (see [`WorldDrawn`]). Not called on the title screen's panorama.
     #[hook(
         side = "client",
         contract = "listen",
-        target = "mod_api::render::native_world_drawn"
+        target = "mod_api::render::native_world_drawn",
+        neoforge = "RenderLevelStageEvent.AfterLevel"
     )]
     fn world_drawn();
     /// Asked as a frame is built and drawn: set what your mod needs in
@@ -881,7 +1067,8 @@ pub trait Hooks {
         side = "client",
         contract = "collect",
         out = "needs",
-        target = "mod_api::render::native_render_needs"
+        target = "mod_api::render::native_render_needs",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart)"
     )]
     fn render_needs();
     /// The small bar `GuiGraphicsExtractor.itemDecorations` draws under an
@@ -889,7 +1076,13 @@ pub trait Hooks {
     /// (the damage bar, or a bundle's fullness already applied) and may be
     /// replaced (width `0..=13`, colour `rgb`) or set to `None` to hide it.
     /// Asked each frame a stack is drawn. Client-side.
-    #[hook(side = "client", contract = "listen", scope = "item", key = "stack")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        scope = "item",
+        key = "stack",
+        neoforge = "RegisterItemDecorationsEvent"
+    )]
     fn item_bar();
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
     /// that comparators read (how full or far along it is, as a composter's
@@ -901,7 +1094,8 @@ pub trait Hooks {
         out = "output",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_has_analog_output"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_has_analog_output",
+        neoforge = "none (vanilla BlockBehaviour.hasAnalogOutputSignal; NeoForge adds no event or extension for it)"
     )]
     fn has_analog_output();
     /// `BlockState.getAnalogOutputSignal`: the signal a comparator reads from
@@ -922,7 +1116,8 @@ pub trait Hooks {
         out = "output",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_analog_output"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_analog_output",
+        neoforge = "none (vanilla BlockBehaviour.getAnalogOutputSignal; NeoForge adds no event or extension for it)"
     )]
     fn analog_output();
     /// Register namespaced NBT component types before content loads.
@@ -930,7 +1125,8 @@ pub trait Hooks {
         side = "both",
         contract = "collect",
         out = "types",
-        context = "registration"
+        context = "registration",
+        neoforge = "RegisterEvent"
     )]
     fn component_types();
     /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
@@ -947,7 +1143,8 @@ pub trait Hooks {
         contract = "replace",
         out = "answer",
         scope = "item",
-        key = "stack"
+        key = "stack",
+        neoforge = "none (vanilla DispenserBlock.getDispenseMethod; NeoForge adds no event or extension for it)"
     )]
     fn dispense_item();
     /// Client-side image component for this stack's tooltip. Answer its width/height
@@ -958,13 +1155,20 @@ pub trait Hooks {
         contract = "replace",
         out = "size",
         scope = "item",
-        key = "stack"
+        key = "stack",
+        neoforge = "RegisterClientTooltipComponentFactoriesEvent"
     )]
     fn tooltip_component();
     /// Render the measured component at origin, inside the tooltip background.
     /// Stack is the component's data. Use native_sprite/native_fill/native_text;
     /// size is the measurement returned by native_tooltip_component this frame.
-    #[hook(side = "client", contract = "listen", scope = "item", key = "stack")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        scope = "item",
+        key = "stack",
+        neoforge = "RegisterClientTooltipComponentFactoriesEvent"
+    )]
     fn tooltip_component_draw();
     /// On an authoritative server, `BlockState.canSurvive` for `state` at
     /// `pos` (`BlockBehaviour.canSurvive`), before the block answers it: as
@@ -981,7 +1185,8 @@ pub trait Hooks {
         out = "survives",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_can_survive"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_can_survive",
+        neoforge = "none (vanilla BlockBehaviour.canSurvive; NeoForge adds no event or extension for it)"
     )]
     fn can_survive();
     /// On an authoritative server, `VegetationBlock.mayPlaceOn` for the
@@ -997,7 +1202,8 @@ pub trait Hooks {
         out = "may",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_may_place_on"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_may_place_on",
+        neoforge = "IBlockExtension.canSustainPlant"
     )]
     fn may_place_on();
     /// Draw the mod block entity at `pos`, of block `block`
@@ -1017,7 +1223,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         scope = "block_entity",
-        key = "block"
+        key = "block",
+        neoforge = "EntityRenderersEvent.RegisterRenderers"
     )]
     fn block_entity_submit();
     /// Where the mod block entity at `pos` draws, for culling
@@ -1032,7 +1239,8 @@ pub trait Hooks {
         contract = "collect",
         out = "bounds",
         scope = "block_entity",
-        key = "block"
+        key = "block",
+        neoforge = "IBlockEntityRendererExtension.getRenderBoundingBox"
     )]
     fn block_entity_render_bounding_box();
     /// A block nothing in Horizon knows a `BonemealableBlock` for is about to
@@ -1054,7 +1262,8 @@ pub trait Hooks {
         out = "valid",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_valid_bonemeal_target"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_valid_bonemeal_target",
+        neoforge = "none (vanilla BonemealableBlock.isValidBonemealTarget; NeoForge adds no event or extension for it); BonemealEvent fires when meal is used, before the block's contract"
     )]
     fn is_valid_bonemeal_target();
     /// `BonemealableBlock.isBonemealSuccess` for a block that answered
@@ -1069,7 +1278,8 @@ pub trait Hooks {
         out = "success",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_bonemeal_success"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_bonemeal_success",
+        neoforge = "none (vanilla BonemealableBlock.isBonemealSuccess; NeoForge adds no event or extension for it)"
     )]
     fn is_bonemeal_success();
     /// `BonemealableBlock.performBonemeal` for a block that answered
@@ -1083,12 +1293,17 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_perform_bonemeal"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_perform_bonemeal",
+        neoforge = "none (vanilla BonemealableBlock.performBonemeal; NeoForge adds no event or extension for it)"
     )]
     fn perform_bonemeal();
     /// `Block.stepOn` for a mod block, on its authoritative server level.
     /// No self: the simulation owns the entity during this callback.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (vanilla Block.stepOn; NeoForge adds no event or extension for it)"
+    )]
     fn block_step_on();
     /// A consumable's effect of a mod's own kind: the item's `on_consume_effects`
     /// entry is of a type in a namespace of its own, and the loader kept it
@@ -1096,7 +1311,7 @@ pub trait Hooks {
     /// player is the one consuming, and the game's own effects,
     /// sounds, teleports and drops are open. An unclaimed kind does
     /// nothing.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(side = "server", contract = "listen", neoforge = "RegisterEvent")]
     fn consume_effect();
     /// A native mod's hook point (docs/modding/src/how-to/native-mods.md), declared in `hooks/*.rs` with the game's:
     /// the loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,
@@ -1113,7 +1328,8 @@ pub trait Hooks {
         out = "table",
         context = "data_load",
         version = 2,
-        target = "horizon_world::loot::native_loot_table_load"
+        target = "horizon_world::loot::native_loot_table_load",
+        neoforge = "LootTableLoadEvent"
     )]
     fn loot_table_load();
     /// A block broke or a mob died, and `drops` are the items about to drop, in
@@ -1135,7 +1351,12 @@ pub trait Hooks {
     /// a torch losing its wall, a piston, `/setblock ... destroy`), nor a
     /// creative break or a tool that can't harvest the block, nor experience.
     /// Server-side, for every player.
-    #[hook(side = "server", contract = "collect", out = "drops")]
+    #[hook(
+        side = "server",
+        contract = "collect",
+        out = "drops",
+        neoforge = "LivingDropsEvent, BlockDropsEvent"
+    )]
     fn loot_drops();
     /// A block is about to take the state it is placed in
     /// (`Block.getStateForPlacement(BlockPlaceContext)`), `state` the block's
@@ -1164,7 +1385,8 @@ pub trait Hooks {
         out = "answer",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_state_for_placement"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_state_for_placement",
+        neoforge = "none (vanilla Block.getStateForPlacement; NeoForge adds no event or extension for it)"
     )]
     fn state_for_placement();
     /// A `minecraft:post_attack` effect of a mod's own kind, on a mob a
@@ -1176,7 +1398,7 @@ pub trait Hooks {
     /// such entry is told once a hit, and once for each mob a sweep lands on.
     /// A hit on a player, and an entry inside `minecraft:all_of`, aren't told
     /// yet. An unclaimed kind does nothing.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(side = "server", contract = "listen", neoforge = "RegisterEvent")]
     fn enchant_effect();
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
@@ -1216,7 +1438,8 @@ pub trait Hooks {
         out = "components",
         context = "data_load",
         version = 2,
-        target = "horizon_world::item_defaults::native_modify_default_components"
+        target = "horizon_world::item_defaults::native_modify_default_components",
+        neoforge = "ModifyDefaultComponentsEvent"
     )]
     fn modify_default_components();
     /// A mouse button went down over the open screen
@@ -1273,7 +1496,11 @@ pub trait Hooks {
     /// `shake`, so several mods' shakes add up. Read while playing only;
     /// Horizon scales the sum by Distortion Effects and bounds it
     /// (`native_shake_matrix`).
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "ViewportEvent.ComputeCameraAngles"
+    )]
     fn camera_shake();
     /// The values native mods hand their shader packs in this frame,
     /// `partial` ticks past the last tick (0 to 1): a pack's WGSL reads
@@ -1281,7 +1508,11 @@ pub trait Hooks {
     /// pack reads; a mod that bundles its pack as `native-<mod id>` is the
     /// one that pack is for. Asked once a frame while a pack is on; a value
     /// that isn't finite reads as 0 (`native_shader_params_now`).
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart)"
+    )]
     fn shader_params();
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
@@ -1289,7 +1520,8 @@ pub trait Hooks {
         side = "client",
         contract = "cancel",
         out = "canceled",
-        cancellable = true
+        cancellable = true,
+        neoforge = "ExtractBlockOutlineRenderStateEvent"
     )]
     fn block_highlight();
     /// Before one first-person hand, item, map or empty arm is drawn
@@ -1311,7 +1543,11 @@ pub trait Hooks {
     /// (`client_setup` is the once-only moment after the initial load). Runs in
     /// Reloading: published asset/data queries may refresh caches, but world
     /// handles and transactions remain unavailable.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "ClientResourceLoadFinishedEvent"
+    )]
     fn client_resources_reloaded();
     /// Append an item's custom decorations after its default bar, cooldown and count.
     /// Coordinates are the icon's top-left in GUI units, as the batch takes them;
@@ -1342,7 +1578,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        host = "read"
+        host = "read",
+        neoforge = "none (vanilla Item.getUseDuration; NeoForge adds no event or extension for it); LivingEntityUseItemEvent.Start can set a use's duration"
     )]
     fn use_duration();
     /// `Item.getUseAnimation` of `stack` in use, for first- and third-person
@@ -1350,14 +1587,25 @@ pub trait Hooks {
     /// change it. A `Spear` override on an item without kinetic data is refused
     /// as `None`. Asked on the client when each render consumer updates; answer
     /// from the stack alone.
-    #[hook(side = "client", contract = "listen", scope = "item", key = "stack")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        scope = "item",
+        key = "stack",
+        neoforge = "none (vanilla Item.getUseAnimation; NeoForge adds no event or extension for it)"
+    )]
     fn use_animation();
     /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
     /// when eating starts: `can_eat` arrives with vanilla's (creative,
     /// `can_always_eat`, or hungry). Clear it to refuse the food, set it to
     /// let a full player eat. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
-    #[hook(side = "both", contract = "listen", host = "read")]
+    #[hook(
+        side = "both",
+        contract = "listen",
+        host = "read",
+        neoforge = "none (vanilla Player.canEat; NeoForge adds no event or extension for it)"
+    )]
     fn can_eat();
     /// NeoForge's `LivingEntityUseItemEvent.Start`: `entity` starts using
     /// `stack` in `hand` (`LivingEntity.startUsingItem`), for `duration`
@@ -1457,7 +1705,12 @@ pub trait Hooks {
     /// player-only helpers give nothing; `host.commands().feedback()` answers on the
     /// console. A name no mod registered goes to vanilla's dispatcher as
     /// before.
-    #[hook(side = "server", contract = "cancel", out = "ran")]
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "ran",
+        neoforge = "none (a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions)"
+    )]
     fn perform_console_command();
     /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`,
     /// vanilla's `Screen.keyPressed`): `screen` is the screen it is, `key`
@@ -1534,7 +1787,12 @@ pub trait Hooks {
     /// player's integrated server included). Listener applies run first. A later reload refusal
     /// preserves the old engine generation, but does not undo callback effects. Contributions
     /// share one list, so a failed file cannot be attributed to a particular mod.
-    #[hook(side = "server", contract = "collect", out = "files")]
+    #[hook(
+        side = "server",
+        contract = "collect",
+        out = "files",
+        neoforge = "AddPackFindersEvent"
+    )]
     fn data_pack_files();
     /// Change the colours of `biome` (`minecraft:plains`) on this client: the
     /// grass, foliage (leaves, vines), dry foliage (leaf litter) and water
@@ -1544,7 +1802,11 @@ pub trait Hooks {
     /// and calls that when the season turns. The dark forest's modifier
     /// still applies to the grass set here; the swamp's noise colours
     /// replace it.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "none (NeoForge adds ColorResolvers with RegisterColorHandlersEvent.ColorResolvers; it does not retint a biome's own colours)"
+    )]
     fn biome_colors();
     /// The server's data tables are built (NeoForge's `TagsUpdatedEvent`
     /// with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of
@@ -1558,7 +1820,11 @@ pub trait Hooks {
     /// connected to a server never fires it. Runs in Reloading: published
     /// asset/data queries can rebind caches, including on first open; world
     /// handles and transactions remain unavailable.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "TagsUpdatedEvent.ServerDataLoad"
+    )]
     fn server_data_loaded();
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
     /// Called for world rendering and near-plane overlays; hand/HUD FOV uses its own path.
@@ -1700,7 +1966,12 @@ pub trait Hooks {
     /// piece from the start, the silent ones at volume 0, and raise them (a
     /// fuller arrangement as a village grows). Their sound events should be
     /// `stream: true` in `sounds.json`.
-    #[hook(side = "client", contract = "collect", out = "layers")]
+    #[hook(
+        side = "client",
+        contract = "collect",
+        out = "layers",
+        neoforge = "none (SelectMusicEvent swaps the one track; NeoForge has no layered music)"
+    )]
     fn music_layers();
     /// The server is about to send its data to the players (NeoForge's
     /// `OnDatapackSyncEvent`, its `sendRecipes`): push the recipe types
@@ -1774,7 +2045,11 @@ pub trait Hooks {
     /// closing (a lost connection, death, another dimension, out of reach, the
     /// block gone) is heard too (`recheckOpeners`). Once for each change, with
     /// no player's state swapped in. Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (vanilla ContainerOpenersCounter; NeoForge adds no event or extension for it); PlayerContainerEvent.Open and Close fire per player"
+    )]
     fn mod_container_viewers();
     /// NeoForge's `LivingKnockBackEvent`: `LivingEntity.knockback` is about to push entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) `strength` away from the
@@ -1825,7 +2100,11 @@ pub trait Hooks {
     /// value, so forcing orbs of different values together drops points unless the mod
     /// raises `into`'s value with `native_set_experience_orb` in `native_experience_orb_merge`.
     /// Server-side.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (vanilla ExperienceOrb.canMerge; NeoForge adds no event or extension for it)"
+    )]
     fn experience_orb_can_merge();
     /// The experience orb `into` is about to take `from` in, after
     /// `native_experience_orb_can_merge` said yes (`from` is 0 and `from_value` the
@@ -1835,7 +2114,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        cancellable = true
+        cancellable = true,
+        neoforge = "none (vanilla ExperienceOrb.tryMergeToExisting; NeoForge adds no event or extension for it)"
     )]
     fn experience_orb_merge();
     /// Slot placement and stack limits for registered vanilla and mod menus;
@@ -1853,7 +2133,8 @@ pub trait Hooks {
         context = "loop",
         cancellable = false,
         version = 2,
-        target = "horizon_client_lib::menu::native_menu_slot_rules"
+        target = "horizon_client_lib::menu::native_menu_slot_rules",
+        neoforge = "none (vanilla Slot.mayPlace and mayPickup; NeoForge adds no event or extension for it)"
     )]
     fn menu_slot_rules();
     /// NeoForge's `LivingEntityUseItemEvent.Tick`: each tick `entity` uses
@@ -1893,7 +2174,13 @@ pub trait Hooks {
     /// the server). Both sides, as `native_living_entity_use_item_tick`:
     /// change the world only where this `Game` runs the world, not on a
     /// server's client. Runs every tick of every use: check the item first.
-    #[hook(side = "both", contract = "listen", scope = "item", key = "stack")]
+    #[hook(
+        side = "both",
+        contract = "listen",
+        scope = "item",
+        key = "stack",
+        neoforge = "LivingEntityUseItemEvent.Tick"
+    )]
     fn on_use_tick();
     /// NeoForge's `LivingEntityUseItemEvent.Stop`: `entity` lets go of
     /// `stack` in `hand` before its use ran its time
@@ -1919,7 +2206,13 @@ pub trait Hooks {
     /// `native_living_entity_use_item_stop` let it through. Both sides, as
     /// vanilla's: change the world only where this `Game` runs the world,
     /// not on a server's client.
-    #[hook(side = "both", contract = "listen", scope = "item", key = "stack")]
+    #[hook(
+        side = "both",
+        contract = "listen",
+        scope = "item",
+        key = "stack",
+        neoforge = "LivingEntityUseItemEvent.Stop"
+    )]
     fn release_using();
     /// A loot function of a mod's own kind: the entry named a `type` in a
     /// namespace outside `minecraft:`, and the roll kept it for this call.
@@ -1928,7 +2221,8 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "stack",
-        target = "horizon_world::loot::native_loot_function"
+        target = "horizon_world::loot::native_loot_function",
+        neoforge = "RegisterEvent"
     )]
     fn loot_function();
     /// A loot condition of a mod's own kind: the entry named a `type` in a
@@ -1939,7 +2233,8 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "holds",
-        target = "horizon_world::loot::native_loot_condition"
+        target = "horizon_world::loot::native_loot_condition",
+        neoforge = "RegisterEvent"
     )]
     fn loot_condition();
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
@@ -2002,7 +2297,13 @@ pub trait Hooks {
     /// then does the tick keep the copy of each flying projectile that a
     /// canceled impact flies on from, so a game without such a mod pays
     /// nothing. Server-side.
-    #[hook(side = "server", contract = "collect", out = "hears", host = "read")]
+    #[hook(
+        side = "server",
+        contract = "collect",
+        out = "hears",
+        host = "read",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart); an opt-in gate for a hook"
+    )]
     fn hears_projectile_impacts();
     /// A projectile hit something (NeoForge's `ProjectileImpactEvent`, posted
     /// where vanilla's projectile has found what it meets, before the hit
@@ -2310,7 +2611,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "collect",
         out = "listened",
-        cancellable = false
+        cancellable = false,
+        neoforge = "none (Horizon-only; NeoForge has no counterpart); an opt-in gate for a hook"
     )]
     fn entity_tick_listened();
     /// A mob's or an armor stand's equipment slot took a different stack
@@ -2340,7 +2642,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "collect",
         out = "listened",
-        cancellable = false
+        cancellable = false,
+        neoforge = "none (Horizon-only; NeoForge has no counterpart); an opt-in gate for a hook"
     )]
     fn living_equipment_listened();
     /// Draw the player `player` (`who`: its profile name, and whether it is
@@ -2382,7 +2685,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "client",
         contract = "collect",
         out = "listened",
-        cancellable = false
+        cancellable = false,
+        neoforge = "none (Horizon-only; NeoForge has no counterpart); an opt-in gate for a hook"
     )]
     fn player_render_listened();
     /// A player finished editing a sign: `ServerGamePacketListenerImpl.updateSignText`
@@ -2969,7 +3273,11 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// experience unspent when it overrides a positive proposal. If the selected
     /// stack changes, the repair is skipped.
     /// Server-side, including `PlayerRef::give_experience_points`.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (NeoForge only scales a repair with IItemExtension.getXpRepairRatio)"
+    )]
     fn mending_repair();
     /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
     /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
@@ -2996,7 +3304,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         out = "odds",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_fire_odds"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_fire_odds",
+        neoforge = "IBlockExtension.getFlammability, IBlockExtension.getFireSpreadSpeed"
     )]
     fn fire_odds();
     /// On an authoritative server, `CampfireBlock.isSmokeSource` for the
@@ -3010,7 +3319,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         out = "smoke",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_smoke_source"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_smoke_source",
+        neoforge = "none (vanilla CampfireBlock.isSmokeSource; NeoForge adds no event or extension for it)"
     )]
     fn smoke_source();
     /// A firework rocket completed its explosion effects.
@@ -3117,7 +3427,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         out = "items",
         context = "data_load",
         version = 3,
-        target = "mod_api::crafting::native_ingredient"
+        target = "mod_api::crafting::native_ingredient",
+        neoforge = "ICustomIngredient"
     )]
     fn ingredient();
     /// A server player is about to open an inventory supplied by a block at
@@ -3344,7 +3655,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        cancellable = true
+        cancellable = true,
+        neoforge = "none (vanilla ServerGamePacketListenerImpl.handleSetCreativeModeSlot; NeoForge adds no event or extension for it)"
     )]
     fn creative_slot();
     /// The food level of the server player `player` (`name`) is about to change
@@ -3378,7 +3690,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        cancellable = true
+        cancellable = true,
+        neoforge = "none (vanilla hanging entity breaking; NeoForge adds no event or extension for it); AttackEntityEvent fires for players only"
     )]
     fn hanging_break();
     /// A server player places a hanging entity: an item frame
@@ -3396,7 +3709,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        cancellable = true
+        cancellable = true,
+        neoforge = "none (vanilla HangingEntityItem.useOn; NeoForge adds no event or extension for it); PlayerInteractEvent.RightClickBlock fires before it"
     )]
     fn hanging_place();
     /// The item `item` of a server player is about to lose `amount` points of
@@ -3468,7 +3782,12 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// itself (after a respawn or a change of level) keeps the last answer
     /// and does not ask again; the integrated server's owner is not asked
     /// when the world's cheats are switched.
-    #[hook(side = "server", contract = "collect", out = "names")]
+    #[hook(
+        side = "server",
+        contract = "collect",
+        out = "names",
+        neoforge = "none (NeoForge 26.3 has no such event)"
+    )]
     fn player_commands_sent();
     /// The item `item` of the server player `player` (`name`) broke in `slot`
     /// (`mainhand`, `offhand`, `head`, `chest`, `legs`, `feet`, `body` or
@@ -3521,7 +3840,12 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// command counts it as no change). For a change the game makes inside
     /// a player's turn their state is swapped in; for the hardcore respawn
     /// it is not.
-    #[hook(side = "server", contract = "cancel", out = "cancel")]
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "cancel",
+        neoforge = "PlayerEvent.PlayerChangeGameModeEvent"
+    )]
     fn player_game_mode_changed();
     /// A server player inserted a book into a lectern, after the block entity and inventory changed.
     /// `book` is the item id. Server-side.
@@ -3623,7 +3947,11 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// what the server does: a sprint that ends by itself (a hit's knockback,
     /// hunger, a wall) is not reported. The player's state is swapped in, so
     /// the helpers and `PlayerRef::tell` work. Once for each change, on a server.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (NeoForge has no sprint event)"
+    )]
     fn player_sprint();
     /// `player` (`name`) pressed the swap-hands key: heard before the main and
     /// off hand items swap (the `SWAP_ITEM_WITH_OFFHAND` player action that
@@ -3693,7 +4021,11 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// (`resource-pack` in `server.properties`) is answered before the
     /// player has joined, and those answers are not heard. Once for each
     /// answer, on a server.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (NeoForge has no resource-pack status event)"
+    )]
     fn resource_pack_status();
     /// The world's spawn point changed to `pos` and `angle`.
     #[hook(
@@ -3717,7 +4049,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        cancellable = true
+        cancellable = true,
+        neoforge = "none (NeoForge has no TNT priming event; the primed TNT entity joins with EntityJoinLevelEvent)"
     )]
     fn tnt_primed();
     /// A boat or minecart was created at `pos`, after it joined the level.
@@ -3760,7 +4093,11 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// vehicle. Not heard: a vehicle moved before anyone rode it, a mount
     /// (horse, pig...) or a vehicle carrying only a mob. Server-side, in the
     /// level the vehicle is in.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (NeoForge has no vehicle move event; EntityTickEvent covers the tick)"
+    )]
     fn vehicle_moved();
     /// The server world's border bounds changed, either immediately or when
     /// its timed size change was requested.
@@ -4223,7 +4560,11 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// A hopper at `pos` began an item transfer attempt. This runs after its
     /// cooldown and enabled checks, before pushing or pulling any items.
     /// Server-side, including the single-player server.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (NeoForge has no hopper event)"
+    )]
     fn prepare_hopper_transfer();
     /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent.
     #[hook(

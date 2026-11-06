@@ -11,7 +11,7 @@ use horizon_client::{
     items::ItemStack,
     mesher::Vertex,
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 pub use mod_api::game::{NativeMapDecoration, NativeMapInfo};
 use std::collections::HashMap;
 
@@ -2003,6 +2003,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,

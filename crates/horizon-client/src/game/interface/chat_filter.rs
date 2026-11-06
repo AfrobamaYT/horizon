@@ -7,10 +7,10 @@ use super::{Game, dedicated};
 use horizon_chat_filter::Action;
 use horizon_client::lan::hub::{HostEvent, chat_filter::Place};
 use horizon_client::text::Text;
+use horizon_core::nbt::Tag;
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use horizon_protocol::text::{literal, translatable};
 use horizon_server_files::user_lists::{BanEntry, NameAndId};
-use horizon_world::nbt::Tag;
 
 /// A moderation reply retains its translation component for each client's language.
 #[derive(Debug, PartialEq)]

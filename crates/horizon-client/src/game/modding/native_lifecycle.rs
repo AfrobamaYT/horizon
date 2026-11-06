@@ -244,6 +244,7 @@ impl Game<'_> {
             self.native_world_lifecycle(&context, WorldPhase::WorldCloseFinal, "");
         }
         self.attachment_indexes.clear();
+        mod_api::__private::clear_game_parts();
     }
 
     pub(super) fn native_lifecycle_server_tick_start(&mut self, world_running: bool) {

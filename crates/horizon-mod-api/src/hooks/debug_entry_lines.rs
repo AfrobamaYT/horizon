@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "client",
         contract = "collect",
         out = "lines",
-        cancellable = false
+        cancellable = false,
+        neoforge = "RegisterDebugEntriesEvent"
     )]
     fn debug_entry_lines();
 }

@@ -1561,8 +1561,21 @@ impl Audio {
         volume: f32,
         pitch: f32,
     ) {
+        let seed = self.random.next_long();
+        self.play_on_seeded(source, event, at, volume, pitch, seed);
+    }
+    /// A level sound with an explicit category and seed, as received from the server.
+    pub fn play_on_seeded(
+        &mut self,
+        source: usize,
+        event: &str,
+        at: Option<[f64; 3]>,
+        volume: f32,
+        pitch: f32,
+        seed: i64,
+    ) {
         self.source_override = Some(source);
-        self.play(event, at, volume, pitch);
+        self.play_seeded(event, at, volume, pitch, seed);
         self.source_override = None;
     }
     /// `SimpleSoundInstance.forJukeboxSong` at a jukebox; the handle stays
@@ -1714,6 +1727,29 @@ mod tests {
         assert_eq!(archived, original);
         assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
         std::fs::remove_dir(&folder).unwrap();
+    }
+
+    #[test]
+    fn explicit_category_seed_does_not_advance_local_sound_random() {
+        let source = ResourceSource::indexed(Default::default());
+        let mut audio = Audio::silent(&source);
+        let mut expected = audio.random.clone();
+        audio.capture = Some(Vec::new());
+        audio.play_on_seeded(
+            8,
+            "minecraft:entity.cow.ambient",
+            Some([1.0; 3]),
+            0.5,
+            1.5,
+            -17,
+        );
+        assert_eq!(audio.random.next_long(), expected.next_long());
+        let capture = audio.capture.as_ref().unwrap();
+        assert_eq!(capture.len(), 1);
+        assert_eq!(capture[0].source, 8);
+        assert_eq!(capture[0].position, [1.0; 3]);
+        assert_eq!((capture[0].volume, capture[0].pitch), (0.5, 1.5));
+        assert!(audio.source_override.is_none());
     }
 
     #[test]

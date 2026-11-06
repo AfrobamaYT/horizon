@@ -92,9 +92,9 @@ fn view_pages(data: Option<&StackData>) -> Vec<Text> {
         .map(|(i, page)| match tagged.then(|| &w.page_tags[i]) {
             // A component object, or a component list (`ComponentSerialization`
             // takes both; servers behind ViaVersion send the list form).
-            Some(
-                tag @ (horizon_world::nbt::Tag::Compound(_) | horizon_world::nbt::Tag::List(_)),
-            ) => horizon_client::entity_nbt::name_text(tag),
+            Some(tag @ (horizon_core::nbt::Tag::Compound(_) | horizon_core::nbt::Tag::List(_))) => {
+                horizon_client::entity_nbt::name_text(tag)
+            }
             _ => Text::literal(page),
         })
         .collect()

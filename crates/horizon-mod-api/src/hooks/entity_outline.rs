@@ -11,6 +11,10 @@ pub trait Hooks {
     /// server and other players see, stays. Asked each frame for every mob,
     /// player (yourself in third person), dropped item and projectile drawn.
     /// API @API:entity_outline@.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "none (NeoForge 26.3 has no glowing or team colour override)"
+    )]
     fn entity_outline();
 }

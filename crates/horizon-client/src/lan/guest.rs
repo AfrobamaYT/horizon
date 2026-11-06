@@ -303,7 +303,7 @@ pub struct Guest {
     /// (`ServerPlayer.restoreFrom`, `PlayerMotion::carried_attributes`),
     /// until that body exists: the scale a player has set stays through a
     /// respawn and a change of level (#3684).
-    pub carried_attributes: Option<horizon_world::nbt::Tag>,
+    pub carried_attributes: Option<horizon_core::nbt::Tag>,
     /// The vehicle the player's file names (`ServerPlayer.saveParentVehicle`'s
     /// "RootVehicle"), for the ride to come back on the next login.
     pub saved_vehicle: Option<[i32; 4]>,
@@ -444,7 +444,7 @@ pub struct Guest {
     /// An unfinished drag in the inventory menu.
     pub drag: Option<(u8, Vec<usize>)>,
     /// The compound this player was loaded from, for fields Horizon does not model.
-    pub saved: Option<horizon_world::nbt::Tag>,
+    pub saved: Option<horizon_core::nbt::Tag>,
     /// Server-owned attachment data for this player.
     pub attachments: horizon_world::attachments::Attachments,
     /// `ServerPlayer.seenCredits`: the end poem has been shown.
@@ -1031,8 +1031,8 @@ fn dye_id(name: &str) -> Option<i32> {
 /// `SignText.STREAM_CODEC` of a saved `SignText.CODEC` value: the four
 /// messages, the four filtered ones when it has them, the dye's id (black when
 /// absent) and the glow.
-fn sign_text_bytes(text: &horizon_world::nbt::Tag) -> Option<Vec<u8>> {
-    use horizon_world::nbt::Tag;
+fn sign_text_bytes(text: &horizon_core::nbt::Tag) -> Option<Vec<u8>> {
+    use horizon_core::nbt::Tag;
     let lines = |key: &str| match text.get(key) {
         Some(Tag::List(lines)) if lines.len() == 4 => Some(lines),
         _ => None,
@@ -1099,7 +1099,7 @@ fn network_stack(
     }
     if let Some(d) = s.data() {
         // TridentItem.use runs on both peers: each must see the stack's own durability limit.
-        if let Some(horizon_world::nbt::Tag::Int(max)) = d.other("minecraft:max_damage") {
+        if let Some(horizon_core::nbt::Tag::Int(max)) = d.other("minecraft:max_damage") {
             stack.added.push((
                 horizon_protocol::item::component::MAX_DAMAGE,
                 horizon_protocol::item::Component::Int(*max),
@@ -1273,7 +1273,7 @@ fn network_stack(
         // The compass's lodestone target.
         if let Some(t) = d.other("minecraft:lodestone_tracker") {
             let target = t.get("target").and_then(|g| {
-                let Some(horizon_world::nbt::Tag::IntArray(pos)) = g.get("pos") else {
+                let Some(horizon_core::nbt::Tag::IntArray(pos)) = g.get("pos") else {
                     return None;
                 };
                 let dimension = crate::save::text(g.get("dimension"))?;
@@ -1419,9 +1419,9 @@ fn network_stack(
     // components), so a server menu's items can say more than their name.
     if let Some(lore_tag) = s.data().and_then(|d| d.other("minecraft:lore")) {
         let lines = match lore_tag {
-            horizon_world::nbt::Tag::List(lines) => Some(lines.clone()),
+            horizon_core::nbt::Tag::List(lines) => Some(lines.clone()),
             // A string is one literal line, as ComponentSerialization decodes a string tag.
-            horizon_world::nbt::Tag::Compound(_) | horizon_world::nbt::Tag::String(_) => {
+            horizon_core::nbt::Tag::Compound(_) | horizon_core::nbt::Tag::String(_) => {
                 Some(vec![lore_tag.clone()])
             }
             _ => None,
@@ -1441,16 +1441,16 @@ fn network_stack(
     // The stack's custom rarity ("common", "uncommon", "rare", "epic" or 0..=3).
     if let Some(r) = s.data().and_then(|d| d.other("minecraft:rarity")) {
         let index = match r {
-            horizon_world::nbt::Tag::String(s) => match &*s.to_string_lossy() {
+            horizon_core::nbt::Tag::String(s) => match &*s.to_string_lossy() {
                 "common" => Some(0),
                 "uncommon" => Some(1),
                 "rare" => Some(2),
                 "epic" => Some(3),
                 _ => None,
             },
-            horizon_world::nbt::Tag::Byte(b) if (0..=3).contains(b) => Some(*b as i32),
-            horizon_world::nbt::Tag::Short(s) if (0..=3).contains(s) => Some(*s as i32),
-            horizon_world::nbt::Tag::Int(i) if (0..=3).contains(i) => Some(*i),
+            horizon_core::nbt::Tag::Byte(b) if (0..=3).contains(b) => Some(*b as i32),
+            horizon_core::nbt::Tag::Short(s) if (0..=3).contains(s) => Some(*s as i32),
+            horizon_core::nbt::Tag::Int(i) if (0..=3).contains(i) => Some(*i),
             _ => None,
         };
         if let Some(index) = index {
@@ -1475,7 +1475,7 @@ fn network_stack(
         stack
             .removed
             .push(horizon_protocol::item::component::MAX_STACK_SIZE);
-    } else if let Some(horizon_world::nbt::Tag::Int(n)) =
+    } else if let Some(horizon_core::nbt::Tag::Int(n)) =
         s.data().and_then(|d| d.other("minecraft:max_stack_size"))
         && (1..=99).contains(n)
     {
@@ -1503,7 +1503,7 @@ fn network_stack(
     }
     // Arbitrary NBT other mods and item models read back client-side
     // (`item_model.rs`'s `custom_data_at`), as vanilla's DataComponentPatch does.
-    if let Some(tag @ horizon_world::nbt::Tag::Compound(_)) =
+    if let Some(tag @ horizon_core::nbt::Tag::Compound(_)) =
         s.data().and_then(|d| d.other("minecraft:custom_data"))
     {
         stack.added.push((
@@ -1524,8 +1524,8 @@ fn network_stack(
 }
 
 /// `CustomModelData.CODEC` read from its saved form, for its stream codec.
-fn custom_model_data(t: &horizon_world::nbt::Tag) -> horizon_protocol::item::Component {
-    use horizon_world::nbt::Tag;
+fn custom_model_data(t: &horizon_core::nbt::Tag) -> horizon_protocol::item::Component {
+    use horizon_core::nbt::Tag;
     // NbtOps writes a list of ints or bytes as an int or byte array.
     let entries = |key: &str| -> Vec<Tag> {
         match t.get(key) {
@@ -1581,9 +1581,9 @@ pub fn within_block_range(eye: [f64; 3], range: f64, pos: [i32; 3]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_core::nbt::Tag;
     use horizon_protocol::buf::{Codec, Reader, Writer};
     use horizon_protocol::item::{Component, component};
-    use horizon_world::nbt::Tag;
 
     #[test]
     fn lore_lines_reach_the_client() {
@@ -1698,7 +1698,7 @@ mod tests {
         let mut horn = ItemStack::new("minecraft:goat_horn", 1);
         horn.data_mut().other.push((
             "minecraft:instrument".into(),
-            horizon_world::nbt::Tag::String("minecraft:sing_goat_horn".into()),
+            horizon_core::nbt::Tag::String("minecraft:sing_goat_horn".into()),
         ));
         let synced_id = |registry: &str, name: &str| match (registry, name) {
             ("minecraft:instrument", "minecraft:sing_goat_horn") => Some(1),
