@@ -725,7 +725,7 @@ mod tests {
                 "ordered"
             );
             assert!(positions.contains(&[0, -3]) && positions.contains(&[2, -1]));
-            let nether = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(nether.loaded_chunks(game), None, "not opened yet");
         });
     }
