@@ -1,11 +1,9 @@
 //! The modding book's wasm sample, built by `cargo horizon-mod build --wasm`, loaded as the game
 //! loads it. CI builds the sample first and points `HORIZON_WASM_SAMPLE` at its `.hmod` and
 //! `HORIZON_WASM_STD` at the std member; the test is ignored elsewhere.
-use std::sync::Mutex;
-
 use horizon_mod_wasm::{Refusal, WasmPackage};
 use horizon_mods::manifest::Manifest;
-use mod_api::Text;
+use mod_api::testing::FakeHost;
 
 /// The built sample: its manifest and its `mod.wasm`, and the std member.
 fn sample() -> (Manifest, Vec<u8>, Vec<u8>) {
@@ -36,24 +34,6 @@ fn listing(manifest: &Manifest, injection: &str) -> Manifest {
         wasm.toolchain(),
     ))
     .unwrap()
-}
-
-/// The chat lines a point's listeners broadcast.
-#[derive(Default)]
-struct Server(Mutex<Vec<String>>);
-
-impl mod_api::Host for Server {}
-
-impl mod_api::ServerHost for Server {
-    fn messages(&self) -> &dyn mod_api::Messages {
-        self
-    }
-}
-
-impl mod_api::Messages for Server {
-    fn broadcast(&self, line: Text) {
-        self.0.lock().unwrap().push(line.plain());
-    }
 }
 
 #[test]
@@ -111,7 +91,7 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         mod_points::__private::POINTS[mod_points::PointId::Tick as usize]
             .load(std::sync::atomic::Ordering::Acquire)
     );
-    let mut server = Server::default();
+    let mut server = FakeHost::new();
     for _ in 0..400 {
         let mut args = mod_points::TickArgs::__new();
         mod_points::__private::fire(mod_points::PointId::Tick, "tick", &mut |listener| {
@@ -119,8 +99,14 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         });
         assert!(!args.cancel, "the sample lets the tick run");
     }
+    let said: Vec<String> = server
+        .messages
+        .broadcast_lines()
+        .iter()
+        .map(|line| line.plain())
+        .collect();
     assert_eq!(
-        *server.0.lock().unwrap(),
+        said,
         [
             "hello_wasm: 200 server ticks",
             "hello_wasm: 400 server ticks"

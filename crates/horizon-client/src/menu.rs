@@ -3622,6 +3622,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::{banner::Banners, brewing::Brewing, crafting::Recipes};
     use horizon_world::loot::PackOverlay;
+    use mod_api::testing::FakeHost;
 
     fn stack(item: &str, count: u32) -> Option<ItemStack> {
         Some(ItemStack {
@@ -5150,11 +5151,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A server host that answers nothing: the hooks here don't call it.
-    struct NoHost;
-    impl mod_api::Host for NoHost {}
-    impl mod_api::ServerHost for NoHost {}
-
     /// Records what `player_brewed_potion` told it.
     struct BrewWatcher(std::sync::Arc<std::sync::Mutex<Vec<(u128, i32, ItemStack)>>>);
 
@@ -5212,7 +5208,7 @@ pub(crate) mod tests {
             "brew-watcher",
             Box::new(BrewWatcher(seen.clone())),
         )];
-        let mut host = NoHost;
+        let mut host = FakeHost::new();
         mod_api::testing::with_mods(mods.into(), || {
             for input in [Input::Pickup, Input::QuickMove] {
                 let mut menu = Menu::new(Kind::Brewing);

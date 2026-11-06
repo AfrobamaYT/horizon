@@ -16,6 +16,8 @@ semver = "1"
 log = "0.4"
 
 [dev-dependencies]
+# `FakeHost`, the host the tests run mods against.
+horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
 # A component built in the test, importing a function this game doesn't have.
 wasm-encoder = "0.261"
 wit-parser = "0.261"

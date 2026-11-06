@@ -3,43 +3,18 @@
 //! another group asking a capability of the same name gets none. CI builds the mods in
 //! `tests/groups/` first and points `HORIZON_WASM_GROUPS` at that folder and `HORIZON_WASM_STD`
 //! at the std member; the test is ignored elsewhere.
-use mod_api::__private::game::BackendRefOf;
 use mod_api::__private::game::Fields;
-use mod_api::{
-    Backend, BackendRef, BlockEntityRef, BlockEntityTypeKey, Host, LevelRef, NativeWorldEpoch,
-    ServerChatEvent, ServerHost, Text,
-};
+use mod_api::testing::FakeHost;
+use mod_api::{ServerChatEvent, Text};
 
 /// One level with a `test:counter_box` block entity at its origin column.
-struct World;
-
-fn overworld() -> LevelRef {
-    LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld")
+fn world() -> FakeHost {
+    let mut host = FakeHost::new();
+    host.level
+        .block_entity([0, 64, 0])
+        .of_type("test:counter_box");
+    host
 }
-
-impl Backend for World {
-    fn level_in_place(&self, level: LevelRef) -> bool {
-        level == overworld()
-    }
-    fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
-        (entity.fields().position == [0, 64, 0])
-            .then(|| mod_api::__private::game::block_entity_type_key("test:counter_box"))
-    }
-}
-
-impl Host for World {
-    fn backend(&self) -> Option<BackendRef<'_>> {
-        Some(BackendRef::of(self))
-    }
-    fn level(&self, dimension: &str) -> Option<LevelRef> {
-        (dimension == "minecraft:overworld").then(overworld)
-    }
-    fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-        Some(mod_api::__private::game::block_entity_ref(level, position))
-    }
-}
-
-impl ServerHost for World {}
 
 /// The built group mods, and the std member.
 fn built() -> ([horizon_mod_wasm::WasmPackage; 4], Vec<u8>) {
@@ -115,6 +90,7 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     mod_api::__private::install_parts(&loaded.mods).unwrap();
+    let mut world = world();
     let mut answers: Vec<String> = loaded
         .mods
         .iter()
@@ -129,7 +105,7 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
                 message: &mut message,
                 replies: &mut replies,
             };
-            entry.fields().hooks.server_chat(&mut World, &mut event);
+            entry.fields().hooks.server_chat(&mut world, &mut event);
             message.plain()
         })
         .filter(|answer| !answer.is_empty())

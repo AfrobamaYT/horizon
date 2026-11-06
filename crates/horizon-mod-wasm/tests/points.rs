@@ -3,13 +3,8 @@
 //! and points `HORIZON_WASM_POINTS` at that folder and `HORIZON_WASM_STD` at the std member; the
 //! test is ignored elsewhere.
 use mod_api::HostSide;
+use mod_api::testing::FakeHost;
 use mod_points::{HandleChatInputArgs, PointId, Points};
-
-struct Server;
-
-impl mod_api::Host for Server {}
-
-impl mod_api::ServerHost for Server {}
 
 /// A native mod appending `N` at the same point.
 struct NativeTail;
@@ -47,7 +42,9 @@ fn native_and_wasm_listeners_at_a_point_run_in_the_installed_order() {
     mod_points::__private::fire(
         PointId::HandleChatInput,
         "handle_chat_input",
-        &mut |listener| listener.handle_chat_input(HostSide::Server(&mut Server), &mut args),
+        &mut |listener| {
+            listener.handle_chat_input(HostSide::Server(&mut FakeHost::new()), &mut args)
+        },
     );
     assert_eq!(args.message, "xNW");
 }

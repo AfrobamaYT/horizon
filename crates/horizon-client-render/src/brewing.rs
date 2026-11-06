@@ -630,12 +630,8 @@ mod tests {
     }
 
     use mod_api::Flow;
+    use mod_api::testing::FakeHost;
     use std::sync::{Arc, Mutex};
-
-    /// A server host that answers nothing: the hooks here don't call it.
-    struct NoHost;
-    impl mod_api::Host for NoHost {}
-    impl mod_api::ServerHost for NoHost {}
 
     /// Cancels every brew and leaves its own slots; records what it saw.
     struct BrewSwapper(Arc<Mutex<Vec<String>>>);
@@ -716,9 +712,9 @@ mod tests {
             stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 2));
             stand
         };
-        let mut host = NoHost;
+        let mut host = FakeHost::new();
         // What `tick_brewing_stand` does once the brew is due.
-        let brew = |host: &mut NoHost, stand: &mut BrewingStand| {
+        let brew = |host: &mut FakeHost, stand: &mut BrewingStand| {
             let mut stacks = stand.items.clone();
             let mut cancel = false;
             mod_api::dispatch_potion_brew_pre(host, [1, 2, 3], &mut stacks, &mut cancel);

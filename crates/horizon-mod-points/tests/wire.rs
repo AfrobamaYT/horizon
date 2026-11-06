@@ -1,14 +1,11 @@
 //! How records cross to a wasm mod (`mod_points::wire`), on the real points: an integration test, so
 //! the generated points compile once for the tests, not again as a unit-test copy of the crate.
 #![cfg(feature = "wasm-host")]
+use mod_api::testing::FakeHost;
 use mod_points::__private::wire::{Forward, Mismatch, PointHost, Record, Value, Wire, forwarded};
 use mod_points::places::SHAPES;
 use mod_points::{PointId, ids};
 use std::borrow::Cow;
-
-struct Host;
-impl mod_api::Host for Host {}
-impl mod_api::ServerHost for Host {}
 
 struct Listener(fn(PointId, PointHost<'_>, &mut dyn Record));
 impl Forward for Listener {
@@ -109,7 +106,7 @@ fn a_record_crosses_and_takes_back_what_a_listener_changed() {
         ]
     );
     let mut record = mod_points::HandleChatInputArgs::__new("hi");
-    listener.handle_chat_input(mod_api::HostSide::Server(&mut Host), &mut record);
+    listener.handle_chat_input(mod_api::HostSide::Server(&mut FakeHost::new()), &mut record);
     assert_eq!((&*record.message, record.cancel), ("hello", true));
 
     // Unchanged text stays the game's own borrow.
@@ -117,17 +114,17 @@ fn a_record_crosses_and_takes_back_what_a_listener_changed() {
         record.write_back(record.lower()).unwrap();
     })));
     let mut kept = mod_points::HandleChatInputArgs::__new("hi");
-    unchanged.handle_chat_input(mod_api::HostSide::Server(&mut Host), &mut kept);
+    unchanged.handle_chat_input(mod_api::HostSide::Server(&mut FakeHost::new()), &mut kept);
     assert!(matches!(kept.message, Cow::Borrowed("hi")));
 
     let mut reach = mod_points::ReachArgs::__new();
-    listener.reach(&Host, &mut reach);
+    listener.reach(&FakeHost::new(), &mut reach);
     assert_eq!(reach.result, Some(6.0));
-    listener.reach_return(&Host, &mut reach);
+    listener.reach_return(&FakeHost::new(), &mut reach);
     assert_eq!(reach.result, Some(7.0));
 
     let mut turn = mod_points::TurnPlayerArgs::__new(1.0, 2.0);
-    listener.turn_player(mod_api::HostSide::Server(&mut Host), &mut turn);
+    listener.turn_player(mod_api::HostSide::Server(&mut FakeHost::new()), &mut turn);
     assert_eq!((turn.xo, turn.yo, turn.cancel), (1.0, 2.0, false));
 }
 
@@ -149,6 +146,6 @@ fn a_native_width_sentinel_survives_a_listener_that_leaves_it() {
         record.write_back(fields).unwrap();
     })));
     let mut record = mod_points::SlotCandidatesArgs::__new(usize::MAX);
-    listener.slot_candidates(mod_api::HostSide::Server(&mut Host), &mut record);
+    listener.slot_candidates(mod_api::HostSide::Server(&mut FakeHost::new()), &mut record);
     assert_eq!((record.limit, record.cancel), (u64::MAX, false));
 }
