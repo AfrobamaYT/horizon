@@ -2725,6 +2725,18 @@ impl Game<'_> {
             .expect("client reload notice on its owning thread");
         self.fire_client_resources_reloaded();
     }
+    /// `TextureAtlasStitchedEvent` for each atlas the resources just published, the blocks' then
+    /// the GUI's: on the first load before `client_setup`, after a successful reload before
+    /// `client_resources_reloaded`.
+    pub(super) fn texture_atlases_stitched(&mut self) {
+        for atlas in [mod_api::TextureAtlas::Blocks, mod_api::TextureAtlas::Gui] {
+            self.native_texture_atlas_stitched(atlas);
+        }
+    }
+    /// Atlas `atlas` was stitched and published: its sprites can be looked up.
+    pub(super) fn native_texture_atlas_stitched(&mut self, atlas: mod_api::TextureAtlas) {
+        self.fire_texture_atlas_stitched(atlas);
+    }
     /// NeoForge's `FMLClientSetupEvent`: the client started. Fires once per game process,
     /// after the first client load has applied and before the title screen's first frame;
     /// never again on a reload (`client_resources_reloaded`) or a new world.
@@ -10721,9 +10733,9 @@ impl Game<'_> {
             .enchantments
             .can_enchant(self.items(), id, item)
     }
-    /// The size of sprite `name` in its own pixels, as `native_sprite` draws it on `draw`, if
+    /// The size of GUI atlas sprite `name` in its own pixels, as `native_sprite` draws it, if
     /// there is one.
-    pub(super) fn native_sprite_size(&self, _draw: &HudBatch, name: &str) -> Option<[f32; 2]> {
+    pub(super) fn gui_sprite_pixels(&self, name: &str) -> Option<[f32; 2]> {
         let r = self.gui.atlas.sprites.get(name)?;
         Some([r.w as f32, r.h as f32])
     }
@@ -10738,7 +10750,7 @@ impl Game<'_> {
         let dst = [at[0], at[1], size, size];
         let sprite = look
             .and_then(|l| l.sprite)
-            .and_then(|s| self.native_sprite_size(batch, &s).map(|size| (s, size)));
+            .and_then(|s| self.gui_sprite_pixels(&s).map(|size| (s, size)));
         if let Some((name, px)) = sprite {
             self.native_sprite(batch, &name, [0.0, 0.0, px[0], px[1]], dst, Some(tint));
         } else {
@@ -12532,10 +12544,7 @@ mod tests {
                 surface: &mut batch,
             };
             // A server's HUD atlas is metrics-only (upstream 2e5a2629a): no sprite sheets,
-            // so sprite sizes answer None there, while an upper-case A still advances
-            // 6 GUI pixels.
-            assert_eq!(draw.sprite_size("font/ascii"), None);
-            assert_eq!(draw.sprite_size("mymod:no_such_sprite"), None);
+            // while an upper-case A still advances 6 GUI pixels.
             assert_eq!(draw.text_width("AA"), 12.0);
             assert_eq!(draw.text_width(""), 0.0);
         });

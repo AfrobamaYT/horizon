@@ -295,6 +295,7 @@ mod structure_template;
 mod sweep_attack;
 mod tag_fluid_reads;
 mod teleport_command;
+mod texture_atlas_stitched;
 mod tick_target_millis;
 mod toast_add;
 mod tooltip_color;

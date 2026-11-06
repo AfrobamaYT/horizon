@@ -234,7 +234,7 @@ pub use server_reload::{RetainedListeners, ServerListenerRegistry};
 pub use client_reload::ClientListenerRegistry;
 
 pub use crate::biome::{BiomeColors, SpawnEntry};
-pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
+pub use crate::block_sprites::{AtlasRegion, BlockSprites, FaceSprite, SpriteRef, TextureAtlas};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{CraftResult, Ingredient, Recipe, RecipePropertyAddition};
