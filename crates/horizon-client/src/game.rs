@@ -22007,7 +22007,7 @@ impl Game<'_> {
         );
         let data_maps = native_data_maps::DataMaps::load(
             &data_map_types,
-            &files,
+            &overlay,
             &items.item_tags,
             &items.block_tags,
         );

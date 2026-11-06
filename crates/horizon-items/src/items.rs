@@ -467,54 +467,52 @@ fn parse_instrument(v: &Value) -> Instrument {
         range: v["range"].as_f64().unwrap_or(0.0) as f32,
     }
 }
-fn load_instruments(root: &Path) -> HashMap<String, Instrument> {
-    let mut instruments = HashMap::new();
-    let Ok(dir) = fs::read_dir(root.join("data/minecraft/instrument")) else {
-        return instruments;
-    };
-    for entry in dir.flatten() {
-        let path = entry.path();
-        let (Some(stem), Ok(bytes)) = (path.file_stem().and_then(|s| s.to_str()), fs::read(&path))
-        else {
-            continue;
-        };
-        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
-            continue;
-        };
-        instruments.insert(format!("minecraft:{stem}"), parse_instrument(&v));
+/// Select one JSON resource per ID before applying the owning load's conditions.
+/// A skipped winning resource stays absent; it never uncovers a lower version.
+pub(crate) fn data_files(root: &Path, kind: &str, overlay: &PackOverlay) -> HashMap<String, Value> {
+    let mut files: HashMap<_, _> = horizon_world::damage_source::resource_files(root, kind)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(id, bytes)| {
+            serde_json::from_slice::<Value>(&bytes)
+                .ok()
+                .map(|v| (id, v))
+        })
+        .collect();
+    for (id, versions) in overlay.kind(kind) {
+        if let Ok(value) = serde_json::from_slice::<Value>(PackOverlay::top(versions)) {
+            files.insert(id.to_owned(), value);
+        }
     }
-    instruments
+    files.retain(|_, value| overlay.conditions.allows(value));
+    files
 }
-fn load_songs(root: &Path) -> HashMap<String, Song> {
-    let mut songs = HashMap::new();
-    let Ok(dir) = fs::read_dir(root.join("data/minecraft/jukebox_song")) else {
-        return songs;
-    };
-    for entry in dir.flatten() {
-        let path = entry.path();
-        let (Some(stem), Ok(bytes)) = (path.file_stem().and_then(|s| s.to_str()), fs::read(&path))
-        else {
-            continue;
-        };
-        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
-            continue;
-        };
-        let sound = match &v["sound_event"] {
-            Value::String(s) => s.clone(),
-            other => other["sound_id"].as_str().unwrap_or("").to_owned(),
-        };
-        songs.insert(
-            format!("minecraft:{stem}"),
-            Song {
-                sound,
-                length_ticks: (v["length_in_seconds"].as_f64().unwrap_or(0.0) as f32 * 20.0).ceil()
-                    as i64,
-                comparator: v["comparator_output"].as_i64().unwrap_or(0) as i32,
-                description: v["description"].clone(),
-            },
-        );
-    }
-    songs
+fn load_instruments(root: &Path, overlay: &PackOverlay) -> HashMap<String, Instrument> {
+    data_files(root, "instrument", overlay)
+        .into_iter()
+        .map(|(id, v)| (id, parse_instrument(&v)))
+        .collect()
+}
+fn load_songs(root: &Path, overlay: &PackOverlay) -> HashMap<String, Song> {
+    data_files(root, "jukebox_song", overlay)
+        .into_iter()
+        .map(|(id, v)| {
+            let sound = match &v["sound_event"] {
+                Value::String(s) => s.clone(),
+                other => other["sound_id"].as_str().unwrap_or("").to_owned(),
+            };
+            (
+                id,
+                Song {
+                    sound,
+                    length_ticks: (v["length_in_seconds"].as_f64().unwrap_or(0.0) as f32 * 20.0)
+                        .ceil() as i64,
+                    comparator: v["comparator_output"].as_i64().unwrap_or(0) as i32,
+                    description: v["description"].clone(),
+                },
+            )
+        })
+        .collect()
 }
 pub fn load_tags(
     root: &Path,
@@ -1059,8 +1057,8 @@ impl Items {
             block_tag_order: load_tag_lists(root, "block", overlay)?,
             fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
             loot,
-            songs: load_songs(root),
-            instruments: load_instruments(root),
+            songs: load_songs(root, overlay),
+            instruments: load_instruments(root, overlay),
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(
                 root, overlay, defaults,
             )),
@@ -2486,6 +2484,63 @@ mod tests {
     use super::*;
     use horizon_core::random::LegacyRandom;
     use serde_json::json;
+
+    #[test]
+    fn server_json_conditions_filter_selected_songs_instruments_and_enchantments() {
+        let root = std::env::temp_dir().join(format!("horizon-server-json-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let mut files = Vec::new();
+        for kind in ["jukebox_song", "instrument", "enchantment"] {
+            let dir = root.join("data/demo").join(kind);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("entry.json"), "{}").unwrap();
+            files.push((format!("{kind}/demo:entry"), vec![
+                b"{}".to_vec(),
+                json!({"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"provider"}],"description":"winning","max_level":7}).to_string().into_bytes(),
+            ]));
+            files.push((
+                format!("{kind}/demo:unknown"),
+                vec![
+                    json!({"neoforge:conditions":[{"type":"unsupported"}]})
+                        .to_string()
+                        .into_bytes(),
+                ],
+            ));
+        }
+        let off = PackOverlay {
+            files: &files,
+            ..PackOverlay::NONE
+        };
+        let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
+        let on = PackOverlay {
+            files: &files,
+            conditions: &enabled,
+        };
+        for kind in ["jukebox_song", "instrument", "enchantment"] {
+            assert!(data_files(&root, kind, &off).is_empty());
+            let selected = data_files(&root, kind, &on);
+            assert_eq!(selected.len(), 1);
+            assert_eq!(selected["demo:entry"]["description"], "winning");
+        }
+        assert!(load_songs(&root, &off).is_empty());
+        assert_eq!(
+            load_songs(&root, &on)["demo:entry"].description,
+            json!("winning")
+        );
+        assert!(load_instruments(&root, &off).is_empty());
+        assert!(load_instruments(&root, &on).contains_key("demo:entry"));
+        fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        assert!(
+            crate::enchant::Enchantments::load_with(&root, &off, &defaults)
+                .list
+                .is_empty()
+        );
+        let enchantments = crate::enchant::Enchantments::load_with(&root, &on, &defaults);
+        assert_eq!(enchantments.list.len(), 1);
+        assert_eq!(enchantments.list[0].max_level, 7);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn tag_conditions_use_enabled_server_ids_before_each_replace_and_reload() {
