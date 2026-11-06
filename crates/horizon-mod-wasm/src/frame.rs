@@ -322,17 +322,18 @@ impl<'t> Frame<'t> {
         }
         // Rust separates every mutable borrow from both mutable and shared arguments. Paths
         // prove separation without trusting cached pointers or aliases returned by thunks.
-        let mut borrowed = Vec::new();
-        if let Some(receiver) = receiver {
-            borrowed.push((receiver, thunk.writes & 1 != 0));
-        }
-        for (index, arg) in args.iter().enumerate() {
-            if let Call::Node(node) = arg {
-                borrowed.push((*node, thunk.writes >> (index + 1) & 1 != 0));
-            }
-        }
-        for (index, (left, left_written)) in borrowed.iter().enumerate() {
-            for (right, right_written) in &borrowed[index + 1..] {
+        let borrowed = receiver
+            .map(|receiver| (receiver, thunk.writes & 1 != 0))
+            .into_iter()
+            .chain(args.iter().enumerate().filter_map(|(index, arg)| {
+                if let Call::Node(node) = arg {
+                    Some((*node, thunk.writes >> (index + 1) & 1 != 0))
+                } else {
+                    None
+                }
+            }));
+        for (index, (left, left_written)) in borrowed.clone().enumerate() {
+            for (right, right_written) in borrowed.clone().skip(index + 1) {
                 if !left_written && !right_written {
                     continue;
                 }
