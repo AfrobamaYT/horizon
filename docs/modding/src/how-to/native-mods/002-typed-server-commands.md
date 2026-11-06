@@ -21,3 +21,10 @@ from the source's world, relative or local coordinates without loading chunks.
 A player's source is their position and rotation. The console has no source
 entity and uses the Overworld spawn's block corner with zero rotation, so `@s`
 cannot resolve there. Both hooks receive the same owned data, on native and wasm.
+
+When the usages a mod registers change at runtime, call
+`host.commands().refresh_commands()` on the server. At the start of the next
+server tick, every mod is asked to register again. The server rebuilds the typed
+command dispatcher and sends each player's tree after `player_commands_sent`
+filters it, as vanilla does after `/reload`. Repeated requests before that tick
+coalesce; without a world open to players, nothing is rebuilt.
