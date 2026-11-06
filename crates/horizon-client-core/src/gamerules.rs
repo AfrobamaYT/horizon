@@ -34,6 +34,11 @@ pub struct Rule {
     pub min: i32,
     pub max: i32,
 }
+impl Rule {
+    fn matches(&self, id: &str) -> bool {
+        self.name == id || (!id.contains(':') && self.name.strip_prefix("minecraft:") == Some(id))
+    }
+}
 struct VanillaRule {
     name: &'static str,
     category: &'static str,
@@ -188,10 +193,7 @@ impl RuleRegistry {
             .map(|(_, rule)| rule)
     }
     pub fn rule(&self, name: &str) -> Option<&Rule> {
-        self.available_rules(true).find(|r| {
-            r.name == name
-                || (!name.contains(':') && r.name.strip_prefix("minecraft:") == Some(name))
-        })
+        self.available_rules(true).find(|r| r.matches(name))
     }
 }
 /// The vanilla-backed registry, shared by all existing consumers.
@@ -398,10 +400,7 @@ impl GameRules {
     }
     /// Look up a definition in this rule set's registry.
     pub fn rule(&self, name: &str) -> Option<&Rule> {
-        self.available_rules().find(|rule| {
-            rule.name == name
-                || (!name.contains(':') && rule.name.strip_prefix("minecraft:") == Some(name))
-        })
+        self.available_rules().find(|rule| rule.matches(name))
     }
     pub fn get(&self, name: &str) -> Option<Value> {
         let index = self
@@ -410,9 +409,7 @@ impl GameRules {
             .iter()
             .enumerate()
             .find_map(|(index, rule)| {
-                ((rule.name == name
-                    || (!name.contains(':') && rule.name.strip_prefix("minecraft:") == Some(name)))
-                    && (index != RULES.len() || self.minecart_improvements))
+                ((rule.matches(name)) && (index != RULES.len() || self.minecart_improvements))
                     .then_some(index)
             })?;
         Some(self.values[index])
@@ -440,9 +437,7 @@ impl GameRules {
     /// Set a rule; false if the name or value type is wrong.
     pub fn set(&mut self, name: &str, value: Value) -> bool {
         let Some((index, r)) = self.registry.rules.iter().enumerate().find(|(index, r)| {
-            (*index != RULES.len() || self.minecart_improvements)
-                && (r.name == name
-                    || (!name.contains(':') && r.name.strip_prefix("minecraft:") == Some(name)))
+            (*index != RULES.len() || self.minecart_improvements) && (r.matches(name))
         }) else {
             return false;
         };

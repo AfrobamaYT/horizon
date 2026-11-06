@@ -7645,6 +7645,71 @@ mod tests {
     }
 
     #[test]
+    fn level_saved_rules_have_vanilla_keys_types_and_defaults() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-rule-defaults-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut level = super::Level::default();
+        level.write(&dir).unwrap();
+        let super::Tag::Compound(rules) = super::read_saved_data(&dir, "game_rules").unwrap()
+        else {
+            panic!("rule compound")
+        };
+        assert_eq!(rules.len(), 58);
+        assert!(
+            rules
+                .keys()
+                .all(|key| key.to_string().unwrap().starts_with("minecraft:"))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:random_tick_speed".into()),
+            Some(&super::Tag::Int(3))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:keep_inventory".into()),
+            Some(&super::Tag::Byte(0))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:max_snow_accumulation_height".into()),
+            Some(&super::Tag::Int(1))
+        );
+        assert!(!rules.contains_key(&"minecraft:max_minecart_speed".into()));
+        level.enabled_features = [crate::gamerules::MINECART_IMPROVEMENTS.to_owned()].into();
+        level.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("minecraft:max_minecart_speed"),
+            Some(&super::Tag::Int(8))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_bare_saved_rules_load_under_canonical_keys() {
+        let dir = std::env::temp_dir().join(format!("horizon-rule-legacy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        super::Level::default().write(&dir).unwrap();
+        super::write_saved_data(
+            &dir,
+            "game_rules",
+            super::Tag::compound([
+                ("keep_inventory", super::Tag::Byte(1)),
+                ("random_tick_speed", super::Tag::Int(7)),
+            ]),
+        )
+        .unwrap();
+        let level = super::Level::read(&dir).unwrap();
+        assert_eq!(level.game_rules.get("minecraft:keep_inventory"), Some(&1));
+        assert_eq!(
+            level.game_rules.get("minecraft:random_tick_speed"),
+            Some(&7)
+        );
+        assert!(!level.game_rules.contains_key("keep_inventory"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn level_save_preserves_absent_mod_rules() {
         let dir =
             std::env::temp_dir().join(format!("horizon-gamerules-unknown-{}", std::process::id()));
