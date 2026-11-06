@@ -99,29 +99,9 @@ pub fn render(
         label: None,
         source: wgpu::ShaderSource::Wgsl(entity_shader().into()),
     });
-    let entries: Vec<_> = (0..8)
-        .map(|binding| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty: match binding {
-                0 => wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                2 | 4 | 6 => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                _ => wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-            },
-            count: None,
-        })
-        .collect();
     let bindings = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
-        entries: &entries,
+        entries: &entity_binding_entries(),
     });
     let atlas_view = atlas_texture.create_view(&Default::default());
     let light_view = lightmap.create_view(&Default::default());
@@ -168,28 +148,29 @@ pub fn render(
         bind_group_layouts: &[Some(&bindings)],
         immediate_size: 0,
     });
-    let attributes = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Uint32,3=>Unorm8x4,4=>Uint8x4,5=>Snorm8x4,6=>Float32x2];
     let buffers = [Some(wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<Vertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &attributes,
+        attributes: &ENTITY_ATTRIBUTES,
     })];
     let reuse = reuse::Reuse::default();
     let kept = reuse.on(&device);
     let pipeline = entity_pipeline_factory(&kept, &layout, &layout, &shader, &buffers, format)(
-        "Entities",
-        None,
-        true,
-        wgpu::CompareFunction::GreaterEqual,
-        wgpu::DepthBiasState {
-            constant: 128,
-            slope_scale: 0.0,
-            clamp: 0.0,
+        EntityPipelineOptions {
+            label: "Entities",
+            cull_mode: None,
+            depth_write: true,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            bias: wgpu::DepthBiasState {
+                constant: 128,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
+            blend: wgpu::BlendState::ALPHA_BLENDING,
+            clouds: false,
+            fragment: "fs_entity",
+            write_mask: wgpu::ColorWrites::ALL,
         },
-        wgpu::BlendState::ALPHA_BLENDING,
-        false,
-        "fs_entity",
-        wgpu::ColorWrites::ALL,
     );
     let vertex = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
