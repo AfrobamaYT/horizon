@@ -607,15 +607,19 @@ fn the_end_asks_for_no_creature_packs_and_the_overworld_does() {
     };
     let assets = Arc::new(Assets::load(&root).unwrap());
     let biomes = Arc::new(Biomes::load(&root).unwrap());
+    let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     for (dimension, want) in [
         ("minecraft:overworld", false),
         ("minecraft:the_nether", false),
         ("minecraft:the_end", true),
     ] {
         let terrain = VanillaTerrain::for_dimension(
-            &root.join("worldgen"),
-            assets.registry,
-            &biomes,
+            horizon_client::vanillagen::TerrainResources {
+                dir: &root.join("worldgen"),
+                registry: assets.registry,
+                biomes: &biomes,
+                item_data: &item_data,
+            },
             12345,
             dimension,
         )
