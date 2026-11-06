@@ -2,7 +2,7 @@
 
 use super::{Dim, Game};
 use horizon_world::attachments::{
-    Holder, index::AttachmentIndex, observer::IndexedAttachmentObserver,
+    AttachmentLifetime, Holder, index::AttachmentIndex, observer::IndexedAttachmentObserver,
 };
 use mod_api::{AttachmentHolder, ChunkRef};
 use std::{
@@ -12,7 +12,34 @@ use std::{
 
 pub(super) type Indexes = HashMap<Dim, Arc<Mutex<AttachmentIndex<AttachmentHolder>>>>;
 
+#[cfg(test)]
+mod painting_tests;
+
 impl Game<'_> {
+    /// Publish saved contents only when an authoritative entity owns their lifetime.
+    pub(super) fn bind_saved_entity_attachments(&mut self, id: u32, slot: &mut AttachmentLifetime) {
+        if !self.native_authoritative() {
+            return;
+        }
+        let Some(level) = self.native_level(self.dim.id()) else {
+            return;
+        };
+        let Some(map) = self
+            .persist
+            .uuids
+            .get(&id)
+            .and_then(|uuid| self.entity_attachments.get_mut(uuid))
+            .filter(|map| map.has_index_entries())
+        else {
+            return;
+        };
+        let index = self.attachment_indexes.entry(self.dim).or_default();
+        *slot = AttachmentLifetime::new(map.bind_index(
+            index,
+            AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id)),
+        ));
+    }
+
     /// Publish the dimension's saved maps before listeners observe its load.
     pub(super) fn bind_dimension_attachments(&mut self, dim: Dim) {
         let Some(level) = self.native_level(dim.id()) else {

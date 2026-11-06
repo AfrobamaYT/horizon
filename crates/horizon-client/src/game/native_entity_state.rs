@@ -613,6 +613,7 @@ mod tests {
             assert_eq!(item.tick_count(game), Some(77));
 
             game.orbs.push(ExperienceOrb {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 id: 43,
