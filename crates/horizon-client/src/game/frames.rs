@@ -415,10 +415,20 @@ impl Game<'_> {
         // The framed map forgets the frame, except when the drops are off and
         // something caused the break (`removeFramedMap` runs only for a null
         // `causedBy` then).
-        if self.ui.rules.bool("entity_drops") || !by_player {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            || !by_player
+        {
             self.remove_framed_map(f);
         }
-        if !self.ui.rules.bool("entity_drops") || (by_player && self.creative) {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            || (by_player && self.creative)
+        {
             return;
         }
         let c = center(f);

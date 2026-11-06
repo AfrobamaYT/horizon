@@ -470,7 +470,13 @@ impl Game<'_> {
             if self.exec.returned.is_some() {
                 break;
             }
-            if self.exec.commands > self.ui.rules.int("max_command_sequence_length").max(1) as u32 {
+            if self.exec.commands
+                > self
+                    .ui
+                    .rules
+                    .int_at(horizon_client::gamerules::vanilla::MAX_COMMAND_SEQUENCE_LENGTH)
+                    .max(1) as u32
+            {
                 break;
             }
         }

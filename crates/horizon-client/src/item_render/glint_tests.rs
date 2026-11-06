@@ -161,7 +161,7 @@ fn gui_glint_matches_pinned_vanilla_atlas_input() {
         ),
     ]);
     let render = |foil| {
-        let mut batch = crate::hud::HudBatch::new([64, 64]);
+        let mut batch = crate::hud::HudBatch::scratch([64, 64]);
         gui::draw(
             &state("minecraft:item/enchanted_book", foil, DisplayContext::Gui),
             &renderer,
@@ -554,7 +554,7 @@ fn external_item_atlas_oracle() {
             ("item/enchanted_book".into(), missing),
             ("misc/enchanted_glint_item".into(), missing),
         ]);
-        let mut batch = crate::hud::HudBatch::new([64, 64]);
+        let mut batch = crate::hud::HudBatch::scratch([64, 64]);
         gui::draw(
             &state(
                 "minecraft:item/enchanted_book",

@@ -3545,6 +3545,9 @@ struct Game<'a> {
     water_plane_memo: std::cell::Cell<Option<f32>>,
     /// The camera's block and the second `water_plane` last scanned at.
     water_plane_scan: std::cell::Cell<Option<([i32; 3], i64)>>,
+    /// The mobs' box reach while the boats and minecarts tick, with the mob count it was
+    /// worked out for (`vehicle_mob_reach`).
+    vehicle_mob_reach: std::cell::Cell<Option<(usize, horizon_client::mobs::BoxReach)>>,
     persist: persist::EntityMemory,
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
     /// Connected to a server: the world comes from the network (game/remote.rs).
@@ -4588,7 +4591,11 @@ impl Game<'_> {
     /// the drops (`native_living_drops`) before they join the level.
     fn drop_inventory(&mut self, at: [f64; 3], dying: &creatures::DyingDrops<'_>) {
         let mut stacks: Vec<ItemStack> = Vec::new();
-        if !self.ui.rules.bool("keep_inventory") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+        {
             stacks.extend(self.inventory.iter_mut().filter_map(Option::take));
             stacks.extend(self.armor.iter_mut().rev().filter_map(Option::take));
             stacks.extend(self.offhand.take());
@@ -4745,7 +4752,11 @@ impl Game<'_> {
         // motion is `new ItemEntity(..)`'s own, from the item's random.
         let p = spill::pop_position(&mut self.world.random, pos);
         // Block.popResource draws its offsets before the private overload checks the gamerule.
-        if !self.ui.rules.bool("block_drops") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+        {
             return;
         }
         let v = dispenser::new_item_motion();
@@ -5543,7 +5554,10 @@ impl Game<'_> {
     /// with neither a server nor a player (the headless fixtures) ticks
     /// everywhere.
     fn update_chunk_tickets(&mut self) {
-        let rule = self.ui.rules.bool("spectators_generate_chunks");
+        let rule = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPECTATORS_GENERATE_CHUNKS);
         let mut players: Vec<((i32, i32), bool)> = self.lan.as_ref().map_or_else(Vec::new, |h| {
             h.hub
                 .guests
@@ -6656,7 +6670,10 @@ impl Game<'_> {
     /// so a block falling onto one that just landed lands on top of it. `i` is
     /// its place in the list; the caller has checked it is ticking.
     fn tick_one_falling(&mut self, i: usize) -> Result<()> {
-        let entity_drops = self.ui.rules.bool("entity_drops");
+        let entity_drops = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS);
         let mut f = self.falling.remove(i);
         let original = f.clone();
         match self.fall_step(&mut f, entity_drops) {
@@ -6990,7 +7007,10 @@ impl Game<'_> {
         // BeehiveBlock.playerWillDestroy: a creative break still drops the hive
         // with its bees and honey level.
         if creative
-            && self.ui.rules.bool("block_drops")
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
             && let Some((h, (honey, _))) = &hive
             && (!h.bees.is_empty() || honey.is_some_and(|l| l > 0))
             && let Some(stack) = self.picked_stack(pos, true)
@@ -7085,7 +7105,10 @@ impl Game<'_> {
                 if facts.name.starts_with("minecraft:infested_")
                     && !silk
                     && !canceled
-                    && self.ui.rules.bool("block_drops")
+                    && self
+                        .ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
                 {
                     let at = [
                         f64::from(pos[0]) + 0.5,
@@ -8681,7 +8704,11 @@ impl Game<'_> {
         self.native_inventory_ticks();
         if running {
             self.world.game_time += 1;
-            if self.ui.rules.bool("advance_weather") {
+            if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ADVANCE_WEATHER)
+            {
                 self.world.weather.tick_timers(&mut self.world.random);
             }
             self.world.weather.tick_levels();
@@ -8733,7 +8760,11 @@ impl Game<'_> {
         // Entities added since the last tick join the level before it ticks.
         self.native_joins_flush(false, 0);
         self.share_spawn_conditions();
-        horizon_client::mobs::sulfur_cube::set_tnt_explodes(self.ui.rules.bool("tnt_explodes"));
+        horizon_client::mobs::sulfur_cube::set_tnt_explodes(
+            self.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES),
+        );
         self.update_chunk_tickets();
         self.score_destroyed_entities();
         horizon_client::spans::time("tick_effects", || self.tick_effects(running));
@@ -8847,8 +8878,6 @@ impl Game<'_> {
         if let Some(log) = self.world.block_log.as_mut() {
             log.extend(held);
         }
-        // Everything that has joined has had its spawn packet.
-        self.ordered.announced = horizon_client::join_seq::JoinSeq::upcoming();
         self.tick_friends();
         horizon_client::spans::time("tick_hand", || self.tick_hand());
         horizon_client::spans::time("tick_sleep", || self.tick_sleep());
@@ -8867,6 +8896,10 @@ impl Game<'_> {
             self.run_ordered_ticks(horizon_client::join_seq::JoinSeq::MAX, true)?;
             self.apply_late_wind_pushes();
         }
+        // Everything that has joined has had its spawn packet and, if it joined
+        // before the entity passes (TNT a piston or repeater primed), its first
+        // tick in the late pass above (#10063).
+        self.ordered.announced = horizon_client::join_seq::JoinSeq::upcoming();
         if running {
             horizon_client::spans::time("tick_moving_pistons", || self.tick_moving_pistons())?;
             horizon_client::spans::time("tick_block_entities", || self.tick_block_entities())?;
@@ -13184,7 +13217,7 @@ impl Game<'_> {
         );
     }
     /// `Player.canCriticalAttack` for a living target at attack strength
-    /// `scale`: falling, off the ground, not in water, not blind (mobility
+    /// `scale`: falling, off the ground, not in water, not on a ladder, not blind (mobility
     /// restricted), not riding, not sprinting.
     pub(super) fn critical_attack(&self, scale: f32) -> bool {
         let player = self.player.as_ref();
@@ -13192,6 +13225,7 @@ impl Game<'_> {
             !p.ground.on_ground
                 && p.fall_distance > 0.0
                 && !p.fluids.was_touching_water
+                && !p.on_climbable
                 && !p.sprinting
         });
         let restricted = self.potions.effects.get("blindness").is_some() || self.riding.is_some();
@@ -13442,7 +13476,7 @@ impl Game<'_> {
         let interaction = if !self.can_entity_grief(source) {
             explosion::BlockInteraction::Keep
         } else {
-            self.destroy_type("mob_explosion_drop_decay")
+            self.destroy_type(horizon_client::gamerules::vanilla::MOB_EXPLOSION_DROP_DECAY)
         };
         self.server_explode(center, radius, interaction, fire)
     }
@@ -13457,7 +13491,7 @@ impl Game<'_> {
         let interaction = if !self.can_entity_grief(source) {
             explosion::BlockInteraction::Keep
         } else {
-            self.destroy_type("tnt_explosion_drop_decay")
+            self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY)
         };
         self.server_explode(center, radius, interaction, false)
     }
@@ -14845,7 +14879,7 @@ impl Game<'_> {
                 return Ok(UseResult::Pass);
             };
             // `BucketItem.use`: `level.mayInteract` and `mayUseItemAt`.
-            if !self.may_build() {
+            if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
                 return Ok(UseResult::Fail);
             }
             let mut canceled = false;
@@ -14896,7 +14930,7 @@ impl Game<'_> {
         };
         let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
         if let Some((content, sound, mob)) = bucket {
-            if !self.may_build() {
+            if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
                 return Ok(UseResult::Fail);
             }
             let target = self.bucket_target(content, &hit);
@@ -15015,7 +15049,7 @@ impl Game<'_> {
             }
         }
         if item == "flint_and_steel" || item == "fire_charge" {
-            if !self.may_build() {
+            if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
                 return Ok(UseResult::Fail);
             }
             let name = self.res.facts().get(clicked).name.clone();
@@ -15473,11 +15507,7 @@ impl Game<'_> {
             a.fired_from_weapon = weapon;
         }
         // Flame: the arrow is spawned burning (EnchantmentHelper.onProjectileSpawned).
-        if let Some(seconds) = self.bow_projectile_ignite()
-            && let Some(a) = arrow.arrow.as_mut()
-        {
-            a.ignite_for_seconds(seconds);
-        }
+        self.ignite_spawned_arrow(stack, &mut arrow);
         let (velocity, on_ground) = self.player.as_ref().map_or((Vec3::ZERO, true), |pl| {
             (self.known_player_movement(), pl.ground.on_ground)
         });
@@ -16316,7 +16346,12 @@ impl Game<'_> {
             return;
         }
         // ServerPlayer.startSleepInBed: a percentage above 100 cannot skip the night.
-        if self.ui.rules.int("players_sleeping_percentage") > 100 {
+        if self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+            > 100
+        {
             self.tell_sleeper(
                 "sleep.not_possible",
                 "No amount of rest can pass this night",
@@ -16455,7 +16490,11 @@ impl Game<'_> {
         // skip to morning if `advance_time` is on, wake everyone, and
         // resetWeatherCycle if `advance_weather` is on and it is raining.
         if self.enough_slept() {
-            if self.ui.rules.bool("advance_time") {
+            if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME)
+            {
                 let t = self.world.day_time;
                 let mut target = t + 24000 - t.rem_euclid(24000);
                 // SleepFinishedTimeEvent: the mods may move the wake-up time,
@@ -16475,7 +16514,12 @@ impl Game<'_> {
                 }
             }
             // Level.isRaining: the rain level is above 0.2.
-            if self.ui.rules.bool("advance_weather") && self.weather_levels(1.0).0 > 0.2 {
+            if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ADVANCE_WEATHER)
+                && self.weather_levels(1.0).0 > 0.2
+            {
                 self.world.weather.raining = false;
                 self.world.weather.thundering = false;
                 self.world.weather.rain_time = 0;
@@ -20501,6 +20545,9 @@ impl Game<'_> {
                     } else {
                         Vec::new()
                     };
+                    if horizon_client::spans::trace::due() {
+                        horizon_client::spans::trace::stop();
+                    }
                     if let Some(threshold) = self.options.spikes
                         && let Some(r) = self.renderer.as_ref()
                     {
@@ -21300,6 +21347,7 @@ impl<'a> Game<'a> {
             sky_darken_memo: Default::default(),
             water_plane_memo: Default::default(),
             water_plane_scan: Default::default(),
+            vehicle_mob_reach: Default::default(),
             persist: Default::default(),
             entity_attachments: Default::default(),
             remote: None,

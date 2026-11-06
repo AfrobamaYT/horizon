@@ -1322,7 +1322,7 @@ mod initial_history_tests {
     /// 100-block offset; one it doesn't set is -100.05 (near) or 156 (far).
     #[test]
     fn the_shadow_projection_is_iris_s_for_the_pack_s_planes() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let f = frame(&hud);
         let (o, z, one) = (0, 0x80000000, 0x3f800000);
         type Case = (f32, Option<f32>, Option<f32>, [u32; 4], [u32; 4]);
@@ -1396,7 +1396,7 @@ mod initial_history_tests {
     /// flying field of view (76.99999°) at 1280×720, the camera at (13.5, 69.62, -13.5).
     #[test]
     fn the_matrices_are_iris_to_the_last_bit() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let mut f = frame(&hud);
         f.camera = DVec3::new(13.5, 68.0 + f64::from(1.62f32), -13.5);
         f.yaw = 90.0;
@@ -1480,7 +1480,7 @@ mod initial_history_tests {
     /// angles are vanilla's timeline at those ticks.
     #[test]
     fn the_sun_moon_and_up_are_iris_s_to_the_last_bit() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let mut f = frame(&hud);
         let o = 0;
         type Case = (f32, f32, f32, u32, u32, [[u32; 3]; 3], bool);
@@ -1577,7 +1577,7 @@ mod initial_history_tests {
     /// negative x keeps its sign in the remainder.
     #[test]
     fn the_moon_s_shadow_matrices_are_iris_to_the_last_bit() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let mut f = frame(&hud);
         f.camera = DVec3::new(-556.5, 75.0 + f64::from(1.62f32), 212.5);
         f.sky.sun_angle = f32::from_bits(0x43107d5b);
@@ -1615,7 +1615,7 @@ mod initial_history_tests {
     /// (13.5, 69.62, -13.5). The sky angles are vanilla's timeline at those ticks.
     #[test]
     fn the_shadow_matrices_turn_by_iris_s_angle_between_ticks() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let mut f = frame(&hud);
         f.camera = DVec3::new(13.5, 68.0 + f64::from(1.62f32), -13.5);
         let (o, z, one, minus) = (0, 0x80000000, 0x3f800000, 0xbf800000);
@@ -1691,7 +1691,7 @@ mod initial_history_tests {
 
     #[test]
     fn first_history_is_current_then_tracks_the_actual_previous_frame() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut f = frame(&hud);
         let mut u = FrameUniforms::default();
         f.camera = DVec3::new(1024.25, -3.5, 11.75);
@@ -1730,7 +1730,7 @@ mod initial_history_tests {
     /// clouds' drift at 0.03 blocks a tick, 5266 ticks in.
     #[test]
     fn cloud_time_is_how_far_the_clouds_drifted() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let drift = crate::clouds::drift(5266, 0.0, 256);
@@ -1746,7 +1746,7 @@ mod initial_history_tests {
 
     #[test]
     fn environmental_smoothing_starts_at_the_first_inputs_without_resetting_each_frame() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let mut input = PackInputs {
@@ -1776,7 +1776,7 @@ mod initial_history_tests {
         eprintln!("Core matrix GPU: {:?}", adapter.get_info());
         let (device, queue) =
             pollster::block_on(adapter.request_device(&Default::default())).unwrap();
-        let hud = HudBatch::new([800, 400]);
+        let hud = HudBatch::scratch([800, 400]);
         let mut f = frame(&hud);
         f.camera = DVec3::new(1024.25, 100.5, -2048.75);
         f.yaw = 180.0;
@@ -1853,7 +1853,7 @@ mod initial_history_tests {
         eprintln!("Normal matrix GPU: {:?}", adapter.get_info());
         let (device, queue) =
             pollster::block_on(adapter.request_device(&Default::default())).unwrap();
-        let hud = HudBatch::new([800, 400]);
+        let hud = HudBatch::scratch([800, 400]);
         let mut f = frame(&hud);
         // Facing west (-X), level: view space looks down -Z with +X to the right (north).
         f.yaw = 90.0;
@@ -2053,7 +2053,7 @@ mod initial_history_tests {
     /// 0.1, blockEntityId -1, fogMode 0 and fogShape -1.
     #[test]
     fn fog_and_draw_uniforms_outside_a_draw_follow_iris() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut f = frame(&hud);
         f.fog = Some(crate::fog::FogData {
             color: [0.7, 0.8, 1.0, 1.0],
@@ -2081,7 +2081,7 @@ mod initial_history_tests {
     /// and end, a scale of 1 / (end - start), and a density of 0, not 1.
     #[test]
     fn the_compatibility_gl_fog_has_no_density() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut f = frame(&hud);
         f.fog = Some(crate::fog::FogData {
             color: [0.09, 0.24, 0.23, 1.0],
@@ -2103,7 +2103,7 @@ mod initial_history_tests {
     /// (cylinder) where composite and final programs read 0 and -1.
     #[test]
     fn programs_that_draw_geometry_read_their_own_fog_and_centre_depth() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut u = FrameUniforms::default();
         u.update(&frame(&hud), &PackInputs::default(), [800, 450]);
         let at = |name, geometry| index_in(name, geometry).unwrap();
@@ -2126,7 +2126,7 @@ mod initial_history_tests {
     /// centre depth 0.1 s.
     #[test]
     fn smoothed_uniforms_take_iris_half_lives() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         // The next frame comes `seconds` after the last (and a few microseconds of the test).
@@ -2165,7 +2165,7 @@ mod initial_history_tests {
     /// the frame is drawn, and smoothed values are at their targets.
     #[test]
     fn a_still_frame_takes_the_world_ticks_as_its_clock() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let mut input = PackInputs {
@@ -2201,7 +2201,7 @@ mod initial_history_tests {
     /// 0.25 in the End), and `playerMood` and `constantMood` both the cave mood.
     #[test]
     fn ambient_light_and_mood_come_from_the_inputs() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut u = FrameUniforms::default();
         let input = PackInputs {
             ambient_light: 0.25,

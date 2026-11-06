@@ -328,7 +328,11 @@ impl Game<'_> {
     /// `CommandSource.acceptsSuccess`: a player's source takes success feedback while
     /// `send_command_feedback` is on; the server console's and an RCON client's always do.
     fn accepts_success(&self) -> bool {
-        self.console_broadcast.is_some() || self.ui.rules.bool("send_command_feedback")
+        self.console_broadcast.is_some()
+            || self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK)
     }
     /// sendSuccess honouring `send_command_feedback`.
     pub(super) fn feedback(&mut self, message: Text) {
@@ -362,8 +366,15 @@ impl Game<'_> {
         let line = Text::translate("chat.type.admin", &[name, message])
             .with_color(text::GRAY)
             .italic();
-        let ops = self.ui.rules.bool("send_command_feedback");
-        let console = self.options.dedicated.is_some() && self.ui.rules.bool("log_admin_commands");
+        let ops = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
+        let console = self.options.dedicated.is_some()
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::LOG_ADMIN_COMMANDS);
         if ops || console {
             self.admin_feedback.push((line, ops, console));
         }
@@ -387,12 +398,18 @@ impl Game<'_> {
         {
             return;
         }
-        let ops = self.ui.rules.bool("send_command_feedback");
+        let ops = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
         // MinecraftServer.sendSystemMessage, unless the server is the source.
         let console = self.console_broadcast.is_none()
             && self.lan_acting.is_some()
             && self.options.dedicated.is_some()
-            && self.ui.rules.bool("log_admin_commands");
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::LOG_ADMIN_COMMANDS);
         if !ops && !console {
             return;
         }
@@ -1277,7 +1294,11 @@ impl Game<'_> {
             let mode_name = Text::translate(&format!("gameMode.{}", mode.name()), &[]);
             // GameModeCommand.logGamemodeChange: the source's own entity.
             let own = self.source_entity() == Some(t);
-            let told = !own && self.ui.rules.bool("send_command_feedback");
+            let told = !own
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
             let changed = self.for_player(t, |g| {
                 if !g.set_game_mode(mode) {
                     return false;
@@ -2971,7 +2992,10 @@ impl Game<'_> {
         let area = (0..3)
             .map(|i| i64::from(max[i] - min[i] + 1))
             .product::<i64>();
-        let limit = self.ui.rules.int("max_block_modifications");
+        let limit = self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::MAX_BLOCK_MODIFICATIONS);
         if area > i64::from(limit) {
             return Err(err("commands.fill.toobig", &[&limit, &area]));
         }
@@ -3067,7 +3091,10 @@ impl Game<'_> {
             return Err(err("commands.clone.overlap", &[]));
         }
         let area = (0..3).map(|i| i64::from(size[i] + 1)).product::<i64>();
-        let limit = self.ui.rules.int("max_block_modifications");
+        let limit = self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::MAX_BLOCK_MODIFICATIONS);
         if area > i64::from(limit) {
             return Err(err("commands.clone.toobig", &[&limit, &area]));
         }

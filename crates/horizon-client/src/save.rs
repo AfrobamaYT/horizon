@@ -4811,8 +4811,20 @@ impl Level {
             write_world_gen_settings(dir, self.seed, WorldGen::default())?;
         }
         if !saved_data_path(dir, "game_rules").exists() || !self.game_rules.is_empty() {
-            // Only rules vanilla knows: an unknown key makes it reject the file.
-            let mut rules = Tag::Compound(Compound::new());
+            // Preserve other namespaces even when their mod is not currently loaded.
+            let mut rules = match read_saved_data(dir, "game_rules") {
+                Some(Tag::Compound(entries)) => Tag::Compound(
+                    entries
+                        .into_iter()
+                        .filter(|(key, _)| {
+                            key.to_string().is_ok_and(|s| {
+                                s.split_once(':').is_some_and(|(ns, _)| ns != "minecraft")
+                            })
+                        })
+                        .collect(),
+                ),
+                _ => Tag::Compound(Compound::new()),
+            };
             for (name, default) in GAME_RULES {
                 let value = self.game_rules.get(name).copied().unwrap_or(default);
                 let tag = if INT_RULES.contains(&name) {
@@ -7621,6 +7633,30 @@ mod tests {
         let read = super::Level::read(&dir).unwrap();
         assert_eq!(read.game_rules, rules.by_name());
         assert_eq!(read.game_rule("advance_time"), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn level_save_preserves_absent_mod_rules() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-gamerules-unknown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut level = super::Level::default();
+        level.write(&dir).unwrap();
+        super::write_saved_data(
+            &dir,
+            "game_rules",
+            super::Tag::compound([("absent:rule", super::Tag::Long(42))]),
+        )
+        .unwrap();
+        level.game_rules.insert("advance_time".into(), 0);
+        level.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("absent:rule"),
+            Some(&super::Tag::Long(42))
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -29,7 +29,10 @@ impl Game<'_> {
     /// ran this game tick.
     pub(super) fn perform_cart_command(&mut self, id: u32) -> bool {
         let game_time = self.world.game_time;
-        let rules_work = self.ui.rules.bool("command_blocks_work");
+        let rules_work = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCKS_WORK);
         let Some(c) = self.command_cart_mut(id) else {
             return false;
         };
@@ -97,11 +100,20 @@ impl Game<'_> {
         else {
             return;
         };
-        let feedback = self.ui.rules.bool("send_command_feedback");
+        let feedback = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
         if feedback {
             self.cart_command_output(id, message.clone());
         }
-        if broadcast && feedback && self.ui.rules.bool("command_block_output") {
+        if broadcast
+            && feedback
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCK_OUTPUT)
+        {
             self.broadcast_source_to_admins(name, message);
         }
     }
@@ -164,7 +176,10 @@ impl Game<'_> {
     /// command (which resets the success count), output tracking, the cleared
     /// last output, `onUpdated` while command blocks work, and the chat note.
     pub(super) fn apply_cart_command(&mut self, id: u32, command: String, track_output: bool) {
-        let enabled = self.ui.rules.bool("command_blocks_work");
+        let enabled = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCKS_WORK);
         let Some(c) = self.command_cart_mut(id) else {
             return;
         };

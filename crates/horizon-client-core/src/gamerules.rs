@@ -1,5 +1,5 @@
 //! Game rules (26.3 `GameRules`): the registered rules with their category,
-//! type, default and bounds, a value map, and persistence in the world's
+//! type, default and bounds, dense values, and persistence in the world's
 //! `data/minecraft/game_rules.dat` saved-data file.
 use horizon_world::{
     DATA_VERSION,
@@ -140,11 +140,174 @@ pub fn rule(name: &str) -> Option<&'static Rule> {
     available_rules(true).find(|r| r.name == name)
 }
 
+/// A vanilla rule's resolved position in the registration order.
+#[derive(Clone, Copy, Debug)]
+pub struct RuleIndex(usize);
+
+const fn vanilla_index(name: &str) -> RuleIndex {
+    let mut i = 0;
+    while i < RULES.len() {
+        let a = RULES[i].name.as_bytes();
+        let b = name.as_bytes();
+        let mut n = 0;
+        while n < a.len() && n < b.len() && a[n] == b[n] {
+            n += 1;
+        }
+        if n == a.len() && n == b.len() {
+            return RuleIndex(i);
+        }
+        i += 1;
+    }
+    panic!("unknown vanilla rule")
+}
+
+/// Resolved vanilla rules used by the simulation.
+pub mod vanilla {
+    use super::{RuleIndex, vanilla_index};
+    /// The `spawn_wandering_traders` rule.
+    pub const SPAWN_WANDERING_TRADERS: RuleIndex = vanilla_index("spawn_wandering_traders");
+    /// The `spawn_wardens` rule.
+    pub const SPAWN_WARDENS: RuleIndex = vanilla_index("spawn_wardens");
+    /// The `spawn_patrols` rule.
+    pub const SPAWN_PATROLS: RuleIndex = vanilla_index("spawn_patrols");
+    /// The `raids` rule.
+    pub const RAIDS: RuleIndex = vanilla_index("raids");
+    /// The `entity_drops` rule.
+    pub const ENTITY_DROPS: RuleIndex = vanilla_index("entity_drops");
+    /// The `spectators_generate_chunks` rule.
+    pub const SPECTATORS_GENERATE_CHUNKS: RuleIndex = vanilla_index("spectators_generate_chunks");
+    /// The `keep_inventory` rule.
+    pub const KEEP_INVENTORY: RuleIndex = vanilla_index("keep_inventory");
+    /// The `show_death_messages` rule.
+    pub const SHOW_DEATH_MESSAGES: RuleIndex = vanilla_index("show_death_messages");
+    /// The `players_sleeping_percentage` rule.
+    pub const PLAYERS_SLEEPING_PERCENTAGE: RuleIndex = vanilla_index("players_sleeping_percentage");
+    /// The `allow_entering_nether_using_portals` rule.
+    pub const ALLOW_ENTERING_NETHER_USING_PORTALS: RuleIndex =
+        vanilla_index("allow_entering_nether_using_portals");
+    /// The `elytra_movement_check` rule.
+    pub const ELYTRA_MOVEMENT_CHECK: RuleIndex = vanilla_index("elytra_movement_check");
+    /// The `global_sound_events` rule.
+    pub const GLOBAL_SOUND_EVENTS: RuleIndex = vanilla_index("global_sound_events");
+    /// The `immediate_respawn` rule.
+    pub const IMMEDIATE_RESPAWN: RuleIndex = vanilla_index("immediate_respawn");
+    /// The `limited_crafting` rule.
+    pub const LIMITED_CRAFTING: RuleIndex = vanilla_index("limited_crafting");
+    /// The `locator_bar` rule.
+    pub const LOCATOR_BAR: RuleIndex = vanilla_index("locator_bar");
+    /// The `player_movement_check` rule.
+    pub const PLAYER_MOVEMENT_CHECK: RuleIndex = vanilla_index("player_movement_check");
+    /// The `pvp` rule.
+    pub const PVP: RuleIndex = vanilla_index("pvp");
+    /// The `respawn_radius` rule.
+    pub const RESPAWN_RADIUS: RuleIndex = vanilla_index("respawn_radius");
+    /// The `advance_weather` rule.
+    pub const ADVANCE_WEATHER: RuleIndex = vanilla_index("advance_weather");
+    /// The `spawn_phantoms` rule.
+    pub const SPAWN_PHANTOMS: RuleIndex = vanilla_index("spawn_phantoms");
+    /// The `command_block_output` rule.
+    pub const COMMAND_BLOCK_OUTPUT: RuleIndex = vanilla_index("command_block_output");
+    /// The `command_blocks_work` rule.
+    pub const COMMAND_BLOCKS_WORK: RuleIndex = vanilla_index("command_blocks_work");
+    /// The `log_admin_commands` rule.
+    pub const LOG_ADMIN_COMMANDS: RuleIndex = vanilla_index("log_admin_commands");
+    /// The `max_block_modifications` rule.
+    pub const MAX_BLOCK_MODIFICATIONS: RuleIndex = vanilla_index("max_block_modifications");
+    /// The `max_command_forks` rule.
+    pub const MAX_COMMAND_FORKS: RuleIndex = vanilla_index("max_command_forks");
+    /// The `max_command_sequence_length` rule.
+    pub const MAX_COMMAND_SEQUENCE_LENGTH: RuleIndex = vanilla_index("max_command_sequence_length");
+    /// The `send_command_feedback` rule.
+    pub const SEND_COMMAND_FEEDBACK: RuleIndex = vanilla_index("send_command_feedback");
+    /// The feature-gated `max_minecart_speed` rule.
+    pub const MAX_MINECART_SPEED: RuleIndex = RuleIndex(super::RULES.len());
+    /// The `reduced_debug_info` rule.
+    pub const REDUCED_DEBUG_INFO: RuleIndex = vanilla_index("reduced_debug_info");
+    /// The `show_advancement_messages` rule.
+    pub const SHOW_ADVANCEMENT_MESSAGES: RuleIndex = vanilla_index("show_advancement_messages");
+    /// The `players_nether_portal_creative_delay` rule.
+    pub const PLAYERS_NETHER_PORTAL_CREATIVE_DELAY: RuleIndex =
+        vanilla_index("players_nether_portal_creative_delay");
+    /// The `players_nether_portal_default_delay` rule.
+    pub const PLAYERS_NETHER_PORTAL_DEFAULT_DELAY: RuleIndex =
+        vanilla_index("players_nether_portal_default_delay");
+    /// The `mob_explosion_drop_decay` rule.
+    pub const MOB_EXPLOSION_DROP_DECAY: RuleIndex = vanilla_index("mob_explosion_drop_decay");
+    /// The `tnt_explosion_drop_decay` rule.
+    pub const TNT_EXPLOSION_DROP_DECAY: RuleIndex = vanilla_index("tnt_explosion_drop_decay");
+    /// The `block_explosion_drop_decay` rule.
+    pub const BLOCK_EXPLOSION_DROP_DECAY: RuleIndex = vanilla_index("block_explosion_drop_decay");
+    /// The `advance_time` rule.
+    pub const ADVANCE_TIME: RuleIndex = vanilla_index("advance_time");
+    /// The `water_source_conversion` rule.
+    pub const WATER_SOURCE_CONVERSION: RuleIndex = vanilla_index("water_source_conversion");
+    /// The `lava_source_conversion` rule.
+    pub const LAVA_SOURCE_CONVERSION: RuleIndex = vanilla_index("lava_source_conversion");
+    /// The `random_tick_speed` rule.
+    pub const RANDOM_TICK_SPEED: RuleIndex = vanilla_index("random_tick_speed");
+    /// The `block_drops` rule.
+    pub const BLOCK_DROPS: RuleIndex = vanilla_index("block_drops");
+    /// The `mob_griefing` rule.
+    pub const MOB_GRIEFING: RuleIndex = vanilla_index("mob_griefing");
+    /// The `max_snow_accumulation_height` rule.
+    pub const MAX_SNOW_ACCUMULATION_HEIGHT: RuleIndex =
+        vanilla_index("max_snow_accumulation_height");
+    /// The `spawn_mobs` rule.
+    pub const SPAWN_MOBS: RuleIndex = vanilla_index("spawn_mobs");
+    /// The `spawn_monsters` rule.
+    pub const SPAWN_MONSTERS: RuleIndex = vanilla_index("spawn_monsters");
+    /// The `fire_spread_radius_around_player` rule.
+    pub const FIRE_SPREAD_RADIUS_AROUND_PLAYER: RuleIndex =
+        vanilla_index("fire_spread_radius_around_player");
+    /// The `spread_vines` rule.
+    pub const SPREAD_VINES: RuleIndex = vanilla_index("spread_vines");
+    /// The `natural_health_regeneration` rule.
+    pub const NATURAL_HEALTH_REGENERATION: RuleIndex = vanilla_index("natural_health_regeneration");
+    /// The `drowning_damage` rule.
+    pub const DROWNING_DAMAGE: RuleIndex = vanilla_index("drowning_damage");
+    /// The `fall_damage` rule.
+    pub const FALL_DAMAGE: RuleIndex = vanilla_index("fall_damage");
+    /// The `fire_damage` rule.
+    pub const FIRE_DAMAGE: RuleIndex = vanilla_index("fire_damage");
+    /// The `freeze_damage` rule.
+    pub const FREEZE_DAMAGE: RuleIndex = vanilla_index("freeze_damage");
+    /// The `tnt_explodes` rule.
+    pub const TNT_EXPLODES: RuleIndex = vanilla_index("tnt_explodes");
+    /// The `spawner_blocks_work` rule.
+    pub const SPAWNER_BLOCKS_WORK: RuleIndex = vanilla_index("spawner_blocks_work");
+    /// The `universal_anger` rule.
+    pub const UNIVERSAL_ANGER: RuleIndex = vanilla_index("universal_anger");
+    /// The `mob_drops` rule.
+    pub const MOB_DROPS: RuleIndex = vanilla_index("mob_drops");
+    /// The `max_entity_cramming` rule.
+    pub const MAX_ENTITY_CRAMMING: RuleIndex = vanilla_index("max_entity_cramming");
+    /// The `forgive_dead_players` rule.
+    pub const FORGIVE_DEAD_PLAYERS: RuleIndex = vanilla_index("forgive_dead_players");
+    /// The `ender_pearls_vanish_on_death` rule.
+    pub const ENDER_PEARLS_VANISH_ON_DEATH: RuleIndex =
+        vanilla_index("ender_pearls_vanish_on_death");
+    /// The `projectiles_can_break_blocks` rule.
+    pub const PROJECTILES_CAN_BREAK_BLOCKS: RuleIndex =
+        vanilla_index("projectiles_can_break_blocks");
+}
+
 /// Current values (defaults unless set).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameRules {
-    values: BTreeMap<&'static str, Value>,
+    values: Vec<Value>,
+    // Keep entries that cannot be interpreted by the current registry verbatim.
+    // A temporarily absent mod must not lose its saved rule values.
+    unknown: nbt::Compound,
     minecart_improvements: bool,
+}
+impl Default for GameRules {
+    fn default() -> Self {
+        Self {
+            values: available_rules(true).map(|rule| rule.default).collect(),
+            unknown: nbt::Compound::new(),
+            minecart_improvements: false,
+        }
+    }
 }
 impl GameRules {
     pub fn with_features(features: &[String]) -> Self {
@@ -157,8 +320,9 @@ impl GameRules {
     /// newly enabled rules and discard rules absent from the target feature set.
     pub fn copy_with_features(&self, features: &[String]) -> Self {
         let mut rules = Self::with_features(features);
-        for (&name, &value) in &self.values {
-            rules.set(name, value);
+        rules.unknown = self.unknown.clone();
+        for (rule, &value) in available_rules(true).zip(&self.values) {
+            rules.set(rule.name, value);
         }
         rules
     }
@@ -166,14 +330,20 @@ impl GameRules {
         available_rules(self.minecart_improvements)
     }
     pub fn get(&self, name: &str) -> Option<Value> {
-        let r = rule(name)?;
-        if r.name == MAX_MINECART_SPEED.name && !self.minecart_improvements {
-            return None;
-        }
-        Some(self.values.get(r.name).copied().unwrap_or(r.default))
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        let index = self.available_rules().position(|rule| rule.name == name)?;
+        Some(self.values[index])
     }
-    pub fn bool(&self, name: &str) -> bool {
-        matches!(self.get(name), Some(Value::Bool(true)))
+    /// Read a resolved vanilla boolean rule without a name lookup.
+    pub fn bool_at(&self, index: RuleIndex) -> bool {
+        matches!(self.values[index.0], Value::Bool(true))
+    }
+    /// Read a resolved vanilla integer rule without a name lookup.
+    pub fn int_at(&self, index: RuleIndex) -> i32 {
+        match self.values.get(index.0) {
+            Some(Value::Int(value)) => *value,
+            _ => 0,
+        }
     }
     /// Parse a network rule value, retaining type and range validation.
     pub fn set_string(&mut self, name: &str, text: &str) -> bool {
@@ -184,15 +354,14 @@ impl GameRules {
         };
         value.is_some_and(|v| self.set(name, v))
     }
-    pub fn int(&self, name: &str) -> i32 {
-        match self.get(name) {
-            Some(Value::Int(v)) => v,
-            _ => 0,
-        }
-    }
     /// Set a rule; false if the name or value type is wrong.
     pub fn set(&mut self, name: &str, value: Value) -> bool {
-        let Some(r) = rule(name).filter(|r| self.get(r.name).is_some()) else {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        let Some((index, r)) = self
+            .available_rules()
+            .enumerate()
+            .find(|(_, r)| r.name == name)
+        else {
             return false;
         };
         let ok = match (r.default, value) {
@@ -200,10 +369,8 @@ impl GameRules {
             (Value::Int(_), Value::Int(v)) => (r.min..=r.max).contains(&v),
             _ => false,
         };
-        if ok && value == r.default {
-            self.values.remove(r.name);
-        } else if ok {
-            self.values.insert(r.name, value);
+        if ok {
+            self.values[index] = value;
         }
         ok
     }
@@ -211,8 +378,9 @@ impl GameRules {
     /// them (booleans as 0 or 1).
     pub fn by_name(&self) -> BTreeMap<String, i32> {
         self.available_rules()
-            .map(|r| {
-                let v = match self.values.get(r.name).copied().unwrap_or(r.default) {
+            .enumerate()
+            .map(|(index, r)| {
+                let v = match self.values[index] {
                     Value::Bool(b) => i32::from(b),
                     Value::Int(i) => i,
                 };
@@ -222,24 +390,22 @@ impl GameRules {
     }
     /// GameRuleMap codec: `{data: {"minecraft:<rule>": value...}, DataVersion}`.
     pub fn to_nbt(&self) -> NamedTag {
-        let data: Vec<(horizon_world::nbt::JavaString, Tag)> = self
-            .available_rules()
-            .map(|r| {
-                let v = self.values.get(r.name).copied().unwrap_or(r.default);
-                let tag = match v {
-                    Value::Bool(b) => Tag::Byte(i8::from(b)),
-                    Value::Int(i) => Tag::Int(i),
-                };
-                (
-                    horizon_world::nbt::JavaString::from(format!("minecraft:{}", r.name).as_str()),
-                    tag,
-                )
-            })
-            .collect();
+        let mut data = self.unknown.clone();
+        data.extend(self.available_rules().enumerate().map(|(index, r)| {
+            let v = self.values[index];
+            let tag = match v {
+                Value::Bool(b) => Tag::Byte(i8::from(b)),
+                Value::Int(i) => Tag::Int(i),
+            };
+            (
+                horizon_world::nbt::JavaString::from(format!("minecraft:{}", r.name).as_str()),
+                tag,
+            )
+        }));
         NamedTag {
             name: "".into(),
             tag: Tag::compound([
-                ("data", Tag::compound(data)),
+                ("data", Tag::Compound(data)),
                 ("DataVersion", Tag::Int(DATA_VERSION)),
             ]),
         }
@@ -249,12 +415,15 @@ impl GameRules {
     }
     pub fn from_nbt_with_features(root: &Tag, features: &[String]) -> Self {
         let mut rules = Self::with_features(features);
-        let Some(data) = root.get("data") else {
+        let Some(Tag::Compound(data)) = root.get("data") else {
             return rules;
         };
+        rules.unknown = data.clone();
         for r in rules.available_rules() {
             let key = format!("minecraft:{}", r.name);
-            let value = data.get(&key).or_else(|| data.get(r.name));
+            let value = data
+                .get(&key.as_str().into())
+                .or_else(|| data.get(&r.name.into()));
             match (r.default, value) {
                 (Value::Bool(_), Some(Tag::Byte(v))) => {
                     rules.set(r.name, Value::Bool(*v != 0));
@@ -264,6 +433,8 @@ impl GameRules {
                 }
                 _ => {}
             }
+            rules.unknown.remove(&key.as_str().into());
+            rules.unknown.remove(&r.name.into());
         }
         rules
     }
@@ -300,32 +471,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unknown_rules_survive_save_and_feature_copy() {
+        let source = Tag::compound([(
+            "data",
+            Tag::compound([
+                ("missing:example", Tag::Long(123)),
+                ("minecraft:keep_inventory", Tag::Byte(1)),
+            ]),
+        )]);
+        let rules = GameRules::from_nbt(&source).copy_with_features(&[]);
+        assert_eq!(rules.get("keep_inventory"), Some(Value::Bool(true)));
+        assert_eq!(
+            rules
+                .to_nbt()
+                .tag
+                .get("data")
+                .unwrap()
+                .get("missing:example"),
+            Some(&Tag::Long(123))
+        );
+    }
+
+    #[test]
+    fn resolved_reads_follow_mutations() {
+        let mut rules = GameRules::default();
+        assert!(rules.bool_at(vanilla::SPAWN_MOBS));
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 3);
+        assert!(rules.set("spawn_mobs", Value::Bool(false)));
+        assert!(rules.set("random_tick_speed", Value::Int(12)));
+        assert!(!rules.bool_at(vanilla::SPAWN_MOBS));
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 12);
+    }
+
+    #[test]
     fn network_values_validate_rule_names_types_and_bounds() {
         let mut rules = GameRules::default();
         assert!(rules.set_string("minecraft:keep_inventory", "true"));
-        assert!(rules.bool("keep_inventory"));
+        assert!(rules.bool_at(vanilla::KEEP_INVENTORY));
         assert!(!rules.set_string("minecraft:keep_inventory", "1"));
-        assert!(rules.bool("keep_inventory"));
+        assert!(rules.bool_at(vanilla::KEEP_INVENTORY));
         assert!(rules.set_string("minecraft:random_tick_speed", "7"));
-        assert_eq!(rules.int("random_tick_speed"), 7);
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 7);
         assert!(!rules.set_string("minecraft:random_tick_speed", "-1"));
         assert!(!rules.set_string("minecraft:random_tick_speed", "999999999999"));
         assert!(!rules.set_string("minecraft:unknown", "true"));
         assert!(!rules.set_string("other:keep_inventory", "false"));
-        assert_eq!(rules.int("random_tick_speed"), 7);
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 7);
     }
     #[test]
     fn defaults_bounds_and_round_trip() {
         let mut rules = GameRules::default();
-        assert!(rules.bool("advance_time"));
-        assert_eq!(rules.int("random_tick_speed"), 3);
+        assert!(rules.bool_at(vanilla::ADVANCE_TIME));
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 3);
         assert!(!rules.set("random_tick_speed", Value::Bool(true)));
         assert!(!rules.set("max_snow_accumulation_height", Value::Int(9)));
         assert!(rules.set("keep_inventory", Value::Bool(true)));
         assert!(rules.set("minecraft:random_tick_speed", Value::Int(10)));
         let back = GameRules::from_nbt(&rules.to_nbt().tag);
         assert_eq!(back, rules);
-        assert!(back.bool("keep_inventory"));
+        assert!(back.bool_at(vanilla::KEEP_INVENTORY));
         let dir = std::env::temp_dir().join(format!("horizon-gamerules-{}", std::process::id()));
         rules.save(&dir).unwrap();
         assert_eq!(GameRules::load(&dir), rules);

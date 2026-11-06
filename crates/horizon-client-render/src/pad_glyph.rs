@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn art_is_one_quad_centred_on_the_text_line_with_no_key_behind_it() {
         let atlas = atlas();
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw(
             &mut batch,
             &atlas,
@@ -364,7 +364,7 @@ mod tests {
             20.0,
         );
         assert_eq!(quads(&batch), vec![[7.0, 16.0, 23.0, 32.0]]);
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw(
             &mut batch,
             &atlas,
@@ -381,7 +381,7 @@ mod tests {
         let mut atlas = atlas();
         let style = GlyphStyle::Nintendo;
         atlas.sprites.remove(sprite(Button::South, style).unwrap());
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw(&mut batch, &atlas, Button::South, style, 10.0, 20.0);
         let [x, y, w, h] = rect(&atlas, Button::South, style, 10.0, 20.0);
         assert_eq!(quads(&batch)[0], [x, y, x + w, y + h]);

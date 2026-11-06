@@ -38,7 +38,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         let mut d = TextDisplayData::default();
         d.apply(&packet.values);
         let lines = Lines::split(&atlas.font, &d.text, d.line_width);
-        let mut batch = HudBatch::new([1, 1]);
+        let mut batch = HudBatch::scratch([1, 1]);
         let default_background = background_color(
             input["chat_only"].as_bool().unwrap_or(false),
             input["background_opacity"].as_f64().unwrap_or(0.0),

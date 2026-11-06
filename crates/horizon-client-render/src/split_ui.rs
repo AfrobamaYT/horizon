@@ -1519,7 +1519,7 @@ mod tests {
         let mut ui = screen(2);
         ui.size = SIZE;
         let done = |ui: &SplitUi, frame: u64| {
-            let mut batch = HudBatch::new([427, 300]);
+            let mut batch = HudBatch::scratch([427, 300]);
             ui.draw(&mut batch, &atlas, (0.0, 0.0), false);
             set_action_screen(9);
             end_frame(frame);

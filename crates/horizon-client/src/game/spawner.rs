@@ -117,7 +117,10 @@ impl Game<'_> {
         let at = [key.0, key.1, key.2].map(|c| f64::from(c) + 0.5);
         let range = f64::from(spawner.required_player_range);
         if !self.alive_player_near(at[0], at[1], at[2], range)
-            || !self.ui.rules.bool("spawner_blocks_work")
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWNER_BLOCKS_WORK)
         {
             return Ok(());
         }
@@ -481,7 +484,11 @@ impl Game<'_> {
             Some(BlockEntity::TrialSpawner(_)) => true,
             _ => return None,
         };
-        if !self.ui.rules.bool("spawner_blocks_work") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWNER_BLOCKS_WORK)
+        {
             self.system_message(horizon_client::text::Text::translate(
                 "advMode.notEnabled.spawner",
                 &[],
