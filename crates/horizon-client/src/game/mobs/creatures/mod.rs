@@ -594,7 +594,7 @@ impl Game<'_> {
     /// when it breaks the slot empties and `onEquippedItemBroken` broadcasts
     /// the break event.
     fn wear_sun_protection(&mut self, id: u32) {
-        use horizon_world::player_inventory::EquipmentSlot;
+        use horizon_core::equipment_slot::EquipmentSlot;
         let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
@@ -637,7 +637,7 @@ impl Game<'_> {
     /// pieces reach). A fire hit leaves a fire-resistant piece alone
     /// (`ItemStack.canBeHurtBy`).
     fn hurt_mob_armor(&mut self, id: u32, damage: f32, kind: horizon_client::mobs::DamageKind) {
-        use horizon_world::player_inventory::EquipmentSlot;
+        use horizon_core::equipment_slot::EquipmentSlot;
         if damage <= 0.0 {
             return;
         }
@@ -3104,7 +3104,7 @@ impl Game<'_> {
                     let mut horn = ItemStack::new("minecraft:goat_horn", 1);
                     horn.data_mut().set_other(
                         "minecraft:instrument",
-                        Some(horizon_world::nbt::Tag::String(instrument.into())),
+                        Some(horizon_core::nbt::Tag::String(instrument.into())),
                     );
                     // Goat.dropHorn's ItemEntity constructor leaves pickupDelay at
                     // 0 (no setDefaultPickUpDelay).
@@ -8829,6 +8829,7 @@ mod local_sound_event_tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -9842,6 +9843,163 @@ mod breeding_tests {
 }
 
 #[cfg(test)]
+mod projectile_batch_tests {
+    use super::*;
+    use horizon_client::{chunk::Chunk, join_seq::JoinSeq};
+    use mod_api::{Flow, HearsProjectileImpactsEvent, Hooks, ProjectileImpactEvent, ServerHost};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Observed {
+        impacts: Vec<u32>,
+        spawned: bool,
+        remove: Option<u32>,
+    }
+
+    struct CancelImpacts(Arc<Mutex<Observed>>);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for CancelImpacts {
+        fn hears_projectile_impacts(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut HearsProjectileImpactsEvent,
+        ) {
+            event.hears = true;
+        }
+
+        fn projectile_impact(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut ProjectileImpactEvent<'_>,
+        ) -> Flow {
+            let mut observed = self.0.lock().unwrap();
+            observed.impacts.push(event.projectile);
+            if !observed.spawned {
+                // The projectile is installed even though summon has no projectile return target.
+                let _ = host.summon(
+                    event.dimension,
+                    "minecraft:snowball",
+                    [8.5, 70.0, 0.5],
+                    Default::default(),
+                );
+                observed.spawned = true;
+            }
+            if observed.remove == Some(event.projectile) {
+                let entity = host.entity(event.projectile).unwrap();
+                assert!(entity.discard(host));
+            }
+            Flow::Cancel
+        }
+    }
+
+    fn with_batch(remove: bool, test: impl FnOnce(&mut Game<'_>, [u32; 3], [JoinSeq; 3], u32)) {
+        let observed = Arc::new(Mutex::new(Observed::default()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "cancel-projectile-batch",
+            Box::new(CancelImpacts(observed.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(2, 64, 0, stone).unwrap();
+                let ids = std::array::from_fn(|i| game.next_entity + i as u32 + 1);
+                game.next_entity += 3;
+                // Snowballs leave on impact; arrows stay in their slot, stuck in the wall.
+                // The third projectile misses, so its survivor order must be preserved.
+                for (i, kind) in [
+                    ProjectileKind::Snowball,
+                    ProjectileKind::Arrow {
+                        base_damage: 2.0,
+                        critical: false,
+                        effect: None,
+                    },
+                    ProjectileKind::Snowball,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let x = if i == 2 { 5.5 } else { 0.5 };
+                    let mut p = Projectile::new(kind, Vec3::new(x, 64.5, 0.5), None);
+                    p.id = ids[i];
+                    p.velocity = Vec3::new(3.0, 0.0, 0.0);
+                    game.creatures.projectiles.push(p);
+                }
+                let joins = std::array::from_fn(|i| game.creatures.projectiles[i].join);
+                observed.lock().unwrap().remove = remove.then_some(ids[1]);
+                game.tick_projectiles().unwrap();
+                let observed = observed.lock().unwrap().clone();
+                assert_eq!(observed.impacts, [ids[0], ids[1]]);
+                assert!(observed.spawned);
+                let spawned = game
+                    .creatures
+                    .projectiles
+                    .iter()
+                    .find(|p| !ids.contains(&p.id))
+                    .unwrap()
+                    .id;
+                test(game, ids, joins, spawned);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn canceled_impacts_keep_projectile_batch_joins_and_survivor_order() {
+        with_batch(false, |game, ids, joins, spawned| {
+            let list = &mut game.creatures.projectiles;
+            // The replayed snowball is appended; the arrow keeps its original slot.
+            assert_eq!(
+                list.iter().map(|p| p.id).collect::<Vec<_>>(),
+                [ids[1], ids[2], spawned, ids[0]]
+            );
+            for (id, join) in ids.into_iter().zip(joins) {
+                let p = list.iter_mut().find(|p| p.id == id).unwrap();
+                assert_eq!(p.join, join);
+                assert_eq!(p.age, 1);
+                assert!(p.position.x > 2.0);
+                assert!(!p.stuck);
+            }
+            let snowball = list.iter_mut().find(|p| p.id == ids[0]).unwrap();
+            assert!(snowball.has_been_shot);
+            assert!(snowball.take_shoot_event().is_none());
+            let fresh = list.iter().find(|p| p.id == spawned).unwrap();
+            assert!(joins.into_iter().all(|join| join < fresh.join));
+            assert_eq!(fresh.age, 0);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_projectile_removed_in_its_impact_hook_stays_removed_after_replay() {
+        with_batch(true, |game, ids, joins, spawned| {
+            // Pending removal refuses the handle already, even before the physical sweep.
+            assert!(game.native_entity(ids[1]).is_none());
+            game.native_removals_flush();
+            let list = &game.creatures.projectiles;
+            assert_eq!(
+                list.iter().map(|p| p.id).collect::<Vec<_>>(),
+                [ids[2], spawned, ids[0]]
+            );
+            assert_eq!(list[0].join, joins[2]);
+            assert_eq!(list[2].join, joins[0]);
+            game.tick_projectiles().unwrap();
+            assert!(!game.creatures.projectiles.iter().any(|p| p.id == ids[1]));
+        });
+    }
+}
+
+#[cfg(test)]
 mod breeze_random_tests {
     use super::*;
 
@@ -10457,8 +10615,8 @@ mod armor_destroy_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn body_armor_guards_and_break_event_are_preserved() {
         use horizon_client::mobs::{DamageKind, Mob};
+        use horizon_core::equipment_slot::EquipmentSlot;
         use horizon_core::geometry::Vec3;
-        use horizon_world::player_inventory::EquipmentSlot;
         with_game(|game| {
             let kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
             game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
@@ -10488,8 +10646,8 @@ mod armor_destroy_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn sun_protection_uses_mob_draw_and_broadcasts_break() {
         use horizon_client::mobs::Mob;
+        use horizon_core::equipment_slot::EquipmentSlot;
         use horizon_core::{geometry::Vec3, random::RandomSource};
-        use horizon_world::player_inventory::EquipmentSlot;
         with_game(|game| {
             let kind = game
                 .res
@@ -10655,7 +10813,7 @@ mod armor_destroy_tests {
 mod conversion_tag_tests {
     use super::*;
     use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -10664,6 +10822,7 @@ mod conversion_tag_tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,

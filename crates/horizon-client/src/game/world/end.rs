@@ -16,12 +16,12 @@ use horizon_client::{
     vanillagen::VanillaTerrain,
     world_spawn::PlayerSpawnFinder,
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{
     geometry::Vec3,
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::nbt::Tag;
 
 use std::{collections::HashMap, sync::Arc};
 

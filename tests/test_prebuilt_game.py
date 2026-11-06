@@ -64,13 +64,13 @@ class PrebuiltContentsTests(unittest.TestCase):
         for large in ("horizon_client", "horizon_mod_wasm"):
             root = self.folder("deps/libhorizon_client.so")
             for name in ("horizon_client", "horizon_mod_wasm"):
-                self.dll(root, f"{name}.dll", 60001 if name == large else 45000)
+                self.dll(root, f"{name}.dll", 49000 if name == large else 48999)
             output = io.StringIO()
             with self.subTest(large), contextlib.redirect_stdout(output):
                 prebuilt_game.exports(root)
             warnings = [line for line in output.getvalue().splitlines() if line.startswith("::warning::")]
             self.assertEqual(len(warnings), 1)
-            self.assertIn(f"{large}.dll exports 60,001 names", warnings[0])
+            self.assertIn(f"{large}.dll exports 49,000 names", warnings[0])
             self.assertEqual(output.getvalue().count("exported names (Windows' limit"), 2)
 
     def test_exports_is_silent_without_dlls(self):

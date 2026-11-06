@@ -25,11 +25,14 @@ use horizon_client::{
     test_instance_block::{ErrorMarker, Status, TestInstanceBlock},
     text::{self, Text},
 };
-use horizon_world::{
-    level::flags,
-    worldgen::structure::{BoundingBox, Mirror, Rotation, StructureTemplate},
-};
 use std::time::Instant;
+use {
+    horizon_core::bounding_box::BoundingBox,
+    horizon_world::{
+        level::flags,
+        worldgen::structure::{Mirror, Rotation, StructureTemplate},
+    },
+};
 
 type Pos = (i32, i32, i32);
 

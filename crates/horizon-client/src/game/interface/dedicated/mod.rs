@@ -21,8 +21,8 @@ use horizon_client::{
     },
     text::Text,
 };
+use horizon_core::nbt::{JavaString, Tag};
 use horizon_protocol::text::translatable;
-use horizon_world::nbt::{JavaString, Tag};
 use mod_api::NativePermissionLevel;
 use std::{
     io::Write,

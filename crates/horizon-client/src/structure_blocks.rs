@@ -2,15 +2,13 @@
 //! template containers): turned into client containers, with loot tables
 //! unpacked as `RandomizableContainer.unpackLootTable` would on first open.
 use crate::{containers::BlockEntity, items::ItemStack};
-use horizon_world::{
-    item_defaults::ItemDefaults,
-    loot::LootData,
-    nbt::{Compound, JavaString, Tag},
-    worldgen::generator::ProtoChunk,
-};
 use std::{
     path::Path,
     sync::{Arc, Mutex},
+};
+use {
+    horizon_core::nbt::{Compound, JavaString, Tag},
+    horizon_world::{item_defaults::ItemDefaults, loot::LootData, worldgen::generator::ProtoChunk},
 };
 
 /// The `custom_data` key holding an exploration map's search until the game
@@ -152,6 +150,7 @@ fn loot_key(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> u64 {
     let mut hasher = DefaultHasher::new();
     root.hash(&mut hasher);
     overlay.files.hash(&mut hasher);
+    overlay.conditions.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -389,7 +388,7 @@ mod tests {
             vec!["test:machine".into()],
         ))
         .unwrap();
-        let Tag::Compound(nbt) = horizon_world::nbt::parse_snbt(
+        let Tag::Compound(nbt) = horizon_core::nbt::parse_snbt(
             r#"{id:"minecraft:banner",energy:900L,LootTable:"test:loot",Items:[{Slot:0b,id:"minecraft:stone",count:3}]}"#,
         ).unwrap().0 else {
             panic!("not a compound");
@@ -513,7 +512,7 @@ mod tests {
             "loot_table/chests/x".to_owned(),
             vec![br#"{"pools": []}"#.to_vec()],
         )];
-        let packs = PackOverlay { files: &files };
+        let packs = PackOverlay::new(&files);
         let other = reuse_or_load(&mut slot, &root, &packs, &defaults).unwrap();
         assert!(!Arc::ptr_eq(&first, &other));
         let next_defaults = horizon_world::item_defaults::read(&root).unwrap();
@@ -541,7 +540,7 @@ mod tests {
             (1, 2, 3),
             "minecraft:plains",
         );
-        let mut saved = horizon_world::nbt::Compound::new();
+        let mut saved = horizon_core::nbt::Compound::new();
         saved.insert("Items".into(), crate::save::encode_items(&slots));
         assert!(rolled.restore(&mut saved));
         assert!(!saved.contains_key(&"Items".into()));

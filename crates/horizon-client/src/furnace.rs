@@ -275,7 +275,7 @@ mod tests {
         let (items, recipes, providers) = data("output-components");
         let context = crate::test_resources::server_loop_context();
         let mut different = ItemStack::new("test:ingot", 1);
-        different.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Cold".into()));
+        different.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Cold".into()));
         for (output, eligible) in [
             (Some(different), false),
             (None, true),

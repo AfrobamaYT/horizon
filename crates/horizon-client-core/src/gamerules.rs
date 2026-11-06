@@ -1,16 +1,18 @@
 //! Game rules (26.3 `GameRules`): the registered rules with their category,
 //! type, default and bounds, dense values, and persistence in the world's
 //! `data/minecraft/game_rules.dat` saved-data file.
-use horizon_world::{
-    DATA_VERSION,
-    compression::Compression,
-    nbt::{self, Limits, NamedTag, Tag},
-};
 use std::{
     collections::BTreeMap,
     fs,
     path::Path,
     sync::{Arc, OnceLock},
+};
+use {
+    horizon_core::{
+        nbt,
+        nbt::{Limits, NamedTag, Tag},
+    },
+    horizon_world::{DATA_VERSION, compression::Compression},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -568,7 +570,7 @@ impl GameRules {
                         Value::Bool(b) => Tag::Byte(i8::from(b)),
                         Value::Int(i) => Tag::Int(i),
                     };
-                    (horizon_world::nbt::JavaString::from(r.name.as_str()), tag)
+                    (horizon_core::nbt::JavaString::from(r.name.as_str()), tag)
                 }),
         );
         NamedTag {

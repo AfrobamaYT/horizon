@@ -811,7 +811,7 @@ fn mob_name(m: &Mob) -> Text {
 mod held_item_tests {
     use super::has_custom_name;
     use horizon_client::items::ItemStack;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     /// `DamageSource.getLocalizedDeathMessage`: only a non-empty stack with
     /// a `custom_name` component names the item.

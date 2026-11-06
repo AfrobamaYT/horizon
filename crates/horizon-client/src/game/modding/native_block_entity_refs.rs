@@ -9,7 +9,7 @@ use horizon_client::{
     save,
     world::World,
 };
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 use mod_api::__private::game::*;
 use mod_api::{
     BlockEntityDataError, BlockEntityItemError, BlockEntityRef, BlockEntityTypeKey, ItemStack,
@@ -54,7 +54,7 @@ impl Game<'_> {
                 .find(|guest| {
                     guest.uuid == player.fields().uuid
                         && guest.placed
-                        && guest.dimension == entity.fields().level.dimension()
+                        && guest.dimension == entity.fields().level.dimension_id()
                 })
                 .map(|guest| guest.conn)
         }) else {
@@ -462,7 +462,7 @@ impl Game<'_> {
                 g.participates_online()
                     && g.placed
                     && !spectator
-                    && g.dimension == level.dimension()
+                    && g.dimension == level.dimension_id()
                     && g.menu.as_ref().is_some_and(|m| menu_holds(m, key))
             })
             .filter_map(|g| {
@@ -648,7 +648,7 @@ mod tests {
     }
 
     fn compound(snbt: &str) -> Compound {
-        match horizon_world::nbt::parse_snbt(snbt).unwrap().0 {
+        match horizon_core::nbt::parse_snbt(snbt).unwrap().0 {
             Tag::Compound(c) => c,
             _ => panic!("not a compound"),
         }
@@ -884,7 +884,7 @@ mod tests {
             assert_eq!(left.viewers(game), Some(vec![guest12]));
 
             // The same position in another level has none of these viewers.
-            let nether = LevelRef::new(epoch, "minecraft:the_nether");
+            let nether = LevelRef::new(epoch, mod_api::DimensionKey::NETHER);
             game.enter_level(Dim::Nether).unwrap();
             game.world
                 .chunks

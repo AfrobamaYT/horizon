@@ -32,4 +32,5 @@ The preprocessor needs only Python 3 and runs automatically in local and CI buil
 - [The manifest and the package](reference/manifest.md)
 - [The registry index](reference/registry-index.md)
 - [Hook notes](reference/hook-notes.md)
+- [NeoForge counterparts](reference/neoforge-counterparts.md)
 - [The mod API (rustdoc)](reference/api.md)

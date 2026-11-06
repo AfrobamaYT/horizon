@@ -3,7 +3,7 @@
 //! entity removal, and the force-loaded chunks of
 //! `TestInstanceBlockEntity.forceLoadChunks` and `GameTestRunner`'s release.
 use super::Game;
-use horizon_world::worldgen::structure::BoundingBox;
+use horizon_core::bounding_box::BoundingBox;
 
 type Aabb = ([f64; 3], [f64; 3]);
 

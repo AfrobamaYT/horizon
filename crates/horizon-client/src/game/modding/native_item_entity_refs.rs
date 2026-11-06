@@ -158,7 +158,7 @@ mod tests {
                 extra: None,
             };
             stack.data_mut().custom_name =
-                Some(horizon_world::nbt::Tag::String("Named pick".into()));
+                Some(horizon_core::nbt::Tag::String("Named pick".into()));
             game.spawn_item(stack.clone(), [0.0; 3], [0.0; 3], 0);
             let entity = game.native_entity(game.dropped[0].id).unwrap();
             let item = game.native_item_entity_ref(entity).unwrap();

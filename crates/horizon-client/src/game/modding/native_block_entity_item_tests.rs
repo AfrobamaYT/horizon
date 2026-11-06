@@ -1,6 +1,6 @@
 use super::native_live_holder_tests::{mod_holder, with_mod_parts};
 use horizon_client::containers::{BlockEntity, ModBlockEntity, ModContainer};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use mod_api::{
     BlockEntityItemError as Error, Host, HostTransaction, ITEMS, ItemResource, ItemStack,
     ServerHost, Transaction,

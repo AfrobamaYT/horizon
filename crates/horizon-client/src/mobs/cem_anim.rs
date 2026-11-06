@@ -10,8 +10,8 @@
 //! `global_varb.*` every entity shares, and `render.*`, which nothing reads back yet.
 
 use super::{Mob, Part, anim::Poses, anim::State};
+use horizon_core::use_animation::UseAnimation;
 use horizon_optifine::cem::expr::{Expr, compile};
-use horizon_world::consumable::UseAnimation;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,

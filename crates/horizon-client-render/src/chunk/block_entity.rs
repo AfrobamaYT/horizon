@@ -7,14 +7,14 @@ use horizon_client_core::{
     who::{EventSource, Who},
 };
 use horizon_items::{banner_layer::BannerLayer, items::ItemStack};
-use horizon_world::{
-    level::sculk::SculkSpreader,
-    nbt::{Compound, Tag},
-};
 pub use mod_api::containers::{
     ModBlockEntity, ModBlockEntityFields, ModContainer, ModEnergyBuffer, ModFluidTanks, ModRevision,
 };
 use std::{collections::HashMap, sync::Arc};
+use {
+    horizon_core::nbt::{Compound, Tag},
+    horizon_world::level::sculk::SculkSpreader,
+};
 
 /// An entity's UUID as its four ints (`UUIDUtil.CODEC`).
 pub type Uuid = [i32; 4];
@@ -136,8 +136,8 @@ impl Default for PotentSulfur {
 /// `BrushableBlockEntity`: the loot table is resolved on the first brush.
 #[derive(Clone, Debug, Default)]
 pub struct Brushable {
-    pub loot_table: Option<horizon_world::nbt::Tag>,
-    pub loot_seed: Option<horizon_world::nbt::Tag>,
+    pub loot_table: Option<horizon_core::nbt::Tag>,
+    pub loot_seed: Option<horizon_core::nbt::Tag>,
     pub item: Option<ItemStack>,
     /// Direction's legacy network id; not saved to disk by vanilla.
     pub hit_direction: Option<i32>,
@@ -182,9 +182,9 @@ pub struct Campfire {
 /// sound and `custom_name`.
 #[derive(Clone, Debug, Default)]
 pub struct Skull {
-    pub profile: Option<horizon_world::nbt::Tag>,
+    pub profile: Option<horizon_core::nbt::Tag>,
     pub note_block_sound: Option<String>,
-    pub custom_name: Option<horizon_world::nbt::Tag>,
+    pub custom_name: Option<horizon_core::nbt::Tag>,
     /// What `profile` draws, read from it once rather than every frame.
     pub skin: Option<SkullSkin>,
 }
@@ -227,7 +227,7 @@ pub struct Banner {
     pub layers: Vec<BannerLayer>,
     pub name: Option<String>,
     /// Components not consumed by BannerBlockEntity's implicit fields.
-    pub components: horizon_world::nbt::Compound,
+    pub components: horizon_core::nbt::Compound,
 }
 /// `CreakingHeartBlockEntity` (the logic is in `game/mobs/creaking.rs`).
 #[derive(Clone, Debug, Default)]

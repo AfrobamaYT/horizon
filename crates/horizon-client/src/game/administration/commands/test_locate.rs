@@ -299,7 +299,7 @@ impl Game<'_> {
         let corner =
             TestInstanceBlock::structure_pos_of([at.0 + padding, at.1 + padding, at.2 + padding]);
         // getStructureBoundingBox(getStructurePos(testPos), size, NONE)
-        let area = horizon_world::worldgen::structure::BoundingBox::new(
+        let area = horizon_core::bounding_box::BoundingBox::new(
             corner,
             [0, 1, 2].map(|i| corner[i] + size[i] - 1),
         );

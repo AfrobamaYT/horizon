@@ -3,7 +3,7 @@
 //! overrides on it.
 use crate::item_data::BundleSelected;
 use crate::items::{ItemStack, Items};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// A bundle weight: vanilla's `Fraction`, exact and kept reduced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

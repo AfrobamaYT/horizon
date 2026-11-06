@@ -84,7 +84,7 @@ horizon_world::worldgen::generator::ProtoChunk
 horizon_world::worldgen::generator::WorkerState
 horizon_world::worldgen::generator_structures::StructureState
 horizon_world::worldgen::overrides::WorldgenOverrides
-horizon_world::worldgen::structure::BoundingBox
+horizon_core::bounding_box::BoundingBox
 horizon_world::worldgen::structure::legacy::PieceRandom
 
 # Treefall: typed lower-crate reads used by its Blocks/Host adapter.

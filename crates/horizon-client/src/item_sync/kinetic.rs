@@ -4,7 +4,10 @@ use horizon_protocol::{
     item::Component,
     registry::Builtin,
 };
-use horizon_world::{datafix::dynamic::as_number, identifier::Identifier, nbt::Tag};
+use {
+    horizon_core::{identifier::Identifier, nbt::Tag},
+    horizon_world::datafix::dynamic::as_number,
+};
 
 const CONDITIONS: [&str; 3] = [
     "dismount_conditions",

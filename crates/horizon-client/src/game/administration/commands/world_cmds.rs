@@ -8,10 +8,10 @@ use horizon_client::{
     settings::SOUND_SOURCES,
     text::Text,
 };
+use horizon_core::nbt::Tag;
 use horizon_core::random::RandomSource;
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use horizon_world::attribute_map::ValueKind;
-use horizon_world::nbt::Tag;
 
 /// Queue bookkeeping for synchronous command damage, preserving prior requests
 /// and unrelated events. The existing game policy handles each extracted request.

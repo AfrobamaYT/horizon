@@ -7,7 +7,7 @@ use horizon_client::{
     jigsaw_block::{self, JigsawBlock, JointType},
 };
 use horizon_protocol::packets::play;
-use horizon_world::{nbt::Tag, worldgen::generator::JigsawQuery};
+use {horizon_core::nbt::Tag, horizon_world::worldgen::generator::JigsawQuery};
 
 type Pos = (i32, i32, i32);
 

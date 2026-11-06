@@ -10,11 +10,12 @@ use horizon_client::{
     mobs::MobTypes,
 };
 use horizon_items::equipment::{Equipment, SLOT_NAMES};
-use horizon_world::{
-    attribute_map::ValueKind, attributes::entity::Catalog, loot::PackOverlay, nbt::Tag,
-};
 use serde_json::Value;
 use std::{fmt::Write as _, fs, path::Path, sync::Arc};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{attribute_map::ValueKind, attributes::entity::Catalog, loot::PackOverlay},
+};
 
 fn slot(name: &str) -> usize {
     SLOT_NAMES.iter().position(|n| *n == name).unwrap()
@@ -90,7 +91,7 @@ pub fn main() -> horizon_client::Result<()> {
         let case: Value = serde_json::from_str(line)?;
         let name = case["name"].as_str().unwrap_or_default();
         let entity = case["entity"].as_str().unwrap_or_default();
-        let (tag, _) = horizon_world::nbt::parse_snbt(case["snbt"].as_str().unwrap_or_default())?;
+        let (tag, _) = horizon_core::nbt::parse_snbt(case["snbt"].as_str().unwrap_or_default())?;
         let passes = [&case["equip"], &case["then"]];
         let mut row = name.to_owned();
         // Equips the slots a pass names, then runs the equipment pass on `live`.

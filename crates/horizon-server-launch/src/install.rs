@@ -16,7 +16,7 @@ impl Install {
     /// The install holding `program` (`<root>/releases/<tag>/horizon-server`, reached directly or through
     /// `current`).
     pub fn around(program: &Path) -> Option<Self> {
-        let program = std::fs::canonicalize(program).ok()?;
+        let program = dunce::canonicalize(program).ok()?;
         let releases = program.parent()?.parent()?;
         if releases.file_name()? != "releases" {
             return None;

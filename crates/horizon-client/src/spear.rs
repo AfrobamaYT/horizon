@@ -510,7 +510,7 @@ mod tests {
     fn effective_kinetic_components_drive_the_first_person_pose() {
         use crate::{first_person::ItemPose, items::ItemStack};
         use horizon_assets::item_model::ItemModels;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         use serde_json::json;
         use std::{collections::BTreeMap, sync::Arc};
 
@@ -665,12 +665,12 @@ mod tests {
         );
         let mut stack = crate::items::ItemStack::new("minecraft:stick", 1);
         for (number, ticks) in [
-            (horizon_world::nbt::Tag::Double(40.75f64.to_bits()), 40),
-            (horizon_world::nbt::Tag::Float(f32::NAN.to_bits()), 0),
+            (horizon_core::nbt::Tag::Double(40.75f64.to_bits()), 40),
+            (horizon_core::nbt::Tag::Float(f32::NAN.to_bits()), 0),
         ] {
             stack.data_mut().set_other(
                 "minecraft:kinetic_weapon",
-                Some(horizon_world::nbt::Tag::compound([("delay_ticks", number)])),
+                Some(horizon_core::nbt::Tag::compound([("delay_ticks", number)])),
             );
             assert_eq!(
                 UseTiming::of_stack(&stack, None).unwrap().delay_ticks,

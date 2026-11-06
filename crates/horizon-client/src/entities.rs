@@ -1718,7 +1718,7 @@ pub struct Cushion {
     /// BlockAttachedEntity.ticksSinceLastCheck.
     pub check_interval: u32,
     /// `Entity.getCustomName` (`CustomName`), copied onto the dropped cushion.
-    pub custom_name: Option<horizon_world::nbt::Tag>,
+    pub custom_name: Option<horizon_core::nbt::Tag>,
 }
 impl Cushion {
     /// `Entity.makeBoundingBox`: x and z half a block out, y to y + 0.25.
@@ -1776,7 +1776,7 @@ pub struct ItemFrame {
     pub invisible: bool,
     pub check_interval: u32,
     /// `Entity.getCustomName` (`CustomName`), copied onto the dropped frame.
-    pub custom_name: Option<horizon_world::nbt::Tag>,
+    pub custom_name: Option<horizon_core::nbt::Tag>,
 }
 impl ItemFrame {
     /// `ItemFrame.setItem`: the adopted stack holds one item. The caller owns
@@ -3007,7 +3007,7 @@ mod merge_tests {
             for item in &mut items {
                 item.stack.data_mut().set_other(
                     "minecraft:max_stack_size",
-                    Some(horizon_world::nbt::Tag::Int(99)),
+                    Some(horizon_core::nbt::Tag::Int(99)),
                 );
             }
             let before = [items[0].stack.clone(), items[1].stack.clone()];
@@ -4045,9 +4045,9 @@ mod armor_stand_motion_tests {
         let mut tag = ItemStack::new("minecraft:name_tag", 4);
         assert!(!stand.name_with_tag(&tag));
         assert!(stand.custom_name.is_none());
-        let name = horizon_world::nbt::Tag::compound([
-            ("text", horizon_world::nbt::Tag::String("Bob".into())),
-            ("color", horizon_world::nbt::Tag::String("gold".into())),
+        let name = horizon_core::nbt::Tag::compound([
+            ("text", horizon_core::nbt::Tag::String("Bob".into())),
+            ("color", horizon_core::nbt::Tag::String("gold".into())),
         ]);
         tag.data_mut().custom_name = Some(name.clone());
         assert!(stand.name_with_tag(&tag));
@@ -4055,7 +4055,7 @@ mod armor_stand_motion_tests {
         assert_eq!(stand.health, 20.0);
         assert!(!stand.name_with_tag(&ItemStack::new("minecraft:name_tag", 3)));
         stand.health = 0.0;
-        tag.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Other".into()));
+        tag.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Other".into()));
         assert!(
             stand.name_with_tag(&tag),
             "a dead target still handles the named tag"

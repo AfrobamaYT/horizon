@@ -95,7 +95,10 @@ fn string_list(v: &Value) -> Vec<String> {
         _ => vec![],
     }
 }
-fn read_tag_dir(dir: &Path) -> HashMap<String, Vec<String>> {
+fn read_tag_dir(
+    dir: &Path,
+    conditions: &horizon_world::conditions::LoadConditions,
+) -> HashMap<String, Vec<String>> {
     let Ok(folder) = horizon_world::json_folder::read(dir) else {
         return HashMap::new();
     };
@@ -104,6 +107,9 @@ fn read_tag_dir(dir: &Path) -> HashMap<String, Vec<String>> {
         .iter()
         .filter_map(|file| {
             let v = serde_json::from_slice::<Value>(file.bytes().ok()?).ok()?;
+            if !conditions.allows(&v) {
+                return None;
+            }
             let values = v["values"]
                 .as_array()
                 .into_iter()
@@ -205,13 +211,16 @@ impl Enchantments {
         defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> Self {
         let data = root.join("data/minecraft");
-        let mut raw_tags = read_tag_dir(&data.join("tags/enchantment"));
+        let mut raw_tags = read_tag_dir(&data.join("tags/enchantment"), overlay.conditions);
         for (id, files) in overlay.tag_kind("enchantment") {
-            let slot = raw_tags.entry(id).or_default();
             for bytes in files {
                 let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
                     continue;
                 };
+                if !overlay.conditions.allows(&v) {
+                    continue;
+                }
+                let slot = raw_tags.entry(id.clone()).or_default();
                 if v["replace"].as_bool() == Some(true) {
                     slot.clear();
                 }
@@ -245,7 +254,10 @@ impl Enchantments {
                 })
                 .collect()
         };
-        let entity_tags = unordered(read_tag_dir(&data.join("tags/entity_type")));
+        let entity_tags = unordered(read_tag_dir(
+            &data.join("tags/entity_type"),
+            overlay.conditions,
+        ));
         let damage_tags = match horizon_world::damage_source::Catalog::load(root, overlay) {
             Ok(catalog) => catalog
                 .tags()
@@ -257,18 +269,15 @@ impl Enchantments {
                 })
                 .collect(),
             // Small tools/fixtures may not carry the prepared catalog.
-            Err(_) => unordered(read_tag_dir(&data.join("tags/damage_type"))),
+            Err(_) => unordered(read_tag_dir(
+                &data.join("tags/damage_type"),
+                overlay.conditions,
+            )),
         };
         // The registry lists entries sorted by id, like the data-pack loader.
-        let mut files: BTreeMap<String, Value> = BTreeMap::new();
-        // The folder's own files, not its subfolders'.
-        if let Ok(folder) = horizon_world::json_folder::read(&data.join("enchantment")) {
-            for file in folder.files.iter().filter(|f| !f.name.contains('/')) {
-                if let Ok(v) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
-                    files.insert(format!("minecraft:{}", file.name), v);
-                }
-            }
-        }
+        let files: BTreeMap<String, Value> = crate::items::data_files(root, "enchantment", overlay)
+            .into_iter()
+            .collect();
         let lang: HashMap<String, String> =
             horizon_core::prepared_files::read(&root.join("assets/minecraft/lang/en_us.json"))
                 .ok()

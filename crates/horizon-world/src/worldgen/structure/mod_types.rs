@@ -8,7 +8,7 @@
 //! state and its contexts carry no `Host`.
 use super::legacy::LegacyPiece;
 use super::start::StartContext;
-use crate::nbt::Compound;
+use horizon_core::nbt::Compound;
 use horizon_core::{
     position::ChunkPos,
     random::{LegacyRandom, WorldgenRandom},
@@ -84,9 +84,9 @@ pub fn with_test_types<T>(types: &ModStructureTypes, with: impl FnOnce() -> T) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worldgen::structure::BoundingBox;
     use crate::worldgen::structure::legacy::{PieceContext, Result};
     use crate::worldgen::structure::start::StructureKind;
+    use horizon_core::bounding_box::BoundingBox;
     use serde_json::json;
     use std::collections::BTreeSet;
 
@@ -118,7 +118,7 @@ mod tests {
         fn load_piece(&self, tag: &Compound) -> Option<Box<dyn LegacyPiece>> {
             let int_array = |key: &str| -> Option<[i32; 3]> {
                 let value = tag.get(&key.into())?;
-                let crate::nbt::Tag::IntArray(a) = value else {
+                let horizon_core::nbt::Tag::IntArray(a) = value else {
                     return None;
                 };
                 Some([a[0], a[1], a[2]])
@@ -145,7 +145,7 @@ mod tests {
             Box::leak(self.id.clone().into_boxed_str())
         }
         fn save(&self) -> Option<Compound> {
-            use crate::nbt::Tag;
+            use horizon_core::nbt::Tag;
             let mut tag = super::super::legacy::piece_tag(&self.id, self.bounding_box(), None, 0);
             tag.insert("Min".into(), Tag::IntArray(self.min.to_vec()));
             tag.insert("Max".into(), Tag::IntArray(self.max.to_vec()));
@@ -218,7 +218,7 @@ mod tests {
     /// type id, as it was saved.
     #[test]
     fn load_piece_rebuilds_the_saved_piece() {
-        use crate::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let types: ModStructureTypes = BTreeMap::from([(
             "testmod:boxed".to_owned(),
             Arc::new(Boxed(vec![])) as Arc<dyn ModStructureType>,

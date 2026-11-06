@@ -536,7 +536,7 @@ impl Game<'_> {
                 };
                 // An inline table (ResourceOrIdArgument) keeps its random sequence.
                 if table.starts_with('{') {
-                    let (tag, _) = horizon_world::nbt::parse_snbt(&table)
+                    let (tag, _) = horizon_core::nbt::parse_snbt(&table)
                         .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
                     let json = horizon_client::scoreboard::tag_to_json(&tag);
                     // LootCommand's omitted fishing tool is EMPTY, not mainhand.

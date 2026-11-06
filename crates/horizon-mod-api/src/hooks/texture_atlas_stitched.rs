@@ -8,6 +8,11 @@ pub trait Hooks {
     /// the sprites a mod draws up here, once, and keep what it finds until the next stitch of that
     /// atlas: `texture_sprites` for [`TextureAtlas::Blocks`], `gui_sprite` for
     /// [`TextureAtlas::Gui`]. Never look them up by name every frame. Client-side.
-    #[hook(side = "client", contract = "listen", cancellable = false)]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        cancellable = false,
+        neoforge = "TextureAtlasStitchedEvent"
+    )]
     fn texture_atlas_stitched();
 }

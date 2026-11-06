@@ -91,6 +91,9 @@ use crate::{
     registry::{BlockRegistry, BlockStateId},
 };
 use horizon_core::{
+    connection_kind::ConnectionKind, dimension::Dimension, neighbour_update::NeighbourUpdate,
+};
+use horizon_core::{
     geometry::{Aabb, Direction, VoxelShape},
     position::{BlockPos, ChunkPos},
     random::LegacyRandom,
@@ -143,18 +146,6 @@ pub use buckets::{BucketContent, fluid_bucket, fluid_pickup_sound};
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
 pub use falling::Landing;
 
-/// A neighbour update a block asks for when it is removed, each the one vanilla's own removal
-/// uses (`Level.updateNeighborsAt`, `updateNeighborsAtExceptFromFacing`,
-/// `updateNeighbourForOutputSignal`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NeighbourUpdate {
-    /// `Level.updateNeighbourForOutputSignal`: comparators beside the position re-read.
-    OutputSignal,
-    /// `Level.updateNeighborsAt`: all six neighbours hear the block changed.
-    Neighbours,
-    /// `Level.updateNeighborsAtExceptFromFacing`: all neighbours but the one in the direction.
-    NeighboursExcept(Direction),
-}
 /// A write a block's part asks for when an entity lands on it (`Block.fallOn`'s own
 /// `setBlockAndUpdate` or `destroyBlock`), at the block the entity landed on. The level
 /// applies each once the entity's batch has ticked, in the order asked.
@@ -168,19 +159,6 @@ pub enum LandingWrite {
         /// Whether the block drops its resources.
         drop: bool,
     },
-}
-/// Which vanilla rule a connection query comes from: the block asking is a fence,
-/// a wall, or iron bars or a pane, and vanilla's own answer is that rule's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum ConnectionKind {
-    /// `FenceBlock.connectsTo`: an arm of a fence.
-    Fence,
-    /// `WallBlock.connectsTo`: a side of a wall, low or tall from the block above.
-    Wall,
-    /// `IronBarsBlock.attachsTo`: an arm of iron bars or a glass pane, which are
-    /// the same block class.
-    Bars,
 }
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
@@ -209,13 +187,6 @@ pub mod flags {
     pub const UPDATE_SKIP_ALL_SIDEEFFECTS: i32 = 816;
     /// `Block.UPDATE_LIMIT`, the recursion budget of shape updates.
     pub const UPDATE_LIMIT: i32 = 512;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dimension {
-    Overworld,
-    Nether,
-    End,
 }
 
 /// Game rules consulted by block behaviour (vanilla defaults).
@@ -291,7 +262,10 @@ pub enum LevelEvent {
     /// A placed template's container whose data has a `LootTable`
     /// (`RandomizableContainer.tryLoadLootTable`): the caller keeps the table
     /// and rolls it, as for a container a command gives one.
-    ContainerLootTable { pos: BlockPos, tag: crate::nbt::Tag },
+    ContainerLootTable {
+        pos: BlockPos,
+        tag: horizon_core::nbt::Tag,
+    },
     /// `Block.dropResources(state, level, pos)`: the caller evaluates the
     /// block's loot table (no tool, no breaker) and pops the items.
     DropResources { pos: BlockPos, state: BlockStateId },
@@ -936,7 +910,7 @@ pub trait LevelAccess {
     /// Load saved block-entity data into the block entity of the block just
     /// placed at `pos` (`BlockEntity.loadWithComponents`): a bee nest a grown
     /// tree placed gets its bees. Levels without block entities drop it.
-    fn load_block_entity(&mut self, _pos: BlockPos, _nbt: crate::nbt::Compound) {}
+    fn load_block_entity(&mut self, _pos: BlockPos, _nbt: horizon_core::nbt::Compound) {}
     /// Biome identifier at `pos` (`minecraft:plains`), for features placed by
     /// block behaviour (bone meal flowers). None when unknown.
     fn biome_name(&self, _pos: BlockPos) -> Option<&str> {

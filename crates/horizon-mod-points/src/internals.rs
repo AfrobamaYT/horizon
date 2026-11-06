@@ -129,6 +129,8 @@ pub struct Type {
     pub node: NodeFn,
     /// Fields whose step creates no reference to the parent (including wrappers).
     pub raw_fields: &'static [u32],
+    /// Primitive field reads that do not create references.
+    pub raw_gets: &'static [u32],
     /// Index steps create no reference to the parent or its elements.
     pub raw_index: bool,
 }

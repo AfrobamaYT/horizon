@@ -1,8 +1,8 @@
 //! Shared equipment durability mutation.
 use super::Game;
 use horizon_client::items::ItemStack;
+use horizon_core::nbt::Tag;
 use horizon_world::item_durability::{self, DurabilityStack, DurabilityWorld};
-use horizon_world::nbt::Tag;
 use std::convert::Infallible;
 
 struct World<'a, 'g> {

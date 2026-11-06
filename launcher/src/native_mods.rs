@@ -36,6 +36,7 @@ mod internals_sync;
 mod isolate;
 mod package;
 mod prebuilt;
+mod sites;
 mod wasm_internals;
 
 pub use isolate::LeftOut;
@@ -2260,6 +2261,7 @@ fn pipeline(
                 "internals": m.native().internals,
                 "raw": m.native().injection.iter().filter(|injection| injection.raw.is_some()).map(|injection| serde_json::json!({
                     "id": injection.id, "target": injection.target, "kind": injection.kind,
+                    "selector": injection.selector, "ordinal": injection.ordinal, "fingerprint": injection.fingerprint,
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
@@ -2354,10 +2356,16 @@ fn pipeline(
         } else {
             sync(&source, &fresh)?;
         }
-        // The staged game gets its points as a prebuilt one does: the revision's own staging
-        // pass, so the mods' `impl Points` compiles the same on both routes.
+        // Stage beside `fresh` and publish the tree and catalog only after the mods' sites
+        // check, as the prebuilt route validates before it creates its output.
         let listed = real.join("points.json");
-        let mut pass = cargo(&rust, &fresh, "run");
+        let pending = real.join("stage.pending");
+        let catalog_dir = real.join("catalog.partial");
+        let _ = fs::remove_dir_all(&pending);
+        let _ = fs::remove_dir_all(&catalog_dir);
+        fs::create_dir_all(&catalog_dir).map_err(|e| e.to_string())?;
+        sync(&fresh, &pending)?;
+        let mut pass = cargo(&rust, &pending, "run");
         pass.args([
             "--locked",
             "--release",
@@ -2368,13 +2376,39 @@ fn pipeline(
             "horizon-stage",
             "--",
         ])
-        .arg(&fresh)
-        .arg(&listed)
-        .arg(real.join("internals.json"))
+        .arg(&pending)
+        .arg(catalog_dir.join(inject::POINTS))
+        .arg(catalog_dir.join(internals::INTERNALS))
         .env("CARGO_TARGET_DIR", real.join("target"));
         wasm_internals::stage(&fresh, &wasm_internals, &mut pass)?;
-        run(pass, "Marking the game's injection points", |_| {})?;
-        inject::check(&point_injections, &inject::listed(&listed)?).map_err(|e| e.to_string())?;
+        fn discard(pending: &Path, catalog: &Path, error: impl std::fmt::Display) -> String {
+            let _ = fs::remove_dir_all(pending);
+            let _ = fs::remove_dir_all(catalog);
+            error.to_string()
+        }
+        run(pass, "Marking the game's injection points", |_| {})
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let catalog = internals::Catalog::read(&catalog_dir)
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        mods.iter()
+            .try_for_each(|bundle| catalog.check(&bundle.manifest))
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        inject::check(
+            &point_injections,
+            &inject::listed(&catalog_dir.join(inject::POINTS))
+                .map_err(|error| discard(&pending, &catalog_dir, error))?,
+        )
+        .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let _ = fs::remove_dir_all(&fresh);
+        fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
+        fs::rename(catalog_dir.join(inject::POINTS), &listed)
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        fs::rename(
+            catalog_dir.join(internals::INTERNALS),
+            real.join(internals::INTERNALS),
+        )
+        .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
             // Offline metadata resolves all targets, including packages not fetched for this host.
             let mut fetch = cargo(&rust, &source, "fetch");

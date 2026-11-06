@@ -65,6 +65,36 @@ impl StandaloneGeometry {
             slots,
         }
     }
+
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Vertices and per-slot index ranges for the generation's GPU buffer.
+    pub(super) fn prepared_upload(
+        &self,
+    ) -> (
+        Vec<horizon_client::gfx::PreparedModelVertex>,
+        Vec<Option<(u32, u32)>>,
+    ) {
+        let mut vertices = Vec::new();
+        let mut ranges = Vec::new();
+        for slot in &self.slots {
+            let Some(faces) = slot else {
+                ranges.push(None);
+                continue;
+            };
+            let index_start = vertices.len() as u32 / 4 * 6;
+            for face in faces {
+                for corner in 0..4 {
+                    vertices.push(face.gpu_vertex(corner));
+                }
+            }
+            let index_count = vertices.len() as u32 / 4 * 6 - index_start;
+            ranges.push((index_count > 0).then_some((index_start, index_count)));
+        }
+        (vertices, ranges)
+    }
 }
 
 /// `BlockEntityRenderer.getViewDistance`'s default, in blocks.
@@ -874,7 +904,7 @@ impl Game<'_> {
     ) -> Result<(), ModelError> {
         use mod_api::__private::game::Fields;
         let fields = model.fields();
-        if fields.generation != self.standalone_geometry.generation {
+        if fields.generation != self.standalone_geometry.generation() {
             return Err(ModelError::StaleModel);
         }
         let faces = self
@@ -1130,7 +1160,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn prepared_model_entity_pixels() {
         use mod_api::{__private::game::Fields, ClientHost};
-        horizon_client::models::register_standalone(vec!["minecraft:block/grass_block".into()]);
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let model = game
                 .render_assets()
@@ -1180,14 +1211,14 @@ mod tests {
                 Quat::IDENTITY,
                 Vec3::new(-0.55, -0.85, 0.5),
             );
-            let Some(rendered) = horizon_client::gfx::entity_pixel_test::render(
+            let rendered = horizon_client::gfx::entity_pixel_test::render(
                 vertices,
                 [atlas.width, atlas.height],
                 &pixels,
                 view,
-            ) else {
-                return;
-            };
+                false,
+            )
+            .expect("software Vulkan entity pixels");
             let coverage = rendered
                 .as_chunks::<4>()
                 .0
@@ -1202,12 +1233,139 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
+    fn prepared_instance_matches_cpu_pixels() {
+        use glam::DVec3;
+        use horizon_client::gfx::{PreparedModelInstance, fail_next_prepared_upload};
+        use mod_api::{__private::game::Fields, ClientHost};
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let model = game
+                .render_assets()
+                .model(&Identifier::parse("minecraft:block/grass_block").unwrap())
+                .unwrap();
+            let slot = model.fields().slot;
+            let local = Mat4::from_scale_rotation_translation(
+                Vec3::new(1.2, 0.5, 1.7),
+                Quat::from_rotation_z(0.25),
+                Vec3::ZERO,
+            );
+            let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
+            let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
+            let pose = horizon_client::gfx::camera_matrix(local, origin, camera);
+            let mut surface = draw();
+            surface.poses = vec![pose];
+            surface.light = 0xF030;
+            game.native_draw_model(&mut surface, model, 0x80c040)
+                .unwrap();
+            let tint = horizon_client::hud_layout::multiply(
+                u32::MAX,
+                horizon_client::mobs::render::abgr(0x80c040),
+            )
+            .to_le_bytes()
+            .map(|byte| byte as f32 / 255.0);
+            let instance = PreparedModelInstance::new(local, origin, camera, tint, 0xF030);
+            assert_eq!(instance.matrix(), pose);
+            let (vertices, ranges) = game.standalone_geometry.prepared_upload();
+            let atlas = &game.gui.atlas;
+            let mut pixels = atlas.pixels().to_vec();
+            let face_index = game.standalone_geometry.slots[slot as usize]
+                .as_ref()
+                .unwrap()
+                .iter()
+                .position(|face| face.facing == Direction::South && face.tint_index >= 0)
+                .unwrap();
+            let sprite = game
+                .pack
+                .render
+                .resolve_model(model)
+                .unwrap()
+                .faces
+                .iter()
+                .filter_map(|face| {
+                    game.pack
+                        .layer_names
+                        .get(&face.layer)
+                        .and_then(|name| atlas.sprites.get(name))
+                        .copied()
+                })
+                .nth(face_index)
+                .unwrap();
+            let x0 = (sprite.u0 * atlas.width as f32).round() as u32;
+            let x1 = (sprite.u1 * atlas.width as f32).round() as u32;
+            let y0 = (sprite.v0 * atlas.height as f32).round() as u32;
+            let y1 = (sprite.v1 * atlas.height as f32).round() as u32;
+            for y in y0..y1 {
+                for x in x0..(x0 + x1) / 2 {
+                    pixels[((y * atlas.width + x) * 4 + 3) as usize] = 0;
+                }
+            }
+            let view = Mat4::from_scale_rotation_translation(
+                Vec3::new(1.4, 1.4, 0.2),
+                Quat::IDENTITY,
+                Vec3::new(-0.55, -0.85, 0.5),
+            );
+            let cpu = horizon_client::gfx::entity_pixel_test::render(
+                &surface.vertices,
+                [atlas.width, atlas.height],
+                &pixels,
+                view,
+                true,
+            )
+            .expect("software Vulkan entity pixels");
+            let uploaded = game.standalone_geometry.generation();
+            let instance_pixels = |ranges, requested| {
+                horizon_client::gfx::entity_pixel_test::render_instance(
+                    horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
+                        vertices: &vertices,
+                        ranges,
+                        uploaded,
+                        requested,
+                        slot,
+                        instance: &instance,
+                        atlas_size: [atlas.width, atlas.height],
+                        atlas: &pixels,
+                        view_proj: view,
+                    },
+                )
+            };
+            let gpu = instance_pixels(ranges, uploaded).expect("software Vulkan prepared instance");
+            let mut worst = 0u8;
+            for (cpu, gpu) in cpu.iter().zip(gpu.iter()) {
+                worst = worst.max(cpu.abs_diff(*gpu));
+            }
+            assert!(worst <= 2, "cpu and instance pixels differed by {worst}");
+            assert!(
+                cpu.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|pixel| pixel[3] != 255 && pixel[3] != 0)
+            );
+            fail_next_prepared_upload();
+            assert!(
+                instance_pixels(game.standalone_geometry.prepared_upload().1, uploaded).is_err(),
+                "a forced upload failure must not draw"
+            );
+            assert!(
+                instance_pixels(
+                    game.standalone_geometry.prepared_upload().1,
+                    uploaded.wrapping_add(1),
+                )
+                .is_err(),
+                "a stale generation must not draw"
+            );
+        });
+    }
+
+    #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn resolved_model_draws_and_resource_replacement_invalidates_it() {
         use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
         use mod_api::{BlockEntityDrawContext, ClientHost};
 
-        horizon_client::models::register_standalone(vec!["minecraft:block/grass_block".into()]);
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let id = Identifier::parse("minecraft:block/grass_block").unwrap();
             let model = game.render_assets().model(&id).unwrap();

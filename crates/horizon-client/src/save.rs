@@ -28,17 +28,6 @@ use horizon_core::{
     ticks::{SavedTick, TickPriority, TickTypeId},
 };
 use horizon_world::attachments::{ATTACHMENTS_KEY, attachment_compound};
-use horizon_world::{
-    DATA_VERSION,
-    chunk::BlockState,
-    chunk_status::ChunkStatus,
-    compression::Compression,
-    heightmap::{Heightmap, HeightmapChunk, HeightmapState, HeightmapType},
-    nbt::{self, Compound, JavaString, Limits, NamedTag, Tag},
-    region::{ChunkRecord, RegionFile},
-    registry::{BlockRegistry, BlockStateId},
-    worldgen::terrain::TerrainBlockStates,
-};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
@@ -47,6 +36,22 @@ use std::{
         Arc, Condvar, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
         mpsc,
+    },
+};
+use {
+    horizon_core::{
+        nbt,
+        nbt::{Compound, JavaString, Limits, NamedTag, Tag},
+    },
+    horizon_world::{
+        DATA_VERSION,
+        chunk::BlockState,
+        chunk_status::ChunkStatus,
+        compression::Compression,
+        heightmap::{Heightmap, HeightmapChunk, HeightmapState, HeightmapType},
+        region::{ChunkRecord, RegionFile},
+        registry::{BlockRegistry, BlockStateId},
+        worldgen::terrain::TerrainBlockStates,
     },
 };
 
@@ -6615,7 +6620,7 @@ mod tests {
     #[test]
     fn a_lecterns_page_loads_within_its_book() {
         let page_of = |tag: &str| {
-            let tag = horizon_world::nbt::parse_snbt(tag).unwrap().0;
+            let tag = horizon_core::nbt::parse_snbt(tag).unwrap().0;
             let (_, entity) = decode_block_entity(&tag).expect("lectern");
             let crate::containers::BlockEntity::Lectern(l) = entity else {
                 panic!("not a lectern");
@@ -6654,7 +6659,7 @@ mod tests {
             r#"{{id:"minecraft:lectern",x:1,y:64,z:2,Page:1,Book:{{{}}}}}"#,
             book(r#""one","two","three""#)
         );
-        let tag = horizon_world::nbt::parse_snbt(&tag).unwrap().0;
+        let tag = horizon_core::nbt::parse_snbt(&tag).unwrap().0;
         let (pos, entity) = decode_block_entity(&tag).expect("lectern");
         let crate::containers::BlockEntity::Lectern(l) = entity else {
             panic!("not a lectern");
@@ -6669,7 +6674,7 @@ mod tests {
     }
     #[test]
     fn a_chest_loot_table_takes_precedence_over_saved_items() {
-        let mut saved = horizon_world::nbt::parse_snbt(
+        let mut saved = horizon_core::nbt::parse_snbt(
             r#"{id:"minecraft:chest",x:1,y:2,z:3,Items:[{Slot:3b,id:"minecraft:diamond",count:7}],LootTable:"minecraft:chests/simple_dungeon",LootTableSeed:42L}"#,
         )
         .unwrap()
@@ -6720,7 +6725,7 @@ mod tests {
             ("minecraft:dispenser", 9),
             ("minecraft:dropper", 9),
         ] {
-            let mut saved = horizon_world::nbt::parse_snbt(&format!(
+            let mut saved = horizon_core::nbt::parse_snbt(&format!(
                 r#"{{id:"{id}",x:1,y:2,z:3,Items:[{{Slot:3b,id:"minecraft:diamond",count:7}}],LootTable:"minecraft:chests/simple_dungeon",LootTableSeed:42L}}"#
             ))
             .unwrap()
@@ -6774,7 +6779,7 @@ mod tests {
             "minecraft:dropper",
         ] {
             for invalid in ["INVALID TABLE", "bad:table/with spaces", "bad@id"] {
-                let saved = horizon_world::nbt::parse_snbt(&format!(
+                let saved = horizon_core::nbt::parse_snbt(&format!(
                     r#"{{id:"{id}",x:1,y:2,z:3,Items:[{{Slot:0b,id:"minecraft:diamond",count:3}}],LootTable:"{invalid}"}}"#
                 ))
                 .unwrap()
@@ -6793,7 +6798,7 @@ mod tests {
     /// takes it from the tag the block entity was loaded (or set) with.
     #[test]
     fn a_locked_chest_keeps_its_lock_through_decode_and_encode() {
-        let saved = horizon_world::nbt::parse_snbt(
+        let saved = horizon_core::nbt::parse_snbt(
             r#"{id:"minecraft:chest",x:1,y:2,z:3,lock:{items:"minecraft:gold_ingot"}}"#,
         )
         .unwrap()
@@ -6806,7 +6811,7 @@ mod tests {
         assert!(plain.get("lock").is_none());
         // ...so `data get` puts back the one it was loaded with.
         let data = block_entity_data(pos, &chest, "minecraft:chest", saved.get("lock"));
-        let lock = horizon_world::nbt::parse_snbt(r#"{items:"minecraft:gold_ingot"}"#)
+        let lock = horizon_core::nbt::parse_snbt(r#"{items:"minecraft:gold_ingot"}"#)
             .unwrap()
             .0;
         assert_eq!(data.get("lock"), Some(&lock));
@@ -6814,7 +6819,7 @@ mod tests {
     #[test]
     fn spawner_block_entity_round_trips() {
         // A dungeon spawner as vanilla saves it (`id` is mob_spawner, not the block).
-        let saved = horizon_world::nbt::parse_snbt(
+        let saved = horizon_core::nbt::parse_snbt(
             r#"{id:"minecraft:mob_spawner",x:67,y:-52,z:-64,Delay:20s,SpawnData:{entity:{id:"minecraft:zombie"}},SpawnPotentials:[]}"#,
         )
         .unwrap()
@@ -6864,7 +6869,7 @@ mod tests {
         ))
         .unwrap();
         let tag = |id: &str| {
-            horizon_world::nbt::parse_snbt(&format!(r#"{{id:"{id}",x:1,y:64,z:2,energy:900L}}"#,))
+            horizon_core::nbt::parse_snbt(&format!(r#"{{id:"{id}",x:1,y:64,z:2,energy:900L}}"#,))
                 .unwrap()
                 .0
         };
@@ -6904,7 +6909,7 @@ mod tests {
 
     #[test]
     fn mod_block_entity_round_trips() {
-        let saved = horizon_world::nbt::parse_snbt(
+        let saved = horizon_core::nbt::parse_snbt(
             r#"{id:"gtmod:macerator",x:5,y:-60,z:12,energy:1200L,progress:7,Items:[{Slot:0b,id:"minecraft:iron_ore",count:3}]}"#,
         )
         .unwrap()
@@ -6932,7 +6937,7 @@ mod tests {
             r#"Items:[{Slot:0b,id:"minecraft:air",count:1}]"#,
             r#"Items:[{Slot:0b,id:"minecraft:stone",count:1,note:"mine"}]"#,
         ] {
-            let saved = horizon_world::nbt::parse_snbt(&format!(
+            let saved = horizon_core::nbt::parse_snbt(&format!(
                 r#"{{id:"gtmod:cable",x:0,y:0,z:0,{items}}}"#
             ))
             .unwrap()
@@ -6949,7 +6954,7 @@ mod tests {
             );
         }
         // Vanilla's types are never a mod's, modelled or not.
-        let ender = horizon_world::nbt::parse_snbt(r#"{id:"minecraft:ender_chest",x:0,y:0,z:0}"#)
+        let ender = horizon_core::nbt::parse_snbt(r#"{id:"minecraft:ender_chest",x:0,y:0,z:0}"#)
             .unwrap()
             .0;
         assert!(!matches!(
@@ -7103,7 +7108,7 @@ mod tests {
     fn skull_block_entity_keeps_its_profile() {
         // A placed `player_head` as vanilla saves it: the owning player's
         // `profile` survives load, encode and `canonical`.
-        let saved = horizon_world::nbt::parse_snbt(
+        let saved = horizon_core::nbt::parse_snbt(
             r#"{id:"minecraft:skull",x:10,y:64,z:20,profile:{name:"Steve",id:[I;1,2,3,4],properties:[{name:"textures",value:"abc"}]},note_block_sound:"minecraft:entity.player.hurt",custom_name:"Trophy"}"#,
         )
         .unwrap()

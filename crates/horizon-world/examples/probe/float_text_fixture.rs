@@ -1,6 +1,9 @@
 //! Java numeric text, actual SNBT and DataFixer numeric text on the same bits.
-use horizon_world::{datafix::json, nbt::Tag, snbt_text};
 use std::io::Write;
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{datafix::json, snbt_text},
+};
 
 pub fn main() {
     let args: Vec<_> = super::args().collect();

@@ -8,7 +8,7 @@ use super::hub::{HostEvent, Hub, TickCtx};
 use crate::collisions::SceneCollisions;
 use horizon_anticheat::{Check, Config, Strikes};
 use horizon_core::geometry::{Aabb, Vec3};
-use horizon_world::nbt::{JavaString, Tag};
+use horizon_core::nbt::{JavaString, Tag};
 use std::{io::Write, time::Instant};
 
 pub struct Anticheat {

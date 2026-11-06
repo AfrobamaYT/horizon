@@ -45,6 +45,7 @@ fn leave_block_goal_uses_real_neighbor_shapes_and_keeps_air_placement() {
     let settings = Settings::default();
     let loaded = load_resources(
         horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,

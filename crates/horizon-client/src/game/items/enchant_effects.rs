@@ -908,7 +908,7 @@ impl Game<'_> {
                         let data = stack.data();
                         let component = |id| data.and_then(|data| data.other(id));
                         let max_damage = match component("minecraft:max_damage") {
-                            Some(horizon_world::nbt::Tag::Int(value)) => *value as u32,
+                            Some(horizon_core::nbt::Tag::Int(value)) => *value as u32,
                             _ => self
                                 .res
                                 .items()
