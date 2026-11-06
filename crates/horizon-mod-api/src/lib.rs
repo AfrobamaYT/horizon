@@ -318,8 +318,9 @@ pub use horizon_items::item_data::StackData;
 pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
-/// A fluid state copied from the engine. Amount is zero exactly for the empty fluid.
-/// This is an output or hook input only; the engine never consumes a guest-supplied state.
+/// A fluid state copied from the engine. For engine-built values, amount is zero exactly for
+/// the empty fluid. A mod may change a placement event's copy; that mod-provided data is
+/// forwarded to later Parts and is never consumed by the engine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct FluidState {

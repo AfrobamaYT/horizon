@@ -1006,7 +1006,7 @@ use horizon_core::{
 use horizon_world::level::{BonemealCheck, PlaceContext};
 use horizon_world::{
     consumable::UseAnimation,
-    fluid::{FluidKind, FluidState},
+    fluid::FluidKind,
     level::{BlockId, LevelAccess, PlacementContext, Ticks},
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},

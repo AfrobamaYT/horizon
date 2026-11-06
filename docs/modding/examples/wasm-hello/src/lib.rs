@@ -56,7 +56,15 @@ impl Hooks for Mod {
         assert_eq!(speed.id(host), "minecraft:speed");
         let state = host.block_state_default(stone).expect("stone state");
         let fluid = host.state_fluid_state(state).expect("fluid state");
-        assert_eq!((fluid.amount, fluid.falling, fluid.is_source(), fluid.is_empty()), (8, true, true, false));
+        assert_eq!(
+            (
+                fluid.amount,
+                fluid.falling,
+                fluid.is_source(),
+                fluid.is_empty()
+            ),
+            (8, true, true, false)
+        );
         *event.message = Text::literal(format!("{} (via mod.wasm)", event.raw_text));
         Flow::Continue
     }
