@@ -8831,7 +8831,7 @@ mod local_sound_event_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -8853,7 +8853,9 @@ mod local_sound_event_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -9977,12 +9979,22 @@ mod pearl_tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let registry = assets.registry;
         let facts = horizon_client::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let data = horizon_client::mobs::MobData::load(&root, &facts);
-        let biomes = horizon_client::biome::Biomes::load(&root).unwrap();
+        let data = horizon_client::mobs::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
+        let biomes = horizon_client::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = horizon_client::items::Items::load(
             &root,
@@ -10654,7 +10666,7 @@ mod conversion_tag_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -10674,7 +10686,9 @@ mod conversion_tag_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

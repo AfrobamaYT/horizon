@@ -16,19 +16,22 @@ pub fn main() -> horizon_client::Result<()> {
             .ok_or("usage: environment_fixture RESOURCES INPUT OUTPUT")?,
     );
     let input = fs::read_to_string(args.get(2).ok_or("missing INPUT")?)?;
-    let biomes = Biomes::load(root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let mut environments: HashMap<String, Environment> = HashMap::new();
     let mut out = String::new();
     for line in input.lines() {
         let f: Vec<&str> = line.split(' ').collect();
         let dimension = f[0];
-        let environment =
-            match environments.entry(dimension.to_owned()) {
-                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
-                std::collections::hash_map::Entry::Vacant(e) => e.insert(
-                    Environment::load_dimension(root, dimension, dimension == "overworld")?,
-                ),
-            };
+        let environment = match environments.entry(dimension.to_owned()) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => e.insert(Environment::load_dimension(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                dimension,
+                dimension == "overworld",
+            )?),
+        };
         let info = biomes.get(biomes.id(&format!("minecraft:{}", f[4])));
         let mut sky = environment.sample(
             f[1].parse()?,

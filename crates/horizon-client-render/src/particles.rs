@@ -13,6 +13,7 @@ use crate::{
     world::World,
 };
 use glam::{DVec3, Quat, Vec3 as FVec3};
+use horizon_assets::resource_source::ResourceSource;
 use horizon_core::{
     geometry::{Aabb, Axis, Vec3, trig},
     random::{LegacyRandom, RandomSource},
@@ -22,7 +23,6 @@ pub use mod_api::particles::ParticleOptions;
 use std::{
     array,
     collections::{HashMap, HashSet},
-    path::Path,
 };
 
 pub use horizon_client_core::particle_type::ParticleType;
@@ -1318,7 +1318,11 @@ struct TrackedExplosion {
     block_count: usize,
 }
 impl ParticleEngine {
-    pub fn new(root: &Path, atlas: &HashMap<String, Rect>, translucent: &HashSet<String>) -> Self {
+    pub fn new(
+        root: &ResourceSource,
+        atlas: &HashMap<String, Rect>,
+        translucent: &HashSet<String>,
+    ) -> Self {
         let mut engine = Self {
             particles: Vec::new(),
             pending: Vec::new(),
@@ -1353,7 +1357,7 @@ impl ParticleEngine {
     /// name or index.
     pub fn reload(
         &mut self,
-        root: &Path,
+        root: &ResourceSource,
         atlas: &HashMap<String, Rect>,
         translucent: &HashSet<String>,
     ) {
@@ -1379,21 +1383,14 @@ impl ParticleEngine {
     }
     /// The sprite sets of every `particles/*.json` under `root`: vanilla's own
     /// and a native mod's (`assets/<namespace>/particles/<name>.json`).
-    fn load_sprites(&mut self, root: &Path) {
-        let assets = root.join("assets");
-        if let Ok(namespaces) = std::fs::read_dir(&assets) {
-            for namespace in namespaces.flatten() {
-                let ns = namespace.file_name().to_string_lossy().into_owned();
-                if ns == "minecraft" || !namespace.path().is_dir() {
-                    continue;
-                }
-                self.load_mod_sprites(&ns, &namespace.path().join("particles"));
+    fn load_sprites(&mut self, root: &ResourceSource) {
+        for ns in root.namespaces("assets") {
+            if ns != "minecraft" {
+                self.load_mod_sprites(root, &ns);
             }
         }
-        let dir = root.join("assets/minecraft/particles");
         for &ty in ParticleType::ALL {
-            let Ok(bytes) =
-                horizon_core::prepared_files::read(&dir.join(format!("{}.json", ty.name())))
+            let Ok(bytes) = root.read(&format!("assets/minecraft/particles/{}.json", ty.name()))
             else {
                 continue;
             };
@@ -1419,23 +1416,20 @@ impl ParticleEngine {
     }
     /// A namespace's particle JSONs that vanilla has no type for: each becomes
     /// one sprite set under `<ns>:<file name>`.
-    fn load_mod_sprites(&mut self, ns: &str, dir: &Path) {
-        let Ok(files) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for file in files.flatten() {
-            let path = file.path();
-            if path.extension().is_none_or(|e| e != "json") {
-                continue;
-            }
-            let Some(stem) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+    fn load_mod_sprites(&mut self, root: &ResourceSource, ns: &str) {
+        let prefix = format!("assets/{ns}/particles/");
+        for path in root.list(&prefix) {
+            let Some(stem) = path
+                .strip_prefix(&prefix)
+                .and_then(|p| p.strip_suffix(".json"))
+            else {
                 continue;
             };
             let key = format!("{ns}:{stem}");
             if ParticleType::from_name(&key).is_some() {
                 continue;
             }
-            let Ok(bytes) = std::fs::read(&path) else {
+            let Ok(bytes) = root.read(&path) else {
                 continue;
             };
             let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
@@ -1444,7 +1438,7 @@ impl ParticleEngine {
             let behaviour = json.get("horizon:behaviour").and_then(|value| {
                 let behaviour = ModBehaviour::parse(value);
                 if behaviour.is_none() {
-                    log::warn!("Invalid particle behaviour in {}", path.display());
+                    log::warn!("Invalid particle behaviour in {}", path);
                 }
                 behaviour
             });
@@ -4901,7 +4895,11 @@ mod tests {
     #[test]
     fn special_particles_wait_for_admission_without_ticking_or_counting() {
         with_empty_particle_level(|level| {
-            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            let mut engine = ParticleEngine::new(
+                &ResourceSource::indexed(Default::default()),
+                &HashMap::new(),
+                &HashSet::new(),
+            );
             engine.fireworks(
                 [0.0; 3],
                 [0.0; 3],
@@ -4933,7 +4931,11 @@ mod tests {
     #[test]
     fn clear_removes_live_and_pending_special_particles_without_resurrection() {
         with_empty_particle_level(|level| {
-            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            let mut engine = ParticleEngine::new(
+                &ResourceSource::indexed(Default::default()),
+                &HashMap::new(),
+                &HashSet::new(),
+            );
             for admitted in [false, true] {
                 engine.fireworks(
                     [0.0; 3],
@@ -4961,8 +4963,11 @@ mod tests {
             // 12,288 always accepts (but draws); one at 12,832 accepts below
             // 0.75201416. These independent outcomes distinguish enqueue order.
             for order in [[0, 1, 2], [1, 0, 2], [2, 0, 1], [0, 2, 1]] {
-                let mut engine =
-                    ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+                let mut engine = ParticleEngine::new(
+                    &ResourceSource::indexed(Default::default()),
+                    &HashMap::new(),
+                    &HashSet::new(),
+                );
                 let mut ordinary = Particle::blank(ParticleType::Flame, [0.0; 3]);
                 ordinary.lifetime = 100;
                 engine.particles = vec![ordinary.clone(); 12_288];
@@ -5008,7 +5013,11 @@ mod tests {
             }
             // The exact two-group counterexample: ordinary then guardian must
             // assign the second draw to the guardian, rejecting it.
-            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            let mut engine = ParticleEngine::new(
+                &ResourceSource::indexed(Default::default()),
+                &HashMap::new(),
+                &HashSet::new(),
+            );
             let mut ordinary = Particle::blank(ParticleType::Flame, [0.0; 3]);
             ordinary.lifetime = 100;
             engine.particles = vec![ordinary.clone(); 12_288];
@@ -5026,7 +5035,11 @@ mod tests {
     #[test]
     fn special_particles_admission_obeys_the_group_limit() {
         with_empty_particle_level(|level| {
-            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            let mut engine = ParticleEngine::new(
+                &ResourceSource::indexed(Default::default()),
+                &HashMap::new(),
+                &HashSet::new(),
+            );
             for _ in 0..20_000 {
                 engine.elder_guardian();
             }
@@ -5042,7 +5055,11 @@ mod tests {
     #[test]
     fn guardian_lifetime_starts_only_after_particle_admission() {
         with_empty_particle_level(|level| {
-            let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+            let mut engine = ParticleEngine::new(
+                &ResourceSource::indexed(Default::default()),
+                &HashMap::new(),
+                &HashSet::new(),
+            );
             engine.elder_guardian();
             engine.tick(level);
             for left in (0..30).rev() {
@@ -5100,7 +5117,11 @@ mod tests {
 
     #[test]
     fn disabled_culled_render_matches_the_regular_particle_path() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         let sprite = "test:smoke".to_owned();
         engine.atlas.insert(
             sprite.clone(),
@@ -5159,6 +5180,42 @@ mod tests {
     }
 
     #[test]
+    fn resolved_particle_definitions_load_and_reload_without_directories() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            (
+                "assets/minecraft/particles/smoke.json".into(),
+                Resource::bytes(br#"{"textures":["minecraft:smoke_0"]}"#.to_vec()),
+            ),
+            (
+                "assets/example/particles/nested/spark.json".into(),
+                Resource::bytes(br#"{"textures":["example:spark/0","example:spark/1"]}"#.to_vec()),
+            ),
+            (
+                "assets/example/particles/broken.json".into(),
+                Resource::bytes(b"invalid".to_vec()),
+            ),
+        ]));
+        let mut engine = ParticleEngine::new(&source, &HashMap::new(), &HashSet::new());
+        let smoke = engine.sets[&ParticleType::Smoke];
+        assert_eq!(
+            engine.names[engine.set_sprites[smoke as usize][0] as usize],
+            "particle/smoke_0"
+        );
+        let spark = engine.mod_sets["example:nested/spark"].0;
+        assert_eq!(engine.set_sprites[spark as usize].len(), 2);
+        assert!(!engine.mod_sets.contains_key("example:broken"));
+        engine.reload(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
+        assert!(engine.sets.is_empty());
+        assert!(engine.mod_sets.is_empty());
+        assert!(engine.set_sprites.is_empty());
+    }
+
+    #[test]
     fn a_mod_particles_json_becomes_its_sprite_set() {
         let dir =
             std::env::temp_dir().join(format!("horizon-mod-particles-{}", std::process::id()));
@@ -5170,7 +5227,11 @@ mod tests {
         )
         .unwrap();
         assert!(particles.join("spark.json").exists());
-        let mut engine = ParticleEngine::new(&dir, &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::directory(dir.clone()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         let (set, _) = *engine
             .mod_sets
             .get("mymod:spark")
@@ -5205,7 +5266,11 @@ mod tests {
             }}"#,
         )
         .unwrap();
-        engine.reload(&dir, &HashMap::new(), &HashSet::new());
+        engine.reload(
+            &ResourceSource::directory(dir.clone()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         let custom = engine
             .make(
                 &ParticleOptions::named("mymod:spark"),
@@ -5226,7 +5291,11 @@ mod tests {
                 format!(r#"{{"textures":["mymod:spark/1","mymod:spark/2"]{suffix}}}"#,),
             )
             .unwrap();
-            engine.reload(&dir, &HashMap::new(), &HashSet::new());
+            engine.reload(
+                &ResourceSource::directory(dir.clone()),
+                &HashMap::new(),
+                &HashSet::new(),
+            );
             let fallback = engine
                 .make(
                     &ParticleOptions::named("mymod:spark"),
@@ -5331,7 +5400,11 @@ mod tests {
 
     #[test]
     fn mod_animation_modes_pick_their_sprites() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.set_sprites.push(vec![10, 11, 12]);
         let mut looping = Particle::blank(ParticleType::Smoke, [0.0; 3]);
         looping.set = Some(0);
@@ -5358,7 +5431,11 @@ mod tests {
 
     #[test]
     fn mod_animated_particles_start_on_the_first_sprite() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.set_sprites.push(vec![10, 11, 12]);
         for animation in ["age", "loop"] {
             for curves in [false, true] {
@@ -5447,7 +5524,11 @@ mod tests {
             collision: &collision,
             player: None,
         };
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.set_sprites.push(vec![10, 11, 12]);
         let sprite = |p: &Particle| match p.sprite {
             Sprite::Index(i) => i,
@@ -5539,7 +5620,11 @@ mod tests {
             collision: &collision,
             player: None,
         };
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         let mut particle = Particle::blank(ParticleType::Smoke, [0.0; 3]);
         particle.has_physics = false;
         ModBehaviour::parse(&serde_json::json!({
@@ -5570,7 +5655,11 @@ mod tests {
 
     #[test]
     fn fading_mod_particles_use_the_blended_layer() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.rects.push(Some(Rect {
             u0: 0.0,
             v0: 0.0,
@@ -5636,7 +5725,11 @@ mod tests {
 
     #[test]
     fn egg_teleport_unpacks_offsets_and_preserves_seeded_draw_order() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.seed_randoms(0, 0, 0);
         // Destination offset (-15, 7, 15); the unused top byte is ignored.
         engine.block_teleportation([4, 12, -5], 0xff01_0f1fu32 as i32, [16, 8, 16]);
@@ -5667,7 +5760,11 @@ mod tests {
 
     #[test]
     fn consume_teleport_unpacks_offsets_within_127() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.seed_randoms(0, 0, 0);
         // TeleportRandomlyConsumeEffect: BlockUtil.clampedPackDifferenceInPosition
         // of the move (-7, -3, 9) with radii 127, from (4, 12, -5) to (-3, 9, 4).
@@ -5692,8 +5789,11 @@ mod tests {
             (2, 0, 99_413_408_083_437),
         ] {
             for distant in [false, true] {
-                let mut engine =
-                    ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+                let mut engine = ParticleEngine::new(
+                    &ResourceSource::indexed(Default::default()),
+                    &HashMap::new(),
+                    &HashSet::new(),
+                );
                 engine.seed_randoms(0, 0, 0);
                 if distant {
                     engine.camera = [1000.0; 3];
@@ -5783,7 +5883,11 @@ mod tests {
     }
     #[test]
     fn spore_blossom_air_stops_at_its_particle_limit() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         let spore = ParticleOptions::simple(ParticleType::SporeBlossomAir);
         for i in 0..1001 {
             engine.create(&spore, [f64::from(i % 16), 70.0, 0.0], [0.0; 3]);
@@ -5808,7 +5912,11 @@ mod tests {
     /// the option's destination and arrival time, where it used to refuse it.
     #[test]
     fn a_vibration_option_makes_the_signal_its_provider_draws() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         let options = ParticleOptions::vibration(
             mod_api::particles::PositionSource::Block([10, 70, -4]),
             [10.5, 70.5, -3.5],
@@ -5848,7 +5956,11 @@ mod tests {
     }
     #[test]
     fn entity_vibration_options_draw_toward_the_resolved_point() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         let options = ParticleOptions::vibration(
             mod_api::particles::PositionSource::Entity {
                 id: 42,
@@ -5917,7 +6029,11 @@ mod tests {
     }
     #[test]
     fn explosion_tracker_tracks_and_ignores_zero_blocks() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         assert!(engine.tracked_explosions.is_empty());
         engine.track_explosion([1.0, 2.0, 3.0], 4.0, 100);
         engine.track_explosion([5.0, 6.0, 7.0], 2.0, 50);
@@ -5931,7 +6047,11 @@ mod tests {
     }
     #[test]
     fn explosion_tracker_caps_debris_at_512_across_multiple_explosions() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         // Queue two explosions near camera: 400 blocks and 300 blocks (total 700).
         engine.track_explosion([0.0, 0.0, 0.0], 4.0, 400);
         engine.track_explosion([2.0, 0.0, 2.0], 5.0, 300);
@@ -5944,7 +6064,11 @@ mod tests {
     }
     #[test]
     fn explosion_tracker_emits_debris_only_in_air() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.track_explosion([0.0, 64.0, 0.0], 4.0, 100);
 
         // When no blocks are air, zero debris particles are emitted.

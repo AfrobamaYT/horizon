@@ -1072,14 +1072,27 @@ mod tests {
 
             // A failed resource build never publishes a replacement, so the handle remains valid.
             let missing = game.options.resources.join("absent-model-test-root");
-            assert!(game.pack.assets.reload(&missing).is_err());
+            assert!(
+                game.pack
+                    .assets
+                    .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                        missing
+                    ))
+                    .is_err()
+            );
             assert_eq!(
                 game.native_draw_model(&mut surface, model, 0x123456),
                 Ok(())
             );
             let before = bytes(&surface.vertices);
             // Identical texture bytes still produce a new model generation.
-            let replacement = game.pack.assets.reload(&game.options.resources).unwrap();
+            let replacement = game
+                .pack
+                .assets
+                .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                    game.options.resources.clone(),
+                ))
+                .unwrap();
             assert_ne!(replacement.generation, game.pack.render.generation);
             game.pack.render = std::sync::Arc::new(replacement);
             assert_eq!(
@@ -1138,7 +1151,12 @@ mod tests {
 
         super::super::native_entity_refs::tests::with_game(|game| {
             // The server fixture only measures fonts; this test needs drawable glyphs.
-            game.gui.atlas = horizon_client::hud::HudAtlas::build(&game.options.resources).unwrap();
+            game.gui.atlas = horizon_client::hud::HudAtlas::build(
+                &horizon_assets::resource_source::ResourceSource::directory(
+                    game.options.resources.to_path_buf(),
+                ),
+            )
+            .unwrap();
             let mut surface = draw();
             let mut drawn = GameBlockEntityDrawContext {
                 game,

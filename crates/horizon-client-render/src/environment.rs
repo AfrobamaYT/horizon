@@ -2,8 +2,9 @@
 //! (`KeyframeTrackSampler`, `EasingType`): sky/fog colours, sky light factor,
 //! celestial angles and star brightness for the overworld day cycle.
 use crate::Result;
+use horizon_assets::resource_source::ResourceSource;
 use serde_json::Value;
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug)]
 enum Easing {
@@ -145,18 +146,18 @@ pub struct Sky {
     pub cloud_height: f32,
 }
 impl Environment {
-    pub fn load(root: &Path) -> Result<Self> {
+    pub fn load(root: &ResourceSource) -> Result<Self> {
         Self::load_dimension(root, "overworld", true)
     }
     /// A dimension's base attributes, optionally driven by the day timeline.
-    pub fn load_dimension(root: &Path, dimension: &str, day_cycle: bool) -> Result<Self> {
+    pub fn load_dimension(root: &ResourceSource, dimension: &str, day_cycle: bool) -> Result<Self> {
         let timeline: Value = if day_cycle {
-            horizon_world::json_file::read(&root.join("data/minecraft/timeline/day.json"))?
+            serde_json::from_slice(&root.read("data/minecraft/timeline/day.json")?)?
         } else {
             serde_json::json!({"period_ticks": 24000, "tracks": {}})
         };
-        let dimension: Value = horizon_world::json_file::read(
-            &root.join(format!("data/minecraft/dimension_type/{dimension}.json")),
+        let dimension: Value = serde_json::from_slice(
+            &root.read(&format!("data/minecraft/dimension_type/{dimension}.json"))?,
         )?;
         let mut tracks = HashMap::new();
         for (name, track) in timeline["tracks"].as_object().ok_or("invalid timeline")? {
@@ -412,7 +413,24 @@ mod tests {
             .join("../../.local/horizon-client/26.3");
         root.join("data/minecraft/timeline/day.json")
             .exists()
-            .then(|| Environment::load(&root).unwrap())
+            .then(|| Environment::load(&ResourceSource::directory(root)).unwrap())
+    }
+
+    #[test]
+    fn resolved_dimension_and_timeline_data_need_no_files() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            ("data/minecraft/timeline/day.json".into(), Resource::bytes(br#"{"period_ticks":100,"tracks":{"example:value":{"keyframes":[{"ticks":0,"value":2},{"ticks":50,"value":4}]}}}"#.to_vec())),
+            ("data/minecraft/dimension_type/overworld.json".into(), Resource::bytes(br#"{"attributes":{"example:base":3}}"#.to_vec())),
+        ]));
+        let environment = Environment::load(&source).unwrap();
+        assert_eq!(environment.period, 100);
+        assert_eq!(environment.base("example:base")[0], 3.0);
+        assert_eq!(environment.value("example:value", [0.0; 4], 25)[0], 3.0);
+        let constant = Environment::load_dimension(&source, "overworld", false).unwrap();
+        assert!(constant.tracks.is_empty());
+        assert_eq!(constant.base("example:base")[0], 3.0);
+        assert!(Environment::load_dimension(&source, "missing", false).is_err());
     }
 
     #[test]

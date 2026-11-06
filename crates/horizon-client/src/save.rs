@@ -5536,7 +5536,12 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .expect("biomes"),
+        );
         let bell = assets.registry.default_state("minecraft:bell").unwrap().0;
         let dir = std::env::temp_dir().join(format!("horizon-poi-save-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -5642,7 +5647,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let key = AttachmentType {
             namespace: "test",
             name: "counter",
@@ -5707,7 +5715,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let tables = SaveTables::new(&assets);
         let chest = assets.registry.default_state("minecraft:chest").unwrap();
         let mut slots = vec![None; 27];
@@ -5785,7 +5796,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let tables = SaveTables::new(&assets);
         let stone = assets.registry.default_state("minecraft:stone").unwrap();
         // To The Max's Overworld: -64..2032, 131 sections.
@@ -5840,7 +5854,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let tables = SaveTables::new(&assets);
         let rack = assets
             .registry
@@ -5899,7 +5916,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let stone = assets.registry.default_state("minecraft:stone").unwrap();
         let mut lit = Chunk::empty(4, -7);
         lit.set(1, 70, 2, stone.0);
@@ -5931,7 +5951,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let stone = assets.registry.default_state("minecraft:stone").unwrap();
         let water = assets.registry.default_state("minecraft:water").unwrap();
         let sand = assets.registry.default_state("minecraft:sand").unwrap();
@@ -8276,7 +8299,10 @@ mod tests {
         if let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") {
             let root = PathBuf::from(root);
             let assets = crate::assets::Assets::load(&root).expect("assets");
-            let biomes = Biomes::load(&root).expect("biomes");
+            let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .expect("biomes");
             let grass = assets
                 .registry
                 .default_state("minecraft:short_grass")
@@ -8452,7 +8478,12 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .expect("biomes"),
+        );
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).expect("facts");
         let dir = std::env::temp_dir().join(format!("horizon-bobby-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -8565,7 +8596,12 @@ mod tests {
         let resources = PathBuf::from(resources);
         let cache = PathBuf::from(cache);
         let assets = crate::assets::Assets::load(&resources).expect("assets");
-        let biomes = Arc::new(Biomes::load(&resources).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                resources.to_path_buf(),
+            ))
+            .expect("biomes"),
+        );
         let facts = crate::blocks::BlockFacts::load(&resources, assets.registry).expect("facts");
         let registry = assets.registry;
         let levels = [
@@ -8791,7 +8827,12 @@ mod far_census {
             .map(|n| n.trim().parse().unwrap())
             .collect();
         let assets = Arc::new(crate::assets::Assets::load(&root).expect("assets"));
-        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .expect("biomes"),
+        );
         let registry = assets.registry;
         let item_data = crate::test_resources::item_data(
             &root,
@@ -8801,6 +8842,7 @@ mod far_census {
         let terrain = Arc::new(
             crate::vanillagen::VanillaTerrain::new(
                 crate::vanillagen::TerrainResources {
+                    data: None,
                     dir: &root.join("worldgen"),
                     registry,
                     biomes: &biomes,
