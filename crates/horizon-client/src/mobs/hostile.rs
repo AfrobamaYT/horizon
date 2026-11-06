@@ -354,6 +354,13 @@ pub fn creeper_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
             1.0,
             0.5,
         ));
+        // Creeper.tick: `gameEvent(GameEvent.PRIME_FUSE)` with the sound.
+        events.push(MobEvent::GameEvent {
+            event: "minecraft:prime_fuse",
+            at: [m.position.x, m.position.y, m.position.z],
+            source: m.id,
+            state: horizon_world::registry::BlockStateId(0),
+        });
     }
     m.swell = (m.swell + dir).max(0);
     if m.swell >= m.max_swell {
@@ -385,7 +392,13 @@ pub fn creeper_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
                 .extra
                 .effects
                 .iter()
-                .map(|(id, ticks, amp)| (id.strip_prefix("minecraft:").unwrap_or(id), *ticks, *amp))
+                .map(|e| {
+                    (
+                        e.id.strip_prefix("minecraft:").unwrap_or(e.id),
+                        e.duration,
+                        e.amplifier,
+                    )
+                })
                 .collect();
             let color = horizon_client_core::potions::effects_color(
                 effects

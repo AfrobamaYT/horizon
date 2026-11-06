@@ -3,6 +3,21 @@
 //! (`game`). None of it is part of the API a mod is written against.
 use crate::*;
 
+/// Switch an installed mod's dispatches on or off, returning whether it was found.
+pub fn set_mod_enabled(id: &str, on: bool) -> bool {
+    crate::set_mod_enabled(id, on)
+}
+
+/// Resolve a listener's owner once at load, for dispatch through [`mod_index_on`].
+pub fn mod_index(id: &str) -> Option<usize> {
+    crate::mods().iter().position(|entry| entry.id == id)
+}
+
+/// Whether a resolved listener's owner is currently enabled.
+pub fn mod_index_on(index: usize) -> bool {
+    crate::mod_index_on(index)
+}
+
 /// The installed mod `id`'s hooks, for the game to hand its other faces (its `impl Points`) on.
 pub fn hooks_of(id: &str) -> Option<&'static dyn Hooks> {
     crate::mods()
@@ -427,3 +442,11 @@ pub mod game {
         }
     }
 }
+
+// hidden: load-owned key resolution, used by the game at the registry boundaries
+pub use crate::registry_keys::effect_key;
+pub use crate::registry_keys::{
+    ResolvedBlock, block as resolved_block, effect as resolved_effect, resolve_blocks,
+    resolve_effects,
+};
+pub use crate::registry_keys::{block_id as block_key_id, effect_id as effect_key_id};

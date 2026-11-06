@@ -256,7 +256,6 @@
   "horizon.extras.sort_key": "Chave de classificação",
   "horizon.extras.no_ai": "Sem IA",
   "horizon.extras.agent_control": "Controle de Agente",
-  "horizon.extras.discord_presence": "Presença rica em discórdia",
   "horizon.extras.splitscreen": "Tela dividida",
   "horizon.extras.chat_animation": "Bate-papo tranquilo",
   "horizon.extras.chat_indicator": "Indicador de mensagem",
@@ -275,7 +274,6 @@
   "horizon.extras.sort_key.tooltip": "Classifica a peça sob o cursor. Clique e pressione uma tecla; A fuga o desvincula.",
   "horizon.extras.no_ai.tooltip": "Oculta e desativa todos os recursos de IA: controle de agente, horizonte-ctl e servidores MCP. O interruptor do lançador também.",
   "horizon.extras.agent_control.tooltip": "Seu próprio agente de IA pode jogar este jogo por meio do horizonte-ctl ou de um cliente MCP, apenas neste computador.",
-  "horizon.extras.discord_presence.tooltip": "Mostra Jogando Horizon em seu perfil do Discord enquanto o Discord é executado: menus, single player ou multiplayer, a dimensão e o tempo de jogo. Nunca o nome de um mundo ou o endereço de um servidor.",
   "Calibrate...": "Calibrar...",
   "Calibrate Anyway...": "Calibrar de qualquer maneira...",
   "Use Automatic Setup": "Usar configuração automática",
@@ -331,7 +329,6 @@
   "horizon.osk.close": "Fechar",
   "horizon.extras.chat_animation.tooltip": "Uma nova linha de bate-papo aparece da esquerda enquanto desaparece, em vez de aparecer inteira.",
   "horizon.extras.chat_indicator.tooltip": "A barra colorida à esquerda de uma linha de bate-papo.",
-  "horizon.extras.wheel_cycles_settings.tooltip": "A roda de rolagem sobre um botão nas configurações altera seu valor, como no vanilla. Desligado, a roda apenas rola a lista.",
   "horizon.extras.pack_browser.tooltip": "Select Resource Packs obtém um botão Adicionar que pesquisa Modrinth e instala um pacote em sua pasta de pacotes. Desligado, o jogo nunca entra em contato com Modrinth.",
   "horizon.extras.splitscreen.tooltip": "Num mundo, outro controlador pode entrar como novo jogador: pressione A quando solicitado e escolha um perfil e onde jogar.",
   "horizon.splitscreen.setup.monitor": "Monitorar %s",
@@ -422,6 +419,7 @@
   "Frame Generation": "Geração de quadros",
   "Shows a made-up frame between each two real ones: smoother, a little more lag.": "Mostra um quadro composto entre cada dois quadros reais: mais suave, um pouco mais de atraso.",
   "Shadow Cache": "Cache de sombra",
+  "Shader Packs...": "Pacotes de sombreadores...",
   "Reuses the pack shadow map when sun, view and world match. Off by default.": "Reutiliza o mapa de sombras do pacote quando o sol, a visão e o mundo correspondem. Desativado por padrão.",
   "Find BlueMap": "Encontre o BlueMap",
   "On servers, finds their BlueMap web map for far terrain. Next join.": "Nos servidores, encontra seu mapa da web BlueMap para terrenos distantes. Próxima adesão.",
@@ -474,5 +472,8 @@
   "horizon.pack.filter.realistic": "Realista",
   "horizon.pack.filter.simplistic": "Simplista",
   "horizon.pack.filter.vanillaLike": "Semelhante à baunilha",
-  "horizon.pack.addFailed": "O pacote não pôde ser adicionado: %s"
+  "horizon.pack.addFailed": "O pacote não pôde ser adicionado: %s",
+  "horizon.extras.header.world": "Mundo",
+  "horizon.extras.pregen": "Pré-gerar chunks",
+  "horizon.extras.pregen.tooltip": "Habilita /pregen nos seus mundos de um jogador e em LAN. Com comandos habilitados, use /pregen start para gerar uma área antes de explorá-la. Não habilita o comando nos servidores em que você entra."
 }

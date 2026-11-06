@@ -691,6 +691,14 @@ impl std::error::Error for ReservedBlockEntityNamespace {}
 /// A block ID resolved against the complete content and vanilla registry.
 struct KnownBlock<'a>(&'a str);
 
+/// The template class's rule for downward skylight through a declared outline.
+#[derive(Clone, Copy)]
+enum SkylightRule {
+    Shape,
+    Fluid,
+    Template,
+}
+
 /// A block being added: its declaration and where its states go.
 struct NewBlock<'a> {
     decl: &'a Block,
@@ -700,6 +708,10 @@ struct NewBlock<'a> {
     item: Option<String>,
     shapes: Option<Vec<VoxelShape>>,
     collision_shapes: Option<Vec<VoxelShape>>,
+    /// Whether each shaped state contains fluid, including intrinsic template fluids.
+    has_fluid: Vec<bool>,
+    skylight: SkylightRule,
+    custom_dampening: bool,
     default: u32,
     /// The declared state properties' combinations, every property at its
     /// default first (one empty combination when the block declares none):
@@ -1028,6 +1040,50 @@ impl<'a> Plan<'a> {
             },
             false => BTreeSet::new(),
         };
+        // Class chains are most-derived first. Fluid-dependent overrides must
+        // use the resolved state's fluid, not the template's cached dry answer.
+        let mut skylight_rules = BTreeMap::new();
+        let mut custom_dampening = BTreeSet::new();
+        if base.join("block-behaviours.json").exists() {
+            let behaviors = read_json(&base.join("block-behaviours.json"))?;
+            let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
+                return Err("block-behaviours.json has no blocks".into());
+            };
+            for block in blocks {
+                let (Some(J::Str(name)), Some(J::Arr(classes))) =
+                    (block.get("name"), block.get("class"))
+                else {
+                    continue;
+                };
+                let classes: Vec<&str> = classes
+                    .iter()
+                    .filter_map(|class| match class {
+                        J::Str(name) => Some(name.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(rule) = classes.iter().find_map(|class| match *class {
+                    "BarrierBlock"
+                    | "CrossCollisionBlock"
+                    | "GlowLichenBlock"
+                    | "LightBlock"
+                    | "VegetationBlock"
+                    | "WallBlock" => Some(SkylightRule::Fluid),
+                    "BambooStalkBlock" | "HangingMossBlock" | "LiquidBlock"
+                    | "MossyCarpetBlock" | "PipeBlock" | "ShulkerBoxBlock" | "TintedGlassBlock"
+                    | "TransparentBlock" | "VineBlock" => Some(SkylightRule::Template),
+                    _ => None,
+                }) {
+                    skylight_rules.insert(name.clone(), rule);
+                }
+                if classes
+                    .iter()
+                    .any(|class| matches!(*class, "LeavesBlock" | "TintedGlassBlock"))
+                {
+                    custom_dampening.insert(name.clone());
+                }
+            }
+        }
         let mut facts = read_json(&base.join("facts.json"))?;
         let names: Vec<String> = match facts.at("states") {
             Some(J::Arr(states)) => states
@@ -1263,6 +1319,25 @@ impl<'a> Plan<'a> {
                     })
                 };
                 let collision_shapes = decl.collision_shapes.as_ref().map(resolve).transpose()?;
+                let mut has_fluid = Vec::new();
+                if shapes.is_some() {
+                    for &(state, combo) in &order {
+                        let J::Arr(row) = &rows[(states.start + state) as usize] else {
+                            unreachable!()
+                        };
+                        // facts.json exports !BlockState.getFluidState().isEmpty(),
+                        // including water in bubble columns and aquatic plants.
+                        let Some(J::Bool(fluid)) = row.get(2) else {
+                            return Err("facts.json: a state without a fluid flag".into());
+                        };
+                        has_fluid.push(
+                            *fluid
+                                || combos[combo as usize]
+                                    .iter()
+                                    .any(|(name, value)| name == "waterlogged" && value == "true"),
+                        );
+                    }
+                }
                 // The lookup from (template state, combination) to the state's row.
                 let mut rows = vec![0; order.len()];
                 for (position, &(state, combo)) in order.iter().enumerate() {
@@ -1289,6 +1364,12 @@ impl<'a> Plan<'a> {
                     item: None,
                     shapes,
                     collision_shapes,
+                    has_fluid,
+                    skylight: skylight_rules
+                        .get(&decl.template)
+                        .copied()
+                        .unwrap_or(SkylightRule::Shape),
+                    custom_dampening: custom_dampening.contains(&decl.template),
                     default,
                     combos,
                     order,
@@ -1473,6 +1554,41 @@ impl<'a> Plan<'a> {
                                 )
                             })
                             .collect();
+                        // BlockState.initCache and BlockBehaviour.getLightDampening:
+                        // the declared outline is the block's occlusion shape.
+                        let full = !shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
+                        let can_occlude = matches!(row.get("can_occlude"), Some(J::Bool(true)));
+                        let solid = can_occlude && full;
+                        let down = match b.skylight {
+                            SkylightRule::Shape => !full && !b.has_fluid[state_index],
+                            SkylightRule::Fluid => !b.has_fluid[state_index],
+                            SkylightRule::Template => {
+                                matches!(row.get("skylight_down"), Some(J::Bool(true)))
+                            }
+                        };
+                        // A partial outline needs directional light occlusion even
+                        // when its full-cube template bypasses shape checks. Keep
+                        // the template's participation for special full shapes.
+                        let shape_occlusion = can_occlude
+                            && (!full || matches!(row.get("shape_occlusion"), Some(J::Bool(true))));
+                        row.set("shape_occlusion", J::Bool(shape_occlusion));
+                        row.set("solid_render", J::Bool(solid));
+                        row.set("skylight_down", J::Bool(down));
+                        if !b.custom_dampening {
+                            row.set(
+                                "dampening",
+                                J::Num(
+                                    (if solid {
+                                        15
+                                    } else if down {
+                                        0
+                                    } else {
+                                        1
+                                    })
+                                    .into(),
+                                ),
+                            );
+                        }
                         row.set("outline", J::Arr(boxes));
                         row.set("outline_edges", J::Arr(shape_edges(shape)));
                     }
@@ -1890,7 +2006,7 @@ impl<'a> Plan<'a> {
         Ok(())
     }
 
-    fn collision_shapes(&self, tag: &mut Tag) -> Result<()> {
+    fn declared_shapes(&self, tag: &mut Tag, collision: bool) -> Result<()> {
         let Tag::Compound(root) = tag else {
             return Err("collision table is not a compound".into());
         };
@@ -1899,7 +2015,12 @@ impl<'a> Plan<'a> {
             return Err("collision table has no shapes".into());
         };
         for block in &self.blocks {
-            if let Some(shapes) = block.collision_shapes.as_ref().or(block.shapes.as_ref()) {
+            let shapes = if collision {
+                block.collision_shapes.as_ref().or(block.shapes.as_ref())
+            } else {
+                block.shapes.as_ref()
+            };
+            if let Some(shapes) = shapes {
                 let mut encoded = BTreeMap::new();
                 for (offset, shape) in shapes.iter().enumerate() {
                     let key: Vec<_> = shape
@@ -2046,6 +2167,11 @@ impl<'a> Plan<'a> {
                         else {
                             continue;
                         };
+                        if b.decl.properties.occludes == Some(false)
+                            && let Tag::Byte(flags) = &mut v
+                        {
+                            *flags &= !16;
+                        }
                         if let (Some(f), Some(slot)) =
                             (b.decl.properties.friction, v.get_mut("friction"))
                         {
@@ -2634,7 +2760,15 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
                 .map_err(|e| format!("{name}: {e}"))?;
             plan.nbt(&mut named.tag);
             if name == "cached-collision.nbt" || name == "worldgen/blocks/cached-collision.nbt" {
-                plan.collision_shapes(&mut named.tag)?;
+                plan.declared_shapes(&mut named.tag, true)?;
+            } else if name == "occlusion.nbt" {
+                plan.declared_shapes(&mut named.tag, false)?;
+            } else if name == "worldgen/blocks/block-properties.nbt" {
+                let occlusion = named
+                    .tag
+                    .get_mut("occlusion")
+                    .ok_or("block properties have no occlusion")?;
+                plan.declared_shapes(occlusion, false)?;
             }
             nbt::write_named(&named, Limits::tables()).map_err(|e| format!("{name}: {e}"))?
         };
@@ -3054,7 +3188,10 @@ pub fn build(
 }
 
 /// The root to load: `base` itself with no content, else the mods' overlay
-/// over it, built in an immutable, stamp-keyed directory under `cache`.
+/// over it, built in `cache/mod-content/<stamp>`: one folder per mod set, so
+/// a running game keeps reading the root it was given while a switch builds
+/// another (docs/design/mod-hotload.md). Roots of other sets unused for a day
+/// are removed.
 ///
 /// The root is built once and kept: later starts with the same build, base
 /// and mod files reuse it. With ATM10's carried mods a build takes about
@@ -3075,22 +3212,108 @@ pub fn resource_root(
         return Ok(base.to_owned());
     }
     let stamp = stamp(base, jar_store, mods)?;
-    let out = cache.join(format!("mod-content-{stamp}"));
+    let roots = cache.join("mod-content");
+    let out = roots.join(&stamp[..ROOT_NAME]);
     if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes()) {
         // A reused root warns as the build did.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
         warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
+        // Used again: kept another day.
+        let _ = fs::write(out.join(STAMP), &stamp);
         return Ok(out);
     }
     for warning in build(base, jar_store, mods, &out)? {
         log::warn!("Horizon: {warning}");
     }
     fs::write(out.join(STAMP), stamp)?;
+    prune_roots(&roots, &out, KEEP_ROOTS);
     Ok(out)
 }
 
 /// Canonical block-to-declared-block-entity-type mapping, sorted by block id.
 pub const BLOCK_ENTITY_TYPES: &str = "horizon-block-entity-types.json";
+
+/// The length of a root's folder name: the start of its stamp.
+const ROOT_NAME: usize = 16;
+/// How long a root no start or switch used is kept.
+const KEEP_ROOTS: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Removes from `roots` the roots other than `current` whose stamp is older
+/// than `keep`, and what an older game left there (one root built straight in
+/// the folder). A game still running on a removed root was started more than
+/// `keep` ago and reads its tables already; only the folders' own names are
+/// touched.
+fn prune_roots(roots: &Path, current: &Path, keep: std::time::Duration) {
+    let Ok(entries) = fs::read_dir(roots) else {
+        return;
+    };
+    let old_layout = roots.join(STAMP).exists();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == current {
+            continue;
+        }
+        let name = entry.file_name();
+        let is_root = name.len() == ROOT_NAME
+            && name
+                .to_string_lossy()
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit())
+            && path.is_dir();
+        let stale = match is_root {
+            true => fs::metadata(path.join(STAMP))
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_none_or(|age| age > keep),
+            // The old single root's files and folders.
+            false => old_layout,
+        };
+        if !stale {
+            continue;
+        }
+        let removed = match path.is_dir() {
+            true => fs::remove_dir_all(&path),
+            false => fs::remove_file(&path),
+        };
+        if let Err(e) = removed {
+            log::warn!(
+                "Horizon: an old mod content root stays: {}: {e}",
+                path.display()
+            );
+        }
+    }
+}
+
+/// Whether turning a content mod on or off can apply in a running game
+/// (docs/design/mod-hotload.md): its assets and data can, through the
+/// resource reload and the server's data reload. What a world numbers or
+/// generates from cannot yet: then the translation key of why.
+pub fn live_switch(content: &Content) -> std::result::Result<(), &'static str> {
+    if !content.blocks.is_empty()
+        || !content.items.is_empty()
+        || !content.effects.is_empty()
+        || !content.entity_types.is_empty()
+        || !content.menu_types.is_empty()
+        || !content.creative_tabs.is_empty()
+        || !content.block_entity_types.is_empty()
+    {
+        return Err("horizon.mods.switch.registries");
+    }
+    let worldgen = |file: &&String| {
+        let mut parts = file.split('/');
+        parts.next() == Some("data")
+            && parts.nth(1).is_some_and(|folder| {
+                matches!(folder, "worldgen" | "dimension" | "dimension_type")
+                    || folder == "tags" && file.contains("/tags/worldgen/")
+                    || matches!(folder, "neoforge" | "forge") && file.contains("/biome_modifier/")
+            })
+    };
+    if content.files.iter().any(|f| worldgen(&f)) {
+        return Err("horizon.mods.switch.worldgen");
+    }
+    Ok(())
+}
 
 /// In a root built by [`build`]: its warnings, one per line.
 const WARNINGS: &str = "horizon-mod-content-warnings.txt";

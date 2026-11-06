@@ -5,7 +5,7 @@ use super::Game;
 use horizon_client::{
     items::ItemStack,
     mobs::{
-        Mob, Species, Who,
+        Mob, Species,
         finalize::{
             SLOT_NAMES, item_stack, set_drop_chance, set_item, set_item_stack,
             set_slot_enchantments, slot_enchantments, stored_drop_chance,
@@ -191,7 +191,11 @@ impl Game<'_> {
         }
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::Piglin || !m.alive() || m.extra.using_item > 0 {
+            if m.species() != Species::Piglin
+                || !m.alive()
+                || m.extra.using_item > 0
+                || !self.creatures.ticked.contains(&m.id)
+            {
                 continue;
             }
             // `Piglin.wantsToPickUp`: NeoForge's `canEntityGrief` for the piglin.
@@ -396,6 +400,10 @@ impl Game<'_> {
         }
         let at = p.position;
         let eye = [at.x, at.y + 1.62, at.z];
+        let player_uuid = self
+            .lan_acting_uuid
+            .map(horizon_client::lan::playerdata::uuid_ints)
+            .or(self.level.player_uuid);
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
             if m.species() != Species::Piglin
@@ -412,8 +420,7 @@ impl Game<'_> {
                 continue;
             }
             let m = &mut self.mobs[i];
-            m.extra.anger = 600;
-            m.ai.target = Some(Who::Player);
+            horizon_client::mobs::piglin::set_guarded_anger_target(m, player_uuid);
         }
     }
     /// A clear line of sight between two points (blocks with collision stop it).

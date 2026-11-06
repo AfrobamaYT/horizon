@@ -2,7 +2,7 @@
 //! settings, kept in `horizon-extras.txt` next to `options.txt` so that file
 //! stays exactly vanilla's, and the logic behind them. Every extra is off by
 //! default; see `docs/extras.md`. Horizon's own switches outside the Extras page
-//! (No AI, Agent Control, Discord Rich Presence) are kept here too.
+//! (No AI, Agent Control) are kept here too.
 pub use mod_api::extras::Corner;
 use std::{collections::VecDeque, fs, path::Path};
 
@@ -22,6 +22,8 @@ pub struct Extras {
     /// Modrinth. Off by default: it is Horizon's own and the screen is
     /// otherwise vanilla's (tools/test_pack_screen_parity.py).
     pub pack_browser: bool,
+    /// Make /pregen available in single-player and hosted LAN worlds.
+    pub pregen: bool,
     pub fullbright: bool,
     /// Held, dropped and burning light sources light their surroundings (`dynamic_light`).
     pub dynamic_lights: bool,
@@ -92,8 +94,6 @@ pub struct Extras {
     /// F3+R and F3+E start/stop a repro recording and write its bundle (off by
     /// default: a recording copies the world).
     pub repro_keys: bool,
-    /// "Playing Horizon" on the player's Discord profile (`discord_presence`; on by default).
-    pub discord_presence: bool,
     /// Another controller can join P1's world (`splitscreen`, off by default).
     pub splitscreen: bool,
     /// Two players in one window: 0 auto (side by side when wider than tall), 1 side by side,
@@ -105,7 +105,7 @@ pub struct Extras {
     /// Splitscreen: each player's name in the corner of their view (`splitscreenNames`).
     pub splitscreen_names: bool,
     /// The wheel over a cycle button in the settings changes it (`CycleButton.mouseScrolled`,
-    /// on by default as vanilla); off, the wheel only scrolls the list.
+    /// off by default); on, it cycles the hovered setting as vanilla does.
     pub wheel_cycles_settings: bool,
     /// The built-in music tracks the Music page turned off (sound ids): they
     /// leave every pool they play in (`musicOff`, empty by default: vanilla's
@@ -126,6 +126,7 @@ impl Default for Extras {
     fn default() -> Self {
         Self {
             pack_browser: false,
+            pregen: false,
             fullbright: false,
             dynamic_lights: false,
             zoom: false,
@@ -160,12 +161,11 @@ impl Default for Extras {
             no_ai: false,
             agent_control: false,
             repro_keys: false,
-            discord_presence: true,
             splitscreen: false,
             splitscreen_two: 0,
             splitscreen_three: 0,
             splitscreen_names: true,
-            wheel_cycles_settings: true,
+            wheel_cycles_settings: false,
             music_off: Vec::new(),
             music_page: false,
             three_d_skin_layers: false,
@@ -196,6 +196,7 @@ impl Extras {
             };
             match key.trim() {
                 "packBrowser" => e.pack_browser = flag(e.pack_browser),
+                "pregen" => e.pregen = flag(e.pregen),
                 "fullbright" => e.fullbright = flag(e.fullbright),
                 "dynamicLights" => e.dynamic_lights = flag(e.dynamic_lights),
                 "zoom" => e.zoom = flag(e.zoom),
@@ -251,12 +252,13 @@ impl Extras {
                 horizon_core::no_ai::KEY => e.no_ai = flag(e.no_ai),
                 "agentControl" => e.agent_control = flag(e.agent_control),
                 "reproKeys" => e.repro_keys = flag(e.repro_keys),
-                "discordPresence" => e.discord_presence = flag(e.discord_presence),
                 "splitscreen" => e.splitscreen = flag(e.splitscreen),
                 "splitscreenTwo" => e.splitscreen_two = value.parse().unwrap_or(0).min(2),
                 "splitscreenThree" => e.splitscreen_three = value.parse().unwrap_or(0).min(2),
                 "splitscreenNames" => e.splitscreen_names = flag(e.splitscreen_names),
-                "wheelCyclesSettings" => e.wheel_cycles_settings = flag(e.wheel_cycles_settings),
+                "wheelCyclesListSettings" => {
+                    e.wheel_cycles_settings = flag(e.wheel_cycles_settings)
+                }
                 "musicOff" => {
                     e.music_off = value
                         .split(',')
@@ -276,8 +278,9 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "packBrowser:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\n{}:{}\n",
+            "packBrowser:{}\npregen:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesListSettings:{}\nmusicOff:{}\nmusicPage:{}\n{}:{}\n",
             bool_text(self.pack_browser),
+            bool_text(self.pregen),
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -317,7 +320,6 @@ impl Extras {
             bool_text(self.no_ai),
             bool_text(self.agent_control),
             bool_text(self.repro_keys),
-            bool_text(self.discord_presence),
             bool_text(self.splitscreen),
             self.splitscreen_two,
             self.splitscreen_three,
@@ -354,6 +356,7 @@ impl Extras {
     pub fn set_key(&mut self, name: &str, value: String) -> bool {
         match name {
             SORT_KEY => self.sort_key = value,
+            crate::pvp::HUD_EDITOR_KEY => self.pvp.editor_key = value,
             _ => return false,
         }
         true
@@ -487,8 +490,6 @@ pub enum Item {
     /// Not on the Extras page: Horizon Settings shows No AI, its AI Agent page Agent Control.
     NoAi,
     AgentControl,
-    /// On the Horizon Settings page.
-    DiscordPresence,
     /// On the AI Agent page, next to Agent Control: the F3 recording shortcuts.
     ReproKeys,
     /// On the Splitscreen settings page.
@@ -496,20 +497,18 @@ pub enum Item {
     WheelCyclesSettings,
     /// The Select Resource Packs screen's Add button (Modrinth).
     PackBrowser,
+    Pregen,
     /// On the PvP & HUD page (`pvp::rows`).
     Pvp(crate::pvp::Opt),
 }
 /// The Extras page: headers (language keys) and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
     use Item::*;
+    // Fullbright, Dynamic lights and Hide block-break particles change the picture: they
+    // are on the graphics screen's Quality page (`graphics_ui::rows`), not here.
     vec![
-        Err("horizon.extras.header.lighting"),
-        Ok(Fullbright),
-        Ok(DynamicLights),
         Err("horizon.extras.header.third_person"),
         Ok(OwnNameTag),
-        Err("horizon.extras.header.particles"),
-        Ok(HideBlockParticles),
         Err("horizon.extras.header.inventory"),
         Ok(MouseTweaks),
         Ok(MouseTweaksWheel),
@@ -518,6 +517,8 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
         Err("horizon.extras.header.chat"),
         Ok(ChatAnimation),
         Ok(ChatIndicator),
+        Err("horizon.extras.header.world"),
+        Ok(Pregen),
         Err("horizon.extras.header.multiplayer"),
         Ok(AutoReconnect),
         Err("horizon.extras.header.sound"),
@@ -546,12 +547,12 @@ impl Item {
             Item::NoAi => "horizon.extras.no_ai",
             Item::AgentControl => "horizon.extras.agent_control",
             Item::ReproKeys => "horizon.extras.repro_keys",
-            Item::DiscordPresence => "horizon.extras.discord_presence",
             Item::Splitscreen => "horizon.extras.splitscreen",
             Item::ChatAnimation => "horizon.extras.chat_animation",
             Item::ChatIndicator => "horizon.extras.chat_indicator",
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings",
             Item::PackBrowser => "horizon.extras.pack_browser",
+            Item::Pregen => "horizon.extras.pregen",
             Item::Pvp(o) => o.caption_key(),
         }
     }
@@ -572,12 +573,12 @@ impl Item {
             Item::NoAi => "horizon.extras.no_ai.tooltip",
             Item::AgentControl => "horizon.extras.agent_control.tooltip",
             Item::ReproKeys => "horizon.extras.repro_keys.tooltip",
-            Item::DiscordPresence => "horizon.extras.discord_presence.tooltip",
             Item::Splitscreen => "horizon.extras.splitscreen.tooltip",
             Item::ChatAnimation => "horizon.extras.chat_animation.tooltip",
             Item::ChatIndicator => "horizon.extras.chat_indicator.tooltip",
-            Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings.tooltip",
+            Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_list_settings.tooltip",
             Item::PackBrowser => "horizon.extras.pack_browser.tooltip",
+            Item::Pregen => "horizon.extras.pregen.tooltip",
             Item::Pvp(o) => o.description_key(),
         }
     }
@@ -609,10 +610,10 @@ impl Item {
             Item::NoAi => "No AI",
             Item::AgentControl => "Agent Control",
             Item::ReproKeys => "Recording shortcuts",
-            Item::DiscordPresence => "Discord Rich Presence",
             Item::Splitscreen => "Splitscreen",
             Item::WheelCyclesSettings => "Scroll wheel changes settings",
             Item::PackBrowser => "Resource pack browser",
+            Item::Pregen => "Chunk pregeneration",
             Item::Pvp(o) => o.caption(),
         }
     }
@@ -626,8 +627,8 @@ impl Item {
             ChatIndicator => ChatAnimation,
             Pvp(o) => return o.parent().map(Pvp),
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
-            | AutoReconnect | NoAi | AgentControl | ReproKeys | DiscordPresence | Splitscreen
-            | ChatAnimation | WheelCyclesSettings | MusicPage | PackBrowser => {
+            | AutoReconnect | NoAi | AgentControl | ReproKeys | Splitscreen | ChatAnimation
+            | WheelCyclesSettings | MusicPage | PackBrowser | Pregen => {
                 return None;
             }
         })
@@ -635,6 +636,9 @@ impl Item {
     /// The English description: the fallback of [`Item::description_text`].
     pub fn description(self) -> &'static str {
         match self {
+            Item::Pregen => {
+                "Enables /pregen in your single-player and LAN worlds. With cheats enabled, use /pregen start to generate an area before exploring it. Does not enable the command on servers you join."
+            }
             Item::Fullbright => "Show blocks and entities at full light, even in dark areas.",
             Item::DynamicLights => {
                 "Torches and other light sources held, dropped or on fire light the blocks around them."
@@ -672,9 +676,6 @@ impl Item {
             Item::ChatIndicator => "The coloured bar at the left of a chat line.",
             Item::NoAi => {
                 "Hides and turns off every AI feature: agent control, horizon-ctl and the MCP servers. The launcher's switch too."
-            }
-            Item::DiscordPresence => {
-                "Shows Playing Horizon on your Discord profile while Discord runs: menus, single player or multiplayer, the dimension and the time played. Never a world's name or a server's address."
             }
             Item::Splitscreen => {
                 "In a world, another controller can join as a new player: press A when it asks, then pick a profile and where to play."
@@ -732,10 +733,10 @@ impl Item {
             Item::NoAi => e.no_ai,
             Item::AgentControl => e.agent_control,
             Item::ReproKeys => e.repro_keys,
-            Item::DiscordPresence => e.discord_presence,
             Item::Splitscreen => e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings,
             Item::PackBrowser => e.pack_browser,
+            Item::Pregen => e.pregen,
             Item::Pvp(o) => return o.switch(&e.pvp),
             _ => return None,
         })
@@ -769,10 +770,10 @@ impl Item {
             Item::NoAi => e.no_ai = !e.no_ai,
             Item::AgentControl => e.agent_control = !e.agent_control,
             Item::ReproKeys => e.repro_keys = !e.repro_keys,
-            Item::DiscordPresence => e.discord_presence = !e.discord_presence,
             Item::Splitscreen => e.splitscreen = !e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings = !e.wheel_cycles_settings,
             Item::PackBrowser => e.pack_browser = !e.pack_browser,
+            Item::Pregen => e.pregen = !e.pregen,
             Item::Pvp(o) => o.cycle(&mut e.pvp, back),
             Item::SortKey => {}
         }
@@ -781,6 +782,7 @@ impl Item {
     pub fn key_name(self) -> Option<&'static str> {
         match self {
             Item::SortKey => Some(SORT_KEY),
+            Item::Pvp(crate::pvp::Opt::HudEditorKey) => Some(crate::pvp::HUD_EDITOR_KEY),
             _ => None,
         }
     }
@@ -791,14 +793,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_saved_wheel_setting_from_before_the_default_changed_is_dropped() {
+        assert!(!Extras::parse("wheelCyclesSettings:true\n").wheel_cycles_settings);
+        let on = Extras {
+            wheel_cycles_settings: true,
+            ..Extras::default()
+        };
+        assert!(Extras::parse(&on.serialize()).wheel_cycles_settings);
+    }
+
+    #[test]
     fn everything_is_off_by_default_and_round_trips() {
         let d = Extras::default();
         assert!(!d.fullbright && !d.dynamic_lights);
         assert!(!d.zoom && !d.fps && !d.keystrokes && !d.minimap && !d.auto_reconnect);
         assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag && !d.ui_sound_reserve);
-        assert!(!d.hide_block_particles);
+        assert!(!d.hide_block_particles && !d.pregen);
         assert!(!d.music_page && d.music_off.is_empty());
-        assert!(d.discord_presence && d.wheel_cycles_settings);
+        assert!(!d.wheel_cycles_settings);
         assert_eq!(Extras::parse(""), d);
         assert_eq!(Extras::parse(&d.serialize()), d);
         let mut e = d.clone();
@@ -821,6 +833,8 @@ mod tests {
         e.minimap_rotate = true;
         e.minimap_corner = Corner::BottomLeft;
         e.auto_reconnect = true;
+        Item::Pregen.cycle(&mut e, false);
+        assert_eq!(Item::Pregen.switch(&e), Some(true));
         Item::OwnNameTag.cycle(&mut e, false);
         assert_eq!(Item::OwnNameTag.switch(&e), Some(true));
         assert_eq!(Item::HideBlockParticles.switch(&e), Some(false));
@@ -835,12 +849,11 @@ mod tests {
         e.sort_key = "key.keyboard.r".into();
         e.chat_animation = true;
         e.chat_indicator = false;
-        e.discord_presence = false;
         assert!(!e.splitscreen);
         Item::Splitscreen.cycle(&mut e, false);
         assert_eq!(Item::Splitscreen.switch(&e), Some(true));
         Item::WheelCyclesSettings.cycle(&mut e, false);
-        assert_eq!(Item::WheelCyclesSettings.switch(&e), Some(false));
+        assert_eq!(Item::WheelCyclesSettings.switch(&e), Some(true));
         e.music_off = vec![
             "minecraft:music/game/calm1".into(),
             "minecraft:music.menu".into(),

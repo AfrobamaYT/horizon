@@ -1285,7 +1285,7 @@ fn java_hash_set_order(positions: &mut Vec<BlockPos>) {
     *positions = ordered.into_iter().map(|(_, _, p)| p).collect();
 }
 
-impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     fn nibble(word: u32, direction: Direction) -> i32 {
         ((word >> (4 * direction as u32)) & 15) as i32
     }

@@ -172,7 +172,8 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for EventsMod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-            r.block_part("minecraft:stone", Events);
+            let block_key = r.block_key("minecraft:stone");
+            r.block_part(block_key, Events);
         }
     }
 

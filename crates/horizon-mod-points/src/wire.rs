@@ -1,5 +1,5 @@
 //! How a point's record crosses to a wasm mod and back, through the one generic `listeners`
-//! interface (`wit/points.wit`): nothing here is per point. Each record's [`Record`] impl,
+//! interface (`wit/points.wit`): nothing here is per point. Each record's codec,
 //! generated beside it, lowers its fields to [`Value`]s in order; the mod's guest lifts them into
 //! the record ([`Lift`]), runs its listener and lowers them again; the game writes them back.
 use std::borrow::Cow;
@@ -161,7 +161,7 @@ pub fn field<'v, T: Wire<'v>>(fields: &mut std::slice::Iter<'v, Value>) -> Resul
 /// `field`'s new value, from the next of the fields a listener left.
 pub fn taken<T: WriteBack>(
     field: &T,
-    fields: &mut std::vec::IntoIter<Value>,
+    fields: &mut impl Iterator<Item = Value>,
 ) -> Result<T, Mismatch> {
     field.taken(fields.next().ok_or(Mismatch)?)
 }
@@ -259,7 +259,7 @@ pub use guest::{FromHost, fire, listener};
 /// forwarded with its record.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 mod host {
-    use super::Record;
+    use super::{Mismatch, Record, Value};
     use crate::PointId;
 
     /// The host a point hands its listeners.
@@ -278,97 +278,35 @@ mod host {
         fn forward(&self, place: PointId, host: PointHost<'_>, record: &mut dyn Record);
     }
 
-    /// A [`Forward`] as the mod's `Points`.
-    pub struct Forwarded(pub Box<dyn Forward>);
-}
-#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
-pub use host::{Forward, Forwarded, PointHost};
+    // Keep monomorphizations private: non-generic impls involving a public trait or record
+    // export their methods even when the other half of the impl is private.
+    pub(crate) struct Forwarded<F: ?Sized>(pub(crate) Box<F>);
+    pub(crate) struct RecordRef<'a, R>(pub(crate) &'a mut R);
 
-#[cfg(all(test, feature = "wasm-host", not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-    use crate::places::SHAPES;
+    /// A concrete record's codec, generic over its field sink and source so only the erased
+    /// `RecordRef` crosses crates, not a method per public record.
+    pub(crate) trait Fields {
+        fn lower(&self, fields: &mut impl Extend<Value>);
+        fn write_back(&mut self, fields: impl Iterator<Item = Value>) -> Result<(), Mismatch>;
+    }
 
-    /// The field types a record's shape may name: each one [`Wire`] carries with the same range in
-    /// the game and in a wasm32 mod. Native-width integers cross as `u64`/`i64`, and `i128` isn't
-    /// an API scalar, so neither may appear.
-    const CARRIED: &[&str] = &[
-        "bool", "char", "str", "f32", "f64", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
-    ];
-
-    #[test]
-    fn every_point_of_the_game_crosses_to_a_wasm_mod() {
-        for shape in SHAPES.iter() {
-            let (host, fields) = shape.split_once('|').expect("a shape names its host");
-            assert!(
-                ["read", "side", "server", "client", "none"].contains(&host),
-                "a point's listener gets no known host in ({shape})"
-            );
-            for field in fields.split(',').filter(|field| !field.is_empty()) {
-                let (name, ty) = field.split_once(':').expect("a field is name:type");
-                let ty = ty
-                    .strip_prefix("Option<")
-                    .and_then(|ty| ty.strip_suffix('>'))
-                    .unwrap_or(ty);
-                assert!(
-                    !name.is_empty() && CARRIED.contains(&ty),
-                    "a point's record field {field} in ({shape}) doesn't cross"
-                );
-            }
+    impl<R: Fields> Record for RecordRef<'_, R> {
+        fn lower(&self) -> Vec<Value> {
+            let mut fields = Vec::new();
+            self.0.lower(&mut fields);
+            fields
+        }
+        fn write_back(&mut self, fields: Vec<Value>) -> Result<(), Mismatch> {
+            self.0.write_back(fields.into_iter())
         }
     }
 
-    #[test]
-    fn a_record_crosses_and_takes_back_what_a_listener_changed() {
-        let mut record = crate::HandleChatInputArgs::__new("hi");
-        let fields = record.lower();
-        assert!(matches!(&fields[..], [Value::Str(text), Value::B(false)] if text == "hi"));
-        record
-            .write_back(vec![Value::Str("hello".into()), Value::B(true)])
-            .unwrap();
-        assert_eq!((&*record.message, record.cancel), ("hello", true));
-        // Unchanged text stays the game's own borrow.
-        let mut kept = crate::HandleChatInputArgs::__new("hi");
-        kept.write_back(vec![Value::Str("hi".into()), Value::B(false)])
-            .unwrap();
-        assert!(matches!(kept.message, Cow::Borrowed("hi")));
-
-        let mut reach = crate::ReachArgs::__new();
-        assert!(matches!(&reach.lower()[..], [Value::None]));
-        reach.write_back(vec![Value::F(6.0)]).unwrap();
-        assert_eq!(reach.result, Some(6.0));
-        // A mod answering another shape is refused, and the record is left as it was.
-        let mut turn = crate::TurnPlayerArgs::__new(1.0, 2.0);
-        assert_eq!(turn.write_back(vec![Value::F(3.0)]), Err(Mismatch));
-        assert_eq!(
-            turn.write_back(vec![
-                Value::F(3.0),
-                Value::B(true),
-                Value::B(true),
-                Value::B(true)
-            ]),
-            Err(Mismatch)
-        );
-        assert_eq!(
-            turn.write_back(vec![Value::F(3.0), Value::Str("4".into()), Value::B(true)]),
-            Err(Mismatch)
-        );
-        assert_eq!((turn.xo, turn.yo, turn.cancel), (1.0, 2.0, false));
-    }
-
-    #[test]
-    fn a_native_width_sentinel_survives_a_listener_that_leaves_it() {
-        // `slot_candidates` is called with `usize::MAX` for an unbounded slot source.
-        let shape = crate::places::NAMES
-            .iter()
-            .position(|name| *name == "slot_candidates")
-            .map(|place| crate::places::SHAPES[place])
-            .expect("slot_candidates is a point");
-        assert!(shape.contains("limit:u64"), "{shape}");
-        let record = crate::SlotCandidatesArgs::__new(usize::MAX);
-        let fields = record.lower();
-        assert!(matches!(&fields[0], Value::U(u64::MAX)));
-        // As the mod lifts it, on any target.
-        assert_eq!(u64::lift(&fields[0]), Ok(u64::MAX));
+    /// A wasm mod's listeners as the game's `Points`, without exposing its per-place methods.
+    pub fn forwarded(forward: Box<dyn Forward>) -> Box<dyn crate::Points> {
+        Box::new(Forwarded(forward))
     }
 }
+#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+pub(crate) use host::{Fields, Forwarded, RecordRef};
+#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+pub use host::{Forward, PointHost, forwarded};

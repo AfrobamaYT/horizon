@@ -766,6 +766,10 @@ enum Cmd {
     /// Horizon source revision with the launcher's own Rust, as the version the instance then
     /// plays. Not sandboxed: the mods' code runs with your rights
     NativeBuild {
+        /// Discover internal uses through compiler diagnostics. Prints resolved declarations
+        /// as JSON for cargo horizon-mod internals sync; never installs or selects a game
+        #[arg(long, conflicts_with_all = ["server_output", "instance", "version", "update", "profile"], requires = "folder")]
+        sync_internals: bool,
         /// A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them
         /// (default: the native mods installed and turned on in the instance)
         folder: Option<PathBuf>,
@@ -819,7 +823,7 @@ enum Cmd {
     /// minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions
     /// on|off, prune-old-versions on|off (delete old versions after an install, keeping the
     /// selected one, the ones instances use and the newest few), keep-versions N (how many of the
-    /// newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port
+    /// newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port|socks5://host:port
     /// ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language
     /// system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent
     /// violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any
@@ -1284,6 +1288,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             );
         }
         Cmd::NativeBuild {
+            sync_internals,
             folder,
             server_output,
             allow_jar_downloads,
@@ -1295,6 +1300,14 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         } => {
             if !trust_native_code {
                 return Err("Native mods run with full access to this computer. Read their source, then pass --trust-native-code.".into());
+            }
+            if sync_internals {
+                let entries = native_mods::sync_internals(&folder.expect("required by clap"))?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&entries).map_err(|error| error.to_string())?
+                );
+                return Ok(());
             }
             let started = std::time::Instant::now();
             let profile = match profile.as_deref().and_then(native_mods::Profile::parse) {
@@ -2298,9 +2311,9 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
         .as_ref()
         .and_then(|i| i.java.as_ref())
         .map(|j| j.target());
-    let home = match (&action, instance) {
+    let home = match (&action, &instance) {
         (ModsCmd::Search { .. }, _) | (_, None) => backend::game_home(),
-        (_, Some(i)) => i.home,
+        (_, Some(i)) => i.home.clone(),
     };
     let entry_json = |e: &installed::Entry| serde_json::to_value(e).unwrap_or_default();
     let line = |label: &str, f: f32| progress(label.to_string())(f);
@@ -2396,7 +2409,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                         "id": p.id, "slug": p.slug, "title": p.title, "summary": p.summary,
                         "author": p.author, "downloads": p.downloads, "page": p.page,
                         "license": p.license, "support": support.label(), "reason": support.reason(),
-                        "about": if p.source == SourceId::Horizon { horizon::trust_and_capabilities(&p.id) } else { Vec::new() },
+                        "about": if p.source == SourceId::Horizon { horizon::trust_and_capabilities(&p.id, instance.as_ref()) } else { Vec::new() },
                     })
                 }).collect());
             } else {
@@ -2407,7 +2420,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                     let support = p.support();
                     if p.source == SourceId::Horizon {
                         println!("{}  ({})  {}\n  {}", p.title, p.slug, p.author, p.summary);
-                        for line in horizon::trust_and_capabilities(&p.id) {
+                        for line in horizon::trust_and_capabilities(&p.id, instance.as_ref()) {
                             println!("  {line}");
                         }
                         continue;
@@ -3799,6 +3812,35 @@ mod tests {
             Cli::try_parse_from(["horizon-launcher", "mods", "check", "x", "--instance", "A"])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn native_build_sync_is_explicit_and_never_selects_an_instance() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(
+                [
+                    &["horizon-launcher", "native-build", "--sync-internals"],
+                    args,
+                ]
+                .concat(),
+            )
+        };
+        assert!(matches!(
+            parse(&["mod", "--trust-native-code"]).unwrap().command,
+            Some(Cmd::NativeBuild {
+                sync_internals: true,
+                folder: Some(_),
+                ..
+            })
+        ));
+        assert!(parse(&[]).is_err());
+        for args in [
+            ["mod", "--instance", "A"],
+            ["mod", "--server-output", "out"],
+            ["mod", "--profile", "developer"],
+        ] {
+            assert!(parse(&args).is_err());
+        }
     }
 
     #[test]

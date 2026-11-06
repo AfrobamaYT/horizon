@@ -3,6 +3,7 @@
 //! (`LocalPlayer.aiStep`'s riding jump), positioning, dismounting, and the
 //! mount's health and jump bar on the HUD.
 use super::Game;
+use horizon_client::actions::Action;
 use horizon_client::{
     blocks::Fluid,
     hud::HudBatch,
@@ -143,7 +144,7 @@ impl Game<'_> {
         {
             return Some(false);
         }
-        if self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft) {
+        if self.keys.held(Action::Sneak) {
             return None;
         }
         let saddle = m.saddle_item()?;
@@ -185,7 +186,7 @@ impl Game<'_> {
         }
         // Pig.mobInteract: held food goes to Animal.mobInteract, not a ride.
         let food = m.kind.food.iter().any(|f| f.as_str() == item);
-        if !m.extra.saddled() || food || self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft) {
+        if !m.extra.saddled() || food || self.keys.held(Action::Sneak) {
             return false;
         }
         let id = m.id;
@@ -218,8 +219,10 @@ impl Game<'_> {
                         &broken,
                     );
                     self.award_stat("broken", &broken.item, 1);
-                    self.inventory[self.selected] =
-                        Some(ItemStack::new("minecraft:fishing_rod", 1));
+                    // hurtAndConvertOnBreak keeps the broken stick's components.
+                    let mut rod = stack.transmute("minecraft:fishing_rod", 1);
+                    rod.damage = 0;
+                    self.inventory[self.selected] = Some(rod);
                 }
             }
         }
@@ -266,8 +269,8 @@ impl Game<'_> {
         if species == Species::SkeletonHorse && !m.extra.tame {
             return false;
         }
-        let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft)
-            || self.keys.contains(&winit::keyboard::KeyCode::ShiftRight);
+        let sneaking =
+            self.keys.held(Action::Sneak) || self.keys.raw(&winit::keyboard::KeyCode::ShiftRight);
         // Horse / ZombieHorse.mobInteract: food is fed, and anything else in
         // hand makes an untamed one mad instead of seating the player.
         let dandelion = [self.held(), self.offhand.as_ref()]
@@ -504,7 +507,7 @@ impl Game<'_> {
             pitch: self.pitch,
             jump: if jump > 0.0 { jump } else { pending },
             steer,
-            sprint: keys.sprint || self.keys.contains(&winit::keyboard::KeyCode::ControlLeft),
+            sprint: keys.sprint || self.keys.held(Action::Sprint),
             jumping: keys.jump,
             // A server's player (a LAN guest, single player's window) drives
             // a horse from its own client (`handleMoveVehicle`).
@@ -750,23 +753,24 @@ impl Game<'_> {
         for conn in guests {
             self.guest_hit_by(conn, |g| g.rider_fall_damage(distance, modifier));
         }
-        let rider = self
+        let riders: Vec<u32> = self
             .mobs
             .iter()
-            .find(|m| m.id == mob)
-            .and_then(|m| m.extra.rider);
-        if let Some(rider) = rider
-            && let Some(r) = self.mobs.iter_mut().find(|m| m.id == rider)
-        {
-            let mut events = Vec::new();
-            r.cause_fall_damage_from(
-                &self.loop_context,
-                crate::game::entity::damage_level_of!(self),
-                distance,
-                modifier,
-                &mut events,
-            );
-            let _ = self.handle_mob_events(events);
+            .filter(|m| m.extra.mount == Some(mob))
+            .map(|m| m.id)
+            .collect();
+        for rider in riders {
+            if let Some(r) = self.mobs.iter_mut().find(|m| m.id == rider) {
+                let mut events = Vec::new();
+                r.cause_fall_damage_from(
+                    &self.loop_context,
+                    crate::game::entity::damage_level_of!(self),
+                    distance,
+                    modifier,
+                    &mut events,
+                );
+                let _ = self.handle_mob_events(events);
+            }
         }
     }
     /// The player this game runs (the local one, or the server player it acts
@@ -1109,13 +1113,32 @@ mod tests {
             game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
             game.riding = Some(21);
             let mut stick = ItemStack::new("minecraft:carrot_on_a_stick", 1);
-            stick.damage = game.items().get(&stick.item).unwrap().max_damage - 1;
+            let max = game.items().get(&stick.item).unwrap().max_damage;
+            stick.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Old Nag".into()));
+            // One point short of breaking: the shared durability path adds wear.
+            stick.damage = max - 8;
+            let (updated, broken) = game.damage_stack(&stick, 7, true);
+            assert!(broken.is_none());
+            assert_eq!(updated.unwrap().damage, max - 1);
+            stick.damage = max - 7;
+            assert!(game.damage_stack(&stick, 0, true).1.is_none());
+            let mut undamageable = stick.clone();
+            undamageable.data_mut().set_other(
+                "!minecraft:max_damage",
+                Some(horizon_world::nbt::Tag::Byte(1)),
+            );
+            assert!(
+                game.damage_stack(&undamageable, max as i32, true)
+                    .1
+                    .is_none()
+            );
             game.inventory[game.selected] = Some(stick);
             assert!(game.use_steering_stick("minecraft:carrot_on_a_stick"));
-            assert_eq!(
-                &*game.inventory[game.selected].as_ref().unwrap().item,
-                "minecraft:fishing_rod"
-            );
+            let rod = game.inventory[game.selected].as_ref().unwrap();
+            assert_eq!(&*rod.item, "minecraft:fishing_rod");
+            assert_eq!(rod.count, 1);
+            assert_eq!(rod.damage, 0, "the rod starts whole");
+            assert_eq!(rod.custom_name().as_deref(), Some("Old Nag"));
         });
     }
 

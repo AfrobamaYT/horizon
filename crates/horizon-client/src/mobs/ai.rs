@@ -158,7 +158,13 @@ impl Mob {
         off_hand: bool,
         animation: crate::first_person::SwingAnimation,
     ) -> bool {
-        let amplifier = |id: &str| self.extra.effects.iter().find(|e| e.0 == id).map(|e| e.2);
+        let amplifier = |id: &str| {
+            self.extra
+                .effects
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.amplifier)
+        };
         let dig_speed = amplifier("minecraft:haste").max(amplifier("minecraft:conduit_power"));
         let fatigue = amplifier("minecraft:mining_fatigue");
         let duration = crate::first_person::swing_duration(animation, dig_speed, fatigue);
@@ -1960,7 +1966,7 @@ fn species_ai_step(
         Species::Guardian | Species::ElderGuardian => super::guardian::ai_step(m, w, events),
         Species::Vex => super::vex::ai_step(m, w, level),
         Species::Ravager => super::ravager::ai_step(m, w, events),
-        Species::Wither => super::wither::ai_step(m, w, events),
+        Species::Wither => super::wither::ai_step(m, w, level.random(), events),
         Species::Allay => super::allay::ai_step(m, w),
         Species::Bee => super::bee::ai_step(m, w),
         Species::PolarBear => super::polar_bear::ai_step(m, w),
@@ -2735,8 +2741,15 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     }
     let _ = Fluid::None;
 }
-/// Mob.ate (sheep regrow wool, babies grow).
-pub fn ate(m: &mut Mob) {
+/// Mob.ate: `gameEvent(GameEvent.EAT)`, then (Sheep.ate) the wool grows back and a baby
+/// grows.
+pub fn ate(m: &mut Mob, events: &mut Vec<MobEvent>) {
+    events.push(MobEvent::GameEvent {
+        event: "minecraft:eat",
+        at: [m.position.x, m.position.y, m.position.z],
+        source: m.id,
+        state: horizon_world::registry::BlockStateId(0),
+    });
     if m.species() == Species::Sheep {
         m.extra.sheared = false;
         // Sheep.ate: only a baby `canAgeUp` (no age lock holds it) grows.
@@ -2869,20 +2882,20 @@ pub(crate) fn tick_effects(
     let first = m.extra.effects.len();
     let mut i = 0;
     while i < m.extra.effects.len() && i < first {
-        let (effect, amp) = (m.extra.effects[i].0, m.extra.effects[i].2);
+        let (effect, amp) = (m.extra.effects[i].id, m.extra.effects[i].amplifier);
         // MobEffectInstance.tickServer: an infinite (-1) effect times its
         // ticks by the mob's tickCount and never counts down.
-        let infinite = m.extra.effects[i].1 == -1;
+        let infinite = m.extra.effects[i].duration == -1;
         // MobEffectInstance.tickServer: hasRemainingDuration is false at 0, so the
         // instance ticks nothing; LivingEntity.tickEffects drops it below.
-        if !infinite && m.extra.effects[i].1 == 0 {
+        if !infinite && m.extra.effects[i].duration == 0 {
             i += 1;
             continue;
         }
         let count = if infinite {
             m.age as i32
         } else {
-            m.extra.effects[i].1
+            m.extra.effects[i].duration
         };
         let interval = |base: i32| (base >> amp.max(0)).max(1);
         // A refused mod effect is left at 0 ticks for the retain below.
@@ -2917,12 +2930,13 @@ pub(crate) fn tick_effects(
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
                 // tickServer: one with no ticks left goes unasked.
-                if !infinite && m.extra.effects[i].1 <= 0 {
+                if !infinite && m.extra.effects[i].duration <= 0 {
                     i += 1;
                     continue;
                 }
                 if let Some(mods) = mods
-                    && !mods.tick_mod_effect(level, id, m, count, amp)
+                    && let Some(index) = m.extra.effects[i].registry_index
+                    && !mods.tick_mod_effect(level, index, m, count, amp)
                 {
                     // Removed before it counts down.
                     expired = true;
@@ -2930,26 +2944,26 @@ pub(crate) fn tick_effects(
             }
             _ => {}
         }
-        if m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
+        if m.extra.effects.get(i).is_some_and(|e| e.id == effect) {
             if !expired {
                 if let Some(hidden) = m.extra.effect_chains.iter_mut().find(|e| e.id == effect) {
                     hidden.tick_down();
                 }
                 if !infinite {
-                    m.extra.effects[i].1 -= 1;
+                    m.extra.effects[i].duration -= 1;
                 }
             } else {
-                m.extra.effects[i].1 = 0;
+                m.extra.effects[i].duration = 0;
             }
             if !expired
-                && m.extra.effects[i].1 == 0
+                && m.extra.effects[i].duration == 0
                 && let Some(chain) = m.extra.effect_chains.iter().position(|e| e.id == effect)
             {
                 let mut hidden = m.extra.effect_chains.remove(chain);
                 if effect == "minecraft:absorption" {
                     m.absorption = m.absorption.min(4.0 * (hidden.amplifier + 1) as f32);
                 }
-                m.extra.effects[i] = (effect, hidden.duration, hidden.amplifier);
+                m.extra.effects[i] = super::StoredEffect::from_instance(effect, &hidden);
                 m.extra.ambient_effects.retain(|e| *e != effect);
                 if hidden.ambient {
                     m.extra.ambient_effects.push(effect);
@@ -2968,7 +2982,7 @@ pub(crate) fn tick_effects(
         if m.extra
             .effects
             .get(i)
-            .is_some_and(|e| e.0 == effect && e.1 > 0 && e.1 % 600 == 0)
+            .is_some_and(|e| e.id == effect && e.duration > 0 && e.duration % 600 == 0)
         {
             m.effects_dirty = true;
         }
@@ -2976,13 +2990,15 @@ pub(crate) fn tick_effects(
     }
     let mob_id = m.id;
     m.retain_effects(|e| {
-        if e.1 > 0 || e.1 == -1 {
+        if e.duration > 0 || e.duration == -1 {
             return true;
         }
         // `MobEffectEvent.Expired`: canceling the expiry keeps the effect.
         let mut cancel = false;
-        if let Some(mods) = mods {
-            mods.effect_expired(mob_id, e.0, e.2, &mut cancel);
+        if let Some(mods) = mods
+            && let Some(index) = e.registry_index
+        {
+            mods.effect_expired(mob_id, index, e.amplifier, &mut cancel);
         }
         cancel
     });
@@ -3253,7 +3269,7 @@ mod poison_effect_tests {
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.add_effect("poison", 100, 0);
-        assert_eq!(pig.extra.effects[0].0, "minecraft:poison");
+        assert_eq!(pig.extra.effects[0].id, "minecraft:poison");
         let initial_pig_health = pig.health;
         tick_effects(
             &mut pig,
@@ -3437,7 +3453,7 @@ mod poison_effect_tests {
             level,
             None,
         );
-        assert_eq!(pig.extra.effects[0].1, 600);
+        assert_eq!(pig.extra.effects[0].duration, 600);
         assert!(
             !pig.is_invisible(),
             "LivingEntity's periodic effect update clears the manual flag at duration 600"
@@ -3460,8 +3476,14 @@ mod poison_effect_tests {
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind.clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.health = 20.0;
-        pig.extra.effects.push(("minecraft:poison", 25, 0));
-        pig.extra.effects.push(("minecraft:resistance", -1, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:poison", 25, 0));
+        pig.extra.effects.push(crate::mobs::StoredEffect::new(
+            "minecraft:resistance",
+            -1,
+            0,
+        ));
         tick_effects(
             &mut pig,
             crate::test_resources::server_loop_context(),
@@ -3472,8 +3494,12 @@ mod poison_effect_tests {
         // `onMobHurt` finds Infested in the same in-place list: the hurt mob
         // leaves a silverfish call in the outbox.
         let mut pig = Mob::new(2, pig_kind.clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
-        pig.extra.effects.push(("minecraft:poison", 25, 0));
-        pig.extra.effects.push(("minecraft:infested", -1, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:poison", 25, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:infested", -1, 0));
         tick_effects(
             &mut pig,
             crate::test_resources::server_loop_context(),
@@ -3503,7 +3529,9 @@ mod poison_effect_tests {
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.health = 20.0;
-        pig.extra.effects.push(("minecraft:poison", 0, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:poison", 0, 0));
         let mut test_level = crate::health::TestLevel::new(0);
         tick_effects(
             &mut pig,
@@ -3533,7 +3561,11 @@ mod poison_effect_tests {
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.extra
             .set_main_hand(Some("minecraft:totem_of_undying".into()));
-        pig.extra.effects.push(("minecraft:instant_damage", 5, 4));
+        pig.extra.effects.push(crate::mobs::StoredEffect::new(
+            "minecraft:instant_damage",
+            5,
+            4,
+        ));
         tick_effects(
             &mut pig,
             crate::test_resources::server_loop_context(),
@@ -3547,7 +3579,10 @@ mod poison_effect_tests {
             "minecraft:fire_resistance",
         ] {
             assert!(
-                pig.extra.effects.iter().any(|e| e.0 == effect && e.1 > 0),
+                pig.extra
+                    .effects
+                    .iter()
+                    .any(|e| e.id == effect && e.duration > 0),
                 "{effect} kept after the totem fired"
             );
         }
@@ -3568,7 +3603,9 @@ mod poison_effect_tests {
         let data = MobTypes::load(&root).unwrap();
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
-        pig.extra.effects.push(("minecraft:wither", 40, 0));
+        pig.extra
+            .effects
+            .push(crate::mobs::StoredEffect::new("minecraft:wither", 40, 0));
         tick_effects(
             &mut pig,
             crate::test_resources::server_loop_context(),

@@ -130,7 +130,15 @@ impl CommandTree {
         let suggestions: HashMap<&str, &'static str> = SUGGESTIONS.iter().copied().collect();
         let mut paths: HashMap<Vec<String>, usize> = HashMap::new();
         paths.insert(Vec::new(), 0);
-        for root in [&self.root, extra] {
+        let horizon = if crate::command::vanilla::game_dispatcher()
+            .find("pregen")
+            .is_some()
+        {
+            crate::pregen::command_tree()
+        } else {
+            Value::Null
+        };
+        for root in [&self.root, extra, &horizon] {
             fill(
                 root,
                 0,
@@ -248,7 +256,8 @@ fn fill(
         nodes.push(Node {
             name: name.clone(),
             kind: if argument { 2 } else { 1 },
-            executable: child["executable"].as_bool().unwrap_or(false),
+            executable: child["executable"].as_bool().unwrap_or(false)
+                && child["execution_level"].as_u64().unwrap_or(0) <= u64::from(level),
             restricted: required > 0,
             children: Vec::new(),
             redirect: redirect(child),
@@ -363,6 +372,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pregen_completion_keeps_permissions_and_radius_bounds() {
+        let tree = CommandTree {
+            root: crate::pregen::command_tree(),
+        };
+        let builtin = Builtin::default();
+        assert_eq!(tree.packet(0, false, &builtin).nodes.len(), 1);
+        let packet = tree.packet(2, false, &builtin);
+        let root = packet.nodes.iter().find(|n| n.name == "pregen").unwrap();
+        assert!(root.restricted && !root.executable);
+        let radius = packet.nodes.iter().find(|n| n.name == "radius").unwrap();
+        assert!(radius.executable);
+        assert_eq!(
+            radius.parser.as_ref().unwrap().1,
+            vec![3, 0, 0, 0, 0, 1, 201, 195, 128]
+        );
+        let shapes: Vec<_> = radius
+            .children
+            .iter()
+            .map(|&i| packet.nodes[i as usize].name.as_str())
+            .collect();
+        assert_eq!(shapes, ["circle", "square"]);
+        assert_eq!(
+            packet
+                .nodes
+                .iter()
+                .filter(|n| n.name == "center" && n.executable)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
     fn integer_bounds_and_entity_flags() {
         let p: Value = serde_json::from_str(r#"{"min": 1, "max": 1000}"#).unwrap();
         assert_eq!(
@@ -401,6 +442,90 @@ mod tests {
             ["", "me", "tell", "say", "stop", "action", "message"]
         );
         assert!(op.nodes[3].restricted);
+    }
+
+    #[test]
+    fn native_execution_levels_filter_runnable_flags_not_public_children() {
+        let mods = serde_json::json!({"type": "root", "children": {
+            "foo": {"type": "literal", "executable": true, "execution_level": 4,
+                "children": {"bar": {"type": "literal", "executable": true, "execution_level": 0}}}
+        }});
+        let tree = CommandTree { root: Value::Null };
+        for level in 0..=4 {
+            let packet = tree.packet_with(level, true, &Builtin::default(), &mods);
+            let foo = packet.nodes.iter().find(|n| n.name == "foo").unwrap();
+            assert_eq!(foo.executable, level == 4);
+            assert!(!foo.restricted, "public child keeps the root traversable");
+            assert!(
+                packet
+                    .nodes
+                    .iter()
+                    .find(|n| n.name == "bar")
+                    .unwrap()
+                    .executable
+            );
+            let dispatcher =
+                crate::command::network::from_packet(&packet, &crate::command::Dispatcher::new());
+            let registries = crate::command::Registries::default();
+            assert_eq!(
+                dispatcher.parse("foo", &registries).executable().is_ok(),
+                level == 4
+            );
+            assert!(
+                dispatcher
+                    .parse("foo bar", &registries)
+                    .executable()
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn native_argument_alternatives_survive_packet_reconstruction() {
+        let mut builtin = Builtin::default();
+        builtin.registries.insert(
+            "minecraft:command_argument_type".into(),
+            horizon_protocol::registry::Ids::from_names(
+                horizon_protocol::packets::play::ARGUMENT_TYPES
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect(),
+            ),
+        );
+        let mods = serde_json::json!({"type": "root", "children": {
+            "foo": {"type": "literal", "children": {
+                "a": {"type": "argument", "parser": "brigadier:integer", "executable": true, "execution_level": 4,
+                    "children": {"bar": {"type": "literal", "executable": true, "execution_level": 0}}},
+                "b": {"type": "argument", "parser": "brigadier:string", "properties": {"type": "word"}, "executable": true, "execution_level": 0}
+            }},
+            "denied": {"type": "literal", "children": {
+                "a": {"type": "argument", "parser": "brigadier:integer", "executable": true, "execution_level": 4,
+                    "children": {"bar": {"type": "literal", "executable": true, "execution_level": 0}}}
+            }}
+        }});
+        let tree = CommandTree { root: Value::Null };
+        for level in 0..=4 {
+            let packet = tree.packet_with(level, true, &builtin, &mods);
+            let dispatcher =
+                crate::command::network::from_packet(&packet, &crate::command::Dispatcher::new());
+            let registries = crate::command::Registries::default();
+            let parsed = dispatcher.parse("foo 7", &registries);
+            let (context, _) = parsed.executable().unwrap();
+            assert_eq!(context.get("b").is_some(), level < 4);
+            assert!(
+                dispatcher
+                    .parse("foo 7 bar", &registries)
+                    .executable()
+                    .is_ok()
+            );
+            assert_eq!(
+                dispatcher
+                    .parse("denied 7", &registries)
+                    .executable()
+                    .is_ok(),
+                level == 4
+            );
+        }
     }
 
     #[test]

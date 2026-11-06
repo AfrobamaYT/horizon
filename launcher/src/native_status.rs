@@ -73,6 +73,8 @@ pub struct Build {
     /// It compiled another commit than its Nightly's, with no record of why: built before the
     /// launcher kept which mods pinned it ([`pinning`] reads them from the instance's mods).
     pub pinned_unknown: bool,
+    /// The mods turned on that it was built without, and why.
+    pub left_out: Vec<native_mods::LeftOut>,
 }
 
 impl Build {
@@ -90,6 +92,7 @@ impl Build {
             base: about.base,
             horizon: about.horizon,
             pinned_by: Vec::new(),
+            left_out: about.left_out,
         }
     }
 
@@ -137,30 +140,37 @@ pub fn enabled(home: &Path) -> Vec<Mod> {
     out
 }
 
-fn hnmods(home: &Path) -> Vec<std::path::PathBuf> {
-    let mut paths: Vec<_> = fs::read_dir(home.join(native_mods::INSTALLED))
-        .map(|dir| dir.flatten().map(|e| e.path()).collect())
-        .unwrap_or_default();
-    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
-    paths.sort();
-    paths
-}
-
-/// The native mods turned on in game folder `home` that pin Horizon commit `revision` (those naming
-/// a hook points' version follow the others, so they pin nothing).
+/// The native mods turned on in game folder `home` that pin Horizon commit `revision`.
 pub fn pinning(home: &Path, revision: &str) -> Vec<String> {
-    hnmods(home)
+    bundles_on(home)
         .into_iter()
-        .filter_map(|path| horizon_mods::index::native::Bundle::read(&path).ok())
-        .filter(|b| {
-            b.manifest
-                .native
-                .as_ref()
-                .is_some_and(|n| n.horizon == revision)
-        })
-        .filter(|b| java::is_enabled(home, &b.manifest.id))
+        .filter(|b| b.manifest.native.as_ref().expect("native bundle").horizon == revision)
         .map(|b| b.manifest.id)
         .collect()
+}
+
+/// The readable native mods turned on in game folder `home`.
+pub fn bundles_on(home: &Path) -> Vec<horizon_mods::index::native::Bundle> {
+    hmods(home)
+        .into_iter()
+        .filter_map(|path| horizon_mods::index::native::Bundle::read(&path).ok())
+        .filter(|b| java::is_enabled(home, &b.manifest.id))
+        .collect()
+}
+
+/// Paths declared by a native package, in manifest order.
+pub fn declared_internals(manifest: &horizon_mods::Manifest) -> Vec<String> {
+    manifest
+        .native
+        .as_ref()
+        .map(|native| {
+            native
+                .internals
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// A native file not tracked by the registry/browser, including GitHub installs.
@@ -169,6 +179,7 @@ pub struct Installed {
     pub file: String,
     pub id: String,
     pub version: String,
+    pub internals: Vec<String>,
     pub origin: Option<crate::github_mods::Origin>,
     /// The validated package icon, or the package error (the file remains removable).
     pub icon: Result<Option<Arc<horizon_mods::icon::Icon>>, String>,
@@ -192,10 +203,15 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
             let origin = (path.file_stem()?.to_str()? == id)
                 .then(|| crate::github_mods::origin(home, &id))
                 .flatten();
+            let internals = package
+                .as_ref()
+                .map(|p| declared_internals(&p.manifest))
+                .unwrap_or_default();
             Some(Installed {
                 file,
                 id,
                 version,
+                internals,
                 origin,
                 icon: package.map(|p| p.icon.map(Arc::new)),
             })
@@ -242,9 +258,15 @@ pub fn in_mode(
     }
 }
 
+/// The mods a build tried: both those it holds and those it left out.
 fn parse_built(about: &serde_json::Value) -> Vec<Mod> {
     let mods = about["mods"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let left_out = about["left_out"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
     mods.iter()
+        .chain(left_out)
         .filter_map(|m| {
             Some((
                 m["id"].as_str()?.into(),
@@ -380,10 +402,22 @@ mod tests {
             java::set_enabled(&home, id, true).unwrap();
         }
         assert_eq!(state(&enabled(&home), None), State::NotBuilt);
+        let mut pins = pinning(&home, &"a".repeat(40));
+        pins.sort();
+        assert_eq!(
+            pins,
+            ["github", "local", "registry"],
+            "fit reads the enabled flat packages, including a renamed local file"
+        );
+        assert!(pinning(&home, &"b".repeat(40)).is_empty());
         for id in ["registry", "github", "local"] {
             java::set_enabled(&home, id, false).unwrap();
         }
         assert_eq!(state(&enabled(&home), None), State::NoMods);
+        assert!(
+            bundles_on(&home).is_empty(),
+            "disabled packages pin nothing"
+        );
         assert_eq!(
             untracked(&home).len(),
             2,
@@ -479,6 +513,17 @@ mod tests {
         });
         assert_eq!(parse_built(&about), [m("zoom", "2.1"), d("y", "1", "ab")]);
         assert!(parse_built(&serde_json::json!({})).is_empty());
+        let about = serde_json::json!({
+            "mods": [{"id": "zoom", "version": "2.1"}],
+            "left_out": [{"id": "hitbox_plus", "version": "1.3.0", "sha256": "aa", "why": "other-version"}],
+        });
+        let build = parse_built(&about);
+        let on = [m("zoom", "2.1"), d("hitbox_plus", "1.3.0", "aa")];
+        assert_eq!(state(&on, Some(build.as_slice())), State::UpToDate);
+        let on = [m("zoom", "2.1"), m("hitbox_plus", "1.3.1")];
+        assert_eq!(state(&on, Some(build.as_slice())), State::Outdated);
+        let on = [m("zoom", "2.1"), d("hitbox_plus", "1.3.0", "bb")];
+        assert_eq!(state(&on, Some(build.as_slice())), State::Outdated);
         assert_eq!(built("v0.1.0"), None, "not a native build");
     }
 

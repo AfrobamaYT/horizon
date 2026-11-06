@@ -91,6 +91,7 @@ Deprecations and breaking changes are in bold. The release notes of the game rel
 | Native mods (flat Rust projects, [../modding/src/how-to/native-mods.md](../modding/src/how-to/native-mods.md)) | experimental | the pinned revisions |
 | `cargo horizon-mod` (`new`, `build`, `run`, `check`) | preview | none yet (unversioned) |
 | Shader API | experimental | 0.1 |
+| Shader API 0.2 (linear light, [hdr-linear-light.md](../design/hdr-linear-light.md)) | experimental, behind a switch: `horizon-shader` checks it, the game refuses it until it draws it behind `HORIZON_HDR_FRAME=float`, and the registry doesn't list it | 0.2 |
 | `horizon-ctl` commands and MCP tools | preview | none yet (unversioned) |
 | The game's own control-socket commands outside `horizon-ctl`'s table (test hooks) | experimental | |
 | `horizon-server` commands, `server.toml` | stable | `horizon-server --version` |
@@ -98,6 +99,5 @@ Deprecations and breaking changes are in bold. The release notes of the game rel
 | `horizon-launcher` commands and MCP tools | preview | none yet (unversioned) |
 | Launch API: `horizon-client`'s launch options, session JSON, exit codes; `horizon-prepare`'s output and progress | experimental | 0.1.0, `horizon-client --launch-api` and `horizon-prepare --launch-api` |
 | Benchmark report | stable | `"version": 1` |
-| Telemetry batch and consent | stable | `"schema": 1`, consent `2` |
 | `horizon-graphics.txt`, `horizon-extras.txt`, `horizon-mods.txt` | preview | none |
 | `SHA256SUMS` and `SHA256SUMS.sig` | stable | |

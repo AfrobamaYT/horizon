@@ -69,6 +69,8 @@ pub(crate) struct Def {
     /// Its lifetime parameters: it borrows when there are any.
     pub(super) lifetimes: usize,
     pub(super) kind: Kind,
+    /// A checked tuple-record constructor used only when the host receives untrusted fields.
+    pub(super) host_constructor: Option<String>,
 }
 
 #[derive(Debug)]
@@ -286,6 +288,7 @@ impl<'a> Types<'a> {
                     return Ok(Ty::Named(def));
                 }
                 let def = self.push(Def {
+                    host_constructor: None,
                     rust: format!("mod_api::{std}"),
                     wit,
                     lifetimes: 0,
@@ -365,6 +368,7 @@ impl<'a> Types<'a> {
             return Ok(id);
         }
         Ok(self.push(Def {
+            host_constructor: None,
             rust: rust.into(),
             wit: format!("json-{}", name.to_kebab_case()),
             lifetimes: 0,
@@ -393,6 +397,7 @@ impl<'a> Types<'a> {
             let rust = self.public_path(id, name);
             let wit = self.unique_wit(id, name);
             let def = self.push(Def {
+                host_constructor: None,
                 rust,
                 wit,
                 lifetimes: 0,
@@ -422,6 +427,7 @@ impl<'a> Types<'a> {
         let lifetimes = generics(&item).lifetimes().count();
         // Reserve the slot first: a type may refer to itself.
         let def = self.push(Def {
+            host_constructor: None,
             rust,
             wit: wit.clone(),
             lifetimes,
@@ -429,6 +435,13 @@ impl<'a> Types<'a> {
         });
         self.by_item.insert(id, def);
         let kind = self.kind(id, &item, name, &wit)?;
+        let constructor = host_constructor(attrs(&item))?;
+        if constructor.is_some() && (lifetimes != 0 || !matches!(kind, Kind::TupleRecord(_))) {
+            return Err(format!(
+                "{name}: host_constructor requires an owned tuple struct"
+            ));
+        }
+        self.defs[def].host_constructor = constructor;
         self.defs[def].kind = self.chain(def, kind);
         Ok(Ty::Named(def))
     }
@@ -523,6 +536,7 @@ impl<'a> Types<'a> {
             let link = fields[at].rust.clone();
             let def = &self.defs[id];
             let frame = Def {
+                host_constructor: None,
                 rust: def.rust.clone(),
                 wit: format!("{}-frame", def.wit),
                 lifetimes: def.lifetimes,
@@ -552,6 +566,7 @@ impl<'a> Types<'a> {
         };
         let def = &self.defs[id];
         let frame = Def {
+            host_constructor: None,
             rust: def.rust.clone(),
             wit: format!("{}-frame", def.wit),
             lifetimes: def.lifetimes,
@@ -738,6 +753,33 @@ fn via(attrs: &[syn::Attribute]) -> Option<Type> {
         .ok()?;
         form
     })
+}
+
+/// The checked constructor declared on an owned tuple struct.
+fn host_constructor(attrs: &[syn::Attribute]) -> Result<Option<String>, String> {
+    let mut constructor = None;
+    for attr in attrs {
+        if !attr
+            .path()
+            .segments
+            .last()
+            .is_some_and(|part| part.ident == "wasm")
+        {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("host_constructor") {
+                constructor = Some(meta.value()?.parse::<syn::Ident>()?.to_string());
+            } else if meta.path.is_ident("via") {
+                let _ = meta.value()?.parse::<Type>()?;
+            } else {
+                return Err(meta.error("expected via or host_constructor"));
+            }
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(constructor)
 }
 
 /// The name a `use` tree of one path brings in.

@@ -1,6 +1,15 @@
 //! The `level_world` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Helpers {
+    /// The dimension type's build range, logical height and sky properties from this
+    /// loaded server level, including parked levels. None for a stale handle, an
+    /// unavailable level or on a client. Does not load a level or allocate.
+    #[helper(
+        side = "both",
+        receiver = "level",
+        target = "horizon_client::game::native_level_world::Game<'_>::native_level_dimension_shape"
+    )]
+    fn level_dimension_shape();
     #[helper(
         side = "server",
         receiver = "level",
@@ -19,6 +28,12 @@ pub trait Helpers {
         target = "horizon_client::game::native_level_world::Game<'_>::native_level_game_rule"
     )]
     fn level_game_rule();
+    #[helper(
+        side = "server",
+        receiver = "level",
+        target = "horizon_client::game::native_level_world::Game<'_>::native_level_game_rules"
+    )]
+    fn level_game_rules();
     /// The rain and thunder levels of this level, each 0.0 to 1.0
     /// (`Level.getRainLevel` and `Level.getThunderLevel` at partial tick 1.0).
     /// Both are 0 where the level cannot have weather. Reads any open server

@@ -9,22 +9,46 @@ pub struct EffectInstance {
     /// Effect id: vanilla's without namespace (`speed`, `poison`, ...), a
     /// content mod's `<ns>:<path>`.
     pub id: &'static str,
+    /// The registry index, resolved at the instance boundary; unknown internal fixtures have none.
+    pub registry_index: Option<usize>,
     /// Remaining ticks; -1 is infinite.
     pub duration: i32,
     pub amplifier: i32,
     pub ambient: bool,
     pub visible: bool,
     pub hidden: Option<Box<EffectInstance>>,
+    /// Previous and current client blend factors for effects with no blend
+    /// duration. Darkness and nausea use their existing longer fades instead.
+    pub client_blend: (bool, bool),
 }
 impl EffectInstance {
     pub fn new(id: &'static str, duration: i32, amplifier: i32) -> Self {
+        Self::resolved(
+            id,
+            potions::effect(id).map(|def| def.index),
+            duration,
+            amplifier,
+        )
+    }
+    /// Construct from an already resolved registry entry without another name lookup.
+    pub fn from_def(def: &potions::EffectDef, duration: i32, amplifier: i32) -> Self {
+        Self::resolved(def.id, Some(def.index), duration, amplifier)
+    }
+    fn resolved(
+        id: &'static str,
+        registry_index: Option<usize>,
+        duration: i32,
+        amplifier: i32,
+    ) -> Self {
         Self {
             id,
+            registry_index,
             duration,
             amplifier: amplifier.clamp(0, 255),
             ambient: false,
             visible: true,
             hidden: None,
+            client_blend: (false, false),
         }
     }
     fn infinite(&self) -> bool {
@@ -74,12 +98,13 @@ impl EffectInstance {
         changed
     }
     /// `MobEffectInstance.tickClient`: a client counts its effects down
-    /// (the server removes them).
+    /// (the server removes them), then advances the zero-duration blend.
     pub fn tick_client(&mut self) {
         if self.infinite() || self.duration > 0 {
             self.tick_down();
             self.downgrade();
         }
+        self.client_blend = (self.client_blend.1, !self.ends_within(0));
     }
     /// Counts down this instance and its hidden chain without promoting it.
     pub fn tick_down(&mut self) {
@@ -181,6 +206,13 @@ impl PlayerEffects {
     pub fn get(&self, id: &str) -> Option<&EffectInstance> {
         self.list.iter().find(|e| e.id == id)
     }
+    /// Read by the registry identity already resolved at creation, without comparing names.
+    pub fn get_registered(&self, index: usize) -> Option<&EffectInstance> {
+        self.list
+            .iter()
+            .find(|effect| effect.registry_index == Some(index))
+    }
+
     pub fn amplifier(&self, id: &str) -> Option<i32> {
         self.get(id).map(|e| e.amplifier)
     }

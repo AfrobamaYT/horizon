@@ -18,20 +18,26 @@ use crate::rust_toolchain::{self, Toolchain};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use horizon_mods::dependencies;
+
 mod api;
 mod crates;
-mod dependencies;
 mod diagnostics;
 mod inject;
 mod inject_cache;
+mod internals;
+mod internals_sync;
+mod isolate;
 mod package;
 mod prebuilt;
+
+pub use isolate::LeftOut;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
@@ -130,6 +136,103 @@ impl Target {
             Self::Server => format!("horizon-engine{}", std::env::consts::EXE_SUFFIX),
         }
     }
+}
+
+/// The platform the game's source will be compiled for. On Windows this follows the installed
+/// game's executable, not the PC's native architecture; the launcher must have a matching managed
+/// host toolchain before any compilation starts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BuildPlatform {
+    target: Option<&'static str>,
+    machine: Option<u16>,
+    /// Non-default target builds get their own Cargo cache and record namespace.
+    cache_dir: Option<&'static str>,
+}
+
+impl BuildPlatform {
+    fn cache_key(self) -> Option<&'static str> {
+        self.cache_dir
+    }
+}
+
+fn platform_for_game(base: &str) -> Result<BuildPlatform, String> {
+    if std::env::consts::OS != "windows" {
+        return Ok(BuildPlatform::default());
+    }
+    let executable = backend::version_dir(base).join(backend::CLIENT);
+    let machine = pe_machine(&executable).map_err(|error| {
+        trf(
+            "Could not read {name}: {error}",
+            &[
+                ("name", &executable.display().to_string()),
+                ("error", &error),
+            ],
+        )
+    })?;
+    let selected_target = rust_toolchain::windows_target_for_machine(machine).ok_or_else(|| {
+        architecture_mismatch(&format!("PE machine 0x{machine:04x}"), "x64 or ARM64")
+    })?;
+    let Some(host) = rust_toolchain::host() else {
+        return Err(architecture_mismatch(
+            windows_architecture(selected_target),
+            std::env::consts::ARCH,
+        ));
+    };
+    windows_build_platform(machine, host.target)
+}
+
+fn windows_build_platform(machine: u16, host_target: &str) -> Result<BuildPlatform, String> {
+    let target = rust_toolchain::windows_target_for_machine(machine).ok_or_else(|| {
+        architecture_mismatch(&format!("PE machine 0x{machine:04x}"), "x64 or ARM64")
+    })?;
+    if rust_toolchain::windows_target_for_host(host_target, machine).is_none() {
+        return Err(architecture_mismatch(
+            windows_architecture(target),
+            windows_architecture(host_target),
+        ));
+    }
+    let cache_dir = (target == rust_toolchain::WINDOWS_ARM64_TARGET).then_some(target);
+    Ok(BuildPlatform {
+        target: Some(target),
+        machine: Some(machine),
+        cache_dir,
+    })
+}
+
+fn architecture_mismatch(game: &str, toolchain: &str) -> String {
+    trf(
+        "Native mods require supported Windows architectures that match. Game: {game_arch}; build toolchain: {toolchain_arch}.",
+        &[("game_arch", game), ("toolchain_arch", toolchain)],
+    )
+}
+
+fn windows_architecture(target: &str) -> &'static str {
+    match target {
+        rust_toolchain::WINDOWS_X64_TARGET => "x64",
+        rust_toolchain::WINDOWS_ARM64_TARGET => "ARM64",
+        _ => unreachable!(),
+    }
+}
+
+/// Reads the COFF machine from a Windows PE executable after validating its two signatures.
+pub(crate) fn pe_machine(path: &Path) -> Result<u16, String> {
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut dos = [0; 64];
+    file.read_exact(&mut dos)
+        .map_err(|error| error.to_string())?;
+    if &dos[..2] != b"MZ" {
+        return Err("missing DOS MZ signature".into());
+    }
+    let pe_offset = u32::from_le_bytes(dos[0x3c..0x40].try_into().unwrap()) as u64;
+    file.seek(SeekFrom::Start(pe_offset))
+        .map_err(|error| error.to_string())?;
+    let mut header = [0; 6];
+    file.read_exact(&mut header)
+        .map_err(|error| error.to_string())?;
+    if &header[..4] != b"PE\0\0" {
+        return Err("missing PE signature".into());
+    }
+    Ok(u16::from_le_bytes([header[4], header[5]]))
 }
 
 /// What a native build was made from, kept per profile in `native/built.json` after it compiled:
@@ -237,26 +340,34 @@ fn read_records(path: &Path) -> std::collections::BTreeMap<String, Record> {
 /// A build record's key in `built.json`: the profile's folder in `native/target/` for a game
 /// build (as it always was), the target's own name before it for a server one, so the two never
 /// read each other's record. `Balanced` and `Developer` share one: their last build in that folder.
-fn record_key(target: Target, profile: Profile) -> String {
+fn record_key(target: Target, profile: Profile, platform: Option<&str>) -> String {
     let folder = profile.cargo().0;
-    match target {
+    let key = match target {
         Target::Client => folder.into(),
         Target::Server => format!("{}-{folder}", target.name()),
+    };
+    match platform {
+        Some(platform) => format!("{platform}-{key}"),
+        None => key,
     }
 }
 
 /// The last build of `target` in `profile`'s folder in `native/target/`, if that folder (the
 /// compiled crates both build from) is still there.
-fn last_record(target: Target, profile: Profile) -> Option<Record> {
-    if !root().join("target").join(profile.cargo().0).is_dir() {
+fn last_record(target: Target, profile: Profile, platform: Option<&str>) -> Option<Record> {
+    let mut target_dir = root().join("target");
+    if let Some(platform) = platform {
+        target_dir.push(platform);
+    }
+    if !target_dir.join(profile.cargo().0).is_dir() {
         return None;
     }
-    read_records(&records_path()).remove(&record_key(target, profile))
+    read_records(&records_path()).remove(&record_key(target, profile, platform))
 }
 
-fn save_record(target: Target, profile: Profile, record: &Record) {
+fn save_record(target: Target, profile: Profile, platform: Option<&str>, record: &Record) {
     let mut all = read_records(&records_path());
-    all.insert(record_key(target, profile), record.clone());
+    all.insert(record_key(target, profile, platform), record.clone());
     if let Ok(text) = serde_json::to_vec_pretty(&all) {
         let _ = fs::write(records_path(), text);
     }
@@ -432,6 +543,18 @@ fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     result
 }
 
+/// Dispatch Cargo's discovery-only rustc wrapper before normal launcher startup.
+pub fn internals_rustc_wrapper() -> Option<i32> {
+    internals_sync::rustc_wrapper()
+}
+
+/// Discover used internals without installing a game or changing an instance.
+pub fn sync_internals(
+    folder: &Path,
+) -> Result<Vec<horizon_mods::internals::ListedInternal>, String> {
+    internals_sync::check(folder).map_err(|error| error.to_string())
+}
+
 pub const DEFAULT_CACHE_GIB: u64 = 30;
 
 fn cache_error(error: crate::native_cache::Error) -> String {
@@ -590,14 +713,14 @@ impl Bundle {
     }
 
     /// Whether horizon-mixins changes the game's source for it: a helper injection or a module.
-    /// A `trait_method` injection listens at a point instead ([`inject`]).
+    /// A `trait_method` or `raw` injection listens at a point instead ([`inject`]).
     fn needs_mixins(&self) -> bool {
         !self.native().module.is_empty()
             || self
                 .native()
                 .injection
                 .iter()
-                .any(|injection| injection.trait_method.is_none())
+                .any(|injection| injection.helper.is_some())
     }
 }
 
@@ -1022,6 +1145,8 @@ pub struct About {
     pub horizon: String,
     /// What it compiles: the game or the headless engine a server runs.
     pub target: Target,
+    /// The mods turned on that it was built without, and why.
+    pub left_out: Vec<LeftOut>,
 }
 
 /// What installed native build `version` was made from; None for any other version.
@@ -1045,6 +1170,12 @@ fn about_in(dir: &Path) -> Option<About> {
             Some("client") => Target::Client,
             _ => return None,
         },
+        left_out: json["left_out"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(LeftOut::from_json)
+            .collect(),
     })
 }
 
@@ -1128,6 +1259,7 @@ pub fn version_for(
     mixins: &str,
     profile: Profile,
     target: Target,
+    platform: Option<&str>,
     bundles: &[Bundle],
 ) -> Result<String, String> {
     let mut hash = Sha256::new();
@@ -1136,6 +1268,7 @@ pub fn version_for(
         .into_iter()
         .chain(configs.iter().copied())
         .chain([rust_toolchain::VERSION, revision])
+        .chain(platform)
     {
         hash.update(part.as_bytes());
         hash.update([0]);
@@ -1212,6 +1345,8 @@ pub enum Step {
     /// The mods compile against the prebuilt game.
     PrebuiltMods,
     Install,
+    /// This mod was left out of the build.
+    LeftOut(LeftOut),
     /// The build ended: seconds it took.
     Done {
         secs: u64,
@@ -1261,6 +1396,7 @@ impl Step {
             | Self::CachedMixins
             | Self::Plan(..)
             | Self::Crates
+            | Self::LeftOut(_)
             | Self::PrebuiltGame(_) => (Stage::Prepare, None),
             Self::Compile { done, total, .. } => (
                 Stage::Compile,
@@ -1321,6 +1457,7 @@ impl Step {
                 ),
             },
             Self::Install => tr("Installing the build").into(),
+            Self::LeftOut(left) => left.label(),
             Self::Done {
                 secs,
                 profile,
@@ -1341,29 +1478,41 @@ impl Step {
 /// An error ends with its first `error` lines and the last lines: a failed build script's output
 /// alone could push the line naming its crate out of the last ones.
 fn run(cmd: Command, what: &str, line: impl FnMut(&str)) -> Result<(), String> {
-    run_with_compiler(cmd, what, line, None)
+    run_checked(cmd, what, line, None).map_err(|e| e.error)
 }
 
-fn run_with_compiler(
+/// A failed command, with diagnostic ownership for build isolation.
+struct Ran {
+    error: String,
+    tail: String,
+    owners: Vec<String>,
+}
+
+fn run_checked(
     mut cmd: Command,
     what: &str,
     mut line: impl FnMut(&str),
     compiler: Option<diagnostics::Compiler<'_>>,
-) -> Result<(), String> {
+) -> Result<(), Ran> {
+    let ran = |error: String| Ran {
+        error,
+        tail: String::new(),
+        owners: Vec::new(),
+    };
     let mut log = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_path())
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| ran(e.to_string()))?;
     if CANCEL.load(Ordering::Relaxed) {
-        return Err(CANCELLED.into());
+        return Err(ran(CANCELLED.into()));
     }
     let _ = writeln!(log, "$ {cmd:?}");
     let stdout = if compiler.is_some() {
         cmd.stdout(Stdio::piped());
-        Some(log.try_clone().map_err(|e| e.to_string())?)
+        Some(log.try_clone().map_err(|e| ran(e.to_string()))?)
     } else {
-        cmd.stdout(log.try_clone().map_err(|e| e.to_string())?);
+        cmd.stdout(log.try_clone().map_err(|e| ran(e.to_string()))?);
         None
     };
     #[cfg(unix)]
@@ -1371,7 +1520,7 @@ fn run_with_compiler(
     let mut child = cmd
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Could not start {what}: {e}"))?;
+        .map_err(|e| ran(app_control(format!("Could not start {what}: {e}"))))?;
     let finished = Arc::new(AtomicBool::new(false));
     let watcher = {
         let (pid, finished) = (child.id(), finished.clone());
@@ -1392,6 +1541,7 @@ fn run_with_compiler(
         });
         let mut tail = std::collections::VecDeque::new();
         let mut errors = Vec::new();
+        let mut blocked = false;
         for text in BufReader::new(child.stderr.take().expect("piped"))
             .lines()
             .map_while(Result::ok)
@@ -1400,6 +1550,7 @@ fn run_with_compiler(
                 let _ = writeln!(log, "{kept}");
             }
             line(&text);
+            blocked |= rust_toolchain::blocked_by_app_control(&text);
             if text.starts_with("error") && errors.len() < 4 {
                 errors.push(text.clone());
             }
@@ -1416,14 +1567,28 @@ fn run_with_compiler(
             .unwrap_or_default();
         if CANCEL.load(Ordering::Relaxed) {
             let _ = writeln!(log, "Build cancelled.");
-            return Err(CANCELLED.into());
+            return Err(ran(CANCELLED.into()));
         }
-        let status = status.map_err(|e| e.to_string())?;
+        let status = status.map_err(|e| ran(e.to_string()))?;
         if status.success() {
             return Ok(());
         }
         let tail: Vec<String> = tail.into();
-        Err(messages.explain(failure(what, &status.to_string(), &errors, &tail)))
+        let owners = messages.owners();
+        let error = diagnostics::with_internals_hint(messages.explain(failure(
+            what,
+            &status.to_string(),
+            &errors,
+            &tail,
+        )));
+        Err(Ran {
+            error: match blocked {
+                true => with_app_control(error),
+                false => app_control(error),
+            },
+            tail: tail.join("\n"),
+            owners,
+        })
     })
 }
 
@@ -1457,6 +1622,19 @@ fn kill_tree(pid: u32) {
     let _ = Command::new("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .status();
+}
+
+/// `error` led by what to do when Windows' Smart App Control refused one of the build's
+/// programs (#5911): cargo's own lines only say a build script was "never executed".
+fn app_control(error: String) -> String {
+    match rust_toolchain::blocked_by_app_control(&error) {
+        true => with_app_control(error),
+        false => error,
+    }
+}
+
+fn with_app_control(error: String) -> String {
+    format!("{}\n\n{error}", rust_toolchain::smart_app_control())
 }
 
 /// [`run`]'s error: the `errors` lines not already among the last ones (`tail`), then those.
@@ -1536,6 +1714,7 @@ fn tool(rust: &Toolchain, rev: &str, progress: &impl Fn(Step)) -> Result<PathBuf
         progress(Step::Tool);
         let mut cmd = rust.command(&rust.cargo());
         rust_toolchain::low_priority(&mut cmd);
+        rust.configure_cargo(&mut cmd);
         cmd.args([
             "install", "--locked", "--git", MIXINS_GIT, "--rev", rev, "--root",
         ])
@@ -1597,6 +1776,7 @@ fn compile(
 fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
     let mut cmd = rust.command(&rust.cargo());
     rust_toolchain::low_priority(&mut cmd);
+    rust.configure_cargo(&mut cmd);
     cmd.arg(subcommand);
     let config = dir.join(".cargo").join("config.toml");
     if config.is_file() {
@@ -1620,7 +1800,9 @@ fn lock_crates(
         fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
     };
     let horizon = crates::downloaded(&read(source)?)?;
-    let staged = crates::downloaded(&read(stage)?)?;
+    let staged_lock = read(stage)?;
+    crates::check_game_graph(stage, &staged_lock)?;
+    let staged = crates::downloaded(&staged_lock)?;
     let api_ids: Vec<&str> = mods.iter().map(|m| m.manifest.id.as_str()).collect();
     if let Some(why) = crates::refused(&horizon, Some(&staged), wanted, &api_ids) {
         return Err(why);
@@ -1645,7 +1827,7 @@ fn source(revision: &str) -> Result<PathBuf, String> {
     }
     let archive = format!(
         "https://codeload.github.com/{}/tar.gz/{revision}",
-        backend::REPO
+        horizon_mods::index::native::PREBUILT_REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
     let top = unpack_archive(&archive, &partial, u64::MAX)?;
@@ -1684,7 +1866,10 @@ pub(crate) fn unpack_archive(url: &str, partial: &Path, limit: u64) -> Result<Pa
 }
 
 /// Makes `to` hold `from`'s files, writing only those that changed, so Cargo, which goes by file
-/// times, recompiles only what the mods changed.
+/// times, recompiles only what the mods changed. A file written gets the current time, not
+/// `from`'s: a copy keeps the original's time on Windows and macOS, and an unpacked source has
+/// its commit's, which can be older than the last build. Cargo would take that file for one it
+/// already compiled and link the older crate (#10421).
 fn sync(from: &Path, to: &Path) -> Result<(), String> {
     let new = files(from)?;
     let old = if to.is_dir() { files(to)? } else { Vec::new() };
@@ -1692,7 +1877,10 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
         let target = to.join(name);
         if fs::read(&target).ok() != fs::read(path).ok() {
             fs::create_dir_all(target.parent().unwrap_or(to)).map_err(|e| e.to_string())?;
-            fs::copy(path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+            fs::copy(path, &target)
+                .and_then(|_| fs::File::options().write(true).open(&target))
+                .and_then(|file| file.set_modified(std::time::SystemTime::now()))
+                .map_err(|e| format!("{}: {e}", target.display()))?;
         }
     }
     for (name, path) in old {
@@ -1701,6 +1889,24 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Marks a `stage/` whose files all got the time they were written ([`sync`]).
+const STAGE_STAMPED: &str = "stage.stamped";
+
+/// The stage the compiler reads, in `root`. One written before #10421 can hold files with their
+/// commit's time over crates compiled from another commit: it is written again, once, so each of
+/// its files is newer than what `target/` holds.
+fn stage_dir(root: &Path) -> Result<PathBuf, String> {
+    let stage = root.join("stage");
+    let stamped = root.join(STAGE_STAMPED);
+    if !stamped.exists() {
+        if stage.exists() {
+            fs::remove_dir_all(&stage).map_err(|e| format!("{}: {e}", stage.display()))?;
+        }
+        fs::write(&stamped, "").map_err(|e| format!("{}: {e}", stamped.display()))?;
+    }
+    Ok(stage)
 }
 
 /// Copy a bundle without its API package's Cargo build output.
@@ -1738,6 +1944,45 @@ struct Built {
     profile: Profile,
     /// How long the whole build took.
     secs: u64,
+    /// The mods turned on that it was built without.
+    left_out: Vec<LeftOut>,
+}
+
+/// Why [`pipeline`] stopped.
+enum Failed {
+    /// These mods stopped it (`error` says how), while `compiling` or before: it can run again
+    /// without them.
+    Mods {
+        left: Vec<LeftOut>,
+        error: String,
+        compiling: bool,
+    },
+    /// Every mod was left out.
+    Nothing,
+    Other(String),
+}
+
+impl From<String> for Failed {
+    fn from(error: String) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl From<Failed> for String {
+    fn from(failed: Failed) -> Self {
+        match failed {
+            Failed::Mods { error, .. } | Failed::Other(error) => error,
+            Failed::Nothing => String::new(),
+        }
+    }
+}
+
+/// Isolation and jar-download choices for an explicit build.
+#[derive(Default)]
+struct BuildOptions<'a> {
+    allow_jar_downloads: bool,
+    skip: &'a [LeftOut],
+    isolate: bool,
 }
 
 /// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
@@ -1745,10 +1990,11 @@ struct Built {
 /// reuses: a native build's own revision when it is one, [`base_for`]), compiled as `target`
 /// (the game, or the headless engine) and installed as its own version,
 /// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
-/// the profile and the target). A build already made is used again. Mods pinning different
-/// revisions build on the newest one, with the newest horizon-mixins they name, only when the
-/// player agreed to try (`anyway`): else the error starts with [`MISMATCH`] and says which.
-/// With `on_base`, every mod builds on `base`'s own commit, pinned or not (the player's choice).
+/// the profile and the target). A build already made is used again. A mod pinned to another
+/// Horizon revision is refused: the error starts with [`MISMATCH`] and names the mismatched pins.
+/// Building never changes a mod's Horizon pin to match the installed game. Isolation leaves out
+/// only a mod blamed by mixin or compiler diagnostics and its required dependents; servers refuse
+/// failures without leaving anything out.
 /// Nothing of the player's outside the launcher's data is touched: no instance is edited and
 /// no version selected here.
 fn pipeline(
@@ -1756,18 +2002,19 @@ fn pipeline(
     folder: &Path,
     profile: Profile,
     target: Target,
-    allow_jar_downloads: bool,
+    options: BuildOptions<'_>,
     progress: &impl Fn(Step),
-) -> Result<Built, String> {
+) -> Result<Built, Failed> {
     let started = std::time::Instant::now();
     let built_on = about(base);
     if is_native(base) && built_on.is_none() {
         return Err(trf(
             "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.",
             &[("version", base)],
-        ));
+        ).into());
     }
     backend::need_prepared(base)?;
+    let platform = platform_for_game(base)?;
     fs::create_dir_all(root()).map_err(|e| e.to_string())?;
     // The mods are copied first: the build and its key use the copy, whatever happens to the
     // folder meanwhile.
@@ -1784,7 +2031,7 @@ fn pipeline(
     let mut ids = std::collections::HashSet::new();
     for b in &found {
         if !ids.insert(&b.manifest.id) {
-            return Err(format!("Duplicate native mod id {:?}.", b.manifest.id));
+            return Err(format!("Duplicate native mod id {:?}.", b.manifest.id).into());
         }
         copy_bundle(b, &incoming.join(&b.manifest.id))?;
     }
@@ -1803,6 +2050,23 @@ fn pipeline(
         .iter()
         .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies))
         .collect();
+    // The cache identifies every requested input, including a mod left out after a failure:
+    // replacing its files must retry it rather than reuse a build that excluded the old copy.
+    let requested = mods.clone();
+    let pairs: Vec<(&Bundle, &[dependencies::Dependency])> = mods
+        .iter()
+        .zip(&declared)
+        .map(|(b, d)| (b, d.as_slice()))
+        .collect();
+    let left_out = isolate::with_dependents(options.skip, &pairs);
+    let (mods, declared): (Vec<Bundle>, Vec<Vec<dependencies::Dependency>>) = mods
+        .into_iter()
+        .zip(declared)
+        .filter(|(b, _)| !left_out.iter().any(|l| l.id == b.manifest.id))
+        .unzip();
+    if mods.is_empty() {
+        return Err(Failed::Nothing);
+    }
     let inputs: Vec<_> = mods
         .iter()
         .zip(&declared)
@@ -1820,6 +2084,25 @@ fn pipeline(
         .map(api::Project::read)
         .collect::<Result<_, _>>()
         .map_err(|error| error.to_string())?;
+    for bundle in &ordered {
+        let native = bundle.native();
+        if !native.internals.is_empty() {
+            let paths = native
+                .internals
+                .iter()
+                .map(|internal| internal.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            append_log(&trf(
+                "{mod} uses {count} game internals: {paths}",
+                &[
+                    ("mod", &bundle.manifest.id),
+                    ("count", &native.internals.len().to_string()),
+                    ("paths", &paths),
+                ],
+            ))?;
+        }
+    }
     let point_injections: Vec<_> = ordered
         .iter()
         .flat_map(|bundle| inject::of(&bundle.manifest))
@@ -1830,7 +2113,7 @@ fn pipeline(
     };
     let other = mismatch(&mods, &revision);
     if let Some(list) = &other {
-        return Err(format!("{MISMATCH}{list}; rebuild against this game."));
+        return Err(format!("{MISMATCH}{list}; rebuild against this game.").into());
     }
     if target == Target::Server {
         let jars = horizon_mods::manifest::collect_jar_requirements(
@@ -1841,7 +2124,7 @@ fn pipeline(
         crate::jars::prepare(
             &backend::game_home(),
             &jars,
-            crate::jars::Permission::headless(allow_jar_downloads),
+            crate::jars::Permission::headless(options.allow_jar_downloads),
         )
         .map_err(|error| error.to_string())?;
     }
@@ -1862,7 +2145,14 @@ fn pipeline(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
-    let version = version_for(&revision, &mixins, profile, target, &mods)?;
+    let version = version_for(
+        &revision,
+        &mixins,
+        profile,
+        target,
+        platform.cache_key(),
+        &requested,
+    )?;
     let now = Record {
         horizon: revision.clone(),
         mixins: mixins.clone(),
@@ -1893,7 +2183,11 @@ fn pipeline(
     check_cancelled()?;
     let plan = match prebuilt {
         Some(_) => Plan::Prebuilt,
-        None => classify(exists, last_record(target, profile).as_ref(), &now),
+        None => classify(
+            exists,
+            last_record(target, profile, platform.cache_key()).as_ref(),
+            &now,
+        ),
     };
     progress(Step::Plan(plan.clone(), profile));
     let mut built = Built {
@@ -1901,6 +2195,13 @@ fn pipeline(
         plan: plan.clone(),
         profile,
         secs: 0,
+        left_out: if exists {
+            about(&version)
+                .map(|about| about.left_out)
+                .unwrap_or_default()
+        } else {
+            left_out.clone()
+        },
     };
     let about = |route: &str| {
         serde_json::json!({
@@ -1910,12 +2211,22 @@ fn pipeline(
             "rust": rust_toolchain::VERSION,
             "profile": profile.name(),
             "route": route,
+            "left_out": left_out.iter().map(|left| {
+                let mut json = left.to_json();
+                json["sha256"] = serde_json::json!(digests.get(&left.id).cloned().flatten());
+                json
+            }).collect::<Vec<_>>(),
             "target": target.name(),
+            "rust_target": platform.target,
             "secs": started.elapsed().as_secs(),
             "mods": mods.iter().map(|m| serde_json::json!({
                 "id": m.manifest.id,
                 "version": m.manifest.version,
                 "sha256": digests.get(&m.manifest.id).cloned().flatten(),
+                "internals": m.native().internals,
+                "raw": m.native().injection.iter().filter(|injection| injection.raw.is_some()).map(|injection| serde_json::json!({
+                    "id": injection.id, "target": injection.target, "kind": injection.kind,
+                })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
     };
@@ -1979,14 +2290,26 @@ fn pipeline(
                 let mixin_input = real.join("mixins.incoming");
                 stage_mixins(&ordered, &mixin_input)?;
                 progress(Step::Mixins);
-                let result = run(
+                let result = run_checked(
                     apply(&rust, &tool, &source, &mixin_input, &fresh),
                     "horizon-mixins",
                     |_| {},
+                    None,
                 );
                 let _ = fs::remove_dir_all(&mixin_input);
-                result.map_err(blame)?;
-                let parent = snapshot.parent().ok_or("invalid cache path")?;
+                if let Err(ran) = result {
+                    check_cancelled()?;
+                    let error = blame(ran.error);
+                    return Err(match isolate::from_mixins(&ran.tail, &ordered) {
+                        Some(culprit) if options.isolate => Failed::Mods {
+                            left: vec![culprit],
+                            error,
+                            compiling: false,
+                        },
+                        _ => Failed::Other(error),
+                    });
+                }
+                let parent = snapshot.parent().ok_or("invalid cache path".to_owned())?;
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 let partial = parent.join(format!(".{key}.partial"));
                 let _ = fs::remove_dir_all(&partial);
@@ -2023,7 +2346,11 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
-        let has_api = api::stage(&fresh, &projects, &declared, &resolution)?;
+        let catalog = internals::Catalog::read(&real)?;
+        let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
+        for project in &projects {
+            catalog.log_raw(&project.bundle.manifest)?;
+        }
         let paths = mods
             .iter()
             .map(|bundle| {
@@ -2046,21 +2373,24 @@ fn pipeline(
             run(metadata, "Resolving trait mod crates", |_| {})?;
         }
         // Absolute: the compiler runs from elsewhere (`compile`).
-        let stage = real.join("stage");
+        let stage = stage_dir(&real)?;
         sync(&fresh, &stage)?;
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
             progress(Step::Crates);
             lock_crates(&rust, &source, &stage, &mods, &wanted)?;
         }
-        let target_dir = real.join("target");
+        let mut target_dir = real.join("target");
+        if let Some(cache_dir) = platform.cache_dir {
+            target_dir.push(cache_dir);
+        }
         let compiled = profile;
         let (mut crates, mut total, mut name) = (0, None, String::new());
         let identities: Vec<_> = mods
             .iter()
             .map(|m| (m.manifest.id.clone(), m.manifest.version.clone()))
             .collect();
-        run_with_compiler(
+        run_checked(
             compile(
                 &rust,
                 &stage,
@@ -2102,10 +2432,38 @@ fn pipeline(
                 mods: &identities,
             }),
         )
-        .map_err(|e| blame(crates::locked(e)))?;
+        .map_err(|ran| {
+            let error = blame(crates::locked(ran.error));
+            if CANCEL.load(Ordering::Relaxed) {
+                return Failed::Other(CANCELLED.into());
+            }
+            match isolate::from_compiler(&ran.owners, &mods) {
+                left if options.isolate && !left.is_empty() => Failed::Mods {
+                    left,
+                    error,
+                    compiling: true,
+                },
+                _ => Failed::Other(error),
+            }
+        })?;
         check_cancelled()?;
-        save_record(target, profile, &now);
         let binary = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
+        if let Some(expected) = platform.machine {
+            let actual = pe_machine(&binary).map_err(|error| {
+                trf(
+                    "Could not read {name}: {error}",
+                    &[("name", &binary.display().to_string()), ("error", &error)],
+                )
+            })?;
+            if actual != expected {
+                return Err(architecture_mismatch(
+                    &format!("PE machine 0x{expected:04x}"),
+                    &format!("PE machine 0x{actual:04x}"),
+                )
+                .into());
+            }
+        }
+        save_record(target, profile, platform.cache_key(), &now);
         progress(Step::Install);
         install(
             base,
@@ -2123,6 +2481,63 @@ fn pipeline(
     let _ = fs::remove_dir_all(&incoming);
     built.secs = started.elapsed().as_secs();
     Ok(built)
+}
+
+/// How many times a build compiles again without the mods the compiler's errors were traced to:
+/// each costs a compile, where a mod that doesn't apply costs only horizon-mixins' run.
+const COMPILE_RETRIES: usize = 3;
+
+/// Runs `pipeline` until it builds, each time without the mods that stopped it before (they
+/// are said with `progress` as they are left out, and those needing them once it built). The
+/// error, when it can't, starts with the mods already left out.
+fn isolated(
+    mut pipeline: impl FnMut(&[LeftOut]) -> Result<Built, Failed>,
+    progress: &impl Fn(Step),
+) -> Result<Built, String> {
+    let mut skip: Vec<LeftOut> = Vec::new();
+    let mut compiles = 0;
+    let mut last = String::new();
+    let said = |skip: &[LeftOut], error: String| {
+        let labels: Vec<String> = skip.iter().map(LeftOut::label).collect();
+        match labels.is_empty() {
+            true => error,
+            false => format!("{}\n\n{error}", labels.join("\n")),
+        }
+    };
+    loop {
+        match pipeline(&skip) {
+            Ok(built) => {
+                for left in built.left_out.iter().filter(|l| !skip.contains(l)) {
+                    log_warning(&left.label());
+                    progress(Step::LeftOut(left.clone()));
+                }
+                return Ok(built);
+            }
+            Err(Failed::Mods {
+                left,
+                error,
+                compiling,
+            }) => {
+                compiles += usize::from(compiling);
+                let new: Vec<LeftOut> = left
+                    .into_iter()
+                    .filter(|l| !skip.iter().any(|s| s.id == l.id))
+                    .collect();
+                if new.is_empty() || compiles > COMPILE_RETRIES {
+                    return Err(said(&skip, error));
+                }
+                for left in new {
+                    log_warning(&left.label());
+                    progress(Step::LeftOut(left.clone()));
+                    skip.push(left);
+                }
+                last = error;
+            }
+            Err(Failed::Nothing) => return Err(said(&skip, last)),
+            Err(Failed::Other(error)) if error == CANCELLED => return Err(error),
+            Err(Failed::Other(error)) => return Err(said(&skip, error)),
+        }
+    }
 }
 
 /// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
@@ -2143,7 +2558,23 @@ pub fn build(
         return Err(error);
     }
     logged(|| {
-        let built = pipeline(base, folder, profile, Target::Client, false, &progress)?;
+        let built = isolated(
+            |skip| {
+                pipeline(
+                    base,
+                    folder,
+                    profile,
+                    Target::Client,
+                    BuildOptions {
+                        skip,
+                        isolate: true,
+                        ..BuildOptions::default()
+                    },
+                    &progress,
+                )
+            },
+            &progress,
+        )?;
         check_cancelled()?;
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
@@ -2208,9 +2639,13 @@ pub fn build_server(
             folder,
             profile,
             Target::Server,
-            allow_jar_downloads,
+            BuildOptions {
+                allow_jar_downloads,
+                ..BuildOptions::default()
+            },
             &progress,
-        )?;
+        )
+        .map_err(String::from)?;
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
         let cached = root().join("server-builds");
@@ -2442,6 +2877,115 @@ mod tests {
     use super::*;
 
     #[test]
+    fn isolation_keeps_cancellation_exact_after_a_retry() {
+        let _guard = LOG_TEST.lock().unwrap();
+        let mut attempts = 0;
+        let result = isolated(
+            |skip| {
+                attempts += 1;
+                if skip.is_empty() {
+                    return Err(Failed::Mods {
+                        left: vec![LeftOut {
+                            id: "broken".into(),
+                            version: "1.0.0".into(),
+                            why: isolate::Why::OtherVersion,
+                        }],
+                        error: "compiler failure".into(),
+                        compiling: true,
+                    });
+                }
+                assert_eq!(skip[0].id, "broken");
+                Err(Failed::Other(CANCELLED.into()))
+            },
+            &|_| {},
+        );
+        assert_eq!(result.unwrap_err(), CANCELLED);
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn isolation_bounds_recompiles_and_keeps_the_failure() {
+        let _guard = LOG_TEST.lock().unwrap();
+        let mut attempts = 0;
+        let result = isolated(
+            |skip| {
+                attempts += 1;
+                assert_eq!(skip.len(), attempts - 1);
+                Err(Failed::Mods {
+                    left: vec![LeftOut {
+                        id: format!("broken_{attempts}"),
+                        version: "1.0.0".into(),
+                        why: isolate::Why::OtherVersion,
+                    }],
+                    error: "compiler failure".into(),
+                    compiling: true,
+                })
+            },
+            &|_| {},
+        );
+        let error = result.unwrap_err();
+        assert_eq!(attempts, COMPILE_RETRIES + 1);
+        assert!(error.contains("broken_1 was left out"), "{error}");
+        assert!(error.ends_with("compiler failure"), "{error}");
+    }
+
+    #[test]
+    fn pe_machine_reads_the_architecture_after_validating_both_headers() {
+        let dir = dir("pe-machine");
+        let executable = dir.join("game.exe");
+        let mut image = vec![0; 70];
+        image[..2].copy_from_slice(b"MZ");
+        image[0x3c..0x40].copy_from_slice(&64_u32.to_le_bytes());
+        image[64..68].copy_from_slice(b"PE\0\0");
+        image[68..70].copy_from_slice(&rust_toolchain::WINDOWS_ARM64_MACHINE.to_le_bytes());
+        fs::write(&executable, &image).unwrap();
+        assert_eq!(pe_machine(&executable).unwrap(), 0xaa64);
+
+        image[64] = b'X';
+        fs::write(&executable, image).unwrap();
+        assert!(pe_machine(&executable)
+            .unwrap_err()
+            .contains("missing PE signature"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn windows_build_platform_follows_the_selected_games_pe_machine() {
+        let x64 = windows_build_platform(
+            rust_toolchain::WINDOWS_X64_MACHINE,
+            rust_toolchain::WINDOWS_X64_TARGET,
+        )
+        .unwrap();
+        assert_eq!(x64.target, Some(rust_toolchain::WINDOWS_X64_TARGET));
+        assert_eq!(x64.machine, Some(rust_toolchain::WINDOWS_X64_MACHINE));
+        assert_eq!(x64.cache_key(), None, "preserve the x64 cache layout");
+
+        let arm64 = windows_build_platform(
+            rust_toolchain::WINDOWS_ARM64_MACHINE,
+            rust_toolchain::WINDOWS_ARM64_TARGET,
+        )
+        .unwrap();
+        assert_eq!(arm64.target, Some(rust_toolchain::WINDOWS_ARM64_TARGET));
+        assert_eq!(arm64.machine, Some(rust_toolchain::WINDOWS_ARM64_MACHINE));
+        assert_eq!(
+            arm64.cache_key(),
+            Some(rust_toolchain::WINDOWS_ARM64_TARGET)
+        );
+
+        assert!(windows_build_platform(
+            rust_toolchain::WINDOWS_X64_MACHINE,
+            rust_toolchain::WINDOWS_ARM64_TARGET,
+        )
+        .is_err());
+        assert!(windows_build_platform(
+            rust_toolchain::WINDOWS_ARM64_MACHINE,
+            rust_toolchain::WINDOWS_X64_TARGET,
+        )
+        .is_err());
+        assert!(windows_build_platform(0xa641, rust_toolchain::WINDOWS_ARM64_TARGET).is_err());
+    }
+
+    #[test]
     fn a_rebuild_excludes_the_engine_and_unsupported_build_artifacts() {
         use std::ffi::OsStr;
         for own in [
@@ -2473,6 +3017,40 @@ mod tests {
         d
     }
 
+    /// The launcher's toolchain in `dir` for every host it ships one for: the build commands are
+    /// checked for each host on whichever machine runs the tests, not only for its own.
+    fn toolchains(dir: impl Into<PathBuf>) -> Vec<Toolchain> {
+        let dir = dir.into();
+        rust_toolchain::hosts()
+            .iter()
+            .map(|host| Toolchain {
+                dir: dir.clone(),
+                host,
+            })
+            .collect()
+    }
+
+    /// What `rust`'s host puts before cargo's subcommand ([`Toolchain::configure_cargo`]): the
+    /// ARM64 target's rustflags, nothing on the other hosts.
+    fn host_args(rust: &Toolchain) -> Vec<String> {
+        let mut cmd = Command::new("cargo");
+        rust.configure_cargo(&mut cmd);
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// `cmd`'s arguments after its host's own ([`host_args`]), which must come first.
+    fn args_after_host(rust: &Toolchain, cmd: &Command) -> Vec<String> {
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let host = host_args(rust);
+        assert_eq!(args[..host.len()], host, "{}", rust.host.target);
+        args[host.len()..].to_vec()
+    }
+
     fn project_manifest(id: &str, version: &str, horizon: &str, mixins: &str) -> String {
         format!(
             "id='{id}'\nname='{id}'\nversion='{version}'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{horizon}'\nmixins='{mixins}'\n"
@@ -2496,11 +3074,14 @@ mod tests {
 
     #[test]
     fn horizon_mixins_finds_the_launchers_cargo() {
-        let rust = Toolchain {
-            dir: PathBuf::from("/rust/1.99.1-x"),
-        };
+        for rust in toolchains("/rust/1.99.1-x") {
+            horizon_mixins_finds(&rust);
+        }
+    }
+
+    fn horizon_mixins_finds(rust: &Toolchain) {
         let cmd = apply(
-            &rust,
+            rust,
             Path::new("/tools/horizon-mixins"),
             Path::new("/src"),
             Path::new("/mods"),
@@ -3057,6 +3638,7 @@ mod tests {
             B,
             Profile::Balanced,
             Target::Client,
+            None,
             &bundles(&out).unwrap(),
         )
         .unwrap();
@@ -3068,6 +3650,7 @@ mod tests {
                 B,
                 Profile::Balanced,
                 Target::Client,
+                None,
                 &bundles(&out).unwrap()
             )
             .unwrap()
@@ -3135,6 +3718,7 @@ mod tests {
                 MIXINS_REV,
                 Profile::Balanced,
                 Target::Client,
+                None,
                 &bundles(&d).unwrap(),
             )
             .unwrap()
@@ -3145,6 +3729,19 @@ mod tests {
         );
         assert!(is_native(&first) && !backend::is_game_tag(&first));
         assert_eq!(first, key(A));
+        assert_ne!(
+            first,
+            version_for(
+                A,
+                MIXINS_REV,
+                Profile::Balanced,
+                Target::Client,
+                Some(rust_toolchain::WINDOWS_ARM64_TARGET),
+                &bundles(&d).unwrap(),
+            )
+            .unwrap(),
+            "the ARM64 toolchain has a separate installed build"
+        );
         assert_ne!(first, key(B));
         assert_ne!(
             first,
@@ -3153,6 +3750,7 @@ mod tests {
                 B,
                 Profile::Balanced,
                 Target::Client,
+                None,
                 &bundles(&d).unwrap()
             )
             .unwrap()
@@ -3176,6 +3774,7 @@ mod tests {
                 B,
                 Profile::Balanced,
                 Target::Client,
+                None,
                 std::slice::from_ref(&bundle),
             )
             .unwrap()
@@ -3209,6 +3808,7 @@ mod tests {
                 B,
                 Profile::Balanced,
                 Target::Client,
+                None,
                 &bundles(&d).unwrap(),
             )
             .unwrap()
@@ -3237,16 +3837,54 @@ mod tests {
         write_bundle(&d, "hello", "fn hook() {}");
         let found = bundles(&d).unwrap();
         let keys: std::collections::BTreeSet<_> = (Profile::ALL.into_iter())
-            .map(|p| version_for(A, B, p, Target::Client, &found).unwrap())
+            .map(|p| version_for(A, B, p, Target::Client, None, &found).unwrap())
             .collect();
         assert_eq!(keys.len(), 3);
         // The last build in `native/target/fast/` is either's, as `fast`'s was before `dev`.
-        assert_eq!(record_key(Target::Client, Profile::Balanced), "fast");
-        assert_eq!(record_key(Target::Client, Profile::Developer), "fast");
+        assert_eq!(record_key(Target::Client, Profile::Balanced, None), "fast");
+        assert_eq!(record_key(Target::Client, Profile::Developer, None), "fast");
         assert_eq!(
-            record_key(Target::Server, Profile::Optimized),
+            record_key(Target::Server, Profile::Optimized, None),
             "server-release"
         );
+        assert_eq!(
+            record_key(
+                Target::Client,
+                Profile::Balanced,
+                Some(rust_toolchain::WINDOWS_ARM64_TARGET)
+            ),
+            "aarch64-pc-windows-gnullvm-fast"
+        );
+    }
+
+    #[test]
+    fn cached_mixin_output_isolated_from_next_build() {
+        let d = dir("injection-cache-stage");
+        let fresh = d.join("fresh");
+        let snapshot = d.join("snapshot");
+        let stage = d.join("stage");
+        let patched = Path::new("crates/horizon-client/src/game.rs");
+        fs::create_dir_all(fresh.join(patched).parent().unwrap()).unwrap();
+        fs::write(fresh.join(patched), "patched by mixins").unwrap();
+        sync(&fresh, &snapshot).unwrap();
+        sync(&snapshot, &stage).unwrap();
+        assert_eq!(
+            fs::read_to_string(stage.join(patched)).unwrap(),
+            "patched by mixins"
+        );
+
+        // A later no-mixin build stages the clean source and removes stale cached files.
+        let source = d.join("source");
+        fs::create_dir_all(source.join(patched).parent().unwrap()).unwrap();
+        fs::write(source.join(patched), "clean source").unwrap();
+        fs::write(stage.join("stale.rs"), "stale").unwrap();
+        sync(&source, &stage).unwrap();
+        assert_eq!(
+            fs::read_to_string(stage.join(patched)).unwrap(),
+            "clean source"
+        );
+        assert!(!stage.join("stale.rs").exists());
+        fs::remove_dir_all(d).unwrap();
     }
 
     /// The server build (docs/server.md): compiled headless off the same source, with its own
@@ -3256,7 +3894,8 @@ mod tests {
         let d = dir("server-key");
         write_bundle(&d, "hello", "fn hook() {}");
         let found = bundles(&d).unwrap();
-        let key = |target: Target| version_for(A, B, Profile::Balanced, target, &found).unwrap();
+        let key =
+            |target: Target| version_for(A, B, Profile::Balanced, target, None, &found).unwrap();
         assert_ne!(
             key(Target::Client),
             key(Target::Server),
@@ -3265,24 +3904,28 @@ mod tests {
         assert_eq!(key(Target::Server), key(Target::Server));
         assert_ne!(
             key(Target::Server),
-            version_for(A, B, Profile::Optimized, Target::Server, &found).unwrap(),
+            version_for(A, B, Profile::Optimized, Target::Server, None, &found).unwrap(),
             "the profile is still in the server key"
         );
-        let rust = Toolchain {
-            dir: PathBuf::from("/rust/1.99.1-x"),
-        };
+        let rusts = toolchains("/rust/1.99.1-x");
+        // The same after each host's own arguments.
         let flags = |stage: &Path, target: Target| {
-            compile(
-                &rust,
-                stage,
-                target,
-                Path::new("/native/target"),
-                Profile::Balanced,
-                "horizon-client",
-            )
-            .get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect::<Vec<String>>()
+            let each: Vec<Vec<String>> = rusts
+                .iter()
+                .map(|rust| {
+                    let cmd = compile(
+                        rust,
+                        stage,
+                        target,
+                        Path::new("/native/target"),
+                        Profile::Balanced,
+                        "horizon-client",
+                    );
+                    args_after_host(rust, &cmd)
+                })
+                .collect();
+            assert!(each.windows(2).all(|w| w[0] == w[1]), "{each:?}");
+            each[0].clone()
         };
         let server = flags(&d, Target::Server);
         assert!(server.contains(&"--no-default-features".into()));
@@ -3301,9 +3944,10 @@ mod tests {
             Path::new("missing-mod-folder"),
             Profile::Developer,
             Target::Client,
-            false,
+            BuildOptions::default(),
             &|_| panic!("invalid records must not start a build"),
-        ) else {
+        )
+        .map_err(String::from) else {
             panic!("invalid build must be refused");
         };
         assert!(error.contains("native-mods.json record"), "{error}");
@@ -3721,6 +4365,64 @@ mod tests {
         assert!(!to.join("gone.rs").exists());
     }
 
+    /// #10421: a Nightly's source carries its commit's time, older than a build made since on
+    /// another Nightly. Its changed files must reach the stage newer than that build, or Cargo
+    /// keeps the old crate.
+    #[test]
+    fn a_changed_file_is_newer_than_the_last_build_even_from_an_older_source() {
+        use std::time::{Duration, SystemTime};
+        let (from, to) = (dir("sync-old-from"), dir("sync-old-to"));
+        let commit = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        fs::create_dir_all(from.join("crates/horizon-core/src")).unwrap();
+        let file = from.join("crates/horizon-core/src/storage.rs");
+        fs::write(&file, "pub fn unpack_into() {}").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(commit)
+            .unwrap();
+        fs::create_dir_all(to.join("crates/horizon-core/src")).unwrap();
+        fs::write(
+            to.join("crates/horizon-core/src/storage.rs"),
+            "pub fn unpack() {}",
+        )
+        .unwrap();
+        // The older Nightly's build: Cargo records when it started.
+        let built = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        sync(&from, &to).unwrap();
+        let staged = to.join("crates/horizon-core/src/storage.rs");
+        assert_eq!(
+            fs::read_to_string(&staged).unwrap(),
+            "pub fn unpack_into() {}"
+        );
+        assert!(fs::metadata(&staged).unwrap().modified().unwrap() > built);
+        // A file new to the stage too.
+        fs::remove_dir_all(&to).unwrap();
+        sync(&from, &to).unwrap();
+        assert!(fs::metadata(&staged).unwrap().modified().unwrap() > built);
+        fs::remove_dir_all(from).unwrap();
+        fs::remove_dir_all(to).unwrap();
+    }
+
+    /// A stage from before #10421 may hold old times over newer content: it is made again once,
+    /// and kept on every later build.
+    #[test]
+    fn a_stage_from_before_the_time_fix_is_written_again_once() {
+        let root = dir("stage-stamped");
+        fs::create_dir_all(root.join("stage/src")).unwrap();
+        fs::write(root.join("stage/src/lib.rs"), "old").unwrap();
+        let stage = stage_dir(&root).unwrap();
+        assert_eq!(stage, root.join("stage"));
+        assert!(!stage.exists());
+        fs::create_dir_all(stage.join("src")).unwrap();
+        fs::write(stage.join("src/lib.rs"), "new").unwrap();
+        stage_dir(&root).unwrap();
+        assert_eq!(fs::read_to_string(stage.join("src/lib.rs")).unwrap(), "new");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// levzzz5154's decision (2026-10-29): a rebuild stays on the Horizon the instance plays;
     /// only an update (`--update`, `base_for`'s `update`) moves it to a newer one.
     #[test]
@@ -3779,22 +4481,27 @@ mod tests {
 
     #[test]
     fn the_game_compiles_outside_the_players_cargo_configuration() {
-        let rust = Toolchain {
-            dir: PathBuf::from("/rust/1.99.1-x"),
-        };
-        let stage = dir("stage-config");
+        for rust in toolchains("/rust/1.99.1-x") {
+            assert_eq!(
+                host_args(&rust).is_empty(),
+                rust.host.target != rust_toolchain::WINDOWS_ARM64_TARGET,
+                "only the ARM64 host adds its target's rustflags"
+            );
+            compiles_outside_the_players_cargo_configuration(&rust);
+        }
+    }
+
+    fn compiles_outside_the_players_cargo_configuration(rust: &Toolchain) {
+        let stage = dir(&format!("stage-config-{}", rust.host.target));
         let cmd = compile(
-            &rust,
+            rust,
             &stage,
             Target::Client,
             Path::new("/native/target"),
             Profile::Balanced,
             "horizon-client",
         );
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
+        let args = args_after_host(rust, &cmd);
         assert_eq!(
             args[..3],
             [
@@ -3816,36 +4523,41 @@ mod tests {
         fs::create_dir_all(stage.join(".cargo")).unwrap();
         fs::write(stage.join(".cargo/config.toml"), "").unwrap();
         let cmd = compile(
-            &rust,
+            rust,
             &stage,
             Target::Client,
             Path::new("/native/target"),
             Profile::Balanced,
             "horizon-client",
         );
-        let args: Vec<_> = cmd.get_args().collect();
+        let args = args_after_host(rust, &cmd);
         assert_eq!(args[1], "--config");
-        assert_eq!(args[2], stage.join(".cargo/config.toml"));
+        assert_eq!(PathBuf::from(&args[2]), stage.join(".cargo/config.toml"));
+        let _ = fs::remove_dir_all(stage);
     }
 
     #[test]
     fn builds_use_the_selected_profile() {
         let d = dir("profile");
-        let rust = Toolchain {
-            dir: PathBuf::from("/rust/1.99.1-x"),
-        };
+        let rusts = toolchains("/rust/1.99.1-x");
+        // The same after each host's own arguments.
         let args = |profile| -> Vec<String> {
-            compile(
-                &rust,
-                &d,
-                Target::Client,
-                Path::new("/native/target"),
-                profile,
-                "horizon-client",
-            )
-            .get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect()
+            let each: Vec<Vec<String>> = rusts
+                .iter()
+                .map(|rust| {
+                    let cmd = compile(
+                        rust,
+                        &d,
+                        Target::Client,
+                        Path::new("/native/target"),
+                        profile,
+                        "horizon-client",
+                    );
+                    args_after_host(rust, &cmd)
+                })
+                .collect();
+            assert!(each.windows(2).all(|w| w[0] == w[1]), "{each:?}");
+            each[0].clone()
         };
         let performance = args(Profile::Balanced);
         assert!(performance.windows(2).any(|w| w == ["--profile", "fast"]));
@@ -3962,5 +4674,36 @@ mod tests {
         // An error still among the last lines isn't said twice.
         let e = failure("horizon-mixins", "exit status: 1", &errors, &errors);
         assert!(e.contains("The end of its output") && e.matches("alsa-sys").count() == 1);
+    }
+
+    /// Smart App Control refusing a build script (#5911): cargo names the crate, Windows' reason
+    /// is only in a `Caused by` line in the middle of its output, so the error leads with what to do.
+    #[cfg(unix)]
+    #[test]
+    fn a_build_smart_app_control_blocked_says_how_to_build() {
+        let _guard = LOG_TEST.lock().unwrap();
+        clear_log().unwrap();
+        // cargo's output on Windows 11 25H2 with Smart App Control on (the report in #5911).
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", r#"
+            echo 'error: failed to run custom build command for `quote v1.0.47`' >&2
+            echo 'Caused by:' >&2
+            echo '  could not execute process `C:\target\build-script-build` (never executed)' >&2
+            echo 'Caused by:' >&2
+            echo '  An Application Control policy has blocked this file. (os error 4551)' >&2
+            for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do echo "warning: build failed, waiting ($i)" >&2; done
+            exit 101
+        "#]);
+        let e = run(cmd, "Building horizon-mixins", |_| {}).unwrap_err();
+        assert!(e.starts_with(&rust_toolchain::smart_app_control()), "{e}");
+        assert!(e.contains("quote v1.0.47"), "{e}");
+        // Another failure says nothing about it.
+        let mut cmd = Command::new("sh");
+        cmd.args([
+            "-c",
+            "echo 'error: could not compile `horizon-client`' >&2; exit 101",
+        ]);
+        let e = run(cmd, "Compiling the game", |_| {}).unwrap_err();
+        assert!(!e.contains("Smart App Control"), "{e}");
     }
 }

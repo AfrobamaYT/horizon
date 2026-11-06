@@ -124,6 +124,7 @@ pub mod removal;
 pub mod sculk;
 mod shapes;
 mod shelf;
+pub mod signal_access;
 mod signals;
 mod speleothem;
 mod survive;
@@ -138,7 +139,7 @@ mod growth_tests;
 mod tests;
 
 pub use bonemeal::{BonemealCheck, TemplateSettings};
-pub use buckets::BucketContent;
+pub use buckets::{BucketContent, fluid_bucket, fluid_pickup_sound};
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
 pub use falling::Landing;
 
@@ -1498,7 +1499,7 @@ pub(crate) struct Sim<'a, L: LevelAccess + ?Sized> {
 /// and the block, shape and moving-piston reads its wire connections ask. `Sim`
 /// reads through one (`Sim::signals`), so a caller that holds the level shared, such
 /// as a mod's read, gets the game's own answer.
-pub struct Signals<'a, L: LevelAccess + ?Sized> {
+pub struct Signals<'a, L: signal_access::SignalAccess + ?Sized> {
     pub(crate) b: &'a Behaviours,
     pub(crate) level: &'a L,
     pub(crate) ticks: &'a Ticks,
@@ -1519,7 +1520,7 @@ impl<'a, L: LevelAccess + ?Sized> Sim<'a, L> {
 }
 impl Behaviours {
     /// `level` read through the game's `SignalGetter`, for a caller holding it shared.
-    pub fn signals<'a, L: LevelAccess + ?Sized>(
+    pub fn signals<'a, L: signal_access::SignalAccess + ?Sized>(
         &'a self,
         level: &'a L,
         ticks: &'a Ticks,

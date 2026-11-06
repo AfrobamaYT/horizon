@@ -50,6 +50,17 @@ struct Watchdog {
     running: AtomicBool,
 }
 
+/// Stop monitoring on every exit from the tick loop, including an error or panic.
+struct StopWatchdog(Option<Arc<Watchdog>>);
+
+impl Drop for StopWatchdog {
+    fn drop(&mut self) {
+        if let Some(watchdog) = &self.0 {
+            watchdog.running.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
 impl Watchdog {
     /// `DedicatedServer.initServer`: a thread that stops a server whose tick
     /// runs `max_tick_time` ms past its due time; none when that is 0 or less.
@@ -227,6 +238,47 @@ fn load_chat_filter() -> Option<horizon_chat_filter::Guard> {
         ),
     );
     Some(guard)
+}
+
+/// `server.toml`'s `[combat]` (docs/pvp.md): `legacy = true` resolves melee hits by 1.8.9's rules. Off without
+/// the file or the section, and (with an error logged) when the section is wrong.
+fn load_combat() -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Combat {
+        #[serde(default)]
+        legacy: bool,
+    }
+    let Ok(text) = std::fs::read_to_string("server.toml") else {
+        return false;
+    };
+    let section = toml::from_str::<toml::Table>(&text)
+        .map_err(|e| e.to_string())
+        .and_then(|mut t| match t.remove("combat") {
+            Some(section) => section
+                .try_into::<Combat>()
+                .map(|c| c.legacy)
+                .map_err(|e| format!("[combat]: {e}")),
+            None => Ok(false),
+        });
+    match section {
+        Ok(legacy) => {
+            if legacy {
+                log(
+                    "INFO",
+                    "1.8 combat rules on (server.toml [combat]; legacy = false turns them off)",
+                );
+            }
+            legacy
+        }
+        Err(e) => {
+            log(
+                "ERROR",
+                &format!("server.toml: {e}; fights keep 26.3's rules"),
+            );
+            false
+        }
+    }
 }
 
 /// The secret for Velocity's player information forwarding, from `forwarding.secret` beside server.properties.
@@ -828,16 +880,10 @@ impl Game<'_> {
     /// DedicatedServer.initServer and MinecraftServer.runServer.
     // The epoch starts at world open; failures before that send no lifecycle event.
     pub(super) fn run_dedicated(&mut self) -> Result<()> {
-        let result = self.run_dedicated_inner();
-        if let Err(error) = &result {
-            self.native_players_leaving();
-            self.native_lifecycle_world_failed(&error.to_string());
-            self.native_lifecycle_close_failed(&error.to_string());
-        }
-        result
+        self.run_server_lifecycle(true, Self::run_dedicated_inner)
     }
 
-    fn run_dedicated_inner(&mut self) -> Result<()> {
+    fn run_dedicated_inner(&mut self, startup_began: &mut bool) -> Result<()> {
         // This thread ticks the server (MinecraftServer.spin's priority).
         horizon_threads::favour_current();
         self.join_world_rest()?;
@@ -959,7 +1005,9 @@ impl Game<'_> {
         // The mods' common and server configs, read before the server starts.
         self.native_configs_server_start(&world_dir, true);
         // MinecraftServer.loadLevel's start: nothing is loaded yet.
+        *startup_began = true;
         self.native_server_about_to_start(true);
+        self.native_server_starting(true);
         self.native_lifecycle_open_started();
         // The registries the server sends are read while the world prepares.
         let sync = super::lan::preload_sync_data(&self.res.core.item_data);
@@ -1133,11 +1181,12 @@ impl Game<'_> {
             log(
                 "INFO",
                 &format!(
-                    "Transfers on (server.toml [transfer]): players expected for {} s ({} s at most, {} at once), frozen for {} ticks at most",
+                    "Transfers on (server.toml [transfer]): players expected for {} s ({} s at most, {} at once), frozen for {} ticks and held for {} ticks at most",
                     s.expect.as_secs(),
                     s.max_expect.as_secs(),
                     s.max_expected,
-                    s.max_freeze_ticks
+                    s.max_freeze_ticks,
+                    s.max_hold_ticks
                 ),
             );
             host.hub.transfers = Some(transfers);
@@ -1145,6 +1194,7 @@ impl Game<'_> {
         self.sync_ops(&lists);
         let anticheat = load_anticheat();
         let chat_filter = load_chat_filter();
+        self.settings.extras.pvp.combat.rules = load_combat();
         // Horizon's far ring (docs/hosting.md): server.toml's `max_view_distance`.
         let far = props
             .raw
@@ -1211,6 +1261,7 @@ impl Game<'_> {
         let mut crashed: Option<String> = None;
         self.fns.permission = Some(props.function_permission_level.clamp(0, 4) as u8);
         let watchdog = Watchdog::start(props.max_tick_time);
+        let _stop_watchdog = StopWatchdog(watchdog.clone());
         let mut braked = Instant::now();
         let mut overload_warned: Option<Instant> = None;
         // `/stop`, or a stop signal (the shutdown hook's `halt`): either way the players and levels are
@@ -1271,9 +1322,16 @@ impl Game<'_> {
             let ticked =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     match &mut state.report {
-                        Some(recording) => self.tick_server_spans(paused, |wall, cpu, spans| {
-                            recording.add(wall, cpu, spans)
-                        }),
+                        Some(recording) => {
+                            let sampled = recording.sample_next();
+                            super::tick_profile::set_sampling(sampled);
+                            let ticked =
+                                self.tick_server_spans(paused, |wall, cpu, spans, recorded| {
+                                    recording.add(wall, cpu, spans, recorded, sampled)
+                                });
+                            super::tick_profile::set_sampling(false);
+                            ticked
+                        }
                         None => self.tick_server_timed(paused),
                     }
                 }));
@@ -1326,12 +1384,9 @@ impl Game<'_> {
                 );
             }
         }
-        if let Some(watchdog) = &watchdog {
-            watchdog.running.store(false, Ordering::Relaxed);
-        }
         match crashed {
-            Some(message) => self.stop_after_crash(&message),
-            None => self.stop_dedicated(),
+            Some(message) => std::panic::resume_unwind(Box::new(message)),
+            None => Ok(()),
         }
     }
 
@@ -1386,11 +1441,11 @@ impl Game<'_> {
     pub(super) fn update_dedicated_streaming(&mut self) {
         let rule = self.ui.rules.bool("spectators_generate_chunks");
         let guest = self.lan.as_ref().and_then(|h| {
+            // A held player (arriving from another server) is sent the level too, so it
+            // holds the world loaded around it as a placed player does.
             h.hub
-                .guests
-                .iter()
-                .find(|g| h.hub.here(g) && super::game_mode::loads_chunks(rule, g.spectator()))
-                .map(|g| g.chunk())
+                .loading_chunks(|g| super::game_mode::loads_chunks(rule, g.spectator()))
+                .next()
         });
         if self.standalone_server() {
             self.streaming.radius = if guest.is_some() {
@@ -1585,7 +1640,7 @@ impl Game<'_> {
     /// bound to the overworld, whichever level the last server tick left in
     /// place (the last one ticked, often the nether). Its commands run there
     /// and the level in place is put back afterwards.
-    fn as_console_in_overworld<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+    pub(super) fn as_console_in_overworld<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
         let back = console_level(self.dim).and_then(|dim| self.enter_command_level(dim));
         let out = self.as_console(f);
         if let Some(back) = back {
@@ -1611,6 +1666,17 @@ impl Game<'_> {
                 state.lists.lock().unwrap().stop = true;
             }
             // Horizon's own, on the console only: a performance report (report.rs).
+            "horizon-report" if rest.first() == Some(&"stop") => match state.report.take() {
+                Some(recording) => {
+                    log("INFO", "Stopping the performance report: writing it now");
+                    self.finish_report(recording, state.view, state.max_players);
+                }
+                None => log("INFO", "No performance report is being recorded"),
+            },
+            "horizon-report" if rest.first() == Some(&"status") => match &state.report {
+                Some(recording) => log("INFO", &recording.status()),
+                None => log("INFO", "No performance report is being recorded"),
+            },
             "horizon-report" => {
                 let seconds = match rest.first().map(|s| s.parse::<u32>()) {
                     None => Ok(60),
@@ -1621,7 +1687,7 @@ impl Game<'_> {
                     (Err(()), _) => log(
                         "INFO",
                         &format!(
-                            "horizon-report [SECONDS]: 1 to {} seconds, 60 by default",
+                            "horizon-report [SECONDS | stop | status]: 1 to {} seconds, 60 by default",
                             report::MAX_SECONDS
                         ),
                     ),
@@ -1629,7 +1695,7 @@ impl Game<'_> {
                         log("INFO", "A performance report is already being recorded")
                     }
                     (Ok(seconds), None) => {
-                        state.report = Some(report::Recording::start(seconds));
+                        state.report = Some(report::Recording::start(seconds, self.wire_bytes()));
                         log(
                             "INFO",
                             &format!("Recording a performance report for {seconds} s (reports/)"),
@@ -2238,46 +2304,9 @@ impl Game<'_> {
         }
     }
 
-    /// `MinecraftServer.runServer`'s `finally`: a tick that panicked still saves. What the panic
-    /// interrupted is not trusted: a guest's turn (`as_guest`) holds the game's player state
-    /// swapped in, so its record is older than what the game holds, and writing it would put
-    /// back older data than the last autosave; that guest keeps the file it has. If the hub
-    /// has already closed, no players can be saved. The levels, the scoreboard and the other
-    /// state are saved as in a normal stop.
-    fn stop_after_crash(&mut self, message: &str) -> Result<()> {
-        log("ERROR", &format!("The server thread panicked: {message}"));
-        let acting = self.lan_acting;
-        let hub_lost = self.lan.is_none();
-        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut())
-            && let Some(guest) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
-        {
-            guest.placed = false;
-        }
-        if hub_lost {
-            log(
-                "WARN",
-                "The panic interrupted the network tick: players are not saved, only the world",
-            );
-        } else if acting.is_some() {
-            log(
-                "WARN",
-                "The panic interrupted a player's turn: that player keeps the last saved file",
-            );
-        }
-        self.native_lifecycle.begin_close();
-        log("INFO", "Saving worlds");
-        self.save_game()?;
-        self.log_saved_levels();
-        self.native_lifecycle_world_closed();
-        self.lan_close(false);
-        Err(format!("the server thread panicked: {message}").into())
-    }
-
-    fn stop_dedicated(&mut self) -> Result<()> {
+    pub(super) fn stop_dedicated(&mut self, crashed: bool) -> Result<()> {
         // The close request starts before player and world saves.
         self.native_lifecycle.begin_close();
-        // MinecraftServer.stopServer's start: everyone is still here.
-        self.native_server_stopping(true);
         self.native_configs_server_stop();
         log("INFO", "Stopping server");
         self.native_players_leaving();
@@ -2285,7 +2314,9 @@ impl Game<'_> {
         self.flush_native_net();
         // PlayerList.removeAll: each player's file, with the vehicle it
         // alone rides, then its records.
-        self.save_leaving_guests();
+        if !crashed {
+            self.save_leaving_guests();
+        }
         if let Some(h) = self.lan.as_mut() {
             let conns: Vec<u32> = h.hub.guests.iter().map(|g| g.conn).collect();
             for conn in conns {
@@ -2297,20 +2328,17 @@ impl Game<'_> {
         }
         std::thread::sleep(Duration::from_millis(100));
         log("INFO", "Saving worlds");
-        // ServerPlayer.disconnect: nobody is left in a bed.
-        self.free_player_beds()?;
-        self.save_game()?;
-        self.log_saved_levels();
-        // Only a successful final save closes the epoch; storage is still held.
-        self.native_lifecycle_world_closed();
-        self.lan_close(false);
-        Ok(())
+        let result = self.finish_server_save(crashed);
+        if result.is_ok() {
+            self.log_saved_levels();
+        }
+        result
     }
 }
 
 /// `tools/test_dedicated_crash_save.py`'s fixture: with `HORIZON_CRASH_FIXTURE` naming `point`
 /// (`guest`: during a placed guest's turn, `hub`: after a console line while a player is in),
-/// the tick panics there, to see what `stop_after_crash` keeps.
+/// the tick panics there, to see what crash teardown keeps.
 /// `armed` is asked only when the variable names `point`, so the tick pays one
 /// load of a `OnceLock` without it.
 pub(super) fn crash_fixture(point: &str, armed: impl FnOnce() -> bool) {
@@ -2322,7 +2350,7 @@ pub(super) fn crash_fixture(point: &str, armed: impl FnOnce() -> bool) {
 }
 
 /// The text of a panic payload (`panic!("..")` is a `&str`, a formatted one a `String`).
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub(super) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_owned())

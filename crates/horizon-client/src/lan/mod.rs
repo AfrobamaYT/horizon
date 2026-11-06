@@ -7,6 +7,7 @@
 //! network pays nothing.
 pub mod abilities;
 mod advancements;
+pub use advancements::ServerAdvancements;
 pub mod anticheat;
 pub mod arrivals;
 pub mod attributes;
@@ -27,6 +28,7 @@ pub mod forwarding;
 pub mod guest;
 pub mod handoff;
 pub mod hub;
+pub mod import;
 mod io_pool;
 pub mod menu;
 pub mod playerdata;

@@ -3363,7 +3363,7 @@ fn tuple_shapes_follow_final_state_order_and_separate_collision() {
         ),
     ]));
     plan.nbt(&mut tag);
-    plan.collision_shapes(&mut tag).unwrap();
+    plan.declared_shapes(&mut tag, true).unwrap();
     let Some(Tag::List(entries)) = tag.get("shapes") else {
         panic!("shapes")
     };
@@ -3374,6 +3374,363 @@ fn tuple_shapes_follow_final_state_order_and_separate_collision() {
         assert_eq!(entries[mapping[2 + index] as usize], encode_shape(shape));
     }
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+/// Declared outline shapes feed gameplay lighting and both occlusion tables,
+/// independently of the optional collision shape.
+#[test]
+fn declared_shapes_drive_lighting_and_occlusion() {
+    for (label, no_occlusion) in [("occluding", false), ("nonoccluding", true)] {
+        let declaration = format!(
+            r#"{{"template":"minecraft:test","item":false,
+          "properties":{{"occludes":{}}},
+          "shapes":{{"properties":["axis"],"values":{{"x":[[0,0,0,1,1,1]],"y":[[0,0,0,0.5,1,1]]}}}},
+          "collision_shapes":{{"default":[]}}}}"#,
+            !no_occlusion
+        );
+        let (base, mods) = block_base(label, &[&declaration]);
+        let plan = Plan::new(&base, &mods).unwrap();
+        let row =
+            r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+        let mut gameplay: J =
+            serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+        plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+        let Some(J::Arr(rows)) = gameplay.get("states") else {
+            panic!("states")
+        };
+        let full = &rows[2];
+        let partial = &rows[3];
+        assert_eq!(full.get("solid_render"), Some(&J::Bool(!no_occlusion)));
+        assert_eq!(
+            full.get("dampening"),
+            Some(&J::Num((if no_occlusion { 1 } else { 15 }).into()))
+        );
+        assert_eq!(partial.get("solid_render"), Some(&J::Bool(false)));
+        assert_eq!(full.get("shape_occlusion"), Some(&J::Bool(false)));
+        assert_eq!(
+            partial.get("shape_occlusion"),
+            Some(&J::Bool(!no_occlusion))
+        );
+        assert_eq!(partial.get("skylight_down"), Some(&J::Bool(true)));
+        assert_eq!(partial.get("dampening"), Some(&J::Num(0.into())));
+        let mut shapes = Tag::Compound(Compound::from([
+            (
+                JavaString::from("states"),
+                Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+            ),
+            (JavaString::from("shapes"), Tag::List(Vec::new())),
+            (
+                JavaString::from("cached_shapes"),
+                Tag::IntArray(vec![-1, -1]),
+            ),
+        ]));
+        plan.nbt(&mut shapes);
+        plan.declared_shapes(&mut shapes, false).unwrap();
+        let Some(Tag::List(entries)) = shapes.get("shapes") else {
+            panic!("shapes")
+        };
+        let Some(Tag::IntArray(indices)) = shapes.get("cached_shapes") else {
+            panic!("indices")
+        };
+        let expected = plan.blocks[0].shapes.as_ref().unwrap();
+        for (index, shape) in expected.iter().enumerate() {
+            assert_eq!(entries[indices[2 + index] as usize], encode_shape(shape));
+        }
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
+    let declaration = r#"{"template":"minecraft:test","item":false,
+      "shapes":{"default":[[0,0,0,1,0.5,1]]}}"#;
+    let facts = r#"{"states":[
+      ["minecraft:test",false,false,"",{"id":"minecraft:test","properties":{"waterlogged":"false"}}],
+      ["minecraft:test",false,true,"",{"id":"minecraft:test","properties":{"waterlogged":"true"}}]],
+      "defaults":{"minecraft:test":0}}"#;
+    let (base, mods) = block_base_of("shape-light-water", &[declaration], facts);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(rows[3].get("skylight_down"), Some(&J::Bool(false)));
+    assert_eq!(rows[3].get("dampening"), Some(&J::Num(1.into())));
+    drop(plan);
+    fs::write(base.join("block-behaviours.json"), r#"{"blocks":[{"name":"minecraft:test","class":["TintedGlassBlock","TransparentBlock","Block"]}]}"#).unwrap();
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(false)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(15.into())));
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+/// A declared waterlogged property changes a fluid-dependent class override,
+/// but not TransparentBlock's constant skylight rule.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn declared_waterlogged_vegetation_uses_resolved_fluid_for_skylight() {
+    use crate::{
+        blocks::Fluid,
+        chunk::Chunk,
+        light::{LightTables, apply_lighting, light_chunk},
+    };
+    let Some(base) = prepared() else { return };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-vegetation-light-{}", std::process::id()));
+    let m = folder_mod(
+        &scratch.join("mod"),
+        &[
+            ("horizon-mod.toml", &manifest("testmod", "")),
+            (
+                "data/testmod/horizon/block/poppy.json",
+                r#"{
+                  "template": "minecraft:poppy",
+                  "item": false,
+                  "state_properties": {"waterlogged": {"type": "boolean"}},
+                  "shapes": {"default": [[0.3125,0,0.3125,0.6875,0.625,0.6875]]}
+                }"#,
+            ),
+            (
+                "data/testmod/horizon/block/glass.json",
+                r#"{"template":"minecraft:glass","item":false,
+                  "state_properties":{"waterlogged":{"type":"boolean"}},
+                  "shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+        ],
+    );
+    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let tables = LightTables::load(&root, registry, &facts).unwrap();
+    // VegetationBlock checks fluid emptiness independently of the outline;
+    // TransparentBlock always passes skylight. Values come from those rules,
+    // not from the generated facts or from another run of the derivation.
+    for (name, wet, down, dampening, sky) in [
+        ("testmod:poppy", false, true, 0, 15),
+        ("testmod:poppy", true, false, 1, 14),
+        ("testmod:glass", false, true, 0, 15),
+        ("testmod:glass", true, true, 0, 15),
+    ] {
+        let default = registry.default_state(name).unwrap();
+        let mut state = registry.state(default).unwrap().clone();
+        state
+            .properties
+            .insert("waterlogged".into(), wet.to_string());
+        let id = registry.id(&state).unwrap();
+        let declared = facts.get(id);
+        assert_eq!(declared.waterlogged, wet, "{state:?}");
+        assert_eq!(
+            declared.fluid,
+            if wet { Fluid::Water } else { Fluid::None },
+            "{state:?}"
+        );
+        assert!(!declared.can_occlude, "{state:?}");
+        assert_eq!(
+            (declared.skylight_down, declared.dampening),
+            (down, dampening),
+            "{state:?}"
+        );
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(8, 3, 8, id.0);
+        let mut region = [[None; 3]; 3];
+        region[1][1] = Some(&chunk);
+        let lights = light_chunk(&region, &tables, true);
+        apply_lighting(&mut chunk, lights);
+        assert_eq!(chunk.light(8, 4, 8) >> 4, 15, "exposed above {state:?}");
+        assert_eq!(chunk.light(8, 3, 8) >> 4, sky, "exposed cell {state:?}");
+    }
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+/// Load the actual generated tables as the renderer and world generator do.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn declared_shapes_reach_render_and_worldgen_occlusion() {
+    use crate::{
+        chunk::Chunk,
+        light::{LightTables, apply_lighting, light_chunk},
+    };
+    use horizon_core::geometry::Direction;
+    use horizon_world::{
+        block_properties::{BlockPropertiesRegistry, BlockProperty},
+        collision::CachedCollisionRegistry,
+        registry::BlockTableFile,
+    };
+    let Some(base) = prepared() else { return };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-shape-occlusion-{}", std::process::id()));
+    let manifest = manifest("testmod", "");
+    let m = folder_mod(
+        &scratch.join("mod"),
+        &[
+            ("horizon-mod.toml", &manifest),
+            (
+                "data/testmod/horizon/block/full.json",
+                r#"{"template":"minecraft:stone","item":false,"shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/partial.json",
+                r#"{"template":"minecraft:stone","item":false,"shapes":{"default":[[0,0,0,1,0.5,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/open.json",
+                r#"{"template":"minecraft:stone","item":false,"properties":{"occludes":false},"shapes":{"default":[[0,0,0,1,1,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/partial_open.json",
+                r#"{"template":"minecraft:stone","item":false,"properties":{"occludes":false},"shapes":{"default":[[0,0,0,1,0.5,1]]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/bubble.json",
+                r#"{"template":"minecraft:bubble_column","item":false,"shapes":{"default":[]}}"#,
+            ),
+            (
+                "data/testmod/horizon/block/kelp.json",
+                r#"{"template":"minecraft:kelp","item":false,"shapes":{"default":[[0,0,0,1,0.5625,1]]}}"#,
+            ),
+        ],
+    );
+    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let stone = registry.default_state("minecraft:stone").unwrap();
+    let full = registry.default_state("testmod:full").unwrap();
+    let partial = registry.default_state("testmod:partial").unwrap();
+    let open = registry.default_state("testmod:open").unwrap();
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    assert_eq!(
+        (facts.get(full).solid_render, facts.get(full).dampening),
+        (true, 15)
+    );
+    assert_eq!(
+        (
+            facts.get(partial).solid_render,
+            facts.get(partial).dampening
+        ),
+        (false, 0)
+    );
+    assert_eq!(
+        (facts.get(open).solid_render, facts.get(open).dampening),
+        (false, 1)
+    );
+    // Compare against the actual vanilla exports, including the lower slab's
+    // partial outline and leaves' full, non-occluding shape.
+    let slab = registry.default_state("minecraft:stone_slab").unwrap();
+    let leaves = registry.default_state("minecraft:oak_leaves").unwrap();
+    for (content, vanilla) in [(full, stone), (partial, slab), (open, leaves)] {
+        assert_eq!(
+            (
+                facts.get(content).solid_render,
+                facts.get(content).dampening,
+                facts.get(content).skylight_down
+            ),
+            (
+                facts.get(vanilla).solid_render,
+                facts.get(vanilla).dampening,
+                facts.get(vanilla).skylight_down
+            ),
+        );
+    }
+    // Intrinsic water is present without a waterlogged property. Identical
+    // declared outlines must retain the template's exported light facts.
+    for (content, template) in [
+        ("testmod:bubble", "minecraft:bubble_column"),
+        ("testmod:kelp", "minecraft:kelp"),
+    ] {
+        let vanilla = facts.get(registry.default_state(template).unwrap());
+        let declared = facts.get(registry.default_state(content).unwrap());
+        assert_eq!(declared.outline, vanilla.outline);
+        for state in [vanilla, declared] {
+            assert!(!state.waterlogged);
+            assert_eq!((state.skylight_down, state.dampening), (false, 1));
+        }
+    }
+    let tables = LightTables::load(&root, registry, &facts).unwrap();
+    let partial_open = registry.default_state("testmod:partial_open").unwrap();
+    for (roof, below) in [(partial, 0), (slab, 0), (partial_open, 15)] {
+        // A sealed room with a bottom-half roof: its open top admits sky,
+        // but only occluding shapes stop it at the covered bottom face.
+        let mut chunk = Chunk::empty(0, 0);
+        for x in 4..=12 {
+            for z in 4..=12 {
+                chunk.set(x, -1, z, stone.0);
+                chunk.set(x, 3, z, roof.0);
+                if x == 4 || x == 12 || z == 4 || z == 12 {
+                    for y in 0..3 {
+                        chunk.set(x, y, z, stone.0);
+                    }
+                }
+            }
+        }
+        let mut region = [[None; 3]; 3];
+        region[1][1] = Some(&chunk);
+        let lights = light_chunk(&region, &tables, true);
+        apply_lighting(&mut chunk, lights);
+        assert_eq!(chunk.light(8, 3, 8) >> 4, 15, "open roof top {roof:?}");
+        assert_eq!(chunk.light(8, 2, 8) >> 4, below, "roof bottom {roof:?}");
+    }
+    let mut visibility = crate::models::load_visibility(&root, registry).unwrap();
+    for (content, vanilla) in [(full, stone), (partial, slab), (open, leaves)] {
+        assert_eq!(
+            visibility
+                .should_render_face(stone, content, Direction::East, false)
+                .unwrap(),
+            visibility
+                .should_render_face(stone, vanilla, Direction::East, false)
+                .unwrap(),
+        );
+    }
+    assert!(
+        !visibility
+            .should_render_face(stone, full, Direction::East, false)
+            .unwrap()
+    );
+    assert!(
+        visibility
+            .should_render_face(stone, partial, Direction::East, false)
+            .unwrap()
+    );
+    assert!(
+        visibility
+            .should_render_face(stone, open, Direction::East, false)
+            .unwrap()
+    );
+    let collisions =
+        BlockTableFile::open(&root.join("worldgen/blocks/cached-collision.nbt"), registry).unwrap();
+    let collisions =
+        CachedCollisionRegistry::from_table(collisions.table("collision").unwrap()).unwrap();
+    let properties =
+        BlockTableFile::open(&root.join("worldgen/blocks/block-properties.nbt"), registry).unwrap();
+    let properties =
+        BlockPropertiesRegistry::from_table(properties.table("properties").unwrap(), &collisions)
+            .unwrap();
+    assert!(
+        properties
+            .property(full, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(
+        !properties
+            .property(partial, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(
+        !properties
+            .property(open, BlockProperty::SolidRender)
+            .unwrap()
+    );
+    assert!(!properties.bind_can_occlude().contains(open));
+    fs::remove_dir_all(scratch).unwrap();
 }
 
 #[test]
@@ -3897,7 +4254,7 @@ fn a_shape_and_the_state_count_cover_every_combination() {
         ),
     ]));
     plan.nbt(&mut tag);
-    plan.collision_shapes(&mut tag).unwrap();
+    plan.declared_shapes(&mut tag, true).unwrap();
     let Some(Tag::List(entries)) = tag.get("shapes") else {
         panic!("no shapes")
     };
@@ -4747,6 +5104,8 @@ fn blocks_and_items_declared_in_code_get_ids() {
         resource_root(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap(),
         root
     );
+    // Changed declarations build a root of their own: the old one stays as
+    // it was, for a switch back to that set.
     let stamp = fs::read(root.join(STAMP)).unwrap();
     mods[1].content.items[0].max_stack_size = Some(2);
     let changed = resource_root(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap();
@@ -5353,4 +5712,204 @@ fn sign_text_colors_are_the_signs_dye_ids() {
         .map(|(name, _)| *name)
         .collect();
     assert_eq!(names, horizon_mods::content::DYE_COLORS);
+}
+
+/// A content mod of recipes, a tag and a name, for vanilla's items: what
+/// switches live (docs/design/mod-hotload.md).
+fn glint_mod(dir: &Path) -> ContentMod {
+    folder_mod(
+        dir,
+        &[
+            ("horizon-mod.toml", &manifest("glint", "")),
+            (
+                "data/glint/recipe/diamond_from_dirt.json",
+                r#"{"type": "minecraft:crafting_shapeless", "category": "misc",
+                    "ingredients": ["minecraft:dirt", "minecraft:dirt"],
+                    "result": {"id": "minecraft:diamond"}}"#,
+            ),
+            (
+                "data/c/tags/item/gems/glint.json",
+                r#"{"values": ["minecraft:diamond"]}"#,
+            ),
+            (
+                "assets/glint/lang/en_us.json",
+                r#"{"glint.hello": "Hello"}"#,
+            ),
+        ],
+    )
+}
+
+#[test]
+fn only_assets_and_data_switch_live() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-live-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    assert_eq!(
+        live_switch(&glint_mod(&scratch.join("glint")).content),
+        Ok(())
+    );
+    let ruby = ruby_mod(&scratch.join("ruby"));
+    assert_eq!(
+        live_switch(&ruby.content),
+        Err("horizon.mods.switch.registries")
+    );
+    let effect = folder_mod(
+        &scratch.join("fx"),
+        &[
+            ("horizon-mod.toml", &manifest("fx", "")),
+            (
+                "data/fx/horizon/mob_effect/glow.json",
+                r#"{"category": "harmful", "color": 1}"#,
+            ),
+        ],
+    );
+    assert_eq!(
+        live_switch(&effect.content),
+        Err("horizon.mods.switch.registries")
+    );
+    for (id, file, text) in [
+        (
+            "ores",
+            "data/ores/neoforge/biome_modifier/add.json",
+            r#"{"type": "neoforge:none"}"#,
+        ),
+        (
+            "village",
+            "data/minecraft/tags/worldgen/biome/has_structure/village_plains.json",
+            r#"{"values": []}"#,
+        ),
+        (
+            "feat",
+            "data/feat/worldgen/placed_feature/rock.json",
+            r#"{"feature": "minecraft:ore_iron", "placement": []}"#,
+        ),
+    ] {
+        let m = folder_mod(
+            &scratch.join(id),
+            &[("horizon-mod.toml", &manifest(id, "")), (file, text)],
+        );
+        assert_eq!(
+            live_switch(&m.content),
+            Err("horizon.mods.switch.worldgen"),
+            "{file}"
+        );
+    }
+    fs::remove_dir_all(&scratch).unwrap();
+}
+
+/// On, off and on again: each root has what its set of mods has, a switch
+/// never changes a root a game was given, and a set seen before reuses its
+/// root without building it again.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn a_data_mod_loads_unloads_and_loads_again() {
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-reload-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let cache = scratch.join("cache");
+    let glint = glint_mod(&scratch.join("glint"));
+    let dirt = || Some(crate::items::ItemStack::new("minecraft:dirt", 1));
+    let grid = [dirt(), dirt(), None, None];
+    // What a world reads from a root: the item tags and the recipes.
+    let tables = |root: &Path| {
+        let assets = Assets::load(root).unwrap();
+        let facts = BlockFacts::load(root, assets.registry).unwrap();
+        let defaults = horizon_world::item_defaults::read(root).unwrap();
+        let items =
+            Items::load(root, assets.registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
+        let recipes = crate::crafting::Recipes::load(
+            root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
+        let crafted = recipes
+            .find(crate::test_resources::server_loop_context(), &grid, 2)
+            .map(|(_, out)| out.item.to_string());
+        let tagged = items.item_tag_order.get("c:gems/glint").cloned();
+        (
+            crafted,
+            tagged,
+            root.join("assets/glint/lang/en_us.json").is_file(),
+        )
+    };
+    let loaded = (
+        Some("minecraft:diamond".to_owned()),
+        Some(vec!["minecraft:diamond".to_owned()]),
+        true,
+    );
+
+    let started = std::time::Instant::now();
+    let on = resource_root(&base, Path::new(""), std::slice::from_ref(&glint), &cache).unwrap();
+    eprintln!("content root built in {} ms", started.elapsed().as_millis());
+    assert_ne!(on, base);
+    assert_eq!(tables(&on), loaded);
+
+    // Off: the base root, without any of it.
+    let off = resource_root(&base, Path::new(""), &[], &cache).unwrap();
+    assert_eq!(off, base);
+    assert_eq!(tables(&off), (None, None, false));
+    assert!(on.join("assets/glint/lang/en_us.json").is_file());
+
+    // On again: the same root, not built again.
+    let sentinel = on.join("sentinel");
+    fs::write(&sentinel, b"").unwrap();
+    let started = std::time::Instant::now();
+    let again = resource_root(&base, Path::new(""), std::slice::from_ref(&glint), &cache).unwrap();
+    eprintln!(
+        "content root reused in {} ms",
+        started.elapsed().as_millis()
+    );
+    assert_eq!(again, on);
+    assert!(sentinel.exists());
+    assert_eq!(tables(&again), loaded);
+
+    // Another set of mods builds its own root beside it and leaves this one as it was.
+    let ruby = ruby_mod(&scratch.join("ruby"));
+    let package = horizon_mods::Package::read(&scratch.join("glint")).unwrap();
+    let glint_again = ContentMod {
+        id: "glint".into(),
+        jars: Vec::new(),
+        content: Content::read(&scratch.join("glint"), &package.manifest).unwrap(),
+    };
+    let both = resource_root(&base, Path::new(""), &[glint_again, ruby], &cache).unwrap();
+    assert_ne!(both, on);
+    assert!(sentinel.exists());
+    assert_eq!(tables(&both).0, loaded.0);
+    fs::remove_dir_all(&scratch).unwrap();
+}
+
+#[test]
+fn roots_unused_for_a_day_are_removed() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-prune-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let roots = scratch.join("mod-content");
+    let root = |name: &str, age_s: u64| {
+        let dir = roots.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        let stamp = dir.join(STAMP);
+        fs::write(&stamp, b"x").unwrap();
+        let file = fs::File::options().write(true).open(&stamp).unwrap();
+        file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(age_s))
+            .unwrap();
+        dir
+    };
+    let current = root("00000000000000aa", 3 * 86400);
+    let recent = root("00000000000000bb", 60);
+    let stale = root("00000000000000cc", 2 * 86400);
+    // Not a root's name: never touched while the folder has no root of the old layout.
+    let other = roots.join("notes");
+    fs::create_dir_all(&other).unwrap();
+    prune_roots(&roots, &current, KEEP_ROOTS);
+    assert!(current.exists() && recent.exists() && other.exists());
+    assert!(!stale.exists());
+    // An older game's single root, built straight in the folder, goes.
+    fs::write(roots.join(STAMP), b"old").unwrap();
+    fs::create_dir_all(roots.join("assets/minecraft")).unwrap();
+    prune_roots(&roots, &current, KEEP_ROOTS);
+    assert!(!roots.join(STAMP).exists() && !roots.join("assets").exists());
+    assert!(current.exists() && recent.exists());
+    fs::remove_dir_all(&scratch).unwrap();
 }

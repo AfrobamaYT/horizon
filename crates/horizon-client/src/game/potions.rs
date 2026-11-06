@@ -791,6 +791,10 @@ impl Game<'_> {
         let eye = self.eye_position().unwrap_or_default();
         self.using = None;
         self.send_use_item_complete();
+        // Consumable.onConsume: the used statistic and the consume_item
+        // trigger, with the stack as drunk (before it shrinks).
+        self.award_stat("used", &stack.item, 1);
+        self.trigger_item("minecraft:consume_item", stack);
         self.post_entity_event("minecraft:drink", horizon_client::mobs::Who::Player);
         if ominous {
             self.drink_ominous_bottle(slot, stack);
@@ -1060,7 +1064,10 @@ impl Game<'_> {
                     let mut cancel = false;
                     self.native_mob_effect_expired(
                         player,
-                        mob_effect_id(e.id).unwrap_or(e.id),
+                        mod_api::__private::effect_key(
+                            e.registry_index.expect("active effect registry index"),
+                        )
+                        .expect("effects resolved at load"),
                         e.amplifier,
                         &mut cancel,
                     );
@@ -1101,7 +1108,10 @@ impl Game<'_> {
                         },
                     ));
                     let (keep, changes) = self.mod_effect_tick(
-                        e.id,
+                        mod_api::__private::effect_key(
+                            e.registry_index.expect("active effect registry index"),
+                        )
+                        .expect("effects resolved at load"),
                         None,
                         t,
                         e.amplifier,
@@ -1180,9 +1190,23 @@ impl Game<'_> {
         kind: &str,
         effect: &str,
     ) -> bool {
+        let key = brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index));
+        self.can_be_affected_resolved(entity, kind, effect, key)
+    }
+
+    /// The validated registry path, also used by native operations without parsing a name again.
+    pub(super) fn can_be_affected_resolved(
+        &mut self,
+        entity: Option<i32>,
+        kind: &str,
+        effect: &str,
+        key: Option<mod_api::EffectKey>,
+    ) -> bool {
         let mut answered = None;
-        if let Some(living) = self.effect_living_ref(entity) {
-            self.native_mob_effect_applicable(living, effect, &mut answered);
+        if let Some(living) = self.effect_living_ref(entity)
+            && let Some(key) = key
+        {
+            self.native_mob_effect_applicable(living, key, &mut answered);
         }
         match answered {
             Some(EffectApplicable::Allow) => true,
@@ -1196,7 +1220,10 @@ impl Game<'_> {
         // `LivingEntity.addEffect` refuses what cannot affect the entity;
         // players pass the tag check, but the `mob_effect_applicable` hook
         // is asked for every add.
-        if !self.can_be_affected(None, "minecraft:player", effect.id) {
+        let key = effect
+            .registry_index
+            .and_then(mod_api::__private::effect_key);
+        if !self.can_be_affected_resolved(None, "minecraft:player", effect.id, key) {
             return false;
         }
         let id = effect.id;
@@ -1211,28 +1238,35 @@ impl Game<'_> {
             let current = p.health.absorption();
             let _ = p.set_health(current.max(target), true);
         }
-        self.mod_effect_added(id, None, amp, new);
+        if let Some(key) = key {
+            self.mod_effect_added_resolved(key, None, amp, new);
+        }
         changed
     }
     /// Removes one effect, or all effects, and refreshes the player's derived state.
-    pub(super) fn remove_player_effects(&mut self, effect: Option<&str>) -> bool {
+    pub(super) fn remove_player_effects(&mut self, effect: Option<usize>) -> bool {
         let before = self.potions.effects.list.len();
         let mut index = 0;
         while index < self.potions.effects.list.len() {
             let current = &self.potions.effects.list[index];
             // The one being removed, or all of them when `effect` is None.
-            if effect.is_some_and(|id| current.id != id) {
+            if effect.is_some_and(|index| current.registry_index != Some(index)) {
                 index += 1;
                 continue;
             }
-            let (id, amplifier) = (current.id, current.amplifier);
+            let amplifier = current.amplifier;
             // `MobEffectEvent.Remove`: refusing the removal keeps it, and the
             // next one is asked with this one still in place, as in vanilla.
             let mut cancel = false;
             if let Some(living) = self.effect_living_ref(None) {
                 self.native_mob_effect_remove(
                     living,
-                    mob_effect_id(id).unwrap_or(id),
+                    mod_api::__private::effect_key(
+                        current
+                            .registry_index
+                            .expect("active effect registry index"),
+                    )
+                    .expect("effects resolved at load"),
                     amplifier,
                     &mut cancel,
                 );
@@ -1259,7 +1293,24 @@ impl Game<'_> {
         amplifier: i32,
         new: bool,
     ) {
-        if self.remote.is_none() && brewing::is_mod_effect(effect) {
+        if let Some(effect) =
+            brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index))
+        {
+            self.mod_effect_added_resolved(effect, entity, amplifier, new);
+        }
+    }
+    /// Dispatch an already resolved effect's added notices, without a registry name lookup.
+    pub(super) fn mod_effect_added_resolved(
+        &mut self,
+        effect: mod_api::EffectKey,
+        entity: Option<i32>,
+        amplifier: i32,
+        new: bool,
+    ) {
+        if self.remote.is_none()
+            && mod_api::__private::resolved_effect(effect)
+                .is_some_and(|def| def.index >= brewing::EFFECTS.len())
+        {
             if new {
                 self.native_on_effect_added(effect, entity, amplifier);
             }
@@ -1271,7 +1322,7 @@ impl Game<'_> {
     /// may end it. Whether it stays.
     fn mod_effect_tick(
         &self,
-        effect: &str,
+        effect: mod_api::EffectKey,
         entity: Option<i32>,
         tick_count: i32,
         amplifier: i32,
@@ -1501,6 +1552,7 @@ impl Game<'_> {
             }
             if let Some((p, mob, block)) = hit {
                 landed.push((
+                    t.id,
                     t.stack.clone(),
                     p,
                     mob,
@@ -1520,7 +1572,7 @@ impl Game<'_> {
             t.age < 1200 && t.position.y > -128.0
         });
         self.potions.thrown = thrown;
-        for (stack, at, mob, block, age, owner, guest) in landed {
+        for (id, stack, at, mob, block, age, owner, guest) in landed {
             // Projectile.onHit (super.onHit of AbstractThrownPotion): a block
             // is heard at its centre, an entity at the hit.
             let heard = if mob.is_some() {
@@ -1529,7 +1581,7 @@ impl Game<'_> {
                 [at.x.floor() + 0.5, at.y.floor() + 0.5, at.z.floor() + 0.5]
             };
             let thrower = owner.is_some().then_some(Who::Player);
-            self.projectile_event("minecraft:projectile_land", thrower, heard);
+            self.projectile_landed_event(id, thrower, heard);
             let item = stack.item.to_string();
             // A potion a dispenser threw has nobody to name.
             let owner = PotionOwner {
@@ -2272,16 +2324,33 @@ impl Game<'_> {
         batch: &mut HudBatch,
         origin: (f32, f32),
         image_width: i32,
-    ) -> Option<[(String, u32); 2]> {
+    ) -> Option<Vec<(Text, u32)>> {
         let space = Self::effects_space(batch, [origin.0, origin.1], image_width as f32);
         let layout = self.inventory_effects_layout(batch, &space);
         let panels = self.effect_panels(&space, &layout);
-        inventory_effects::paint(
+        let hovered = inventory_effects::paint(
             batch,
             &self.gui.atlas,
             &panels,
             [self.cursor.0 as i32, self.cursor.1 as i32],
-        )
+        )?;
+        Some(self.effect_tooltip(batch, hovered))
+    }
+    /// A hovered panel's tooltip lines, after `GatherEffectScreenTooltipsEvent`
+    /// (fired only while a mod listens).
+    fn effect_tooltip(
+        &self,
+        batch: &HudBatch,
+        hovered: inventory_effects::HoveredEffectPanel<'_, '_>,
+    ) -> Vec<(Text, u32)> {
+        let panel = hovered.panel;
+        let mut lines = inventory_effects::tooltip(hovered);
+        if mod_api::__private::listened(mod_api::HookId::GatherEffectScreenTooltips) {
+            let view = self.screen_view(batch, self.screen);
+            let effect = super::native_living_effects::active_effect(panel.effect);
+            self.native_gather_effect_screen_tooltips(&view, &effect, &mut lines);
+        }
+        lines
     }
     /// The rectangle `draw_inventory_effects` covers, none with no effects
     /// or too little room right of the window. It follows the layout the last
@@ -2318,7 +2387,7 @@ impl Game<'_> {
         &self,
         space: &inventory_effects::EffectsSpace,
         layout: &inventory_effects::EffectsLayout,
-    ) -> Vec<inventory_effects::EffectPanel> {
+    ) -> Vec<inventory_effects::EffectPanel<'_>> {
         inventory_effects::panels(
             space,
             layout,
@@ -2373,7 +2442,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
     fn tick_mod_effect(
         &self,
         level: &mut DamageLevel<'_>,
-        effect: &str,
+        effect: usize,
         mob: &mut Mob,
         tick_count: i32,
         amplifier: i32,
@@ -2382,6 +2451,9 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
             return true;
         };
         let holder = LivingRef::new(EntityRef::new(epoch, mob.id));
+        let Some(effect) = mod_api::__private::effect_key(effect) else {
+            return true;
+        };
         let (keep, changes) = self.mod_effect_tick(
             effect,
             Some(mob.id as i32),
@@ -2403,8 +2475,10 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         }
         keep
     }
-    fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool) {
-        if let Some(living) = self.effect_living_ref(Some(mob as i32)) {
+    fn effect_expired(&self, mob: u32, effect: usize, amplifier: i32, cancel: &mut bool) {
+        if let Some(living) = self.effect_living_ref(Some(mob as i32))
+            && let Some(effect) = mod_api::__private::effect_key(effect)
+        {
             self.native_mob_effect_expired(living, effect, amplifier, cancel);
         }
     }
@@ -2435,7 +2509,7 @@ mod tests {
             fn should_apply_effect_tick_this_tick(
                 &self,
                 _: &dyn Host,
-                event: &mut ShouldApplyEffectTickThisTickEvent<'_>,
+                event: &mut ShouldApplyEffectTickThisTickEvent,
             ) {
                 event.apply = true;
             }
@@ -2817,5 +2891,202 @@ mod tests {
         }];
         assert!(!collect_dragon_breath(high_player, &mut ground_cloud));
         assert_eq!(ground_cloud[0].radius, 1.0);
+    }
+
+    /// Real panel painting/hover selection dispatches even for a fully visible
+    /// widget. Both inventories retain vanilla lines, suppression and layout rules.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_adds_a_line_to_an_effect_tooltip() {
+        use mod_api::{self, ClientHost, GatherEffectScreenTooltipsEvent, Hooks, ModEntry, Mods};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Clone, Copy)]
+        struct Case {
+            room: i32,
+            id: &'static str,
+            name: &'static str,
+            default_tooltip: bool,
+        }
+        #[derive(Clone)]
+        struct Mod {
+            screen: &'static str,
+            case: Case,
+            suppress: bool,
+            calls: Arc<AtomicUsize>,
+        }
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn gather_effect_screen_tooltips(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut GatherEffectScreenTooltipsEvent<'_>,
+            ) {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                assert_eq!(
+                    event.effect.id,
+                    mod_api::__private::part_tests::effect_key(self.case.id)
+                );
+                assert_eq!((event.effect.duration, event.effect.amplifier), (450, 1));
+                assert_eq!(event.screen.id, self.screen);
+                let initial: Vec<_> = event
+                    .tooltip
+                    .iter()
+                    .map(|(text, color)| (text.plain(), *color))
+                    .collect();
+                if self.case.default_tooltip {
+                    assert_eq!(
+                        initial,
+                        [
+                            (self.case.name.to_owned(), u32::MAX),
+                            ("00:22".to_owned(), u32::MAX)
+                        ]
+                    );
+                } else {
+                    assert!(initial.is_empty());
+                }
+                if self.suppress {
+                    event.tooltip.clear();
+                } else {
+                    event.tooltip.push((Text::literal("Fast feet"), 0xff55ffff));
+                }
+            }
+        }
+        struct HidePanels;
+        #[mod_api::__subscriptions]
+        impl Hooks for HidePanels {
+            fn screen_render_inventory_mob_effects(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut mod_api::ScreenRenderInventoryMobEffectsEvent<'_>,
+            ) -> mod_api::Flow {
+                mod_api::Flow::Cancel
+            }
+        }
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for (screen, screen_id, image_width) in [
+                (Screen::Inventory, "inventory", 176),
+                (Screen::Creative, "creative", 195),
+            ] {
+                game.screen = screen;
+                // Fixed panel position; right-side room selects wide or compact.
+                // The longer effect name also clips in the smallest wide layout.
+                for case in [
+                    Case {
+                        room: 200,
+                        id: "speed",
+                        name: "Speed II",
+                        default_tooltip: false,
+                    },
+                    Case {
+                        room: 100,
+                        id: "speed",
+                        name: "Speed II",
+                        default_tooltip: true,
+                    },
+                    Case {
+                        room: 120,
+                        id: "fire_resistance",
+                        name: "Fire Resistance II",
+                        default_tooltip: true,
+                    },
+                ] {
+                    game.potions.effects.list = vec![EffectInstance::new(case.id, 450, 1)];
+                    let left = 102 + image_width;
+                    let origin = (100.0, 50.0);
+                    let mut batch = HudBatch::new([(left + case.room) as u32, 480]);
+                    game.cursor = ((left + 7) as f32, 57.0);
+                    let vanilla = if case.default_tooltip {
+                        vec![
+                            (case.name.to_owned(), u32::MAX),
+                            ("00:22".to_owned(), u32::MAX),
+                        ]
+                    } else {
+                        Vec::new()
+                    };
+                    let lines = game
+                        .draw_inventory_effects(&mut batch, origin, image_width)
+                        .unwrap();
+                    assert_eq!(
+                        lines
+                            .iter()
+                            .map(|(text, color)| (text.plain(), *color))
+                            .collect::<Vec<_>>(),
+                        vanilla
+                    );
+                    // The existing shared renderer draws nothing for an unchanged
+                    // empty list, without running other tooltip hooks.
+                    let painted = batch.vertices.len();
+                    game.draw_tooltip_lines(&mut batch, &lines, game.cursor.0, game.cursor.1);
+                    assert_eq!(batch.vertices.len() > painted, case.default_tooltip);
+
+                    for suppress in [false, true] {
+                        let calls = Arc::new(AtomicUsize::new(0));
+                        let listener = Mod {
+                            screen: screen_id,
+                            case,
+                            suppress,
+                            calls: calls.clone(),
+                        };
+                        let mods: Mods =
+                            vec![ModEntry::new("effect-tips", Box::new(listener.clone()))].into();
+                        mod_api::testing::with_mods(mods, || {
+                            let lines = game
+                                .draw_inventory_effects(&mut batch, origin, image_width)
+                                .unwrap();
+                            let plain: Vec<_> = lines
+                                .iter()
+                                .map(|(text, color)| (text.plain(), *color))
+                                .collect();
+                            let mut expected = vanilla.clone();
+                            if suppress {
+                                expected.clear();
+                            } else {
+                                expected.push(("Fast feet".to_owned(), 0xff55ffff));
+                            }
+                            assert_eq!(plain, expected);
+                            assert_eq!(calls.load(Ordering::Relaxed), 1);
+                            let painted = batch.vertices.len();
+                            game.draw_tooltip_lines(
+                                &mut batch,
+                                &lines,
+                                game.cursor.0,
+                                game.cursor.1,
+                            );
+                            assert_eq!(batch.vertices.len() > painted, !suppress);
+
+                            // A miss, a hidden layout and too little room must
+                            // never gather tooltips, even with a subscriber.
+                            game.cursor = (0.0, 0.0);
+                            assert!(
+                                game.draw_inventory_effects(&mut batch, origin, image_width)
+                                    .is_none()
+                            );
+                            game.cursor = ((left + 7) as f32, 57.0);
+                            let hidden: Mods = vec![
+                                ModEntry::new("effect-tips", Box::new(listener.clone())),
+                                ModEntry::new("hide-panels", Box::new(HidePanels)),
+                            ]
+                            .into();
+                            mod_api::testing::with_mods(hidden, || {
+                                assert!(
+                                    game.draw_inventory_effects(&mut batch, origin, image_width)
+                                        .is_none()
+                                );
+                            });
+                            let mut narrow = HudBatch::new([(left + 31) as u32, 480]);
+                            assert!(
+                                game.draw_inventory_effects(&mut narrow, origin, image_width)
+                                    .is_none()
+                            );
+                            assert_eq!(calls.load(Ordering::Relaxed), 1);
+                        });
+                    }
+                }
+            }
+        });
     }
 }

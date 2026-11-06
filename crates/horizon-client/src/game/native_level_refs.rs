@@ -10,8 +10,8 @@ use horizon_core::{
 };
 use mod_api::mod_chunk_tickets::ModTicket;
 use mod_api::{
-    BlockStateId, ChunkRef, ChunkStatus, LevelRef, LightLayer, NativeTicketOwner, TicketController,
-    Vec3,
+    BlockHit, BlockStateId, BlockTransformPreview, ChunkRef, ChunkStatus, Hand, ItemStack,
+    LevelRef, LightLayer, NativeTicketOwner, PlayerRef, TicketController, Vec3,
 };
 
 fn block_pos([x, y, z]: [i32; 3]) -> BlockPos {
@@ -260,6 +260,62 @@ impl Game<'_> {
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
+    /// Preview a held tool's transformation without changing the block or stack. The existing
+    /// block-tool hook fires with `simulated` true; listeners must not mutate the level in a
+    /// simulation. The player must be live in the level in place, and the block must be loaded;
+    /// parked levels cannot provide the hook's level context. A stale handle, invalid face,
+    /// unavailable player or level, or no transformation returns None.
+    pub(super) fn native_level_block_transform(
+        &self,
+        level: LevelRef,
+        player: PlayerRef,
+        hand: Hand,
+        stack: &ItemStack,
+        pos: [i32; 3],
+        hit: BlockHit,
+    ) -> Option<BlockTransformPreview> {
+        use super::native_server::PlayerRead;
+        let world = self.native_level_read_world(level)?;
+        if level.dimension() != self.dim.id()
+            || !world.is_loaded_at(pos[0], pos[1], pos[2])
+            || !matches!(
+                hit.face,
+                [1, 0, 0] | [-1, 0, 0] | [0, 1, 0] | [0, -1, 0] | [0, 0, 1] | [0, 0, -1]
+            )
+        {
+            return None;
+        }
+        let (offhand, sneaking) = match self.player_handle_read(player)? {
+            PlayerRead::Acting { .. } if self.dim.id() == level.dimension() => {
+                (self.offhand.as_ref(), self.keys.held(super::Mapping::Sneak))
+            }
+            PlayerRead::Guest(guest) if guest.dimension == level.dimension() => {
+                (guest.offhand.as_ref(), guest.sneaking)
+            }
+            _ => return None,
+        };
+        let blocking = !sneaking && offhand.is_some_and(|s| self.blocks_attacks(s).is_some());
+        let hit = super::Hit {
+            pos,
+            face: hit.face,
+            point: hit.point,
+            inside: hit.inside,
+        };
+        let (state, sound, loot, durability, particle) = self.block_transform_in(
+            stack,
+            &hit,
+            super::TransformContext {
+                world,
+                player: Some(player.entity().id()),
+                hand,
+                blocking,
+                simulated: true,
+            },
+        )?;
+        Some(BlockTransformPreview::new(
+            state, sound, loot, durability, particle,
+        ))
+    }
     /// `FluidState.getFlow` at `pos`: the current that pushes an entity there, after the
     /// `fluid_flow` hook, as entities feel it. Zero where no fluid flows. None as for
     /// `block_state`.
@@ -312,25 +368,27 @@ impl Game<'_> {
     }
     /// `f` over the game's own `SignalGetter` for the level in place, as the level's blocks
     /// and mods' parts answer it; `None` for another level, a stale handle or a client.
-    /// The reads take the server host mutably: the signal path asks mods' `block_signal`,
-    /// `is_signal_source`, `should_check_weak_power` and `should_redstone_wire_connect_to`
-    /// parts, which get the level itself as their host, and only `with_level` builds it.
+    /// A shared borrow also lends Parts their restricted read-only level host. Comparator
+    /// outputs and moving-piston state come from this level's live tick state.
     fn native_level_signals<R>(
-        &mut self,
+        &self,
         level: LevelRef,
-        f: impl FnOnce(&horizon_world::level::Signals<'_, super::GameLevel<'_>>) -> R,
+        f: impl FnOnce(
+            &horizon_world::level::Signals<'_, super::native_level_signals::ReadLevel<'_, '_>>,
+        ) -> R,
     ) -> Option<R> {
         if !self.native_level_in_place(level) {
             return None;
         }
-        Some(self.with_level(|b, level, ticks| f(&b.signals(&*level, &*ticks))))
+        let view = super::native_level_signals::ReadLevel { game: self, level };
+        Some(f(&self.res.behaviours().signals(&view, &self.block_ticks)))
     }
     /// How strongly the block at `pos` powers the block on its `direction` side, power it
     /// conducts included (`SignalGetter.getSignal(pos, direction)`, as a block reads its
     /// neighbour `pos` that lies `direction` from it), 0 to 15. None for another level, a stale
-    /// handle or a client.
+    /// handle or a client. Takes a shared host and opens no transaction.
     pub(super) fn native_level_signal(
-        &mut self,
+        &self,
         level: LevelRef,
         pos: [i32; 3],
         direction: Direction,
@@ -340,7 +398,7 @@ impl Game<'_> {
     /// The strong power alone that the block at `pos` gives that way
     /// (`SignalGetter.getDirectSignal(pos, direction)`), 0 to 15. None as for `signal`.
     pub(super) fn native_level_direct_signal(
-        &mut self,
+        &self,
         level: LevelRef,
         pos: [i32; 3],
         direction: Direction,
@@ -350,7 +408,7 @@ impl Game<'_> {
     /// The strongest strong power reaching the block at `pos` from its six neighbours
     /// (`SignalGetter.getDirectSignalTo`), 0 to 15. None as for `signal`.
     pub(super) fn native_level_direct_signal_to(
-        &mut self,
+        &self,
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<i32> {
@@ -360,7 +418,7 @@ impl Game<'_> {
     /// (`SignalGetter.getBestNeighborSignal`, what a dispenser or a piston reads), 0 to 15.
     /// None as for `signal`.
     pub(super) fn native_level_best_neighbor_signal(
-        &mut self,
+        &self,
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<i32> {
@@ -368,11 +426,7 @@ impl Game<'_> {
     }
     /// Whether any neighbour powers the block at `pos` (`SignalGetter.hasNeighborSignal`),
     /// asking no side past the first that does. False where `signal` is None.
-    pub(super) fn native_level_has_neighbor_signal(
-        &mut self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> bool {
+    pub(super) fn native_level_has_neighbor_signal(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_signals(level, |s| s.has_neighbor_signal(block_pos(pos)))
             .unwrap_or(false)
     }
@@ -413,10 +467,16 @@ impl Game<'_> {
         Some(self.world.game_time)
     }
     /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
-    /// every level; it keeps counting past 24000. API 381.
+    /// every level; it keeps counting past 24000. On a client, the synchronized
+    /// Overworld clock, advanced at its server-supplied rate, even when the
+    /// displayed dimension has a different default clock. API 381.
     pub(super) fn native_level_day_time(&self, level: LevelRef) -> Option<i64> {
-        self.native_level_world(level)?;
-        Some(self.world.day_time)
+        self.native_level_read_world(level)?;
+        if self.is_logical_server() {
+            Some(self.world.day_time)
+        } else {
+            self.remote.as_ref().map(|r| r.overworld_clock_time())
+        }
     }
 }
 
@@ -425,6 +485,172 @@ mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_transform_preview_preserves_state_and_marks_simulation() {
+        use super::super::native_guest_turn_tests::with_guests;
+        use horizon_client::{chunk::Chunk, items::ItemStack};
+        use mod_api::{BlockHit, BlockToolModificationEvent, Flow, Hand, Hooks, Host};
+        use std::sync::{Arc, Mutex};
+
+        struct Observer(Arc<Mutex<Vec<bool>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Observer {
+            fn block_tool_modification(
+                &self,
+                _: &dyn Host,
+                event: &mut BlockToolModificationEvent<'_>,
+            ) -> Flow {
+                self.0.lock().unwrap().push(event.tool.simulated);
+                Flow::Continue
+            }
+        }
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "preview_test",
+            Box::new(Observer(heard.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_guests(|game| {
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let pos = [0, 64, 0];
+                let log = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:oak_log")
+                    .unwrap();
+                game.world.set(pos[0], pos[1], pos[2], log).unwrap();
+                let tool = ItemStack::new("minecraft:iron_axe", 1);
+                game.lan.as_mut().unwrap().hub.guests[0].inventory[0] = Some(tool.clone());
+                let player = game.native_player_ref(12).unwrap();
+                let level = game.native_level(game.dim.id()).unwrap();
+                let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
+                let preview = level
+                    .block_transform(game, player, Hand::Main, &tool, pos, hit)
+                    .unwrap();
+                let stripped = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stripped_oak_log")
+                    .unwrap();
+                assert_eq!(preview.state, stripped);
+                assert_eq!(preview.durability, 1);
+                assert_eq!(game.world.block(pos[0], pos[1], pos[2]), log);
+                assert_eq!(
+                    game.lan.as_ref().unwrap().hub.guests[0].inventory[0],
+                    Some(tool.clone())
+                );
+                assert!(
+                    level
+                        .block_transform(game, player, Hand::Main, &tool, [16, 64, 0], hit)
+                        .is_none()
+                );
+                game.as_guest(12, |game| {
+                    let hit = super::super::Hit {
+                        pos,
+                        face: hit.face,
+                        point: hit.point,
+                        inside: hit.inside,
+                    };
+                    assert!(game.use_block_transformer(&tool, &hit).unwrap());
+                })
+                .unwrap();
+                assert_eq!(game.world.block(pos[0], pos[1], pos[2]), stripped);
+                assert_eq!(
+                    game.lan.as_ref().unwrap().hub.guests[0].inventory[0]
+                        .as_ref()
+                        .unwrap()
+                        .damage,
+                    1
+                );
+            })
+        });
+        assert_eq!(*heard.lock().unwrap(), vec![true, false]);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn shared_level_signal_dispatches_and_clamps_part_output() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::geometry::Direction;
+        use mod_api::Host;
+        use std::sync::Arc;
+
+        mod_api::__private::part_tests::signal_game_thread();
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let y = game.world.bottom_y() + 1;
+            let glass = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:glass")
+                .unwrap();
+            game.world.set(1, y, 1, glass).unwrap();
+            let level = game.native_level(game.dim.id()).unwrap();
+            let host: &dyn Host = game;
+            assert_eq!(level.signal(host, [1, y, 1], Direction::East), Some(15));
+            assert_eq!(
+                level.direct_signal(host, [1, y, 1], Direction::East),
+                Some(0)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn shared_level_signal_reads_live_comparator_and_refuses_other_levels() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::geometry::Direction;
+        use mod_api::Host;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let y = game.world.bottom_y() + 1;
+            let registry = &game.pack.assets.registry;
+            let redstone = registry.default_state("minecraft:redstone_block").unwrap();
+            game.world.set(1, y, 1, redstone).unwrap();
+            let comparator = registry.default_state("minecraft:comparator").unwrap();
+            let mut comparator_state = registry.state(comparator).unwrap().clone();
+            comparator_state
+                .properties
+                .insert("powered".into(), "true".into());
+            comparator_state
+                .properties
+                .insert("facing".into(), "east".into());
+            let comparator = registry.resolve(&comparator_state).unwrap();
+            game.world.set(4, y, 4, comparator).unwrap();
+            game.block_ticks
+                .comparator_outputs
+                .insert(BlockPos::new(4, y, 4), 9);
+            let level = game.native_level(game.dim.id()).unwrap();
+            let host: &dyn Host = game;
+            assert_eq!(level.signal(host, [1, y, 1], Direction::East), Some(15));
+            assert_eq!(level.best_neighbor_signal(host, [2, y, 1]), Some(15));
+            assert!(level.has_neighbor_signal(host, [2, y, 1]));
+            assert_eq!(level.signal(host, [4, y, 4], Direction::East), Some(9));
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            let other = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            for unavailable in [stale, other] {
+                assert_eq!(unavailable.signal(host, [1, y, 1], Direction::East), None);
+                assert!(!unavailable.has_neighbor_signal(host, [2, y, 1]));
+            }
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

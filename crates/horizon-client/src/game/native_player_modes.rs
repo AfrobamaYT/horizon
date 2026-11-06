@@ -9,9 +9,14 @@ use mod_api::{GameMode, PlayerRef};
 impl Game<'_> {
     /// The player's permission level, 0 to 4 (`Player.permissions()`,
     /// `PlayerList.getProfilePermissions`): an op's level, the
-    /// single-player owner's 4 with commands allowed.
+    /// single-player owner's 4 with commands allowed. A displaced connected
+    /// player keeps their permission level even while their body is unavailable.
+    /// None for a stale or unavailable player.
     pub(super) fn native_player_permission_level(&self, player: PlayerRef) -> Option<u8> {
-        Some(match self.player_handle_read(player)? {
+        let read = self
+            .player_handle_read(player)
+            .or_else(|| self.online_player_record(player).map(PlayerRead::Guest))?;
+        Some(match read {
             PlayerRead::Guest(g) => g.permission,
             PlayerRead::Acting { .. } if self.lan_acting.is_some() => self.ui.registries.permission,
             PlayerRead::Acting { .. } if self.allow_commands() => 4,
@@ -40,12 +45,11 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<Option<GameMode>> {
-        let id = match self.player_handle_read(player)? {
+        Some(match self.player_handle_read(player)? {
             // The acting player's own: a guest's turn swaps theirs in.
-            PlayerRead::Acting { .. } => self.previous_mode.map(super::game_mode::mode_id_of),
-            PlayerRead::Guest(guest) => guest.previous_game_mode,
-        };
-        Some(id.and_then(GameMode::from_id))
+            PlayerRead::Acting { .. } => self.previous_mode,
+            PlayerRead::Guest(guest) => guest.previous_game_mode.and_then(GameMode::from_id),
+        })
     }
     /// `Player.isSecondaryUseActive`: whether the player uses items and
     /// blocks as with sneak held, as vanilla reads it from the shift-key

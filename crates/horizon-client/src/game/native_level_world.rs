@@ -9,7 +9,7 @@ use horizon_core::position::BlockPos;
 use horizon_core::random::LegacyRandom;
 use horizon_world::level::{Dimension as LevelDimension, LevelAccess};
 use horizon_world::registry::BlockStateId;
-use mod_api::{FeatureFlags, GameRuleValue, LevelRef};
+use mod_api::{FeatureFlags, GameRuleValue, LevelDimensionShape, LevelRef};
 use std::sync::Arc;
 
 fn weather_for_level(
@@ -93,6 +93,21 @@ impl Game<'_> {
             .as_ref()
             .map_or(&self.level.enabled_features, |remote| &remote.features)
     }
+    /// Dimension shape of a loaded server level, including parked levels.
+    pub(super) fn native_level_dimension_shape(
+        &self,
+        level: LevelRef,
+    ) -> Option<LevelDimensionShape> {
+        let shape = self.native_level_world(level)?.shape;
+        Some(LevelDimensionShape::new(
+            shape.min_y,
+            shape.height,
+            shape.logical_height,
+            shape.sky_light,
+            shape.has_ceiling,
+        ))
+    }
+
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
     pub(super) fn native_level_seed(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
@@ -114,6 +129,22 @@ impl Game<'_> {
         self.native_level_world(level)?;
         let r = horizon_client::gamerules::rule(rule)?;
         self.ui.rules.get(r.name)
+    }
+    /// Every game rule the world has (`GameRules`) with its current value, by `minecraft:` id
+    /// (`max_minecart_speed` only with minecart improvements): None for a stale handle and on
+    /// a client.
+    pub(super) fn native_level_game_rules(
+        &self,
+        level: LevelRef,
+    ) -> Option<Vec<(String, GameRuleValue)>> {
+        self.native_level_world(level)?;
+        let rules = &self.ui.rules;
+        Some(
+            rules
+                .available_rules()
+                .filter_map(|r| Some((["minecraft:", r.name].concat(), rules.get(r.name)?)))
+                .collect(),
+        )
     }
     /// The rain and thunder levels, each 0.0 to 1.0 (`Level.getRainLevel`,
     /// `getThunderLevel` at partial tick 1.0): both 0 in a level with no weather.
@@ -172,8 +203,42 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
-    use mod_api::{FeatureFlags, LevelHost};
-    use std::sync::Arc;
+    use horizon_client::gamerules;
+    use mod_api::testing::with_mods;
+    use mod_api::{
+        FeatureFlags, GameRuleChangedEvent, GameRuleValue, Hooks, LevelHost, ModEntry, ServerHost,
+    };
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dimension_shape_reads_current_parked_and_stale_levels() {
+        use super::super::Dim;
+        use horizon_client::chunk::LevelShape;
+        use mod_api::{Host, LevelDimensionShape, NativeAuthority};
+
+        with_game(|game| {
+            game.world.shape = LevelShape::new(-32, 320, 256, true, false).unwrap();
+            let overworld = game.level("minecraft:overworld").unwrap();
+            let expected = LevelDimensionShape::new(-32, 320, 256, true, false);
+            let host: &dyn Host = game;
+            assert_eq!(overworld.dimension_shape(host), Some(expected));
+            game.enter_level(Dim::Nether).unwrap();
+            game.world.shape = LevelShape::new(0, 256, 128, false, true).unwrap();
+            let nether = game.level("minecraft:the_nether").unwrap();
+            let host: &dyn Host = game;
+            assert_eq!(overworld.dimension_shape(host), Some(expected));
+            assert_eq!(
+                nether.dimension_shape(host),
+                Some(LevelDimensionShape::new(0, 256, 128, false, true))
+            );
+            game.native_lifecycle
+                .begin_open(NativeAuthority::IntegratedServer);
+            let host: &dyn Host = game;
+            assert_eq!(overworld.dimension_shape(host), None);
+            assert_eq!(nether.dimension_shape(host), None);
+        });
+    }
 
     /// A chunk of air with `biome` in every cell: full sky light everywhere.
     fn chunk_in(game: &super::Game<'_>, x: i32, biome: &str) -> Arc<Chunk> {
@@ -272,6 +337,74 @@ mod tests {
             });
         });
     }
+
+    /// What a `game_rule_changed` listener read of the whole rule set: the changed rule, whether a
+    /// player caused it, and `keep_inventory`, `random_tick_speed` and the rule count it saw.
+    type RuleRead = (
+        String,
+        bool,
+        Option<GameRuleValue>,
+        Option<GameRuleValue>,
+        usize,
+    );
+    struct RuleReader(Arc<Mutex<Vec<RuleRead>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for RuleReader {
+        fn game_rule_changed(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut GameRuleChangedEvent<'_>,
+        ) {
+            let rules = host
+                .level("minecraft:overworld")
+                .and_then(|level| level.game_rules(host))
+                .unwrap_or_default();
+            let value = |id: &str| rules.iter().find(|(rule, _)| rule == id).map(|(_, v)| *v);
+            self.0.lock().unwrap().push((
+                event.rule.to_owned(),
+                event.actor.is_some(),
+                value("minecraft:keep_inventory"),
+                value("minecraft:random_tick_speed"),
+                rules.len(),
+            ));
+        }
+    }
+
+    /// A listener of a change no player made reads every server rule through its host: the new
+    /// value and the others as they stand.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_game_rule_listener_reads_the_whole_rule_set() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "rule-reader",
+            Box::new(RuleReader(seen.clone())),
+        )]
+        .into();
+        with_mods(mods, || {
+            with_game(|game| {
+                assert!(
+                    game.ui
+                        .rules
+                        .set("random_tick_speed", GameRuleValue::Int(7))
+                );
+                let keep_inventory = gamerules::rule("keep_inventory").unwrap();
+                game.set_game_rule(keep_inventory, GameRuleValue::Bool(true), None);
+            });
+        });
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [(
+                "minecraft:keep_inventory".to_owned(),
+                false,
+                Some(GameRuleValue::Bool(true)),
+                Some(GameRuleValue::Int(7)),
+                // Vanilla 26.3 `GameRules` has 59, `max_minecart_speed` behind minecart improvements.
+                58,
+            )]
+        );
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn weather_read_resolves_levels_and_refuses_stale_or_unavailable_handles() {
