@@ -109,6 +109,7 @@ pub mod player_food;
 pub mod player_health;
 pub mod player_hurt;
 pub mod player_travel;
+pub mod poi;
 pub mod powder_snow_collision;
 pub mod region;
 pub mod registry;
