@@ -817,7 +817,7 @@ mandatory = true
             } else {
                 let error = identity.unwrap_err();
                 assert!(
-                    error.contains("fabric.mod.json: metadata exceeds 1048576 bytes"),
+                    error.contains("fabric.mod.json: an entry unpacks to more than 1 MiB"),
                     "{error}"
                 );
             }
