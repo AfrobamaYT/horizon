@@ -97,6 +97,8 @@ pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, OwningLoad, OwningLoop,
     PackageInfo, PackageKind, RegistrationContext,
 };
+mod advancement_progress;
+pub use advancement_progress::{AdvancementProgress, CriterionProgress};
 mod criteria;
 pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
 mod packets;
@@ -1168,13 +1170,17 @@ pub struct NativeServerPlayer {
 /// `eco give <player:player> <amount:integer>`. Kinds: `word`, `text` (the
 /// rest of the line, last), `integer`, `number`, `boolean`, `player`,
 /// `item`, `block_pos`. Usages of one command share their words; the
-/// server merges them into one tree.
+/// server merges them into one tree. Each executable usage keeps its own level:
+/// a public `foo bar` lets everyone traverse `foo`, but does not make an
+/// operator-only `foo` executable. Optional arguments also allow execution at
+/// their preceding prefixes, at that usage's level.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeCommand {
     /// The usage.
     pub usage: String,
-    /// The operator level a player needs to see and run it (0: everyone).
+    /// The operator level a player needs to run this usage (0: everyone).
+    /// Shared prefixes stay visible when needed to reach a lower-level usage.
     pub level: u8,
 }
 
@@ -3225,6 +3231,7 @@ pub type Mods = Arc<[ModEntry]>;
 pub(crate) struct Installed {
     mods: Mods,
     subscribers: horizon_client_core::subscribers::Subscribers,
+    disabled: Box<[std::sync::atomic::AtomicBool]>,
 }
 
 impl Installed {
@@ -3242,7 +3249,15 @@ impl Installed {
             mods.len(),
             subscriptions,
         );
-        Self { mods, subscribers }
+        let disabled = mods
+            .iter()
+            .map(|_| std::sync::atomic::AtomicBool::new(false))
+            .collect();
+        Self {
+            mods,
+            subscribers,
+            disabled,
+        }
     }
 }
 
@@ -3325,14 +3340,40 @@ pub(crate) fn listened(hook: generated::HookId) -> bool {
     installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
+/// Switch an installed trait mod's subsequent dispatches on or off.
+pub(crate) fn set_mod_enabled(id: &str, on: bool) -> bool {
+    let Some(installed) = installed() else {
+        return false;
+    };
+    let mut found = false;
+    for (entry, disabled) in installed.mods.iter().zip(&*installed.disabled) {
+        if entry.id == id {
+            disabled.store(!on, std::sync::atomic::Ordering::Relaxed);
+            found = true;
+        }
+    }
+    found
+}
+
 /// Whether an installed mod subscribes to an injected hook.
 // hidden: a game-side helper, not part of the mod surface
 #[doc(hidden)]
 pub fn subscribed_by(index: usize, hook: Option<generated::HookId>) -> bool {
     hook.is_some_and(|hook| {
         installed().is_some_and(|installed| {
-            index < installed.mods.len() && installed.subscribers.contains(hook as usize, index)
+            index < installed.mods.len()
+                && !installed.disabled[index].load(std::sync::atomic::Ordering::Relaxed)
+                && installed.subscribers.contains(hook as usize, index)
         })
+    })
+}
+
+fn mod_index_on(index: usize) -> bool {
+    installed().is_none_or(|installed| {
+        installed
+            .disabled
+            .get(index)
+            .is_none_or(|disabled| !disabled.load(std::sync::atomic::Ordering::Relaxed))
     })
 }
 
@@ -3363,6 +3404,9 @@ fn entered_with_id(
         installed
             .subscribers
             .indices(hook_id as usize)
+            .filter(move |&index| {
+                !installed.disabled[index].load(std::sync::atomic::Ordering::Relaxed)
+            })
             .map(move |index| {
                 drop(crash_guard.take());
                 let entry = &installed.mods[index];
@@ -3388,18 +3432,21 @@ fn entered_parts<'a, P: ?Sized>(
     hook: &'static str,
 ) -> impl Iterator<Item = &'a P> {
     let mut guard = None;
-    parts.iter().map(move |attached| {
-        // The last part's mark goes first, as in `Entered`.
-        drop(guard.take());
-        guard = Some(crate::crash::enter_native_mod(
-            crate::crash::NativeModCall {
-                id: attached.mod_id,
-                hook,
-                part: Some(attached.type_name),
-            },
-        ));
-        &*attached.part
-    })
+    parts
+        .iter()
+        .filter(|attached| mod_index_on(attached.mod_index))
+        .map(move |attached| {
+            // The last part's mark goes first, as in `Entered`.
+            drop(guard.take());
+            guard = Some(crate::crash::enter_native_mod(
+                crate::crash::NativeModCall {
+                    id: attached.mod_id,
+                    hook,
+                    part: Some(attached.type_name),
+                },
+            ));
+            &*attached.part
+        })
 }
 
 struct Entered<'a> {

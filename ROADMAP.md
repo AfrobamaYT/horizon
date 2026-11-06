@@ -150,7 +150,7 @@ New public numbers comparing Horizon with vanilla on many kinds of computers, me
 
 <details><summary>Technical</summary>
 
-Redo the comparison after the current performance work ([#1073](https://github.com/horizon-rust/horizon/issues/1073)); reliability, coverage and presentation ([#1346](https://github.com/horizon-rust/horizon/issues/1346)); a scene must count as loaded only once its first chunk arrives ([#1749](https://github.com/horizon-rust/horizon/issues/1749)). Next: a performance history across releases (an automatic comparison of each release with the last, on a timeline), more report fields (server TPS and MSPT, power, battery drain, temperature, throttling) and more hardware (a MacBook on battery, low-end laptops, community reports). Players' reports come in through `--benchmark` and `horizon-launcher data benchmark` ([docs/benchmark.md](docs/benchmark.md)).
+Redo the comparison after the current performance work ([#1073](https://github.com/horizon-rust/horizon/issues/1073)); reliability, coverage and presentation ([#1346](https://github.com/horizon-rust/horizon/issues/1346)); a scene must count as loaded only once its first chunk arrives ([#1749](https://github.com/horizon-rust/horizon/issues/1749)). Next: a performance history across releases (an automatic comparison of each release with the last, on a timeline), more report fields (server TPS and MSPT, power, battery drain, temperature, throttling) and more hardware (a MacBook on battery, low-end laptops, community reports). Players run `--benchmark` and can share the local report by hand ([docs/benchmark.md](docs/benchmark.md)); neither the game nor the launcher uploads reports.
 
 </details>
 
@@ -854,7 +854,7 @@ Run Horizon's built-in benchmark and share the report: every new computer makes 
 
 <details><summary>Technical</summary>
 
-`horizon-launcher play --arg=--benchmark --arg=standard` writes a JSON report; `horizon-launcher data benchmark <report>` shows what would be sent and uploads it (playhorizon.dev/docs/performance). Results from three installs with the same hardware appear on the Benchmarks page. Example: [#1711](https://github.com/horizon-rust/horizon/issues/1711).
+`horizon-launcher play --arg=--benchmark --arg=standard` writes a JSON report in the game's benchmarks/ folder. Read it and share it by hand if you choose; the launcher never uploads it (docs/telemetry.md).
 
 More: [https://playhorizon.dev/docs/performance](https://playhorizon.dev/docs/performance)
 
@@ -872,7 +872,6 @@ More: [https://playhorizon.dev/docs/performance](https://playhorizon.dev/docs/pe
 - **Cooldowns drawn on items** (v0.2.67): After you throw an ender pearl, its slot should show the cooldown sweeping away, as in vanilla. [#1763](https://github.com/horizon-rust/horizon/issues/1763) · [#1933](https://github.com/horizon-rust/horizon/issues/1933)
 - **Pre-generate an area with /pregen** (v0.2.67): A /pregen command that builds an area of the world ahead of time, so players don't wait for new terrain when they explore. [#1805](https://github.com/horizon-rust/horizon/issues/1805)
 - **Horizon's own shader format and kit** (v0.2.70): Horizon's own way to make shader packs, with tools to write and test them. Every pack is checked before it runs, and the registry will list them. [#1820](https://github.com/horizon-rust/horizon/issues/1820) · [#1822](https://github.com/horizon-rust/horizon/issues/1822) · [#1861](https://github.com/horizon-rust/horizon/issues/1861) · [#1863](https://github.com/horizon-rust/horizon/issues/1863) · [#1855](https://github.com/horizon-rust/horizon/issues/1855) · [docs/shaders.md](docs/shaders.md) · [docs/api/shaders.md](docs/api/shaders.md)
-- **Discord Rich Presence** (v0.2.58): Your Discord profile can show that you are playing Horizon, with a switch to turn it off. [#1787](https://github.com/horizon-rust/horizon/issues/1787) · [#1788](https://github.com/horizon-rust/horizon/issues/1788)
 - **Server dialogs and login screens** (v0.2.67): Servers that show dialogs, such as the register and login screens of AuthMe, will work in Horizon. [#1720](https://github.com/horizon-rust/horizon/issues/1720) · [#1734](https://github.com/horizon-rust/horizon/issues/1734) · [#1735](https://github.com/horizon-rust/horizon/issues/1735)
 - **Microsoft sign-in** (launcher@0.2.17): Sign in with your Microsoft account in the launcher to play on online-mode servers. [docs/microsoft-account.md](docs/microsoft-account.md) · [#2879](https://github.com/horizon-rust/horizon/issues/2879)
 - **HDR monitors** (v0.2.74): Output for HDR monitors: brighter highlights and richer colour where your screen supports it. [#1441](https://github.com/horizon-rust/horizon/issues/1441) · [#2021](https://github.com/horizon-rust/horizon/issues/2021) · [#2292](https://github.com/horizon-rust/horizon/issues/2292)
