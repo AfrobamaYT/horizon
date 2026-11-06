@@ -899,7 +899,11 @@ fn offer_data_packs_with_a_feature_asks_and_the_confirm_screen_decides() {
     );
     // Back (`onAbort`): the Data Packs screen reopens with the selection
     // it had, the confirm screen is gone.
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
     // confirm_experiments::footer_pair's Back, for a 480-wide screen
     // (COLUMN_SPACING is 10).
     let back_x = ((480.0_f32 - (150.0 * 2.0 + 10.0)) / 2.0).trunc() + 150.0 + 10.0 + 1.0;
@@ -1144,7 +1148,11 @@ fn delete_removes_links_without_following_them() {
 fn hovered_buttons_ask_for_the_hand_or_not_allowed() {
     use crate::widgets::Cursor;
     let mut f = Fixture::new();
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
     let cursor_over = |title: &Title, label: Option<&str>| {
         let mouse = label.map_or((0.0, 0.0), |label| {
             let buttons = title.buttons(480.0, 262.0);
@@ -1171,7 +1179,11 @@ fn world_search_hint_is_gray_and_only_shown_empty_and_unfocused() {
     let mut f = Fixture::new();
     f.world("World", "World");
     f.select();
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
     let draw = |title: &Title| {
         let mut batch = HudBatch::scratch([480, 262]);
         title.draw(&atlas, &mut batch, (0.0, 0.0), true);
@@ -1211,7 +1223,11 @@ fn scrolled_world_list_draws_inside_the_list_and_drags_its_scroller() {
     f.title.release();
     f.title.drag((bar.0, 60.0), size);
     assert_eq!(f.title.scroll.get().amount, moved);
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
     let mut batch = HudBatch::scratch([480, 262]);
     f.title.draw(&atlas, &mut batch, (0.0, 0.0), true);
     assert!(!batch.vertices.is_empty());
@@ -2222,7 +2238,10 @@ fn a_finished_optimization_stamps_the_level_data() {
 /// 590 px World Type label on Create World, `hi_in`'s Join Server).
 #[test]
 fn a_button_label_wider_than_its_button_stays_inside_it() {
-    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+        (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+    ))
+    .unwrap();
     let mut b = Button {
         x: 100.0,
         y: 40.0,
@@ -2361,6 +2380,7 @@ fn the_single_biome_preset_is_customized_into_the_generator() {
         &crate::save::Level::read(&dir).unwrap_or_default(),
         false,
         &dir,
+        crate::gamerules::rule_registry(),
     );
     assert_eq!(options.single_biome, "minecraft:jungle");
 }
@@ -2431,7 +2451,10 @@ mod text_and_icon {
     use super::*;
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap()
     }
     fn button(label: &str, icon: Option<(&'static str, f32)>) -> Button {
         Button {
@@ -2537,7 +2560,10 @@ mod text_and_icon {
 fn a_create_world_tab_label_wider_than_its_tab_stays_inside_it() {
     let mut f = Fixture::new();
     f.click("Singleplayer");
-    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+        (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+    ))
+    .unwrap();
     // 90 px wide: three 20 px tabs from x = 14, too narrow for "Game".
     let mut batch = HudBatch::scratch([90, 262]);
     f.title.draw(&atlas, &mut batch, (0.0, 100.0), true);
@@ -2642,5 +2668,133 @@ fn the_multiplayer_screens_have_their_own_ids() {
         }
         .id(),
         "disconnected"
+    );
+}
+
+#[test]
+fn creation_rules_keep_injected_registry_and_selected_values() {
+    use crate::gamerules::{GameRules, Rule, RuleRegistry, Value};
+    use std::sync::Arc;
+    let rule = Rule {
+        name: "example:enabled".into(),
+        category: "example:machines".into(),
+        default: Value::Bool(true),
+        min: 0,
+        max: 0,
+    };
+    let registry =
+        Arc::new(RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule]).unwrap());
+    let mut fixture = Fixture::new();
+    fixture.title.set_rule_registry(registry.clone());
+    fixture.title.enter_singleplayer();
+    let Mode::Create { options, .. } = &fixture.title.mode else {
+        panic!("creation")
+    };
+    assert!(Arc::ptr_eq(options.rules.registry(), &registry));
+    assert_eq!(
+        options.rules.get("example:enabled"),
+        Some(Value::Bool(true))
+    );
+    fixture.title.close_rules(Exit::Apply(vec![(
+        "example:enabled".into(),
+        Value::Bool(false),
+    )]));
+    let Action::Create { options, .. } = fixture.title.create_action() else {
+        panic!("create")
+    };
+    assert!(Arc::ptr_eq(options.rules.registry(), &registry));
+    assert_eq!(
+        options.rules.get("example:enabled"),
+        Some(Value::Bool(false))
+    );
+    let reopened = GameRules::with_registry(registry, &[]);
+    assert_eq!(reopened.get("example:enabled"), Some(Value::Bool(true)));
+}
+
+#[test]
+fn recreate_rules_load_saved_values_and_default_new_rules() {
+    use crate::gamerules::{GameRules, Rule, RuleRegistry, Value};
+    use std::sync::Arc;
+    let fixture = Fixture::new();
+    let dir = fixture.root.join("world");
+    let definitions = |names: &[&str]| {
+        names
+            .iter()
+            .map(|name| Rule {
+                name: format!("example:{name}"),
+                category: "example:machines".into(),
+                default: Value::Bool(true),
+                min: 0,
+                max: 0,
+            })
+            .collect::<Vec<_>>()
+    };
+    let old = Arc::new(
+        RuleRegistry::with_bool_rules(&["example:machines".into()], &definitions(&["old"]))
+            .unwrap(),
+    );
+    let mut rules = GameRules::with_registry(old, &[]);
+    rules.set("example:old", Value::Bool(false));
+    rules.save(&dir).unwrap();
+    let current = Arc::new(
+        RuleRegistry::with_bool_rules(&["example:machines".into()], &definitions(&["old", "new"]))
+            .unwrap(),
+    );
+    let options =
+        WorldOptions::of_world(&crate::save::Level::default(), false, &dir, current.clone());
+    assert!(Arc::ptr_eq(options.rules.registry(), &current));
+    assert_eq!(options.rules.get("example:old"), Some(Value::Bool(false)));
+    assert_eq!(options.rules.get("example:new"), Some(Value::Bool(true)));
+}
+
+#[test]
+fn vanilla_creation_rules_keep_original_nbt_bytes() {
+    use crate::gamerules::{GameRules, RuleRegistry};
+    let mut fixture = Fixture::new();
+    fixture
+        .title
+        .set_rule_registry(std::sync::Arc::new(RuleRegistry::vanilla()));
+    fixture.title.enter_singleplayer();
+    let Mode::Create { options, .. } = &fixture.title.mode else {
+        panic!("creation")
+    };
+    let encode = |rules: &GameRules| {
+        horizon_world::nbt::write_named(&rules.to_nbt(), horizon_world::nbt::Limits::default())
+            .unwrap()
+    };
+    assert_eq!(encode(&options.rules), encode(&GameRules::default()));
+}
+
+#[test]
+fn late_registry_handoff_preserves_open_creation_edits() {
+    use crate::gamerules::{Rule, RuleRegistry, Value};
+    let rule = Rule {
+        name: "example:enabled".into(),
+        category: "example:machines".into(),
+        default: Value::Bool(true),
+        min: 0,
+        max: 0,
+    };
+    let registry = std::sync::Arc::new(
+        RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule]).unwrap(),
+    );
+    let mut fixture = Fixture::new();
+    fixture.title.enter_singleplayer();
+    fixture.title.close_rules(Exit::Apply(vec![(
+        "minecraft:keep_inventory".into(),
+        Value::Bool(true),
+    )]));
+    fixture.title.set_rule_registry(registry.clone());
+    let Action::Create { options, .. } = fixture.title.create_action() else {
+        panic!("creation")
+    };
+    assert!(std::sync::Arc::ptr_eq(options.rules.registry(), &registry));
+    assert_eq!(
+        options.rules.get("minecraft:keep_inventory"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        options.rules.get("example:enabled"),
+        Some(Value::Bool(true))
     );
 }

@@ -111,3 +111,63 @@ fn a_mods_tint_source_is_untinted_and_an_unknown_vanilla_one_fails() {
     );
     assert!(tint(r#"{"type":"minecraft:nonsense"}"#).is_err());
 }
+
+#[test]
+fn registered_range_property_thresholds_on_the_mods_number_per_stack() {
+    struct Env;
+    impl ItemEnv for Env {
+        fn item_model_range_property(&self, property: &str, stack: &StackView) -> f32 {
+            assert_eq!(property, "rangetest:fill");
+            stack.count as f32 / 10.0
+        }
+    }
+    let kept = register_range_properties(vec![
+        "rangetest:fill".into(),
+        "minecraft:damage".into(),
+        "unnamespaced".into(),
+        "rangetest:Bad".into(),
+    ]);
+    assert_eq!(kept, ["rangetest:fill"]);
+    assert!(register_range_properties(vec!["rangetest:fill".into()]).is_empty());
+    let json = r#"{"model":{
+        "type":"minecraft:range_dispatch", "property":"rangetest:fill", "scale":2.0,
+        "entries":[
+            {"threshold":1.0,"model":{"type":"minecraft:model","model":"rangetest:item/full"}},
+            {"threshold":0.5,"model":{"type":"minecraft:model","model":"rangetest:item/half"}}
+        ],
+        "fallback":{"type":"minecraft:model","model":"rangetest:item/empty"}
+    }}"#;
+    let context = Context {
+        display: DisplayContext::Gui,
+        owner: None,
+        level: None,
+        seed: 0,
+    };
+    // A resource reload decodes the definition again; the property stays the mod's.
+    for _reload in 0..2 {
+        let mut models = ItemModels::default();
+        models.definitions.insert(
+            "rangetest:cell".into(),
+            ClientItem::from_json(json).unwrap(),
+        );
+        Arc::make_mut(&mut models.prototypes).insert(
+            "rangetest:cell".into(),
+            BTreeMap::from([(
+                "minecraft:item_model".into(),
+                Value::String("rangetest:cell".into()),
+            )]),
+        );
+        let chosen = |count: i32, env: &dyn ItemEnv| {
+            let resolved = models.resolve(&StackView::new("rangetest:cell", count), &context, env);
+            let LayerContent::Model { model } = &resolved.layers[0].content else {
+                panic!("expected model leaf")
+            };
+            model.clone()
+        };
+        // Scaled by 2: 0.2 -> 0.4, 0.3 -> 0.6, 0.5 -> 1.0.
+        assert_eq!(chosen(2, &Env), "rangetest:item/empty");
+        assert_eq!(chosen(3, &Env), "rangetest:item/half");
+        assert_eq!(chosen(5, &Env), "rangetest:item/full");
+        assert_eq!(chosen(5, &NoEnv), "rangetest:item/empty");
+    }
+}

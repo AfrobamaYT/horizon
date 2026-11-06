@@ -77,6 +77,17 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
         }
         _ => {}
     }
+    let mut n = 7;
+    let mut small = mod_internals::view::Small { count: 2 };
+    assert_eq!(
+        mod_internals::view::mutate_copies(&mut n, &mut small).unwrap(),
+        21
+    );
+    assert_eq!(
+        (n, small.count),
+        (12, 9),
+        "mutable copies write back into guest values"
+    );
     game.set_left(game.left().unwrap() + 2).unwrap();
     game.set_right(game.right().unwrap() + 3).unwrap();
     assert_eq!(game.left().unwrap(), 3, "read sees the journal");

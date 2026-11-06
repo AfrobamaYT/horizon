@@ -602,6 +602,7 @@ mod golem_touch_tests {
                 ),
                 eye: [at.x, at.y + 1.62, at.z],
                 alive: true,
+                invulnerable: false,
                 creative: false,
                 sneaking: false,
                 swimming: false,

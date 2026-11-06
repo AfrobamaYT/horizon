@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn bad_answers_are_refused() {
         assert!(read_answer(&mut [0x00].as_slice()).is_err());
-        assert!(read_answer(&mut answer("{}")[..2].as_ref()).is_err());
+        assert!(read_answer(&mut &answer("{}")[..2]).is_err());
         let mut wrong_id = answer("{}");
         wrong_id[1] = 0x01;
         assert!(read_answer(&mut wrong_id.as_slice()).is_err());

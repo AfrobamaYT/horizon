@@ -1254,6 +1254,7 @@ mod pufferfish_sting_tests {
             );
             let others = [target.seen(None)];
             let world = MobWorld {
+                goal_host: None,
                 others: &others,
                 ..w.clone()
             };
@@ -1402,6 +1403,7 @@ mod pufferfish_sting_tests {
                 let pig = make_mob(2, "minecraft:pig", Vec3::new(0.5, 64.0, 0.5));
                 let seen = [pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1429,6 +1431,7 @@ mod pufferfish_sting_tests {
                 let far_pig = make_mob(5, "minecraft:pig", Vec3::new(5.0, 64.0, 5.0));
                 let seen_far = [far_pig.seen(None)];
                 let world_far = MobWorld {
+                    goal_host: None,
                     others: &seen_far,
                     ..w.clone()
                 };
@@ -1451,6 +1454,7 @@ mod pufferfish_sting_tests {
                 invuln_pig.invulnerable_flag = true;
                 let seen = [invuln_pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1483,6 +1487,7 @@ mod pufferfish_sting_tests {
                 cooldown_pig.last_hurt = 3.0; // Pufferfish deals 1 + 2 = 3.0 <= 3.0
                 let seen = [cooldown_pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1516,6 +1521,7 @@ mod pufferfish_sting_tests {
                 let pig = make_mob(2, "minecraft:pig", Vec3::new(0.5, 64.0, 0.5));
                 let seen = [pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1553,6 +1559,7 @@ mod pufferfish_sting_tests {
                 // World Tick 1 continued: Pig ticks later in the same level tick
                 let fish_seen = [mobs[0].seen(None)];
                 let world_for_pig = MobWorld {
+                    goal_host: None,
                     others: &fish_seen,
                     ..w.clone()
                 };
@@ -1581,6 +1588,7 @@ mod pufferfish_sting_tests {
                 noai_pig.no_ai = true;
                 let seen = [noai_pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1592,6 +1600,7 @@ mod pufferfish_sting_tests {
                 assert_eq!(mobs[1].extra.effects[0].duration, 120);
                 let fish_seen = [mobs[0].seen(None)];
                 let world_for_pig = MobWorld {
+                    goal_host: None,
                     others: &fish_seen,
                     ..w.clone()
                 };
@@ -1614,6 +1623,7 @@ mod pufferfish_sting_tests {
                 let pig_b = make_mob(3, "minecraft:pig", Vec3::new(0.4, 64.0, 0.5));
                 let seen = [pig_a.seen(None), pig_b.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
