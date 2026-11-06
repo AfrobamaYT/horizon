@@ -1,75 +1,8 @@
 //! The `screens` area: host methods the game implements (`game/host/screens.rs`).
 #![allow(unused_variables)]
 use crate::*;
-/// The client host's methods of the `screens` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `screens` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ScreensClientHost {
-    /// Side: client.
-    /// Opens a screen of mod `mod_id`'s own over the world: the screen hooks
-    /// fire over it as over any other, so the mod draws it in
-    /// `native_screen_render_post` and takes its clicks, scroll, keys and
-    /// typing there; the mouse is freed, and Escape closes it. Every mod's own
-    /// screen has the `NativeScreenView.id` `mod`, so a mod's screen hooks
-    /// check `native_mod_screen()` is its own before drawing. It doesn't pause
-    /// a single-player game (as the inventory doesn't). True when it is open:
-    /// false while another screen is (or another mod's), over the title
-    /// screen, a book, a sign editor, a dialog or a prompt, while the world
-    /// loads, and anywhere but the window's own client (the server thread, a
-    /// dedicated server). A gamepad can close it (B, Start) but not click on
-    /// it: its clicks don't reach the mouse hooks.
-    fn mod_screen_open(&mut self, mod_id: &str) -> bool {
-        crate::phase::unprovided(
-            "ClientHost::mod_screen_open",
-            "mod_screen_open",
-            crate::phase::LoadAccess::WorldOnly,
-        )
-    }
-    /// Side: client.
-    /// Closes mod `mod_id`'s own screen, if it is open.
-    fn mod_screen_close(&mut self, mod_id: &str) {
-        crate::phase::unprovided(
-            "ClientHost::mod_screen_close",
-            "mod_screen_close",
-            crate::phase::LoadAccess::WorldOnly,
-        )
-    }
-    /// Side: client.
-    /// The mod whose own screen is open, if one is (Escape, or another screen
-    /// replacing it, closes it).
-    fn mod_screen(&self) -> Option<&str> {
-        crate::phase::unprovided(
-            "ClientHost::mod_screen",
-            "mod_screen",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// The open menu's title (the block's name, or the one it was given),
-    /// as plain text.
-    fn screen_title(&self) -> Option<String> {
-        crate::phase::unprovided(
-            "ClientHost::screen_title",
-            "screen_title",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// The last window focus state reported by the window system.
-    fn window_focused(&self) -> bool {
-        crate::phase::unprovided(
-            "ClientHost::window_focused",
-            "window_focused",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// The same screen identifier provided to screen hooks.
-    fn observed_screen_id(&self) -> Option<ScreenId> {
-        crate::phase::unprovided(
-            "ClientHost::observed_screen_id",
-            "observed_screen_id",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
     /// Side: client.
     /// The block of the mod screen that is open (`native_screen`), as the
     /// server named it when the block opened its menu type; None when no mod
@@ -137,6 +70,73 @@ pub trait ScreensClientHost {
         crate::phase::unprovided(
             "ClientHost::menu_blur_radius",
             "menu_blur_radius",
+            crate::phase::LoadAccess::ClientSetup,
+        )
+    }
+    /// Side: client.
+    /// Opens a screen of mod `mod_id`'s own over the world: the screen hooks
+    /// fire over it as over any other, so the mod draws it in
+    /// `native_screen_render_post` and takes its clicks, scroll, keys and
+    /// typing there; the mouse is freed, and Escape closes it. Every mod's own
+    /// screen has the `NativeScreenView.id` `mod`, so a mod's screen hooks
+    /// check `native_mod_screen()` is its own before drawing. It doesn't pause
+    /// a single-player game (as the inventory doesn't). True when it is open:
+    /// false while another screen is (or another mod's), over the title
+    /// screen, a book, a sign editor, a dialog or a prompt, while the world
+    /// loads, and anywhere but the window's own client (the server thread, a
+    /// dedicated server). A gamepad can close it (B, Start) but not click on
+    /// it: its clicks don't reach the mouse hooks.
+    fn mod_screen_open(&mut self, mod_id: &str) -> bool {
+        crate::phase::unprovided(
+            "ClientHost::mod_screen_open",
+            "mod_screen_open",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: client.
+    /// Closes mod `mod_id`'s own screen, if it is open.
+    fn mod_screen_close(&mut self, mod_id: &str) {
+        crate::phase::unprovided(
+            "ClientHost::mod_screen_close",
+            "mod_screen_close",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: client.
+    /// The mod whose own screen is open, if one is (Escape, or another screen
+    /// replacing it, closes it).
+    fn mod_screen(&self) -> Option<&str> {
+        crate::phase::unprovided(
+            "ClientHost::mod_screen",
+            "mod_screen",
+            crate::phase::LoadAccess::ClientSetup,
+        )
+    }
+    /// Side: client.
+    /// The open menu's title (the block's name, or the one it was given),
+    /// as plain text.
+    fn screen_title(&self) -> Option<String> {
+        crate::phase::unprovided(
+            "ClientHost::screen_title",
+            "screen_title",
+            crate::phase::LoadAccess::ClientSetup,
+        )
+    }
+    /// Side: client.
+    /// The last window focus state reported by the window system.
+    fn window_focused(&self) -> bool {
+        crate::phase::unprovided(
+            "ClientHost::window_focused",
+            "window_focused",
+            crate::phase::LoadAccess::ClientSetup,
+        )
+    }
+    /// Side: client.
+    /// The same screen identifier provided to screen hooks.
+    fn observed_screen_id(&self) -> Option<ScreenId> {
+        crate::phase::unprovided(
+            "ClientHost::observed_screen_id",
+            "observed_screen_id",
             crate::phase::LoadAccess::ClientSetup,
         )
     }

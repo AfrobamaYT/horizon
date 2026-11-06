@@ -21,7 +21,7 @@ pub trait NetworkServerHost {
         )
     }
 }
-/// The client host's methods of the `network` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `network` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait NetworkClientHost {
     /// Side: client.
     /// The client half: sends `data` on `channel` to the server (the same

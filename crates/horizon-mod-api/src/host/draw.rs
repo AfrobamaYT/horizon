@@ -1,7 +1,7 @@
 //! The `draw` area: host methods the game implements (`game/host/draw.rs`).
 #![allow(unused_variables)]
 use crate::*;
-/// The client host's methods of the `draw` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `draw` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait DrawClientHost {
     /// Side: client.
     /// Fluid `fluid`'s name as the lang names it (`fluid_type.<mod>.<name>`, vanilla's by its block),

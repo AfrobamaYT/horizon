@@ -38,7 +38,7 @@ pub trait PlayersServerHost {
         )
     }
 }
-/// The client host's methods of the `players` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `players` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait PlayersClientHost {
     /// Side: client.
     /// For a client mod: a push added to the local player's velocity, in blocks a tick, as an

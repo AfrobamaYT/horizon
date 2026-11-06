@@ -111,7 +111,7 @@ pub trait ConfigServerHost {
         )
     }
 }
-/// The client host's methods of the `config` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `config` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ConfigClientHost {
     /// Side: client.
     /// The selected language's text for a translation key (`Component.translatable`'s lookup), `None`

@@ -90,7 +90,7 @@ pub trait ItemsServerHost {
         )
     }
 }
-/// The client host's methods of the `items` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `items` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ItemsClientHost {
     /// Side: client.
     /// Creative mode only: gives the player `count` of `item`

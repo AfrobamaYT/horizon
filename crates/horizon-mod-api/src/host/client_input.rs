@@ -1,7 +1,7 @@
 //! The `client_input` area: host methods the game implements (`game/host/client_input.rs`).
 #![allow(unused_variables)]
 use crate::*;
-/// The client host's methods of the `client_input` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `client_input` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ClientInputClientHost {
     /// Side: client.
     /// Right-clicks with these items (at most 64 ids) are mod `mod_id`'s; a later call replaces the list.

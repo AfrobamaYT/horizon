@@ -30,7 +30,7 @@ pub trait MenusServerHost {
         )
     }
 }
-/// The client host's methods of the `menus` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `menus` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait MenusClientHost {
     /// Side: client.
     /// The local player in a logged-in client world.

@@ -1,7 +1,7 @@
 //! The `effects` area: host methods the game implements (`game/host/effects.rs`).
 #![allow(unused_variables)]
 use crate::*;
-/// The client host's methods of the `effects` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `effects` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait EffectsClientHost {
     /// Side: client.
     /// A small local vanilla particle; caller should rate-limit emission.

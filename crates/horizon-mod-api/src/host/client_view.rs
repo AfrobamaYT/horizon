@@ -13,8 +13,17 @@ pub trait ClientViewHost {
         )
     }
 }
-/// The client host's methods of the `client_view` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `client_view` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ClientViewClientHost {
+    /// Side: client.
+    /// The applied client pause state, not whether a pause screen is open.
+    fn is_paused(&self) -> bool {
+        crate::phase::unprovided(
+            "ClientHost::is_paused",
+            "is_paused",
+            crate::phase::LoadAccess::ClientSetup,
+        )
+    }
     /// Side: client.
     /// The clock of the world this window shows, for client mods: its game
     /// time and time of day as the server last sent them
@@ -82,15 +91,6 @@ pub trait ClientViewClientHost {
             "ClientHost::set_camera_type",
             "set_camera_type",
             crate::phase::LoadAccess::WorldOnly,
-        )
-    }
-    /// Side: client.
-    /// The applied client pause state, not whether a pause screen is open.
-    fn is_paused(&self) -> bool {
-        crate::phase::unprovided(
-            "ClientHost::is_paused",
-            "is_paused",
-            crate::phase::LoadAccess::ClientSetup,
         )
     }
     /// Side: client.

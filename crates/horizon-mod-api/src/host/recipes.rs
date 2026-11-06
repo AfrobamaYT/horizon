@@ -77,7 +77,7 @@ pub trait RecipesHost {
         )
     }
 }
-/// The client host's methods of the `recipes` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `recipes` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait RecipesClientHost {
     /// Side: client.
     /// Shows the panel beside container screens with these items (at most

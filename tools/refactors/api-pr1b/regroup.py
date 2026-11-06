@@ -92,8 +92,8 @@ def area_sources(directory, table, assignments):
                         missing.append(f'{path.stem}.{method}')
                         continue
                 key = (dest, tier)
-                if method in grouped[key]:
-                    raise ValueError(f'duplicate {dest}.{tier}.{method}')
+                if method in grouped[key] and grouped[key][method] != body:
+                    raise ValueError(f'conflicting method copies: {dest}.{tier}.{method}')
                 grouped[key][method] = body
                 mapping[(old_name, method)] = camel(dest) + tier
                 imports[dest].update(re.findall(r'^use [^\n]+;\n', text, re.M))
@@ -114,7 +114,8 @@ def area_sources(directory, table, assignments):
             name = camel(dest) + tier
             body = ''.join(methods.values())
             if directory == API:
-                lead = f'/// {DESCRIPTION[tier].format(a=dest)}\n'
+                doc = DESCRIPTION[tier].format(a=dest).replace('[`ClientHost`]', '[`crate::ClientHost`]')
+                lead = f'/// {doc}\n'
                 if 'Backend' in tier:
                     lead += "// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait\n#[doc(hidden)]\n"
                 sections.append(f'{lead}pub trait {name} {{\n{body}}}\n')

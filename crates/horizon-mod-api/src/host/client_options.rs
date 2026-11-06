@@ -1,7 +1,7 @@
 //! The `client_options` area: host methods the game implements (`game/host/client_options.rs`).
 #![allow(unused_variables)]
 use crate::*;
-/// The client host's methods of the `client_options` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `client_options` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ClientOptionsClientHost {
     /// Side: client.
     /// A snapshot of the current input preferences.
