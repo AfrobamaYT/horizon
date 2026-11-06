@@ -1126,6 +1126,7 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for MissingItem {
             fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                registrar.block_key("minecraft:stone");
                 registrar.item_key("reload_test:missing");
             }
         }
@@ -1145,7 +1146,22 @@ mod tests {
             )
             .unwrap();
             game.world_root = root.clone();
+            mod_api::__private::install_parts(&[ModEntry::new(
+                "reload_test",
+                Box::new(MissingItem),
+            )])
+            .unwrap();
             let stone = mod_api::__private::part_tests::block_key("minecraft:stone");
+            let registry = game.pack.assets.registry;
+            mod_api::__private::resolve_blocks(|id| {
+                let default = registry.default_state(id)?;
+                Some(mod_api::__private::ResolvedBlock {
+                    default,
+                    states: mod_api::BlockStateRange::new(default, 1),
+                    block: game.res.behaviours().block(default),
+                })
+            })
+            .unwrap();
             let old_tag =
                 super::super::native_world_read::block_in_tag(stone, "reload_test:candidate");
             let old_context = game.loop_context.clone();
@@ -1154,11 +1170,6 @@ mod tests {
             let old_tables = game.world_tables.as_ref().map(|tables| tables as *const _);
             let old_generation = game.damage_tag_generation;
             let old_enabled = game.fns.enabled.clone();
-            mod_api::__private::install_parts(&[ModEntry::new(
-                "reload_test",
-                Box::new(MissingItem),
-            )])
-            .unwrap();
             let error = game.reload_datapacks(true, &[]).err().unwrap();
             assert!(error.to_string().contains("reload_test:missing"));
             assert_eq!(game.options.resources, old_root);
@@ -1174,7 +1185,15 @@ mod tests {
                 super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
                 old_tag
             );
-            mod_api::__private::install_parts(&[]).unwrap();
+            struct Valid;
+            #[mod_api::__subscriptions]
+            impl Hooks for Valid {
+                fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                    registrar.block_key("minecraft:stone");
+                }
+            }
+            mod_api::__private::install_parts(&[ModEntry::new("reload_test", Box::new(Valid))])
+                .unwrap();
             game.reload_datapacks(true, &[]).unwrap();
             assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
             assert_eq!(
