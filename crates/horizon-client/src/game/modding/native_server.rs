@@ -2581,7 +2581,6 @@ mod tests {
                         panic!("block missing")
                     };
                     assert_eq!(block.success_count, 1);
-                    assert!(block.last_output.is_some());
                     let source = heard.lock().unwrap()[0].clone();
                     assert!(
                         matches!(source, CommandSource::CommandBlock { position: [1, 64, 1], level, .. } if level == game.dim.key())

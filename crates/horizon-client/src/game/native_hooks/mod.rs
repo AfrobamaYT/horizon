@@ -60,6 +60,7 @@ use horizon_core::{
 };
 use horizon_world::level::{BonemealCheck, PlaceContext};
 use mod_api::__private::game::IngredientTest;
+use mod_api::CommandSource;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{

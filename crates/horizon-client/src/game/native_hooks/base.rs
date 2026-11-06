@@ -1640,7 +1640,7 @@ impl Game<'_> {
     /// Execute a parsed mod command with its origin and effective permission.
     pub(in crate::game) fn native_run_mod_command(
         &mut self,
-        source: &mod_api::CommandSource,
+        source: &CommandSource,
         command: &CommandInvocation,
         ran: &mut bool,
     ) {

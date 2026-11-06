@@ -449,10 +449,9 @@ pub trait Hooks {
         neoforge = "RegisterCommandsEvent"
     )]
     fn register_commands();
-    /// Execute a registered mod command after parsing, permission checks and
-    /// argument resolution. Return `Flow::Cancel` when handled. `source` identifies
-    /// the origin and effective permission, independent of `execute as`. Feedback
-    /// follows its silence and track-output rules; a player's state is swapped in.
+    /// Execute a parsed mod command after permission checks and argument resolution.
+    /// Return `Flow::Cancel` when handled. `source` identifies origin and permission,
+    /// independent of `execute as`. Feedback honours silence, track-output and the swapped-in player.
     #[hook(
         side = "server",
         contract = "cancel",
