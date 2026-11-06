@@ -1501,7 +1501,12 @@ impl Game<'_> {
     /// Advance the overworld clock (ServerClockManager.tick) when
     /// `advance_time` allows it.
     pub(super) fn advance_clock(&mut self) {
-        if !self.ui.rules.bool("advance_time") || self.ui.clock.paused {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME)
+            || self.ui.clock.paused
+        {
             return;
         }
         let c = &mut self.ui.clock;
@@ -1514,7 +1519,12 @@ impl Game<'_> {
     /// advance the overworld clock at, 0 while it is paused (`/time pause`)
     /// or `advance_time` is off.
     pub(super) fn network_clock_rate(&self) -> f32 {
-        if self.ui.rules.bool("advance_time") && !self.ui.clock.paused {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME)
+            && !self.ui.clock.paused
+        {
             self.ui.clock.rate
         } else {
             0.0
@@ -1524,28 +1534,50 @@ impl Game<'_> {
     pub(super) fn level_rules(&self) -> horizon_world::level::GameRules {
         let r = &self.ui.rules;
         horizon_world::level::GameRules {
-            water_source_conversion: r.bool("water_source_conversion"),
-            lava_source_conversion: r.bool("lava_source_conversion"),
-            random_tick_speed: r.int("random_tick_speed"),
-            block_drops: r.bool("block_drops"),
-            mob_griefing: r.bool("mob_griefing"),
-            max_snow_accumulation_height: r.int("max_snow_accumulation_height"),
-            spawn_mobs: r.bool("spawn_mobs"),
-            spawn_monsters: r.bool("spawn_monsters"),
-            fire_spread_radius_around_player: r.int("fire_spread_radius_around_player"),
-            spread_vines: r.bool("spread_vines"),
+            water_source_conversion: r
+                .bool_at(horizon_client::gamerules::vanilla::WATER_SOURCE_CONVERSION),
+            lava_source_conversion: r
+                .bool_at(horizon_client::gamerules::vanilla::LAVA_SOURCE_CONVERSION),
+            random_tick_speed: r.int_at(horizon_client::gamerules::vanilla::RANDOM_TICK_SPEED),
+            block_drops: r.bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS),
+            mob_griefing: r.bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+            max_snow_accumulation_height: r
+                .int_at(horizon_client::gamerules::vanilla::MAX_SNOW_ACCUMULATION_HEIGHT),
+            spawn_mobs: r.bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS),
+            spawn_monsters: r.bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS),
+            fire_spread_radius_around_player: r
+                .int_at(horizon_client::gamerules::vanilla::FIRE_SPREAD_RADIUS_AROUND_PLAYER),
+            spread_vines: r.bool_at(horizon_client::gamerules::vanilla::SPREAD_VINES),
         }
     }
     /// Apply rules mirrored in other state (natural regeneration, difficulty).
     pub(super) fn sync_rules(&mut self) {
-        self.world.health_rules.natural_regeneration =
-            self.ui.rules.bool("natural_health_regeneration");
+        self.world.health_rules.natural_regeneration = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::NATURAL_HEALTH_REGENERATION);
         // Player.isInvulnerableTo: the damage-type rules.
-        self.world.health_rules.drowning_damage = self.ui.rules.bool("drowning_damage");
-        self.world.health_rules.fall_damage = self.ui.rules.bool("fall_damage");
-        self.world.health_rules.fire_damage = self.ui.rules.bool("fire_damage");
-        self.world.health_rules.freeze_damage = self.ui.rules.bool("freeze_damage");
-        horizon_client::mobs::sulfur_cube::set_tnt_explodes(self.ui.rules.bool("tnt_explodes"));
+        self.world.health_rules.drowning_damage = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::DROWNING_DAMAGE);
+        self.world.health_rules.fall_damage = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::FALL_DAMAGE);
+        self.world.health_rules.fire_damage = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::FIRE_DAMAGE);
+        self.world.health_rules.freeze_damage = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::FREEZE_DAMAGE);
+        horizon_client::mobs::sulfur_cube::set_tnt_explodes(
+            self.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES),
+        );
         use horizon_world::food::Difficulty;
         self.world.health_rules.difficulty = match self.ui.difficulty {
             0 => Difficulty::Peaceful,

@@ -140,6 +140,84 @@ pub fn rule(name: &str) -> Option<&'static Rule> {
     available_rules(true).find(|r| r.name == name)
 }
 
+/// A vanilla rule's resolved position in the registration order.
+#[derive(Clone, Copy, Debug)]
+pub struct RuleIndex(usize);
+
+const fn vanilla_index(name: &str) -> RuleIndex {
+    let mut i = 0;
+    while i < RULES.len() {
+        let a = RULES[i].name.as_bytes();
+        let b = name.as_bytes();
+        let mut n = 0;
+        while n < a.len() && n < b.len() && a[n] == b[n] {
+            n += 1;
+        }
+        if n == a.len() && n == b.len() {
+            return RuleIndex(i);
+        }
+        i += 1;
+    }
+    panic!("unknown vanilla rule")
+}
+
+/// Resolved vanilla rules used by the simulation.
+pub mod vanilla {
+    use super::{RuleIndex, vanilla_index};
+    /// The `advance_time` rule.
+    pub const ADVANCE_TIME: RuleIndex = vanilla_index("advance_time");
+    /// The `water_source_conversion` rule.
+    pub const WATER_SOURCE_CONVERSION: RuleIndex = vanilla_index("water_source_conversion");
+    /// The `lava_source_conversion` rule.
+    pub const LAVA_SOURCE_CONVERSION: RuleIndex = vanilla_index("lava_source_conversion");
+    /// The `random_tick_speed` rule.
+    pub const RANDOM_TICK_SPEED: RuleIndex = vanilla_index("random_tick_speed");
+    /// The `block_drops` rule.
+    pub const BLOCK_DROPS: RuleIndex = vanilla_index("block_drops");
+    /// The `mob_griefing` rule.
+    pub const MOB_GRIEFING: RuleIndex = vanilla_index("mob_griefing");
+    /// The `max_snow_accumulation_height` rule.
+    pub const MAX_SNOW_ACCUMULATION_HEIGHT: RuleIndex =
+        vanilla_index("max_snow_accumulation_height");
+    /// The `spawn_mobs` rule.
+    pub const SPAWN_MOBS: RuleIndex = vanilla_index("spawn_mobs");
+    /// The `spawn_monsters` rule.
+    pub const SPAWN_MONSTERS: RuleIndex = vanilla_index("spawn_monsters");
+    /// The `fire_spread_radius_around_player` rule.
+    pub const FIRE_SPREAD_RADIUS_AROUND_PLAYER: RuleIndex =
+        vanilla_index("fire_spread_radius_around_player");
+    /// The `spread_vines` rule.
+    pub const SPREAD_VINES: RuleIndex = vanilla_index("spread_vines");
+    /// The `natural_health_regeneration` rule.
+    pub const NATURAL_HEALTH_REGENERATION: RuleIndex = vanilla_index("natural_health_regeneration");
+    /// The `drowning_damage` rule.
+    pub const DROWNING_DAMAGE: RuleIndex = vanilla_index("drowning_damage");
+    /// The `fall_damage` rule.
+    pub const FALL_DAMAGE: RuleIndex = vanilla_index("fall_damage");
+    /// The `fire_damage` rule.
+    pub const FIRE_DAMAGE: RuleIndex = vanilla_index("fire_damage");
+    /// The `freeze_damage` rule.
+    pub const FREEZE_DAMAGE: RuleIndex = vanilla_index("freeze_damage");
+    /// The `tnt_explodes` rule.
+    pub const TNT_EXPLODES: RuleIndex = vanilla_index("tnt_explodes");
+    /// The `spawner_blocks_work` rule.
+    pub const SPAWNER_BLOCKS_WORK: RuleIndex = vanilla_index("spawner_blocks_work");
+    /// The `universal_anger` rule.
+    pub const UNIVERSAL_ANGER: RuleIndex = vanilla_index("universal_anger");
+    /// The `mob_drops` rule.
+    pub const MOB_DROPS: RuleIndex = vanilla_index("mob_drops");
+    /// The `max_entity_cramming` rule.
+    pub const MAX_ENTITY_CRAMMING: RuleIndex = vanilla_index("max_entity_cramming");
+    /// The `forgive_dead_players` rule.
+    pub const FORGIVE_DEAD_PLAYERS: RuleIndex = vanilla_index("forgive_dead_players");
+    /// The `ender_pearls_vanish_on_death` rule.
+    pub const ENDER_PEARLS_VANISH_ON_DEATH: RuleIndex =
+        vanilla_index("ender_pearls_vanish_on_death");
+    /// The `projectiles_can_break_blocks` rule.
+    pub const PROJECTILES_CAN_BREAK_BLOCKS: RuleIndex =
+        vanilla_index("projectiles_can_break_blocks");
+}
+
 /// Current values (defaults unless set).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameRules {
@@ -182,6 +260,17 @@ impl GameRules {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
         let index = self.available_rules().position(|rule| rule.name == name)?;
         Some(self.values[index])
+    }
+    /// Read a resolved vanilla boolean rule without a name lookup.
+    pub fn bool_at(&self, index: RuleIndex) -> bool {
+        matches!(self.values[index.0], Value::Bool(true))
+    }
+    /// Read a resolved vanilla integer rule without a name lookup.
+    pub fn int_at(&self, index: RuleIndex) -> i32 {
+        match self.values[index.0] {
+            Value::Int(value) => value,
+            _ => 0,
+        }
     }
     pub fn bool(&self, name: &str) -> bool {
         matches!(self.get(name), Some(Value::Bool(true)))
@@ -337,6 +426,17 @@ mod tests {
                 .get("missing:example"),
             Some(&Tag::Long(123))
         );
+    }
+
+    #[test]
+    fn resolved_reads_follow_mutations() {
+        let mut rules = GameRules::default();
+        assert!(rules.bool_at(vanilla::SPAWN_MOBS));
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 3);
+        assert!(rules.set("spawn_mobs", Value::Bool(false)));
+        assert!(rules.set("random_tick_speed", Value::Int(12)));
+        assert!(!rules.bool_at(vanilla::SPAWN_MOBS));
+        assert_eq!(rules.int_at(vanilla::RANDOM_TICK_SPEED), 12);
     }
 
     #[test]
