@@ -66,14 +66,15 @@ pub(super) fn boat_pushes(boat: Aabb, other: Aabb, other_is_boat: bool) -> bool 
 }
 
 impl Game<'_> {
-    /// The players in boat `id`: the window's player (or the server player
-    /// acting as it) and the server's other players.
     /// Starts or ends a stretch of vehicle ticks (`tick_boats`, `tick_carts`): while one runs,
     /// a vehicle's box query tests the mobs' positions against their [`BoxReach`] first.
-    /// Nothing a vehicle does resizes a mob, and a mob joining or leaving works it out again.
+    /// Mods may grow or rescale a mob between queries, so only an unmodded batch reuses the snapshot.
+    /// A mob joining or leaving works it out again.
     pub(super) fn vehicles_ticking(&self, on: bool) {
-        self.vehicle_mob_reach
-            .set(on.then(|| (self.mobs.len(), BoxReach::of(&self.mobs))));
+        self.vehicle_mob_reach.set(
+            (on && mod_api::__private::mods().is_empty())
+                .then(|| (self.mobs.len(), BoxReach::of(&self.mobs))),
+        );
     }
     /// The mobs' [`BoxReach`] while vehicles tick, none otherwise.
     pub(super) fn vehicle_mob_reach(&self) -> Option<BoxReach> {
@@ -85,6 +86,8 @@ impl Game<'_> {
         self.vehicle_mob_reach.set(Some((self.mobs.len(), reach)));
         Some(reach)
     }
+    /// The players in boat `id`: the window's player (or the server player
+    /// acting as it) and the server's other players.
     pub(super) fn boat_players(&self, id: u32) -> usize {
         let guests = self.lan.as_ref().map_or(0, |h| {
             h.hub
@@ -508,6 +511,40 @@ mod tests {
         assert!(!species_can_ride(Species::Warden));
         assert!(!species_can_ride(Species::Wither));
         assert!(species_can_ride(Species::Cow));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_growing_a_mob_during_vehicle_ticks_keeps_it_in_collision_queries() {
+        use super::super::native_entity_refs::tests::with_game;
+
+        struct Resize;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Resize {}
+
+        with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            let mut cow = Mob::new(77, kind, Vec3::ZERO, 0.0);
+            horizon_client::mobs::finalize::set_baby(&mut cow, true);
+            game.mobs.push(cow);
+            let mob = game
+                .native_mob_ref(game.native_entity(77).unwrap())
+                .unwrap();
+            let area = Aabb::new(Vec3::new(0.3, 0.0, 0.0), Vec3::new(0.4, 1.0, 0.1));
+            assert!(!game.mobs[0].bounds().intersects(area));
+            let mods = vec![mod_api::ModEntry::new("resize-test", Box::new(Resize))].into();
+            mod_api::testing::with_mods(mods, || {
+                game.vehicles_ticking(true);
+                assert!(mob.set_baby(game, false));
+                let cow = &game.mobs[0];
+                assert!(cow.bounds().intersects(area));
+                assert!(
+                    game.vehicle_mob_reach()
+                        .is_none_or(|reach| reach.may_meet(cow, area))
+                );
+                game.vehicles_ticking(false);
+            });
+        });
     }
 
     #[test]
