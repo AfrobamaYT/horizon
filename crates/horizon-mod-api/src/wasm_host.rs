@@ -1035,6 +1035,18 @@ mod tests {
     }
 
     #[test]
+    fn world_line_array_tuple_roundtrip() {
+        let line = crate::WorldLine::new(
+            [1.25, -2.5, 3.75],
+            [4.0, 5.5, -6.25],
+            0x12345678,
+            2.5,
+            crate::WorldDepth::ThroughWalls,
+        );
+        assert_eq!(glue::world_line_roundtrip(&line).unwrap(), line);
+    }
+
+    #[test]
     fn recipe_rule_generated_wire_roundtrip() {
         use crate::{Ingredient, Recipe, RecipeRule, RecipeTemplate, Tag};
         let mut recipe = Recipe::new(
