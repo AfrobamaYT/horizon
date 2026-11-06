@@ -646,6 +646,7 @@ mod tests {
             (json!(40.75), 40),
             (json!(-0.5), 0),
             (json!(4_294_967_336_i64), 40),
+            (json!(4_294_967_336.75), 40),
         ] {
             let timing = UseTiming::from_json(&json!({
                 "delay_ticks": value,
@@ -655,9 +656,13 @@ mod tests {
             assert_eq!(timing.delay_ticks, ticks);
             assert_eq!(timing.damage_conditions.unwrap().max_duration_ticks, ticks);
         }
-        for value in [json!(-1), json!("40"), json!(true)] {
+        for value in [json!(-1), json!("40"), json!(true), json!(2_147_483_648.0)] {
             assert!(UseTiming::from_json(&json!({"delay_ticks": value})).is_none());
         }
+        assert_eq!(
+            UseTiming::from_json(&json!({"delay_ticks": null, "damage_conditions": null})),
+            UseTiming::from_json(&json!({}))
+        );
         let mut stack = crate::items::ItemStack::new("minecraft:stick", 1);
         for (number, ticks) in [
             (horizon_world::nbt::Tag::Double(40.75f64.to_bits()), 40),

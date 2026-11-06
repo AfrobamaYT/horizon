@@ -28,7 +28,7 @@ impl TimingValue for Value {
         self.is_object()
     }
     fn get(&self, key: &str) -> Option<&Self> {
-        self.get(key)
+        self.get(key).filter(|v| !v.is_null())
     }
     fn int(&self) -> Option<i32> {
         Some(if let Some(n) = self.as_i64() {
@@ -36,7 +36,9 @@ impl TimingValue for Value {
         } else if let Some(n) = self.as_u64() {
             n as i32
         } else {
-            self.as_f64()? as i32
+            // JsonParser's decimal tokens use BigDecimal.intValue: truncate
+            // and wrap, unlike NBT Float/Double.intValue's saturating cast.
+            (self.as_f64()?.trunc() % 4_294_967_296.0) as i64 as i32
         })
     }
 }
