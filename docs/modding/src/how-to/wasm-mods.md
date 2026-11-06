@@ -146,7 +146,7 @@ to write a tuple. Both helpers are in `mod_internals::view`.
 or before a declared function call, not immediately at `set_many`. Reads see that journal,
 including the last successful write to a field in a batch. Batches pay the same per-entry
 base, path, journal scan and value fuel costs as single calls, including refused entries.
-All input costs are charged before any entry runs; read outputs are charged before returning.
+Raw batches over twelve entries trap before dispatch; valid inputs are prepaid and read outputs are charged before return.
 
 ### Internals budgets and trust boundary
 
