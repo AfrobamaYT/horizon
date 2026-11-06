@@ -23,7 +23,8 @@ impl Backend for World {
     }
     fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
         (entity.fields().position == [0, 64, 0])
-            .then(|| mod_api::__private::game::block_entity_type_key("test:counter_box"))
+            .then(|| mod_api::__private::block_entity_type_key("test:counter_box"))
+            .flatten()
     }
 }
 
@@ -115,6 +116,13 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     mod_api::__private::install_parts(&loaded.mods).unwrap();
+    mod_api::__private::resolve_block_entity_types(
+        &horizon_client_core::block_entity_types::BlockEntityTypes::new(
+            Default::default(),
+            vec!["test:counter_box".into()],
+        ),
+    )
+    .unwrap();
     let mut answers: Vec<String> = loaded
         .mods
         .iter()

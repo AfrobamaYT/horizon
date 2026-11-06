@@ -253,7 +253,12 @@ impl Game<'_> {
             self.native_player_unleash_entity(player, &name, id);
         }
         // Leashable.tickLeash gates a dying entity's lead drop on entity_drops.
-        let drop = drop && (alive || self.ui.rules.bool("entity_drops"));
+        let drop = drop
+            && (alive
+                || self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS));
         if sound {
             self.lead_sound("break", at);
         }
@@ -430,8 +435,11 @@ impl Game<'_> {
                 self.mobs[index].extra.leash = Some(Holder::Player);
                 self.mobs[index].extra.leash_player = Some(holder);
                 self.lead_sound("tied", at);
-                // The lead is always used up.
-                if let Some(stack) = self.held_mut().as_mut() {
+                // `Player.interactOn` restores the count of a player with
+                // infinite materials (creative); others spend the lead.
+                if !self.creative
+                    && let Some(stack) = self.held_mut().as_mut()
+                {
                     stack.count -= 1;
                     if stack.count == 0 {
                         *self.held_mut() = None;

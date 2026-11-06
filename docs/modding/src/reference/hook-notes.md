@@ -19,6 +19,48 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Client window and screen state
+
+`ClientHost::window_focused()` reports the last focus state from the window
+system. `ClientHost::observed_screen_id()` returns the same ID screen hooks see,
+including overlays. `None` means no view is available: there may be no open
+screen or no renderer yet. It does not mean the client is outside a world.
+Read again after a screen or focus change.
+
+## Input preferences
+
+`ClientHost::input_options()` returns a copy of the current mouse and movement
+input preferences, even outside a world. Read again after settings change; an
+older snapshot stays unchanged. The fields are documented in the API reference.
+
+## Client session and local-player status
+
+`ClientHost::client_session()` supplies read-only `client_server()`,
+`client_language()` and `client_frame_stats()`. All return `None` outside a
+logged-in client world. These reads use existing local state and send nothing.
+`ClientServer` keeps missing names and addresses explicit: its `name` is the
+integrated world's display name, or `None` for an external connection (the game
+retains the player name, not a server display name). Its `address` is absent for
+memory connections; friend-invite secrets are redacted. `integrated_local`
+means this window actually owns that integrated server, not that the address
+looks like localhost. A splitscreen guest does not own the server.
+
+`client_language()` reads the applied language, not a pending options choice.
+Use the existing `ClientHost::is_paused()` for the applied pause state.
+`ClientFrameStats` reports the game's most recently computed `fps`, lifetime
+`rendered_frames` (menus included), and the newest completed frame's wall
+interval as `frame_time_ns` (including waits). The interval is `None` until a
+sample exists or after the chart is reset. Reading it starts no new recording.
+
+`PlayerRef::block_breaking(&dyn ClientHost)` and `ambient_mood(&dyn ClientHost)`
+only accept the current local player's handle. Stale, fake and nonlocal handles
+return `None`, as does a disconnected client. `BlockBreakingState::Idle` is
+instead a valid local player who is not breaking a block. `Breaking` gives the
+target position, accumulated predicted progress and optional visible crack
+stage (0 through 9; absent at zero progress). The stage uses the same
+calculation as the world overlay. Mood is the existing cave ambience value,
+normally 0 through 1, not a server-side measurement.
+
 ## Sending a map image
 
 `PlayerRef::send_map` sends a complete 128-by-128 map image through a
@@ -615,7 +657,7 @@ one, where vanilla gives the `by` one.
 
 - Nicknames for server mods: `player.set_nickname(host, Option<&str>)` shows a name in place of a player's in chat (their messages, `/me`, `/msg`) and the Tab list, the real name on hover and everywhere else; `host.messages().text_allowed(text)` asks the server's chat filter. Obtain a `PlayerRef` from `host.players().server_players()` or `.acting_player()` and retain that value, not the borrowed service. The handle is tied to its world epoch and entity identity: nickname writes refuse stale or offline players, but can reach a connected player displaced by another player's turn. A nickname already set persists across reconnects until changed or the server stops.
 
-- Tag and fluid reads from any hook that has a `Host`: `host.block_in_tag("minecraft:oak_log", "minecraft:logs")`, `host.item_stack_in_tag(&stack, tag)` (`ItemStack.is(TagKey)`), `host.state_fluid_state(state)` (`BlockState.getFluidState`: water for a waterlogged state, `None` for an id no state has) and `host.fluid_in_tag("minecraft:water", "minecraft:water")`. The tag may be written with or without `minecraft:`, with no `#`. They read the world's merged tags, data packs and content mods included; an unknown tag is false and an empty stack tests `minecraft:air`. The tag reads are `None` on a client and before the world loads its tags. `host.state_outline(state)` (`BlockState.getShape` with an empty getter at the origin) gives a state's outline boxes in the block's own space, with no random offset and no world context; empty for air, `None` for an id no state has. `host.tag_members(TagRegistry::Block, tag)` (also `Item` and `Fluid`; `HolderSet.Named` iteration) lists a tag's members in vanilla's order, the file's order with nested tags in place and the first occurrence kept: an unknown tag lists nothing, and it is `None` where the tag reads are. `level.fluid_state(host, pos)` (`BlockGetter.getFluidState`) reads the fluid at a position, `None` where the block read is (an unloaded chunk or a `y` outside the world).
+- Tag and fluid reads from any hook that has a `Host`: `host.block_in_tag(oak_log, "minecraft:logs")`, `host.item_stack_in_tag(&stack, tag)` (`ItemStack.is(TagKey)`), `host.state_fluid_state(state)` (`BlockState.getFluidState`: water for a waterlogged state, `None` for an id no state has) and `host.fluid_in_tag("minecraft:water", "minecraft:water")`. The tag may be written with or without `minecraft:`, with no `#`. They read the world's merged tags, data packs and content mods included; an unknown tag is false and an empty stack tests `minecraft:air`. The tag reads are `None` on a client and before the world loads its tags. `host.state_outline(state)` (`BlockState.getShape` with an empty getter at the origin) gives a state's outline boxes in the block's own space, with no random offset and no world context; empty for air, `None` for an id no state has. `host.tag_members(TagRegistry::Block, tag)` (also `Item` and `Fluid`; `HolderSet.Named` iteration) lists a tag's members in vanilla's order, the file's order with nested tags in place and the first occurrence kept: an unknown tag lists nothing, and it is `None` where the tag reads are. `level.fluid_state(host, pos)` (`BlockGetter.getFluidState`) reads the fluid at a position, `None` where the block read is (an unloaded chunk or a `y` outside the world).
 - Fluid facts from any hook that has a `Host`, on either side and with no world: `host.fluid_is_same("minecraft:water", "minecraft:flowing_water")` (`Fluid.isSame`: a source and its flowing form are one fluid; false when either id names no fluid), `host.fluid_bucket(fluid)` (`Fluid.getBucket`: `minecraft:water_bucket` or `minecraft:lava_bucket`) and `host.fluid_pickup_sound(fluid)` (`Fluid.getPickupSound`: `minecraft:item.bucket.fill` or `minecraft:item.bucket.fill_lava`). Fluids are named by id, with or without `minecraft:`. The bucket and the sound are `None` for `minecraft:empty`, which has neither (vanilla's bucket there is air), and for an id no fluid has.
 
 - A block part's `is_pathfindable` changes whether a path of a `PathComputationType` (`Land`, `Water`, `Air`) may go through the block's states (`BlockBehaviour.isPathfindable`); `event.pathfindable` starts with the block's own answer. The answer depends on the state and the type alone: the game asks once per state and type when parts resolve (at world load and on every `/reload`) and path finding, spawning and the goals read the stored answer, so a part cannot answer from a position, a level or the time. Server-side.
@@ -646,6 +688,8 @@ or transactions. Declarations still go on each event or registrar.
 - Dispenser item behaviours (`native_dispense_item`): a server hook receives the dimension, dispenser position, facing and selected stack, before any vanilla behaviour, for mod or vanilla items. Leave its answer `None` for vanilla, or answer `Some((remainder, event))`: a `None` remainder empties the slot, `Some(stack)` writes that remainder without consuming again, and `event` is the level event played with the smoke (1000 click, 1001 fail, 0 nothing, as `NOOP`). Answer `Some((native_dispense_default(dimension, pos, facing, stack.clone()), 1000))` to drop one item normally, including items with a special vanilla behaviour. Droppers are unaffected.
 
 - Image tooltip components: `native_tooltip_component(stack, size)` answers finite positive width/height in GUI pixels, and `native_tooltip_component_draw(stack, batch, origin, size)` draws that component with `native_sprite`, `native_fill` and `native_text`. The stack supplies its data. Space and background are reserved after the text and any vanilla bundle component; the component width participates in tooltip positioning. Neither hook changes ordinary tooltips without an answer. Client-side.
+
+- `ClientHost::modifiers()` returns a `ClientModifiers` snapshot of the window's shift, control, alt and super keys, using the same GLFW bits as the input hooks. It is available outside a world and clears on focus loss. Reading it copies the current modifier state; it does not allocate or dispatch hooks.
 
 - `Hooks::render_tooltip_gather_components` (NeoForge's `RenderTooltipEvent.GatherComponents`, client-side, cancellable): an item's tooltip as one list of `TooltipElement`s, a `Text` line with its colour or an `Image` (a `TooltipImage`: the stack whose item's `tooltip_component_draw` part draws it, and its size in GUI pixels), after `item_tooltip` and before anything is wrapped or measured. Add, change, reorder or remove elements. `max_width` starts at -1, no limit, which leaves the lines as vanilla draws them; a mod that sets it wraps every line wider than that. Cancel and nothing is drawn. An image with a non-finite or non-positive size is dropped.
 
@@ -777,7 +821,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - `native_item_decorations(stack, x, y, batch)` appends custom GUI drawing after the default bar, cooldown shade and count have been painted for an item icon. The stack is the displayed stack, x/y are its icon's top-left in GUI units, the units the batch takes (no item-local translation remains active). Existing GUI helpers can draw badges, text and overlays. The shared path covers the hotbar, carried stacks, menu slots, recipe book and item tooltip icons, and the item icons of the advancement, beacon, stats and trading screens. `native_item_bar` still controls the bar separately; this hook does not suppress vanilla decorations.
 
-- Using an item over time, as vanilla's `Item.getUseDuration`, `getUseAnimation` and `finishUsingItem` and NeoForge's `LivingEntityUseItemEvent.Start` and `.Finish`. `native_use_duration` answers a stack's use time: a mod's own item with no use of vanilla's that answers above 0 is used over time on a right click, until it is let go or the time runs out, on single player and LAN alike. `native_use_animation` picks the first person pose of a use (eat, drink, bow, trident, brush), and `native_can_eat` decides whether a food can be eaten now. `native_living_entity_use_item_start` may change a use's duration or refuse it, on the server and where the window's client predicts the use, and on the server `native_living_entity_use_item_finish` may replace what the hand holds once the time ran out (consumables, potions and mods' items). Both take the using entity, None for a player, so mobs can fire them later, and the hand in use. Change the world only where this game runs the world, not on a server's client.
+- Using an item over time, as vanilla's `Item.getUseDuration`, `getUseAnimation` and `finishUsingItem` and NeoForge's `LivingEntityUseItemEvent.Start` and `.Finish`. `native_use_duration` answers a stack's use time: a mod's own item with no use of vanilla's that answers above 0 is used over time on a right click, until it is let go or the time runs out, on single player and LAN alike. `native_use_animation` changes the item's vanilla use animation, including specialised item poses, each first-person frame and each local or remote player model tick; a spear override without kinetic data is refused. `native_can_eat` decides whether a food can be eaten now. `native_living_entity_use_item_start` may change a use's duration or refuse it, on the server and where the window's client predicts the use, and on the server `native_living_entity_use_item_finish` may replace what the hand holds once the time ran out (consumables, potions and mods' items). Both take the using entity, None for a player, so mobs can fire them later, and the hand in use. Change the world only where this game runs the world, not on a server's client.
 
 - Items and block state properties for drawing mod block entities: in `native_block_entity_submit`, `native_draw_item(draw,
   stack, display, owner_yaw, seed)` draws an item stack under `draw`'s pose as a campfire's or a shelf's
@@ -799,7 +843,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - Any command a player types: `native_player_command(player, name, command, cancel, replies)` is heard before the command is looked at (NeoForge's `CommandEvent`), without its slash, for vanilla's commands, the mods' own and commands the player may not run, once for each command a player sends, on a server. Also each line of a quiet command batch. A mod sets `canceled` to stop it: nothing runs and nothing is answered but the lines it pushes to `replies`, which reach the player as system chat.
 
-- Redstone signals as a block reads them, on a level handle (`LevelRef`) on a server, through the game's own `SignalGetter`, mods' `block_signal` and `should_check_weak_power` parts included: `level.signal(host, pos, direction)` (`getSignal`, how strongly the block at `pos` powers its neighbour on the `direction` side, conducted power included), `level.direct_signal(host, pos, direction)` (`getDirectSignal`, the strong power alone), `level.direct_signal_to(host, pos)` (`getDirectSignalTo`), `level.best_neighbor_signal(host, pos)` (`getBestNeighborSignal`, the strongest power reaching `pos`, as a dispenser or a piston reads it) and `level.has_neighbor_signal(host, pos)` (`hasNeighborSignal`, stopping at the first powered side). Each costs what the game's own call does. They take `&mut dyn ServerHost`, not `&dyn Host`: the signal path asks mods' parts, which get the level as their host, and only a write borrow of the game builds it. They read the level in place: None (or false) for another level, a stale handle or a client.
+- Redstone signals as a block reads them, on a level handle (`LevelRef`) on a server, through the game's own `SignalGetter`, mods' `block_signal` and `should_check_weak_power` parts included: `level.signal(host, pos, direction)` (`getSignal`, how strongly the block at `pos` powers its neighbour on the `direction` side, conducted power included), `level.direct_signal(host, pos, direction)` (`getDirectSignal`, the strong power alone), `level.direct_signal_to(host, pos)` (`getDirectSignalTo`), `level.best_neighbor_signal(host, pos)` (`getBestNeighborSignal`, the strongest power reaching `pos`, as a dispenser or a piston reads it) and `level.has_neighbor_signal(host, pos)` (`hasNeighborSignal`, stopping at the first powered side). Each costs what the game's own call does. They take `&dyn Host` and read the live signal state without a transaction or mutable level borrow. Block signal and weak-power Part callbacks receive the restricted `LevelHost`, so they cannot recursively invoke these signal helpers, just as on the write path. They read the level in place: None (or false) for another level, a stale handle or a client.
 
 - `level.weather(host)` (rain and thunder levels, 0 in the Nether and the End), `level.day_time(host)` (the time of day), `level.height(host)` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light and `level.is_raining_at(host, pos)` for rain at a position: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
 
@@ -1276,6 +1320,12 @@ registration path.
   player. The game's two copies of `CameraType` are now one, `mod_api::CameraType`. Client side.
 
 - A client tick's two moments, as NeoForge's `ClientTickEvent.Pre` and `.Post`: `client_tick_pre(host, event)` runs at the start of every client tick (`Minecraft.tick`), paused or not and on the title screen too, and `client_tick_post` at its end. They replace the single `tick` hook, which also fired on a server's own `Game`: the server's tick is `server_tick` (`ServerTickEvent`), so a mod that implemented `tick` implements `client_tick_pre` and, for a server, `server_tick`. Window only, client side; a tick with no listener costs one branch.
+- How long a client tick lasts, a "timer": `tick_target_millis(host, event)` gets the milliseconds the window's
+  `DeltaTracker.Timer` divides each frame's time by (`Minecraft.getTickTargetMillis`), vanilla's 50 at 20 ticks a
+  second or the server's slower `/tick rate`, and may set another, once a frame before that frame's client ticks run.
+  25 runs the client twice as fast, 100 half as fast, still at most ten ticks a frame; an answer that is not a finite
+  number above zero keeps vanilla's. Only the window's clock changes; a server keeps its own rate. Client side; with no
+  listener, one branch a frame.
 
 - A player swapping their main and off hand items: `native_player_swap_hands(player, name, cancel)` is heard before the swap (Bukkit's `PlayerSwapHandItemsEvent`; a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod sets `cancel` to keep the items where they are; the player's client gets its slots back.
 
@@ -1444,7 +1494,7 @@ registration path.
 
 - A server player caught a bucketable mob: `native_player_bucket_entity(player, name, entity_id, entity)` runs after the mob was removed and the filled bucket was put in the player's hand or inventory. `entity` is the mob species id.
 
-- A server player's selected beacon effects were stored: `native_player_change_beacon_effect(player, name, pos, primary, secondary)`. Empty effect ids mean none is selected.
+- A server player's selected beacon effects were stored: `native_player_change_beacon_effect(player, name, pos, primary, secondary)`. The primary and secondary values are `Option<EffectKey>`; `None` means no effect is selected.
 
 
 - A server player counts as deeply asleep after 100 ticks in a bed: `native_player_deep_sleep(player, name)` fires once at that point.
@@ -1517,7 +1567,7 @@ registration path.
 
 - A raid wave has spawned at its position, with its raid id, wave number and raider count (riders' mounts not counted).
 
-- A raid is triggered or reaches `victory`, `loss` or `stopped`: `native_raid_state_change(raid, pos, state)` reports its id, center and new state.
+- A raid is triggered or reaches `victory`, `loss` or `stopped`: `native_raid_state_change(raid, pos, state)` reports its owning `RaidRef`, center and new state. The handle retains its level even when that level is parked; an already removed raid cannot be read.
 
 - `native_sculk_bloom(dimension, pos)` is called after a sculk catalyst at `pos` takes experience and enters the blooming state.
 
@@ -1699,8 +1749,17 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   even if `foo bar` is public. Players can traverse the shared `foo` prefix to reach `bar`, but cannot execute
   `foo` itself. Optional arguments make their preceding prefixes executable at that usage's level; if several
   usages execute at the same prefix, its lowest executable usage level wins. A rejected usage does not change
-  the permissions of accepted usages. A name vanilla has, or a usage that doesn't parse, is left out with a
-  warning in the log.
+  the permissions of accepted usages. When argument alternatives consume the same input without errors, an
+  executable alternative takes precedence over a denied one; equally valid alternatives keep registration order.
+  A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
+
+- **`perform_command` / `perform_console_command`**: `event.command` is an owned `CommandInvocation`
+  with its literal path and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean
+  values retain the dispatcher's types; word and greedy text are strings. Player selectors resolve to a single live
+  `PlayerRef`, items become component-bearing stacks of one, and block positions resolve source-relative/local
+  coordinates without requiring loaded chunks. Missing optional arguments are absent. Parsing, permission and
+  resolution failures produce feedback without calling listeners. The console resolves from the Overworld spawn's
+  block corner with zero rotation and no source entity (`@s` fails). Return `Flow::Cancel` when handled.
 - **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
   `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's
@@ -1906,7 +1965,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_crafter_craft(pos, recipe)`**: a crafter completed `recipe` at `pos`, after consuming its ingredients and handling its output. Server-side.
 - **`native_player_attack_cooldown_reset(player, name)`**: a server player's punch was handled: the main-hand swing and attack-strength reset have both happened. The player's state is not swapped in.
 - **`native_player_bucket_entity(player, name, entity_id, entity)`**: a server player caught a bucketable mob after the mob was removed and the filled bucket was put in the player's hand or inventory. `entity` is the mob species id.
-- **`native_player_change_beacon_effect(player, name, pos, primary, secondary)`**: a server player's beacon selection was stored. Effect values are ids, empty when none is selected.
+- **`native_player_change_beacon_effect(player, name, pos, primary, secondary)`**: a server player's beacon selection was stored. Effect values are `Option<EffectKey>`, `None` when none is selected.
 - **`native_player_deep_sleep(player, name)`**: a server player reached 100 ticks asleep in a bed and now counts as deeply asleep for the night-skip check.
 - **`native_player_egg_throw(player, name)`**: a server player threw an egg after its projectile was launched and its use applied.
 - **`native_player_elytra_boost(player, name)`**: a server player used a firework rocket to boost while gliding, after the rocket was launched and consumed.
@@ -2003,7 +2062,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied.
 - **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
-- **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`.
+- **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`. Its `RaidRef` identifies the owning level, not necessarily the level currently in place.
 - **`native_world_saved(wait)`**: the server completed its world save cycle; `wait` is true when chunk writes were flushed before returning.
 - **`native_entities_load(dimension, chunk, count)`**: saved entity records for `chunk` finished loading into `dimension`.
 - **`native_entities_unload(dimension, chunk, count)`**: entities in `chunk` left the active world and were queued for saving.
@@ -2419,19 +2478,19 @@ handle, an entity the client doesn't track and a level it doesn't show:
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
   which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
 - `living.effects(host)` lists a living entity's active effects (vanilla's `activeEffects`) as `NativeActiveEffect`s — the
-  namespaced id as an owned `Identifier`, the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
-  show-icon flag, the icon always shows. `living.effect(host, id)` reads one (`getEffect`) and `living.potion_affected(host,
-  id)` answers `hasEffect`; a bare vanilla id reads as `minecraft:`'s. `living.add_effect(host, &effect)` is
+  load-owned `EffectKey` (read its canonical name with `key.id(host)`), the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
+  show-icon flag, the icon always shows. `living.effect(host, key)` reads one (`getEffect`) and `living.potion_affected(host,
+  key)` answers `hasEffect`; request the key once through `Registrar::effect_key`. `living.add_effect(host, &effect)` is
   `LivingEntity.addEffect` by the game's own path: a player's or a guest's goes through the potion machinery (its attribute
   modifiers, absorption, and the added-effect hooks for a content mod's effect), a mob's past `canBeAffected` (a spider
   shrugs off poison) and with the same hooks. It returns true when accepted — whether it replaced one already there or only
   extended it is `MobEffectInstance.update`'s business (a stronger one replaces with its own duration, an equal one extends,
-  a weaker one changes nothing). `living.remove_effect(host, id)` and `living.remove_all_effects(host)` take effects away
+  a weaker one changes nothing). `living.remove_effect(host, key)` and `living.remove_all_effects(host)` take effects away
   the way their running out does: the attribute modifiers they gave recompute and absorption's hearts go with theirs. The
   added-effect hooks hear a player's add without an entity id, so a guest's reaches them as the acting player (`None`) — a
   limitation of the hooks themselves, unchanged here. Armor stands and the dragon keep no effects, as `/effect` skips them:
   `effects` and `effect` read `None` for them and their writes return false. On a client,
-  `living.effect_blend_factor(host, id, partial)` (`getEffectBlendFactor`) reads how far the local player's effect has
+  `living.effect_blend_factor(host, key, partial)` (`getEffectBlendFactor`) reads how far the local player's effect has
   faded in at the partial tick: darkness fades over 22 ticks and nausea in over 150 and out over 20. Other effects start
   at 0 after a blended addition and interpolate to their post-countdown target each client tick (1 while active, 0 once
   expired). An unblended addition starts at its target immediately; a replacement packet preserves the old blend.
@@ -2450,8 +2509,10 @@ handle, an entity the client doesn't track and a level it doesn't show:
   change and no draw. `set_owner` on an arrow also allows pickup for a player owner (`AbstractArrow.setOwner`);
   `deflect` does not (vanilla's `EntityReference` overload). Arrows (and a mob's trident for
   `pickup`) also have `pickup`/`set_pickup` (`NativeArrowPickup`), `base_damage`/`set_base_damage` and
-  `critical`/`set_critical`; the critical flag reaches clients through the entity data, and the others are
-  server-only as in vanilla.
+  `critical`/`set_critical` and `pierce_level`/`set_pierce_level`. The pierce level is a signed byte:
+  vanilla stores all values from -128 through 127 unchanged, and nonpositive values do not pierce. The
+  typed result distinguishes a stale handle, a non-arrow projectile and a wrong-side host. The critical
+  flag reaches clients through entity data; these handle methods operate on the server.
 - `living.drop(host, stack, throw_randomly, include_thrower_name)` throws a stack the mod holds from the eyes
   (`LivingEntity.drop`) and gives the item entity; it never touches a slot. `is_tamed(host)` and `owner(host)` read a
   tamable mob or a horse (`TamableAnimal.isTame`, its owner's UUID).
@@ -3109,3 +3170,31 @@ It searches the world's saved templates before data packs and returns the rotate
 in vanilla placement order, with each transformed state and its saved block-entity data. It uses
 the palette selected at `at`; processors and entities are not included. Invalid or missing names
 return `None`. A builder can retain this snapshot and place its blocks over time.
+
+## Entity model layers
+
+`Hooks::layer_definitions` is the client registration-phase counterpart of NeoForge 26.3's
+`EntityRenderersEvent.RegisterLayerDefinitions`. It receives a `RegistrationContext`, once at
+client startup, and collects `(id, LayerDefinition)` entries in dependency order. Dedicated
+and integrated server roles do not fire this client event. IDs are `<mod id>:<model>#<layer>`;
+vanilla-namespace, malformed and duplicate IDs are logged and left out.
+
+A `LayerDefinition` holds a `MeshDefinition` of named parts whose `CubeListBuilder` boxes sit
+at a `PartPose`, on a texture of the given size. Texture offsets, mirroring and
+`CubeDeformation` match vanilla's model builders. This listener is compiled in the API tests:
+
+```rust,ignore
+{{#include ../../../../crates/horizon-client/tests/mod_api_hooks.rs:layer_definitions}}
+```
+
+`ClientHost::bake_layer` bakes a registered layer or a vanilla layer by its
+`entity-models.json` name (`minecraft:zombie#main`) into an owned `ModelPart` tree. Bake once
+and keep it. Before each frame, call `reset_all_poses` and set the parts' positions and
+rotations as `setupAnim` does. A layer unavailable from the cached mob types is read from
+resources for each bake, so do not bake it every frame.
+
+Draw the tree with `BlockEntityDrawContext::model_part`, using the same draw context the mob
+or block entity submit hook received. There is no separate Host drawing helper. Positions
+are texels, +y down and the front towards -z; convert the mob's frame with scale
+`[1.0, -1.0, -1.0]` then translation `[0.0, -1.501, 0.0]`, as `LivingEntityRenderer` does.
+The sprite is the entity texture ID and the tint is `0xRRGGBB`.

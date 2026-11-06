@@ -1351,7 +1351,8 @@ impl Game<'_> {
             // remembers them before the blast can kill it.
             self.fight.blast_by = by;
             // EndCrystal.hurtServer: ExplosionInteraction.BLOCK.
-            let interaction = self.destroy_type("block_explosion_drop_decay");
+            let interaction =
+                self.destroy_type(horizon_client::gamerules::vanilla::BLOCK_EXPLOSION_DROP_DECAY);
             // EndCrystal is 2 by 2 blocks: its box decides `isInWater`.
             let (x, y, z) = (c.position.x, c.position.y, c.position.z);
             self.combat.explosion_in_water = self.bounds_in_water(Aabb::new(
@@ -2556,7 +2557,10 @@ impl Game<'_> {
             }
         }
         // checkWalls over head, neck and body.
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         let mut in_wall = false;
         let Some(d) = self.dragon.as_ref() else {
             return;
@@ -2659,7 +2663,10 @@ impl Game<'_> {
         let fight = self.is_fight_dragon();
         let first_kill = fight && !self.fight.previously_killed;
         let xp = if first_kill { 12000 } else { 500 };
-        let drops = self.ui.rules.bool("mob_drops");
+        let drops = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS);
         if t > 150 && t % 5 == 0 && drops {
             self.spawn_orbs([p.x, p.y, p.z], (xp as f32 * 0.08) as u32);
         }
@@ -3735,6 +3742,8 @@ impl Game<'_> {
             vertical_collision: false,
             horizontal_collision: false,
             needs_sync: false,
+            idle: false,
+            bare: false,
             leash: None,
             spectator: false,
             watching: false,
@@ -4063,7 +4072,8 @@ impl Game<'_> {
             }
         }
         // DragonRespawnStage.SUMMONING_PILLARS: ExplosionInteraction.BLOCK.
-        let interaction = self.destroy_type("block_explosion_drop_decay");
+        let interaction =
+            self.destroy_type(horizon_client::gamerules::vanilla::BLOCK_EXPLOSION_DROP_DECAY);
         let _ = self.server_explode(
             [f64::from(cx) + 0.5, f64::from(h), f64::from(cz) + 0.5],
             5.0,

@@ -10,7 +10,7 @@ use horizon_client::{
     projectiles::{OwnerFields, Projectile, ProjectileKind, Turn},
 };
 use horizon_core::geometry::Vec3;
-use mod_api::{EntityRef, NativeArrowPickup, NativeDeflection, ProjectileRef};
+use mod_api::{EntityRef, NativeArrowPickup, NativeDeflection, PierceLevelError, ProjectileRef};
 
 /// Where a projectile handle's entity lives.
 #[derive(Clone, Copy)]
@@ -264,6 +264,47 @@ impl Game<'_> {
         true
     }
 
+    fn native_arrow_index(&self, projectile: ProjectileRef) -> Result<usize, PierceLevelError> {
+        if !self.is_logical_server() {
+            return Err(PierceLevelError::WrongSide);
+        }
+        let backing = self
+            .native_projectile_backing(projectile)
+            .ok_or(PierceLevelError::Stale)?;
+        match backing {
+            Backing::List(index) if self.creatures.projectiles[index].arrow.is_some() => Ok(index),
+            _ => Err(PierceLevelError::NotArrow),
+        }
+    }
+
+    /// `AbstractArrow.getPierceLevel`: the signed byte stored by vanilla.
+    pub(super) fn native_projectile_pierce_level(
+        &self,
+        projectile: ProjectileRef,
+    ) -> Result<i8, PierceLevelError> {
+        let index = self.native_arrow_index(projectile)?;
+        Ok(self.creatures.projectiles[index]
+            .arrow
+            .as_ref()
+            .unwrap()
+            .pierce as i8)
+    }
+
+    /// `AbstractArrow.setPierceLevel`: stores the signed byte without clamping.
+    pub(super) fn native_projectile_set_pierce_level(
+        &mut self,
+        projectile: ProjectileRef,
+        level: i8,
+    ) -> Result<(), PierceLevelError> {
+        let index = self.native_arrow_index(projectile)?;
+        self.creatures.projectiles[index]
+            .arrow
+            .as_mut()
+            .unwrap()
+            .pierce = level as u8;
+        Ok(())
+    }
+
     /// `AbstractArrow.getBaseDamage`, for an arrow (a trident's is fixed).
     pub(super) fn native_projectile_base_damage(&self, projectile: ProjectileRef) -> Option<f64> {
         match self.native_projectile(projectile)?.kind {
@@ -368,6 +409,19 @@ mod tests {
             assert_eq!(game.creatures.projectiles[0].owner, Some(Who::Mob(99)));
             assert!(!handle.set_owner(game, Some(entity)));
 
+            assert_eq!(handle.pierce_level(game), Ok(0));
+            let role = game.options.execution_role;
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+            assert_eq!(handle.pierce_level(game), Err(PierceLevelError::WrongSide));
+            assert_eq!(
+                handle.set_pierce_level(game, 1),
+                Err(PierceLevelError::WrongSide)
+            );
+            game.options.execution_role = role;
+            for level in [i8::MIN, -1, 0, 1, i8::MAX] {
+                assert_eq!(handle.set_pierce_level(game, level), Ok(()));
+                assert_eq!(handle.pierce_level(game), Ok(level));
+            }
             assert_eq!(handle.pickup(game), Some(NativeArrowPickup::Disallowed));
             assert!(handle.set_pickup(game, NativeArrowPickup::CreativeOnly));
             assert_eq!(
@@ -437,6 +491,11 @@ mod tests {
             let ball = game
                 .native_projectile_ref(game.native_entity(ball_id).unwrap())
                 .unwrap();
+            assert_eq!(ball.pierce_level(game), Err(PierceLevelError::NotArrow));
+            assert_eq!(
+                ball.set_pierce_level(game, 1),
+                Err(PierceLevelError::NotArrow)
+            );
             assert_eq!(ball.pickup(game), None);
             assert_eq!(ball.base_damage(game), None);
             assert!(!ball.set_critical(game, true));
@@ -449,6 +508,11 @@ mod tests {
                 NativeWorldEpoch::new(entity.epoch().get() + 1),
                 entity.id(),
             ));
+            assert_eq!(stale.pierce_level(game), Err(PierceLevelError::Stale));
+            assert_eq!(
+                stale.set_pierce_level(game, 1),
+                Err(PierceLevelError::Stale)
+            );
             assert_eq!(stale.owner(game), None);
             assert!(!stale.set_pickup(game, NativeArrowPickup::Allowed));
             assert!(!stale.deflect(game, NativeDeflection::Reverse, None, None, false, [1.0; 3]));

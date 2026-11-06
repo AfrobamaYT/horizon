@@ -909,7 +909,9 @@ impl Game<'_> {
             if in_water {
                 a.enchantment_fall_distance = 0.0;
             } else {
-                a.enchantment_fall_distance += (a.previous.y - a.position.y).max(0.0);
+                // Entity.checkFallDamage narrows each movement before adding to the double.
+                a.enchantment_fall_distance +=
+                    f64::from((a.previous.y - a.position.y).max(0.0) as f32);
             }
             let landed = a.on_ground && a.enchantment_fall_distance > 0.0;
             if a.on_ground {
@@ -1027,7 +1029,10 @@ impl Game<'_> {
                 .state(self.world.block(p.x, p.y, p.z))
                 .is_some_and(|s| s.name == "minecraft:turtle_egg");
             if egg
-                && self.ui.rules.bool("mob_griefing")
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
                 && self.world.random.next_int_bound(chance).unwrap_or(1) == 0
             {
                 self.crack_turtle_egg([p.x, p.y, p.z])?;

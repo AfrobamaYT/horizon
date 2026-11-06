@@ -369,7 +369,7 @@ impl Game<'_> {
             if !matrix.is_finite() {
                 continue;
             }
-            let mut batch = HudBatch::new([1, 1]);
+            let mut batch = HudBatch::scratch([1, 1]);
             text_display::draw(&mut batch, &self.gui.atlas, &d, lines, background);
             let light = Self::display_light(&self.world, &d, position);
             // Font.DisplayMode: SEE_THROUGH over everything, else POLYGON_OFFSET.

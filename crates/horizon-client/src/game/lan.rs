@@ -414,6 +414,8 @@ pub(super) struct LanHost {
     /// The entity id counter when this tick's states were taken for guests
     /// (`lan_note_joined`), None when no guest tracked them.
     pub(super) states_next_entity: Option<u32>,
+    /// Last tick's states of the idle mobs and items (game/lan_idle.rs).
+    pub(super) idle_states: super::lan_idle::IdleStates,
 }
 
 impl Game<'_> {
@@ -696,8 +698,8 @@ pub(super) fn mob_meta(
     meta.extend(
         hub.effect_meta(
             (m.extra.effects.iter())
-                .filter(|e| !m.extra.hidden_effects.contains(&e.0))
-                .map(|e| (e.0, m.extra.ambient_effects.contains(&e.0))),
+                .filter(|e| !m.extra.hidden_effects.contains(&e.id))
+                .map(|e| (e.id, m.extra.ambient_effects.contains(&e.id))),
         ),
     );
     defaults.push((10, serializer::PARTICLES, Value::Particles(Vec::new())));
@@ -922,7 +924,7 @@ pub(super) fn mob_meta(
         }
         // Villager.DATA_VILLAGER_DATA and ZombieVillager's (after Zombie's three).
         "minecraft:villager" | "minecraft:zombie_villager" => {
-            use horizon_client::mobs::render::{PROFESSIONS, VILLAGER_TYPES};
+            use horizon_client::mobs::render::VILLAGER_TYPES;
             if kind == "minecraft:villager" {
                 unhappy_counter(m, meta, defaults);
             } else {
@@ -933,7 +935,7 @@ pub(super) fn mob_meta(
                 defaults.push((19, serializer::BOOLEAN, Value::Bool(false)));
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
-            let profession = PROFESSIONS[e.variant2 as usize % PROFESSIONS.len()];
+            let profession = horizon_client::mobs::villager::profession(e.variant2).id;
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),
@@ -1596,6 +1598,7 @@ impl Game<'_> {
             sleep_ignored: Default::default(),
             states: Default::default(),
             states_next_entity: None,
+            idle_states: Default::default(),
         });
         self.audio.capture = Some(Vec::new());
         Ok(())
@@ -2091,11 +2094,24 @@ impl Game<'_> {
     }
 
     /// The entities guests track: mobs, items and the rest (game/lan_entities.rs).
-    /// `mob_players` is the guest each mob sees as its player (game/lan_mobs.rs).
-    /// Only the entities whose id is above `after` (0: all of them).
-    fn lan_entities(&mut self, out: &mut States, drain_minecart_steps: bool, after: u32) {
+    /// Only the entities whose id is above `after` (0: all of them). With
+    /// `kept`, idle mobs and items no client can pair with are described bare
+    /// (game/lan_idle.rs).
+    fn lan_entities(
+        &mut self,
+        out: &mut States,
+        drain_minecart_steps: bool,
+        after: u32,
+        mut kept: Option<&mut super::lan_idle::IdlePass<'_>>,
+    ) {
         out.clear();
         let mut speeds = super::lan_attributes::SpeedByType::default();
+        // ChunkMap.tick sends the changes of an entity outside the
+        // entity-ticking range only when it changed section or needs sync.
+        let levels = self.tickets.levels();
+        let idle_at = |p: horizon_core::geometry::Vec3| {
+            !levels.in_entity_ticking_range((p.x.floor() as i32) >> 4, (p.z.floor() as i32) >> 4)
+        };
         for m in self.mobs.iter().filter(|m| !m.removed && m.id > after) {
             let Some(host) = self.lan.as_ref() else {
                 return;
@@ -2103,10 +2119,11 @@ impl Game<'_> {
             let (mob_players, hub) = (&host.mob_players, &host.hub);
             // The lead's holder: the player the mob sees, another mob or a
             // fence knot (game/lan_entities.rs).
-            let player_entity = mob_players
-                .get(&m.id)
-                .and_then(|conn| hub.guest(*conn))
-                .map(|g| g.entity_id);
+            let player_entity = || {
+                (mob_players.get(&m.id))
+                    .and_then(|conn| hub.guest(*conn))
+                    .map(|g| g.entity_id)
+            };
             let leash = m.extra.leash.and_then(|h| match h {
                 Holder::Player => match m.extra.leash_player {
                     Some(u) => hub
@@ -2114,21 +2131,37 @@ impl Game<'_> {
                         .iter()
                         .find(|g| playerdata::uuid_ints(g.uuid) == u)
                         .map(|g| g.entity_id),
-                    None => player_entity,
+                    None => player_entity(),
                 },
                 Holder::Mob(id) | Holder::Boat(id) => Some(id as i32),
                 Holder::Knot(p) => self.knot_ids.get(&p).map(|&id| id as i32),
             });
-            let e = out.add(m.id as i32, entity_uuid(m.id), m.kind.id.as_str());
-            e.position = [m.position.x, m.position.y, m.position.z];
-            (e.yaw, e.pitch, e.head_yaw) = (m.yaw, m.head_pitch, m.head_yaw);
-            e.on_ground = m.on_ground;
-            e.velocity = [m.velocity.x, m.velocity.y, m.velocity.z];
+            let idle = idle_at(m.position);
+            let place = super::lan_idle::Place {
+                position: [m.position.x, m.position.y, m.position.z],
+                rotation: (m.yaw, m.head_pitch, m.head_yaw),
+                on_ground: m.on_ground,
+                velocity: [m.velocity.x, m.velocity.y, m.velocity.z],
+            };
+            let kind = m.kind.id.as_str();
+            let bare = idle
+                && (kept.as_deref_mut()).is_some_and(|k| k.bare(hub, m.id as i32, kind, &place))
+                && !m.needs_sync;
+            let e = out.add(m.id as i32, entity_uuid(m.id), kind);
+            e.position = place.position;
+            (e.yaw, e.pitch, e.head_yaw) = place.rotation;
+            e.on_ground = place.on_ground;
+            e.velocity = place.velocity;
             e.needs_sync = m.needs_sync;
+            (e.idle, e.bare) = (idle, bare);
+            e.leash = leash;
+            if bare {
+                continue;
+            }
             mob_meta(
                 m,
                 hub,
-                player_entity,
+                player_entity(),
                 self.world.game_time,
                 &mut e.meta,
                 &mut e.defaults,
@@ -2142,17 +2175,34 @@ impl Game<'_> {
                 return;
             };
             mob_equipment(m, &mut host.hub, &mut e.equipment);
-            e.leash = leash;
         }
         for d in self.dropped.iter().filter(|d| d.id > after) {
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
+            let idle = idle_at(d.position);
+            let place = super::lan_idle::Place {
+                position: [d.position.x, d.position.y, d.position.z],
+                rotation: (0.0, 0.0, 0.0),
+                on_ground: d.on_ground,
+                velocity: [d.velocity.x, d.velocity.y, d.velocity.z],
+            };
+            let bare = idle
+                && (kept.as_deref_mut())
+                    .is_some_and(|k| k.bare(&host.hub, d.id as i32, "minecraft:item", &place))
+                && !d.needs_sync;
+            let e = out.add(d.id as i32, entity_uuid(d.id), "minecraft:item");
+            e.position = place.position;
+            e.on_ground = place.on_ground;
+            e.velocity = place.velocity;
+            (e.idle, e.bare) = (idle, bare);
+            if bare {
+                continue;
+            }
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
             let stack = host.hub.stack(&Some(d.stack.clone()));
-            let e = out.add(d.id as i32, entity_uuid(d.id), "minecraft:item");
-            e.position = [d.position.x, d.position.y, d.position.z];
-            e.on_ground = d.on_ground;
-            e.velocity = [d.velocity.x, d.velocity.y, d.velocity.z];
             // `ServerEntity.getRequiresPrecisePosition` is false for an item:
             // `needs_sync` asks for its data again, not for an exact position.
             // The collision case is `full_precision_required` in the tracker.
@@ -2169,6 +2219,7 @@ impl Game<'_> {
         for o in self.orbs.iter().filter(|o| o.id > after) {
             let e = out.add(o.id as i32, entity_uuid(o.id), "minecraft:experience_orb");
             e.position = [o.position.x, o.position.y, o.position.z];
+            e.idle = idle_at(o.position);
             e.on_ground = o.on_ground;
             e.velocity = [o.velocity.x, o.velocity.y, o.velocity.z];
             // ExperienceOrb.DATA_VALUE.
@@ -2604,8 +2655,12 @@ impl Game<'_> {
                 streaming: Some(&self.streaming),
             };
             host.hub.movement_checks = (
-                self.ui.rules.bool("player_movement_check"),
-                self.ui.rules.bool("elytra_movement_check"),
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::PLAYER_MOVEMENT_CHECK),
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
             );
             host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
             let pass = self.level_pass;
@@ -2753,7 +2808,7 @@ impl Game<'_> {
             self.lan_assign_ids();
             if self.next_entity != next {
                 let mut states = States::default();
-                self.lan_entities(&mut states, false, next);
+                self.lan_entities(&mut states, false, next, None);
                 self.lan_hook_states(&mut states);
                 self.lan_entity_uuids(&mut states);
                 host.hub.note_joined(states.as_slice());
@@ -2845,14 +2900,32 @@ impl Game<'_> {
                     return;
                 };
                 host.hub.riding = riding;
+                // Idle states are kept only when the players' moves are in:
+                // the clients that could pair are known. The range scale is
+                // the one the tracker gets below.
+                let mut idle_states = std::mem::take(&mut host.idle_states);
+                let mut kept = if self.level_pass.packets_drained {
+                    let percent = if host.hub.config.integrated {
+                        (self.settings.entity_distance * 100.0).round() as i32
+                    } else {
+                        host.hub.entity_range_percent
+                    };
+                    idle_states.pass(&host.hub, percent)
+                } else {
+                    None
+                };
                 horizon_client::spans::time("lan_entity_states", || {
-                    self.lan_entities(&mut states, true, 0);
+                    self.lan_entities(&mut states, true, 0, kept.as_mut());
+                    if let Some(kept) = kept {
+                        kept.finish();
+                    }
                     self.lan_hook_states(&mut states);
                     self.lan_entity_uuids(&mut states);
                 });
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
+                host.idle_states = idle_states;
                 host.states_next_entity = Some(self.next_entity);
             } else {
                 let Some(host) = self.lan.as_mut() else {
@@ -2934,8 +3007,12 @@ impl Game<'_> {
                     streaming: Some(&self.streaming),
                 };
                 host.hub.movement_checks = (
-                    self.ui.rules.bool("player_movement_check"),
-                    self.ui.rules.bool("elytra_movement_check"),
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::PLAYER_MOVEMENT_CHECK),
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
                 );
                 // IntegratedServer.getScaledTrackingDistance: the Entity Distance
                 // option scales what an integrated server or a LAN host tracks (a
@@ -2944,10 +3021,16 @@ impl Game<'_> {
                     host.hub.entity_range_percent =
                         (self.settings.entity_distance * 100.0).round() as i32;
                 }
-                host.hub
-                    .set_immediate_respawn(self.ui.rules.bool("immediate_respawn"));
-                host.hub
-                    .set_limited_crafting(self.ui.rules.bool("limited_crafting"));
+                host.hub.set_immediate_respawn(
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::IMMEDIATE_RESPAWN),
+                );
+                host.hub.set_limited_crafting(
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::LIMITED_CRAFTING),
+                );
                 // A server with several levels runs a pass for each
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
@@ -3151,7 +3234,7 @@ impl Game<'_> {
                 return;
             }
             // A dedicated server has no host player.
-            self.lan_entities(&mut theirs, false, 0);
+            self.lan_entities(&mut theirs, false, 0, None);
             self.lan_hook_states(&mut theirs);
             self.lan_entity_uuids(&mut theirs);
             theirs.as_slice()
@@ -3516,7 +3599,10 @@ impl Game<'_> {
         // covers what the player tracks (`ChunkTrackingView`, within its view
         // distance + 1) and those chunks' lit neighbours.
         let radius = host.hub.config.view_distance + 1;
-        let rule = self.ui.rules.bool("spectators_generate_chunks");
+        let rule = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPECTATORS_GENERATE_CHUNKS);
         // The held players are sent the level, so their chunks are kept as the placed ones'.
         self.streaming.extra = host
             .hub

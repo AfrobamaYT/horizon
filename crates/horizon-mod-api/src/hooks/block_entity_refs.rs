@@ -36,12 +36,31 @@ pub trait Helpers {
         target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_data"
     )]
     fn block_entity_data();
+    /// Read the vanilla lock's item predicate as an NBT compound. None means no lock,
+    /// or an unavailable block entity. The predicate follows vanilla LockCode semantics.
+    #[helper(
+        side = "both",
+        receiver = "block_entity",
+        target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_lock"
+    )]
+    fn block_entity_lock();
+    /// Set the vanilla lock's item predicate, or clear it with None. Returns false for
+    /// an unavailable entity or no change. The write joins the current transaction.
+    #[helper(
+        side = "server",
+        receiver = "block_entity",
+        target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_set_lock"
+    )]
+    fn block_entity_set_lock();
     #[helper(
         side = "server",
         receiver = "block_entity",
         target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_merge_data"
     )]
     fn block_entity_merge_data();
+    /// Replace the saved payload, not the block entity's type or position. Ignores
+    /// identity fields, joins the transaction and restores the original data on abort.
+    /// Changing type goes through the owning block's lifecycle, not this method.
     #[helper(
         side = "server",
         receiver = "block_entity",

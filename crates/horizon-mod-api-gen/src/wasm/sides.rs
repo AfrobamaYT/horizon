@@ -1061,3 +1061,7 @@ fn frame_objects(types: &Types<'_>, ty: &Ty, e: &str, out: &mut String) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+#[path = "boundary_tests.rs"]
+mod boundary_tests;

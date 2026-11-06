@@ -395,8 +395,6 @@ impl Game<'_> {
         creative: bool,
         create: Option<&WorldOptions>,
     ) -> Result<()> {
-        // The window's mod configs before the server's, as on NeoForge.
-        self.native_configs_client_start();
         self.client_logging_out();
         horizon_client::command::vanilla::set_horizon_commands(
             self.options.pregen || self.settings.extras.pregen,
@@ -1266,6 +1264,14 @@ impl Game<'_> {
             .spawn(move || {
                 let run = || -> Result<()> {
                     let mut server = server_game(&res, pack, options, settings)?;
+                    // The oracle supplies an already-open synthetic world rather
+                    // than running the normal config and startup lifecycle.
+                    server
+                        .mod_phase
+                        .advance(mod_api::__private::ModPhase::Config)?;
+                    server
+                        .mod_phase
+                        .advance(mod_api::__private::ModPhase::World)?;
                     match fixture {
                         ComponentHarness::Dispenser(spec) => server.dispense_fixture(&spec),
                         ComponentHarness::Sculk(spec) => server.sculk_fixture(&spec),
@@ -1328,6 +1334,40 @@ pub(super) mod tests {
         move || {
             flags.published.load(Ordering::Relaxed) == 0 && tasks.send(Box::new(|_| {})).is_err()
         }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_session_identifies_only_its_own_integrated_server() {
+        use mod_api::ClientHost;
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _pipe = super::super::native_client_session::tests::logged_client(game);
+            let (tasks, _waiting_server) = channel();
+            game.integrated = Some(Integrated {
+                flags: Arc::new(Flags::default()),
+                thread: None,
+                tasks,
+                world_name: "First world".into(),
+            });
+            let local = game.client_session().client_server().unwrap();
+            assert!(local.integrated_local);
+            assert_eq!(local.name.as_deref(), Some("First world"));
+            assert_eq!(local.address, None);
+            game.integrated.as_mut().unwrap().world_name = "Renamed world".into();
+            assert_eq!(
+                game.client_session()
+                    .client_server()
+                    .unwrap()
+                    .name
+                    .as_deref(),
+                Some("Renamed world")
+            );
+            game.integrated.take();
+            let guest = game.client_session().client_server().unwrap();
+            assert!(!guest.integrated_local);
+            assert_eq!(guest.name, None);
+            assert_eq!(guest.address, None);
+        });
     }
 
     #[test]

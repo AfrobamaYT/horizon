@@ -202,7 +202,11 @@ impl SpawnLevel for PatrolCx<'_, '_, '_> {
 }
 impl PatrolLevel for PatrolCx<'_, '_, '_> {
     fn spawn_patrols(&self) -> bool {
-        self.level.game.ui.rules.bool("spawn_patrols")
+        self.level
+            .game
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_PATROLS)
     }
     fn bright_outside(&self) -> bool {
         self.level.game.dim == Dim::Overworld && self.level.game.sky_darken() < 4
@@ -451,9 +455,16 @@ impl Game<'_> {
     /// `Raids.createOrExtendRaid`: not for spectators, with the `raids` rule
     /// and where raids may start; the raid centres on the occupied village
     /// points of interest within 64 blocks.
-    fn create_or_extend_raid(&mut self, at: [i32; 3], amplifier: Option<i32>) -> Option<i32> {
+    pub(super) fn create_or_extend_raid(
+        &mut self,
+        at: [i32; 3],
+        amplifier: Option<i32>,
+    ) -> Option<i32> {
         if self.spectator()
-            || !self.ui.rules.bool("raids")
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::RAIDS)
             || !self.gameplay_attribute(horizon_client::patrol::CAN_START_RAID, at)
         {
             return None;
@@ -469,7 +480,13 @@ impl Game<'_> {
         if triggered {
             self.award_custom_stat("raid_trigger", 1);
             self.trigger_player("minecraft:voluntary_exile");
-            self.native_raid_state_change(id, center, "triggered");
+            if let Some(level) = self.native_level(self.dim.id()) {
+                self.native_raid_state_change(
+                    mod_api::RaidRef::new(level, id),
+                    center,
+                    "triggered",
+                );
+            }
         }
         Some(id)
     }
@@ -497,8 +514,10 @@ impl Game<'_> {
         true
     }
     pub(super) fn raid_command_stop(&mut self, id: i32) {
-        if let Some(center) = self.raiding.raids.stop(id) {
-            self.native_raid_state_change(id, center, "stopped");
+        if let Some(center) = self.raiding.raids.stop(id)
+            && let Some(level) = self.native_level(self.dim.id())
+        {
+            self.native_raid_state_change(mod_api::RaidRef::new(level, id), center, "stopped");
         }
     }
     pub(super) fn raid_set_omen(&mut self, id: i32, level: i32) -> i32 {
@@ -650,14 +669,25 @@ impl Game<'_> {
                 centers: &centers,
             };
             let members = |id: i32| infos.get(&id).cloned().unwrap_or_default();
-            raids.tick(&lvl, self.ui.rules.bool("raids"), &members)
+            raids.tick(
+                &lvl,
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::RAIDS),
+                &members,
+            )
         };
         self.raiding.raids = raids;
         for (id, (old, _)) in old_states {
             if let Some(r) = self.raiding.raids.get(id)
                 && r.status != old
+                && let Some(level) = self.native_level(self.dim.id())
             {
-                self.native_raid_state_change(id, r.center, r.status.name());
+                self.native_raid_state_change(
+                    mod_api::RaidRef::new(level, id),
+                    r.center,
+                    r.status.name(),
+                );
             }
         }
         for (id, action) in actions {
@@ -1291,7 +1321,14 @@ impl Game<'_> {
                 game.world.day_time,
             )
         };
-        let enemies = self.ui.rules.bool("spawn_mobs") && self.ui.rules.bool("spawn_monsters");
+        let enemies = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS);
         let mut random = std::mem::replace(
             &mut self.world.random,
             horizon_core::random::LegacyRandom::new(0),
@@ -1332,7 +1369,14 @@ impl Game<'_> {
         if self.dim != Dim::Overworld {
             return;
         }
-        let enemies = self.ui.rules.bool("spawn_mobs") && self.ui.rules.bool("spawn_monsters");
+        let enemies = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS);
         if self.sky_darken() < 4 || !enemies {
             self.raiding.siege.tonight = false;
             self.raiding.siege.set_up = false;

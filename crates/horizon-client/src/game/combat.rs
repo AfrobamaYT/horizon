@@ -670,7 +670,11 @@ impl Game<'_> {
         let Some(owner) = m.extra.owner.filter(|_| tamable && m.extra.tame) else {
             return;
         };
-        if !self.ui.rules.bool("show_death_messages") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SHOW_DEATH_MESSAGES)
+        {
             return;
         }
         let host = self.player.is_some()
