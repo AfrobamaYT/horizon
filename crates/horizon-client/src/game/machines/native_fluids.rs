@@ -117,16 +117,13 @@ impl CauldronFluids {
 
 /// The tanks of a mod block its side `side` reaches (none: every tank), in the order the side
 /// numbers them for the fluid capability.
-fn side_tanks(tanks: &ModFluidTanks, side: Option<Direction>) -> Vec<usize> {
+fn side_tanks(tanks: &ModFluidTanks, side: Option<Direction>) -> impl Iterator<Item = usize> + '_ {
     let n = tanks.tanks.len();
-    match side {
-        Some(face) => tanks.faces[face as usize]
-            .iter()
-            .copied()
-            .filter(|&tank| tank < n)
-            .collect(),
-        None => (0..n).collect(),
-    }
+    let face = side.map(|face| &tanks.faces[face as usize]);
+    (0..face.map_or(n, Vec::len)).filter_map(move |i| {
+        let tank = face.map_or(i, |face| face[i]);
+        (tank < n).then_some(tank)
+    })
 }
 
 /// Whether the tanks at `at` take `fluid`. A mod block's saved tanks keep an id and an amount,
@@ -134,12 +131,10 @@ fn side_tanks(tanks: &ModFluidTanks, side: Option<Direction>) -> Vec<usize> {
 /// water and lava, discarding their components as NeoForge's `CauldronFluidContent` does:
 /// the one place a fluid's components are dropped, and what comes out of a cauldron is plain.
 fn game_holds(fluid: &FluidStack, at: &FluidAt) -> bool {
-    let id = mod_api::__private::fluid_id(fluid.fluid)
-        .expect("resolved fluid key")
-        .to_owned();
+    let id = mod_api::__private::fluid_id(fluid.fluid).expect("resolved fluid key");
     match at {
-        FluidAt::Mod(_) => tank_fluid(&id) && !fluid.has_components(),
-        FluidAt::Cauldron(_) => matches!(id.as_str(), "minecraft:water" | "minecraft:lava"),
+        FluidAt::Mod(_) => tank_fluid(id) && !fluid.has_components(),
+        FluidAt::Cauldron(_) => matches!(id, "minecraft:water" | "minecraft:lava"),
     }
 }
 
@@ -263,6 +258,36 @@ impl Game<'_> {
             _ => None,
         }
     }
+    /// Read one tank directly from the authoritative NBT without copying its list.
+    fn tank_entry(&self, pos: [i32; 3], index: usize) -> Option<(Option<&JavaString>, i32)> {
+        let BlockEntity::Mod(entity) = self.world.block_entities.get(&(pos[0], pos[1], pos[2]))?
+        else {
+            return None;
+        };
+        let Some(Tag::List(list)) = entity
+            .nbt
+            .iter()
+            .find(|(key, _)| key.0.iter().copied().eq("fluids".encode_utf16()))
+            .map(|(_, value)| value)
+        else {
+            return Some((None, 0));
+        };
+        let Some(entry) = list.get(index) else {
+            return Some((None, 0));
+        };
+        let id = match entry.get("Fluid") {
+            Some(Tag::String(id)) if !id.0.iter().copied().eq("minecraft:empty".encode_utf16()) => {
+                Some(id)
+            }
+            _ => None,
+        };
+        let amount = match entry.get("Amount") {
+            Some(Tag::Int(amount)) => *amount,
+            _ => 0,
+        };
+        Some((id, amount))
+    }
+
     /// `tank_state`'s writer.
     fn set_tank_state(&mut self, pos: [i32; 3], state: &[Tank]) {
         let key = (pos[0], pos[1], pos[2]);
@@ -284,7 +309,7 @@ impl Game<'_> {
     /// cauldron's one. None where no tanks are.
     pub(in crate::game) fn native_fluid_tank_count(&self, at: BlockSide) -> Option<usize> {
         match self.capability_tanks(at)? {
-            FluidAt::Mod(tanks) => Some(side_tanks(&tanks, at.side).len()),
+            FluidAt::Mod(tanks) => Some(side_tanks(&tanks, at.side).count()),
             FluidAt::Cauldron(_) => Some(1),
         }
     }
@@ -296,13 +321,10 @@ impl Game<'_> {
     ) -> Option<FluidStack> {
         match self.capability_tanks(at)? {
             FluidAt::Mod(tanks) => {
-                let real = *side_tanks(&tanks, at.side).get(tank)?;
-                let (fluid, amount) = self
-                    .tank_state(at.pos, tanks.tanks.len())?
-                    .swap_remove(real);
+                let real = side_tanks(&tanks, at.side).nth(tank)?;
+                let (fluid, amount) = self.tank_entry(at.pos, real)?;
                 let amount = u32::try_from(amount).ok().filter(|&amount| amount > 0)?;
-                let id = fluid?;
-                let identity = mod_api::__private::fluid_key(&id)?;
+                let identity = mod_api::__private::fluid_key_utf16(&fluid?.0)?;
                 Some(FluidStack {
                     fluid: identity,
                     amount,
@@ -333,9 +355,9 @@ impl Game<'_> {
         match self.capability_tanks(at) {
             Some(at) if !game_holds(fluid, &at) => 0,
             Some(FluidAt::Mod(tanks)) => side_tanks(&tanks, at.side)
-                .get(tank)
+                .nth(tank)
                 .filter(|real| tanks.inputs.contains(real))
-                .map_or(0, |&real| tanks.tanks[real].max(0).unsigned_abs()),
+                .map_or(0, |real| tanks.tanks[real].max(0).unsigned_abs()),
             Some(FluidAt::Cauldron(_)) if tank == 0 => 1000,
             _ => 0,
         }
@@ -357,33 +379,35 @@ impl Game<'_> {
             return None;
         }
         let amount = mb(fluid.amount);
-        let id = mod_api::__private::fluid_id(fluid.fluid)
-            .expect("resolved fluid key")
-            .to_owned();
+        let id = mod_api::__private::fluid_id(fluid.fluid).expect("resolved fluid key");
         let took = match self.capability_tanks(at) {
             Some(at) if !game_holds(&fluid, &at) => 0,
             Some(FluidAt::Mod(tanks)) => {
                 let real = side_tanks(&tanks, at.side)
-                    .get(tank)
-                    .copied()
+                    .nth(tank)
                     .filter(|real| tanks.inputs.contains(real));
-                let state = real.zip(self.tank_state(at.pos, tanks.tanks.len()));
-                let Some((real, mut state)) = state else {
+                let Some(real) = real else {
                     return Some(fluid);
                 };
-                let entry = &mut state[real];
-                if entry.1 > 0 && entry.0.as_deref() != Some(id.as_str()) {
+                let Some((held, current)) = self.tank_entry(at.pos, real) else {
+                    return Some(fluid);
+                };
+                if current > 0
+                    && !held.is_some_and(|held| held.0.iter().copied().eq(id.encode_utf16()))
+                {
                     return Some(fluid);
                 }
-                let add = (tanks.tanks[real] - entry.1).clamp(0, amount);
+                let add = (tanks.tanks[real] - current).clamp(0, amount);
                 if add > 0 {
-                    entry.0 = Some(id.to_owned());
-                    entry.1 += add;
+                    let Some(mut state) = self.tank_state(at.pos, tanks.tanks.len()) else {
+                        return Some(fluid);
+                    };
+                    state[real] = (Some(id.to_owned()), current + add);
                     self.set_tank_state(at.pos, &state);
                 }
                 add
             }
-            Some(FluidAt::Cauldron(kind)) if tank == 0 => match kind.fill(&id, amount) {
+            Some(FluidAt::Cauldron(kind)) if tank == 0 => match kind.fill(id, amount) {
                 Some((took, to)) if self.cauldron_set(at.pos, to) => took,
                 _ => 0,
             },
@@ -407,8 +431,7 @@ impl Game<'_> {
         match self.capability_tanks(at)? {
             FluidAt::Mod(tanks) => {
                 let real = side_tanks(&tanks, at.side)
-                    .get(tank)
-                    .copied()
+                    .nth(tank)
                     .filter(|real| tanks.outputs.contains(real))?;
                 let mut state = self.tank_state(at.pos, tanks.tanks.len())?;
                 let entry = &mut state[real];
@@ -846,6 +869,16 @@ mod tests {
                     1,
                 ));
                 assert_eq!(source.owner(), "the game");
+                game.set_tank_state(from, &tanks(&[(Some("water"), 1000), (None, 0)]));
+                assert_eq!(source.resource(game, 0), Some(water.clone()));
+                assert_eq!(source.amount(game, 0), 1000);
+                assert_eq!(
+                    game.transaction(|host, tx| Ok::<_, ()>(
+                        source.extract(host, tx, 0, &water, 1000)
+                    )),
+                    Ok(1000)
+                );
+                assert_eq!(source.resource(game, 0), None);
                 assert!(source.is_valid(game, 0, &chocolate));
                 assert_eq!(
                     game.transaction(|host, tx| Ok::<_, ()>(

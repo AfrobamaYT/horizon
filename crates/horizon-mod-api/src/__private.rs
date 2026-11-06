@@ -437,4 +437,4 @@ pub use crate::registry_keys::{
     block_entity_type_key, block_entity_type_name, block_id as block_key_id,
     effect_id as effect_key_id,
 };
-pub use crate::registry_keys::{effect_key, fluid_id, fluid_key, resolve_fluids};
+pub use crate::registry_keys::{effect_key, fluid_id, fluid_key, fluid_key_utf16, resolve_fluids};

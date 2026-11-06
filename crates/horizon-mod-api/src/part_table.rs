@@ -1831,9 +1831,23 @@ pub mod tests {
                 id: "minecraft:water".to_owned()
             }]
         );
-        resolve_fluids(&["minecraft:water"]).unwrap();
+        resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
         let chocolate = fluid_key("maker:chocolate").unwrap();
         assert_eq!(fluid_id(chocolate), Some("maker:chocolate"));
+        for name in ["minecraft:water", "minecraft:lava", "maker:chocolate"] {
+            let key = fluid_key(name).unwrap();
+            assert_eq!(
+                crate::registry_keys::fluid_key_utf16(&name.encode_utf16().collect::<Vec<_>>()),
+                Some(key)
+            );
+            assert_eq!(fluid_id(key), Some(name));
+        }
+        for path in ["water", "lava"] {
+            assert_eq!(
+                crate::registry_keys::fluid_key_utf16(&path.encode_utf16().collect::<Vec<_>>()),
+                fluid_key(path)
+            );
+        }
         assert_eq!(FluidKey::from_slot(chocolate.0), Ok(chocolate));
         assert!(fluid_key("missing:fluid").is_none());
     }
