@@ -5958,7 +5958,7 @@ impl Game<'_> {
                 // ServerPlayer.onInsideBlock: the enter_block trigger, for the
                 // player who moved.
                 MotionEvent::EnterBlock { state } => {
-                    self.as_guest(host, conn, |game| game.trigger_enter_block(state));
+                    self.as_guest(conn, |game| game.trigger_enter_block(state));
                 }
                 // HoneyBlock.maybeDoSlideEffects: the sound reaches the
                 // others (Player.playSound excludes the player, whose client
