@@ -61,17 +61,11 @@ impl EffectsClientBackend for Game<'_> {
         self.native_sound_state(sound)
     }
     fn sound_stop(&self, sound: SoundRef) -> bool {
-        mod_api::__private::check_access(
-            "sound_stop",
-            mod_api::__private::LoadAccess::ClientSetup,
-        );
+        mod_api::__private::check_access("sound_stop", mod_api::__private::LoadAccess::ClientSetup);
         self.native_sound_stop(sound)
     }
     fn sound_fade(&self, sound: SoundRef, volume: f32, ticks: u32) -> bool {
-        mod_api::__private::check_access(
-            "sound_fade",
-            mod_api::__private::LoadAccess::ClientSetup,
-        );
+        mod_api::__private::check_access("sound_fade", mod_api::__private::LoadAccess::ClientSetup);
         self.native_sound_fade(sound, volume, ticks)
     }
 }
