@@ -10,6 +10,10 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
         Target::Client => vec![
+            (
+                "game_modules.rs",
+                super::game_modules::declarations(&root.join("crates/horizon-client/src/game"))?,
+            ),
             ("mod_api_host_generated.rs", generated.implementation),
             ("mod_api_fire_generated.rs", generated.fire),
             // The mob tick's goal read view (#1077), included beside the

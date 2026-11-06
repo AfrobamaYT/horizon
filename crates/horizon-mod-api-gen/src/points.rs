@@ -98,7 +98,7 @@ pub(crate) fn module_files(
     let mut pending = vec![(module, path, dir, Vec::new())];
     while let Some((module, path, dir, cfg)) = pending.pop() {
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file = crate::game_modules::parse(&path, &source)?;
         let here = path
             .parent()
             .expect("a source file has a folder")
