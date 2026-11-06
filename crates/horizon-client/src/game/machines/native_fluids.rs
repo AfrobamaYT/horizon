@@ -908,12 +908,70 @@ mod tests {
                 }
                 let handle = mod_api::__private::intern_unresolved_fluid("othermod:fluid").unwrap();
                 game.set_tank_state(from, &tanks(&[(Some("othermod:fluid"), 1000), (None, 0)]));
+                let pipe_target = [4, 64, 0];
+                assert!(game.native_level_set_block(
+                    level,
+                    pipe_target,
+                    block,
+                    NativeBlockUpdateFlags::NEIGHBORS
+                ));
+                game.world.block_entities.insert(
+                    (4, 64, 0),
+                    BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                        "fluid_filter_test:water_tank".into(),
+                        ModBlockEntityFields::default(),
+                    ))),
+                );
+                let target = level.capability(game, &FLUIDS, pipe_target, None).unwrap();
+                assert_eq!(
+                    game.transaction(|host, tx| move_resources(
+                        host,
+                        &source,
+                        &target,
+                        |_| true,
+                        300,
+                        tx
+                    )),
+                    Ok(300)
+                );
+                assert_eq!(
+                    game.tank_state(pipe_target, 2).unwrap()[0],
+                    (Some("othermod:fluid".into()), 300)
+                );
+                let mut saved = Chunk::empty(0, 0);
+                saved.set(4, 64, 0, block.0);
+                saved.block_entities.push((
+                    (4, 64, 0),
+                    game.world.block_entities.get(&(4, 64, 0)).unwrap().clone(),
+                ));
+                let mut disk = horizon_client::save::SaveDir::new(
+                    std::env::temp_dir()
+                        .join(format!("horizon-fluid-roundtrip-{}", std::process::id())),
+                    horizon_client::save::LevelShape::OVERWORLD,
+                );
+                disk.enable_trusted_fluid_load();
+                disk.save(
+                    &[Arc::new(saved)],
+                    game.pack.assets.registry,
+                    game.res.biomes(),
+                )
+                .unwrap();
+                let loaded = disk
+                    .load(0, 0, game.pack.assets.registry, game.res.biomes())
+                    .unwrap();
+                let BlockEntity::Mod(loaded) = &loaded.block_entities[0].1 else {
+                    panic!("saved mod tank")
+                };
+                assert_eq!(
+                    read_tanks(&loaded.nbt, 2)[0],
+                    (Some("othermod:fluid".into()), 300)
+                );
                 let unresolved = source.resource(game, 0).unwrap();
                 assert_eq!(
                     *unresolved.fluid(),
                     mod_api::FluidIdentity::Unresolved(handle)
                 );
-                assert_eq!(source.amount(game, 0), 1000);
+                assert_eq!(source.amount(game, 0), 700);
                 assert_eq!(
                     game.transaction(|host, tx| Ok::<_, ()>(source.extract(
                         host,
@@ -926,7 +984,7 @@ mod tests {
                 );
                 assert_eq!(
                     game.tank_state(from, 2).unwrap()[0],
-                    (Some("othermod:fluid".into()), 800)
+                    (Some("othermod:fluid".into()), 500)
                 );
                 game.set_tank_state(from, &tanks(&[(Some("water"), 1000), (None, 0)]));
                 assert_eq!(source.resource(game, 0), Some(water.clone()));

@@ -305,7 +305,11 @@ impl Well {
         let look = horizon_client::mod_content::fluid_look(&id);
         let tint = fluid_tint(&id, look.as_ref().and_then(|l| l.tint));
         let amount = format!("{} mB", fluid.amount);
-        let name = fluid_name(&id);
+        let name = if fluid.key().is_some() {
+            fluid_name(&id)
+        } else {
+            horizon_client::lang::get("horizon.fluid.unknown")
+        };
         Self {
             sprite: look.and_then(|l| l.sprite),
             tint,
@@ -921,6 +925,18 @@ mod tests {
             "{action:?} under {result:?}"
         );
         assert!(shown.block(72.0) >= action.1 + 12.0);
+    }
+
+    #[test]
+    fn an_unresolved_fluid_uses_the_unknown_label() {
+        let handle = mod_api::__private::intern_unresolved_fluid("missing:panel_fluid").unwrap();
+        let well = Well::new(&mod_api::FluidStack {
+            fluid: mod_api::FluidIdentity::Unresolved(handle),
+            amount: 250,
+            components: None,
+        });
+        assert!(well.label.contains("250 mB"));
+        assert!(!well.label.contains("Panel Fluid"));
     }
 
     /// A well's texts are made once: its amount and its name, which falls back
