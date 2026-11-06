@@ -1340,6 +1340,59 @@ mod tests {
     }
 
     #[test]
+    fn command_json_selects_before_conditions_and_function_tags_gate_each_layer() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-command-conditions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut packs = Vec::new();
+        for name in ["low", "high"] {
+            let folder = root.join(name);
+            let conditions = if name == "high" {
+                serde_json::json!([{"type":"neoforge:mod_loaded","modid":"provider"}])
+            } else {
+                serde_json::json!([])
+            };
+            for kind in ["predicate", "item_modifier"] {
+                let file = folder.join(format!("data/demo/{kind}/entry.json"));
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(
+                    file,
+                    serde_json::json!({"layer":name,"neoforge:conditions":conditions}).to_string(),
+                )
+                .unwrap();
+            }
+            let dir = folder.join("data/demo/tags/function");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("load.json"), serde_json::json!({"replace":true,"values":[format!("demo:{name}")],"neoforge:conditions":conditions}).to_string()).unwrap();
+            std::fs::write(
+                dir.join("unknown.json"),
+                r#"{"neoforge:conditions":[{"type":"unsupported"}],"replace":true}"#,
+            )
+            .unwrap();
+            packs.push(DataPack::from_source(
+                name.into(),
+                ResourceSource::directory(folder),
+            ));
+        }
+        let refs = packs.iter().collect::<Vec<_>>();
+        let off = DataStore::load_with_conditions(
+            &refs,
+            &horizon_world::conditions::LoadConditions::vanilla(),
+        );
+        assert!(off.predicates.is_empty());
+        assert!(off.item_modifiers.is_empty());
+        assert_eq!(off.function_tags["demo:load"], [("demo:low".into(), true)]);
+        assert!(!off.function_tags.contains_key("demo:unknown"));
+        let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
+        let on = DataStore::load_with_conditions(&refs, &enabled);
+        assert_eq!(on.predicates["demo:entry"]["layer"], "high");
+        assert_eq!(on.item_modifiers["demo:entry"]["layer"], "high");
+        assert_eq!(on.function_tags["demo:load"], [("demo:high".into(), true)]);
+        assert_eq!(on.files, off.files);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn folder_packs_list_the_needed_kinds_in_walk_order() {
         let dir = std::env::temp_dir().join(format!("hz-datapack-kinds-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
