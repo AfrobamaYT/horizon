@@ -6414,6 +6414,7 @@ mod tests {
             }),
         });
         ui.show(Page::KeyBinds);
+        ui.scroll(&s, size, -10_000.0);
         let key_label = |ui: &mut OptionsUi, s: &Settings| {
             let (widgets, ..) = ui.layout(s, size.0, size.1);
             widgets.into_iter().find_map(|w| match w.kind {
@@ -6426,6 +6427,8 @@ mod tests {
             })
         };
         let (label, x, y) = key_label(&mut ui, &s).expect("the key's row");
+        let (_, top, bottom, _) = ui.layout(&s, size.0, size.1);
+        assert!(y >= top && y + 20.0 <= bottom);
         assert_eq!(label, "Z");
         ui.click(
             &mut s,
@@ -6437,6 +6440,7 @@ mod tests {
             false,
             false,
         );
+        assert_eq!(ui.selected_key, Some(MOD_KEY));
         assert_eq!(
             ui.key(&mut s, &atlas, winit::keyboard::KeyCode::KeyR, Some("r")),
             vec![Event::Changed]
