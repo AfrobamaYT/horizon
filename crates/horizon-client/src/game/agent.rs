@@ -695,7 +695,7 @@ impl Game<'_> {
             if matches!(m.species(), Species::Villager | Species::ZombieVillager) {
                 v["villager"] = json!({
                     "type": VILLAGER_TYPES[m.extra.variant as usize % VILLAGER_TYPES.len()],
-                    "profession": horizon_client::mobs::villager::profession(m.extra.variant2).id,
+                    "profession": horizon_client::mobs::villager::profession(m.extra.profession.index().unwrap_or(0)).id,
                     "level": m.extra.villager_level,
                 });
             }

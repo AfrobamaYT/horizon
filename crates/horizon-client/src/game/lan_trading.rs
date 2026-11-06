@@ -683,7 +683,8 @@ mod tests {
         game.lan.as_mut().unwrap().hub.guests.push(guest);
 
         let villager = spawn(game, 40, "minecraft:villager");
-        game.mobs[0].extra.variant2 = 5;
+        game.mobs[0].extra.profession =
+            horizon_client::mobs::villager::ProfessionState::from_index(5);
         let profession = "minecraft:farmer".to_owned();
         let first = offer("minecraft:wheat", "minecraft:emerald");
         game.mobs[0].extra.trade = Some(Box::new(Trader {

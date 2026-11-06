@@ -3547,6 +3547,8 @@ struct Game<'a> {
     /// worked out for (`vehicle_mob_reach`).
     vehicle_mob_reach: std::cell::Cell<Option<(usize, horizon_client::mobs::BoxReach)>>,
     persist: persist::EntityMemory,
+    /// Missing profession IDs already reported for this world session.
+    missing_professions: HashSet<String>,
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
     /// Connected to a server: the world comes from the network (game/remote.rs).
     remote: Option<remote::Remote>,
@@ -14184,6 +14186,7 @@ impl Game<'_> {
         self.clear_client_particles();
         self.riding = None;
         self.persist = Default::default();
+        self.missing_professions.clear();
         self.entity_attachments.clear();
         self.clear_remote_objects();
         self.clear_remote_projectiles();
@@ -21379,6 +21382,7 @@ impl<'a> Game<'a> {
             water_plane_scan: Default::default(),
             vehicle_mob_reach: Default::default(),
             persist: Default::default(),
+            missing_professions: Default::default(),
             entity_attachments: Default::default(),
             remote: None,
             lan: None,

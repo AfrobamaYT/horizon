@@ -600,12 +600,12 @@ mod tests {
                         id.as_str(),
                         "minecraft:villager" | "minecraft:zombie_villager"
                     ) {
-                        m.extra.variant2 = 5;
+                        m.extra.profession = crate::mobs::villager::ProfessionState::from_index(5);
                         m.extra.villager_level = 3;
                     }
                     // White field markings (`entityTranslucent`).
                     if id == "minecraft:horse" {
-                        m.extra.variant2 = 2;
+                        m.extra.profession = crate::mobs::villager::ProfessionState::from_index(2);
                     }
                     let mut cpu = Vec::new();
                     render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);

@@ -1971,7 +1971,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             S::Villager | S::WanderingTrader => {
                 if s == S::Villager {
                     if reason == Reason::Breeding {
-                        m.extra.variant2 = 0;
+                        m.extra.profession = Default::default();
                     }
                     self.villager_type(m);
                 }
@@ -2064,7 +2064,9 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                 let mut fresh = LegacyRandom::new(
                     (m.random.state() as i64).wrapping_mul(0x5851_F42D_4C95_7F2D) ^ i64::from(m.id),
                 );
-                m.extra.variant2 = fresh.next_int_bound(15).unwrap_or(0) as u8;
+                m.extra.profession = super::villager::ProfessionState::from_index(
+                    fresh.next_int_bound(15).unwrap_or(0) as u8,
+                );
                 self.zombie(m, g, reason)
             }
             S::Husk => self.husk(m, g, reason),

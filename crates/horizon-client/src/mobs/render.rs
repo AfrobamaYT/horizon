@@ -947,7 +947,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                 white,
                 false,
             );
-            let prof = super::villager::profession(m.extra.variant2).id;
+            let prof = super::villager::profession(m.extra.profession.index().unwrap_or(0)).id;
             if !m.is_baby() && prof != "none" {
                 push(
                     &mut v,
@@ -2150,7 +2150,8 @@ fn render_visible(
                 .split_once("/type/")
                 .or_else(|| layer.texture.split_once("/baby/"))
         {
-            let profession = super::villager::profession(m.extra.variant2).id;
+            let profession =
+                super::villager::profession(m.extra.profession.index().unwrap_or(0)).id;
             data.villager_hats
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2923,8 +2924,9 @@ mod tests {
                         let mut m =
                             Mob::new(1, kind.clone(), horizon_core::geometry::Vec3::ZERO, 0.0);
                         m.extra.age = if baby { -24000 } else { 0 };
-                        (m.extra.variant, m.extra.variant2, m.extra.villager_level) =
-                            (t as u8, p as u8, 5);
+                        (m.extra.variant, m.extra.villager_level) = (t as u8, 5);
+                        m.extra.profession =
+                            super::super::villager::ProfessionState::from_index(p as u8);
                         let layers = layers(&m, m.age as f32);
                         let group = if baby { "/baby/" } else { "/type/" };
                         assert!(

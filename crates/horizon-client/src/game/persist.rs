@@ -827,6 +827,14 @@ impl Game<'_> {
             self.next_entity,
             Some(self.pack.assets.registry),
         )?;
+        if let horizon_client::mobs::villager::ProfessionState::Unresolved(id) = &m.extra.profession
+            && self.missing_professions.insert(id.clone())
+        {
+            log::warn!(
+                "Unknown villager profession {id} at {:?}; preserving its saved identity",
+                m.position
+            );
+        }
         if horizon_client::mobs::camel::is_camel(m.species()) {
             horizon_client::mobs::camel::finish_load(&mut m, self.world.game_time);
         }

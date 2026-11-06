@@ -3350,13 +3350,7 @@ fn villager_data(m: &Mob) -> Tag {
                 VILLAGER_TYPES[m.extra.variant as usize % VILLAGER_TYPES.len()]
             )),
         ),
-        (
-            "profession",
-            string(&format!(
-                "minecraft:{}",
-                crate::mobs::villager::profession(m.extra.variant2).id
-            )),
-        ),
+        ("profession", string(&m.extra.profession.id())),
         ("level", Tag::Int(m.extra.villager_level.max(1))),
     ])
 }
@@ -3479,9 +3473,10 @@ fn read_villager(m: &mut Mob, tag: &Tag) {
         if let Some(t) = name("type").and_then(|t| VILLAGER_TYPES.iter().position(|v| *v == t)) {
             m.extra.variant = t as u8;
         }
-        m.extra.variant2 = name("profession")
-            .and_then(|p| crate::mobs::villager::profession_index(&p))
-            .unwrap_or(0);
+        m.extra.profession = text(data.get("profession"))
+            .as_deref()
+            .map(crate::mobs::villager::ProfessionState::from_id)
+            .unwrap_or_default();
         m.extra.villager_level = number(data.get("level"))
             .unwrap_or(1)
             .clamp(1, i64::from(i32::MAX)) as i32;
@@ -3861,6 +3856,31 @@ mod tests {
         ]);
         let mob = mob_from_nbt(&tag, &types, 7, None).unwrap();
         assert_eq!(villager_data(&mob), data);
+    }
+
+    #[test]
+    fn unresolved_villager_profession_round_trips_through_entity_nbt() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:villager".into();
+        def.species = crate::mobs::Species::Villager;
+        let types = [("minecraft:villager".into(), kind)].into();
+        let data = Tag::compound([
+            ("profession", string("example:nested/engineer")),
+            ("type", string("minecraft:plains")),
+            ("level", Tag::Int(1)),
+        ]);
+        let tag = Tag::compound([
+            ("id", string("minecraft:villager")),
+            ("Pos", doubles(&[0.0, 100.0, 0.0])),
+            ("VillagerData", data.clone()),
+        ]);
+        let mob = mob_from_nbt(&tag, &types, 7, None).unwrap();
+        assert_eq!(villager_data(&mob), data);
+        assert_eq!(mob.extra.profession.index(), None);
+        let saved = mob_to_nbt(&mob, [0; 4], None, None);
+        let reloaded = mob_from_nbt(&saved, &types, 8, None).unwrap();
+        assert_eq!(villager_data(&reloaded), data);
     }
 
     #[test]
