@@ -126,8 +126,11 @@ impl Game<'_> {
         self.change_mod_sound(sound, Change::Stop)
     }
     /// For a client mod: from the next audio update, its sound's volume moves to `volume` (at
-    /// or above 0, as `SoundPlay`'s) in equal steps over the next `ticks` ticks it plays, or at
-    /// once for 0. A fade to 0 stops it when the fade ends, as `LoopSoundInstance.fadeOut` does;
+    /// or above 0, as `SoundPlay`'s) in equal steps over the next `ticks` unpaused ticks it plays,
+    /// or at once for 0. While the game is paused the fade waits, as vanilla's tickable sounds do
+    /// (`SoundEngine.tick(paused)`), and an interface or music sound keeps playing at its volume
+    /// (`pauseAllExcept(MUSIC, UI)`). A fade to 0 stops it when the fade ends, as
+    /// `LoopSoundInstance.fadeOut` does;
     /// a fade up from a `SoundPlay` at volume 0 fades it in. A later fade replaces one in
     /// progress. False, changing nothing, for a volume that isn't a number at or above 0, a sound
     /// that is already over, and on a server.

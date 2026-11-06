@@ -15,7 +15,8 @@ pub trait Helpers {
         target = "horizon_client::game::native_local_sounds::Game<'_>::native_sound_stop"
     )]
     fn sound_stop();
-    /// Fades the sound's volume to a target over some ticks; a fade to 0 stops it at the end.
+    /// Fades the sound's volume to a target over some unpaused ticks; a fade to 0 stops it at the
+    /// end. While the game is paused the fade waits, and an interface or music sound keeps playing.
     #[helper(
         side = "client",
         receiver = "sound",

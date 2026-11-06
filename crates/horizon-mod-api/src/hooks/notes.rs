@@ -1186,8 +1186,10 @@ computed at the call:
 - `sound.stop(host)` stops it for good: a waiting sound never starts and a looping one never repeats. A stop asked
   since the last update already reads `Stopped`.
 - `sound.fade(host, volume, ticks)` moves its volume to `volume` (at or above 0) in equal steps over the next `ticks`
-  ticks it plays, or at once for 0. A fade to 0 stops it when the fade ends, as `LoopSoundInstance.fadeOut` does. A
-  `SoundPlay` at volume 0 faded up fades in, and a later fade replaces one in progress.
+  unpaused ticks it plays, or at once for 0. A fade to 0 stops it when the fade ends, as `LoopSoundInstance.fadeOut`
+  does. A `SoundPlay` at volume 0 faded up fades in, and a later fade replaces one in progress. While the game is
+  paused the fade waits, as vanilla's tickable sounds do (`SoundEngine.tick(paused)`): an interface or music sound
+  keeps playing at the volume it had (`pauseAllExcept(MUSIC, UI)`), and any other sound pauses with the game.
 
 `stop` and `fade` answer false, changing nothing, once the sound is over. Once it ends, is stopped or faded out, or is
 cleared (leaving or changing levels stops every sound), the handle reads `Stopped` and its writes do nothing. It stays
