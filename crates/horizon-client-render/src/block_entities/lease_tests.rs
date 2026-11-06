@@ -74,6 +74,13 @@ fn replacement_taken_before_old_put_rejects_aba_without_changing_tick_order() {
             .set(entities.attachments_mut(P).unwrap(), Holder::Level, 9)
             .unwrap();
         assert!(entities.mods_near(0.0, 0.0, 64.0).next().is_none());
+        assert!(!entities.put(old_lease, old));
+        assert!(matches!(entities.get(&P), Some(BlockEntity::Chest(items)) if items.len() == 2));
+        let (old_lease, old) = entities.take(&P).unwrap();
+        replace(&mut entities);
+        VALUE
+            .set(entities.attachments_mut(P).unwrap(), Holder::Level, 9)
+            .unwrap();
         let (new_lease, new) = entities.take(&P).unwrap();
         assert!(!entities.put(old_lease, old));
         assert!(entities.get(&P).is_none());
