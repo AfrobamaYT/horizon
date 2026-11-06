@@ -2613,8 +2613,10 @@ mod tests {
                     ));
                     assert!(game.perform_native_console_command("typed repeat guest13 3"));
                     assert!(game.command_source.is_none(), "console source restored");
-                    game.as_guest(12, |game| assert!(game.native_run_command("typed opt 13")))
-                        .unwrap();
+                    game.as_guest(12, |game| {
+                        assert!(game.native_run_command("execute as guest13 run typed opt 13"))
+                    })
+                    .unwrap();
                     let heard = heard.lock().unwrap();
                     assert_eq!(heard.len(), 11);
                     let first = &heard[0].1;
