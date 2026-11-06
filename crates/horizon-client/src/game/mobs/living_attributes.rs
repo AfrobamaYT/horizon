@@ -21,13 +21,26 @@ use std::sync::Arc;
 /// both run it. The map is taken out so the seed can read the mob.
 fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
     let mut live = std::mem::take(&mut m.extra.live);
+    let seed = || {
+        horizon_client::entity_nbt::attribute_entries(m)
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect()
+    };
+    // A base write can invalidate an unequipped shulker's map too. Restore
+    // its saved shell modifier before the next same-tick damage read.
+    if m.species() == horizon_client::mobs::Species::Shulker {
+        live.read(
+            catalog,
+            &m.kind.id,
+            "minecraft:armor",
+            horizon_world::attribute_map::ValueKind::Computed,
+            &seed,
+        )
+        .expect("a shulker has an armor attribute");
+    }
     let changed =
-        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, || {
-            horizon_client::entity_nbt::attribute_entries(m)
-                .into_iter()
-                .map(|(_, e)| e)
-                .collect()
-        });
+        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, seed);
     warn_failed(m.id, &m.kind.id, changed);
     m.extra.live = live;
 }
@@ -538,6 +551,64 @@ mod tests {
             assert!(speed.modifiers.is_empty());
             // Nothing else: an attribute nothing created sends no instance.
             assert_eq!(synced.len(), 3, "{synced:?}");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_base_write_preserves_covered_for_damage_and_attribute_sync() {
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:shulker")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let catalog = game.motion.attributes.clone();
+            let m = &mut game.mobs[0];
+            // The permanent row installed by Shulker.setRawPeekAmount(0).
+            m.extra
+                .live
+                .edit(
+                    &catalog,
+                    &m.kind.id,
+                    "minecraft:armor",
+                    true,
+                    Vec::new,
+                    |value, observer| {
+                        value.add_permanent(
+                            Modifier::new("minecraft:covered", 20.0, Operation::AddValue).unwrap(),
+                            observer,
+                        )
+                    },
+                )
+                .unwrap();
+            let shulker = living(game, 12);
+            assert!(shulker.set_attribute_base(game, "minecraft:max_health", 40.0));
+            // No handle read in between: damage must not need a read to restore the map.
+            assert_eq!(
+                horizon_client::mobs::armor::values(&game.mobs[0]),
+                (20.0, 0.0)
+            );
+            let mut synced = Vec::new();
+            let m = game.mobs[0].clone();
+            game.mob_attributes(
+                &m,
+                &mut crate::game::lan_attributes::SpeedByType::default(),
+                &mut synced,
+            );
+            let armor_id = catalog.id("minecraft:armor").unwrap().registry_id();
+            let armor = synced.iter().find(|row| row.attribute == armor_id).unwrap();
+            assert_eq!(armor.base, 0.0);
+            assert_eq!(
+                armor.modifiers,
+                [horizon_protocol::packets::play::AttributeModifier {
+                    id: "minecraft:covered".into(),
+                    amount: 20.0,
+                    operation: 0,
+                }]
+            );
         });
     }
 

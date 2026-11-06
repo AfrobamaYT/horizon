@@ -3182,6 +3182,8 @@ pub struct MobWorld<'a> {
     pub facts: &'a BlockFacts,
     /// Fluid states and flow facts, for the currents that push mobs.
     pub fluid_tables: &'a crate::motion::FluidResources,
+    /// The owning side's attribute definitions for species-specific writes.
+    pub attributes: &'a Arc<horizon_world::attributes::entity::Catalog>,
     pub movement: &'a horizon_world::movement_properties::BoundMovementProperties,
     pub collision: &'a BlockCollisionRegistry<'a>,
     pub suffocation: &'a horizon_world::suffocation::SuffocationRegistry<'a>,

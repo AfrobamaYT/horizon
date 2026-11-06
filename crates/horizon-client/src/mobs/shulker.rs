@@ -363,7 +363,41 @@ fn teleport(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool {
     false
 }
 /// `Shulker.setRawPeekAmount`: the shell opens or closes with a sound.
-fn set_peek(m: &mut Mob, amount: i32, events: &mut Vec<MobEvent>) {
+fn set_peek(
+    m: &mut Mob,
+    amount: i32,
+    events: &mut Vec<MobEvent>,
+    catalog: &std::sync::Arc<horizon_world::attributes::entity::Catalog>,
+) {
+    use horizon_world::attributes::{Modifier, Operation};
+    let seed = if m.extra.live.built().is_none() {
+        crate::entity_nbt::attribute_entries(m)
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    m.extra
+        .live
+        .edit(
+            catalog,
+            &m.kind.id,
+            "minecraft:armor",
+            true,
+            || seed,
+            |value, observer| {
+                value.remove("minecraft:covered", observer)?;
+                if amount == 0 {
+                    value.add_permanent(
+                        Modifier::new("minecraft:covered", 20.0, Operation::AddValue).unwrap(),
+                        observer,
+                    )?;
+                }
+                Ok(())
+            },
+        )
+        .expect("a shulker has an armor attribute");
     let sound = if amount == 0 {
         "entity.shulker.close"
     } else {
@@ -668,10 +702,10 @@ impl Goal for ShulkerAttack {
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.attack_time = 20;
-        set_peek(m, 100, cx.events);
+        set_peek(m, 100, cx.events, cx.w.attributes);
     }
     fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
-        set_peek(m, 0, cx.events);
+        set_peek(m, 0, cx.events, cx.w.attributes);
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
         if !peaceful_off(m, cx.w) {
@@ -732,11 +766,11 @@ impl Goal for Peek {
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.time = reduced(20 * (1 + m.random.next_int_bound(3).unwrap_or(0)));
-        set_peek(m, 30, cx.events);
+        set_peek(m, 30, cx.events, cx.w.attributes);
     }
     fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         if m.ai.target.is_none() {
-            set_peek(m, 0, cx.events);
+            set_peek(m, 0, cx.events, cx.w.attributes);
         }
     }
     fn tick(&mut self, _m: &mut Mob, _cx: &mut Cx) {
@@ -822,6 +856,205 @@ mod tests {
     use crate::mobs::sensor_scan_tests::kind;
     use std::sync::Arc;
 
+    use horizon_world::{
+        attribute_map::ValueKind,
+        attributes::{Modifier, Operation, entity::Catalog},
+        nbt::Tag,
+    };
+
+    fn catalog() -> Arc<Catalog> {
+        let bits = |v: f64| format!("{:016x}", v.to_bits());
+        Arc::new(Catalog::from_json(&serde_json::json!({
+            "data_version": horizon_world::DATA_VERSION,
+            "attributes": [
+                {"id":"minecraft:armor", "default":bits(0.0), "min":bits(0.0), "max":bits(30.0), "syncable":true},
+                {"id":"minecraft:armor_toughness", "default":bits(0.0), "min":bits(0.0), "max":bits(20.0), "syncable":true}
+            ],
+            "entities": {"minecraft:shulker":{"minecraft:armor":bits(0.0), "minecraft:armor_toughness":bits(0.0)}}
+        })).unwrap())
+    }
+
+    fn armor(m: &Mob, catalog: &Arc<Catalog>) -> f64 {
+        m.extra
+            .live
+            .read(
+                catalog,
+                &m.kind.id,
+                "minecraft:armor",
+                ValueKind::Computed,
+                Vec::new,
+            )
+            .unwrap()
+    }
+
+    fn modifiers(m: &Mob, catalog: &Arc<Catalog>) -> Vec<Modifier> {
+        m.extra
+            .live
+            .modifiers(catalog, &m.kind.id, "minecraft:armor", Vec::new)
+            .unwrap()
+    }
+
+    #[test]
+    fn covered_is_a_permanent_map_modifier_only_at_the_peek_transition() {
+        let catalog = catalog();
+        let mut m = shulker();
+        // Construction defines raw peek 0, not a modifier (Shulker constructor).
+        assert_eq!(armor(&m, &catalog), 0.0);
+        assert!(modifiers(&m, &catalog).is_empty());
+        assert_eq!(super::super::armor::values(&m), (0.0, 0.0));
+        m.extra
+            .live
+            .edit(
+                &catalog,
+                &m.kind.id,
+                "minecraft:armor",
+                true,
+                Vec::new,
+                |value, observer| {
+                    value.set_base_value(5.0, observer)?;
+                    value.add_permanent(
+                        Modifier::new("test:scale", 0.1, Operation::AddMultipliedTotal).unwrap(),
+                        observer,
+                    )
+                },
+            )
+            .unwrap();
+        let mut events = Vec::new();
+        set_peek(&mut m, 30, &mut events, &catalog);
+        assert_eq!(armor(&m, &catalog), 5.5);
+        set_peek(&mut m, 0, &mut events, &catalog);
+        assert!((armor(&m, &catalog) - 27.5).abs() < 1e-12);
+        assert_eq!(super::super::armor::values(&m), (27.0, 0.0));
+        let covered = modifiers(&m, &catalog)
+            .into_iter()
+            .find(|m| m.id() == "minecraft:covered")
+            .unwrap();
+        assert_eq!(covered.amount(), 20.0);
+        assert_eq!(covered.operation(), Operation::AddValue);
+        // Closing again replaces the same id, without stacking or changing the base.
+        set_peek(&mut m, 0, &mut events, &catalog);
+        assert_eq!(modifiers(&m, &catalog).len(), 2);
+        assert_eq!(
+            m.extra.live.read(
+                &catalog,
+                &m.kind.id,
+                "minecraft:armor",
+                ValueKind::Base,
+                Vec::new
+            ),
+            Some(5.0)
+        );
+        let mut saved = Vec::new();
+        m.extra.live.save_into(&mut saved);
+        let types = [(m.kind.id.clone(), m.kind.clone())].into_iter().collect();
+        let tag = Tag::compound([
+            ("id", horizon_client_core::nbt_value::string(&m.kind.id)),
+            ("Pos", Tag::List(vec![Tag::Double(0); 3])),
+            ("Peek", Tag::Byte(30)),
+            ("attributes", Tag::List(saved)),
+        ]);
+        // Loading Peek does not invoke setRawPeekAmount: permanent attributes
+        // survive independently, even when the loaded raw peek is nonzero.
+        let loaded = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();
+        assert_eq!(loaded.extra.counter, 30);
+        assert!((armor(&loaded, &catalog) - 27.5).abs() < 1e-12);
+        assert_eq!(modifiers(&loaded, &catalog).len(), 2);
+        m.extra.live.invalidate();
+        assert!((armor(&m, &catalog) - 27.5).abs() < 1e-12);
+        set_peek(&mut m, 100, &mut events, &catalog);
+        assert_eq!(armor(&m, &catalog), 5.5);
+        m.extra.live.invalidate();
+        assert_eq!(modifiers(&m, &catalog).len(), 1);
+        assert_eq!(armor(&m, &catalog), 5.5);
+        m.extra
+            .live
+            .edit(
+                &catalog,
+                &m.kind.id,
+                "minecraft:armor",
+                true,
+                Vec::new,
+                |value, observer| {
+                    value.remove("test:scale", observer)?;
+                    value.add_permanent(
+                        Modifier::new("test:base_scale", 0.1, Operation::AddMultipliedBase)
+                            .unwrap(),
+                        observer,
+                    )
+                },
+            )
+            .unwrap();
+        set_peek(&mut m, 0, &mut events, &catalog);
+        // (5 + 20) + (5 + 20) * 0.1 = 27.5, floored only at the damage boundary.
+        assert_eq!(armor(&m, &catalog), 27.5);
+        assert_eq!(super::super::armor::values(&m), (27.0, 0.0));
+        m.extra
+            .live
+            .edit(
+                &catalog,
+                &m.kind.id,
+                "minecraft:armor",
+                true,
+                Vec::new,
+                |value, observer| value.set_base_value(20.0, observer),
+            )
+            .unwrap();
+        assert_eq!(armor(&m, &catalog), 30.0);
+        assert_eq!(super::super::armor::values(&m), (30.0, 0.0));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn teleport_closes_raw_peek_without_adding_covered() {
+        assert!(super::super::world::with_built_test_world(
+            &[],
+            |world, registry| {
+                for x in -2..=1 {
+                    for z in -2..=1 {
+                        world
+                            .chunks
+                            .insert((x, z), Arc::new(crate::chunk::Chunk::empty(x, z)));
+                    }
+                }
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                for x in -24..=24 {
+                    for z in -24..=24 {
+                        world.set(x, 63, z, stone).unwrap();
+                    }
+                }
+            },
+            |world, _| {
+                let mut m = shulker();
+                m.position = Vec3::new(0.5, 64.0, 0.5);
+                m.random = LegacyRandom::new(0);
+                let mut events = Vec::new();
+                set_peek(&mut m, 100, &mut events, world.attributes);
+                assert!(modifiers(&m, world.attributes).is_empty());
+                assert!((0..100).any(|_| teleport(&mut m, world, &mut events)));
+                assert_eq!(m.extra.counter, 0);
+                assert!(modifiers(&m, world.attributes).is_empty());
+                assert_eq!(super::super::armor::values(&m), (0.0, 0.0));
+            }
+        ));
+    }
+
+    #[test]
+    fn loading_a_closed_peek_does_not_add_covered() {
+        let m = shulker();
+        let types = [(m.kind.id.clone(), m.kind)].into_iter().collect();
+        let tag = Tag::compound([
+            (
+                "id",
+                horizon_client_core::nbt_value::string("minecraft:shulker"),
+            ),
+            ("Pos", Tag::List(vec![Tag::Double(0); 3])),
+            ("Peek", Tag::Byte(0)),
+        ]);
+        let loaded = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();
+        assert_eq!(armor(&loaded, &catalog()), 0.0);
+        assert!(modifiers(&loaded, &catalog()).is_empty());
+    }
+
     /// Shulker.setRawPeekAmount: the lid opening posts CONTAINER_OPEN and shutting
     /// CONTAINER_CLOSE, for the sculk sensors and wardens nearby.
     #[test]
@@ -837,10 +1070,10 @@ mod tests {
         };
         let mut m = shulker();
         let mut events = Vec::new();
-        set_peek(&mut m, 30, &mut events);
+        set_peek(&mut m, 30, &mut events, &catalog());
         assert_eq!(posted(&events), ["minecraft:container_open"]);
         let mut events = Vec::new();
-        set_peek(&mut m, 0, &mut events);
+        set_peek(&mut m, 0, &mut events, &catalog());
         assert_eq!(posted(&events), ["minecraft:container_close"]);
     }
 
@@ -851,6 +1084,14 @@ mod tests {
         k.id = "minecraft:shulker".into();
         k.species = Species::Shulker;
         k.max_head_y_rot = 180.0;
+        k.attributes = Arc::new(
+            [
+                ("minecraft:armor".into(), 0.0),
+                ("minecraft:armor_toughness".into(), 0.0),
+            ]
+            .into_iter()
+            .collect(),
+        );
         // EntityTypes.SHULKER: sized(1.0F, 1.0F).eyeHeight(0.5F).
         k.width = 1.0;
         k.height = 1.0;

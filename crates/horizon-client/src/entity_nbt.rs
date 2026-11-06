@@ -1552,9 +1552,11 @@ pub fn mob_from_nbt(
     if let Some(Tag::List(attrs)) = tag.get("attributes") {
         use crate::mobs::finalize::{Attr, Op, add_modifier};
         for a in attrs {
-            let Some(attr) =
-                text(a.get("id")).and_then(|id| Attr::ALL.into_iter().find(|x| x.id() == id))
-            else {
+            let Some(attr) = text(a.get("id")).and_then(|id| {
+                Attr::ALL
+                    .into_iter()
+                    .find(|x| *x != Attr::Armor && x.id() == id)
+            }) else {
                 continue;
             };
             let Some(Tag::List(modifiers)) = a.get("modifiers") else {
@@ -1575,7 +1577,8 @@ pub fn mob_from_nbt(
         // An attribute the type lacks is skipped (`AttributeMap.apply`).
         let kind = m.kind.clone();
         m.extra.live.load(tag.get("attributes"), |id| {
-            kind.attributes.contains_key(id) && !Attr::ALL.iter().any(|a| a.id() == id)
+            kind.attributes.contains_key(id)
+                && !Attr::ALL.iter().any(|a| *a != Attr::Armor && a.id() == id)
         });
     }
     m.health = float(tag.get("Health")).map_or(m.attrs.max_health, |h| h as f32);
