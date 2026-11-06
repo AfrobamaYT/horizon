@@ -322,7 +322,7 @@ impl Game<'_> {
             out.push(r);
         }
         for s in &stations.recipes.smithing {
-            let (id, template, base, addition, results) = match s {
+            let (id, slots, results) = match s {
                 Smithing::Transform {
                     id,
                     template,
@@ -331,10 +331,17 @@ impl Game<'_> {
                     result,
                 } => (
                     id,
-                    template,
-                    base,
-                    addition,
-                    index.stack(result, 1, String::new()).into_iter().collect(),
+                    vec![
+                        template.as_ref().map(|i| index.any(i)).unwrap_or_default(),
+                        index.any(base),
+                        addition.as_ref().map(|i| index.any(i)).unwrap_or_default(),
+                    ],
+                    result
+                        .item
+                        .as_deref()
+                        .and_then(|item| index.stack(item, result.count, String::new()))
+                        .into_iter()
+                        .collect(),
                 ),
                 Smithing::Trim {
                     id,
@@ -342,10 +349,14 @@ impl Game<'_> {
                     base,
                     addition,
                     ..
-                } => (id, template, base, addition, index.any(base)),
+                } => (
+                    id,
+                    vec![index.any(template), index.any(base), index.any(addition)],
+                    index.any(base),
+                ),
             };
             let mut r = recipe(id.clone(), RecipeKind::Smithing);
-            r.slots = vec![index.any(template), index.any(base), index.any(addition)];
+            r.slots = slots;
             r.results = results;
             out.push(r);
         }
