@@ -259,7 +259,7 @@ fn listed(root: &Path) -> Result<Vec<(usize, String)>, String> {
 const LIST: &str = "crates/horizon-mod-api-gen/points.txt";
 
 /// A path without generic arguments or spaces, as listed paths and found ones are compared.
-fn plain_path(path: &str) -> String {
+pub(crate) fn plain_path(path: &str) -> String {
     let mut out = String::new();
     let mut depth = 0;
     for c in path.chars() {
