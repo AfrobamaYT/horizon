@@ -219,6 +219,16 @@ fn interned(args: std::fmt::Arguments) -> Cow<'static, str> {
         Cow::Borrowed(name)
     })
 }
+/// Resolve the namespace of a profession to the shared atlas's sprite name.
+fn profession_texture(folder: &str, id: &str) -> Cow<'static, str> {
+    let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+    if namespace == "minecraft" {
+        interned(format_args!("{folder}/profession/{path}"))
+    } else {
+        interned(format_args!("{namespace}:{folder}/profession/{path}"))
+    }
+}
+
 fn climate(m: &Mob) -> &'static str {
     match m.extra.variant {
         1 => "warm",
@@ -952,7 +962,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                 push(
                     &mut v,
                     model.clone(),
-                    interned(format_args!("{folder}/profession/{prof}")),
+                    profession_texture(folder, prof),
                     white,
                     false,
                 );
@@ -2662,6 +2672,18 @@ pub fn held_item_stack(extra: &super::Extra, off_hand: bool) -> Option<crate::it
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profession_texture_preserves_nested_namespaces() {
+        assert_eq!(
+            profession_texture("entity/villager", "minecraft:farmer"),
+            "entity/villager/profession/farmer"
+        );
+        assert_eq!(
+            profession_texture("entity/zombie_villager", "example:nested/engineer"),
+            "example:entity/zombie_villager/profession/nested/engineer"
+        );
+    }
 
     /// A baby zombie's armour reads the `humanoid_baby` textures for every
     /// slot, not the adult `humanoid`/`humanoid_leggings` ones (#7302).
