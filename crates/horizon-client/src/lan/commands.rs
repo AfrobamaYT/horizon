@@ -151,7 +151,14 @@ impl CommandTree {
                         serde_json::json!({"type": "argument", "parser": "brigadier:bool", "executable": true})
                     }
                     crate::gamerules::Value::Int(_) => {
-                        serde_json::json!({"type": "argument", "parser": "brigadier:integer", "properties": {"min": rule.min, "max": rule.max}, "executable": true})
+                        let mut bounds = serde_json::Map::new();
+                        if rule.min != i32::MIN {
+                            bounds.insert("min".into(), rule.min.into());
+                        }
+                        if rule.max != i32::MAX {
+                            bounds.insert("max".into(), rule.max.into());
+                        }
+                        serde_json::json!({"type": "argument", "parser": "brigadier:integer", "properties": bounds, "executable": true})
                     }
                 };
                 for name in [rule.name.to_owned(), format!("minecraft:{}", rule.name)] {

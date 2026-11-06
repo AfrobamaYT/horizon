@@ -5366,6 +5366,23 @@ mod tests {
                 .map(|s| s.text)
                 .collect::<Vec<_>>()
         };
+        for (name, report_bounds) in [
+            ("random_tick_speed", serde_json::json!({"min": 0})),
+            (
+                "max_snow_accumulation_height",
+                serde_json::json!({"min": 0, "max": 8}),
+            ),
+        ] {
+            let rule = packet.nodes.iter().find(|n| n.name == name).unwrap();
+            let value = &packet.nodes[rule.children[0] as usize];
+            assert_eq!(
+                value.parser.as_ref().unwrap().1,
+                match report_bounds.get("max") {
+                    None => vec![1, 0, 0, 0, 0],
+                    Some(_) => vec![3, 0, 0, 0, 0, 0, 0, 0, 8],
+                }
+            );
+        }
         assert!(suggestions("gamerule keep_").contains(&"keep_inventory".to_owned()));
         assert_eq!(suggestions("gamerule keep_inventory "), ["false", "true"]);
         assert!(suggestions("gamerule max_snow_accumulation_height ").is_empty());
