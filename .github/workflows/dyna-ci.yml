@@ -64,6 +64,9 @@ jobs:
             ENABLED=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_SELF_HOSTED" -q .value 2>/dev/null || true)
             LEASE=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_POOL_UNTIL" -q .value 2>/dev/null || true)
           fi
+          # A refused read prints GitHub's error JSON: keep only a well-formed answer, else use the snapshot.
+          case "${LEASE:-}" in '' | *[!0-9]*) LEASE= ;; esac
+          case "${ENABLED:-}" in true | false) ;; *) ENABLED= ;; esac
           echo "pool lease: live=${LEASE:-unreadable} snapshot=${VARS_LEASE:-none}"
           ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - name: The ignored-tests shard matrix
@@ -97,10 +100,14 @@ jobs:
   # Formatting, clippy and the mod API's wasm32 check on GitHub's own runners, in parallel with verify's tests on
   # Dyna's: the fork's account has its own hosted pool, so a run's wall time is the longer of the two, not the sum.
   lint:
+    # Dyna's large runner for main's pushes and this repository's own pull requests (owner, 2026-11-05): its
+    # build folder persists, so clippy re-checks only what changed. A fork's pull request, or a run while the
+    # pool is down, stays on GitHub's runners with the snapshot cache below.
+    needs: changes
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    # Main seeds the lint cache from cold (two full clippy graphs, about 40 minutes): give it room to finish and save.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 45 || 100 }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-large' || 'ubuntu-latest' }}
+    # A cold lint (two full clippy graphs) takes 40+ minutes on GitHub runners: room to finish, main to save its cache.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 100 }}
     env:
       # Keep incremental check state too: changed workspace crates can reuse unchanged queries.
       CARGO_INCREMENTAL: 1
@@ -115,13 +122,31 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Install Dyna runner dependencies without root
+        if: steps.rust.outputs.required != 'false' && runner.environment != 'github-hosted'
+        run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
         if: steps.rust.outputs.required != 'false'
+        env:
+          HOSTED: ${{ runner.environment == 'github-hosted' }}
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          if [ "$HOSTED" = true ]; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          else
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
+            # The slot's build folder persists between jobs; point the checkout's target at it.
+            mkdir -p "$CARGO_TARGET_DIR"
+            ln -s "$CARGO_TARGET_DIR" target
+            # sccache can't wrap clippy-driver (`sccache clippy-driver rustc -vV` fails); the persistent
+            # build folder is the cache here, so lint runs without the runner's wrapper.
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
       - name: Lint cache toolchain
-        if: steps.rust.outputs.required != 'false'
+        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
         id: toolchain
         run: |
           echo "hash=$(rustc +stable -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -130,7 +155,7 @@ jobs:
       # rust-cache's default removes workspace artifacts. Those are the expensive part here,
       # in two feature graphs; keep both, and publish a fresh snapshot from main every 6 hours.
       - uses: actions/cache/restore@v4
-        if: steps.rust.outputs.required != 'false'
+        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
         id: lint-cache
         with:
           path: |
@@ -141,11 +166,32 @@ jobs:
           restore-keys: |
             lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
             lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
+      # A restore-key hit can predate a profile or dependency change: a successful download
+      # does not mean Cargo has artifacts for the requested graph (for example, #1190).
+      - name: Report lint cache compatibility
+        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
+        env:
+          REQUESTED_KEY: ${{ steps.lint-cache.outputs.cache-primary-key }}
+          MATCHED_KEY: ${{ steps.lint-cache.outputs.cache-matched-key }}
+        run: |
+          if [ -z "$MATCHED_KEY" ]; then
+            STATUS="No lint cache found; this run builds from cold."
+          elif [[ "$MATCHED_KEY" == "${REQUESTED_KEY%-*-*}-"* ]]; then
+            STATUS="Matching manifests and lockfile; unchanged Cargo units can be reused."
+          else
+            STATUS="Fallback cache from different manifests or lockfile; dependency or profile changes can require a full rebuild until main saves a matching snapshot."
+            echo "::notice::$STATUS"
+          fi
+          {
+            echo "### Lint workspace cache"
+            echo "$STATUS"
+            printf '\nRequested: `%s`\n\nRestored: `%s`\n\n' "$REQUESTED_KEY" "${MATCHED_KEY:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
       # A fresh checkout otherwise makes every workspace source newer than the cached artifacts.
       # Only byte-identical Git objects regain their cached mtimes; changed inputs stay new.
       - name: Restore unchanged source timestamps
         if: steps.rust.outputs.required != 'false'
-        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json
+        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check formatting and lint
         if: steps.rust.outputs.required != 'false'
         id: native-lint
@@ -162,7 +208,7 @@ jobs:
       # Publish native work even if the independent wasm check fails. Pull requests only read
       # main's snapshots; they can never replace a cache subsequently consumed by main.
       - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.native-lint.outcome == 'success' && steps.server-lint.outcome == 'success' && steps.lint-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && runner.environment == 'github-hosted' && github.ref == 'refs/heads/main' && steps.native-lint.outcome == 'success' && steps.server-lint.outcome == 'success' && steps.lint-cache.outputs.cache-hit != 'true' }}
         with:
           path: |
             ~/.cargo/registry
@@ -312,7 +358,7 @@ jobs:
 
   verify:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -321,6 +367,7 @@ jobs:
     env:
       VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
       VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
+      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j4' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -371,14 +418,15 @@ jobs:
             export PATH="$CARGO_HOME/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      # Dependencies and the workspace's own build, saved from main's runs (pull requests read main's cache).
+      # Dependency-only cache: a full workspace/test snapshot would compete with lint for the 10 GB budget.
+      # Profile overrides in Cargo.toml are part of rust-cache's key; unchanged dependencies still restore.
       - uses: Swatinem/rust-cache@v2
         if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
         with:
           shared-key: verify
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # A dyna-medium runner has a hard 8 GiB limit and 4 CPUs; four horizon-client rustc processes at about 2.6 GB
-      # each go past it, so Dyna runs build two crates at a time. Formatting and lint run in parallel on GitHub's
+      # A dyna-large runner has a hard 16 GiB limit and 8 CPUs; horizon-client rustc processes take about 2.6 GB
+      # each, so Dyna runs build four crates at a time. Formatting and lint run in parallel on GitHub's
       # runners (the lint job), so this job only tests. A cargo flag, not CARGO_BUILD_JOBS: sccache hashes
       # CARGO_* variables, and that would split the runners' cache from the boxes'.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
@@ -387,15 +435,18 @@ jobs:
       # these 4-core runners it was no faster (#4978).
       - name: Test Rust core and voxel kernel correctness
         if: steps.rust.outputs.required != 'false'
-        env:
-          JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
+        run: cargo +stable test $JOBS --workspace --lib --bins --tests
+      # Separate timings make rebuilds between Cargo invocations visible without changing the test selection.
+      # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
+      # prepared vanilla data, so without it they pass at once. Keep the target selection identical to avoid
+      # recompiling the workspace with a different dependency graph.
+      - name: Test ignored mod content roots
+        if: steps.rust.outputs.required != 'false'
         run: |
-          cargo +stable test $JOBS --workspace --lib --bins --tests
-          # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
-          # prepared vanilla data, so without it they pass at once. Keep the target selection identical to avoid
-          # recompiling the workspace with a different dependency graph.
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
-          cargo +stable test $JOBS --workspace --doc
+      - name: Test Rust documentation examples
+        if: steps.rust.outputs.required != 'false'
+        run: cargo +stable test $JOBS --workspace --doc
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
@@ -445,6 +496,16 @@ jobs:
           for dir in minecraft datagen horizon-client tools; do
             ln -sfn "/cache/horizon-local/$dir" ".local/$dir"
           done
+      - uses: actions/setup-java@v4
+        if: steps.data.outputs.present != 'false' && matrix.shard == 'horizon-client'
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Generate the fishing test's vanilla reference inputs
+        if: steps.data.outputs.present != 'false' && matrix.shard == 'horizon-client'
+        run: |
+          reference=$(mktemp -d "$RUNNER_TEMP/fishing-reference.XXXXXX")
+          python3 tools/test_fishing_rng_parity.py --prepare-reference "$reference" --env-file "$GITHUB_ENV"
       - name: Run the ignored tests that need prepared data
         if: steps.data.outputs.present != 'false'
         env:
@@ -452,7 +513,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
-          python3 tools/ci/ignored_tests.py "$SHARD"
+          python3 tools/ci/with_xvfb.py python3 tools/ci/ignored_tests.py "$SHARD"
   # Aggregate the main-push and dispatch shards: green when each passed or was skipped.
   ignored-tests:
     needs: [changes, ignored-tests-shards]

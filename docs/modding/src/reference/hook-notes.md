@@ -1245,7 +1245,7 @@ registration path.
   Answer only for your own blocks and leave the answer empty otherwise; the level is read-only. The deprecated in-frame
   path fires neither.
 
-- A server player's game mode about to change: `native_player_game_mode_changed(player, name, from, to, cancel)` is heard before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode (0 survival, 1 creative, 2 adventure, 3 spectator), on a server; not for the default mode a player joins with. A mod sets `cancel` to keep the old mode.
+- A server player's game mode about to change: `Hooks::player_game_mode_changed` receives a `PlayerGameModeChangedEvent` before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode, on a server; not for the default mode a player joins with. Its `from` and `to` are `GameMode` values, the same type used by command parsing and `PlayerRef::game_mode`, `set_game_mode` and `previous_game_mode`. Return `Flow::Cancel` to keep the old mode; numeric ids are only for network and save boundaries.
 
 - The server's difficulty changed, from one of `peaceful`, `easy`, `normal`, `hard` to another, through `native_difficulty_changed` (NeoForge's `DifficultyChangeEvent`). It is vanilla's `MinecraftServer.setDifficulty`, which `/difficulty`, a dedicated server's management and a test environment's difficulty all go through, and it is told only when the difficulty is another one. It only hears: the change has already happened.
 
@@ -1687,7 +1687,13 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   <amount:integer>", 3)` for operators of level 3. Kinds: `word`, `text` (the rest of the line, last), `integer`,
   `number`, `boolean`, `player`, `item`, `block_pos`. The usages of one command merge into one tree, which every
   player receives after vanilla's (filtered by their level, as vanilla's is), so their chat box completes and colours
-  it. The server also parses player and console invocations against that tree, including each usage's permission and argument types, before calling a mod. A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
+  it. The server also parses player and console invocations against that tree, including each usage's permission and argument types, before calling a mod.
+  Each executable usage keeps its own permission: an operator-only `foo` remains unavailable to ordinary players
+  even if `foo bar` is public. Players can traverse the shared `foo` prefix to reach `bar`, but cannot execute
+  `foo` itself. Optional arguments make their preceding prefixes executable at that usage's level; if several
+  usages execute at the same prefix, its lowest executable usage level wins. A rejected usage does not change
+  the permissions of accepted usages. A name vanilla has, or a usage that doesn't parse, is left out with a
+  warning in the log.
 - **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
   `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's
@@ -1708,12 +1714,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   screen (`slot` is the inventory menu's slot; below 0 is a stack thrown out of the screen), with the `item` (`minecraft:air`
   for an emptied slot) and `count`. Heard after vanilla's checks, before the slot changes. Set `cancel` and the packet is
   ignored. The player's state is swapped in. Stacks a creative player gets other ways (pick block, `/give`) are not heard.
-- **`native_player_game_mode_changed(player, name, from, to, cancel)`**: a server player's game mode is about to change
-  (0 survival, 1 creative, 2 adventure, 3 spectator, as `NativeServerPlayer.game_mode`): the `/gamemode` command, the
+- **`Hooks::player_game_mode_changed`**: a server player's game mode is about to change, from `event.from` to
+  `event.to`, both `GameMode` (`Survival`, `Creative`, `Adventure`, `Spectator`): the `/gamemode` command, the
   F3+F4 switcher's packet and a hardcore world's respawn into spectator, once per change to a different mode. The mode a
-  player joins with (`defaultgamemode`) is not heard. Set `cancel` and the player keeps their mode. Inside the command and
-  the switcher the player's state is swapped in; for the hardcore respawn it is not (use the UUID with the helpers that
-  take one).
+  player joins with (`defaultgamemode`) is not heard. Return `Flow::Cancel` and the player keeps their mode. Inside the
+  command and the switcher the player's state is swapped in; for the hardcore respawn it is not. The hook receives a
+  `&mut dyn ServerHost`, and `event.player` identifies the player by UUID.
 - **`native_player_changed_dimension(player, name, from, to)`**: a player changed dimension, once per move
   (`from` and `to` are ids such as `minecraft:overworld` and `minecraft:the_nether`), heard when the move has ended:
   the portal's exit is found and the player stands there, a command's teleport has landed, or a respawn in another
@@ -3087,7 +3093,7 @@ Horizon ticks vanilla's spawners where it always has: the trader, patrol, cat an
 
 - **`finalize_spawn(dimension, kind, reason, pos, spawner, difficulty, spawn_cancelled, cancel)`** (NeoForge's `FinalizeSpawnEvent`): fires where the game calls `Mob.finalizeSpawn` for a mob it made, before it runs. There are two cancels, as in NeoForge: return `Flow::Cancel` to skip finalization (no equipment, attributes or class setup; the mob still spawns uninitialised, and finalization's random draws are skipped), or set `spawn_cancelled` so no mob is added. `difficulty` (`NativeDifficulty`) is settable and is what finalization reads. `spawner` is `NativeSpawner::Block` for a spawner or trial spawner, none otherwise. Fired only where vanilla 26.3 calls `finalizeSpawn`, with vanilla's reason at that call: natural spawning, chunk generation, spawners, trial spawners, patrols, raids and sieges, reinforcements, cat spawners, phantoms, jockeys, `/summon`, `/raid`, spawn eggs, dispensers, the nether portal's piglin (`Structure`), skeleton traps, evoker vexes, wandering traders and conversions. Not fired where vanilla creates the mob without it (breeding, an infested block's silverfish, a thrown egg's chick, a thrown pearl's endermite, hatching eggs, built golems, the oozing effect's slimes, a lightning trap's horse), for loads (`persist.rs` finalizes a placed entity only through its `horizon:finalize` marker, which is a load) or for structure mobs placed by world generation. Group data is left out: it lives only in the worldgen `finalize` path, which has no host. Both new types are plain data (`NativeDifficulty` and `NativeSpawner`, `#[non_exhaustive]`). Read-only host; replayed ticks, so listeners are pure functions of their inputs. Tick-time effect: one `listened` branch with no listeners. Beyond NeoForge: none.
 
-`window_resize` notifies client mods after a window resize or applying a changed GUI scale, fullscreen, or Unicode font setting. Its width and height are physical pixels; duplicate physical resize events are suppressed.
+`window_resize` notifies client mods after a window resize or applying a changed GUI scale, fullscreen, or Unicode font setting. Its `width` and `height` are physical pixels, and `gui_width` and `gui_height` are scaled GUI pixels. It fires only when physical or scaled dimensions change.
 
 ### Structure template snapshots
 

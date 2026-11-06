@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use horizon_core::game_mode::GameMode;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
