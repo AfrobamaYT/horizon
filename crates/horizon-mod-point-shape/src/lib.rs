@@ -125,7 +125,7 @@ pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
 }
 
 /// Whether `ty` holds a reference or a lifetime other than `'static`: a value that may borrow.
-fn borrows(ty: &Type) -> bool {
+pub fn borrows(ty: &Type) -> bool {
     struct Find(bool);
     impl<'ast> syn::visit::Visit<'ast> for Find {
         fn visit_type_reference(&mut self, reference: &'ast syn::TypeReference) {

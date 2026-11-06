@@ -36,8 +36,8 @@ fn declaration(selector: &str, ordinal: Option<usize>) -> Declaration {
 
 #[test]
 fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
-    let source = "pub struct Game { pub value: u32 } impl Game { fn step(&mut self, value: u32) -> u32 { self.value += value; self.value } pub fn run(&mut self) -> Result<u32, ()> { let mut f = || self.step(2); let n = Ok::<_, ()>(f())?; Ok(n + add(3)) } } fn add(value: u32) -> u32 { value + 1 }";
-    let (rewritten, sites) = rewrite(
+    let source = "pub struct Game { pub value: u32 } impl Game { fn step(&mut self, value: u32) -> u32 { self.value += value; self.value } pub fn run(&mut self) -> Result<u32, ()> { let mut f = || self.step(2); let n = Ok::<_, ()>(f())?; let fixed = const { add(3) }; Ok(n + fixed + add(3)) } } const fn add(value: u32) -> u32 { value + 1 }";
+    let (rewritten, mut sites) = rewrite(
         source,
         "horizon_client::game",
         &entries(),
@@ -47,8 +47,25 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
         ],
     )
     .unwrap();
-    assert_eq!(sites.len(), 2);
-    syn::parse_file(&rewritten).unwrap();
+    let lower_entries = [
+        internal("lower::Made", "struct", "struct Made(u32);"),
+        internal("lower::lower_run", "fn", "fn lower_run() -> Made"),
+        internal("lower::make", "fn", "fn make() -> Made"),
+    ];
+    let request = Declaration {
+        target: "lower::lower_run".into(),
+        selector: "make".into(),
+        ordinal: Some(0),
+        origin: "sites/lower.txt:1".into(),
+    };
+    let (lower, found) = rewrite(
+        "pub struct Made(pub u32); fn make() -> Made { Made(7) } fn lower_run() -> Made { make() }",
+        "lower",
+        &lower_entries,
+        &[request],
+    )
+    .unwrap();
+    sites.extend(found);
     let variants = sites
         .iter()
         .map(|site| format!("{},", site.name))
@@ -59,15 +76,17 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
         extern crate self as mod_points;
         extern crate self as horizon_mod_api_macros;
         pub enum SiteId {{ {variants} }}
-        pub mod __private {{ pub static SITES: [std::sync::atomic::AtomicBool; 2] = [const {{ std::sync::atomic::AtomicBool::new(false) }}; 2]; }}
+        pub mod __private {{ pub static SITES: [std::sync::atomic::AtomicBool; 3] = [const {{ std::sync::atomic::AtomicBool::new(false) }}; 3]; }}
         #[macro_export] macro_rules! site {{ ($place:ident, $listener:ident, $recv_ty:ident, $record:ident, $output:ident, $receiver:expr, $args:expr, $original:expr) => {{ ($original)($receiver, &mut $args) }}; }}
         mod game {{ {rewritten} }}
+        {lower}
         fn main() {{
             for enabled in [false, true] {{
                 for flag in &__private::SITES {{ flag.store(enabled, std::sync::atomic::Ordering::Relaxed); }}
                 let mut game = game::Game {{ value: 0 }};
-                assert_eq!(game.run(), Ok(6));
+                assert_eq!(game.run(), Ok(10));
                 assert_eq!(game.value, 2);
+                assert_eq!(lower_run().0, 7);
             }}
         }}
     "#
@@ -102,16 +121,13 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
 
 #[test]
 fn site_rewrite_ordinals_hashes_and_refusals() {
+    let run = |source: &str, declarations: &[Declaration]| {
+        rewrite(source, "horizon_client::game", &entries(), declarations)
+    };
     let source = "impl Game { fn run(&mut self) { self.step(1); self.step(2); } }";
     let declarations = [declaration(".step", Some(1))];
-    let (_, sites) = rewrite(source, "horizon_client::game", &entries(), &declarations).unwrap();
-    let (_, changed) = rewrite(
-        &source.replace("step(2)", "step(3)"),
-        "horizon_client::game",
-        &entries(),
-        &declarations,
-    )
-    .unwrap();
+    let (_, sites) = run(source, &declarations).unwrap();
+    let (_, changed) = run(&source.replace("step(2)", "step(3)"), &declarations).unwrap();
     assert_eq!(sites[0].ordinal, 1);
     assert_eq!(sites[0].name, changed[0].name);
     assert_ne!(sites[0].hash, changed[0].hash);
@@ -120,51 +136,32 @@ fn site_rewrite_ordinals_hashes_and_refusals() {
         (".step", Some(2), "ordinal"),
         (".missing", Some(0), "matched no call"),
     ] {
-        let error = rewrite(
-            source,
-            "horizon_client::game",
-            &entries(),
-            &[declaration(selector, ordinal)],
-        )
-        .unwrap_err();
-        assert!(
-            error.contains("sites/test.txt:2") && error.contains(reason),
-            "{error}"
-        );
+        let error = run(source, &[declaration(selector, ordinal)]).unwrap_err();
+        assert!(error.origin.as_ref().unwrap().contains("sites/test.txt:2"));
+        assert!(error.to_string().contains(reason));
     }
     let mut conflict = declaration("self.step", Some(1));
     conflict.origin = "sites/other.txt:4".into();
-    let error = rewrite(
-        source,
-        "horizon_client::game",
-        &entries(),
-        &[declarations[0].clone(), conflict],
-    )
-    .unwrap_err();
+    let error = run(source, &[declarations[0].clone(), conflict]).unwrap_err();
     assert!(
-        error.contains("sites/test.txt:2") && error.contains("sites/other.txt:4"),
-        "{error}"
+        error.to_string().contains("sites/test.txt:2")
+            && error.to_string().contains("sites/other.txt:4")
     );
     let nested = "impl Game { fn run(&mut self) { add(add(1)); } }";
     assert!(
-        rewrite(
+        run(
             nested,
-            "horizon_client::game",
-            &entries(),
             &[declaration("add", Some(0)), declaration("add", Some(1))]
         )
         .unwrap_err()
+        .to_string()
         .contains("overlap")
     );
     let bad = "impl Game { fn run(&mut self) { self.step(self.value); } }";
     assert!(
-        rewrite(
-            bad,
-            "horizon_client::game",
-            &entries(),
-            &[declaration(".step", None)]
-        )
-        .unwrap_err()
-        .contains("two-phase")
+        run(bad, &[declaration(".step", None)])
+            .unwrap_err()
+            .to_string()
+            .contains("two-phase")
     );
 }

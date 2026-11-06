@@ -163,6 +163,7 @@ pub struct Field<'r> {
 /// The rule over one game's internals.
 pub struct Rule {
     named: HashMap<String, Named>,
+    symbols: std::collections::HashSet<String>,
     /// Import facts in each lexical module. Conflicting conditional imports stay unresolved.
     refs: HashMap<String, BTreeMap<String, Option<String>>>,
     memo: std::cell::RefCell<HashMap<String, Crossing>>,
@@ -276,6 +277,11 @@ impl Rule {
         }
         Self {
             named,
+            symbols: internals
+                .iter()
+                .filter(|e| e.cfg.is_empty())
+                .map(|e| bare(&e.path))
+                .collect(),
             refs,
             memo: Default::default(),
         }
@@ -312,7 +318,7 @@ impl Rule {
 
     /// Resolve import facts first, then explicit paths and declarations in the current module.
     /// A name that happens to be unique elsewhere is not proof of an import.
-    fn resolve(&self, module: &str, written: &syn::Path) -> Option<String> {
+    pub(crate) fn resolve(&self, module: &str, written: &syn::Path) -> Option<String> {
         let spelled = written
             .segments
             .iter()
@@ -337,7 +343,7 @@ impl Rule {
         let mut scope = module;
         let resolved = if let Some(rest) = rest.strip_prefix("crate::") {
             format!("{}::{rest}", module.split("::").next()?)
-        } else if self.named.contains_key(rest) {
+        } else if self.symbols.contains(rest) {
             rest.to_owned()
         } else {
             if let Some(tail) = rest.strip_prefix("self::") {
@@ -349,7 +355,7 @@ impl Rule {
             }
             format!("{scope}::{rest}")
         };
-        self.named.contains_key(&resolved).then_some(resolved)
+        self.symbols.contains(&resolved).then_some(resolved)
     }
 
     /// What `ty`, written in module `module` (where `Self` is `this`), is.
