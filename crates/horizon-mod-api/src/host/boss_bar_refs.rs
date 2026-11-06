@@ -36,6 +36,7 @@ pub trait BossBarRefsServerHost {
     }
 }
 /// The handles' reads of the `boss_bar_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait BossBarRefsBackend {
     /// Side: server.
@@ -139,6 +140,7 @@ pub trait BossBarRefsBackend {
     }
 }
 /// The handles' server writes of the `boss_bar_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait BossBarRefsBackendMut {
     /// Side: server.

@@ -1,6 +1,5 @@
 //! The game's side of the `menu_refs` area (`horizon-mod-api/src/host/menu_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl MenuRefsClientHost for Game<'_> {
     fn local_player(&self) -> Option<PlayerRef> {

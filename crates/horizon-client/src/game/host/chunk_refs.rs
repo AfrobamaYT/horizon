@@ -1,6 +1,5 @@
 //! The game's side of the `chunk_refs` area (`horizon-mod-api/src/host/chunk_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ChunkRefsHost for Game<'_> {
     fn chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {

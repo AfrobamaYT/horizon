@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `living_effects` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LivingEffectsBackend {
     /// Side: both.
@@ -41,6 +42,7 @@ pub trait LivingEffectsBackend {
     }
 }
 /// The handles' client-side reads of the `living_effects` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LivingEffectsClientBackend {
     /// Side: client.
@@ -70,6 +72,7 @@ pub trait LivingEffectsClientBackend {
     }
 }
 /// The handles' server writes of the `living_effects` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LivingEffectsBackendMut {
     /// Side: server.

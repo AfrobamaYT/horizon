@@ -1,6 +1,5 @@
 //! The game's side of the `item_components` area (`horizon-mod-api/src/host/item_components.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ItemComponentsHost for Game<'_> {
     fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {

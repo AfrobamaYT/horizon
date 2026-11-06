@@ -752,7 +752,7 @@ fn server_services_preserve_identity_and_message_delivery() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn canonical_permissions_preserve_owner_and_fake_player_reads() {
     use horizon_client::motion::PlayerMotion;
-    use mod_api::{GameMode, ServerHost};
+    use mod_api::GameMode;
 
     with_guests(|game| {
         let _serving = super::integrated::tests::install_serving(game, false);

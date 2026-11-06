@@ -1,6 +1,5 @@
 //! The game's side of the `host_send_map` area (`horizon-mod-api/src/host/host_send_map.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl HostSendMapBackendMut for Game<'_> {
     fn player_send_map(&mut self, player: PlayerRef, map_id: i32, colors: &[u8]) -> bool {

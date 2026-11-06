@@ -1,6 +1,5 @@
 //! The game's side of the `block_state_ids` area (`horizon-mod-api/src/host/block_state_ids.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl BlockStateIdsHost for Game<'_> {
     fn fluid_key(&self, id: &str) -> Option<FluidKey> {

@@ -1,6 +1,5 @@
 //! The game's side of the `send_packet` area (`horizon-mod-api/src/host/send_packet.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl SendPacketClientHost for Game<'_> {
     fn send_packet(&mut self, packet: ServerboundPlayPacket) -> Result<(), SendPacketError> {

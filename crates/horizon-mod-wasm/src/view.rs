@@ -10,7 +10,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use wasmtime::component::{Linker, Resource};
 
 mod imports;
+mod lazy;
 mod transport;
+
+#[cfg(test)]
+mod allocation;
 
 /// A declared-list entry resolved once at load.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -339,12 +343,14 @@ impl Metered {
         host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
         n: u32,
-        v: Vec<wire::Cell>,
+        v: impl lazy::Materialize<Owned = Vec<wire::Cell>>,
     ) -> wasmtime::Result<Result<(), wire::Refusal>> {
-        import(
+        lazy::import(
             host,
-            node_cost(&node).saturating_add(wire_cost(&v)),
-            || View.set(node, n, v),
+            node_cost(&node),
+            || Ok(()),
+            v,
+            |v| View.set(node, n, v),
             |_| 0,
         )
     }
@@ -363,12 +369,14 @@ impl Metered {
     fn key(
         host: wasmtime::StoreContextMut<'_, State>,
         node: Resource<wire::Node>,
-        k: Vec<wire::Cell>,
+        k: wasmtime::component::WasmList<lazy::Cell>,
     ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
-        import(
+        lazy::import(
             host,
-            node_cost(&node).saturating_add(wire_cost(&k)),
-            || View.key(node, k),
+            node_cost(&node),
+            || Ok(()),
+            k,
+            |k| View.key(node, k),
             reached_cells,
         )
     }
@@ -484,24 +492,29 @@ impl Metered {
         host: wasmtime::StoreContextMut<'_, State>,
         declared: u32,
         receiver: Option<Resource<wire::Node>>,
-        args: Vec<wire::Arg>,
+        args: wasmtime::component::WasmList<lazy::Arg>,
     ) -> wasmtime::Result<Result<wire::CallReply, wire::Refusal>> {
-        let cells = args
-            .iter()
-            .map(|a| match a {
-                wire::Arg::Value(v) => wire_cost(v),
-                wire::Arg::Node(n) => node_cost(n),
-            })
-            .fold(
-                receiver.as_ref().map_or(0, node_cost),
-                usize::saturating_add,
-            );
-        import(
+        let count = args.len();
+        let base = 1000usize
+            .saturating_add(receiver.as_ref().map_or(0, node_cost))
+            .saturating_add(journal_cost());
+        lazy::import(
             host,
-            1000usize
-                .saturating_add(cells)
-                .saturating_add(journal_cost()),
-            || View.call(declared, receiver, args),
+            base,
+            || {
+                current(|active| {
+                    let Some(Resolved::Thunk(function)) = active.declared.get(declared as usize)
+                    else {
+                        return Err(wire::Refusal::NotHere("not a declared function".into()));
+                    };
+                    if count != active.frame.argument_count(*function)? {
+                        return Err(wire::Refusal::Changed("an argument count".into()));
+                    }
+                    Ok(())
+                })
+            },
+            lazy::Arguments(args),
+            |args| View.call(declared, receiver, args),
             |reply| {
                 reply
                     .updates
@@ -1098,6 +1111,47 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
+    fn call_payload_budgets_follow_each_value_and_trusted_arity() {
+        let group = fixture_group();
+        let mut game = fixture_game();
+        fixture_result(&group, &mut game, "lazy_multiple_values").unwrap();
+        assert_eq!((game.left, game.right), (1, 10));
+        let (result, peak) =
+            allocation::measure(|| fixture_result(&group, &mut game, "lazy_wrong_arity"));
+        result.unwrap();
+        assert!(
+            peak < 131_072,
+            "wrong arity copied a payload ({peak} bytes)"
+        );
+        assert_eq!((game.left, game.right), (1, 10));
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
+    fn oversized_strings_are_refused_without_copying_the_guest_payload() {
+        let group = fixture_group();
+        fixture_result(&group, &mut fixture_game(), "before").unwrap();
+        let (_, control) = allocation::measure(|| std::hint::black_box(vec![0u8; 2_097_152]));
+        assert!(
+            control >= 2_097_152,
+            "the allocation observer must see owned payloads"
+        );
+        for route in ["set", "key", "call", "batch"] {
+            let mut game = fixture_game();
+            let (result, peak) = allocation::measure(|| {
+                fixture_result(&group, &mut game, &format!("lazy_string_{route}"))
+            });
+            result.unwrap();
+            assert!(
+                peak < 131_072,
+                "{route} allocated {peak} bytes in one host allocation"
+            );
+            assert_eq!((game.left, game.right), (1, 10));
+        }
     }
 
     #[test]

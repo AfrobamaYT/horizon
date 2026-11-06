@@ -1,6 +1,5 @@
 //! The game's side of the `model_layers` area (`horizon-mod-api/src/host/model_layers.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ModelLayersClientHost for Game<'_> {
     fn bake_layer(&self, layer: &str) -> Option<ModelPart> {

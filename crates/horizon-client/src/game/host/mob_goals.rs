@@ -1,6 +1,5 @@
 //! The game's side of the `mob_goals` area (`horizon-mod-api/src/host/mob_goals.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl MobGoalsBackend for Game<'_> {
     fn mob_goals(&self, mob: MobRef) -> Option<Vec<NativeMobGoalEntry>> {

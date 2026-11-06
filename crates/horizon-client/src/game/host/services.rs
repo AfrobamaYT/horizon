@@ -1,6 +1,5 @@
 //! The game's side of the `services` area (`horizon-mod-api/src/host/services.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ServicesServerHost for Game<'_> {
     fn commands(&mut self) -> &mut dyn Commands {

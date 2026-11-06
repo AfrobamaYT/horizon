@@ -1,6 +1,5 @@
 //! The game's side of the `level_events` area (`horizon-mod-api/src/host/level_events.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelEventsBackendMut for Game<'_> {
     fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool {
