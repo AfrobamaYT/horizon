@@ -122,9 +122,7 @@ impl PreparedModels {
                 ]
             })
             .collect();
-        // Vertex and index buffers, not storage bindings, so only `max_buffer_size` applies.
-        // Checked before `create_buffer`: an oversized buffer is a fatal wgpu validation
-        // error when no scope is active.
+        // Vertex and index buffers, so only `max_buffer_size` applies.
         let limit = device.limits().max_buffer_size;
         let vertex_bytes = std::mem::size_of_val(vertices) as u64;
         let index_bytes = std::mem::size_of_val(indices.as_slice()) as u64;
@@ -209,10 +207,7 @@ impl PreparedModels {
             "fs_hdr_mark",
             wgpu::ColorWrites::ALPHA,
         );
-        // Pop before mapping. `create_buffer_init` maps immediately, so a failed
-        // allocation panicked inside that helper before this scope could be read.
-        // No bind group or texture is created here. The caller replaces `prepared_models`
-        // only after this returns Ok.
+        // Pop before mapping: a failed allocation must not be mapped.
         let scope_error = checks.pop().map(|error| error.to_string());
         copy_after_scope(scope_error.clone(), || {
             map_bytes(&vertex_buffer, bytemuck::cast_slice(vertices))
