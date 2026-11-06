@@ -2094,14 +2094,16 @@ pub(super) mod tests {
             let real_holder = horizon_world::attachments::Holder::Player(1);
             attachment
                 .set(
-                    game.attachment_map_quiet(real_holder).unwrap(),
+                    game.attachment_map_quiet(real_holder, mod_api::AttachmentAccess::Existing)
+                        .unwrap(),
                     horizon_world::attachments::Holder::Level,
                     17,
                 )
                 .unwrap();
             attachment
                 .set(
-                    game.attachment_map_quiet(holder).unwrap(),
+                    game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                        .unwrap(),
                     horizon_world::attachments::Holder::Level,
                     3,
                 )
@@ -2115,7 +2117,8 @@ pub(super) mod tests {
             let nether_actor = game.native_fake_player(nether, 2345, "parked").unwrap();
             attachment
                 .set(
-                    game.attachment_map_quiet(holder).unwrap(),
+                    game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                        .unwrap(),
                     horizon_world::attachments::Holder::Level,
                     8,
                 )
@@ -2123,7 +2126,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(holder).unwrap(),
+                        game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2139,7 +2143,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(holder).unwrap(),
+                        game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2201,7 +2206,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(holder).unwrap(),
+                        game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2211,7 +2217,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(real_holder).unwrap(),
+                        game.attachment_map_quiet(real_holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2221,7 +2228,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(holder).unwrap(),
+                        game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
