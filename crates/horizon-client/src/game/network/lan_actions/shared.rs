@@ -335,6 +335,24 @@ fn building_players(host: &LanHost) -> Vec<BuildingPlayer> {
         .collect()
 }
 
+/// Kept at LAN action scope to preserve its derived internals point identity.
+impl Game<'_> {
+    pub(super) fn vehicle_has_other_viewers(
+        container: Option<(i32, i32, i32)>,
+        guests: &[horizon_client::lan::guest::Guest],
+        closing_conn: Option<u32>,
+        key: (i32, i32, i32),
+    ) -> bool {
+        container == Some(key)
+            || guests.iter().any(|g| {
+                Some(g.conn) != closing_conn
+                    && g.menu
+                        .as_ref()
+                        .is_some_and(|m| m.slots == Slots::Block(key))
+            })
+    }
+}
+
 fn captured_block_break(sound: &horizon_client::audio::CapturedSound, blocks: &[[f64; 3]]) -> bool {
     sound.entity.is_none()
         && blocks

@@ -85,11 +85,25 @@ pub(crate) fn lan_action_modules(directory: &Path) -> Result<String, String> {
         if matches!(module.as_str(), "mod" | "shared") {
             let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
             let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
-            if file.items.iter().any(|item| {
-                matches!(item, syn::Item::Impl(item)
-                if matches!(&*item.self_ty, syn::Type::Path(ty)
-                    if ty.path.segments.len() == 1 && ty.path.segments[0].ident == "Game"))
-            }) {
+            for item in file.items {
+                let syn::Item::Impl(item) = item else {
+                    continue;
+                };
+                let syn::Type::Path(ty) = &*item.self_ty else {
+                    continue;
+                };
+                if ty.path.segments.len() != 1 || ty.path.segments[0].ident != "Game" {
+                    continue;
+                }
+                if module == "shared"
+                    && item.items.iter().all(|member| {
+                        matches!(member, syn::ImplItem::Fn(method)
+                        if method.sig.ident == "vehicle_has_other_viewers"
+                            && method.sig.receiver().is_none())
+                    })
+                {
+                    continue;
+                }
                 return Err(format!(
                     "{}: put Game methods in an action area",
                     path.display()
@@ -163,6 +177,12 @@ mod tests {
         assert!(!code.contains("mod shared;") && !code.contains("mod mod;"));
         fs::write(directory.join("new_area.rs"), "").unwrap();
         assert!(expand(&root, include).unwrap().contains("mod new_area;"));
+        fs::write(
+            directory.join("shared.rs"),
+            "impl Game<'_> { fn vehicle_has_other_viewers() {} }",
+        )
+        .unwrap();
+        assert!(lan_action_modules(&directory).is_ok());
         for file in ["shared.rs", "mod.rs"] {
             fs::write(
                 directory.join(file),

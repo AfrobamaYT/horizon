@@ -499,21 +499,6 @@ impl Game<'_> {
         self.player_menu_closing(conn);
     }
 
-    pub(in crate::game) fn vehicle_has_other_viewers(
-        container: Option<(i32, i32, i32)>,
-        guests: &[horizon_client::lan::guest::Guest],
-        closing_conn: Option<u32>,
-        key: (i32, i32, i32),
-    ) -> bool {
-        container == Some(key)
-            || guests.iter().any(|g| {
-                Some(g.conn) != closing_conn
-                    && g.menu
-                        .as_ref()
-                        .is_some_and(|m| m.slots == Slots::Block(key))
-            })
-    }
-
     /// `ContainerEntity`'s `Container.stopOpen` when a vehicle menu closes
     /// (`AbstractChestBoat.stopOpen` / `MinecartChest.stopOpen`): the menu's
     /// slots go back to the vehicle, the shared placeholder leaves

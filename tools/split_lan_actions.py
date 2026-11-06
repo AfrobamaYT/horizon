@@ -23,6 +23,7 @@ SECTIONS = dict(zip(
     "movement mining pickups effects".split(),
 ))
 SHARED_DOC = "// Shared state, helpers and mixed tests stay at the original LAN action scope.\n"
+POINT_DOC = "/// Kept at LAN action scope to preserve its derived internals point identity.\n"
 INCLUDE = 'include!(concat!(env!("OUT_DIR"), "/lan_action_modules.rs"));\n'
 
 
@@ -57,12 +58,16 @@ def split(source, binary):
         assert area, "first method has no area"
         text = "".join(lines[cursor:method["end"]])
         cursor = method["end"]
-        text = text.replace("super::", "crate::game::")
-        text = text.replace("pub(super)", "pub(in crate::game)")
-        text = re.sub(r"(?m)^    fn ", "    pub(super) fn ", text)
-        outputs[area + ".rs"] += text
+        if method["name"] == "vehicle_has_other_viewers":
+            outputs["shared.rs"] += POINT_DOC + "impl Game<'_> {\n" + text + "}\n"
+            ownership[method["name"]] = "shared"
+        else:
+            text = text.replace("super::", "crate::game::")
+            text = text.replace("pub(super)", "pub(in crate::game)")
+            text = re.sub(r"(?m)^    fn ", "    pub(super) fn ", text)
+            outputs[area + ".rs"] += text
+            ownership[method["name"]] = area
         normalized += text
-        ownership[method["name"]] = area
     normalized += "".join(lines[cursor:])
     outputs["shared.rs"] += "".join(lines[item["end"]:])
     for name in outputs:
@@ -97,19 +102,19 @@ def main():
         actual = {p.name: p.read_text() for p in (ROOT / directory).glob("*.rs")}
         assert not (ROOT / old).exists(), "old hotspot source still exists"
         assert actual == expected, "files differ from the deterministic formatted move"
-        actual["shared.rs"] = actual["shared.rs"].replace(SHARED_DOC, "", 1)
+        actual["shared.rs"] = actual["shared.rs"].replace(SHARED_DOC, "", 1).replace(POINT_DOC, "", 1)
         before = payload({"before.rs": formatted(normalized)}, binary)
         after = payload(actual, binary)
         assert before == after, f"payload mismatch: removed {before - after}; added {after - before}"
         print(f"Moved payload line multisets: equal ({sum(before.values())} nonblank lines)")
-        print(f"Whole Game methods: {len(ownership)}; areas: {len(set(ownership.values()))}")
+        print(f"Whole Game methods: {len(ownership)}; moved: {len(ownership) - 1}; areas: {len(set(ownership.values()) - {'shared'})}; shared point-identity exception: 1")
         print("Exact formatted output and within-area item order: identical to scripted move")
         print("Declared edits: impl/use/include wrappers; equivalent visibility; game-relative paths; ledger paths")
     else:
         (ROOT / directory).mkdir(exist_ok=True)
         for name, text in expected.items():
             (ROOT / directory / name).write_text(text)
-        (ROOT / old).unlink()
+        (ROOT / old).unlink(missing_ok=True)
     for path in sorted((ROOT / "tools/port_map").glob("*.tsv")):
         original = run("git", "show", f"{base}:{path.relative_to(ROOT)}") if base else path.read_text()
         updated = ledger(original, old, directory, ownership)
