@@ -103,9 +103,11 @@ Guest copies own their data: a native borrowed or shared copy is represented by 
 Small named copies are plain structs or enums; their node form, when used as a receiver, has
 `Node` appended to its name. Same-named types retain their fully qualified generated names;
 an unambiguous type also gets a short alias such as `Game` unless it conflicts with the view's
-runtime types. Functions taking a mutable reference to a copy argument are refused at build:
-the host exposes copy fields as values, not as nodes that could supply that argument. The
-catalog coverage job lists these paths and their reason explicitly. Sets are opaque, not indexed
+runtime types. A function's `&mut T` copy argument is also `&mut T` in the guest view: its value
+crosses into a separate host local, and the final value is written back into the guest argument
+after the call, including when the game returns an error. For example, `mutate(&mut count,
+&mut small)?` updates both guest values without making either a node or aliasing game state.
+Mutable node arguments still require the separation described below. Sets are opaque, not indexed
 sequences.
 
 A function returning `Result<T, E>` (including a written `Result<T>` alias) can expose a copyable

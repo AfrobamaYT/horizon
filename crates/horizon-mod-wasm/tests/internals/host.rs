@@ -61,14 +61,41 @@ unsafe fn record(ptr: *mut (), writable: bool, op: Op<'_>) -> Result<Reply, Refu
         _ => Err(I::not_here("not on the raw record")),
     }
 }
-unsafe fn add(receiver: Option<*mut ()>, args: Vec<Arg>) -> Result<Reply, Refusal> {
+unsafe fn add(receiver: Option<*mut ()>, args: Vec<Arg>) -> Result<I::CallReply, Refusal> {
     // SAFETY: the checked thunk descriptor requires a writable Game receiver.
     let game = unsafe { &mut *receiver.unwrap().cast::<Game>() };
     let [arg] = I::fields::<_, 1>(args)?;
     let delta: i64 = I::int(I::value(arg)?)?;
     assert_ne!(delta, -999, "fixture thunk panic");
     game.left += delta;
-    Ok(Reply::Value(Value::S(game.left + game.right)))
+    Ok(I::CallReply::new(Reply::Value(Value::S(
+        game.left + game.right,
+    ))))
+}
+
+struct Small {
+    count: u32,
+}
+fn mutate_copies(n: &mut u32, small: &mut Small) -> u32 {
+    *n += 5;
+    small.count += 7;
+    *n + small.count
+}
+unsafe fn mutate(_: Option<*mut ()>, args: Vec<Arg>) -> Result<I::CallReply, Refusal> {
+    let [n, small] = I::fields::<_, 2>(args)?;
+    let mut n = I::int(I::value(n)?)?;
+    let [count] = I::fields::<_, 1>(I::rec(I::value(small)?)?)?;
+    let mut small = Small {
+        count: I::int(count)?,
+    };
+    let result = mutate_copies(&mut n, &mut small);
+    Ok(I::CallReply {
+        result: Reply::Value(Value::U(result.into())),
+        updates: vec![
+            Value::U(n.into()),
+            Value::Rec(vec![Value::U(small.count.into())]),
+        ],
+    })
 }
 
 pub fn table() -> &'static Table {
@@ -105,14 +132,24 @@ pub fn table() -> &'static Table {
                 field: 1,
             },
         ],
-        thunks: &[Thunk {
-            path: "horizon_client::game::Game::add",
-            hash: "638665cf01d552d5765711831232b653f7b98d9c7bdddb54a58182e433e5cd0e",
-            receiver: Some(0),
-            args: &[None],
-            writes: 1,
-            call: add,
-        }],
+        thunks: &[
+            Thunk {
+                path: "horizon_client::game::Game::add",
+                hash: "638665cf01d552d5765711831232b653f7b98d9c7bdddb54a58182e433e5cd0e",
+                receiver: Some(0),
+                args: &[None],
+                writes: 1,
+                call: add,
+            },
+            Thunk {
+                path: "horizon_client::mutate_copies",
+                hash: "mutate-copies-hash",
+                receiver: None,
+                args: &[None, None],
+                writes: 0,
+                call: mutate,
+            },
+        ],
         places: Box::leak(Box::new([Place {
             place,
             target: mod_points::places::TARGETS[place],

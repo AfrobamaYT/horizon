@@ -1109,6 +1109,7 @@ impl<'r> Gen<'r> {
         let mut nodes = Vec::new();
         let mut lets = Vec::new();
         let mut args = Vec::new();
+        let mut updates = Vec::new();
         // Named input lifetimes can be tied to a receiver's stored borrows. Spelling a listed
         // lifetime-bearing input with `'static` would also invent an outlives guarantee.
         struct InputLifetimes<'r> {
@@ -1151,10 +1152,7 @@ impl<'r> Gen<'r> {
             let arg = format_ident!("a{i}");
             match (&shape, rule.crossing_of(&shape)) {
                 (_, Crossing::Opaque) => return None,
-                (Shape::Ref { mutable, to }, Crossing::Handle)
-                | (Shape::Ref { mutable, to }, Crossing::Copy(_))
-                    if *mutable || rule.crossing_of(to) == Crossing::Handle =>
-                {
+                (Shape::Ref { mutable, to }, _) if rule.crossing_of(to) == Crossing::Handle => {
                     let ty = spell(to)?;
                     let id = self.node(to);
                     nodes.push(quote!(::std::option::Option::Some(#id)));
@@ -1166,7 +1164,14 @@ impl<'r> Gen<'r> {
                     }
                     args.push(quote!(#arg));
                 }
-                (Shape::Ref { to, .. }, Crossing::Copy(_)) => {
+                (Shape::Ref { mutable: true, to }, Crossing::Copy(_)) if buildable(to, rule) => {
+                    let value = self.decode(to, quote!(I::value(#arg)?));
+                    lets.push(quote!(let mut #arg = #value;));
+                    args.push(quote!(&mut #arg));
+                    updates.push(self.encode(to, quote!((&#arg))));
+                    nodes.push(quote!(::std::option::Option::None));
+                }
+                (Shape::Ref { mutable: false, to }, Crossing::Copy(_)) => {
                     if matches!(**to, Shape::Scalar(Scalar::Str)) {
                         let value =
                             self.decode(&Shape::Scalar(Scalar::String), quote!(I::value(#arg)?));
@@ -1254,12 +1259,13 @@ impl<'r> Gen<'r> {
         let hash = &internal.hash;
         self.items.push(quote! {
             #[allow(unused_variables, unused_mut, clippy::all)]
-            unsafe fn #thunk(this: ::std::option::Option<*mut ()>, args: ::std::vec::Vec<I::Arg>) -> ::std::result::Result<I::Reply, I::Refusal> {
+            unsafe fn #thunk(this: ::std::option::Option<*mut ()>, args: ::std::vec::Vec<I::Arg>) -> ::std::result::Result<I::CallReply, I::Refusal> {
                 unsafe {
                     let [#(#names),*] = I::fields::<_, #n>(args)?;
                     #(#lets)*
                     let result = #function(#receiver #(#args),*);
-                    #result
+                    let result: ::std::result::Result<I::Reply, I::Refusal> = #result;
+                    Ok(I::CallReply { result: result?, updates: vec![#(#updates),*] })
                 }
             }
         });
@@ -1756,6 +1762,65 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn mutable_copy_arguments_round_trip_through_generated_thunks() {
+        let entries = [
+            internal(
+                "horizon_client::Pair",
+                "struct",
+                "struct Pair { x: u32, flag: bool }",
+            ),
+            internal(
+                "horizon_client::mutate",
+                "fn",
+                "fn mutate(n: &mut u32, pair: &mut Pair) -> u32",
+            ),
+            internal(
+                "horizon_client::borrow",
+                "fn",
+                "fn borrow(n: &mut u32) -> &mut u32",
+            ),
+            internal(
+                "horizon_client::fail",
+                "fn",
+                "fn fail(n: &mut u32) -> Result<(), String>",
+            ),
+            internal("horizon_client::unit", "fn", "fn unit(n: &mut u32)"),
+        ];
+        let (code, counts) = all_table(&entries);
+        assert_eq!(counts.thunks, 4);
+        run_fixture(
+            &code,
+            r#"
+            struct Pair { x: u32, flag: bool }
+            fn mutate(n: &mut u32, pair: &mut Pair) -> u32 { *n += 5; pair.x += 7; pair.flag = !pair.flag; *n + pair.x }
+            fn borrow(n: &mut u32) -> &mut u32 { *n += 1; n }
+            fn fail(n: &mut u32) -> Result<(), String> { *n = 99; Err("failed".into()) }
+            fn unit(n: &mut u32) { *n = 42; }
+        "#,
+            r#"
+            use internals::{Arg, CallReply};
+            let mut pair = Pair { x: 2, flag: false };
+            let ty = __internals::TABLE.types.iter().find(|t| t.path.ends_with("Pair")).unwrap();
+            unsafe { assert_eq!((ty.node)((&raw mut pair).cast(), true, Op::Read), Ok(Reply::Value(Value::Rec(vec![Value::U(2), Value::B(false)])))); }
+            for thunk in __internals::TABLE.thunks {
+                assert_eq!(thunk.writes, 0, "copy locals never write through nodes");
+                assert!(thunk.args.iter().all(Option::is_none));
+                let mut args = vec![Arg::Value(Value::U(7))];
+                let (result, updates) = if thunk.path.ends_with("mutate") {
+                    args.push(Arg::Value(Value::Rec(vec![Value::U(2), Value::B(false)])));
+                    (Reply::Value(Value::U(21)), vec![Value::U(12), Value::Rec(vec![Value::U(9), Value::B(true)])])
+                } else if thunk.path.ends_with("borrow") {
+                    (Reply::Value(Value::U(8)), vec![Value::U(8)])
+                } else if thunk.path.ends_with("fail") {
+                    (Reply::Value(Value::Var(1, vec![])), vec![Value::U(99)])
+                } else { (Reply::Done, vec![Value::U(42)]) };
+                unsafe { assert_eq!((thunk.call)(None, args), Ok(CallReply { result, updates })); }
+            }
+        "#,
+        );
+    }
+
+    #[test]
     fn coverage_lists_refused_map_key_types() {
         let entries = [
             internal("horizon_client::Key", "struct", "struct Key { id: u32 }"),
@@ -1844,7 +1909,7 @@ pub(crate) mod tests {
                 let Reply::Node(a, _, false) = (ty.node)((&raw mut choice).cast(), false, Op::Field(0)).unwrap() else { panic!() };
                 let Reply::Node(b, _, false) = (ty.node)((&raw mut choice).cast(), false, Op::Field(1)).unwrap() else { panic!() };
                 let thunk = __internals::TABLE.thunks.iter().find(|t| t.path.ends_with("inspect")).unwrap();
-                assert_eq!((thunk.call)(None, vec![internals::Arg::Node(a), internals::Arg::Node(b)]), Ok(Reply::Value(Value::U(5))));
+                assert_eq!((thunk.call)(None, vec![internals::Arg::Node(a), internals::Arg::Node(b)]).map(|r| r.result), Ok(Reply::Value(Value::U(5))));
             }
         "#,
         );
@@ -1958,8 +2023,8 @@ pub(crate) mod tests {
             unsafe {
                 let thunk = &__internals::TABLE.thunks[0];
                 let ptr = &raw mut bag as *mut ();
-                assert!(matches!((thunk.call)(Some(ptr), vec![internals::Arg::Value(Value::B(true))]).unwrap(), Reply::Node(p, _, true) if p == ptr));
-                assert_eq!((thunk.call)(Some(ptr), vec![internals::Arg::Value(Value::B(false))]), Ok(Reply::Value(Value::Var(0, vec![]))));
+                assert!(matches!((thunk.call)(Some(ptr), vec![internals::Arg::Value(Value::B(true))]).unwrap().result, Reply::Node(p, _, true) if p == ptr));
+                assert_eq!((thunk.call)(Some(ptr), vec![internals::Arg::Value(Value::B(false))]).map(|r| r.result), Ok(Reply::Value(Value::Var(0, vec![]))));
             }
             "#,
         );
@@ -1989,7 +2054,7 @@ pub(crate) mod tests {
             unsafe {
                 for thunk in __internals::TABLE.thunks {
                     let expected = if thunk.path.ends_with("succeed") { Value::Var(0, vec![Value::U(37)]) } else { Value::Var(1, vec![]) };
-                    assert_eq!((thunk.call)(None, vec![]), Ok(Reply::Value(expected)));
+                    assert_eq!((thunk.call)(None, vec![]).map(|r| r.result), Ok(Reply::Value(expected)));
                 }
             }
             "#,

@@ -409,7 +409,7 @@ impl wire::HostWithStore<State> for View {
         declared: u32,
         receiver: Option<Resource<wire::Node>>,
         args: Vec<wire::Arg>,
-    ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
+    ) -> wasmtime::Result<Result<wire::CallReply, wire::Refusal>> {
         let cells = args
             .iter()
             .map(|a| match a {
@@ -426,7 +426,13 @@ impl wire::HostWithStore<State> for View {
                 .saturating_add(cells)
                 .saturating_add(journal_cost()),
             || View.call(declared, receiver, args),
-            reached_cells,
+            |reply| {
+                reply
+                    .updates
+                    .iter()
+                    .map(|cells| wire_cost(cells))
+                    .fold(reached_cells(&reply.result), usize::saturating_add)
+            },
         )
     }
 }
@@ -536,7 +542,7 @@ impl View {
         declared: u32,
         receiver: Option<Resource<wire::Node>>,
         args: Vec<wire::Arg>,
-    ) -> Result<wire::Reached, wire::Refusal> {
+    ) -> Result<wire::CallReply, wire::Refusal> {
         current(|a| {
             let Some(Resolved::Thunk(function)) = a.declared.get(declared as usize) else {
                 return Err(wire::Refusal::NotHere("not a declared function".into()));
@@ -566,10 +572,18 @@ impl View {
             // A game function may dispatch into another wasm group. Its imports must not
             // see this listener's frame, nor alias the mutable borrow held by this call.
             let mask = Scope(CURRENT.replace(std::ptr::null_mut()));
-            let (reached, refused) = a.frame.call(*function, receiver, args)?;
+            let (reply, refused) = a.frame.call(*function, receiver, args)?;
             drop(mask);
             log_refused(refused);
-            a.reached(reached)
+            let updates = reply
+                .updates
+                .into_iter()
+                .map(encode)
+                .collect::<Result<_, _>>()?;
+            Ok(wire::CallReply {
+                result: a.reached(reply.result)?,
+                updates,
+            })
         })
     }
 }
@@ -686,6 +700,76 @@ mod tests {
 
     mod fixture {
         include!("../tests/internals/host.rs");
+    }
+
+    #[test]
+    fn mutable_copy_arguments_cross_the_runtime_and_refuse_nodes() {
+        let mut game = fixture::Game {
+            left: 1,
+            right: 10,
+            hidden: vec![],
+            refused_sets: 0,
+            reads: 0,
+        };
+        // SAFETY: the fixture table describes this live, exclusively borrowed Game.
+        let frame = unsafe {
+            Frame::new(
+                fixture::table(),
+                vec![Root {
+                    ptr: (&raw mut game).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        run(frame, &[Resolved::Thunk(1)], || {
+            let reply = View
+                .call(
+                    0,
+                    None,
+                    vec![
+                        wire::Arg::Value(flatten(internals::Value::U(7))),
+                        wire::Arg::Value(flatten(internals::Value::Rec(vec![
+                            internals::Value::U(2),
+                        ]))),
+                    ],
+                )
+                .unwrap();
+            let wire::Reached::Value(value) = reply.result else {
+                panic!()
+            };
+            assert_eq!(unflatten(value).unwrap(), internals::Value::U(21));
+            let updates: Vec<_> = reply
+                .updates
+                .into_iter()
+                .map(|v| unflatten(v).unwrap())
+                .collect();
+            assert_eq!(
+                updates,
+                vec![
+                    internals::Value::U(12),
+                    internals::Value::Rec(vec![internals::Value::U(9)])
+                ]
+            );
+            let node = View.root(0).unwrap();
+            assert!(matches!(
+                View.call(
+                    0,
+                    None,
+                    vec![
+                        wire::Arg::Node(Resource::new_borrow(node.rep())),
+                        wire::Arg::Value(flatten(internals::Value::Rec(vec![
+                            internals::Value::U(2)
+                        ]))),
+                    ]
+                ),
+                Err(wire::Refusal::Changed(_))
+            ));
+            Ok(())
+        })
+        .unwrap();
     }
 
     type FixtureFire = wasmtime::component::TypedFunc<(u32, mod_points::internals::bindings::exports::horizon::mod_internals::raw_listeners::HostKind), ()>;
@@ -970,7 +1054,8 @@ mod tests {
                     unflatten(host.read(borrow(&first)).unwrap()).unwrap(),
                     internals::Value::Rec(vec![internals::Value::S(10)])
                 );
-                let wire::Reached::Value(left) = host.call(0, Some(borrow(&root)), vec![]).unwrap()
+                let wire::Reached::Value(left) =
+                    host.call(0, Some(borrow(&root)), vec![]).unwrap().result
                 else {
                     panic!("a value")
                 };
@@ -1125,7 +1210,8 @@ mod tests {
         let mut game = world();
         run(frame(&mut game), &[Resolved::Thunk(1)], || {
             let root = View.root(0).unwrap();
-            let wire::Reached::Node(first) = View.call(0, Some(borrow(&root)), vec![]).unwrap()
+            let wire::Reached::Node(first) =
+                View.call(0, Some(borrow(&root)), vec![]).unwrap().result
             else {
                 panic!("a player")
             };
@@ -1238,9 +1324,11 @@ mod tests {
         unsafe fn reenter(
             _: Option<*mut ()>,
             _: Vec<internals::Arg>,
-        ) -> Result<internals::Reply, internals::Refusal> {
+        ) -> Result<internals::CallReply, internals::Refusal> {
             assert!(matches!(View.root(0), Err(wire::Refusal::Gone(_))));
-            Ok(internals::Reply::Value(internals::Value::None))
+            Ok(internals::CallReply::new(internals::Reply::Value(
+                internals::Value::None,
+            )))
         }
         static TABLE: Table = Table {
             types: &[],
@@ -1261,7 +1349,10 @@ mod tests {
         run(frame, &[Resolved::Thunk(0)], || {
             assert!(matches!(
                 View.call(0, None, vec![]),
-                Ok(wire::Reached::Value(_))
+                Ok(wire::CallReply {
+                    result: wire::Reached::Value(_),
+                    ..
+                })
             ));
             // The mask restored the active frame, rather than leaving the imports outside it.
             assert!(matches!(
