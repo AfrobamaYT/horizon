@@ -379,7 +379,9 @@ pub trait Hooks {
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
     /// chat box then completes them as vanilla's, within their level. A
-    /// name vanilla has is left out.
+    /// name vanilla has is left out. Each executable usage keeps its own
+    /// permission level; a lower-level child only opens traversal through a
+    /// shared prefix, not execution of that prefix.
     #[hook(side = "server", contract = "collect", out = "commands")]
     fn register_commands();
     /// A player's command on the server (`Commands.performCommand`),
@@ -3761,15 +3763,25 @@ pub trait Hooks {
     fn player_advancement_done();
     /// A criterion of a server player's advancement was granted or revoked, after its progress changed
     /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
-    /// The full advancement progress is
-    /// not yet exposed (tracked on #29).
+    /// `progress` is an owned snapshot of every criterion (including its stored grant date),
+    /// the requirement groups and their completion at this exact mutation. It belongs to
+    /// this player, including first-tick and reload grants held by the server hub. A listener
+    /// may retain a clone; later grants, revokes or reloads do not change that snapshot.
     #[hook(
         side = "server",
         contract = "listen",
         neoforge = "AdvancementEvent.AdvancementProgressEvent",
         cancellable = false
     )]
-    fn player_advancement_progress();
+    fn player_advancement_progress(
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        advancement: &str,
+        criterion: &str,
+        progress_type: NativeProgressType,
+        progress: &AdvancementProgress,
+    );
     /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side.
     #[hook(
         side = "server",
