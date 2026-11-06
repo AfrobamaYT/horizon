@@ -820,7 +820,7 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
                 return;
             }
             if s.same_item_same_components(&c) {
-                let max = view.slot_max(i, &s, rules);
+                let max = view.slot_max(i, &c, rules);
                 let moved = if right { 1 } else { c.count }.min(max.saturating_sub(s.count));
                 s.count += moved;
                 c.count -= moved;

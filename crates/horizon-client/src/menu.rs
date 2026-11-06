@@ -555,7 +555,7 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Dispatch a content mod menu's slot placement and maximum stack rules.
+/// Dispatch registered vanilla and mod menu slot placement and maximum stack rules.
 /// The slot is its backing container index. The shared application bounds the
 /// final maximum.
 #[inline(always)]

@@ -7095,6 +7095,9 @@ mod tests {
                     event.may_place = false;
                 }
                 if event.slot == 0 {
+                    if &*event.stack.item == "minecraft:diorite" && event.stack.count >= 8 {
+                        event.max_stack = 3;
+                    }
                     if &*event.stack.item == "minecraft:andesite" {
                         event.max_stack = 3;
                     }
@@ -7170,8 +7173,14 @@ mod tests {
                         }
                     });
                     let window = host.hub.guests[0].menu.as_ref().unwrap().window;
-                    for (item, expected) in [("minecraft:dirt", 0), ("minecraft:stone", 3)] {
+                    for (item, existing, expected) in [
+                        ("minecraft:dirt", 0, 0),
+                        ("minecraft:stone", 0, 3),
+                        ("minecraft:diorite", 2, 3),
+                    ] {
                         let stack = ItemStack::new(item, 8);
+                        game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
+                            (existing > 0).then(|| ItemStack::new(item, existing));
                         let mut prediction = Menu::new(if is_mod {
                             Kind::Mod(menu_type)
                         } else {
@@ -7182,6 +7191,8 @@ mod tests {
                         } else {
                             "minecraft:generic_9x3"
                         }));
+                        prediction
+                            .load_slot(0, (existing > 0).then(|| ItemStack::new(item, existing)));
                         prediction.carried = Some(stack.clone());
                         prediction
                             .click(&game.menu_env(), 0, 0, Input::Pickup)
@@ -7209,6 +7220,10 @@ mod tests {
                             .map_or(0, |s| s.count);
                         assert_eq!(actual, expected, "{item} mod={is_mod}");
                         assert_eq!(prediction.slot(0).map_or(0, |s| s.count), actual);
+                        assert_eq!(
+                            actual + prediction.carried.as_ref().map_or(0, |s| s.count),
+                            existing + 8
+                        );
                         assert_eq!(
                             prediction.carried.as_ref().map_or(0, |s| s.count),
                             game.lan.as_ref().unwrap().hub.guests[0]
@@ -7335,16 +7350,8 @@ mod tests {
                         }),
                     );
                     let guest = &game.lan.as_ref().unwrap().hub.guests[0];
-                    assert_eq!(
-                        guest
-                            .inventory
-                            .iter()
-                            .flatten()
-                            .map(|s| s.count)
-                            .sum::<u32>(),
-                        8
-                    );
                     assert_eq!(guest.inventory[0].as_ref().unwrap().count, 8);
+                    assert_eq!(guest.inventory.iter().flatten().count(), 1);
                     // A capped occupied swap preserves both stacks and their total count.
                     game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
                         Some(ItemStack::new("minecraft:dirt", 2));
