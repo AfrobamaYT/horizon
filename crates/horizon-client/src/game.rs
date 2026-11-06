@@ -2708,6 +2708,8 @@ struct Game<'a> {
     /// Mod block entities' geometry their mods kept
     /// (game/modding/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    /// Prepared block-entity copies for this frame, in entity-stream order.
+    prepared_model_draws: std::cell::RefCell<Vec<horizon_client::gfx::PreparedModelDraw>>,
     world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
@@ -17223,6 +17225,7 @@ impl Game<'_> {
         &mut self,
         consume: impl FnOnce(&mut Renderer, &Frame<'_>) -> Result<bool>,
     ) -> Result<bool> {
+        self.prepared_model_draws.borrow_mut().clear();
         let prepare = spans::guard("prepare");
         let mut pr = spans::laps();
         // The window's GPU holds the atlas: its copy in memory is kept
@@ -17672,6 +17675,13 @@ impl Game<'_> {
         self.glowing_vertices.get_mut().clear();
         self.shadow_only_vertices.get_mut().clear();
         pr.lap("pr_entity_setup");
+        // The pack is chosen before entity geometry, so a pack that starts this frame
+        // keeps block-entity models in the CPU stream instead of dropping them.
+        let pack_inputs = if title {
+            Default::default()
+        } else {
+            self.shader_pack_inputs(camera, alpha as f32, &sky)
+        };
         if !title {
             let (built, static_sections, visible_static_sections, static_stats) =
                 spans::time("entity_geometry", || {
@@ -17762,11 +17772,6 @@ impl Game<'_> {
             self.gather_dynamic_lights(camera, alpha);
         }
         pr.lap("pr_lights");
-        let pack_inputs = if title {
-            Default::default()
-        } else {
-            self.shader_pack_inputs(camera, alpha as f32, &sky)
-        };
         pr.lap("pr_shader_inputs");
         // Fog hooks may clear particles too. They must run before the final clear
         // boundary, not while constructing Frame after geometry has been extracted.
@@ -17963,13 +17968,17 @@ impl Game<'_> {
         pr.lap("pr_frame");
         // Renderer encoding and GPU waiting belong to render, not prepare.
         drop(prepare);
+        let mut prepared_draws = std::mem::take(&mut *self.prepared_model_draws.borrow_mut());
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
                 renderer.set_pass_timing(self.debug || self.gpu_passes);
+                renderer.stage_prepared_draws(&prepared_draws);
                 consume(renderer, &frame)
             }
             None => Err("renderer".into()),
         };
+        prepared_draws.clear();
+        *self.prepared_model_draws.borrow_mut() = prepared_draws;
         let _cleanup = spans::guard("pr_cleanup");
         // A frame the surface refused (occluded, lost, timed out) is `Ok(false)`.
         self.frame_drawn = matches!(result, Ok(true));
@@ -21091,6 +21100,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),
             mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
