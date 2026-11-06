@@ -13,10 +13,11 @@ use mod_api::{ChannelRef, HookId, OwningLoop, SoundAttenuation, SoundPlay, Sound
 #[inline(never)]
 pub fn native_play_sound(
     context: &horizon_world::native_load_context::LoopContext,
+    starting: bool,
     original: &SoundPlay,
     sound: &mut Option<SoundPlay>,
 ) {
-    mod_api::dispatch_play_sound(&OwningLoop::new(context), original, sound);
+    mod_api::dispatch_play_sound(&OwningLoop::new(context), starting, original, sound);
 }
 
 /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
@@ -136,7 +137,7 @@ impl SoundEngine {
         };
         let original = instance.play_settings();
         let mut sound = Some(original.clone());
-        native_play_sound(source, &original, &mut sound);
+        native_play_sound(source, true, &original, &mut sound);
         match sound {
             None => false,
             Some(edited) => {
@@ -146,6 +147,31 @@ impl SoundEngine {
                 true
             }
         }
+    }
+
+    /// Live volume/pitch refresh, through the single play_sound contract. Other
+    /// settings cannot be changed on an already allocated channel.
+    pub(super) fn playback_update_parameters(&self, id: super::InstanceId) -> Option<(f32, f32)> {
+        let instance = self.instances.get(&id)?;
+        let Some(source) = self
+            .loop_context
+            .as_ref()
+            .filter(|_| mod_api::__private::listened(HookId::PlaySound))
+        else {
+            return Some((instance.volume, instance.pitch));
+        };
+        let original = instance.play_settings();
+        let mut sound = Some(original.clone());
+        native_play_sound(source, false, &original, &mut sound);
+        let edited = sound?;
+        let volume_edited = edited.volume.to_bits() != original.volume.to_bits();
+        let pitch_edited = edited.pitch.to_bits() != original.pitch.to_bits();
+        if volume_edited && (!edited.volume.is_finite() || edited.volume < 0.0)
+            || pitch_edited && (!edited.pitch.is_finite() || edited.pitch <= 0.0)
+        {
+            return None;
+        }
+        Some((edited.volume, edited.pitch))
     }
 
     /// `play_sound_source` or `play_streaming_source`, for a sound that just started.

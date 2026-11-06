@@ -571,6 +571,15 @@ pub trait LevelsBackend {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: both.
+    /// World-space block collision boxes under an empty collision context, without entities or border. Refuses a stale or nonresident level and invalid or overlarge boxes.
+    fn level_collision_boxes(&self, level: LevelRef, aabb: [f64; 6]) -> Option<Vec<[f64; 6]>> {
+        crate::phase::unprovided(
+            "Backend::level_collision_boxes",
+            "level_collision_boxes",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait

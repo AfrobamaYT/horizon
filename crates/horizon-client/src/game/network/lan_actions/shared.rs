@@ -182,7 +182,6 @@ pub(super) struct GuestSwap {
     left: bool,
     right: bool,
     riding: Option<u32>,
-    host_boarding: (i32, Option<u32>),
     host_station: Option<super::stations::Station>,
     sleeping: Option<[i32; 3]>,
     sleep_timer: u32,

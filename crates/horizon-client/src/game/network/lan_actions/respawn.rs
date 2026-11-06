@@ -359,6 +359,16 @@ impl Game<'_> {
             let drops = (g.game_mode != SPECTATOR)
                 .then(|| [at[0], at[1] + g.eye_height() - f64::from(0.3f32), at[2]]);
             let cause = host.play.get_mut(&conn).and_then(|p| p.death_cause.take());
+            // ServerPlayer.die opens with `gameEvent(ENTITY_DIE)` at the player:
+            // sculk sensors and wardens hear the death.
+            if here {
+                self.as_guest(conn, |game| {
+                    let ctx = game.player_context(None);
+                    game.post_game_event("minecraft:entity_die", at, ctx);
+                });
+            }
+            // `getKillCredit`, as the death finds it.
+            let killer = self.guest_kill_credit_type(conn);
             self.native_player_died(uuid, cause.as_deref());
             // ServerPlayer.die: the neutral mobs near a guest in this level
             // forget their anger at them.
@@ -465,6 +475,9 @@ impl Game<'_> {
                     game.drop_inventory(eyes, &dropping);
                 }
                 game.score_player_died();
+                if let Some(kind) = &killer {
+                    game.award_stat("killed_by", kind, 1);
+                }
             });
             self.guest_killed_player_trigger(conn, at, blow);
             self.as_guest(conn, |game| {
@@ -642,6 +655,43 @@ impl Game<'_> {
         self.as_guest(conn, |g| {
             g.trigger_killed_as(TRIGGER, &killer, blow.as_ref());
         });
+    }
+
+    /// The type of the entity a dying guest's combat record credits with the
+    /// kill (`LivingEntity.getKillCredit`): a player (the one in place or a
+    /// guest), a mob (one gone already credits nobody, as vanilla's reference
+    /// no longer resolves), a mob whose own blast this tick killed the guest,
+    /// or the ender dragon.
+    fn guest_kill_credit_type(&self, conn: u32) -> Option<String> {
+        let id = self
+            .guest_combat
+            .get(&conn)?
+            .kill_credit(self.world.game_time)?;
+        let in_place = self.lan_acting.is_none()
+            && self
+                .player
+                .as_ref()
+                .is_some_and(|p| p.entity_id as u32 == id);
+        if in_place
+            || self
+                .lan
+                .as_ref()
+                .is_some_and(|host| host.hub.guests.iter().any(|g| g.entity_id as u32 == id))
+        {
+            return Some("minecraft:player".into());
+        }
+        if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
+            return Some(m.kind.id.clone());
+        }
+        // A mob that blew up this tick has left the list, but vanilla's player
+        // dies inside that blast, before the source is discarded.
+        if let Some((_, kind)) = self.combat.exploded_kinds.iter().rfind(|(m, _)| *m == id) {
+            return Some(kind.clone());
+        }
+        self.dragon
+            .as_ref()
+            .filter(|d| d.id == id)
+            .map(|_| "minecraft:ender_dragon".into())
     }
 
     /// The dying guest's last blow (`LivingEntity.getLastDamageSource`), its

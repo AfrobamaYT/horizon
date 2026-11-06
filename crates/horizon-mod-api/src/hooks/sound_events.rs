@@ -1,6 +1,9 @@
 //! The `sound_events` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Hooks {
+    /// `starting` is true for starts and loop replays, false for a live channel refresh.
+    /// A live refresh applies only volume and pitch transiently; `None` stops the channel.
+    /// Invalid edited numeric values refuse that refresh.
     /// A sound is about to play (`PlaySoundEvent`, vanilla's `SoundEngine.play`): `original` is the sound as asked for, `sound` starts as a copy of it. Edit `sound` (its volume, pitch, source, position, identifier, looping, delay, attenuation or relativeness) to change what plays, or set it to `None` to play nothing. It is asked before the engine's own checks (output open, sound resolved, volume, channel pool), for every sound the client plays, so answer fast; later mods see earlier mods' edits in `sound` and the sound as asked for in `original`. A new `identifier` is resolved again, with its own weighted pick. `context` is the client's `LoopContext`: no game is at hand inside the sound engine. Client-side only; a server has no sound.
     #[hook(
         side = "client",

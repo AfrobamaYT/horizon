@@ -233,8 +233,6 @@ impl Game<'_> {
         if dead || (boat.is_none() && !cart && !mount && !cushion) {
             host.hub.guests.update(gi, |g| {
                 (g.vehicle, g.vehicle_good) = (None, None);
-                // Entity.removePassenger: the rider waits 60 ticks to board again.
-                g.boarding_cooldown = super::boat_passengers::BOARDING_COOLDOWN;
             });
             return;
         }

@@ -2689,6 +2689,9 @@ impl Game<'_> {
                         self.run_guest_commands();
                     }
                 }
+                HostEvent::Jump { conn, from, yaw } => {
+                    self.guest_jump(conn, from, yaw);
+                }
             }
         }
         if timed && let Some(host) = self.lan.as_ref() {
@@ -3840,6 +3843,7 @@ fn event_kind(event: &HostEvent) -> EventKind {
         HostEvent::ClientInformation(c, _, _) => ("client settings", Some(*c), None),
         HostEvent::ChatSubmitted { .. } => ("chat submitted", None, None),
         HostEvent::ChatSessionStarted(_) => ("chat session", None, None),
+        HostEvent::Jump { conn, .. } => ("jump", Some(*conn), None),
         HostEvent::PlayerLoaded(c) => ("loaded", Some(*c), None),
         HostEvent::RecipeBookSettings { conn, .. } => ("recipe book", Some(*conn), None),
         HostEvent::Sneak { conn, .. } => ("sneak", Some(*conn), None),

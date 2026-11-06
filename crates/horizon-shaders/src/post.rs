@@ -185,6 +185,15 @@ const HAND: [&str; 4] = [
     "gbuffers_basic",
 ];
 
+/// `gbuffers_hand_water` and its fallbacks (2.3): translucent held items, after deferred.
+const HAND_WATER: [&str; 5] = [
+    "gbuffers_hand_water",
+    "gbuffers_hand",
+    "gbuffers_textured_lit",
+    "gbuffers_textured",
+    "gbuffers_basic",
+];
+
 /// `gbuffers_weather` and its fallbacks (2.3).
 const WEATHER: [&str; 4] = [
     "gbuffers_weather",
@@ -229,6 +238,11 @@ const GROUPS: [(Group, &str); 6] = [
     (Group::Final, "final"),
 ];
 
+/// The stars' blend: added to the sky, their own alpha replacing the buffer's, as vanilla draws
+/// them (`RenderPipelines.STARS`, `BlendFunction.OVERLAY`). Iris 1.11.7 drew them so with a probe
+/// pack of ours (#10490): colour 0.25 × 0.5 over the disc's 1.0 read 1.125, alpha 0.5.
+pub const STARS_BLEND: Blend = [Factor::SrcAlpha, Factor::One, Factor::One, Factor::Zero];
+
 pub struct PostProgram {
     /// The program's name (`composite3`).
     pub name: String,
@@ -241,6 +255,10 @@ pub struct PostProgram {
     pub flips: Vec<(u32, bool)>,
     /// How the program's output blends into its buffers; `None` writes them.
     pub blend: Option<Blend>,
+    /// `gbuffers_skybasic` without a `blend.*` of its own: each part of the sky blends as
+    /// vanilla draws it, the disc and the void without blending (`RenderPipelines.SKY`), the stars
+    /// with [`STARS_BLEND`] and the sunset fan with `blend`.
+    pub vanilla_sky_blends: bool,
     /// Per-buffer blend overrides, keyed by colortex index (not output location).
     pub buffer_blends: Vec<(u32, Option<Blend>)>,
     /// Bit n: `colortex<n>MipmapEnabled` in its fragment stage, so buffer n's mip chain is
@@ -458,6 +476,8 @@ pub struct Post {
     pub rain_depth: bool,
     /// What draws the first-person hand and held items.
     pub hand: Option<PostProgram>,
+    /// What draws their translucent parts (stained glass, ice...), after deferred and blended.
+    pub hand_water: Option<PostProgram>,
     /// `clouds=off`: no clouds at all, neither the game's nor the pack's program for them.
     pub clouds_off: bool,
     /// Some program reads a shadow buffer, or `shadow.enabled=true`: the shadow pass runs (2.5).
@@ -662,6 +682,7 @@ pub fn load_post(
             .get("rain.depth")
             .is_none_or(|v| v.trim() != "false"),
         hand: None,
+        hand_water: None,
         clouds_off: false,
         shadow_pass: false,
         shadow: None,
@@ -775,13 +796,18 @@ pub fn load_post(
             })
         })
     };
-    // The sky blends as vanilla draws its sunset fan and stars unless `blend.*` says otherwise.
+    // The sky's parts blend as vanilla draws them (the sunset fan translucent, the stars
+    // [`STARS_BLEND`], the disc and the void not at all), unless `blend.*` says otherwise. Iris 1.11.7 left exactly what
+    // `gbuffers_skybasic` wrote on the sky disc, alpha 0.25 included, with a probe pack of ours
+    // (#10490).
     let sky = inputs
         .sky
         .as_ref()
         .and_then(|i| gbuffers(&SKY, Group::Gbuffers, i));
     let sky = sky.map(|mut p| {
-        p.blend = blend(properties, &p.name).unwrap_or(Some(TRANSLUCENT_BLEND));
+        let own = blend(properties, &p.name);
+        p.vanilla_sky_blends = own.is_none();
+        p.blend = own.unwrap_or(Some(TRANSLUCENT_BLEND));
         p
     });
     let celestial = inputs.celestial.as_ref();
@@ -873,6 +899,15 @@ pub fn load_post(
         .and_then(|i| gbuffers(&HAND, Group::Gbuffers, i))
         .map(|mut p| {
             p.blend = blend(properties, &p.name).flatten();
+            p
+        });
+    // Translucent held items draw after deferred as translucent terrain does, and blend.
+    let hand_water = inputs
+        .hand
+        .as_ref()
+        .and_then(|i| gbuffers(&HAND_WATER, Group::Translucent, i))
+        .map(|mut p| {
+            p.blend = blend(properties, &p.name).unwrap_or(Some(TRANSLUCENT_BLEND));
             p
         });
     if let Some(terrain) = &inputs.terrain {
@@ -984,6 +1019,7 @@ pub fn load_post(
     loader.post.lines = lines;
     loader.post.weather = weather;
     loader.post.hand = hand;
+    loader.post.hand_water = hand_water;
     let flag = |key: &str| properties.get(key).map(|v| v.trim() == "true");
     loader.post.translucent_late = flag("separateEntityDraws").unwrap_or(false);
     // `after` when the pack has a deferred program, else `mixed`; ours are all translucent, so
@@ -1029,6 +1065,7 @@ fn load_shadow(
         &post.clouds,
         &post.weather,
         &post.hand,
+        &post.hand_water,
     ];
     // A program's compute stages count as its other stages do: Iris 1.11.7 drew the shadow map
     // for a probe pack of ours whose only reader of it was `prepare.csh` (#10490).
@@ -1213,6 +1250,7 @@ impl Loader<'_> {
                 program: None,
                 buffers: Vec::new(),
                 blend: None,
+                vanilla_sky_blends: false,
                 mipmaps: 0,
                 compute,
                 geometry_triangles: 0,
@@ -1310,6 +1348,7 @@ impl Loader<'_> {
             program: Some(program),
             buffers,
             blend: None,
+            vanilla_sky_blends: false,
             mipmaps,
             compute,
             geometry_triangles: 0,
@@ -1441,6 +1480,7 @@ impl Loader<'_> {
             program: Some(program),
             buffers,
             blend: None,
+            vanilla_sky_blends: false,
             mipmaps: 0,
             compute: Vec::new(),
             geometry_triangles: triangles,
@@ -2969,6 +3009,57 @@ blend.composite1.colortex3 = ONE ONE ONE ONE
         );
     }
 
+    /// A pack's own `gbuffers_hand_water` draws the translucent held items: after deferred,
+    /// blended, beside its opaque `gbuffers_hand`.
+    #[test]
+    fn translucent_held_items_draw_with_gbuffers_hand_water() {
+        let vsh = "#version 120\nvarying vec2 uv;\nvoid main() {\n    gl_Position = ftransform();\n    uv = gl_MultiTexCoord0.xy;\n}\n";
+        let fsh = "#version 120\nuniform sampler2D texture;\nvarying vec2 uv;\nvoid main() {\n    gl_FragData[0] = texture2D(texture, uv);\n}\n";
+        let pack = Pack::from_zip_bytes(
+            "P.zip",
+            zip(&[
+                ("shaders/gbuffers_hand.vsh", vsh),
+                ("shaders/gbuffers_hand.fsh", fsh),
+                ("shaders/gbuffers_hand_water.vsh", vsh),
+                ("shaders/gbuffers_hand_water.fsh", fsh),
+            ]),
+        )
+        .unwrap();
+        let hand = crate::GbuffersInputs {
+            declarations: "layout(location = 0) in vec3 hz_v_pos;".into(),
+            body: "    hz_Vertex = vec4(hz_v_pos, 1.0);\n    hz_Color = vec4(1.0);\n".into(),
+            ..Default::default()
+        };
+        let inputs = GameInputs {
+            hand: Some(hand),
+            ..Default::default()
+        };
+        let post = load_post(
+            &pack,
+            "",
+            &Properties::default(),
+            &Macros::standard(),
+            &inputs,
+        );
+        let (opaque, translucent) = (post.hand.unwrap(), post.hand_water.unwrap());
+        assert_eq!(
+            (opaque.name.as_str(), opaque.blend),
+            ("gbuffers_hand", None)
+        );
+        assert_eq!(
+            (
+                translucent.name.as_str(),
+                translucent.group,
+                translucent.blend
+            ),
+            (
+                "gbuffers_hand_water",
+                Group::Translucent,
+                Some(TRANSLUCENT_BLEND)
+            )
+        );
+    }
+
     #[test]
     fn water_falls_back_to_terrain_and_blends() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/packs/terrain-test");
@@ -3004,6 +3095,12 @@ blend.composite1.colortex3 = ONE ONE ONE ONE
                 Group::Gbuffers,
                 Some(TRANSLUCENT_BLEND)
             )
+        );
+        // Its parts blend as vanilla's: the stars with BlendFunction.OVERLAY.
+        assert!(sky.vanilla_sky_blends);
+        assert_eq!(
+            STARS_BLEND,
+            [Factor::SrcAlpha, Factor::One, Factor::One, Factor::Zero]
         );
         // gbuffers_skytextured falls back to gbuffers_textured, then gbuffers_basic.
         let sun = post.sky_textured.unwrap();
@@ -3049,11 +3146,21 @@ blend.composite1.colortex3 = ONE ONE ONE ONE
             (clouds.name.as_str(), clouds.blend),
             ("gbuffers_textured", Some(TRANSLUCENT_BLEND))
         );
-        // The hand falls back to gbuffers_textured and does not blend.
+        // The hand falls back to gbuffers_textured and does not blend; its translucent items
+        // fall back to the same program, after deferred and blended.
         let hand = post.hand.as_ref().unwrap();
         assert_eq!(
             (hand.name.as_str(), hand.group, hand.blend),
             ("gbuffers_textured", Group::Gbuffers, None)
+        );
+        let hand_water = post.hand_water.as_ref().unwrap();
+        assert_eq!(
+            (hand_water.name.as_str(), hand_water.group, hand_water.blend),
+            (
+                "gbuffers_textured",
+                Group::Translucent,
+                Some(TRANSLUCENT_BLEND)
+            )
         );
         // Weather falls back to gbuffers_textured, after deferred, blended.
         let weather = post.weather.as_ref().unwrap();

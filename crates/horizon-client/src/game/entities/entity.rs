@@ -670,6 +670,77 @@ pub(super) fn tick_item_settle(
     item.water_entry(water > 0.0, false, splash);
     alive
 }
+impl Game<'_> {
+    /// Tick an item owned by the caller. The two results are ordinary survival
+    /// and explicit consumption by a block-contact handler.
+    pub(super) fn tick_item_with_block_contacts(
+        &mut self,
+        item: &mut ItemEntity,
+        no_physics: bool,
+        entity_boxes: &[Aabb],
+        client: bool,
+        splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
+    ) -> (bool, bool) {
+        let heights =
+            item.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
+        // Entity.baseTick splashes before moving, except on the first tick.
+        item.water_entry(heights.0 > 0.0, item.ticks == 0, splash);
+        let step = item.tick_move_before_block_effects(
+            &self.world,
+            self.res.facts(),
+            self.collision,
+            no_physics,
+            heights,
+            entity_boxes,
+            Some(self.border.geometry()),
+        );
+        if !client && let Some((on, distance)) = step.landed() {
+            self.item_fall_on(item.id, on, distance);
+        }
+        if let Some(pos) =
+            item.vertical_contact(&self.world, self.collision, &self.res.motion().blocks, step)
+        {
+            let state = self.world.block(pos.x, pos.y, pos.z);
+            let position = item.position;
+            let mut discarded = false;
+            self.native_item_after_vertical_collision(
+                mod_api::__private::ItemAfterVerticalCollisionCall {
+                    dimension: self.dim.id(),
+                    client,
+                    entity: item.id,
+                    state,
+                    block_pos: [pos.x, pos.y, pos.z],
+                    item_pos: [position.x, position.y, position.z],
+                    stack: &mut item.stack,
+                    discard: &mut discarded,
+                },
+            );
+            if discarded || item.stack.count == 0 {
+                return (false, true);
+            }
+        }
+        item.finish_move_block_effects(
+            &self.world,
+            self.res.facts(),
+            no_physics,
+            Some(&self.res.motion().blocks),
+            step,
+            &self.loop_context,
+        );
+        item.push_by_bubble_column(
+            &self.world,
+            self.pack.assets.registry,
+            self.res.facts(),
+            self.collision,
+        );
+        let alive = item.tick_settle(&self.world, self.res.facts(), no_physics, step);
+        // ItemEntity.tick refreshes immersion and splashes on water entry.
+        let (water, _) =
+            item.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
+        item.water_entry(water > 0.0, false, splash);
+        (alive, false)
+    }
+}
 
 /// The game's lists of entities, in the order systems walk them. Hands them to
 /// `$then`, so one list drives the handles and every typed dispatch.
@@ -902,6 +973,7 @@ macro_rules! damage_level_of {
             Some(&$game.pack.block_registries),
             &$game.damage_hooks,
         )
+        .in_loop(&$game.loop_context)
         .attacked_by($game.combat.attack())
     };
     ($game:ident, $attack:expr) => {
@@ -912,6 +984,7 @@ macro_rules! damage_level_of {
             Some(&$game.pack.block_registries),
             &$game.damage_hooks,
         )
+        .in_loop(&$game.loop_context)
         .attacked_by($attack)
     };
     ($game:ident) => {
@@ -922,6 +995,7 @@ macro_rules! damage_level_of {
             Some(&$game.pack.block_registries),
             &$game.damage_hooks,
         )
+        .in_loop(&$game.loop_context)
     };
 }
 pub(super) use damage_level_of;
@@ -1134,8 +1208,10 @@ impl Entity for Mob {
     fn can_use_portal(&self, game: &Game<'_>) -> bool {
         game.mob_can_use_portal(self)
     }
+    /// `PersistentEntitySectionManager.Callback.onRemove`: discard stops
+    /// section enumeration immediately, before the entity list is swept.
     fn selector_target(&self) -> Option<Target> {
-        (self.death_time == 0).then_some(Target::Mob(self.id))
+        (!self.removed && self.death_time == 0).then_some(Target::Mob(self.id))
     }
     fn bounds(&self) -> Aabb {
         Mob::bounds(self)
@@ -1770,7 +1846,8 @@ impl Entity for Projectile {
             "minecraft:fireball"
             | "minecraft:small_fireball"
             | "minecraft:wind_charge"
-            | "minecraft:breeze_wind_charge" => game.load_fireball(tag, uuid, player_uuid),
+            | "minecraft:breeze_wind_charge"
+            | "minecraft:wither_skull" => game.load_fireball(tag, uuid, player_uuid),
             id if horizon_client::entity_nbt::throwable_kind(id).is_some() => {
                 game.load_throwable(tag, uuid, player_uuid)
             }

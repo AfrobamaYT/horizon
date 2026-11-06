@@ -52,4 +52,18 @@ pub trait EffectsClientHost {
             crate::phase::LoadAccess::ClientSetup,
         )
     }
+    /// Side: client.
+    /// ClientLevel.addParticle: submits one local particle through the ordinary provider, camera-distance, setting and population limits. False without a loaded client world or for non-finite input. True means submitted, not necessarily visible.
+    fn add_particle(
+        &mut self,
+        options: &ParticleOptions,
+        at: [f64; 3],
+        velocity: [f64; 3],
+    ) -> bool {
+        crate::phase::unprovided(
+            "ClientHost::add_particle",
+            "add_particle",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }

@@ -156,6 +156,12 @@ pub enum HostEvent {
         Box<horizon_protocol::packets::configuration::ClientInformation>,
         Box<horizon_protocol::packets::configuration::ClientInformation>,
     ),
+    /// An accepted position started a jump, before later gameplay packets.
+    Jump {
+        conn: u32,
+        from: [f64; 3],
+        yaw: f32,
+    },
     /// A guest's client finished loading the level around them.
     PlayerLoaded(u32),
     /// A guest changed recipe book settings.
@@ -4643,7 +4649,15 @@ impl Hub {
             if g.moves.is_empty() {
                 g.moves_from_ground = g.on_ground;
             }
-            g.moves.push((moved, flags & 1 != 0));
+            let on_ground = flags & 1 != 0;
+            if g.on_ground && !on_ground && moved[1] > 0.0 && !g.spectator() {
+                events.push(HostEvent::Jump {
+                    conn: g.conn,
+                    from: g.previous_position,
+                    yaw: g.yaw,
+                });
+            }
+            g.moves.push((moved, on_ground));
             g.known_movement = moved;
             g.yaw = yaw;
             g.pitch = pitch.clamp(-90.0, 90.0);
