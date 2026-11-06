@@ -4,12 +4,14 @@ An injection is a `[[native.injection]]` table in `horizon-mod.toml`. It is an e
 the mod API has no hook for, and **every injection is a request for a hook**: write it so it can become one
 by renaming its target, then [ask for the hook](#ask-for-the-hook).
 
-It comes in two forms:
+It supports function points, listed call sites, and source-spliced helpers:
 
 - A **point injection** (`trait_method`) listens at an *injection point*. Every `Game` method is one,
   apart from the few its shape rules out ([below](#which-methods-are-points)): the prebuilt game has a slot
   at each one's head and return, which the game fills at load with the listeners of the mods that name it.
   It changes no game source, so it builds against the prebuilt game in seconds.
+- A **raw listener** (`raw`) takes the real receiver and argument types. It can listen at a function
+  point, or at a [listed call site](#listed-call-sites-native-only) with `selector`. Call sites are native-only.
 - A **helper injection** (`helper`) splices your Rust into the game's source with
   [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) before it is compiled. The game is
   rebuilt from source.
@@ -29,20 +31,21 @@ Apply these rules in order and stop at the first that fits.
    Add `horizon-mod-points` to `Cargo.toml` beside `horizon-mod-api` (only a mod that listens at points
    does). Implement that method in `#[mod_api::horizon_mod] impl mod_points::Points` on the same type as the
    mod's `Hooks`, at the crate root. The body uses only `mod_api` types. This is the default injection.
-3. You need private game internals, another kind, or another crate: `helper = "src/<file>.rs"` bound to
-   `&mut Game`. Last resort. It breaks on game updates, rebuilds the game and never runs as `mod.wasm`. File a
-   hook request with it.
+3. You need game internals: check [raw listeners](#raw-listeners-and-declared-internals), including native
+   call sites, before using `helper = "src/<file>.rs"` bound to `&mut Game`. Helpers are the last resort:
+   they rebuild the game. File a hook request with either form.
 
 Exact fields (unknown fields are refused):
 
 | Field | Rule |
 | --- | --- |
 | `id` | unique, nonempty |
-| `kind` | `HEAD` or `RETURN` for `trait_method`; any horizon-mixins kind for `helper` |
+| `kind` | `HEAD` or `RETURN` for function points; the six kinds below for raw call sites; horizon-mixins kinds for `helper` |
 | `hook` + `hook_version` **or** `target` | exactly one of the two forms; a `trait_method` takes `target` |
-| `trait_method` **or** `helper` | exactly one of the two |
-| `bindings`, `cancellable`, `selector`, `require`, `ordinal`, `argument`, `slice`, `variable`, `result` | `helper` only: horizon-mixins' own fields. A point listener gets the point's record instead and cancels through its `cancel` |
-| `priority` | horizon-mixins' order among helpers |
+| `trait_method`, `raw` **or** `helper` | exactly one |
+| `selector`, `ordinal` | `helper` or a native raw call-site listener |
+| `bindings`, `cancellable`, `require`, `argument`, `slice`, `variable`, `result` | `helper` only: horizon-mixins' own fields. A point listener gets the point's record instead and cancels through its `cancel` |
+| `priority` | descending among helpers and raw call-site listeners |
 
 Point errors name the injection: its `target` isn't a point of the game the mod pins, or it names a method
 that isn't the point's (`tick` at a `RETURN` is `tick_return`), or the mod's `impl Points` doesn't override
@@ -63,7 +66,8 @@ the event, and writes take `host`.
    `cancel` or `result` where the function returns `()` or an API value. It uses only `mod_api` types.
    Every `Game` method is a point on both routes: the prebuilt game was built with them all, and a source
    build gets the same points, so a point injection always builds against the prebuilt game in seconds.
-3. **You truly need private internals: a `helper` bound to `Game`.** The last resort. It reads game state no
+3. **You truly need private internals:** check [raw listeners](#raw-listeners-and-declared-internals)
+   first. A `helper` bound to `Game` is the last resort. It reads game state no
    API exposes, so it breaks when the game changes, rebuilds the game, can never run as `mod.wasm`, and should
    always come with a hook request. `hook = "<name>"` names a catalog hook point's function for a helper, so
    the function can move without breaking it (see [the build log](#the-build-log)).
@@ -73,6 +77,7 @@ the event, and writes take `host`.
 | Form | Kinds | Where | Order | Game rebuild | `mod.wasm` |
 | --- | --- | --- | --- | --- | --- |
 | `trait_method` (point) | `HEAD`, `RETURN` | `Game` methods | dependency order | no | yes |
+| `raw` (call site) | six kinds below | listed calls | priority descending, then mod id, then injection id | no | no |
 | `helper` | any | any crate | priority descending, then mod id, then injection id | yes | no |
 | Hook or Part method (no injection) | — | — | dependency order | no | yes |
 
@@ -318,8 +323,8 @@ when its path has a single kind. Kind names match `internals.json`: inherent met
 functions use `fn`, and fields use `field`. A `--kind` applies to all paths in that invocation.
 `cargo horizon-mod update` shows the signature changes and refreshes hashes while retaining
 member kinds. Each injection has exactly one of `trait_method`, `helper` or `raw`.
-`raw` names a function in the mod's crate root, not a helper source file, and accepts only
-`HEAD` or `RETURN` with no mixin bindings or selectors.
+`raw` names a function in the mod's crate root, not a helper source file. Without `selector`, it accepts
+only `HEAD` or `RETURN` with no mixin bindings. A selector chooses a listed call site instead.
 
 Depend on `horizon-internals` (library `internals`) at the same pin as `horizon-mod-api`, never
 on `horizon-client` directly. The build generates a facade for this mod alone. Its nested
@@ -362,6 +367,54 @@ Both routes check the actual game's metadata before compiling mods:
 
 The build log lists each mod's internals and raw places. The same information is recorded in
 `native-mods.json` beside the built game.
+
+### Listed call sites (native only)
+
+A `raw` listener with `selector` wraps a compiled-in call, not the enclosing function. Both native
+build routes use the same `points.json` object: `points` lists function points and `sites` lists
+call sites. Only reviewed entries in `crates/horizon-mod-api-gen/sites/<mod_id>.txt` become sites:
+
+```text
+horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0
+```
+
+List files support `#` comments. The stage reads their sorted union, evaluates the receiver once,
+and rewrites only the selected call expression in its copy of the game. Ordinals count matching
+runtime calls in source order; constant contexts and nested item bodies are not selected.
+
+```toml
+[[native.injection]]
+id = "autosave"
+target = "horizon_client::game::Game<'_>::next_autosave_interval"
+selector = "autosave_interval"
+ordinal = 0                    # omitted means 0
+kind = "MODIFY_EXPRESSION_VALUE"
+raw = "autosave"
+fingerprint = "5873182907d67cea" # this seeded site's hash in points.json
+```
+
+The facade's `internals::raw` module exports this site's exact `Args`, `Receiver`, `Output` and
+`Listener` aliases and a typed registration constructor, all named with its `S…` identifier.
+Use those aliases for the callback. The generated main adapts each kind to one wrap listener:
+
+| Kind | Callback inputs and result |
+| --- | --- |
+| `BEFORE_CALL` | Receiver and mutable arguments; runs before the original call |
+| `MODIFY_ARG` | Receiver and mutable arguments; changes them before the original call |
+| `AFTER_CALL` | Receiver and a shared reference to the result; keeps that result |
+| `MODIFY_EXPRESSION_VALUE` | Receiver and the result by value; returns the replacement |
+| `WRAP_OPERATION` | Receiver, mutable arguments and mutable `original` continuation; returns the result |
+| `WRAP_WITH_CONDITION` | Receiver and shared arguments; returns whether to call the original; unit output only |
+
+Listeners nest by descending priority, then mod ID, then injection ID; the first is outermost.
+A wrap may call `original` zero, one or several times. `cancellable` is refused: returning from the
+caller is not a call-site operation. Borrowing results, non-record arguments, ambiguous targets
+and alias-dependent receiver arguments are refused with the declaration's file, line and reason.
+
+An unlisted raw site raises `E_NOT_SITE`, naming the exact line and `sites/<mod_id>.txt` to add;
+there is no fallback. A source-spliced `helper` remains a separate, rebuild-only form. A stale
+`fingerprint` raises `E_INTERNAL_CHANGED` with the current site hash. `WRAP_WITH_CONDITION` on a
+non-unit site raises `E_SITE_KIND`. These raw sites are not available to wasm mods.
 
 ### Wasm raw listeners
 

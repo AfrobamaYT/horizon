@@ -28,9 +28,14 @@ pub(super) fn of(manifest: &Manifest) -> impl Iterator<Item = &Injection> {
 
 pub(super) fn find<'a>(sites: &'a [Site], injection: &Injection) -> Option<&'a Site> {
     let target = super::internals::plain_path(injection.target.as_deref().expect("site target"));
+    let selector = injection
+        .selector
+        .as_deref()
+        .expect("site selector")
+        .replace(' ', "");
     sites.iter().find(|site| {
         site.target == target
-            && Some(site.selector.as_str()) == injection.selector.as_deref()
+            && site.selector == selector
             && site.ordinal == injection.ordinal.unwrap_or(0)
     })
 }
@@ -57,7 +62,7 @@ pub(super) fn check<'a>(
         return Err(Error::Changed {
             mod_id: manifest.id.clone(),
             path: format!("{} | {} | {}", site.target, site.selector, site.ordinal),
-            signature: format!("site hash {}", site.hash),
+            signature: site.hash.clone(),
         });
     }
     if injection.kind == InjectionKind::WrapWithCondition && site.output != "()" {
@@ -123,3 +128,6 @@ impl Site {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;
