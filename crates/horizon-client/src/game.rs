@@ -293,6 +293,7 @@ mod native_lifecycle;
 mod native_live_holder_tests;
 mod native_living_effects;
 mod native_living_flags;
+mod native_living_position;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
