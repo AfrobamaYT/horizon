@@ -3,8 +3,10 @@
 
 Two comparisons between a base commit and this checkout, both built from scratch:
 
-1. `mod-api.wit` byte for byte. It holds every hook, host import, signature and their order, but no
-   method docs.
+1. `mod-api.wit` byte for byte except the name-resolved sets affected by host regrouping:
+   host-import function lines, whole type blocks, and host/types use-list items. The sets compare
+   exactly; every other byte (including hooks and the world) stays ordered. Hook IDs and dispatch
+   are additionally compared as byte-identical generated Rust.
 2. The host manifest (`host-manifest`): one line per host method with its owner trait, signature,
    receiver mutability, rustdoc and hidden flag. The base's generated host is read as it is; this
    checkout's is the generated unions plus the area files, with each area trait counted under the union
@@ -20,6 +22,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+from wit_order import compare_wit
 
 
 def build(directory, target, tool=False):
@@ -53,10 +57,15 @@ def main():
     new_out = build(root, target, tool=True)
     tool = target / "debug/host-manifest"
     failed = False
-    if not filecmp.cmp(old_out / "mod-api.wit", new_out / "mod-api.wit", shallow=False):
+    if not compare_wit((old_out / "mod-api.wit").read_text(), (new_out / "mod-api.wit").read_text()):
         subprocess.run(["diff", str(old_out / "mod-api.wit"), str(new_out / "mod-api.wit")])
-        print("gate failed: mod-api.wit differs")
         failed = True
+    for name in ("mod_api_generated.rs", "native_render_generated.rs"):
+        if not filecmp.cmp(old_out / name, new_out / name, shallow=False):
+            print(f"gate failed: hook IDs or dispatch differ in {name}")
+            failed = True
+        else:
+            print(f"hook IDs and dispatch byte-identical: {name}")
     old_areas = sorted((tree / "crates/horizon-mod-api/src/host").glob("*.rs"))
     old = manifest(tool, [old_out / "mod_api_generated_host.rs", *old_areas])
     areas = sorted((root / "crates/horizon-mod-api/src/host").glob("*.rs"))
@@ -71,7 +80,7 @@ def main():
         failed = True
     if failed:
         sys.exit(1)
-    print(f"gate passed against {base[:12]}: identical WIT and {len(new.splitlines())} identical host methods")
+    print(f"gate passed against {base[:12]}: identical WIT after name-set ordering and {len(new.splitlines())} identical host methods")
 
 
 main()
