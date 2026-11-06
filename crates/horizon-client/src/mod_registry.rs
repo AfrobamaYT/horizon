@@ -214,7 +214,7 @@ pub fn install(
     fs::create_dir_all(&staging).map_err(|e| format!("{}: {e}", staging.display()))?;
     let download = staging.join(format!("{id}.hmod.part"));
     fs::write(&download, &bytes).map_err(|e| format!("{}: {e}", download.display()))?;
-    let checked = || {
+    let checked = || -> Result<_, String> {
         let trust = index::check_file(index, p, v, &download)?;
         let package = horizon_mods::Package::read(&download)?;
         if package.manifest.native.is_some() || package.manifest.wasm.is_some() {

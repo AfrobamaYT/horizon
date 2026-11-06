@@ -5818,8 +5818,16 @@ fn a_data_mod_loads_unloads_and_loads_again() {
         let defaults = horizon_world::item_defaults::read(root).unwrap();
         let items =
             Items::load(root, assets.registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
-        let recipes = crate::crafting::Recipes::load(root, &items, &PackOverlay::NONE).unwrap();
-        let crafted = recipes.find(&grid, 2).map(|(_, out)| out.item.to_string());
+        let recipes = crate::crafting::Recipes::load(
+            root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
+        let crafted = recipes
+            .find(crate::test_resources::server_loop_context(), &grid, 2)
+            .map(|(_, out)| out.item.to_string());
         let tagged = items.item_tag_order.get("c:gems/glint").cloned();
         (
             crafted,
