@@ -2066,7 +2066,10 @@ mod carried_component_tests {
 
     #[test]
     fn explicit_empty_and_preserved_values_are_carried() {
-        let original = Tag::compound([("minecraft:potion_contents", Tag::compound([]))]);
+        let original = Tag::compound([(
+            "minecraft:potion_contents",
+            Tag::Compound(Default::default()),
+        )]);
         let (_, extra) = decode_components(Some(&original));
         let mut stack = ItemStack::new("minecraft:stick", 1);
         stack.extra = extra;
