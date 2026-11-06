@@ -3515,7 +3515,8 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for SignalMod {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-                r.block_part("minecraft:glass", Signal);
+                let block_key = r.block_key("minecraft:glass");
+                r.block_part(block_key, Signal);
             }
         }
         let mods: super::super::Mods =
