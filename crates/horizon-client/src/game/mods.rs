@@ -1165,6 +1165,7 @@ mod tests {
         let base_mod = write("zbase", "1", "");
         let base = f.0.join("resources");
         std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("horizon-resources.json"), "{}").unwrap();
         let mut sources = ModsState {
             dev: vec![addon.clone(), base_mod.clone()],
             ..Default::default()
@@ -1342,6 +1343,7 @@ mod tests {
         let base = f.0.join("vanilla");
         let store = f.0.join("jars");
         std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("horizon-resources.json"), "{}").unwrap();
         let error = content_overlay(&base, &native, &store).err().unwrap();
         let missing = error.downcast_ref::<MissingJar>().unwrap();
         assert_eq!(missing.owners, ["machine_sample", "alpha", "beta"]);
@@ -1354,7 +1356,14 @@ mod tests {
             ..Default::default()
         };
         let overlay = content_overlay(&base, &content, &store).unwrap();
-        assert_eq!(overlay.root.prepared(), base);
+        assert_ne!(overlay.root.prepared(), base);
+        assert_eq!(
+            horizon_mods::enabled::EnabledMods::read(overlay.root.prepared())
+                .unwrap()
+                .server_ids()
+                .collect::<Vec<_>>(),
+            ["gamma"],
+        );
         assert_eq!(
             overlay
                 .mods
