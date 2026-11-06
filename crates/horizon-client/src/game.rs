@@ -121,7 +121,7 @@ use horizon_core::{
     position::BlockPos,
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
-use horizon_mods::selection::{Argument, LaunchArguments};
+use horizon_mod_package::selection::{Argument, LaunchArguments};
 pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
@@ -21890,7 +21890,7 @@ impl Game<'_> {
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
         let files = functions::overlay_files(stack, contributed);
-        let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+        let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
         let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
         let overlay = horizon_world::loot::PackOverlay {
             conditions: &conditions,
@@ -22577,7 +22577,7 @@ fn gameplay_tables(
             .map_err(|e| e.to_string())
         });
         let motion = startup::time("core.motion", || {
-            let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+            let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
             let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
             MotionResources::load_with_conditions(root, assets, &facts, &conditions)
         })
@@ -22945,7 +22945,7 @@ fn load_world_rest(
         .files
         .into_iter()
         .collect::<Vec<_>>();
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
     let overlay = &horizon_world::loot::PackOverlay {
         conditions: &conditions,
@@ -24165,7 +24165,10 @@ fn run_loading(
 
 pub use launch_api::{UsageError, exit_code};
 
-pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime) -> Result<()> {
+pub fn run_with(
+    launch: LaunchArguments,
+    native: horizon_mod_package::runtime::Runtime,
+) -> Result<()> {
     let Some(mut options) = Options::read(launch)? else {
         return Ok(());
     };

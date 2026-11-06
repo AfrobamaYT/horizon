@@ -86,7 +86,7 @@ class PrReadyTests(unittest.TestCase):
             return {step.name: step for step in steps}["content root tests"]
         self.assertEqual(content_step("crates/horizon-client/src/game.rs").skip, "content root untouched")
         for path in ["crates/horizon-client/src/mod_content.rs", "crates/horizon-client/src/mod_content_tests.rs",
-                     "crates/horizon-mods/src/content.rs", "crates/horizon-assets/src/lib.rs", "Cargo.lock"]:
+                     "crates/horizon-mod-package/src/content.rs", "crates/horizon-assets/src/lib.rs", "Cargo.lock"]:
             with self.subTest(path=path):
                 step = content_step(path)
                 self.assertIsNone(step.skip)
@@ -134,8 +134,8 @@ class PrReadyTests(unittest.TestCase):
     def test_tests_get_the_features_ci_s_workspace_run_gives_them(self):
         self.assertEqual(pr_ready.mod_features(["horizon-world"]), "")
         self.assertEqual(pr_ready.mod_features(["horizon-client"]), "")
-        self.assertEqual(pr_ready.mod_features(["horizon-mods"]),
-                         " --features horizon-mods/index")
+        self.assertEqual(pr_ready.mod_features(["horizon-mod-package"]),
+                         " --features horizon-mod-package/index")
         self.assertEqual(pr_ready.mod_features(None), MODS)
 
     def test_mod_api_data_inputs_build_and_test_the_consuming_crates(self):
