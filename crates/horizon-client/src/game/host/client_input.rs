@@ -18,13 +18,6 @@ impl ClientInputClientHost for Game<'_> {
         mod_api::__private::check_access("mod_key", mod_api::__private::LoadAccess::ClientSetup);
         self.native_mod_key(mod_id, name)
     }
-    fn input_options(&self) -> ClientInputOptions {
-        mod_api::__private::check_access(
-            "input_options",
-            mod_api::__private::LoadAccess::ClientSetup,
-        );
-        self.native_input_options()
-    }
     fn playing(&self) -> bool {
         mod_api::__private::check_access("playing", mod_api::__private::LoadAccess::ClientSetup);
         self.native_playing()
@@ -36,34 +29,6 @@ impl ClientInputClientHost for Game<'_> {
     fn modifiers(&self) -> ClientModifiers {
         mod_api::__private::check_access("modifiers", mod_api::__private::LoadAccess::ClientSetup);
         self.native_modifiers()
-    }
-    fn graphics_options(&self) -> ClientGraphicsOptions {
-        mod_api::__private::check_access(
-            "graphics_options",
-            mod_api::__private::LoadAccess::ClientSetup,
-        );
-        self.native_graphics_options()
-    }
-    fn gui_options(&self) -> ClientGuiOptions {
-        mod_api::__private::check_access(
-            "gui_options",
-            mod_api::__private::LoadAccess::ClientSetup,
-        );
-        self.native_gui_options()
-    }
-    fn chat_options(&self) -> ClientChatOptions {
-        mod_api::__private::check_access(
-            "chat_options",
-            mod_api::__private::LoadAccess::ClientSetup,
-        );
-        self.native_chat_options()
-    }
-    fn audio_options(&self) -> ClientAudioOptions {
-        mod_api::__private::check_access(
-            "audio_options",
-            mod_api::__private::LoadAccess::ClientSetup,
-        );
-        self.native_audio_options()
     }
     fn clipboard_text(&self) -> Option<String> {
         mod_api::__private::check_access(

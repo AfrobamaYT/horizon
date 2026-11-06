@@ -165,15 +165,6 @@ pub trait EntitiesBackend {
         )
     }
     /// Side: both.
-    /// The name of a dimension's key.
-    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
-        crate::phase::unprovided(
-            "Backend::dimension_key_id",
-            "dimension_key_id",
-            crate::phase::LoadAccess::WorldOnly,
-        )
-    }
-    /// Side: both.
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame.
     fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {

@@ -116,13 +116,6 @@ impl EntitiesBackend for Game<'_> {
         mod_api::__private::check_access("entity_level", mod_api::__private::LoadAccess::WorldOnly);
         self.native_entity_level(entity)
     }
-    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
-        mod_api::__private::check_access(
-            "dimension_key_id",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
-        self.native_dimension_key_id(key)
-    }
     fn entity_permanently_invulnerable(&self, entity: EntityRef) -> Option<bool> {
         mod_api::__private::check_access(
             "entity_permanently_invulnerable",

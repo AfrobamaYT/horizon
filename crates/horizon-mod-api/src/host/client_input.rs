@@ -40,15 +40,6 @@ pub trait ClientInputClientHost {
         )
     }
     /// Side: client.
-    /// A snapshot of the current input preferences.
-    fn input_options(&self) -> ClientInputOptions {
-        crate::phase::unprovided(
-            "ClientHost::input_options",
-            "input_options",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
     /// Playing, with nothing over the world: keys and zoom apply.
     fn playing(&self) -> bool {
         crate::phase::unprovided(
@@ -75,42 +66,6 @@ pub trait ClientInputClientHost {
         crate::phase::unprovided(
             "ClientHost::modifiers",
             "modifiers",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// A snapshot of the current graphics preferences.
-    fn graphics_options(&self) -> ClientGraphicsOptions {
-        crate::phase::unprovided(
-            "ClientHost::graphics_options",
-            "graphics_options",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// A snapshot of the current GUI and accessibility preferences.
-    fn gui_options(&self) -> ClientGuiOptions {
-        crate::phase::unprovided(
-            "ClientHost::gui_options",
-            "gui_options",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// A snapshot of the current chat preferences.
-    fn chat_options(&self) -> ClientChatOptions {
-        crate::phase::unprovided(
-            "ClientHost::chat_options",
-            "chat_options",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// A snapshot of the current audio preferences.
-    fn audio_options(&self) -> ClientAudioOptions {
-        crate::phase::unprovided(
-            "ClientHost::audio_options",
-            "audio_options",
             crate::phase::LoadAccess::ClientSetup,
         )
     }

@@ -24,6 +24,15 @@ pub trait LevelsHost {
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LevelsBackend {
+    /// Side: both.
+    /// The name of a dimension's key.
+    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+        crate::phase::unprovided(
+            "Backend::dimension_key_id",
+            "dimension_key_id",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
     /// Side: server.
     /// A handle for chunk `pos` of an open level, loaded or not, so a mod can
     /// force an unloaded chunk. None for a stale handle, on a client, and for

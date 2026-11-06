@@ -84,7 +84,9 @@ def area_sources(directory, table, assignments):
                 if dest is None:
                     # Curated files are also valid input on a replay.
                     destinations = {d for (a, m), d in table.items() if m == method}
-                    if path.stem in destinations:
+                    if len(destinations) == 1:
+                        dest = next(iter(destinations))
+                    elif path.stem in destinations:
                         dest = path.stem
                     else:
                         missing.append(f'{path.stem}.{method}')
@@ -182,6 +184,17 @@ def rewrite_references(text, old_names, mapping):
         stem = name[:-len(old_tier)]
         tier = 'Backend' if old_tier == 'ClientBackend' else old_tier
         overrides[(scope, ty, tier)].add(stem)
+    # The Backend macro skips an entire area, including both Backend and
+    # ClientBackend. Supply a sibling default when only one tier is overridden.
+    for (scope, attrs, indent, ty, name), (start, prefix, _) in groups.items():
+        if name.endswith('ClientBackend'):
+            sibling = name[:-len('ClientBackend')] + 'Backend'
+        elif name.endswith('Backend'):
+            sibling = name[:-len('Backend')] + 'ClientBackend'
+        else:
+            continue
+        if sibling in mapping.values() and (scope, attrs, indent, ty, sibling) not in groups:
+            insertions[start] += f'{attrs}{indent}impl {prefix}{sibling} for {ty} {{}}\n'
     replacements = [(a, b, insertions[a]) for a, b, _ in replacements]
     macro = re.compile(r'(?P<head>(?:mod_api::|crate::)?impl_(?P<kind>host|server_host|client_host|backend|backend_mut|client_backend_mut)_areas!\(\s*)(?P<ty>[^,;)]+)(?:,\s*except\([^)]*\))?\s*\)')
     for match in macro.finditer(text):

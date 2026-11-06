@@ -12,6 +12,13 @@ impl LevelsHost for Game<'_> {
     }
 }
 impl LevelsBackend for Game<'_> {
+    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+        mod_api::__private::check_access(
+            "dimension_key_id",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_dimension_key_id(key)
+    }
     fn level_chunk_ref(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
         mod_api::__private::check_access(
             "level_chunk_ref",

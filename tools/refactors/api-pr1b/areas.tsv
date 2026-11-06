@@ -65,7 +65,7 @@ base	claim_items	client_input
 base	cursor	client_input
 base	mod_key	client_input
 base	poll	client_input
-client_input_options	input_options	client_input
+client_input_options	input_options	client_options
 client_input_reads	mapping	client_input
 client_input_reads	modifiers	client_input
 client_input_reads	playing	client_input
@@ -701,11 +701,11 @@ base	read_columns	world_edit
 base	surface_heights	world_edit
 structure_template	structure_template	world_edit
 camera_read	camera_entity	client_view
-client_options	graphics_options	client_input
-client_options	gui_options	client_input
-client_options	chat_options	client_input
-client_options	audio_options	client_input
-entity_handles	dimension_key_id	entities
+client_options	graphics_options	client_options
+client_options	gui_options	client_options
+client_options	chat_options	client_options
+client_options	audio_options	client_options
+entity_handles	dimension_key_id	levels
 item_components	enchantments_compatible	items
 item_components	item_equippable_slot	items
 level_reads	level_in_world_bounds	levels

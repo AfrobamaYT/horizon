@@ -909,6 +909,8 @@ pub mod tests {
         }
     }
     #[cfg(test)]
+    impl mod_api::prelude::PlayersClientBackend for Player {}
+    #[cfg(test)]
     impl Backend for Player {}
     #[cfg(test)]
     mod_api::impl_backend_areas!(Player, except(entities, items, levels, players));
