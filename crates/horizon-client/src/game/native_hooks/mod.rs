@@ -13558,7 +13558,7 @@ mod tests {
     #[test]
     fn property_setters_refuse_no_change() {
         // A Windows checkout has CRLF line ends: the searches below look for "\n".
-        let source = include_str!("native_hooks.rs").replace("\r\n", "\n");
+        let source = include_str!("mod.rs").replace("\r\n", "\n");
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for head in [
             "    pub(super) fn native_set_block_property(\n        &mut self,\n        ticks:",
@@ -13590,7 +13590,7 @@ mod tests {
 
     #[test]
     fn hook_points_stay_hookable() {
-        let source = include_str!("native_hooks.rs");
+        let source = include_str!("mod.rs");
         let code = source
             .split("\nmod tests {")
             .next()
@@ -13609,7 +13609,7 @@ mod tests {
 
     #[test]
     fn native_breathing_stays_hookable() {
-        let source = include_str!("../breathing.rs").replace("\r\n", "\n");
+        let source = include_str!("../../breathing.rs").replace("\r\n", "\n");
         let hook = source.find("pub fn native_living_breathe(").unwrap();
         // From its doc comment's first line, so an attribute above it counts.
         let start = source[..hook].find("/// An entity's breathing").unwrap();
@@ -13625,7 +13625,7 @@ mod tests {
 
     #[test]
     fn native_loot_kinds_stay_hookable() {
-        let source = include_str!("../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
+        let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         for hook in [
             "pub fn native_loot_function(",
             "pub fn native_loot_condition(",
@@ -13646,7 +13646,8 @@ mod tests {
 
     #[test]
     fn native_ingredient_stays_hookable() {
-        let source = include_str!("../../../horizon-mod-api/src/crafting.rs").replace("\r\n", "\n");
+        let source =
+            include_str!("../../../../horizon-mod-api/src/crafting.rs").replace("\r\n", "\n");
         let at = source.find("pub fn native_ingredient(").unwrap();
         let start = source[..at].rfind("///").unwrap();
         let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
@@ -13663,7 +13664,7 @@ mod tests {
 
     #[test]
     fn loot_table_load_stays_hookable() {
-        let source = include_str!("../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
+        let source = include_str!("../../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         // From its doc comment's last line, so an attribute above it counts.
         let hook = source.find("pub fn native_loot_table_load(").unwrap();
         let start = source[..hook].rfind("///").unwrap();
@@ -13688,7 +13689,7 @@ mod tests {
 
     #[test]
     fn lifecycle_source_stays_hookable() {
-        let source = include_str!("native_lifecycle.rs");
+        let source = include_str!("../native_lifecycle.rs");
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
             assert!(!line.contains("cfg"), "a cfg in lifecycle source: {line}");

@@ -38,7 +38,11 @@ fn game_methods(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or_default();
-        let inner = format!("{module}::{stem}");
+        let inner = if stem == "mod" {
+            module.to_owned()
+        } else {
+            format!("{module}::{stem}")
+        };
         if path.is_dir() {
             game_methods(&path, &inner, methods)?;
         } else if path.extension().is_some_and(|ext| ext == "rs") {
@@ -797,6 +801,7 @@ fn needs_fill(method: &syn::ItemFn, call: &str, in_game: bool) -> Result<bool, S
 }
 
 /// A hook function whose placeholder body becomes `call`.
+#[derive(Clone)]
 struct Fill {
     native: String,
     call: String,
@@ -882,14 +887,27 @@ struct Sources {
 /// Parse and validate the catalog and hook/helper signatures.
 fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     let catalog = Catalog::load(root)?;
-    let source = fs::read_to_string(root.join("crates/horizon-client/src/game/native_hooks.rs"))
-        .map_err(|e| e.to_string())?;
-    let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
+    let dir = root.join("crates/horizon-client/src/game/native_hooks");
+    let mut paths = fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    paths.retain(|path| {
+        path.extension().is_some_and(|ext| ext == "rs")
+            && path.file_name().is_some_and(|name| name != "fire.rs")
+    });
+    paths.sort();
+    let mut files = Vec::new();
     let mut methods = Vec::new();
-    for item in file.items {
-        if let Item::Impl(item) = item {
-            methods.extend(impl_functions(item));
+    for path in paths {
+        let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
+        for item in file.items {
+            if let Item::Impl(item) = item {
+                methods.extend(impl_functions(item));
+            }
         }
+        files.push((path, source));
     }
     let dispatch::HookSources {
         traits,
@@ -929,9 +947,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         "RenderHookId",
     )?;
     // A new hook's placeholder body becomes its dispatch call.
-    let filled = if fills.is_empty() {
-        None
-    } else if matches!(fill, FillMode::Require) {
+    if !fills.is_empty() && matches!(fill, FillMode::Require) {
         let natives = fills
             .iter()
             .map(|fill| fill.native.as_str())
@@ -940,20 +956,25 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         return Err(format!(
             "{natives}: the let _ = (…); placeholder needs its dispatch call; run cargo run -p xtask -- mod-api"
         ));
-    } else if matches!(fill, FillMode::Fill) {
-        Some(filled_hooks(&source, &fills)?)
-    } else {
-        None
-    };
+    }
     for code in [&code, &host, &implementation, &render_code, &goal_view] {
         syn::parse_file(code).map_err(|e| format!("generated Rust: {e}"))?;
     }
-    if let Some(filled) = filled {
-        fs::write(
-            root.join("crates/horizon-client/src/game/native_hooks.rs"),
-            filled,
-        )
-        .map_err(|e| e.to_string())?;
+    if matches!(fill, FillMode::Fill) {
+        let mut outputs = Vec::new();
+        for (path, source) in &files {
+            let local = fills
+                .iter()
+                .filter(|fill| source.contains(&format!("fn {}(", fill.native)))
+                .cloned()
+                .collect::<Vec<_>>();
+            if !local.is_empty() {
+                outputs.push((path, filled_hooks(source, &local)?));
+            }
+        }
+        for (path, output) in outputs {
+            fs::write(path, output).map_err(|e| e.to_string())?;
+        }
     }
     Ok(Sources {
         hooks: code,
@@ -1648,7 +1669,7 @@ mod tests {
             without_counterparts
         );
         std::fs::write(&first, original).unwrap();
-        let hooks = root.join("crates/horizon-client/src/game/native_hooks.rs");
+        let hooks = root.join("crates/horizon-client/src/game/native_hooks/mod.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
         let call = "self.fire_item_damaged(player, name, item, amount, cancel);";
         assert_eq!(shipped.matches(call).count(), 1);
