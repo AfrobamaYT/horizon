@@ -287,16 +287,35 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
     }
     let site = injection.raw.is_some() && injection.selector.is_some();
     if site {
-        if injection.target.is_none() || !matches!(injection.kind, InjectionKind::BeforeCall | InjectionKind::AfterCall | InjectionKind::ModifyArg | InjectionKind::ModifyExpressionValue | InjectionKind::WrapOperation | InjectionKind::WrapWithCondition)
-            || injection.cancellable || !injection.bindings.is_empty()
-            || injection.argument.is_some() || injection.require.is_some() || injection.slice.is_some()
-            || injection.variable.is_some() || injection.result.is_some() {
-            return Err(format!("{MANIFEST}: injection {}: a raw call-site listener needs target, selector and a call-site kind; no non-local cancellation, bindings, argument, require, slice, variable or result", injection.id));
+        if injection.target.is_none()
+            || !matches!(
+                injection.kind,
+                InjectionKind::BeforeCall
+                    | InjectionKind::AfterCall
+                    | InjectionKind::ModifyArg
+                    | InjectionKind::ModifyExpressionValue
+                    | InjectionKind::WrapOperation
+                    | InjectionKind::WrapWithCondition
+            )
+            || injection.cancellable
+            || !injection.bindings.is_empty()
+            || injection.argument.is_some()
+            || injection.require.is_some()
+            || injection.slice.is_some()
+            || injection.variable.is_some()
+            || injection.result.is_some()
+        {
+            return Err(format!(
+                "{MANIFEST}: injection {}: a raw call-site listener needs target, selector and a call-site kind; no non-local cancellation, bindings, argument, require, slice, variable or result",
+                injection.id
+            ));
         }
         return Ok(());
     }
     if matches!(injection.kind, InjectionKind::WrapWithCondition) {
-        return Err(format!("{MANIFEST}: WRAP_WITH_CONDITION needs a raw call-site listener"));
+        return Err(format!(
+            "{MANIFEST}: WRAP_WITH_CONDITION needs a raw call-site listener"
+        ));
     }
     // Point listeners run at the head or return with the point's own types, so nothing
     // else of a mixin applies.

@@ -64,9 +64,18 @@ pub(super) fn main_rs(
             format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}), // injection {:?}\n", manifest.id, injection.method, injection.id)
         })
     }).collect::<String>();
-    let raw = raw + &mods.iter().enumerate().flat_map(|(index, manifest)| {
-        super::sites::of(manifest).map(move |injection| super::sites::find(sites, injection).expect("site checked").registration(index, manifest, injection))
-    }).collect::<String>();
+    let raw = raw
+        + &mods
+            .iter()
+            .enumerate()
+            .flat_map(|(index, manifest)| {
+                super::sites::of(manifest).map(move |injection| {
+                    super::sites::find(sites, injection)
+                        .expect("site checked")
+                        .registration(index, manifest, injection)
+                })
+            })
+            .collect::<String>();
     template
         .replace("/* MOD_RAW */", &raw)
         .replace("/* MOD_ENTRIES */", &entries)

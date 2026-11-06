@@ -30,6 +30,7 @@ fn site_macro_reborrows_a_lifetime_parameterized_receiver_without_unsafe_in_the_
     let mut game = Game(&mut value);
     let mut args = Args { value: 2 };
     let result = horizon_mod_api_macros::site!(
+        __test_site_wrap,
         One,
         Listener,
         Receiver,

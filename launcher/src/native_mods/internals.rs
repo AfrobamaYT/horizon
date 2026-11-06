@@ -50,8 +50,14 @@ pub(super) enum Error {
     Path {
         path: String,
     },
-    NotSite { mod_id: String, line: String },
-    SiteKind { mod_id: String, injection: String },
+    NotSite {
+        mod_id: String,
+        line: String,
+    },
+    SiteKind {
+        mod_id: String,
+        injection: String,
+    },
 }
 
 impl std::fmt::Display for Error {
@@ -141,7 +147,9 @@ impl Catalog {
         for declared in &native.internals {
             internals::check(&self.internals, &manifest.id, declared)?;
         }
-        for injection in sites::of(manifest) { sites::check(&self.sites, manifest, injection)?; }
+        for injection in sites::of(manifest) {
+            sites::check(&self.sites, manifest, injection)?;
+        }
         for injection in inject::raw_of(manifest) {
             if !self.points.iter().any(|point| {
                 point.target == injection.target
@@ -190,7 +198,10 @@ impl Catalog {
         }
         for injection in sites::of(manifest) {
             let site = sites::find(&self.sites, injection).expect("site checked");
-            super::append_log(&trf("{mod} listens raw at {point}", &[("mod", &manifest.id), ("point", &site.name)]))?;
+            super::append_log(&trf(
+                "{mod} listens raw at {point}",
+                &[("mod", &manifest.id), ("point", &site.name)],
+            ))?;
         }
         Ok(())
     }
@@ -285,7 +296,9 @@ impl Catalog {
             ));
         }
         for injection in sites::of(manifest) {
-            sites::find(&self.sites, injection).expect("site checked").facade(&mut exports, &mut constructors, &mut crates);
+            sites::find(&self.sites, injection)
+                .expect("site checked")
+                .facade(&mut exports, &mut constructors, &mut crates);
         }
         for export in exports {
             text.push_str(&export);
@@ -352,11 +365,19 @@ impl Catalog {
 /// Generic arguments belong to a fingerprint, not to a use path or a site target's identity.
 pub(super) fn plain_path(path: &str) -> String {
     let mut depth = 0;
-    path.chars().filter(|&c| match c {
-        '<' => { depth += 1; false },
-        '>' => { depth -= 1; false },
-        _ => depth == 0 && !c.is_whitespace(),
-    }).collect()
+    path.chars()
+        .filter(|&c| match c {
+            '<' => {
+                depth += 1;
+                false
+            }
+            '>' => {
+                depth -= 1;
+                false
+            }
+            _ => depth == 0 && !c.is_whitespace(),
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -516,6 +537,7 @@ pub mod raw {
             include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
             &[&bundle.manifest],
             &catalog.points,
+            &catalog.sites,
         );
         assert!(main.contains("#![forbid(unsafe_code)]"));
         assert!(main.contains(
@@ -621,7 +643,12 @@ pub mod raw {
             text.contains("pub const fn tick_return(id: &'static str, f: __TickReturnListener)")
         );
         assert!(text.contains("PointId::TickReturn"));
-        let main = api::main_rs("/* MOD_RAW */", &[&bundle.manifest], &catalog.points);
+        let main = api::main_rs(
+            "/* MOD_RAW */",
+            &[&bundle.manifest],
+            &catalog.points,
+            &catalog.sites,
+        );
         assert!(main.contains("mod_0_internals::raw::tick_return(\"example\", mod_0::count)"));
         fs::remove_dir_all(dir).unwrap();
     }
