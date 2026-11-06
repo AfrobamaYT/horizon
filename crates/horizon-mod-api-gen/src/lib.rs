@@ -3,6 +3,7 @@ mod catalog;
 mod exports;
 mod host;
 mod layout;
+mod part_table;
 pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
@@ -1013,11 +1014,6 @@ pub mod internals;
 pub mod internals_table;
 pub mod internals_view;
 pub mod points;
-// Inactive until the dispatch/activation step of I4.
-#[expect(
-    dead_code,
-    reason = "site consumers arrive in the following stacked PRs"
-)]
 pub(crate) mod sites;
 pub mod staging;
 mod wasm;

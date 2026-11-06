@@ -293,6 +293,7 @@ mod native_lifecycle;
 mod native_live_holder_tests;
 mod native_living_effects;
 mod native_living_flags;
+mod native_living_position;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -2876,6 +2877,7 @@ struct Game<'a> {
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
     gui: UiResources,
+    standalone_sprites: native_block_entity_draw::StandaloneSprites,
     /// `FogRenderer`'s evolving state.
     fog: horizon_client::fog::FogState,
     screen_fx: horizon_client::screen_effects::ScreenEffects,
@@ -4678,6 +4680,7 @@ impl Game<'_> {
         // ItemEntity.bobOffs comes from the entity's own random, not the level's.
         let bob = self.particles.random().next_float() * std::f32::consts::PI * 2.0;
         self.dropped.push(ItemEntity {
+            attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -15500,6 +15503,7 @@ impl Game<'_> {
         let p = Vec3::new(at[0], at[1], at[2]);
         self.next_entity += 1;
         self.orbs.push(ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -21254,6 +21258,7 @@ impl<'a> Game<'a> {
         let mod_phase = mod_api::__private::PhaseOwner::new(phase);
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
+        let standalone_sprites = native_block_entity_draw::StandaloneSprites::new(&pack, &gui);
         let loop_side = options.execution_role.loop_side();
         let root = options.resources.clone();
         let mod_sources = options.mods.clone();
@@ -21316,6 +21321,7 @@ impl<'a> Game<'a> {
             damage_tag_generation: 1,
             pack,
             gui,
+            standalone_sprites,
             fog: Default::default(),
             screen_fx: Default::default(),
             item_activation: Default::default(),
@@ -23730,10 +23736,12 @@ fn start_game<'a>(
         result?;
         return Ok(None);
     }
-    // FMLClientSetupEvent: once per process, here in `run`, after the initial load applied.
+    // The atlases the initial load stitched, then FMLClientSetupEvent: once per process, here in
+    // `run`, after the initial load applied.
     // A dedicated server has no client and returned above; a splitscreen guest's `run` is
     // another local player of the same process.
     if game.options.is_client_start() {
+        game.texture_atlases_stitched();
         game.native_client_setup();
     }
     // Finish Setup -> Config -> World before any screen, connection, input or tick hooks.
@@ -24487,6 +24495,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mods::register_layer_definitions(options.execution_role);
     mods::register_debug_entries(options.execution_role);
     mods::register_range_select_item_model_properties(options.execution_role);
+    mods::register_select_item_model_properties(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not

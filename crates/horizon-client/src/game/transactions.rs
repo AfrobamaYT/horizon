@@ -493,7 +493,7 @@ impl Game<'_> {
         }
         for (holder, kept) in level.attachments {
             if let Ok(map) = self.attachment_slot(holder) {
-                *map = kept;
+                map.replace_contents(kept);
             }
         }
         for (uuid, kept) in level.players {
