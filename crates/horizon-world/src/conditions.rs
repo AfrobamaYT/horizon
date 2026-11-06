@@ -5,9 +5,9 @@
 //! sense to load when that mod's data is in the root.
 use serde_json::Value;
 
-/// What a condition asks: whether a mod's data is loaded. Callers answer from
-/// the content root's namespaces (`content_namespaces::namespaces`), where a
-/// mod that is off leaves no namespace behind, plus `minecraft`, always.
+/// What a condition asks: whether a mod is enabled for this data-load side.
+/// Callers use the owning resource generation's enabled-mod inventory, plus
+/// `minecraft`, always. Resource namespaces do not identify loaded mods.
 pub type ModLoaded<'a> = dyn Fn(&str) -> bool + 'a;
 
 /// Whether `v`'s `neoforge:conditions` all hold; a file without the key
