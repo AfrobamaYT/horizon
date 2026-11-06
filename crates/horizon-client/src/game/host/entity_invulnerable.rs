@@ -1,6 +1,5 @@
 //! The game's side of the `entity_invulnerable` area (`horizon-mod-api/src/host/entity_invulnerable.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntityInvulnerableBackend for Game<'_> {
     fn entity_permanently_invulnerable(&self, entity: EntityRef) -> Option<bool> {

@@ -15,6 +15,7 @@ pub trait DisplayRefsServerHost {
     }
 }
 /// The handles' reads of the `display_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait DisplayRefsBackend {
     /// Side: server.
@@ -236,6 +237,7 @@ pub trait DisplayRefsBackend {
     }
 }
 /// The handles' server writes of the `display_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait DisplayRefsBackendMut {
     /// Side: server.

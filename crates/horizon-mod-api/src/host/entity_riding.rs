@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `entity_riding` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntityRidingBackend {
     /// Side: server.
@@ -54,6 +55,7 @@ pub trait EntityRidingBackend {
     }
 }
 /// The handles' server writes of the `entity_riding` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntityRidingBackendMut {
     /// Side: server.

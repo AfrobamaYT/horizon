@@ -14,6 +14,7 @@ pub trait MenuRefsClientHost {
     }
 }
 /// The handles' reads of the `menu_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait MenuRefsBackend {
     /// Side: both.
@@ -76,6 +77,7 @@ pub trait MenuRefsBackend {
     }
 }
 /// The handles' client writes of the `menu_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait MenuRefsClientBackendMut {
     /// Side: client.

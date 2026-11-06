@@ -1,6 +1,5 @@
 //! The game's side of the `living_health_writes` area (`horizon-mod-api/src/host/living_health_writes.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LivingHealthWritesBackend for Game<'_> {
     fn living_kill_credit(&self, living: LivingRef) -> Option<EntityRef> {

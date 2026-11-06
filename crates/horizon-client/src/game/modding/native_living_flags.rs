@@ -517,7 +517,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_summons_join_write_survives_the_spawn() {
-        use mod_api::{EntityJoinLevelEvent, Flow, Hooks, Host, ModEntry, ServerHost};
+        use mod_api::{EntityJoinLevelEvent, Flow, Hooks, ModEntry, ServerHost};
         struct Joiner;
         #[mod_api::__subscriptions]
         impl Hooks for Joiner {

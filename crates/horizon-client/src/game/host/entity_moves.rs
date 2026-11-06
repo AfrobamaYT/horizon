@@ -1,6 +1,5 @@
 //! The game's side of the `entity_moves` area (`horizon-mod-api/src/host/entity_moves.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntityMovesBackend for Game<'_> {
     fn entity_head_yaw(&self, entity: EntityRef) -> Option<f32> {

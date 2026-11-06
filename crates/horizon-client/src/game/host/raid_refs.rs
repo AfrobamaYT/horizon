@@ -1,6 +1,5 @@
 //! The game's side of the `raid_refs` area (`horizon-mod-api/src/host/raid_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl RaidRefsBackend for Game<'_> {
     fn level_raid(&self, level: LevelRef, id: i32) -> Option<RaidRef> {

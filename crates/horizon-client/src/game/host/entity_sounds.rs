@@ -1,6 +1,5 @@
 //! The game's side of the `entity_sounds` area (`horizon-mod-api/src/host/entity_sounds.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntitySoundsBackend for Game<'_> {
     fn entity_sound_source(&self, entity: EntityRef) -> Option<SoundSource> {

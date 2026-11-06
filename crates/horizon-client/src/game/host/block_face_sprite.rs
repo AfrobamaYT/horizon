@@ -1,6 +1,5 @@
 //! The game's side of the `block_face_sprite` area (`horizon-mod-api/src/host/block_face_sprite.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl BlockFaceSpriteClientHost for Game<'_> {
     fn block_face_sprite(&self, state: BlockStateId, side: Direction) -> Option<BlockFaceTexture> {

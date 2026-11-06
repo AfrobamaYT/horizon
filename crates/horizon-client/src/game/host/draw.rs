@@ -1,6 +1,5 @@
 //! The game's side of the `draw` area (`horizon-mod-api/src/host/draw.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 /// [`DrawContext`] on the game's `crate::hud::HudBatch`.
 pub(crate) struct GameDrawContext<'a, 'g> {

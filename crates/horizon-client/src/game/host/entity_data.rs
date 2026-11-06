@@ -1,6 +1,5 @@
 //! The game's side of the `entity_data` area (`horizon-mod-api/src/host/entity_data.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntityDataBackend for Game<'_> {
     fn entity_tags(&self, entity: EntityRef) -> Option<Vec<String>> {

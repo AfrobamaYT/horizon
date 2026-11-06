@@ -48,7 +48,11 @@ def main():
         f"    {signature} {{\n        crate::phase::unprovided(\n            \"{union}::{name}\",\n"
         f"            \"{name}\",\n            crate::phase::LoadAccess::{access},\n        )\n    }}\n"
     )
-    hidden = "#[doc(hidden)]\n" if "Backend" in tier else ""
+    hidden = (
+        "// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait\n#[doc(hidden)]\n"
+        if "Backend" in tier
+        else ""
+    )
     if not api_path.exists():
         api_path.write_text(
             f"//! The `{area}` area: host methods the game implements (`game/host/{area}.rs`).\n"

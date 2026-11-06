@@ -1,6 +1,5 @@
 //! The game's side of the `mob_navigation` area (`horizon-mod-api/src/host/mob_navigation.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl MobNavigationBackend for Game<'_> {
     fn mob_is_done(&self, mob: MobRef) -> Option<bool> {

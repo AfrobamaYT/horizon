@@ -24,6 +24,7 @@ use horizon_client::{
     text::Text,
 };
 use horizon_world::registry::BlockStateId;
+#[cfg(test)]
 use mod_api::prelude::*;
 use mod_api::{Identifier, ModelError, ModelPart, ModelRef};
 
@@ -1160,7 +1161,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn prepared_model_entity_pixels() {
-        use mod_api::{__private::game::Fields, ClientHost};
+        use mod_api::__private::game::Fields;
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
@@ -1238,7 +1239,7 @@ mod tests {
     fn prepared_instance_matches_cpu_pixels() {
         use glam::DVec3;
         use horizon_client::gfx::{PreparedModelInstance, fail_next_prepared_upload};
-        use mod_api::{__private::game::Fields, ClientHost};
+        use mod_api::__private::game::Fields;
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
@@ -1363,7 +1364,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn resolved_model_draws_and_resource_replacement_invalidates_it() {
         use super::super::host::draw::GameBlockEntityDrawContext;
-        use mod_api::{BlockEntityDrawContext, ClientHost};
+        use mod_api::BlockEntityDrawContext;
 
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);

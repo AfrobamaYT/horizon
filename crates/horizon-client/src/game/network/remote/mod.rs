@@ -12012,7 +12012,6 @@ mod tests {
     fn mod_chat_needs_a_joined_player_and_what_the_chat_option_allows() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_protocol::connection::Pipe;
-        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;

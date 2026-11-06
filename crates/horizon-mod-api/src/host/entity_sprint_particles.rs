@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' client writes of the `entity_sprint_particles` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntitySprintParticlesClientBackendMut {
     /// Side: client.

@@ -1,6 +1,5 @@
 //! The game's side of the `entity_state` area (`horizon-mod-api/src/host/entity_state.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntityStateBackend for Game<'_> {
     fn entity_is_shift_key_down(&self, entity: EntityRef) -> Option<bool> {

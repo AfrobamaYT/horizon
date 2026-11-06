@@ -1,6 +1,5 @@
 //! The game's side of the `level_shapes` area (`horizon-mod-api/src/host/level_shapes.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelShapesBackend for Game<'_> {
     fn level_block_shape(

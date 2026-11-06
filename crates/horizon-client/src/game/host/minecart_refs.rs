@@ -1,6 +1,5 @@
 //! The game's side of the `minecart_refs` area (`horizon-mod-api/src/host/minecart_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl MinecartRefsServerHost for Game<'_> {
     fn minecart(&self, entity: EntityRef) -> Option<MinecartRef> {

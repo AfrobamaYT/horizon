@@ -1,6 +1,5 @@
 //! The game's side of the `level_entities_in` area (`horizon-mod-api/src/host/level_entities_in.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelEntitiesInBackend for Game<'_> {
     fn level_entities_in(

@@ -1,6 +1,5 @@
 //! The game's side of the `player_food` area (`horizon-mod-api/src/host/player_food.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl PlayerFoodBackend for Game<'_> {
     fn player_needs_food(&self, player: PlayerRef) -> Option<bool> {

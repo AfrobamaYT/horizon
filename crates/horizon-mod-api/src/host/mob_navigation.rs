@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `mob_navigation` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait MobNavigationBackend {
     /// Side: server.
@@ -40,6 +41,7 @@ pub trait MobNavigationBackend {
     }
 }
 /// The handles' server writes of the `mob_navigation` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait MobNavigationBackendMut {
     /// Side: server.

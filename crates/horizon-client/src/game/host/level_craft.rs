@@ -1,6 +1,5 @@
 //! The game's side of the `level_craft` area (`horizon-mod-api/src/host/level_craft.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelCraftBackend for Game<'_> {
     fn level_craft(

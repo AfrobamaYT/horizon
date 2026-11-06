@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `entity_fall_and_push` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntityFallAndPushBackend {
     /// Side: server.
@@ -17,6 +18,7 @@ pub trait EntityFallAndPushBackend {
     }
 }
 /// The handles' server writes of the `entity_fall_and_push` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntityFallAndPushBackendMut {
     /// Side: server.

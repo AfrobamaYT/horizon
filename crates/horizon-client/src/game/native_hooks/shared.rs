@@ -4085,7 +4085,6 @@ mod tests {
     fn client_host_reads_current_pause_state() {
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -4104,7 +4103,7 @@ mod tests {
         use super::super::Screen;
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::ClientHost;
+
         use winit::keyboard::KeyCode;
 
         with_game(|game| {
