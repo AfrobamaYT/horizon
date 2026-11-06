@@ -891,13 +891,9 @@ pub fn worldgen_overrides(
     let mut warnings = Vec::new();
     for pack in packs {
         for file in pack.list_kinds(&overrides::PACK_KINDS) {
-            if let Some((namespace, path)) = file
-                .strip_prefix("data/")
-                .and_then(|rest| rest.split_once("/structure/"))
-                .and_then(|(ns, path)| Some((ns, path.strip_suffix(".nbt")?)))
-            {
+            if let Some(id) = overrides::template_id(&file) {
                 out.set_template(
-                    format!("{namespace}:{path}"),
+                    id,
                     horizon_assets::resource_source::Resource::file(pack.source.clone(), file),
                 );
                 continue;
@@ -1092,6 +1088,7 @@ mod tests {
         for pack in ["a", "b", "off"] {
             write(pack, "pack.mcmeta", "{}");
             write(pack, "data/minecraft/worldgen/noise/cave.json", pack);
+            write(pack, "data/p/structure/room/a.nbt", pack);
             write(
                 pack,
                 "data/minecraft/tags/worldgen/biome/is_hill.json",
@@ -1128,6 +1125,8 @@ mod tests {
             o.entries("noises").collect::<Vec<_>>(),
             [("minecraft:cave", "a")]
         );
+        assert_eq!(o.templates().len(), 1);
+        assert_eq!(o.templates()["p:room/a"].read().unwrap(), b"a");
         assert_eq!(
             o.entries("biomes").collect::<Vec<_>>(),
             [("minecraft:plains", "{}")]
