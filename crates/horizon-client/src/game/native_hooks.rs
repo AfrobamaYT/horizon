@@ -2899,7 +2899,11 @@ impl Game<'_> {
     }
     /// `key.togglePerspective` (F5) cycles the camera type: `previous` is the type it
     /// leaves, and `next` comes in as `CameraType.cycle` and may be set to another.
-    pub(super) fn native_camera_type_cycle(&mut self, previous: CameraType, next: &mut CameraType) {
+    pub(super) fn native_camera_type_cycle(
+        &mut self,
+        previous: mod_api::CameraType,
+        next: &mut mod_api::CameraType,
+    ) {
         self.fire_camera_type_cycle(previous, next);
     }
     /// The window's camera type (`Options.getCameraType`).
