@@ -93,6 +93,8 @@ pub struct Parts {
     entity_capabilities: Capabilities<EntityProviderOf>,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
     place_providers: HashMap<&'static str, PlaceProviderPart>,
+    /// The tooltip appenders, in registration order.
+    tooltip_appenders: Vec<TooltipAppenderPart>,
     /// Only the parts that override each scoped hook, resolved at load or reload.
     hooks: Vec<Option<HookParts>>,
 }
@@ -661,6 +663,9 @@ fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<String>> {
 pub mod tests {
     use super::super::*;
     use super::mark_game_thread;
+
+    #[cfg(test)]
+    use super::{Attached, KnownIds, resolve_parts};
     #[cfg(test)]
     use std::any::type_name;
     #[cfg(test)]

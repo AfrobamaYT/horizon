@@ -51,11 +51,7 @@ struct Source {
 
 impl Source {
     fn offset(&self, position: proc_macro2::LineColumn) -> usize {
-        let line = self.lines[position.line - 1];
-        self.text[line..]
-            .char_indices()
-            .nth(position.column)
-            .map_or(self.text.len(), |(i, _)| line + i)
+        crate::points::offset(&self.text, &self.lines, position)
     }
 
     fn annotate(&mut self, attrs: &[syn::Attribute], start: Span, kind: &str, path: &str) {
@@ -1237,6 +1233,14 @@ fn stage(root: &Path, discovery: bool) -> Result<Widened, String> {
             fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
         ));
     }
+    let sites = crate::sites::listed(&root.join("crates/horizon-mod-api-gen/sites"))
+        .map_err(|e| e.to_string())?;
+    lists.extend(
+        sites
+            .iter()
+            .filter(|d| !d.target.starts_with("horizon_client::"))
+            .map(|d| (d.origin.as_str(), d.target.clone())),
+    );
     widen_mode(root, &lists, discovery)
 }
 

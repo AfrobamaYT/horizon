@@ -16,22 +16,39 @@ SOURCE = Path('crates/horizon-mod-api/src/part_table.rs')
 DIRECTORY = SOURCE.with_suffix('')
 INCLUDE = 'include!(concat!(env!("OUT_DIR"), "/part_table_generated.rs"));\n'
 COMMENT = '//! Shared table state, cross-kind registration and common test fixtures only.\n'
-# Original fixture span boundaries: whole syn items, never bodies, move together.
-TEST_AREAS = [(2009, 'game_rules'), (2128, 'shared'), (2205, 'blocks'),
-              (2218, 'entities'), (2256, 'fluids'), (2321, 'items'),
-              (2372, 'blocks'), (2465, 'effects'), (2538, 'block_entities'),
-              (2617, 'shared'), (2638, 'block_entities'), (2658, 'shared'),
-              (2680, 'structures'), (2714, 'blocks'), (2742, 'block_entities'),
-              (2816, 'shared'), (2837, 'blocks'), (2847, 'shared'),
-              (2981, 'items'), (3866, 'shared'), (3883, 'capabilities'),
-              (3988, 'entities'), (4087, 'capabilities'), (4110, 'shared'),
-              (4158, 'blocks'), (4621, 'capabilities'), (4707, 'items'),
-              (5598, 'tickets'), (5621, 'key_mappings'), (5640, 'tickets'),
-              (5657, 'items'), (5676, 'capabilities'), (5941, 'items'),
-              (5981, 'capabilities'), (6042, 'shared'), (6062, 'items'),
-              (6088, 'shared'), (6097, 'fluids'), (6503, 'energy'),
-              (6676, 'blocks'), (6694, 'block_entities'), (6757, 'capabilities'),
-              (6767, 'blocks')]
+# Original cohesive fixture sections, anchored by declaration rather than line number.
+TEST_AREAS = {
+    'cross_mod_categories_resolve_after_all_registration': 'game_rules',
+    'register_game_keys': 'shared', 'Gauge': 'blocks',
+    'entity_parts_refuse_unnamespaced_ids_and_doubles': 'entities',
+    'invalid_and_duplicate_fluid_declarations_are_refused': 'fluids',
+    'item_keys_validate_forward_references_and_reused_slots': 'items',
+    'registry_keys_resolve_reused_parts_and_rebind_without_changing_identity': 'blocks',
+    'registry_keys_resolve_effects_declared_later_and_generated_name_reads': 'effects',
+    'block_entity_slots_resolve_forward_declarations_and_refuse_unknown': 'block_entities',
+    'registry_keys_reject_unknown_unattached_requests_with_the_requesting_mod': 'shared',
+    'invalid_block_entity_type_paths_refuse_registration': 'block_entities',
+    'invalid_lookup_ids_refuse_registration_naming_the_requesting_mod': 'shared',
+    'duplicate_and_foreign_structure_types_refuse_registration': 'structures',
+    'Connector': 'blocks', 'Press': 'block_entities', 'NoHost': 'shared', 'TagGauge': 'blocks',
+    'Doubler': 'shared', 'Pipe': 'items', 'Level': 'shared', 'Chemical': 'capabilities',
+    'EntityBattery': 'entities', 'Chemist': 'capabilities', 'FixtureContent': 'shared',
+    'signal_game_thread': 'blocks', 'a_level_not_in_place_asks_no_provider': 'capabilities',
+    'an_item_handler_writes_its_stack_back_where_it_lives_splitting_one_off': 'items',
+    'ticket_controllers_get_the_callers_namespace_and_refuse_anothers': 'tickets',
+    'key_mappings_are_owned_and_duplicates_refuse_startup': 'key_mappings',
+    'a_ticket_controller_registered_twice_refuses_the_mods_naming_mod_and_id': 'tickets',
+    'a_place_provider_given_twice_is_refused': 'items',
+    'a_capability_name_answered_with_two_handler_types_is_refused': 'capabilities',
+    'disabled_place_providers_refuse_reads_and_writes_and_resume': 'items',
+    'providers_are_asked_ahead_of_the_game_then_the_game_then_the_mods_in_order': 'capabilities',
+    'TypeOf': 'shared', 'HeldItem': 'items', 'Lie': 'shared', 'ModTank': 'fluids',
+    'ModBattery': 'energy', 'a_mods_tag_part_registered_first_runs_before_its_key_part': 'blocks',
+    'a_vanilla_type_refuses_a_native_payload_part_at_registration': 'block_entities',
+    'with_no_parts_the_block_entity_is_never_named': 'capabilities',
+    'the_same_part_twice_on_one_block_is_refused': 'blocks',
+    
+}
 
 
 def run(*args, source=None):
@@ -50,7 +67,7 @@ def area(text):
     for pattern, kind in [
         (r'game_rule', 'game_rules'), (r'key_mapping', 'key_mappings'),
         (r'ticket|controller', 'tickets'), (r'structure', 'structures'),
-        (r'place_provider|PlaceProviderPart', 'items'),
+        (r'place_provider|PlaceProviderPart|tooltip|Tooltip', 'items'),
         (r'block_entity|BlockEntity|BlockCapabilityProvider|BlockProvider', 'block_entities'),
         (r'entity|Entity', 'entities'), (r'item|ItemKeyError|ItemCapabilityProvider|ItemProvider', 'items'),
         (r'fluid', 'fluids'), (r'effect', 'effects'), (r'block|BlockProvider', 'blocks'),
@@ -79,11 +96,16 @@ def split(source, layout):
             groups = defaultdict(str)
             previous = next(n for n in range(start, end) if lines[n].endswith('pub mod tests {\n')) + 1
             header = ''.join(lines[start:previous])
+            kind = 'shared'
             for member in members:
-                declaration = next((n + 1 for n in range(member['start'] - 1, member['end'])
-                                    if re.match(r'    (?:pub )?(?:fn|struct|impl|enum|trait|mod) ', lines[n])), member['start'])
-                kind = next(k for line, k in reversed(TEST_AREAS) if declaration >= line) if declaration >= 2009 else 'shared'
-                groups[kind] += ''.join(lines[previous:member['end']])
+                text = ''.join(lines[previous:member['end']])
+                declaration = re.search(r'^    (?:pub )?(?:fn|struct|enum|trait|mod) (\w+)', text, re.M)
+                if declaration:
+                    kind = TEST_AREAS.get(declaration[1], kind)
+                target = 'shared' if not declaration and re.search(r'^    use ', text, re.M) else kind
+                if declaration and declaration[1] == 'tooltip_appender_restores_owner_even_on_panic':
+                    target = 'items'
+                groups[target] += text
                 previous = member['end']
             groups['shared'] += ''.join(lines[previous:end - 1])
             for kind, body in groups.items():

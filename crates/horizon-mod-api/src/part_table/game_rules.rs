@@ -227,7 +227,4 @@ pub mod tests {
         );
         assert!(super::install_registrar(duplicate).is_err());
     }
-
-    #[cfg(test)]
-    use super::{Attached, KnownIds, resolve_parts};
 }
