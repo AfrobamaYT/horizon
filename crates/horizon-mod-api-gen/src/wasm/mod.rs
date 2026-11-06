@@ -507,6 +507,10 @@ pub struct Wasm {
     pub host: String,
     /// `Owner::method: why` for each method that doesn't cross.
     pub unbound: Vec<String>,
+    /// Imports eligible for reusable flat-list transport, before transport is enabled.
+    pub flat_list_imports: Vec<String>,
+    /// List-bearing positions left on the owned route by the initial flat-list rule.
+    pub other_list_imports: Vec<String>,
     /// The source files read.
     pub sources: Vec<std::path::PathBuf>,
 }
@@ -533,6 +537,19 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
         providers: providers.clone(),
         guest: sides::guest(&surface.types, &methods, &wit, &hooks)?,
         host: sides::host(&surface.types, &imports, &wit, &hooks, &servers)?,
+        flat_list_imports: imports
+            .iter()
+            .filter(|m| {
+                (!exports().contains(&m.owner) || held(m.owner))
+                    && glue::flat_method(&surface.types, m)
+            })
+            .map(|m| format!("{}::{}", m.owner, m.name))
+            .collect(),
+        other_list_imports: imports
+            .iter()
+            .filter(|m| !exports().contains(&m.owner) || held(m.owner))
+            .flat_map(|m| glue::list_inventory(&surface.types, m))
+            .collect(),
         wit,
         sources: surface.types.index.read.take(),
         unbound: surface
@@ -773,6 +790,43 @@ mod tests {
                 let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
                 let interface = &resolve.interfaces[resolve.packages[package].interfaces[name]];
                 check(interface, &wasm.unbound);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn flat_list_rule_selects_world_draw_slices() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(move || {
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                assert!(
+                    wasm.flat_list_imports
+                        .iter()
+                        .any(|name| name == "WorldDrawContext::lines")
+                );
+                assert!(
+                    wasm.flat_list_imports
+                        .iter()
+                        .any(|name| name == "WorldDrawContext::quads")
+                );
+                println!(
+                    "{} eligible imports:\n{}\n{} owned list positions:\n{}",
+                    wasm.flat_list_imports.len(),
+                    wasm.flat_list_imports.join("\n"),
+                    wasm.other_list_imports.len(),
+                    wasm.other_list_imports.join("\n")
+                );
             })
             .unwrap()
             .join()
