@@ -464,6 +464,8 @@ pub struct PlayerMotion {
     /// move.
     pub nudge: [Option<f64>; 2],
     pub last_climbable: Option<BlockPos>,
+    /// Result of the latest `LivingEntity.onClimbable` query.
+    pub on_climbable: bool,
     /// `Entity.moveDist`, `flyDist` and `nextStep`: footsteps come once per
     /// metre walked, not once per move.
     pub steps: MovementDistances,
@@ -694,6 +696,7 @@ impl PlayerMotion {
             item_use_slows_sprint: false,
             nudge: [None; 2],
             last_climbable: None,
+            on_climbable: false,
             steps: MovementDistances {
                 next_step: 1.0,
                 ..MovementDistances::default()
@@ -1126,10 +1129,15 @@ impl MotionWorld<'_, '_, '_> {
     /// matching ladder. It remembers the block.
     pub fn climbable(&mut self) -> Result<bool> {
         if self.player.flying {
+            self.player.on_climbable = false;
             return Ok(false);
         }
         let resources = self.resources;
-        climbing::on_climbable(self, &resources.climbing).map_err(|e| e.to_string().into())
+        let found: Result<bool> =
+            climbing::on_climbable(self, &resources.climbing).map_err(|e| e.to_string().into());
+        let climbable = found?;
+        self.player.on_climbable = climbable;
+        Ok(climbable)
     }
     pub fn travel_in_air(&mut self, input: Vec3) -> Result<()> {
         living_air::travel_in_air(self, input)
@@ -1916,6 +1924,9 @@ impl MotionWorld<'_, '_, '_> {
                     }
                     _ => {}
                 }
+                // ServerPlayer.onInsideBlock: the server's pass reports it too,
+                // as the enter_block trigger is the server's to fire.
+                self.player.events.push(MotionEvent::EnterBlock { state });
                 if damage_only {
                     continue;
                 }
@@ -1933,8 +1944,6 @@ impl MotionWorld<'_, '_, '_> {
                         .push(MotionEvent::InsidePortal { pos: p }),
                     _ => {}
                 }
-                // ServerPlayer.onInsideBlock
-                self.player.events.push(MotionEvent::EnterBlock { state });
             }
         }
         Ok(iterations + 1)

@@ -831,6 +831,11 @@ impl Game<'_> {
     }
     /// Every boat but the ridden one (which ticks with its rider).
     pub(super) fn tick_boats(&mut self) {
+        self.vehicles_ticking(true);
+        self.tick_boats_now();
+        self.vehicles_ticking(false);
+    }
+    fn tick_boats_now(&mut self) {
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
         let ticking = self.entity_ticking_area();
         let mut round = self.native_tick_round();
@@ -1521,7 +1526,12 @@ impl Game<'_> {
             }
             // `VehicleEntity.destroy(level, dropItem)` drops the boat item on
             // the death path only, and only with `entity_drops` on.
-            if !creative && self.ui.rules.bool("entity_drops") {
+            if !creative
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            {
                 let item = b.entity_type();
                 self.spawn_item(
                     ItemStack {

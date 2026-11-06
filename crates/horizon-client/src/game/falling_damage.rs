@@ -170,7 +170,10 @@ impl Game<'_> {
         }
         if matches!(landing, Landing::Broken)
             && block.drop_item
-            && self.ui.rules.bool("entity_drops")
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
         {
             if let Some(id) = sound_event {
                 self.level_events.push(LevelEvent::LevelEvent {

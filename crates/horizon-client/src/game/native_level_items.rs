@@ -55,7 +55,12 @@ impl Game<'_> {
         }
         let at = spill::pop_position(&mut self.world.random, pos);
         // Block.popResource's private overload checks these after the draws.
-        if !self.stack_spawns(&stack) || !self.ui.rules.bool("block_drops") {
+        if !self.stack_spawns(&stack)
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+        {
             return None;
         }
         self.spawn_level_item(level, stack, at, dispenser::new_item_motion(), 10)

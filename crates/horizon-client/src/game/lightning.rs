@@ -95,7 +95,10 @@ impl Game<'_> {
                 .facts()
                 .get(self.world.block(pos[0], pos[1] - 1, pos[2]))
                 .name;
-            let trap = self.ui.rules.bool("spawn_mobs")
+            let trap = self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
                 && self.world.random.next_double() < difficulty * 0.01
                 && !below.ends_with("lightning_rod");
             if !self.lightning_strike_allowed(None, pos, "weather") {

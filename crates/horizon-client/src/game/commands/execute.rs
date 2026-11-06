@@ -243,7 +243,11 @@ impl Game<'_> {
     /// the executable node): `execute` and `return` walk their own chains.
     pub(in crate::game) fn run_chain(&mut self, root: &Context, ctx: &Context) -> R<i32> {
         self.exec.commands += 1;
-        let limit = self.ui.rules.int("max_command_sequence_length").max(1) as u32;
+        let limit = self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::MAX_COMMAND_SEQUENCE_LENGTH)
+            .max(1) as u32;
         if self.exec.commands > limit {
             return Err(err("command.failed", &[]));
         }
@@ -325,7 +329,10 @@ impl Game<'_> {
     /// ExecuteCommand: `ctx` is the context holding the `execute` literal.
     pub(in crate::game) fn run_execute(&mut self, ctx: &Context) -> R<i32> {
         // BuildContexts: a modifier may not bring the sources to this many.
-        let fork_limit = self.ui.rules.int("max_command_forks") as usize;
+        let fork_limit =
+            self.ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::MAX_COMMAND_FORKS) as usize;
         let mut sources = vec![self.command_source.unwrap_or_else(|| self.player_source())];
         let mut c = ctx;
         // A fork modifier (as, at, positioned as, rotated as, facing entity,

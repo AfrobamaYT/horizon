@@ -222,7 +222,7 @@ mod tests {
             (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
         ))
         .unwrap();
-        let mut batch = HudBatch::new(size);
+        let mut batch = HudBatch::scratch(size);
         let cursor = (cursor.0 / batch.scale, cursor.1 / batch.scale);
         let mut ui = Ui::new(&atlas, &mut batch, cursor);
         f(&mut ui)

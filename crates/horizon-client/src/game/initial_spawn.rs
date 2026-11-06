@@ -309,7 +309,11 @@ impl Game<'_> {
             finder.next_candidate();
             return finder;
         }
-        let mut radius = self.ui.rules.int("respawn_radius").max(0);
+        let mut radius = self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::RESPAWN_RADIUS)
+            .max(0);
         let to_border = self
             .border
             .distance(f64::from(suggestion[0]), f64::from(suggestion[2]))

@@ -341,7 +341,7 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     }
     let loaded_ms = ms(loading.elapsed());
 
-    let hud = HudBatch::new([width, height]);
+    let hud = HudBatch::scratch([width, height]);
     let mut views = Vec::new();
     for &offset in &o.yaw_offsets {
         let mut frame = scene.frame(&hud);

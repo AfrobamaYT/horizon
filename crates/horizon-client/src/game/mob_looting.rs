@@ -22,7 +22,10 @@ use horizon_core::{geometry::Vec3, random::RandomSource};
 impl Game<'_> {
     /// `Mob.aiStep`'s looting block, once per mob per tick.
     pub(super) fn tick_mob_looting(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         if self.dropped.is_empty() || (!griefing && !self.grief_hooked()) {
             return;
         }

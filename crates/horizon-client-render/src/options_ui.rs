@@ -6623,7 +6623,7 @@ mod tests {
         );
         // The pointer is still on the clicked widget: it carries the
         // description (`setTooltip`, drawn while hovered).
-        let mut on = HudBatch::new([480, 480]);
+        let mut on = HudBatch::scratch([480, 480]);
         ui.draw(
             &s,
             &mut on,
@@ -6635,7 +6635,7 @@ mod tests {
         // `focus_from_keyboard` false) does not keep the tooltip against
         // the widget, like vanilla's `MenuTooltipPositioner` does for a
         // keyboard focus.
-        let mut off = HudBatch::new([480, 480]);
+        let mut off = HudBatch::scratch([480, 480]);
         ui.draw(
             &s,
             &mut off,
@@ -6829,11 +6829,11 @@ mod tests {
                     })
                     .unwrap();
                 let cursor = (option.x + 1.0, option.y + 1.0);
-                let mut actual = HudBatch::new([480, 480]);
+                let mut actual = HudBatch::scratch([480, 480]);
                 ui.draw(&s, &mut actual, &atlas, cursor);
                 let key = format!("options.inactivityFpsLimit.{mode}.tooltip");
                 assert!(lang::has(&key));
-                let mut expected = HudBatch::new([480, 480]);
+                let mut expected = HudBatch::scratch([480, 480]);
                 ui::tooltip(
                     &mut expected,
                     &atlas,
@@ -7418,7 +7418,7 @@ mod tests {
         let mut ui = OptionsUi::default();
         ui.show(Page::Language);
         let draw_hint = |ui: &mut OptionsUi| {
-            let mut batch = HudBatch::new([960, 640]);
+            let mut batch = HudBatch::scratch([960, 640]);
             ui.draw(&settings, &mut batch, &atlas, (-1.0, -1.0));
             let search = &ui.language_search;
             batch.vertices.iter().any(|v| {
@@ -7500,7 +7500,7 @@ mod tests {
             let mut s = Settings::default();
             let mut ui = OptionsUi::default();
             ui.show(Page::KeyBinds);
-            let mut batch = HudBatch::new([480, 240]);
+            let mut batch = HudBatch::scratch([480, 240]);
             let size = (batch.width, batch.height);
             let (widgets, top, bottom, _) = ui.layout(&s, size.0, size.1);
             let row = widgets

@@ -12396,7 +12396,7 @@ mod tests {
         use mod_api::DrawContext;
 
         with_game(|game| {
-            let mut batch = horizon_client::hud::HudBatch::new([320, 240]);
+            let mut batch = horizon_client::hud::HudBatch::scratch([320, 240]);
             let draw = GameDrawContext {
                 game,
                 surface: &mut batch,
@@ -13661,7 +13661,7 @@ mod screen_open_tests {
         with_mods(Vec::new().into(), || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.screen = Screen::Creative;
-                let batch = HudBatch::new([854, 480]);
+                let batch = HudBatch::scratch([854, 480]);
                 let image = game.container_image(&batch);
                 let (x, y) = (image.left as f32, image.top as f32);
                 let areas = game.screen_own_exclusion(&batch);
@@ -14485,7 +14485,7 @@ mod text_tests {
         use mod_api::DrawContext;
         super::super::native_entity_refs::tests::with_game(|game| {
             let drawn = |argb: u32| {
-                let mut batch = HudBatch::new([640, 480]);
+                let mut batch = HudBatch::scratch([640, 480]);
                 super::super::mod_api_host::generated::GameDrawContext {
                     game,
                     surface: &mut batch,
@@ -15203,7 +15203,7 @@ mod customize_chat_overlay_tests {
 
     /// The top of what the chat draws, in GUI pixels, and the batch's GUI scale.
     fn chat_top(game: &mut super::Game<'_>) -> (Option<f32>, f32) {
-        let mut batch = HudBatch::new([1280, 720]);
+        let mut batch = HudBatch::scratch([1280, 720]);
         game.draw_chat(&mut batch);
         let top = batch.vertices.iter().map(|v| v.pos[1]).reduce(f32::min);
         (top, batch.scale)
@@ -15237,7 +15237,7 @@ mod customize_chat_overlay_tests {
                     "lifted by 100 GUI pixels: {plain} -> {moved} at scale {scale}"
                 );
                 let (w, h) = {
-                    let b = HudBatch::new([1280, 720]);
+                    let b = HudBatch::scratch([1280, 720]);
                     (b.width as i32, b.height as i32)
                 };
                 assert_eq!(*seen.lock().unwrap(), [(w, h, false, 0, h - 40)]);
