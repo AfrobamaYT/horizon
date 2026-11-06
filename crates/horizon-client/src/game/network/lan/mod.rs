@@ -433,7 +433,7 @@ pub(super) struct LanHost {
     /// The world border as the guests were last told of it (lan/border.rs).
     pub border_sent: Option<lan::border::Sent>,
     /// Guests' commands waiting for the hub to be back in `self.lan`, where
-    /// a command can reach every player (game/network/lan_actions.rs).
+    /// a command can reach every player (game/network/lan_actions/commands.rs).
     pub commands: Vec<super::lan_actions::GuestCommand>,
     /// Mods' quiet commands waiting to run a few a tick (game/network/lan_quiet.rs).
     pub quiet: std::collections::VecDeque<super::lan_quiet::QuietBatch>,
