@@ -2961,8 +2961,8 @@ fn furnace_speed(c: &Minecart, base: f64) -> f64 {
 pub(super) struct PreparedModelFace {
     positions: [[f32; 3]; 4],
     uv: [[f32; 2]; 4],
-    facing: horizon_assets::model::Direction,
-    tint_index: i32,
+    pub(super) facing: horizon_assets::model::Direction,
+    pub(super) tint_index: i32,
     light_emission: u8,
 }
 
