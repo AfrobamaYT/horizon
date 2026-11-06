@@ -235,6 +235,8 @@ mod names;
 mod narrator;
 mod native_biome_colors;
 pub mod native_block_entity_draw;
+#[cfg(test)]
+mod native_block_entity_item_tests;
 mod native_block_entity_refs;
 mod native_block_sprites;
 mod native_block_states;
