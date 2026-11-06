@@ -77,7 +77,7 @@ impl Game<'_> {
                 let Some(key) = update["key"].as_str() else {
                     return json!({ "invalid": format!("No key key in MapLike[{update}]") });
                 };
-                let rule = gamerules::rule(key).filter(|r| self.ui.rules.get(r.name).is_some());
+                let rule = self.ui.rules.rule(key).cloned();
                 let Some(rule) = rule else {
                     let key = if key.contains(':') {
                         key.to_owned()
@@ -112,8 +112,8 @@ impl Game<'_> {
                     "Game rule '{}' updated from '{current}' to '{value}'",
                     rule.name
                 ));
-                self.set_game_rule(rule, value, None);
-                return json!({ "value": typed_rule(rule, value) });
+                self.set_game_rule(&rule, value, None);
+                return json!({ "value": typed_rule(&rule, value) });
             }
             "serversettings/autosave" => {
                 return json!({ "value": auto_save(state) });
@@ -891,14 +891,17 @@ mod tests {
 
     #[test]
     fn a_game_rule_is_written_as_vanillas_typed_codec_does() {
-        let pvp = gamerules::rule("pvp").unwrap();
+        let pvp = gamerules::rule_registry().rule("pvp").unwrap().clone();
         assert_eq!(
-            typed_rule(pvp, GameRuleValue::Bool(false)),
+            typed_rule(&pvp, GameRuleValue::Bool(false)),
             json!({ "key": "minecraft:pvp", "type": "boolean", "value": false })
         );
-        let tick = gamerules::rule("minecraft:random_tick_speed").unwrap();
+        let tick = gamerules::rule_registry()
+            .rule("minecraft:random_tick_speed")
+            .unwrap()
+            .clone();
         assert_eq!(
-            typed_rule(tick, GameRuleValue::Int(3)),
+            typed_rule(&tick, GameRuleValue::Int(3)),
             json!({ "key": "minecraft:random_tick_speed", "type": "integer", "value": 3 })
         );
     }

@@ -51,6 +51,7 @@ pub fn main_with(
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     horizon_threads::configure_allocator();
     horizon_client::spans::startup::init(std::time::Instant::now());
+    horizon_client::spans::trace::start_from_env();
     let launch: crate::Result<_> = std::env::current_dir().map_err(Into::into).and_then(|cwd| {
         Ok(LaunchArguments::parse(
             std::env::args().skip(1),
@@ -66,10 +67,11 @@ pub fn main_with(
             std::process::exit(game::exit_code::USAGE);
         }
     };
-    // Wasm mods join the native ones after them, in dependency order, from the same selection
-    // as content mods. Then the mods are installed, before anything below (logging, the crash
+    // Load wasm code from the same selection as content, then resolve one native/wasm
+    // dispatch order before anything below (logging, the crash
     // handler) that a trait injection may call into.
     let mut wasm_listening = Vec::new();
+    let mut wasm_manifests = Vec::new();
     if let Ok(exe) = &exe {
         let switch = |name: &str| {
             launch
@@ -87,11 +89,50 @@ pub fn main_with(
             budgets,
         };
         let game_dir = &launch.context.game_dir;
-        let (wasm, listening) =
+        let loaded =
             horizon_mod_wasm::load_installed(exe, game_dir, &launch.context.dev_mods, &config);
-        mods.extend(wasm);
-        wasm_listening = listening;
+        mods.extend(loaded.mods);
+        wasm_listening = loaded.listening;
+        wasm_manifests = loaded.manifests;
     }
+    // One installed dispatch order for both targets; ties retain bundle order.
+    let manifests: Vec<_> = native
+        .packages()
+        .iter()
+        .map(|p| &p.manifest)
+        .chain(wasm_manifests.iter())
+        .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
+        .collect();
+    assert_eq!(
+        manifests.len(),
+        mods.len(),
+        "loaded code has checked manifests"
+    );
+    let declared: Vec<_> = manifests
+        .iter()
+        .map(|m| horizon_mods::dependencies::from_manifest(&m.dependencies))
+        .collect();
+    let inputs: Vec<_> = manifests
+        .iter()
+        .zip(&declared)
+        .map(|(m, dependencies)| horizon_mods::dependencies::Mod {
+            id: &m.id,
+            version: &m.version,
+            has_api: true,
+            dependencies,
+        })
+        .collect();
+    let order = horizon_mods::dependencies::resolve(&inputs)
+        .unwrap_or_else(|error| panic!("mod load refused: {error}"));
+    let mut entries: std::collections::BTreeMap<_, _> = mods
+        .into_iter()
+        .map(|entry| (entry.fields().id, entry))
+        .collect();
+    let mods: Vec<_> = order
+        .order
+        .into_iter()
+        .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
+        .collect();
     mod_api::__private::install(mods.into());
     for (id, listeners) in points {
         let hooks = mod_api::__private::hooks_of(id)

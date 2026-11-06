@@ -309,7 +309,11 @@ impl Game<'_> {
         // ServerLevel.globalLevelEvent: without global_sound_events it is a
         // plain level event, which the client has no sound for (1023, 1028
         // and 1038 are only in `LevelEventHandler.globalLevelEvent`).
-        if !self.ui.rules.bool("global_sound_events") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::GLOBAL_SOUND_EVENTS)
+        {
             return;
         }
         self.global_level_event_sound(id, pos);

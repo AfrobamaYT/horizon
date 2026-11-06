@@ -110,7 +110,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1280, 720], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         (b.width, b.height)
     }
     /// Open the options screens (OptionsScreen) from the title or pause menu.
@@ -522,14 +522,6 @@ impl Game<'_> {
     }
     /// Settings that Horizon applies beyond render distance, volume and GUI scale.
     pub(super) fn apply_ui_settings(&mut self) {
-        horizon_client::hud::GUI_SCALE.store(
-            self.settings.gui_scale,
-            std::sync::atomic::Ordering::Relaxed,
-        );
-        horizon_client::hud::GUI_UNICODE.store(
-            self.settings.force_unicode,
-            std::sync::atomic::Ordering::Relaxed,
-        );
         if horizon_client_render::mipmap::set_dither_cutouts(
             self.settings.horizon.dither_cutout_mips,
         ) {
@@ -603,10 +595,16 @@ impl Game<'_> {
         }
     }
     pub(super) fn resize_state_of(&self, size: winit::dpi::PhysicalSize<u32>) -> ResizeState {
+        let viewport = self
+            .renderer
+            .as_ref()
+            .map_or([size.width, size.height], |r| {
+                [r.config.width, r.config.height]
+            });
         ResizeState {
             size,
             gui_size: horizon_client::window::GuiSize::new(
-                [size.width, size.height],
+                viewport,
                 self.settings.gui_scale,
                 self.settings.force_unicode,
             )
@@ -777,6 +775,73 @@ mod resize_state_tests {
             size: PhysicalSize::new(width, 720),
             gui_size: horizon_client::window::GuiSize::new([width, 720], 3, unicode).size,
         }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an X11 display"]
+    fn viewport_resize_notifications_follow_each_player() {
+        use mod_api::{ClientHost, Hooks, ModEntry, WindowResizeEvent, testing::with_mods};
+        use std::sync::{Arc, Mutex};
+        struct Listener(Arc<Mutex<Vec<(u32, u32, u32, u32)>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Listener {
+            fn window_resize(&self, _: &mut dyn ClientHost, event: &mut WindowResizeEvent) {
+                self.0.lock().unwrap().push((
+                    event.width,
+                    event.height,
+                    event.gui_width,
+                    event.gui_height,
+                ));
+            }
+        }
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut builder = winit::event_loop::EventLoop::builder();
+        #[cfg(target_os = "linux")]
+        {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+            builder.with_x11().with_any_thread(true);
+        }
+        let event_loop = builder.build().unwrap();
+        #[allow(deprecated)]
+        let window = Arc::new(
+            event_loop
+                .create_window(
+                    winit::window::Window::default_attributes()
+                        .with_visible(false)
+                        .with_inner_size(PhysicalSize::new(1920, 1080)),
+                )
+                .unwrap(),
+        );
+        assert_eq!(window.inner_size(), PhysicalSize::new(1920, 1080));
+        let mods = vec![ModEntry::new("resize", Box::new(Listener(events.clone())))].into();
+        with_mods(mods, || {
+            for (scale, expected) in [(0, (320, 360)), (2, (480, 540))] {
+                super::super::native_entity_refs::tests::with_client_game(|game| {
+                    game.options.offscreen = true;
+                    game.window = Some(window.clone());
+                    game.renderer = Some(game.new_renderer(window.clone()).unwrap());
+                    game.renderer.as_mut().unwrap().resize(960, 1080);
+                    game.settings.gui_scale = scale;
+                    game.settings.force_unicode = false;
+                    game.notify_window_resize();
+                    game.notify_window_resize();
+                    assert_eq!(
+                        events.lock().unwrap().pop(),
+                        Some((1920, 1080, expected.0, expected.1))
+                    );
+                    assert!(events.lock().unwrap().is_empty());
+                    game.renderer.as_mut().unwrap().resize(1920, 1080);
+                    game.notify_window_resize();
+                    let gui = horizon_client::window::GuiSize::new([1920, 1080], scale, false).size;
+                    assert_eq!(
+                        events.lock().unwrap().pop(),
+                        Some((1920, 1080, gui[0], gui[1]))
+                    );
+                    game.notify_window_resize();
+                    assert!(events.lock().unwrap().is_empty());
+                });
+            }
+        });
     }
 
     /// One resize event that also flips fullscreen is observed twice (by the fullscreen

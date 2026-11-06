@@ -385,8 +385,10 @@ pub trait Hooks {
     #[hook(side = "server", contract = "collect", out = "commands")]
     fn register_commands();
     /// A player's command on the server (`Commands.performCommand`),
-    /// without its slash, for a command a mod registered and the player's
-    /// level allows: set `ran` when it is yours. The player's state is
+    /// parsed into `command` with typed, source-resolved arguments, for a command
+    /// a mod registered and the player's level allows: set `ran` when it is yours.
+    /// Missing optional arguments are absent; parsing or resolution failures never
+    /// reach listeners. The player's state is
     /// swapped in for the call, so `native_player` and the other helpers
     /// read that player; `host.commands().feedback()` answers them. A single player's
     /// owner console (`horizon-ctl command`) reaches it too, as the owner at
@@ -789,13 +791,13 @@ pub trait Hooks {
     #[hook(side = "server", contract = "replace", out = "fluids", host = "read")]
     fn block_entity_fluids();
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
-    /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
+    /// `effect` (an `EffectKey` for `ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
     /// the ticks left (the entity's tick count when infinite). Set `apply`
     /// and `native_apply_effect_tick` follows. Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
     fn should_apply_effect_tick_this_tick();
-    /// `MobEffect.applyEffectTick`: the content mod's effect `effect` acts on
+    /// `MobEffect.applyEffectTick`: the content mod's resolved `EffectKey` `effect` acts on
     /// `entity` in `dimension` (`minecraft:overworld`). Clear `keep` and the
     /// effect ends now, before it counts down. `entity` is a mob's
     /// `Entity.getId`, None for a player (`host.players().acting_player()` says who).
@@ -807,7 +809,7 @@ pub trait Hooks {
     /// Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
     fn apply_effect_tick(
-        effect: &str,
+        effect: EffectKey,
         dimension: &str,
         entity: Option<i32>,
         amplifier: i32,
@@ -1296,7 +1298,9 @@ pub trait Hooks {
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
     /// Selection/F3+T and server-pack reloads share this point; initial startup does not
-    /// (`client_setup` is the once-only moment after the initial load).
+    /// (`client_setup` is the once-only moment after the initial load). Runs in
+    /// Reloading: published asset/data queries may refresh caches, but world
+    /// handles and transactions remain unavailable.
     #[hook(side = "client", contract = "listen")]
     fn client_resources_reloaded();
     /// Append an item's custom decorations after its default bar, cooldown and count.
@@ -1331,13 +1335,11 @@ pub trait Hooks {
         host = "read"
     )]
     fn use_duration();
-    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
-    /// `animation` arrives with its consumable's (`eat`, `drink`), else
-    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
-    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
-    /// Asked each frame the hand draws an item in use, for an item with no
-    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
-    /// theirs). Client-side.
+    /// `Item.getUseAnimation` of `stack` in use, for first- and third-person
+    /// rendering. `animation` arrives with the item's vanilla answer; mods may
+    /// change it. A `Spear` override on an item without kinetic data is refused
+    /// as `None`. Asked on the client when each render consumer updates; answer
+    /// from the stack alone.
     #[hook(side = "client", contract = "listen", scope = "item", key = "stack")]
     fn use_animation();
     /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
@@ -1436,8 +1438,11 @@ pub trait Hooks {
     fn player_command();
     /// A command a mod registered, typed on the dedicated server's console
     /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), without its slash: set `ran`
-    /// when it is yours. There is no player: the source is the console, at
+    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
+    /// typed arguments: set `ran` when it is yours. Relative coordinates and
+    /// selectors use the console at the Overworld spawn, with zero rotation.
+    /// Missing optional arguments are absent; invalid input never reaches listeners.
+    /// There is no player: the source is the console, at
     /// permission level 4, so `host.players().acting_player()` is None and the
     /// player-only helpers give nothing; `host.commands().feedback()` answers on the
     /// console. A name no mod registered goes to vanilla's dispatcher as
@@ -1538,7 +1543,9 @@ pub trait Hooks {
     /// players were sent the new data. The place to
     /// drop caches derived from the data and to rebind what depends on it.
     /// Server-side (the single player's integrated server included); a client
-    /// connected to a server never fires it.
+    /// connected to a server never fires it. Runs in Reloading: published
+    /// asset/data queries can rebind caches, including on first open; world
+    /// handles and transactions remain unavailable.
     #[hook(side = "server", contract = "listen")]
     fn server_data_loaded();
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
@@ -3765,8 +3772,9 @@ pub trait Hooks {
     /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
     /// `progress` is an owned snapshot of every criterion (including its stored grant date),
     /// the requirement groups and their completion at this exact mutation. It belongs to
-    /// this player, including first-tick and reload grants held by the server hub. A listener
-    /// may retain a clone; later grants, revokes or reloads do not change that snapshot.
+    /// the mutated progress, including first-tick and reload grants queued by the server hub.
+    /// During a nested player turn, a suspended player's hub record may contain displaced
+    /// progress. A listener may retain a clone; later mutations do not change the snapshot.
     #[hook(
         side = "server",
         contract = "listen",
@@ -3832,8 +3840,8 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)"
     )]
     fn player_bundle_item_select();
-    /// A server player changed a beacon's selected effects, after they were stored. Empty effect ids
-    /// mean no effect. Server-side.
+    /// A server player changed a beacon's selected effects, after they were stored. Each selected
+    /// effect is an `Option<EffectKey>`; None means no effect. Server-side.
     #[hook(
         side = "server",
         contract = "listen",
@@ -4237,8 +4245,9 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn raid_spawn_wave();
-    /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`).
+    /// A server raid at `pos` changed to `state` (`triggered`, `victory`,
+    /// `loss` or `stopped`). `raid` identifies its owning level, including a
+    /// parked level. A terminal raid already removed from storage cannot be read.
     #[hook(
         side = "server",
         contract = "listen",
@@ -4544,6 +4553,22 @@ pub trait Helpers {
         target = "horizon_client::game::native_server::Game<'_>::native_server_players"
     )]
     fn server_players();
+    /// Find a connected real player by account name, ignoring ASCII case.
+    /// Returns None when no player matches; fake players and nicknames are excluded.
+    #[helper(
+        side = "server",
+        service = "players",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_by_name"
+    )]
+    fn player_by_name();
+    /// Enumerate loaded server levels in overworld, nether, end order.
+    /// Returns an empty list before a server world is open.
+    #[helper(
+        side = "server",
+        service = "levels",
+        target = "horizon_client::game::native_entity_refs::Game<'_>::native_list_levels"
+    )]
+    fn list_levels();
     /// The connection IP without its port (the forwarded address behind a Velocity proxy),
     /// including displaced connected players. Empty for an acting player with no known
     /// connection; None for a stale or unavailable player.
@@ -4762,11 +4787,11 @@ pub trait Helpers {
     fn config_files();
     #[helper(side = "client")]
     fn panel_items();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipes_of_type();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_ingredient();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_result();
     #[helper(side = "both")]
     fn known_recipes();

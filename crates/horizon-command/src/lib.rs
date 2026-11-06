@@ -1012,8 +1012,9 @@ impl Dispatcher {
             }
         }
         if !potentials.is_empty() {
-            // Prefer fully read input, then results without errors (stable sort).
-            potentials.sort_by_key(|p| (p.can_read(), !p.errors.is_empty()));
+            // Prefer fully read input, then results without errors. An executable
+            // result wins an otherwise complete tie; all other ties stay stable.
+            potentials.sort_by_key(|p| (p.can_read(), !p.errors.is_empty(), !p.is_valid()));
             return potentials.swap_remove(0);
         }
         ParseResults {

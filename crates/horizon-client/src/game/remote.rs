@@ -262,6 +262,24 @@ struct Tracked {
     kind: String,
     position: [f64; 3],
     silent: bool,
+    /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever
+    /// either one's type.
+    vehicle: Option<u32>,
+}
+
+/// `Entity.startRiding` / `removePassenger` for a `SetPassengers` packet: the
+/// listed entities ride `vehicle`, the ones that rode it and are no longer
+/// listed got off. Every tracked entity counts, whatever its type, so a
+/// server's item display or marker on a player hides that player's name tag
+/// as vanilla's `isVehicle` does (#5666).
+fn seat_passengers(entities: &mut HashMap<i32, Tracked>, vehicle: u32, passengers: &[i32]) {
+    for (id, t) in entities.iter_mut() {
+        if passengers.contains(id) {
+            t.vehicle = Some(vehicle);
+        } else if t.vehicle == Some(vehicle) {
+            t.vehicle = None;
+        }
+    }
 }
 /// Smooth an entity toward a new position over three ticks (InterpolationHandler).
 #[derive(Clone, Copy)]
@@ -1386,9 +1404,15 @@ impl Game<'_> {
     }
     /// A mob effect's network id as the effect (`brewing::EFFECTS` id).
     pub(super) fn remote_effect_id(&self, effect: i32) -> Option<&'static str> {
+        self.remote_effect_def(effect).map(|def| def.id)
+    }
+    fn remote_effect_def(
+        &self,
+        effect: i32,
+    ) -> Option<&'static horizon_client::brewing::EffectDef> {
         let r = self.remote.as_ref()?;
         let name = r.builtin.get("minecraft:mob_effect")?.name(effect)?;
-        horizon_client::brewing::effect(name).map(|d| d.id)
+        horizon_client::brewing::effect(name)
     }
     /// ClientPacketListener.handleUpdateMobEffect for the player itself
     /// (`LivingEntity.forceAddEffect`): the effect replaces any of its kind.
@@ -1397,10 +1421,11 @@ impl Game<'_> {
         if self.remote.as_ref().is_none_or(|r| r.entity_id != p.id) {
             return;
         }
-        let Some(id) = self.remote_effect_id(p.effect) else {
+        let Some(def) = self.remote_effect_def(p.effect) else {
             return;
         };
-        let mut e = horizon_client::effects::EffectInstance::new(id, p.duration, p.amplifier);
+        let id = def.id;
+        let mut e = horizon_client::effects::EffectInstance::from_def(def, p.duration, p.amplifier);
         e.ambient = p.flags & 1 != 0;
         e.visible = p.flags & 2 != 0;
         let list = &mut self.potions.effects.list;
@@ -2315,7 +2340,8 @@ impl Game<'_> {
         // startWaitingForNewLevel: `LevelLoadTracker.startClientLoad` and the
         // `LevelLoadingScreen`.
         r.level_load.start_client_load(client_millis(), reason);
-        // A replacement LocalPlayer has a fresh sendPosition baseline.
+        // A replacement LocalPlayer has a fresh ambient mood and sendPosition baseline.
+        self.ambience.moodiness = 0.0;
         r.position_sender = Default::default();
         r.predictions.clear();
         self.set_mode_id(spawn.game_type);
@@ -2731,6 +2757,18 @@ impl Game<'_> {
             }
         }
     }
+    /// `Entity.isVehicle` on a client: the entities a tracked entity rides.
+    pub(super) fn remote_vehicle_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.remote
+            .iter()
+            .flat_map(|r| r.entities.values().filter_map(|t| t.vehicle))
+    }
+    /// The `SetPassengers` bookkeeping of the tracked entities.
+    pub(super) fn remote_seat_passengers(&mut self, vehicle: u32, passengers: &[i32]) {
+        if let Some(r) = self.remote.as_mut() {
+            seat_passengers(&mut r.entities, vehicle, passengers);
+        }
+    }
     /// `recreateFromPacket`: yRot and xRot from the packet, the body and head
     /// both at its head yaw (LivingEntity).
     fn spawn_entity(&mut self, id: i32, kind: &str, position: [f64; 3], rotation: [f32; 3]) {
@@ -2785,6 +2823,7 @@ impl Game<'_> {
                     kind: kind.to_owned(),
                     position,
                     silent: false,
+                    vehicle: None,
                 },
             );
         }
@@ -6507,6 +6546,9 @@ impl Game<'_> {
                 // NetherPortalBlock.entityInside on the client's own level:
                 // the portal overlay and its trigger sound (the server moves
                 // the player).
+                horizon_client::motion::MotionEvent::PowderSnowMelt { pos } => {
+                    self.powder_snow_melt(pos);
+                }
                 horizon_client::motion::MotionEvent::InsidePortal { .. } => {
                     self.client_inside_nether_portal();
                 }
@@ -6924,6 +6966,19 @@ impl Game<'_> {
             if (!running && !player) || driven == Some(id) {
                 continue;
             }
+            let animation = if player && self.mobs[i].extra.using_item > 0 {
+                let extra = &self.mobs[i].extra;
+                let slot = if extra.using_off_hand {
+                    horizon_items::equipment::OFFHAND
+                } else {
+                    horizon_items::equipment::MAINHAND
+                };
+                extra
+                    .slot_stack(slot)
+                    .map_or_else(Default::default, |stack| self.item_use_animation(stack))
+            } else {
+                Default::default()
+            };
             let player_ref = tick_listened
                 .then(|| {
                     self.remote.as_ref().and_then(|r| {
@@ -7064,18 +7119,7 @@ impl Game<'_> {
             if player {
                 // AvatarRenderer.getArmPose: the used item's use animation
                 // poses the arm.
-                let used = if m.extra.using_off_hand {
-                    m.extra.off_hand_id()
-                } else {
-                    m.extra.main_hand_id()
-                };
-                m.extra.use_animation = used
-                    .and_then(|i| world_items!(self).get(i))
-                    .filter(|_| m.extra.using_item > 0)
-                    .map_or_else(
-                        Default::default,
-                        horizon_client::first_person::item_use_animation,
-                    );
+                m.extra.use_animation = animation;
             }
             if m.extra.using_item > 0 {
                 if player {
@@ -8654,8 +8698,16 @@ impl Game<'_> {
         stack: &ItemStack,
     ) -> (bool, Option<DryChanges>, Vec<DrySound>) {
         // `BucketItem.use`: `level.mayInteract` and `mayUseItemAt`.
+        // `Player.mayUseItemAt` tests the clicked block against `can_place_on`.
         if !self.may_build() {
-            return (false, None, Vec::new());
+            let aim = if &*stack.item == "minecraft:bucket" {
+                self.bucket_hit()
+            } else {
+                self.pick()
+            };
+            if !aim.is_some_and(|hit| self.can_place_on_in_adventure(hit.pos)) {
+                return (false, None, Vec::new());
+            }
         }
         if &*stack.item == "minecraft:bucket" {
             let Some(hit) = self.bucket_hit() else {
@@ -9740,6 +9792,8 @@ impl Game<'_> {
     /// MultiPlayerGameMode.dropItem (key.drop): predict the removal, then send
     /// the action; swing only if a nonempty stack was removed.
     pub(super) fn remote_drop(&mut self, all: bool) {
+        // ensureHasSentCarriedItem: the server drops from the slot just chosen.
+        self.remote_send_carried();
         let dropped =
             horizon_client::items::take_held_drop(&mut self.inventory[self.selected], all, false);
         self.send(S::PlayerAction(play::PlayerAction {
@@ -9801,7 +9855,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let Some(internal) = self.slot_at(&batch, self.cursor.0, self.cursor.1) else {
             return;
         };
@@ -11454,6 +11508,68 @@ mod effect_blend_tests;
 
 #[cfg(test)]
 mod tests {
+    /// The remote player animation uses the scoped item answer once per tick.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn remote_player_use_animation_dispatches_once() {
+        use mod_api::{ClientHost, Hooks, ItemPart, ModEntry, Mods, Registrar, UseAnimationEvent};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        #[derive(Clone)]
+        struct Part(Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
+        impl ItemPart for Part {
+            fn use_animation(&self, _: &dyn ClientHost, event: &mut UseAnimationEvent<'_>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                *event.animation = mod_api::UseAnimation::Drink;
+            }
+        }
+        struct Mod(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.item_part("minecraft:bow", Part(self.0.clone()));
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: Mods = vec![ModEntry::new(
+            "remote_animation",
+            Box::new(Mod(calls.clone())),
+        )]
+        .into();
+        mod_api::__private::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let (client, _server) = horizon_protocol::connection::Pipe::pair();
+                game.connect_local(client, "animation-client").unwrap();
+                let remote = game.remote.as_mut().unwrap();
+                remote.entity_id = 42;
+                remote.level_players.insert(66, 789);
+                let kind = remote.player_type.as_ref().unwrap().clone();
+                let mut mob = horizon_client::mobs::Mob::new(
+                    66,
+                    kind,
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                );
+                mob.extra.using_item = 1;
+                mob.extra.set_slot_stack(
+                    horizon_items::equipment::MAINHAND,
+                    Some(horizon_client::items::ItemStack::new("minecraft:bow", 1)),
+                );
+                game.mobs.push(mob);
+                game.tick_remote_entities(false);
+                assert_eq!(
+                    game.mobs[0].extra.use_animation,
+                    mod_api::UseAnimation::Drink
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 1);
+            });
+        });
+    }
+
     /// Sleeping metadata and the local tick use the loaded bed's shape, not
     /// a red-bed constant. Missing client data must not replace a server pose
     /// or decide to wake the player.
@@ -12347,7 +12463,14 @@ mod tests {
                 .id("minecraft:speed")
                 .unwrap();
             assert_eq!(living.effects(game), Some(Vec::new()));
-            assert!(living.effect(game, "minecraft:speed").is_none());
+            assert!(
+                living
+                    .effect(
+                        game,
+                        mod_api::__private::part_tests::effect_key("minecraft:speed")
+                    )
+                    .is_none()
+            );
             game.handle_packet(C::UpdateMobEffect(play::UpdateMobEffect {
                 id: 7,
                 effect: speed,
@@ -12356,7 +12479,12 @@ mod tests {
                 flags: 2,
             }))
             .unwrap();
-            let effect = living.effect(game, "minecraft:speed").unwrap();
+            let effect = living
+                .effect(
+                    game,
+                    mod_api::__private::part_tests::effect_key("minecraft:speed"),
+                )
+                .unwrap();
             assert_eq!((effect.duration, effect.amplifier), (600, 1));
             assert_eq!(living.effects(game).unwrap().len(), 1);
             let stone = Some(horizon_protocol::item::Stack::new(
@@ -12606,13 +12734,18 @@ mod tests {
             }))
             .unwrap();
 
-            // Same-level respawn keeps the epoch and the connection's clocks.
-            game.handle_packet(C::Respawn(play::Respawn {
-                spawn: spawn.clone(),
-                keep: 0,
-            }))
-            .unwrap();
-            assert_eq!(end.day_time(game), Some(60_004));
+            // Same-level respawn keeps the epoch and clocks, but replaces the
+            // local player and its mood handler, with or without entity data.
+            for keep in [0, 2] {
+                game.ambience.moodiness = 0.375;
+                game.handle_packet(C::Respawn(play::Respawn {
+                    spawn: spawn.clone(),
+                    keep,
+                }))
+                .unwrap();
+                assert_eq!(game.ambience.moodiness, 0.0);
+                assert_eq!(end.day_time(game), Some(60_004));
+            }
             spawn.dimension_type = 0;
             spawn.dimension = "minecraft:overworld".into();
             game.handle_packet(C::Respawn(play::Respawn {
@@ -13600,6 +13733,42 @@ mod tests {
             "minecraft:entity.player.hurt"
         );
     }
+    /// `ClientPacketListener.handleSetEntityPassengersPacket`: the vehicle
+    /// ejects its passengers, then each listed entity `startRiding`s it, so
+    /// `isVehicle` holds while the list is not empty, whatever the passenger's
+    /// type: a server's item display riding a player hides that player's name
+    /// tag like a text display does (#5666).
+    #[test]
+    fn any_tracked_passenger_makes_its_vehicle_a_vehicle() {
+        use std::collections::{HashMap, HashSet};
+        let tracked = |kind: &str| super::Tracked {
+            kind: kind.to_owned(),
+            position: [0.0, 64.0, 0.0],
+            silent: false,
+            vehicle: None,
+        };
+        let mut entities = HashMap::from([
+            (42, tracked("minecraft:player")),
+            (43, tracked("minecraft:player")),
+            (9, tracked("minecraft:item_display")),
+            (10, tracked("minecraft:block_display")),
+        ]);
+        let vehicles = |e: &HashMap<i32, super::Tracked>| -> HashSet<u32> {
+            e.values().filter_map(|t| t.vehicle).collect()
+        };
+        super::seat_passengers(&mut entities, 42, &[9, 10]);
+        assert_eq!(vehicles(&entities), HashSet::from([42]));
+        // The list replaces the old one: 10 got off, 9 still rides.
+        super::seat_passengers(&mut entities, 42, &[9]);
+        assert_eq!(entities[&10].vehicle, None);
+        assert_eq!(entities[&9].vehicle, Some(42));
+        // startRiding leaves the old vehicle first.
+        super::seat_passengers(&mut entities, 43, &[9]);
+        assert_eq!(vehicles(&entities), HashSet::from([43]));
+        // An empty list: nobody rides 43 any more.
+        super::seat_passengers(&mut entities, 43, &[]);
+        assert!(vehicles(&entities).is_empty());
+    }
     /// `ClientboundSoundEntityPacket`: the sound is heard where the entity it
     /// names is — the local player included, which is no tracked entity — and
     /// an id this level doesn't have plays nothing at all.
@@ -13613,6 +13782,7 @@ mod tests {
                 kind: "minecraft:cow".to_owned(),
                 position: [8.5, 64.0, -3.5],
                 silent: false,
+                vehicle: None,
             },
         );
         let player = Some((2, [0.5, 70.0, 0.5], false));
@@ -13655,6 +13825,7 @@ mod tests {
                 kind: "minecraft:arrow".to_owned(),
                 position: [8.5, 64.0, -3.5],
                 silent: true,
+                vehicle: None,
             },
         );
         let state = super::entity_sound_state(7, None, None, &tracked, None).unwrap();

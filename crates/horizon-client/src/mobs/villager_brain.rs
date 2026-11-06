@@ -861,10 +861,14 @@ fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Opti
             .registry
             .state(state)
             .and_then(|s| s.properties.get("part"));
-        return (part.map(String::as_str) == Some("head")).then_some(Poi::Home);
+        return runtime_bed_poi(name, part.map(String::as_str));
     }
     super::villager::job_site_profession(name).map(Poi::Job)
 }
+fn runtime_bed_poi(name: &str, part: Option<&str>) -> Option<Poi> {
+    (name.ends_with("_bed") && part == Some("head")).then_some(Poi::Home)
+}
+
 /// Which POI types a predicate accepts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum PoiFilter {
@@ -4600,4 +4604,27 @@ pub fn seen_memories(
         mm.golem_detected_recently.present(),
         mm.last_slept.value(),
     )
+}
+
+#[cfg(test)]
+mod poi_classification_tests {
+    use super::*;
+    use horizon_world::chunk::BlockState;
+
+    #[test]
+    fn straw_bed_head_differs_between_runtime_and_saved_pois() {
+        for (name, part, runtime, saved) in [
+            ("minecraft:straw_bed", "head", true, false),
+            ("minecraft:straw_bed", "foot", false, false),
+            ("minecraft:red_bed", "head", true, true),
+            ("minecraft:red_bed", "foot", false, false),
+        ] {
+            let state = BlockState {
+                name: name.into(),
+                properties: [("part".into(), part.into())].into_iter().collect(),
+            };
+            assert_eq!(runtime_bed_poi(name, Some(part)).is_some(), runtime);
+            assert_eq!(horizon_world::poi::poi_type(&state).is_some(), saved);
+        }
+    }
 }

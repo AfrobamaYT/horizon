@@ -685,8 +685,16 @@ impl Game<'_> {
         let blast = Blast {
             vehicles_ignore: self.combat.blast_owner.is_none()
                 && self.blast_attacker().is_some()
-                && !self.ui.rules.bool("mob_griefing"),
-            items_ignore: items_ignore_explosion(self.ui.rules.bool("mob_griefing"), interaction),
+                && !self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+            items_ignore: items_ignore_explosion(
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+                interaction,
+            ),
             spared: exploding.filter(|_| self.combat.explosion_source_named),
         };
         let (items_len, orbs_len) = (self.dropped.len(), self.orbs.len());
@@ -814,7 +822,9 @@ impl Game<'_> {
     pub(super) fn blast_spares_decorations(&self, interaction: BlockInteraction) -> bool {
         let by_mob = self.blast_attacker().is_some();
         blast_spares_decorations(
-            self.ui.rules.bool("mob_griefing"),
+            self.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
             interaction,
             by_mob,
             self.combat.explosion_in_water,
@@ -842,7 +852,9 @@ impl Game<'_> {
         // An armour stand is no `BlockAttachedEntity`: a source in water does not spare it.
         let by_mob = self.blast_attacker().is_some();
         let spares_stands = blast_spares_decorations(
-            self.ui.rules.bool("mob_griefing"),
+            self.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
             interaction,
             by_mob,
             false,
@@ -908,8 +920,11 @@ impl Game<'_> {
     }
     /// `ServerLevel.getDestroyType`: a drop decay rule picks between decaying
     /// and plain destruction.
-    pub(super) fn destroy_type(&self, rule: &str) -> BlockInteraction {
-        if self.ui.rules.bool(rule) {
+    pub(super) fn destroy_type(
+        &self,
+        rule: horizon_client::gamerules::RuleIndex,
+    ) -> BlockInteraction {
+        if self.ui.rules.bool_at(rule) {
             BlockInteraction::DestroyWithDecay
         } else {
             BlockInteraction::Destroy
@@ -1146,7 +1161,12 @@ impl Game<'_> {
         }
         // TntBlock.wasExploded: new PrimedTnt (its push drawn first), then
         // getRandomShortFuse(80); no game event.
-        if is_tnt && self.ui.rules.bool("tnt_explodes") {
+        if is_tnt
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             let r = &mut self.world.random;
             let rot = r.next_double() * f64::from(std::f32::consts::TAU);
             let fuse = r.next_int_bound(20).unwrap_or(0) + 10;

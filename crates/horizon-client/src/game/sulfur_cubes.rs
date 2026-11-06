@@ -121,7 +121,11 @@ impl Game<'_> {
         }
         let explosive = sulfur_cube::archetype(m).is_some_and(|a| a.explosion.is_some());
         if explosive && matches!(item, "minecraft:flint_and_steel" | "minecraft:fire_charge") {
-            if !self.ui.rules.bool("tnt_explodes") {
+            if !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+            {
                 let message = Text::translate("block.minecraft.tnt.disabled", &[]);
                 self.send_overlay_message(message);
                 return false;
@@ -181,7 +185,11 @@ impl Game<'_> {
     /// or next to redstone power lights its fuse (`getBestOwnOrNeighbourSignal`;
     /// no block has an own signal, so the neighbour signal is all there is).
     pub(super) fn sulfur_cube_power_priming(&mut self) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         for i in 0..self.mobs.len() {
@@ -210,7 +218,12 @@ impl Game<'_> {
     /// `primeTime` asks), called after the hit's hurt, which the priming
     /// leaves as it is, so its knock and the fuse both go ahead.
     pub(super) fn burning_arrow_primes(&mut self, p: &Projectile, who: Who) {
-        if !p.arrow.as_ref().is_some_and(|a| a.on_fire()) || !self.ui.rules.bool("tnt_explodes") {
+        if !p.arrow.as_ref().is_some_and(|a| a.on_fire())
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         if let Who::Mob(id) = who
@@ -223,10 +236,13 @@ impl Game<'_> {
     /// `SulfurCubeSearchForItemsGoal` and `pickUpItem`: an adult with nothing
     /// inside hops to a block it can swallow within 8 and takes it in.
     pub(super) fn sulfur_cube_pickups(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::SulfurCube {
+            if m.species() != Species::SulfurCube || !self.creatures.ticked.contains(&m.id) {
                 continue;
             }
             if !m.alive() || m.is_baby() || sulfur_cube::has_body(m) || m.extra.ints[3] > 0 {

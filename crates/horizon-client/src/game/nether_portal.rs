@@ -282,7 +282,11 @@ impl Game<'_> {
     }
     /// `ServerLevel.isAllowedToEnterPortal`.
     pub(super) fn may_enter(&self, target: Dim) -> bool {
-        target != Dim::Nether || self.ui.rules.bool("allow_entering_nether_using_portals")
+        target != Dim::Nether
+            || self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ALLOW_ENTERING_NETHER_USING_PORTALS)
     }
     /// The plan of an entity of `width` by `height` at `at` going through the
     /// portal at `entry` (`getDimensionTransitionFromExit` and the scaled,

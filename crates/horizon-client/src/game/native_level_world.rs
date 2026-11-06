@@ -9,7 +9,7 @@ use horizon_core::position::BlockPos;
 use horizon_core::random::LegacyRandom;
 use horizon_world::level::{Dimension as LevelDimension, LevelAccess};
 use horizon_world::registry::BlockStateId;
-use mod_api::{FeatureFlags, GameRuleValue, LevelRef};
+use mod_api::{FeatureFlags, GameRuleValue, LevelDimensionShape, LevelRef};
 use std::sync::Arc;
 
 fn weather_for_level(
@@ -93,6 +93,21 @@ impl Game<'_> {
             .as_ref()
             .map_or(&self.level.enabled_features, |remote| &remote.features)
     }
+    /// Dimension shape of a loaded server level, including parked levels.
+    pub(super) fn native_level_dimension_shape(
+        &self,
+        level: LevelRef,
+    ) -> Option<LevelDimensionShape> {
+        let shape = self.native_level_world(level)?.shape;
+        Some(LevelDimensionShape::new(
+            shape.min_y,
+            shape.height,
+            shape.logical_height,
+            shape.sky_light,
+            shape.has_ceiling,
+        ))
+    }
+
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
     pub(super) fn native_level_seed(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
@@ -112,8 +127,7 @@ impl Game<'_> {
         rule: &str,
     ) -> Option<GameRuleValue> {
         self.native_level_world(level)?;
-        let r = horizon_client::gamerules::rule(rule)?;
-        self.ui.rules.get(r.name)
+        self.ui.rules.get(rule)
     }
     /// Every game rule the world has (`GameRules`) with its current value, by `minecraft:` id
     /// (`max_minecart_speed` only with minecart improvements): None for a stale handle and on
@@ -194,6 +208,36 @@ mod tests {
         FeatureFlags, GameRuleChangedEvent, GameRuleValue, Hooks, LevelHost, ModEntry, ServerHost,
     };
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dimension_shape_reads_current_parked_and_stale_levels() {
+        use super::super::Dim;
+        use horizon_client::chunk::LevelShape;
+        use mod_api::{Host, LevelDimensionShape, NativeAuthority};
+
+        with_game(|game| {
+            game.world.shape = LevelShape::new(-32, 320, 256, true, false).unwrap();
+            let overworld = game.level("minecraft:overworld").unwrap();
+            let expected = LevelDimensionShape::new(-32, 320, 256, true, false);
+            let host: &dyn Host = game;
+            assert_eq!(overworld.dimension_shape(host), Some(expected));
+            game.enter_level(Dim::Nether).unwrap();
+            game.world.shape = LevelShape::new(0, 256, 128, false, true).unwrap();
+            let nether = game.level("minecraft:the_nether").unwrap();
+            let host: &dyn Host = game;
+            assert_eq!(overworld.dimension_shape(host), Some(expected));
+            assert_eq!(
+                nether.dimension_shape(host),
+                Some(LevelDimensionShape::new(0, 256, 128, false, true))
+            );
+            game.native_lifecycle
+                .begin_open(NativeAuthority::IntegratedServer);
+            let host: &dyn Host = game;
+            assert_eq!(overworld.dimension_shape(host), None);
+            assert_eq!(nether.dimension_shape(host), None);
+        });
+    }
 
     /// A chunk of air with `biome` in every cell: full sky light everywhere.
     fn chunk_in(game: &super::Game<'_>, x: i32, biome: &str) -> Arc<Chunk> {
@@ -343,8 +387,11 @@ mod tests {
                         .rules
                         .set("random_tick_speed", GameRuleValue::Int(7))
                 );
-                let keep_inventory = gamerules::rule("keep_inventory").unwrap();
-                game.set_game_rule(keep_inventory, GameRuleValue::Bool(true), None);
+                let keep_inventory = gamerules::rule_registry()
+                    .rule("keep_inventory")
+                    .unwrap()
+                    .clone();
+                game.set_game_rule(&keep_inventory, GameRuleValue::Bool(true), None);
             });
         });
         assert_eq!(

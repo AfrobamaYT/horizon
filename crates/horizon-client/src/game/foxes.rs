@@ -16,11 +16,18 @@ use horizon_core::geometry::Vec3;
 impl Game<'_> {
     /// `Fox.ALLOWED_ITEMS` and the looting block of `Mob.aiStep` for foxes, once a tick.
     pub(super) fn tick_foxes(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         let mut near = super::item_areas::ItemAreas::default();
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::Fox || !m.alive() || m.removed {
+            if m.species() != Species::Fox
+                || !m.alive()
+                || m.removed
+                || !self.creatures.ticked.contains(&m.id)
+            {
                 continue;
             }
             // `Mob.aiStep`: the items in the box grown by (1, 0, 1), in order.
@@ -66,7 +73,10 @@ impl Game<'_> {
     /// `Dolphin.pickUpItem` in `Mob.aiStep`'s looting block, and the item
     /// `Dolphin.MoveToItemGoal` swims to (`Dolphin.ALLOWED_ITEMS`: no pickup delay, alive, in water).
     pub(super) fn tick_dolphins(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         let in_water = |g: &Self, e: &horizon_client::entities::ItemEntity| {
             g.res
                 .facts()
@@ -81,7 +91,11 @@ impl Game<'_> {
         let mut near = super::item_areas::ItemAreas::default();
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::Dolphin || !m.alive() || m.removed {
+            if m.species() != Species::Dolphin
+                || !m.alive()
+                || m.removed
+                || !self.creatures.ticked.contains(&m.id)
+            {
                 continue;
             }
             // `Mob.aiStep`: the items in the box grown by (1, 0, 1); `Dolphin.pickUpItem`

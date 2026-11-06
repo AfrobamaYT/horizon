@@ -73,7 +73,8 @@ pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
         .unwrap_or(&0.0) as f32;
     to.absorption = from.absorption.clamp(0.0, maximum);
     // addEffect for each: Absorption's onEffectStarted raises it again.
-    for &(effect, ticks, amplifier) in &from.extra.effects {
+    for effect in &from.extra.effects {
+        let (effect, ticks, amplifier) = (effect.id, effect.duration, effect.amplifier);
         to.add_effect(effect, ticks, amplifier);
     }
     to.extra.hidden_effects = from.extra.hidden_effects.clone();
@@ -122,13 +123,21 @@ mod tests {
             single(&s, &mut plain, Params::KEEP_ALL);
             assert_eq!(plain.absorption, 0.0);
             // AbsorptionMobEffect.onEffectStarted: 4 per level, amplifier 1.
-            s.extra.effects.push(("minecraft:absorption", 600, 1));
+            s.extra.effects.push(crate::mobs::StoredEffect::new(
+                "minecraft:absorption",
+                600,
+                1,
+            ));
             let mut boosted = mob(3, "minecraft:stray");
             single(&s, &mut boosted, Params::KEEP_ALL);
             assert_eq!(boosted.absorption, 8.0);
             assert_eq!(
                 boosted.extra.effects,
-                vec![("minecraft:absorption", 600, 1)]
+                vec![crate::mobs::StoredEffect::new(
+                    "minecraft:absorption",
+                    600,
+                    1
+                )]
             );
         });
     }

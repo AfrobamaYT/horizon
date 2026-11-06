@@ -1740,6 +1740,11 @@ pub struct ItemFrame {
     pub custom_name: Option<horizon_world::nbt::Tag>,
 }
 impl ItemFrame {
+    /// `ItemFrame.setItem`: the adopted stack holds one item. The caller owns
+    /// the old map association, sounds and neighbour updates.
+    pub fn set_item(&mut self, item: Option<ItemStack>) {
+        self.item = item.map(|stack| ItemStack { count: 1, ..stack });
+    }
     pub fn step(&self) -> [i32; 3] {
         [
             [0, -1, 0],
@@ -1829,7 +1834,8 @@ pub struct ArmorStand {
     pub disabled_slots: i32,
     /// Server-only `LivingEntity.lastPos` for location-based enchantments.
     pub enchantment_block: Option<BlockPos>,
-    /// Travel accumulated for `LivingEntity.checkFallDamage`'s landing callback.
+    /// `Entity.fallDistance`, also used by `LivingEntity.checkFallDamage`'s landing callback.
+    /// Each downward movement is narrowed to float before adding to this double.
     pub enchantment_fall_distance: f64,
     /// Last equipment seen by `collectEquipmentChanges`; not saved to NBT.
     pub enchantment_equipment: horizon_items::equipment::Equipment,
