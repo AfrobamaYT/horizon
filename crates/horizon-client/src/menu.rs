@@ -1577,8 +1577,6 @@ impl Menu {
     // ---- Slot ----
 
     fn may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
-        // A removed component falls back to the item (`!minecraft:max_stack_size`).
-
         if self.slots[s].role == Role::Hidden {
             return false;
         }
@@ -1769,10 +1767,6 @@ impl Menu {
         partial
     }
 
-    fn dispatch_id(&self) -> Option<&str> {
-        self.registry_id()
-    }
-
     fn slot_rules(
         &self,
         env: &Env,
@@ -1781,7 +1775,7 @@ impl Menu {
         own: bool,
         max: u32,
     ) -> (bool, u32) {
-        let Some(id) = self.dispatch_id() else {
+        let Some(id) = self.registry_id() else {
             return (own, max.min(Self::max_stack(env, stack)));
         };
         apply_menu_slot_rules(
@@ -2451,7 +2445,7 @@ impl Menu {
                 // never aims at its result.
                 let refuses = if self.slots[dest].role == Role::Hidden {
                     true
-                } else if let Some(id) = self.dispatch_id() {
+                } else if let Some(id) = self.registry_id() {
                     !apply_menu_slot_rules(
                         env.loop_context,
                         id,

@@ -7112,6 +7112,110 @@ mod tests {
                         2
                     );
                     assert_eq!(prediction.slot(0).unwrap().count, 2);
+                    // A refused stack cannot be partly transferred to a nearly full bundle.
+                    game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
+                        Some(ItemStack::new("minecraft:dirt", 8));
+                    let mut bundle = ItemStack::new("minecraft:bundle", 1);
+                    bundle.data_mut().bundle_contents = vec![ItemStack::new("minecraft:stone", 60)];
+                    game.lan.as_mut().unwrap().hub.guests[0].carried = Some(bundle);
+                    game.lan_guest_packet(
+                        12,
+                        Serverbound::ContainerClick(ContainerClick {
+                            container: window,
+                            state: 0,
+                            slot: 0,
+                            button: 0,
+                            input: 0,
+                            changed: Vec::new(),
+                            carried: None,
+                        }),
+                    );
+                    assert_eq!(
+                        game.world.block_entities.get(&pos).unwrap().slots()[0]
+                            .as_ref()
+                            .unwrap()
+                            .count,
+                        8
+                    );
+                    assert_eq!(
+                        game.lan.as_ref().unwrap().hub.guests[0]
+                            .carried
+                            .as_ref()
+                            .unwrap()
+                            .data()
+                            .unwrap()
+                            .bundle_contents[0]
+                            .count,
+                        60
+                    );
+                    // A capped occupied swap preserves both stacks and their total count.
+                    game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
+                        Some(ItemStack::new("minecraft:dirt", 2));
+                    game.lan.as_mut().unwrap().hub.guests[0]
+                        .inventory
+                        .fill(None);
+                    game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
+                        Some(ItemStack::new("minecraft:stone", 8));
+                    game.lan_guest_packet(
+                        12,
+                        Serverbound::ContainerClick(ContainerClick {
+                            container: window,
+                            state: 0,
+                            slot: 0,
+                            button: 0,
+                            input: 2,
+                            changed: Vec::new(),
+                            carried: None,
+                        }),
+                    );
+                    assert_eq!(
+                        game.world.block_entities.get(&pos).unwrap().slots()[0]
+                            .as_ref()
+                            .unwrap()
+                            .count,
+                        3
+                    );
+                    let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+                    assert_eq!(guest.inventory[0].as_ref().unwrap().count, 5);
+                    assert_eq!(guest.inventory[1].as_ref().unwrap().count, 2);
+                    // A component-limited displaced stack fills to 16, then leaves 7 elsewhere.
+                    let mut limited = ItemStack::new("minecraft:dirt", 8);
+                    limited.data_mut().set_other(
+                        "minecraft:max_stack_size",
+                        Some(horizon_world::nbt::Tag::Int(16)),
+                    );
+                    game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
+                        Some(limited.clone());
+                    limited.count = 15;
+                    let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
+                    guest.inventory.fill(None);
+                    guest.inventory[1] = Some(limited);
+                    guest.selected = 1;
+                    guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 8));
+                    game.lan_guest_packet(
+                        12,
+                        Serverbound::ContainerClick(ContainerClick {
+                            container: window,
+                            state: 0,
+                            slot: 0,
+                            button: 0,
+                            input: 2,
+                            changed: Vec::new(),
+                            carried: None,
+                        }),
+                    );
+                    let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+                    assert_eq!(guest.inventory[1].as_ref().unwrap().count, 16);
+                    assert_eq!(
+                        guest
+                            .inventory
+                            .iter()
+                            .flatten()
+                            .filter(|s| &*s.item == "minecraft:dirt")
+                            .map(|s| s.count)
+                            .sum::<u32>(),
+                        23
+                    );
                     game.guest_close_all(12);
                 }
             })

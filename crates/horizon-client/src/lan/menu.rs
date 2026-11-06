@@ -855,8 +855,14 @@ fn bundle_click(view: &mut View, i: usize, right: bool, rules: &dyn Rules) -> bo
             Some(other) => {
                 if can_be_in_bundle(&other) {
                     let amount = other.count.min(contents.room_for(items, &other));
-                    let mut slot = HostedSlotView { view, slot: i, rules };
-                    if let Some(mut taken) = crate::menu::SlotView::safe_take(&mut slot, amount, amount) {
+                    let mut slot = HostedSlotView {
+                        view,
+                        slot: i,
+                        rules,
+                    };
+                    if let Some(mut taken) =
+                        crate::menu::SlotView::safe_take(&mut slot, amount, amount)
+                    {
                         contents.try_insert(items, &mut taken);
                     }
                 }
@@ -1001,38 +1007,20 @@ fn add_to_inventory(
     rules: &dyn Rules,
     drops: &mut Vec<ItemStack>,
 ) {
-    let stackable = rules.max_stack(&stack.item) > 1
-        && !(stack.damage > 0
-            && rules
-                .items()
-                .get(&stack.item)
-                .is_some_and(|i| i.max_damage > 0));
-    for index in [view.guest.selected, 40].into_iter().chain(0..36) {
-        let cell = if index == 40 {
-            &mut view.guest.offhand
-        } else {
-            &mut view.guest.inventory[index]
-        };
-        if let Some(existing) = cell
-            && stackable
-            && existing.same_item_same_components(&stack)
-        {
-            let moved = stack
-                .count
-                .min(rules.max_stack(&stack.item).saturating_sub(existing.count));
-            existing.count += moved;
-            stack.count -= moved;
-            if stack.count == 0 {
-                return;
-            }
-        }
-    }
-    if let Some(cell) = view.guest.inventory[..36]
-        .iter_mut()
-        .find(|cell| cell.is_none())
-    {
-        *cell = Some(stack);
-    } else if !view.guest.creative() {
+    let mut inventory = std::mem::take(&mut view.guest.inventory);
+    inventory.resize(41, None);
+    inventory[40] = view.guest.offhand.take();
+    let added = crate::menu::inventory_add(
+        &mut inventory,
+        view.guest.selected,
+        view.guest.creative(),
+        rules.items(),
+        &mut stack,
+    );
+    view.guest.offhand = inventory[40].take();
+    inventory.truncate(36);
+    view.guest.inventory = inventory;
+    if !added && stack.count > 0 {
         drops.push(stack);
     }
 }
