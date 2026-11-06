@@ -184,7 +184,7 @@ impl Game<'_> {
     }
     /// The text of an `nbt` component.
     fn resolve_nbt_component(&mut self, o: &serde_json::Map<String, serde_json::Value>) -> Text {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let path = o.get("nbt").and_then(|v| v.as_str()).unwrap_or("");
         let mut sources: Vec<Tag> = Vec::new();
         if let Some(sel) = o.get("entity").and_then(|v| v.as_str()) {

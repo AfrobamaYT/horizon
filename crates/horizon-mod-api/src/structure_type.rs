@@ -14,9 +14,12 @@
 //! `terrain_adaptation`, and the pieces ride the one piece mechanism the game
 //! has, next to a fortress piece's.
 use horizon_core::random::LegacyRandom;
-use horizon_world::worldgen::structure::{BoundingBox, mod_types::ModStructureType};
-use horizon_world::{nbt::Compound, worldgen::placement::PlacementQueryError};
 use std::sync::Arc;
+use {
+    horizon_core::bounding_box::BoundingBox,
+    horizon_world::worldgen::structure::mod_types::ModStructureType,
+};
+use {horizon_core::nbt::Compound, horizon_world::worldgen::placement::PlacementQueryError};
 
 /// A piece's placement failed; the generation of that piece stops there, as a
 /// piece's own `Result` does in the engine.

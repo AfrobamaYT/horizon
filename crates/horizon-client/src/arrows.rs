@@ -71,7 +71,7 @@ pub fn drawn_ammo(ammo: &crate::items::ItemStack, intangible: bool) -> crate::it
     if intangible {
         drawn.data_mut().set_other(
             INTANGIBLE,
-            Some(horizon_world::nbt::Tag::Compound(Default::default())),
+            Some(horizon_core::nbt::Tag::Compound(Default::default())),
         );
     }
     drawn

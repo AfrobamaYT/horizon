@@ -1580,7 +1580,7 @@ mod action_result_tests {
     }
     #[test]
     fn a_consumable_names_its_use_animation() {
-        use horizon_world::consumable::UseAnimation::*;
+        use horizon_core::use_animation::UseAnimation::*;
         assert_eq!(consumable_animation(&serde_json::json!({})), Eat);
         for (name, expected) in [
             ("drink", Drink),

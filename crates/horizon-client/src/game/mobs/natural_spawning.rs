@@ -23,12 +23,12 @@ use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource, WorldgenRandom, XoroshiroRandom},
 };
-use horizon_world::{
-    nbt::{Compound, Tag},
-    registry::BlockStateId,
-};
 use mod_api::NativeSpawnCheck;
 use std::collections::HashMap;
+use {
+    horizon_core::nbt::{Compound, Tag},
+    horizon_world::registry::BlockStateId,
+};
 
 /// Natural spawning's candidate chunks (`ChunkMap.collectSpawningChunks`):
 /// the union of every player's 17×17 chunk square, in player then dx/dz
