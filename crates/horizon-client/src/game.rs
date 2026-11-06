@@ -24724,6 +24724,41 @@ mod tests {
     }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_option_snapshots_follow_settings() {
+        super::native_entity_refs::tests::with_client_game(|game| {
+            game.settings.fov = 90.0;
+            game.settings.render_distance = 12;
+            game.settings.gamma = 0.75;
+            game.settings.gui_scale = 3;
+            game.settings.show_subtitles = true;
+            game.settings.chat_visibility = 1;
+            game.settings.chat_delay = 1.5;
+            game.settings.master_volume = 0.25;
+            let host: &dyn mod_api::ClientHost = game;
+            let (graphics, gui, chat, audio) = (
+                host.graphics_options(),
+                host.gui_options(),
+                host.chat_options(),
+                host.audio_options(),
+            );
+            assert_eq!(graphics.fov, 90.0);
+            assert_eq!(graphics.render_distance, 12);
+            assert_eq!(graphics.brightness, 0.75);
+            assert_eq!(gui.gui_scale, 3);
+            assert!(gui.show_subtitles);
+            assert_eq!(chat.visibility, 1);
+            assert_eq!(chat.delay, 1.5);
+            assert_eq!(audio.master_volume, 0.25);
+
+            game.settings.fov = 70.0;
+            let host: &dyn mod_api::ClientHost = game;
+            assert_eq!(host.graphics_options().fov, 70.0);
+            assert_eq!(graphics.fov, 90.0, "an older snapshot stays unchanged");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_input_options_follow_settings() {
         super::native_entity_refs::tests::with_client_game(|game| {
             game.settings.sensitivity = 0.25;
@@ -24778,6 +24813,20 @@ mod tests {
 
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_camera_entity_is_the_player_without_a_server_camera() {
+        use mod_api::ClientHost;
+        super::native_entity_refs::tests::with_client_game(|game| {
+            let camera = (game as &dyn ClientHost).camera_entity();
+            assert_eq!(
+                camera.map(|entity| entity.id()),
+                Some(game.own_entity_id() as u32),
+                "the player's own view follows the player"
+            );
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
