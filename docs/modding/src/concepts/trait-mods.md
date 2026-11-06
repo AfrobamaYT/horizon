@@ -89,8 +89,10 @@ Each owning thread progresses through `Packages → Registration → Setup → C
 Registration runs once: `register`, `component_types`, `blocks`, `items` and `standalone_models`
 receive only `RegistrationContext`. Client setup runs once after the initial asset apply. The
 window's Client/Common configs load once immediately after client setup and before title,
-connection, input, render or ordinary tick callbacks. A title-screen callback is already in World:
-world-handle constructors can return `None`, rather than being forbidden in Setup. A dedicated
+connection, input, render or ordinary tick callbacks. This includes pack-error recovery: the failed
+selection is cleared and saved during initialization, but its options screen opens only after Config
+completes. A title-screen callback is already in World: world-handle constructors can return `None`,
+rather than being forbidden in Setup. A dedicated
 server loads Common once before its first world; Server configs load and unload per world.
 A second world does not repeat registration or client setup. Config loading can read settings and
 use the existing scoped `ConfigFiles` service to read or save its own config files. World handles,

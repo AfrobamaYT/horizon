@@ -23112,13 +23112,11 @@ fn start_game<'a>(
     let mut game = Game::new(res, pack, gui, options, settings, audio, prepared)?;
     game.rest_loader = rest_loader;
     game.ui.vanilla_root = vanilla_root;
-    if let Some(error) = pack_error {
+    if pack_error.is_some() {
         // Minecraft.clearResourcePacksOnError: the selection is cleared and
         // saved, so the next launch starts without the packs.
         game.settings.resource_packs.clear();
         game.settings.save(&Game::options_path());
-        game.open_options_at(true, horizon_client::options_ui::Page::Packs);
-        game.ui.options.resource_error = Some(error);
     }
     if game.options.benchmark.is_some() {
         // The same conditions on every machine: no VSync, no frame cap, no
@@ -23187,8 +23185,12 @@ fn start_game<'a>(
     if game.options.is_client_start() {
         game.native_client_setup();
     }
-    // Finish Setup -> Config -> World before title, connection, input or tick hooks.
+    // Finish Setup -> Config -> World before any screen, connection, input or tick hooks.
     game.native_configs_client_start();
+    if let Some(error) = pack_error {
+        game.open_options_at(true, horizon_client::options_ui::Page::Packs);
+        game.ui.options.resource_error = Some(error);
+    }
     match game.options.world.clone() {
         _ if game.options.server.is_some() => {
             let (address, name) = (
