@@ -20,10 +20,13 @@ impl Game<'_> {
             return;
         }
         // PlayerList.respawn replaces the player, retaining only opted-in data.
-        if let Some(attachments) = self.guest_attachments.get_mut(&conn)
+        if let Some(attachments) = self
+            .lan
+            .as_mut()
+            .and_then(|host| host.hub.guests.attachments_mut(conn))
             && let Ok(copy) = attachments.copy_on_death()
         {
-            *attachments = copy;
+            attachments.replace_contents(copy);
         }
         // PlayerList.respawn removes the dead player (Player.remove).
         self.guest_drop_carried(i);

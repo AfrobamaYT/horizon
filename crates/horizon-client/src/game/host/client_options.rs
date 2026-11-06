@@ -2,6 +2,13 @@
 use crate::game::Game;
 use mod_api::{prelude::*, *};
 impl ClientOptionsClientHost for Game<'_> {
+    fn input_options(&self) -> ClientInputOptions {
+        mod_api::__private::check_access(
+            "input_options",
+            mod_api::__private::LoadAccess::ClientSetup,
+        );
+        self.native_input_options()
+    }
     fn graphics_options(&self) -> ClientGraphicsOptions {
         mod_api::__private::check_access(
             "graphics_options",
