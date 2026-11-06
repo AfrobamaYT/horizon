@@ -40,6 +40,15 @@ impl ItemEnv for Env<'_, '_> {
             .native_item_model_property(property, stack, &mut value);
         value
     }
+    fn item_model_range_property(&self, property: &str, stack: &StackView) -> f32 {
+        if !mod_api::__private::listened(mod_api::HookId::ItemModelRangeProperty) {
+            return 0.0;
+        }
+        let mut value = 0.0;
+        self.game
+            .native_item_model_range_property(property, stack, &mut value);
+        value
+    }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
     }
@@ -808,6 +817,63 @@ mod tests {
             });
         });
         assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
+
+    struct Fill;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Fill {
+        fn register_range_select_item_model_property(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterRangeSelectItemModelPropertyEvent<'_>,
+        ) {
+            event.properties.push("example:fill".into());
+        }
+        fn item_model_range_property(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::ItemModelRangePropertyEvent<'_>,
+        ) {
+            if event.property == "example:fill" {
+                event.value = event.stack.count as f32 / 64.0;
+            }
+        }
+    }
+
+    /// A mod registers its numeric property once at start.
+    #[test]
+    fn a_mod_registers_its_range_select_item_model_property() {
+        use mod_api::__private::game::*;
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("fill", Box::new(Fill))].into();
+        mod_api::testing::with_mods(mods, || {
+            let mut properties = Vec::new();
+            Game::native_register_range_select_item_model_property(
+                &mod_api::RegistrationContext::new(),
+                &mut properties,
+            );
+            assert_eq!(properties, ["example:fill"]);
+        });
+    }
+
+    /// The resolver reads a mod's number for its property, 0 for another's or with no mod.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn item_model_range_property_reads_the_mods_number() {
+        let stack = StackView::new("minecraft:stick", 16);
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("fill", Box::new(Fill))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert_eq!(env.item_model_range_property("example:fill", &stack), 0.25);
+                assert_eq!(env.item_model_range_property("other:fill", &stack), 0.0);
+            });
+        });
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert_eq!(env.item_model_range_property("example:fill", &stack), 0.0);
+            });
+        });
     }
 
     #[test]

@@ -229,10 +229,7 @@ pub trait Hooks {
     /// The minimap a native mod shows: set `minimap` when it is none yet.
     #[hook(side = "client", contract = "replace", out = "minimap")]
     fn minimap();
-    /// Options > Mods lists the native mods: push yours.
-    #[hook(side = "both", contract = "collect", out = "mods")]
-    fn mods();
-    /// The buttons of mod `mod_id`'s settings page, under its keys: push
+    /// The buttons of mod `mod_id`'s settings page: push
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
     #[hook(side = "both", contract = "collect", out = "buttons")]
@@ -1827,11 +1824,13 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Slot placement and stack limits for a content mod menu. `slot` is the
-    /// backing container index, including player inventory slots. The slot's
-    /// own answers arrive first; the maximum is bounded to 1–99 and the item
-    /// limit. Runs in the restricted context during server clicks and client
-    /// prediction. Answer from the stack and context alone, and fast.
+    /// Slot placement and stack limits for registered vanilla and mod menus;
+    /// mounts use `horizon:mount_inventory`, while player inventory and the
+    /// creative picker have no registered type. `slot` is the backing index,
+    /// including player inventory slots. The slot's own answers arrive first;
+    /// the maximum is bounded to 1–99 and the item limit. Refusal also prevents
+    /// quick-move top-ups. Runs in the restricted context on server and client
+    /// prediction; answer from the stack and context alone, and fast.
     #[hook(
         side = "both",
         contract = "listen",

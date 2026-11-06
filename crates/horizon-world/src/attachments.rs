@@ -1,9 +1,15 @@
 //! Typed native-mod data attached to server-owned holders.
+#[doc(hidden)]
+pub mod index;
+#[doc(hidden)]
+pub mod observer;
+
 use std::{
     any::Any,
     collections::{BTreeMap, BTreeSet},
     fmt,
-    sync::Arc,
+    hash::Hash,
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 use crate::nbt::{Compound, JavaString, Tag};
@@ -239,6 +245,9 @@ impl<T> AttachmentType<T> {
             sync: self.sync,
         }
     }
+    fn decode(&self, saved: &Compound) -> Result<T, AttachmentError> {
+        (self.codec.as_ref().ok_or(AttachmentError::Decode)?.decode)(saved)
+    }
     fn validate_policy(&self) -> Result<(), AttachmentError> {
         if self.copy_on_death && self.codec.is_none() {
             return Err(AttachmentError::InvalidCopyPolicy);
@@ -297,7 +306,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         let Some(saved) = store.saved(holder, self.namespace, self.name)? else {
             return Ok(None);
         };
-        let value = (self.codec.as_ref().ok_or(AttachmentError::Decode)?.decode)(&saved)?;
+        let value = self.decode(&saved)?;
         self.keep(store, holder, value.clone(), AttachmentWrite::Decoded)?;
         Ok(Some(value))
     }
@@ -366,7 +375,6 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
 }
 
 /// A decoded value with its saved form and its type's policy.
-#[derive(Clone)]
 struct Decoded {
     value: AttachmentValue,
     encoded: Option<Compound>,
@@ -395,36 +403,170 @@ fn raw_value(raw: &Compound) -> Option<&Compound> {
     }
 }
 
-#[derive(Clone)]
 enum Entry {
-    Raw(Compound),
+    Raw { saved: Compound, reads: ReadCache },
     Decoded(Decoded),
 }
-impl Entry {
+
+/// An immutable attachment binding shared by a holder and its snapshots.
+/// Query reads may cache decoded values, but never change the canonical raw/decoded state.
+#[doc(hidden)]
+#[non_exhaustive]
+pub struct AttachmentEntry {
+    state: Entry,
+}
+
+// Separate Rust types can read the same raw binding without claiming its canonical type.
+// Each successful type gets a stable borrowed value; failed decodes are not cached.
+#[derive(Default)]
+struct ReadCache {
+    value: OnceLock<AttachmentValue>,
+    next: OnceLock<Box<ReadCache>>,
+}
+
+impl AttachmentEntry {
+    fn raw(saved: Compound) -> Self {
+        Self {
+            state: Entry::Raw {
+                saved,
+                reads: ReadCache::default(),
+            },
+        }
+    }
+    /// Borrow a value for a query without inserting a default, storing a decoded value,
+    /// or changing saved policies or sync state. Decoded bindings never fall back to NBT.
+    pub fn read<T: Send + Sync + 'static>(
+        &self,
+        key: &AttachmentType<T>,
+    ) -> Result<&T, AttachmentError> {
+        key.validate_policy()?;
+        match &self.state {
+            Entry::Decoded(value) => value
+                .value
+                .downcast_ref()
+                .ok_or(AttachmentError::TypeMismatch),
+            Entry::Raw { saved, reads } => {
+                let mut cache = reads;
+                loop {
+                    let value = match cache.value.get() {
+                        Some(value) => value,
+                        None => {
+                            let value = Arc::new(
+                                key.decode(raw_value(saved).ok_or(AttachmentError::Decode)?)?,
+                            );
+                            // Another reader may have initialized this slot with its type.
+                            let _ = cache.value.set(value);
+                            cache.value.get().expect("cache initialized")
+                        }
+                    };
+                    if let Some(value) = value.downcast_ref() {
+                        return Ok(value);
+                    }
+                    cache = cache.next.get_or_init(Default::default);
+                }
+            }
+        }
+    }
     /// The encoded value, as clients receive it.
     fn synced_value(&self) -> Option<&Compound> {
-        match self {
-            Self::Raw(raw) => raw_value(raw),
-            Self::Decoded(value) => value.encoded.as_ref(),
+        match &self.state {
+            Entry::Raw { saved, .. } => raw_value(saved),
+            Entry::Decoded(value) => value.encoded.as_ref(),
         }
     }
     fn is_synced(&self) -> bool {
-        match self {
-            Self::Raw(raw) => matches!(raw.get(&"sync".into()), Some(Tag::Byte(1))),
-            Self::Decoded(value) => value.policy.sync,
+        match &self.state {
+            Entry::Raw { saved, .. } => matches!(saved.get(&"sync".into()), Some(Tag::Byte(1))),
+            Entry::Decoded(value) => value.policy.sync,
         }
     }
 }
 
+struct AttachmentChange<'a> {
+    key: &'a index::AttachmentKey,
+    entry: Option<&'a Arc<AttachmentEntry>>,
+}
+
+trait AttachmentPublisher: Send + Sync {
+    fn publish(&self, changes: &[AttachmentChange<'_>]);
+    fn unregister(&self) -> bool;
+}
+
+struct IndexedAttachments<H> {
+    index: Weak<Mutex<index::AttachmentIndex<H>>>,
+    owner: index::AttachmentOwner<H>,
+}
+
+impl<H: Copy + Eq + Hash + Send + Sync> AttachmentPublisher for IndexedAttachments<H> {
+    fn publish(&self, changes: &[AttachmentChange<'_>]) {
+        if let Some(index) = self.index.upgrade() {
+            let retired = {
+                let mut index = index.lock().unwrap();
+                let mut retired = index::AttachmentChange::new(());
+                for change in changes {
+                    retired.merge(match change.entry {
+                        Some(entry) => index.set(&self.owner, change.key, entry.clone()),
+                        None => index.remove(&self.owner, change.key),
+                    });
+                }
+                retired
+            };
+            retired.into_result();
+        }
+    }
+
+    fn unregister(&self) -> bool {
+        self.index.upgrade().is_some_and(|index| {
+            let change = {
+                let mut index = index.lock().unwrap();
+                index.unregister(&self.owner)
+            };
+            change.into_result()
+        })
+    }
+}
+
+/// Shared authority for one indexed map registration. Cloning or dropping the handle
+/// has no effect; authoritative lifetime owners must explicitly unregister it.
+#[doc(hidden)]
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct AttachmentRegistration {
+    publisher: Arc<dyn AttachmentPublisher>,
+}
+
+impl AttachmentRegistration {
+    /// Retire only this registration. A stale handle cannot unload its replacement,
+    /// and subsequent writes through the retired map cannot restore membership.
+    pub fn unregister(&self) -> bool {
+        self.publisher.unregister()
+    }
+}
+
 /// The data held by one entity, block entity, chunk or level.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct Attachments {
-    entries: BTreeMap<(JavaString, JavaString), Entry>,
+    entries: BTreeMap<index::AttachmentKey, Arc<AttachmentEntry>>,
     // Keep malformed or otherwise unrecognized NBT exactly as it was read.
-    raw: Compound,
+    // Empty holders need no shared allocation.
+    raw: Option<Arc<Compound>>,
     // Keys to send to clients at the next flush; never saved.
     pending: BTreeSet<(JavaString, JavaString)>,
+    registration: Option<AttachmentRegistration>,
 }
+
+// Save/journal/COW copies are detached. Moves alone preserve publication authority.
+impl Clone for Attachments {
+    fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            raw: self.raw.clone(),
+            pending: self.pending.clone(),
+            registration: None,
+        }
+    }
+}
+
 impl fmt::Debug for Attachments {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Attachments")
@@ -441,32 +583,98 @@ impl AttachmentHost for Attachments {
 }
 
 impl Attachments {
+    /// Install this authoritative map in key order, invalidating any prior binding
+    /// for the holder. Rebind a detached COW map before its first attachment write.
+    /// The weak publisher does not keep the dimension alive. Map Drop never unloads;
+    /// storage must retire the returned handle or use trusted index `unload`.
+    #[doc(hidden)]
+    pub fn bind_index<H: Copy + Eq + Hash + Send + Sync + 'static>(
+        &mut self,
+        index: &Arc<Mutex<index::AttachmentIndex<H>>>,
+        holder: H,
+    ) -> AttachmentRegistration {
+        let change = {
+            let mut index = index.lock().unwrap();
+            index.register(
+                holder,
+                self.entries
+                    .iter()
+                    .map(|(key, entry)| (key.clone(), entry.clone())),
+            )
+        };
+        let owner = change.into_result();
+        let registration = AttachmentRegistration {
+            publisher: Arc::new(IndexedAttachments {
+                index: Arc::downgrade(index),
+                owner,
+            }),
+        };
+        self.registration = Some(registration.clone());
+        registration
+    }
+
+    /// Restore content (including saved data and queued sync) without detaching the
+    /// current live registration. Any binding on `replacement` is discarded, not
+    /// retired. Unchanged entries keep their index slots and shared row backing.
+    #[doc(hidden)]
+    pub fn replace_contents(&mut self, mut replacement: Self) {
+        replacement.registration = self.registration.take();
+        let previous = std::mem::replace(self, replacement);
+        if let Some(registration) = &self.registration {
+            let changes: Vec<_> = previous
+                .entries
+                .keys()
+                .filter(|key| !self.entries.contains_key(*key))
+                .map(|key| AttachmentChange { key, entry: None })
+                .chain(self.entries.iter().map(|(key, entry)| AttachmentChange {
+                    key,
+                    entry: Some(entry),
+                }))
+                .collect();
+            registration.publisher.publish(&changes);
+        }
+    }
+
+    // All canonical entry mutations publish the same Arc the map keeps. Retain the
+    // replaced entry until after publication releases the index lock.
+    fn write_entry(&mut self, key: &index::AttachmentKey, entry: Option<Arc<AttachmentEntry>>) {
+        let previous = match entry {
+            Some(entry) => self.entries.insert(key.clone(), entry),
+            None => self.entries.remove(key),
+        };
+        if let Some(registration) = &self.registration {
+            registration.publisher.publish(&[AttachmentChange {
+                key,
+                entry: self.entries.get(key),
+            }]);
+        }
+        drop(previous);
+    }
+
     /// Read the namespaced attachment compound, leaving unknown data intact.
     pub fn from_nbt(raw: Compound) -> Self {
-        let mut result = Self {
-            entries: BTreeMap::new(),
-            raw,
-            pending: BTreeSet::new(),
-        };
-        for (namespace, tag) in &result.raw {
+        let mut result = Self::default();
+        for (namespace, tag) in &raw {
             if let Tag::Compound(names) = tag {
                 for (name, value) in names {
                     if let Tag::Compound(value) = value {
-                        result
-                            .entries
-                            .insert((namespace.clone(), name.clone()), Entry::Raw(value.clone()));
+                        result.entries.insert(
+                            (namespace.clone(), name.clone()),
+                            Arc::new(AttachmentEntry::raw(value.clone())),
+                        );
                     }
                 }
             }
         }
+        result.raw = (!raw.is_empty()).then(|| Arc::new(raw));
         result
     }
     /// Encode changed values, preserving raw entries and unrecognized tags.
     pub fn to_nbt(&self) -> Compound {
-        let mut raw = self.raw.clone();
+        let mut raw = self.raw.as_deref().cloned().unwrap_or_default();
         for ((namespace, name), entry) in &self.entries {
-            let value = match entry {
-                Entry::Raw(value) => Some(value.clone()),
+            let value = match &entry.state {
+                Entry::Raw { saved, .. } => Some(saved.clone()),
                 Entry::Decoded(value) => envelope(value),
             };
             if let Some(value) = value {
@@ -485,11 +693,11 @@ impl Attachments {
     pub fn copy_on_death(&self) -> Result<Self, AttachmentError> {
         let mut copy = Self::default();
         for (key, entry) in &self.entries {
-            let encoded = match entry {
-                Entry::Raw(raw)
-                    if matches!(raw.get(&"copy_on_death".into()), Some(Tag::Byte(1))) =>
+            let encoded = match &entry.state {
+                Entry::Raw { saved, .. }
+                    if matches!(saved.get(&"copy_on_death".into()), Some(Tag::Byte(1))) =>
                 {
-                    Some(raw.clone())
+                    Some(saved.clone())
                 }
                 Entry::Decoded(value) if value.policy.copy_on_death => {
                     Some(envelope(value).ok_or(AttachmentError::InvalidCopyPolicy)?)
@@ -497,10 +705,21 @@ impl Attachments {
                 _ => None,
             };
             if let Some(encoded) = encoded {
-                copy.entries.insert(key.clone(), Entry::Raw(encoded));
+                copy.entries
+                    .insert(key.clone(), Arc::new(AttachmentEntry::raw(encoded)));
             }
         }
         Ok(copy)
+    }
+    /// The shared immutable binding, without decoding or inserting a value.
+    #[doc(hidden)]
+    pub fn entry(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<Option<&Arc<AttachmentEntry>>, AttachmentError> {
+        self.check_namespace(namespace)?;
+        Ok(self.entries.get(&(namespace.into(), name.into())))
     }
     /// Whether a value is stored, saved or set, without decoding or inserting it.
     fn holds(&self, namespace: &str, name: &str) -> bool {
@@ -509,7 +728,7 @@ impl Attachments {
     /// Refuse a namespace whose saved form isn't a compound: nothing under it can be read or
     /// written without losing it.
     fn check_namespace(&self, namespace: &str) -> Result<(), AttachmentError> {
-        match self.raw.get(&namespace.into()) {
+        match self.raw.as_ref().and_then(|raw| raw.get(&namespace.into())) {
             Some(tag) if !matches!(tag, Tag::Compound(_)) => Err(AttachmentError::InvalidNamespace),
             _ => Ok(()),
         }
@@ -519,16 +738,16 @@ impl Attachments {
         namespace: &str,
         name: &str,
     ) -> Result<Option<AttachmentValue>, AttachmentError> {
-        self.check_namespace(namespace)?;
-        Ok(match self.entries.get(&(namespace.into(), name.into())) {
-            Some(Entry::Decoded(value)) => Some(value.value.clone()),
-            _ => None,
-        })
+        Ok(
+            match self.entry(namespace, name)?.map(|entry| &entry.state) {
+                Some(Entry::Decoded(value)) => Some(value.value.clone()),
+                _ => None,
+            },
+        )
     }
     fn saved(&self, namespace: &str, name: &str) -> Result<Option<Compound>, AttachmentError> {
-        self.check_namespace(namespace)?;
-        match self.entries.get(&(namespace.into(), name.into())) {
-            Some(Entry::Raw(raw)) => raw_value(raw)
+        match self.entry(namespace, name)?.map(|entry| &entry.state) {
+            Some(Entry::Raw { saved, .. }) => raw_value(saved)
                 .cloned()
                 .map(Some)
                 .ok_or(AttachmentError::Decode),
@@ -538,23 +757,31 @@ impl Attachments {
     fn store(&mut self, namespace: &str, name: &str, value: Decoded, write: AttachmentWrite) {
         let sync = value.policy.sync;
         let key: (JavaString, JavaString) = (namespace.into(), name.into());
-        self.entries.insert(key.clone(), Entry::Decoded(value));
+        self.write_entry(
+            &key,
+            Some(Arc::new(AttachmentEntry {
+                state: Entry::Decoded(value),
+            })),
+        );
         if sync && write != AttachmentWrite::Decoded {
             self.pending.insert(key);
         }
-        if write == AttachmentWrite::Set
-            && let Some(Tag::Compound(names)) = self.raw.get_mut(&namespace.into())
-        {
-            names.remove(&name.into());
+        if write == AttachmentWrite::Set {
+            self.remove_saved(namespace, name);
         }
     }
     fn discard(&mut self, namespace: &str, name: &str, sync: bool) {
         let key: (JavaString, JavaString) = (namespace.into(), name.into());
-        self.entries.remove(&key);
+        self.write_entry(&key, None);
         if sync {
             self.pending.insert(key);
         }
-        if let Some(Tag::Compound(names)) = self.raw.get_mut(&namespace.into()) {
+        self.remove_saved(namespace, name);
+    }
+    fn remove_saved(&mut self, namespace: &str, name: &str) {
+        if let Some(raw) = &mut self.raw
+            && let Some(Tag::Compound(names)) = Arc::make_mut(raw).get_mut(&namespace.into())
+        {
             names.remove(&name.into());
         }
     }
@@ -570,7 +797,7 @@ impl Attachments {
                 let value = self
                     .entries
                     .get(&(namespace.clone(), name.clone()))
-                    .and_then(Entry::synced_value)
+                    .and_then(|entry| entry.synced_value())
                     .cloned();
                 AttachmentSync {
                     namespace,
@@ -597,15 +824,11 @@ impl Attachments {
     /// Client side: keep what the server sent, decoded by the next `get`.
     pub fn apply_sync(&mut self, change: AttachmentSync) {
         let key = (change.namespace, change.name);
-        match change.value {
-            Some(value) => {
-                let raw = [("value".into(), Tag::Compound(value))].into();
-                self.entries.insert(key, Entry::Raw(raw));
-            }
-            None => {
-                self.entries.remove(&key);
-            }
-        }
+        let entry = change.value.map(|value| {
+            let raw = [("value".into(), Tag::Compound(value))].into();
+            Arc::new(AttachmentEntry::raw(raw))
+        });
+        self.write_entry(&key, entry);
     }
 }
 
@@ -653,6 +876,480 @@ mod tests {
         copy_on_death: false,
         sync: false,
     };
+    fn rows(
+        index: &Arc<Mutex<index::AttachmentIndex<u32>>>,
+        key: &AttachmentType<i32>,
+    ) -> Arc<Vec<index::AttachmentRow<u32>>> {
+        index
+            .lock()
+            .unwrap()
+            .snapshot(&(key.namespace.into(), key.name.into()))
+    }
+
+    fn indexed_values(
+        index: &Arc<Mutex<index::AttachmentIndex<u32>>>,
+        key: &AttachmentType<i32>,
+    ) -> Vec<(u32, i32)> {
+        rows(index, key)
+            .iter()
+            .map(|row| (row.holder, *row.entry.read(key).unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn binding_publishes_unread_saved_entries_and_canonical_decode() {
+        let mut source = Attachments::default();
+        COUNTER.set(&mut source, Holder::Level, 42).unwrap();
+        SYNCED.set(&mut source, Holder::Level, 8).unwrap();
+        let saved = source.to_nbt();
+        let mut map = Attachments::from_nbt(saved.clone());
+        let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+        map.bind_index(&index, 1);
+        let before = rows(&index, &COUNTER);
+        assert!(Arc::ptr_eq(
+            &before[0].entry,
+            map.entry("test", "counter").unwrap().unwrap()
+        ));
+        assert_eq!(indexed_values(&index, &COUNTER), [(1, 42)]);
+        assert_eq!(indexed_values(&index, &SYNCED), [(1, 8)]);
+        assert_eq!(map.to_nbt(), saved);
+        assert!(map.take_sync_changes().is_empty());
+        assert_eq!(COUNTER.get_existing(&mut map, Holder::Level), Ok(Some(42)));
+        let decoded = rows(&index, &COUNTER);
+        assert!(!Arc::ptr_eq(&before[0].entry, &decoded[0].entry));
+        assert!(Arc::ptr_eq(
+            &decoded[0].entry,
+            map.entry("test", "counter").unwrap().unwrap()
+        ));
+        assert_eq!(before[0].entry.read(&COUNTER), Ok(&42));
+        assert_eq!(map.to_nbt(), saved);
+        assert!(map.take_sync_changes().is_empty());
+    }
+
+    #[test]
+    fn bound_default_set_remove_and_client_sync_publish_current_shared_values() {
+        let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+        let mut map = Attachments::default();
+        map.bind_index(&index, 1);
+        assert!(rows(&index, &SYNCED).is_empty());
+        assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(7));
+        let default = rows(&index, &SYNCED);
+        assert_eq!(map.take_sync_changes(), [change("synced", Some(7))]);
+        SYNCED.set(&mut map, Holder::Level, 9).unwrap();
+        assert_eq!(indexed_values(&index, &SYNCED), [(1, 9)]);
+        assert_eq!(SYNCED.remove(&mut map, Holder::Level), Ok(Some(9)));
+        assert!(rows(&index, &SYNCED).is_empty());
+        assert_eq!(map.take_sync_changes(), [change("synced", None)]);
+        map.apply_sync(change("synced", Some(12)));
+        assert_eq!(indexed_values(&index, &SYNCED), [(1, 12)]);
+        assert!(map.take_sync_changes().is_empty());
+        map.apply_sync(change("synced", None));
+        assert!(rows(&index, &SYNCED).is_empty());
+        assert_eq!(default[0].entry.read(&SYNCED), Ok(&7));
+    }
+
+    #[test]
+    fn clone_is_detached_moves_keep_publication_and_drop_never_unloads() {
+        let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+        let mut map = Attachments::default();
+        COUNTER.set(&mut map, Holder::Level, 1).unwrap();
+        let registration = map.bind_index(&index, 1);
+        let mut detached = map.clone();
+        COUNTER.set(&mut detached, Holder::Level, 2).unwrap();
+        COUNTER.remove(&mut detached, Holder::Level).unwrap();
+        detached.apply_sync(change("counter", Some(3)));
+        drop(detached);
+        drop(registration.clone());
+        assert_eq!(indexed_values(&index, &COUNTER), [(1, 1)]);
+        let mut moved = map;
+        COUNTER.set(&mut moved, Holder::Level, 4).unwrap();
+        drop(moved);
+        assert_eq!(indexed_values(&index, &COUNTER), [(1, 4)]);
+        assert!(registration.unregister());
+        assert!(rows(&index, &COUNTER).is_empty());
+    }
+
+    #[test]
+    fn cow_rebind_keeps_unchanged_rows_and_rejects_stale_map_and_lifetime_handles() {
+        let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+        let mut old = Attachments::default();
+        COUNTER.set(&mut old, Holder::Level, 1).unwrap();
+        let old_registration = old.bind_index(&index, 1);
+        let mut neighbor = old.clone();
+        COUNTER.set(&mut neighbor, Holder::Level, 2).unwrap();
+        neighbor.bind_index(&index, 2);
+        let before = rows(&index, &COUNTER);
+        let mut current = old.clone();
+        let registration = current.bind_index(&index, 1);
+        assert!(Arc::ptr_eq(&before, &rows(&index, &COUNTER)));
+        COUNTER.set(&mut old, Holder::Level, 99).unwrap();
+        COUNTER.remove(&mut old, Holder::Level).unwrap();
+        old.apply_sync(change("counter", Some(100)));
+        old.replace_contents(Attachments::default());
+        assert!(!old_registration.unregister());
+        assert_eq!(indexed_values(&index, &COUNTER), [(1, 1), (2, 2)]);
+        COUNTER.set(&mut current, Holder::Level, 3).unwrap();
+        assert_eq!(indexed_values(&index, &COUNTER), [(1, 3), (2, 2)]);
+        assert_eq!(before[0].entry.read(&COUNTER), Ok(&1));
+        assert!(registration.unregister());
+        assert!(!registration.unregister());
+        COUNTER.set(&mut current, Holder::Level, 4).unwrap();
+        assert_eq!(indexed_values(&index, &COUNTER), [(2, 2)]);
+        assert_eq!(COUNTER.get(&mut current, Holder::Level), Ok(4));
+    }
+
+    #[test]
+    fn restoring_contents_restores_membership_payloads_saved_data_and_future_writes() {
+        let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+        let mut map = Attachments::from_nbt([("unknown".into(), Tag::Int(5))].into());
+        SYNCED.set(&mut map, Holder::Level, 10).unwrap();
+        MEMORY.set(&mut map, Holder::Level, 20).unwrap();
+        map.bind_index(&index, 1);
+        let kept = map.clone();
+        let saved = kept.to_nbt();
+        SYNCED.set(&mut map, Holder::Level, 11).unwrap();
+        MEMORY.remove(&mut map, Holder::Level).unwrap();
+        COUNTER.set(&mut map, Holder::Level, 30).unwrap();
+        let aborted = rows(&index, &SYNCED);
+        map.replace_contents(kept);
+        assert_eq!(map.to_nbt(), saved);
+        assert_eq!(map.take_sync_changes(), [change("synced", Some(10))]);
+        assert_eq!(indexed_values(&index, &SYNCED), [(1, 10)]);
+        assert_eq!(indexed_values(&index, &MEMORY), [(1, 20)]);
+        assert!(rows(&index, &COUNTER).is_empty());
+        assert_eq!(aborted[0].entry.read(&SYNCED), Ok(&11));
+        SYNCED.set(&mut map, Holder::Level, 12).unwrap();
+        assert_eq!(indexed_values(&index, &SYNCED), [(1, 12)]);
+        map.replace_contents(Attachments::default());
+        assert!(rows(&index, &SYNCED).is_empty());
+        assert!(rows(&index, &MEMORY).is_empty());
+        COUNTER.get(&mut map, Holder::Level).unwrap();
+        assert_eq!(indexed_values(&index, &COUNTER), [(1, 0)]);
+    }
+
+    #[test]
+    fn replacing_contents_keeps_only_the_receivers_registration_and_unchanged_rows() {
+        let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+        let mut map = Attachments::default();
+        COUNTER.set(&mut map, Holder::Level, 1).unwrap();
+        let registration = map.bind_index(&index, 1);
+        let before = rows(&index, &COUNTER);
+        map.replace_contents(map.clone());
+        assert!(Arc::ptr_eq(&before, &rows(&index, &COUNTER)));
+        let mut other = map.clone();
+        COUNTER.set(&mut other, Holder::Level, 2).unwrap();
+        let other_registration = other.bind_index(&index, 2);
+        map.replace_contents(other);
+        COUNTER.set(&mut map, Holder::Level, 3).unwrap();
+        assert_eq!(indexed_values(&index, &COUNTER), [(1, 3), (2, 2)]);
+        assert!(registration.unregister());
+        assert_eq!(indexed_values(&index, &COUNTER), [(2, 2)]);
+        assert!(other_registration.unregister());
+    }
+
+    #[test]
+    fn failed_typed_removal_still_publishes_removal_of_the_unread_saved_key() {
+        let raw = [(
+            "test".into(),
+            Tag::Compound([("counter".into(), Tag::Compound(Compound::new()))].into()),
+        )]
+        .into();
+        let mut map = Attachments::from_nbt(raw);
+        let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+        map.bind_index(&index, 1);
+        let before = rows(&index, &COUNTER);
+        assert_eq!(before.len(), 1);
+        assert_eq!(
+            COUNTER.remove(&mut map, Holder::Level),
+            Err(AttachmentError::Decode)
+        );
+        assert!(rows(&index, &COUNTER).is_empty());
+        assert_eq!(before[0].entry.read(&COUNTER), Err(AttachmentError::Decode));
+    }
+
+    #[test]
+    fn expired_index_does_not_keep_maps_or_registration_from_standalone_use() {
+        let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+        let weak = Arc::downgrade(&index);
+        let mut map = Attachments::default();
+        let registration = map.bind_index(&index, 1);
+        drop(index);
+        assert!(weak.upgrade().is_none());
+        assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(7));
+        SYNCED.set(&mut map, Holder::Level, 8).unwrap();
+        let saved = map.clone();
+        SYNCED.remove(&mut map, Holder::Level).unwrap();
+        map.replace_contents(saved);
+        assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(8));
+        map.apply_sync(change("synced", Some(9)));
+        assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(9));
+        assert!(!registration.unregister());
+    }
+
+    #[test]
+    fn retirement_and_rebind_drop_mod_payloads_only_after_unlock() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        #[derive(Clone)]
+        struct Probe {
+            index: Weak<Mutex<index::AttachmentIndex<u32>>>,
+            unlocked: Arc<AtomicBool>,
+            drops: Arc<AtomicUsize>,
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                if let Some(index) = self.index.upgrade() {
+                    self.unlocked
+                        .fetch_and(index.try_lock().is_ok(), Ordering::Relaxed);
+                }
+                self.drops.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let key: AttachmentType<Probe> = AttachmentType {
+            namespace: "test",
+            name: "drop_probe",
+            default: || panic!("no default"),
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        let mut outcomes = Vec::new();
+        for rebind in [false, true] {
+            let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+            let unlocked = Arc::new(AtomicBool::new(true));
+            let drops = Arc::new(AtomicUsize::new(0));
+            let mut map = Attachments::default();
+            key.set(
+                &mut map,
+                Holder::Level,
+                Probe {
+                    index: Arc::downgrade(&index),
+                    unlocked: unlocked.clone(),
+                    drops: drops.clone(),
+                },
+            )
+            .unwrap();
+            let registration = map.bind_index(&index, 1);
+            let mut replacement = map.clone();
+            key.remove(&mut replacement, Holder::Level).unwrap();
+            drop(map);
+            if rebind {
+                replacement.bind_index(&index, 1);
+            } else {
+                assert!(registration.unregister());
+            }
+            assert_eq!(drops.load(Ordering::Relaxed), 2);
+            outcomes.push(unlocked.load(Ordering::Relaxed));
+        }
+        assert_eq!(outcomes, [true, true]);
+    }
+
+    #[test]
+    fn defaults_and_codecs_run_without_an_index_lock() {
+        static INDEX: OnceLock<Arc<Mutex<index::AttachmentIndex<u32>>>> = OnceLock::new();
+        fn probe() {
+            drop(
+                INDEX
+                    .get()
+                    .unwrap()
+                    .try_lock()
+                    .expect("mod code under index lock"),
+            );
+        }
+        let key = AttachmentType {
+            namespace: "test",
+            name: "probe",
+            default: || {
+                probe();
+                5
+            },
+            codec: Some(AttachmentCodec {
+                encode: |n| {
+                    probe();
+                    encode(n)
+                },
+                decode: |form| {
+                    probe();
+                    decode(form)
+                },
+            }),
+            copy_on_death: false,
+            sync: false,
+        };
+        let index = INDEX.get_or_init(Default::default);
+        let mut map = Attachments::default();
+        map.bind_index(index, 1);
+        assert_eq!(key.get(&mut map, Holder::Level), Ok(5));
+        key.set(&mut map, Holder::Level, 6).unwrap();
+        let mut loaded = Attachments::from_nbt(map.to_nbt());
+        loaded.bind_index(index, 1);
+        assert_eq!(indexed_values(index, &key), [(1, 6)]);
+        assert_eq!(key.get_existing(&mut loaded, Holder::Level), Ok(Some(6)));
+    }
+
+    #[test]
+    fn empty_and_new_maps_need_no_saved_backing_allocation() {
+        let mut map = Attachments::default();
+        assert!(map.raw.is_none());
+        COUNTER.set(&mut map, Holder::Level, 1).unwrap();
+        assert!(map.raw.is_none());
+        COUNTER.remove(&mut map, Holder::Level).unwrap();
+        assert!(map.raw.is_none());
+        assert!(Attachments::from_nbt(Compound::new()).raw.is_none());
+    }
+    #[test]
+    fn shared_bindings_and_map_snapshots_keep_replaced_and_removed_values() {
+        let mut map = Attachments::default();
+        SYNCED.set(&mut map, Holder::Level, 1).unwrap();
+        map.take_sync_changes();
+        let loaded = Attachments::from_nbt(map.to_nbt());
+        for mut map in [map, loaded] {
+            let mut snapshot = map.clone();
+            let entry = map.entry("test", "synced").unwrap().unwrap().clone();
+            assert!(Arc::ptr_eq(
+                &entry,
+                snapshot.entry("test", "synced").unwrap().unwrap()
+            ));
+            let saved = snapshot.to_nbt();
+
+            SYNCED.set(&mut map, Holder::Level, 2).unwrap();
+            assert_eq!(entry.read(&SYNCED), Ok(&1));
+            assert_eq!(SYNCED.get_existing(&mut map, Holder::Level), Ok(Some(2)));
+            assert_eq!(SYNCED.remove(&mut map, Holder::Level), Ok(Some(2)));
+            assert!(map.entry("test", "synced").unwrap().is_none());
+            assert_eq!(entry.read(&SYNCED), Ok(&1));
+            assert_eq!(
+                SYNCED.get_existing(&mut snapshot, Holder::Level),
+                Ok(Some(1))
+            );
+            assert_eq!(snapshot.to_nbt(), saved);
+            assert!(snapshot.take_sync_changes().is_empty());
+            assert_eq!(map.take_sync_changes(), [change("synced", None)]);
+        }
+    }
+    #[test]
+    fn raw_read_cache_borrows_without_claiming_the_canonical_type_or_policy() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static DECODES: AtomicUsize = AtomicUsize::new(0);
+        struct NonClone(i32);
+        let key = AttachmentType {
+            namespace: "test",
+            name: "counter",
+            default: || panic!("a query must not create a default"),
+            codec: Some(AttachmentCodec {
+                encode: |_: &NonClone| panic!("a query must not encode"),
+                decode: |saved| {
+                    DECODES.fetch_add(1, Ordering::Relaxed);
+                    decode(saved).map(NonClone)
+                },
+            }),
+            copy_on_death: true,
+            sync: true,
+        };
+        let mut original = Attachments::default();
+        COUNTER.set(&mut original, Holder::Level, 42).unwrap();
+        let saved = original.to_nbt();
+        let mut map = Attachments::from_nbt(saved.clone());
+        let snapshot = map.clone();
+        assert!(Arc::ptr_eq(
+            map.raw.as_ref().unwrap(),
+            snapshot.raw.as_ref().unwrap()
+        ));
+        let entry = map.entry("test", "counter").unwrap().unwrap().clone();
+        let value = entry.read(&key).unwrap();
+        assert_eq!(value.0, 42);
+        assert!(std::ptr::eq(value, entry.read(&key).unwrap()));
+        assert!(std::ptr::eq(
+            value,
+            snapshot
+                .entry("test", "counter")
+                .unwrap()
+                .unwrap()
+                .read(&key)
+                .unwrap()
+        ));
+        assert_eq!(DECODES.load(Ordering::Relaxed), 1);
+        assert!(map.decoded("test", "counter").unwrap().is_none());
+        assert_eq!(map.to_nbt(), saved);
+        assert!(map.synced().is_empty());
+        assert!(map.take_sync_changes().is_empty());
+        assert!(
+            map.copy_on_death()
+                .unwrap()
+                .entry("test", "counter")
+                .unwrap()
+                .is_none()
+        );
+
+        // Another query type gets its own borrowed cache; ordinary reads still decode raw.
+        assert_eq!(entry.read(&COUNTER), Ok(&42));
+        assert!(std::ptr::eq(value, entry.read(&key).unwrap()));
+        assert_eq!(COUNTER.get_existing(&mut map, Holder::Level), Ok(Some(42)));
+        let decoded = map.entry("test", "counter").unwrap().unwrap();
+        assert!(matches!(
+            decoded.read(&key),
+            Err(AttachmentError::TypeMismatch)
+        ));
+        assert_eq!(map.to_nbt(), saved);
+        assert!(map.take_sync_changes().is_empty());
+        assert_eq!(entry.read(&key).unwrap().0, 42);
+    }
+    #[test]
+    fn query_reads_reject_invalid_policy_without_populating_the_cache() {
+        let mut map = Attachments::default();
+        map.apply_sync(change("synced", Some(9)));
+        let invalid = AttachmentType {
+            codec: None,
+            ..SYNCED
+        };
+        let entry = map.entry("test", "synced").unwrap().unwrap();
+        assert_eq!(
+            entry.read(&invalid),
+            Err(AttachmentError::InvalidSyncPolicy)
+        );
+        assert_eq!(entry.read(&SYNCED), Ok(&9));
+        assert!(map.take_sync_changes().is_empty());
+    }
+    #[test]
+    fn failed_query_decodes_are_retried_without_changing_the_saved_binding() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+        let key = AttachmentType {
+            codec: Some(AttachmentCodec {
+                encode,
+                decode: |saved| {
+                    if ATTEMPTS.fetch_add(1, Ordering::Relaxed) == 0 {
+                        Err(AttachmentError::Decode)
+                    } else {
+                        decode(saved)
+                    }
+                },
+            }),
+            ..SYNCED
+        };
+        let mut map = Attachments::default();
+        map.apply_sync(change("synced", Some(9)));
+        let saved = map.to_nbt();
+        let entry = map.entry("test", "synced").unwrap().unwrap();
+        assert_eq!(entry.read(&key), Err(AttachmentError::Decode));
+        assert_eq!(entry.read(&key), Ok(&9));
+        assert_eq!(entry.read(&key), Ok(&9));
+        assert_eq!(ATTEMPTS.load(Ordering::Relaxed), 2);
+        assert!(map.decoded("test", "synced").unwrap().is_none());
+        assert_eq!(map.to_nbt(), saved);
+        assert!(map.take_sync_changes().is_empty());
+    }
+    #[test]
+    fn sync_replacement_and_removal_leave_the_shared_old_entry_readable() {
+        let mut map = Attachments::default();
+        map.apply_sync(change("synced", Some(9)));
+        let old = map.entry("test", "synced").unwrap().unwrap().clone();
+        map.apply_sync(change("synced", Some(10)));
+        assert_eq!(old.read(&SYNCED), Ok(&9));
+        assert_eq!(SYNCED.get_existing(&mut map, Holder::Level), Ok(Some(10)));
+        map.apply_sync(change("synced", None));
+        assert_eq!(old.read(&SYNCED), Ok(&9));
+        assert_eq!(SYNCED.get_existing(&mut map, Holder::Level), Ok(None));
+    }
     #[test]
     fn saved_values_round_trip_and_memory_values_do_not() {
         let mut map = Attachments::default();
@@ -731,6 +1428,8 @@ mod tests {
         )]
         .into();
         let mut map = Attachments::from_nbt(saved.clone());
+        let old = map.entry("test", "counter").unwrap().unwrap().clone();
+        assert_eq!(old.read(&COUNTER), Err(AttachmentError::Decode));
         assert!(COUNTER.has(&mut map, Holder::Level).unwrap());
         assert_eq!(
             COUNTER.get_existing(&mut map, Holder::Level),
@@ -750,6 +1449,7 @@ mod tests {
             Ok(None),
             "removed all the same"
         );
+        assert_eq!(old.read(&COUNTER), Err(AttachmentError::Decode));
     }
     #[test]
     fn synced_set_and_remove_report_the_last_state_once() {

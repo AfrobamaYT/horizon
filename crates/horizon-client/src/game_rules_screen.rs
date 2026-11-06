@@ -181,6 +181,27 @@ impl RulesScreen {
         }
     }
 
+    /// Adopt installed definitions without discarding pending edits.
+    pub fn rebind_registry(&mut self, registry: std::sync::Arc<crate::gamerules::RuleRegistry>) {
+        self.values.rebind_registry(registry.clone());
+        self.initial.rebind_registry(registry);
+        for rule in self
+            .values
+            .available_rules()
+            .filter(|rule| matches!(rule.default, Value::Int(_)))
+        {
+            if !self.numbers.iter().any(|(name, _)| name == &rule.name) {
+                let mut input = EditBox::new(0.0, 0.0, 44.0, 20.0);
+                input.focused = false;
+                if let Some(value) = self.values.get(&rule.name) {
+                    input.set_value(&value.to_string());
+                }
+                input.text_color = VALID;
+                self.numbers.push((rule.name.clone(), input));
+            }
+        }
+    }
+
     /// RuleList.populateChildren: the rules matching the search (id, name,
     /// category or description), by category, each sorted by description id.
     fn rows(&self) -> Vec<Row> {
@@ -757,6 +778,30 @@ mod tests {
         assert_eq!(
             category_key("example:machines"),
             "gamerule.category.example.machines"
+        );
+    }
+
+    #[test]
+    fn registered_rule_is_grouped_under_its_category() {
+        let rule = Rule {
+            name: "example:enabled".into(),
+            category: "example:machines".into(),
+            default: Value::Bool(true),
+            min: 0,
+            max: 0,
+        };
+        let registry = std::sync::Arc::new(
+            crate::gamerules::RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule])
+                .unwrap(),
+        );
+        let mut screen = RulesScreen::new(&GameRules::with_registry(registry, &[]));
+        screen.search.set_value("example:enabled");
+        assert_eq!(
+            screen.rows(),
+            [
+                Row::Category("example:machines".into()),
+                Row::Rule("example:enabled".into())
+            ]
         );
     }
 

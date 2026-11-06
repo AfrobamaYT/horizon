@@ -1620,11 +1620,14 @@ dependencies = [
 name = "horizon-assets"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "horizon-core",
  "log",
+ "miniz_oxide 0.8.9",
  "png",
  "serde",
  "serde_json",
+ "zip",
 ]
 
 [[package]]
@@ -1722,6 +1725,7 @@ dependencies = [
 name = "horizon-client-core"
 version = "0.1.0"
 dependencies = [
+ "horizon-assets",
  "horizon-world",
  "serde_json",
 ]
@@ -1917,6 +1921,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-core",
+ "horizon-mods",
  "horizon-world",
  "log",
  "serde",
@@ -2089,10 +2094,12 @@ dependencies = [
 name = "horizon-optifine"
 version = "0.1.0"
 dependencies = [
+ "horizon-assets",
  "horizon-bench",
  "horizon-core",
  "log",
  "regex",
+ "zip",
 ]
 
 [[package]]
@@ -2259,6 +2266,7 @@ name = "horizon-world"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "horizon-assets",
  "horizon-core",
  "libm",
  "log",
