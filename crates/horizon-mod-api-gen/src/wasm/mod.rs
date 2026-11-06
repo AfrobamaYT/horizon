@@ -749,6 +749,37 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn client_input_options_have_a_generated_wasm_binding() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let client =
+                    &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
+                assert!(client.functions.contains_key("input-options"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name == "ClientHost::input_options")
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn recipe_rules_are_generated_in_wasm_contract() {
         std::thread::Builder::new()
             .stack_size(64 << 20)

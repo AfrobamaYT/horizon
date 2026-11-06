@@ -24373,6 +24373,51 @@ mod tests {
         });
     }
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_input_options_follow_settings() {
+        super::native_entity_refs::tests::with_client_game(|game| {
+            game.settings.sensitivity = 0.25;
+            game.settings.invert_x = true;
+            game.settings.invert_y = false;
+            game.settings.mouse_wheel_sensitivity = 0.75;
+            game.settings.discrete_scroll = true;
+            game.settings.toggle_crouch = false;
+            game.settings.toggle_sprint = true;
+            game.settings.auto_jump = false;
+            let host: &dyn mod_api::ClientHost = game;
+            let first = host.input_options();
+            assert_eq!(first.sensitivity, 0.25);
+            assert!(first.invert_x);
+            assert!(!first.invert_y);
+            assert_eq!(first.mouse_wheel_sensitivity, 0.75);
+            assert!(first.discrete_scroll);
+            assert!(!first.toggle_crouch);
+            assert!(first.toggle_sprint);
+            assert!(!first.auto_jump);
+
+            game.settings.sensitivity = 0.5;
+            game.settings.invert_x = false;
+            game.settings.invert_y = true;
+            game.settings.mouse_wheel_sensitivity = 1.5;
+            game.settings.discrete_scroll = false;
+            game.settings.toggle_crouch = true;
+            game.settings.toggle_sprint = false;
+            game.settings.auto_jump = true;
+            let host: &dyn mod_api::ClientHost = game;
+            let second = host.input_options();
+            assert_eq!(second.sensitivity, 0.5);
+            assert!(!second.invert_x);
+            assert!(second.invert_y);
+            assert_eq!(second.mouse_wheel_sensitivity, 1.5);
+            assert!(!second.discrete_scroll);
+            assert!(second.toggle_crouch);
+            assert!(!second.toggle_sprint);
+            assert!(second.auto_jump);
+            assert_eq!(first.sensitivity, 0.25);
+        });
+    }
+
+    #[test]
     fn weather_follows_the_dimension_type_not_the_id() {
         use super::level_can_have_weather as w;
         assert!(w(true, false, false)); // open sky
