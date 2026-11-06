@@ -143,7 +143,7 @@ jobs:
         run: |
           echo "hash=$(rustc +stable -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           # One snapshot every 6 hours: the repository's 10 GB cache budget can't hold one per main head.
-          echo "slot=$(date -u +%Y%m%d)-$(( $(date -u +%H) / 6 ))" >> "$GITHUB_OUTPUT"
+          echo "slot=$(date -u +%Y%m%d)-$(( 10#$(date -u +%H) / 6 ))" >> "$GITHUB_OUTPUT"
       # rust-cache's default removes workspace artifacts. Those are the expensive part here,
       # in two feature graphs; keep both, and publish a fresh snapshot from main every 6 hours.
       - uses: actions/cache/restore@v4
