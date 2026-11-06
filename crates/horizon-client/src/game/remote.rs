@@ -1340,7 +1340,7 @@ impl Game<'_> {
     }
 
     pub(super) fn send(&self, packet: S) {
-        if let Some(r) = &self.remote {
+        if self.remote.is_some() {
             // MultiPlayerGameMode's attack, interact, useItem, useItemOn, releaseUsingItem, dropItem and
             // piercingAttack run ensureHasSentCarriedItem before their packet: a slot the number keys
             // chose this tick goes out first. A miss, a dig's start or a swap waits for the next tick.
