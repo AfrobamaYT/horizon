@@ -164,7 +164,10 @@ fn authorized_argument_alternatives_win_only_complete_ties() {
             assert!(dispatcher.parse("foo", &registries).executable().is_err());
         }
         let registries = Registries::default();
-        // Unread input and error ordering still precede executability.
+        // A nonmatching literal is not tried; use failing argument parsers to
+        // exercise error ordering independently of the complete-tie case.
+        let tail = dispatcher.argument(integer, "tail", ArgType::Bool);
+        dispatcher.executes(tail, "integer_child");
         let unread = dispatcher.parse("foo 7 nope", &registries);
         assert!(unread.can_read());
         assert!(unread.errors.is_empty());
@@ -172,8 +175,8 @@ fn authorized_argument_alternatives_win_only_complete_ties() {
             unread.context.get("b").is_some(),
             "the error-free peer wins"
         );
-        let baz = dispatcher.literal(word, "baz");
-        dispatcher.executes(baz, "word_child");
+        let tail = dispatcher.argument(word, "tail", ArgType::Bool);
+        dispatcher.executes(tail, "word_child");
         let failed = dispatcher.parse("foo 7 nope", &registries);
         assert!(failed.can_read() && !failed.errors.is_empty());
         assert_eq!(
