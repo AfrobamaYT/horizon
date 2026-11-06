@@ -2038,8 +2038,13 @@ mod tests {
             let id = game.load_mob(tag, None).unwrap();
             let zombie = game.mobs.iter().find(|m| m.id == id).unwrap();
             assert_eq!(zombie.extra.profession.id(), "example:engineer");
-            let saved =
-                entity_nbt::mob_to_nbt(zombie, [0; 4], None, Some(game.pack.assets.registry));
+            let saved = entity_nbt::mob_to_nbt(
+                zombie,
+                [0; 4],
+                None,
+                Some(game.pack.assets.registry),
+                |_| None,
+            );
             let restored = entity_nbt::mob_from_nbt(
                 &saved,
                 game.res.mob_types(),

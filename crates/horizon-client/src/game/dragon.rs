@@ -5934,12 +5934,12 @@ mod tests {
         assert_eq!(melee, ("minecraft:player_attack", 12, 12));
         let mut arrow = Projectile::new(ProjectileKind::Trident, Vec3::ZERO, None);
         arrow.id = 37;
-        let shot = source(DamageKind::Arrow, Some(12), Some(&arrow));
+        let shot = source(DamageKind::Arrow, Some(12), Some(arrow.id as i32));
         assert_eq!(shot, ("minecraft:arrow", 12, 37));
-        let skull = source(DamageKind::WitherSkull, Some(12), Some(&arrow));
+        let skull = source(DamageKind::WitherSkull, Some(12), Some(arrow.id as i32));
         assert_eq!(skull, ("minecraft:wither_skull", 12, 37));
         // DamageSources.magic(): an ownerless skull names no direct entity.
-        let magic = source(DamageKind::Magic, None, Some(&arrow));
+        let magic = source(DamageKind::Magic, None, Some(arrow.id as i32));
         assert_eq!(magic, ("minecraft:magic", 0, 0));
         let blast = source(DamageKind::Explosion, Some(12), None);
         assert_eq!(blast, ("minecraft:player_explosion", 12, 0));

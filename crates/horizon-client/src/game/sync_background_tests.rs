@@ -1,34 +1,35 @@
 //! Regressions for the typed bindings carried by the upstream sync.
-use super::{
-    Chunk,
-    native_entity_refs::tests::{with_client_game, with_game_at},
-};
+use super::native_entity_refs::tests::{with_client_game, with_game_at};
+use horizon_client::chunk::Chunk;
 use mod_api::{ClientHost, Flow, Hooks, ModEntry, ServerHost};
 use std::{path::PathBuf, sync::Arc};
 
-struct Background;
-#[mod_api::horizon_mod]
-impl Hooks for Background {
-    fn screen_transparent_background(
-        &self,
-        host: &dyn ClientHost,
-        event: &mut mod_api::ScreenTransparentBackgroundEvent<'_>,
-    ) -> Flow {
-        if event.screen != "inventory" {
-            return Flow::Continue;
+mod background {
+    use super::*;
+    #[derive(Default)]
+    struct Background;
+    #[mod_api::horizon_mod]
+    impl Hooks for Background {
+        fn screen_transparent_background(
+            &self,
+            host: &dyn ClientHost,
+            event: &mut mod_api::ScreenTransparentBackgroundEvent<'_>,
+        ) -> Flow {
+            if event.screen != "inventory" {
+                return Flow::Continue;
+            }
+            assert!(host.apply_screen_blur());
+            assert!(!host.apply_screen_blur());
+            event.batch.fill([3.0, 4.0, 5.0, 6.0], 0xff123456);
+            Flow::Cancel
         }
-        assert!(host.apply_screen_blur());
-        assert!(!host.apply_screen_blur());
-        event.batch.fill([3.0, 4.0, 5.0, 6.0], 0xff123456);
-        Flow::Cancel
     }
 }
-
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cancelled_background_keeps_custom_geometry_and_one_blur_request() {
     mod_api::testing::with_mods(
-        vec![ModEntry::new("background", Box::new(Background))].into(),
+        vec![ModEntry::new("background", background::hooks())].into(),
         || {
             with_client_game(|game| {
                 let mut batch = horizon_client::hud::HudBatch::scratch([800, 600]);
@@ -58,29 +59,32 @@ fn cancelled_background_keeps_custom_geometry_and_one_blur_request() {
     );
 }
 
-struct Claims;
-#[mod_api::horizon_mod]
-impl Hooks for Claims {
-    fn entity_change_block_pre(
-        &self,
-        _: &mut dyn ServerHost,
-        event: &mut mod_api::EntityChangeBlockPreEvent<'_>,
-    ) -> Flow {
-        assert_eq!(event.player, Some(7));
-        assert_eq!(event.entity, None);
-        assert_eq!(event.kind, "minecraft:player");
-        assert_eq!(event.from, "minecraft:farmland");
-        assert_eq!(event.to, "minecraft:dirt");
-        Flow::Cancel
+mod claims {
+    use super::*;
+    #[derive(Default)]
+    struct Claims;
+    #[mod_api::horizon_mod]
+    impl Hooks for Claims {
+        fn entity_change_block_pre(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut mod_api::EntityChangeBlockPreEvent<'_>,
+        ) -> Flow {
+            assert_eq!(event.player, Some(7));
+            assert_eq!(event.entity, None);
+            assert_eq!(event.kind, "minecraft:player");
+            assert_eq!(event.from, "minecraft:farmland");
+            assert_eq!(event.to, "minecraft:dirt");
+            Flow::Cancel
+        }
     }
 }
-
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cancelled_landing_restores_farmland_before_its_crop_is_notified() {
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     mod_api::testing::with_mods(
-        vec![ModEntry::new("claims", Box::new(Claims))].into(),
+        vec![ModEntry::new("claims", claims::hooks())].into(),
         || {
             with_game_at(root, |game| {
                 game.world

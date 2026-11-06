@@ -465,6 +465,7 @@ mod tests {
                 [1, 2, 3, 4],
                 None,
                 Some(game.pack.assets.registry),
+                |_| None,
             );
             let restored = horizon_client::entity_nbt::mob_from_nbt(
                 &tag,
@@ -495,6 +496,7 @@ mod tests {
                 [5, 6, 7, 8],
                 None,
                 Some(game.pack.assets.registry),
+                |_| None,
             );
             let restored = horizon_client::entity_nbt::mob_from_nbt(
                 &tag,
@@ -1202,6 +1204,7 @@ mod tests {
                     [1, 2, 3, 4],
                     None,
                     Some(game.pack.assets.registry),
+                    |_| None,
                 );
                 assert!(!game.native_living_start_sleeping(living, pos), "{pos:?}");
                 assert_eq!(
@@ -1209,7 +1212,8 @@ mod tests {
                         &game.mobs[0],
                         [1, 2, 3, 4],
                         None,
-                        Some(game.pack.assets.registry)
+                        Some(game.pack.assets.registry),
+                        |_| None
                     ),
                     before
                 );

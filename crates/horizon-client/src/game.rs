@@ -8702,6 +8702,9 @@ impl Game<'_> {
         from: BlockStateId,
         to: BlockStateId,
     ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::EntityChangeBlockPre) {
+            return false;
+        }
         let name = |s: BlockStateId| self.res.facts().get(s).name.to_string();
         let (from, to) = (name(from), name(to));
         let mut cancel = false;

@@ -11445,10 +11445,6 @@ impl Remote {
     pub(super) fn listed_player_count(&self) -> usize {
         self.listed.len()
     }
-    /// Players in the server's player list, this one included.
-    pub(super) fn player_count(&self) -> usize {
-        self.players.len()
-    }
     /// The local player's profile UUID.
     pub(super) fn profile(&self) -> u128 {
         self.profile

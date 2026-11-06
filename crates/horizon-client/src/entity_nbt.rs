@@ -4042,7 +4042,7 @@ mod tests {
         let mob = mob_from_nbt(&tag, &types, 7, None).unwrap();
         assert_eq!(villager_data(&mob), data);
         assert_eq!(mob.extra.profession.index(), None);
-        let saved = mob_to_nbt(&mob, [0; 4], None, None);
+        let saved = mob_to_nbt(&mob, [0; 4], None, None, |_| None);
         let reloaded = mob_from_nbt(&saved, &types, 8, None).unwrap();
         assert_eq!(villager_data(&reloaded), data);
     }
@@ -6965,7 +6965,7 @@ mod held_item_name_tests {
             crate::mobs::finalize::OFFHAND,
             offhand.clone(),
         );
-        let saved = mob_to_nbt(&zombie, [0; 4], None, None);
+        let saved = mob_to_nbt(&zombie, [0; 4], None, None, |_| None);
         let zombie = mob_from_nbt(&saved, &types, 4, None).unwrap();
         assert_eq!(zombie.saddle_item(), Some(saddle));
         assert_eq!(zombie.equipment_stacks()[1], Some(offhand));
@@ -6987,7 +6987,7 @@ mod held_item_name_tests {
             stacks[6].as_ref().unwrap().item.as_ref(),
             "minecraft:diamond_horse_armor"
         );
-        let raw = mob_to_nbt(&horse, [1, 2, 3, 4], None, None);
+        let raw = mob_to_nbt(&horse, [1, 2, 3, 4], None, None, |_| None);
         let mut horse = mob_from_nbt(&raw, &types, 2, None).unwrap();
         assert_eq!(horse.extra.head_id(), Some("minecraft:iron_helmet"));
         assert_eq!(horse.extra.body_id(), Some("minecraft:diamond_horse_armor"));
