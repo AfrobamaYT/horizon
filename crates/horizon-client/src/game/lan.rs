@@ -924,7 +924,7 @@ pub(super) fn mob_meta(
         }
         // Villager.DATA_VILLAGER_DATA and ZombieVillager's (after Zombie's three).
         "minecraft:villager" | "minecraft:zombie_villager" => {
-            use horizon_client::mobs::render::{PROFESSIONS, VILLAGER_TYPES};
+            use horizon_client::mobs::render::VILLAGER_TYPES;
             if kind == "minecraft:villager" {
                 unhappy_counter(m, meta, defaults);
             } else {
@@ -935,7 +935,8 @@ pub(super) fn mob_meta(
                 defaults.push((19, serializer::BOOLEAN, Value::Bool(false)));
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
-            let profession = PROFESSIONS[e.variant2 as usize % PROFESSIONS.len()];
+            let profession =
+                horizon_client::mobs::villager::profession(e.profession.index().unwrap_or(0)).id;
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),
@@ -1572,6 +1573,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config, self.loop_context.clone());
+        hub.rule_registry = self.level.rule_registry.clone();
         hub.sync_attachments = !mod_api::__private::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
@@ -2655,8 +2657,12 @@ impl Game<'_> {
                 streaming: Some(&self.streaming),
             };
             host.hub.movement_checks = (
-                self.ui.rules.bool("player_movement_check"),
-                self.ui.rules.bool("elytra_movement_check"),
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::PLAYER_MOVEMENT_CHECK),
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
             );
             host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
             let pass = self.level_pass;
@@ -3003,8 +3009,12 @@ impl Game<'_> {
                     streaming: Some(&self.streaming),
                 };
                 host.hub.movement_checks = (
-                    self.ui.rules.bool("player_movement_check"),
-                    self.ui.rules.bool("elytra_movement_check"),
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::PLAYER_MOVEMENT_CHECK),
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
                 );
                 // IntegratedServer.getScaledTrackingDistance: the Entity Distance
                 // option scales what an integrated server or a LAN host tracks (a
@@ -3013,10 +3023,16 @@ impl Game<'_> {
                     host.hub.entity_range_percent =
                         (self.settings.entity_distance * 100.0).round() as i32;
                 }
-                host.hub
-                    .set_immediate_respawn(self.ui.rules.bool("immediate_respawn"));
-                host.hub
-                    .set_limited_crafting(self.ui.rules.bool("limited_crafting"));
+                host.hub.set_immediate_respawn(
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::IMMEDIATE_RESPAWN),
+                );
+                host.hub.set_limited_crafting(
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::LIMITED_CRAFTING),
+                );
                 // A server with several levels runs a pass for each
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
@@ -3585,7 +3601,10 @@ impl Game<'_> {
         // covers what the player tracks (`ChunkTrackingView`, within its view
         // distance + 1) and those chunks' lit neighbours.
         let radius = host.hub.config.view_distance + 1;
-        let rule = self.ui.rules.bool("spectators_generate_chunks");
+        let rule = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPECTATORS_GENERATE_CHUNKS);
         // The held players are sent the level, so their chunks are kept as the placed ones'.
         self.streaming.extra = host
             .hub
@@ -4342,6 +4361,31 @@ mod tests {
         });
     }
 
+    #[test]
+    fn unresolved_profession_sends_none_without_changing_saved_identity() {
+        let types = super::super::mods::living_mod_types();
+        let hub = meta_hub("MissingProfessionMeta");
+        let mut mob = Mob::new(
+            1,
+            types["minecraft:villager"].clone(),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        let metadata = |mob: &Mob| {
+            let (mut entries, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(mob, &hub, None, 0, &mut entries, &mut defaults);
+            entries
+                .into_iter()
+                .find(|(_, serializer, _)| *serializer == serializer::VILLAGER_DATA)
+        };
+        let expected = metadata(&mob);
+        assert!(expected.is_some());
+        mob.extra.profession =
+            horizon_client::mobs::villager::ProfessionState::from_id("example:engineer");
+        assert_eq!(metadata(&mob), expected);
+        assert_eq!(mob.extra.profession.id(), "example:engineer");
+    }
+
     /// A content mod's living type sends the entity data of its template's
     /// class (`Zombie.DATA_BABY_ID`, the villager's unhappy counter), entry
     /// for entry what its template sends.
@@ -4375,7 +4419,17 @@ mod tests {
     /// A hub with no players and empty registries, for `mob_meta`.
     fn meta_hub(name: &str) -> horizon_client::lan::hub::Hub {
         use horizon_client::lan::{Lan, NetConfig, chunks::ChunkEncoder, data, hub};
-        let sync = std::sync::Arc::new(data::SyncData::empty());
+        let mut sync = data::SyncData::empty();
+        for (registry, id) in [
+            ("minecraft:villager_type", "minecraft:plains"),
+            ("minecraft:villager_profession", "minecraft:none"),
+        ] {
+            sync.builtin.registries.insert(
+                registry.into(),
+                horizon_protocol::registry::Ids::from_names(vec![id.into()]),
+            );
+        }
+        let sync = std::sync::Arc::new(sync);
         let config = NetConfig {
             announce: false,
             ..NetConfig::loopback(0, name.into(), 2)

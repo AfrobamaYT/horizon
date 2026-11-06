@@ -1,9 +1,6 @@
 //! VillagerProfessionLayer's cached texture metadata and type-layer head visibility.
-use super::{
-    anim::Poses,
-    render::{PROFESSIONS, VILLAGER_TYPES},
-};
-use std::{collections::HashMap, fs, path::Path};
+use super::anim::Poses;
+use std::{collections::HashMap, path::Path};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 enum Hat {
@@ -19,36 +16,41 @@ pub struct VillagerHats(HashMap<String, Hat>);
 impl VillagerHats {
     pub fn load(root: &Path) -> Self {
         let mut hats = HashMap::new();
-        for folder in ["villager", "zombie_villager"] {
-            for (group, names) in [
-                ("type", VILLAGER_TYPES.as_slice()),
-                ("profession", PROFESSIONS.as_slice()),
-            ] {
-                for name in names {
-                    let texture = format!("entity/{folder}/{group}/{name}");
-                    let path = root.join(format!("assets/minecraft/textures/{texture}.png.mcmeta"));
-                    let metadata = fs::read(path)
-                        .ok()
-                        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-                    let hat = match metadata
-                        .as_ref()
-                        .and_then(|v| v["villager"]["hat"].as_str())
-                    {
-                        Some("partial") => Hat::Partial,
-                        Some("full") => Hat::Full,
-                        _ => Hat::None,
-                    };
-                    hats.insert(texture, hat);
-                }
+        for texture in crate::atlas_sources::list_textures(root) {
+            let (namespace, path) = texture.split_once(':').expect("qualified texture");
+            if ![
+                "entity/villager/type/",
+                "entity/villager/profession/",
+                "entity/zombie_villager/type/",
+                "entity/zombie_villager/profession/",
+            ]
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
+            {
+                continue;
             }
+            let metadata_path = root.join(format!("assets/{namespace}/textures/{path}.png.mcmeta"));
+            let metadata = horizon_core::prepared_files::read(&metadata_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+            let hat = match metadata
+                .as_ref()
+                .and_then(|v| v["villager"]["hat"].as_str())
+            {
+                Some("partial") => Hat::Partial,
+                Some("full") => Hat::Full,
+                _ => Hat::None,
+            };
+            hats.insert(texture, hat);
         }
         Self(hats)
     }
 
     pub fn apply(&self, folder: &str, variant: &str, profession: &str, poses: &mut Poses) {
-        let hat = |group, name| {
+        let hat = |group, name: &str| {
+            let (namespace, path) = name.split_once(':').unwrap_or(("minecraft", name));
             self.0
-                .get(&format!("{folder}/{group}/{name}"))
+                .get(&format!("{namespace}:{folder}/{group}/{path}"))
                 .copied()
                 .unwrap_or_default()
         };
@@ -65,6 +67,28 @@ impl VillagerHats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    #[test]
+    fn namespaced_nested_hat_metadata_comes_from_effective_root() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-profession-hats-{}", std::process::id()));
+        let path =
+            root.join("assets/example/textures/entity/villager/profession/nested/engineer.png");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, []).unwrap();
+        fs::write(
+            path.with_extension("png.mcmeta"),
+            r#"{"villager":{"hat":"full"}}"#,
+        )
+        .unwrap();
+        let hats = VillagerHats::load(&root);
+        assert_eq!(
+            hats.0["example:entity/villager/profession/nested/engineer"],
+            Hat::Full
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     #[ignore = "requires prepared 26.3 models and textures in HORIZON_TEST_RESOURCES"]
@@ -72,8 +96,11 @@ mod tests {
         use crate::mobs::{load_model, render::draw};
         let root = std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES");
         let mut hats = VillagerHats::load(Path::new(&root));
-        assert_eq!(hats.0["entity/villager/profession/farmer"], Hat::Full);
-        assert_eq!(hats.0["entity/villager/type/plains"], Hat::None);
+        assert_eq!(
+            hats.0["minecraft:entity/villager/profession/farmer"],
+            Hat::Full
+        );
+        assert_eq!(hats.0["minecraft:entity/villager/type/plains"], Hat::None);
         for (name, folder) in [
             ("villager", "entity/villager"),
             ("villager_baby", "entity/villager"),
@@ -89,9 +116,12 @@ mod tests {
                 (Hat::Partial, Hat::Partial, false),
                 (Hat::Full, Hat::None, false),
             ] {
-                hats.0.insert(format!("{folder}/type/plains"), type_hat);
                 hats.0
-                    .insert(format!("{folder}/profession/farmer"), profession_hat);
+                    .insert(format!("minecraft:{folder}/type/plains"), type_hat);
+                hats.0.insert(
+                    format!("minecraft:{folder}/profession/farmer"),
+                    profession_hat,
+                );
                 let mut poses = Poses::new(&model);
                 hats.apply(folder, "plains", "farmer", &mut poses);
                 let mut actual = Vec::new();

@@ -208,7 +208,10 @@ impl Game<'_> {
     /// gold and other loved items, nuggets, food, gear), walk to them and
     /// take them (`GoToWantedItem`, `Piglin.pickUpItem`).
     pub(super) fn piglin_pickups(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         if !griefing && !self.grief_hooked() {
             return;
         }

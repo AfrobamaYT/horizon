@@ -14,7 +14,7 @@
 //! `sheep_wool3` (ETF), or an even choice when the body has no variants; villagers' layers each
 //! choose their own, as ETF does.
 
-use super::render::{DYE_NAMES, PROFESSIONS};
+use super::render::DYE_NAMES;
 use super::{Mob, MobData, Species};
 use horizon_optifine::random::{self, Block, Facts, Weather};
 use horizon_optifine::random_textures::RandomTextures;
@@ -150,7 +150,7 @@ pub fn choose(
         .collect();
     let profession =
         matches!(m.species(), Species::Villager | Species::ZombieVillager).then(|| {
-            let name = PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()];
+            let name = super::villager::profession(m.extra.profession.index().unwrap_or(0)).id;
             (format!("minecraft:{name}"), m.extra.villager_level.max(1))
         });
     let facts = Facts {
@@ -569,7 +569,7 @@ mod tests {
             ],
         );
         let mut m = mob(Species::Villager);
-        m.extra.variant2 = PROFESSIONS.iter().position(|&p| p == "librarian").unwrap() as u8;
+        m.extra.profession = crate::mobs::villager::ProfessionState::from_id("minecraft:librarian");
         m.extra.villager_level = 3;
         choose(&mut m, &t, &data(), Some(seen("minecraft:plains")), 0);
         let villager2 = variant("entity/villager/villager2");

@@ -51,6 +51,7 @@ pub fn main_with(
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     horizon_threads::configure_allocator();
     horizon_client::spans::startup::init(std::time::Instant::now());
+    horizon_client::spans::trace::start_from_env();
     let launch: crate::Result<_> = std::env::current_dir().map_err(Into::into).and_then(|cwd| {
         Ok(LaunchArguments::parse(
             std::env::args().skip(1),
@@ -225,6 +226,34 @@ pub fn main_with(
     {
         log::warn!("The enchantment level hook is already installed; keeping the first");
     }
+    install_client_hooks();
+    raise_open_file_limit();
+    if let Err(error) = game::run_with(launch, native) {
+        // A bad command line is the caller's mistake, not a crash: no report.
+        let usage = error.is::<game::UsageError>();
+        log::error!("Horizon: {error}");
+        logging::flush();
+        // The report's path is the last line on stderr (crash::SAVED_LINE).
+        if !help && !usage {
+            crash::report_error(&home, side, &*error);
+        }
+        // Started from Explorer, the console window closes with the game:
+        // keep the message on screen until it is read.
+        #[cfg(windows)]
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            eprintln!("Press Enter to close.");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
+        std::process::exit(if usage {
+            game::exit_code::USAGE
+        } else {
+            game::exit_code::ERROR
+        });
+    }
+    logging::flush();
+}
+
+pub(crate) fn install_client_hooks() {
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |context, menu, slot, stack, may_place, max_stack| {
             let context = mod_api::OwningLoop::new(context);
@@ -310,30 +339,6 @@ pub fn main_with(
     }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }
-    raise_open_file_limit();
-    if let Err(error) = game::run_with(launch, native) {
-        // A bad command line is the caller's mistake, not a crash: no report.
-        let usage = error.is::<game::UsageError>();
-        log::error!("Horizon: {error}");
-        logging::flush();
-        // The report's path is the last line on stderr (crash::SAVED_LINE).
-        if !help && !usage {
-            crash::report_error(&home, side, &*error);
-        }
-        // Started from Explorer, the console window closes with the game:
-        // keep the message on screen until it is read.
-        #[cfg(windows)]
-        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-            eprintln!("Press Enter to close.");
-            let _ = std::io::stdin().read_line(&mut String::new());
-        }
-        std::process::exit(if usage {
-            game::exit_code::USAGE
-        } else {
-            game::exit_code::ERROR
-        });
-    }
-    logging::flush();
 }
 
 /// The JVM raises its open-file limit to the hard limit as it starts

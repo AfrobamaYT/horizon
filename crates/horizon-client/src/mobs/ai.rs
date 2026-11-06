@@ -842,6 +842,18 @@ fn effects_from_blocks(
                         ),
                     );
                     visited.push(p);
+                    // PowderSnowBlock.entityInside: a burning mob destroys the
+                    // block (with `mob_griefing`), then EXTINGUISH puts it out.
+                    if w.block_name(x, y, z) == "minecraft:powder_snow" {
+                        if m.is_on_fire() && w.mob_griefing {
+                            events.push(MobEvent::BreakBlock {
+                                pos: p,
+                                drop: false,
+                                by: None,
+                            });
+                        }
+                        m.extinguish_fire();
+                    }
                     match w.block_name(x, y, z) {
                         "minecraft:cactus" => {
                             m.damage(level, 1.0, Damage::of(DamageKind::Cactus));
@@ -1632,11 +1644,12 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
 }
 impl Mob {
     /// LivingEntity.isPushable (and the push it takes from `Entity.push(Entity)`):
-    /// bats and shulkers are never moved by others.
+    /// bats and shulkers are never moved by others, nor is a mob on a climbable
+    /// block (`onClimbable`, cached by the last tick).
     pub fn pushable(&self) -> bool {
         self.alive()
             && !matches!(self.species(), Species::Bat | Species::Shulker)
-            && (!self.kind.flags.climber || !self.climbing)
+            && !self.on_climbable
             && (self.species() != Species::Creaking || super::creaking::can_move(self))
             && (self.species() != Species::Warden || !super::warden::digging_or_emerging(self))
     }
@@ -1666,6 +1679,7 @@ fn push_entities(
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) {
+    m.on_climbable = on_climbable(m, w);
     if m.species() == Species::Bat {
         return;
     }
@@ -1673,7 +1687,7 @@ fn push_entities(
     // The pusher's own isPushable, checked by `e.push(this)` before moving it.
     let self_pushable = m.alive()
         && m.species() != Species::Shulker
-        && !on_climbable(m, w)
+        && !m.on_climbable
         && (m.species() != Species::Creaking || super::creaking::can_move(m))
         && (m.species() != Species::Warden || !super::warden::digging_or_emerging(m))
         && !super::equine::is_vehicle(m);

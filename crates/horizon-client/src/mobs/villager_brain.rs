@@ -861,10 +861,14 @@ fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Opti
             .registry
             .state(state)
             .and_then(|s| s.properties.get("part"));
-        return (part.map(String::as_str) == Some("head")).then_some(Poi::Home);
+        return runtime_bed_poi(name, part.map(String::as_str));
     }
     super::villager::job_site_profession(name).map(Poi::Job)
 }
+fn runtime_bed_poi(name: &str, part: Option<&str>) -> Option<Poi> {
+    (name.ends_with("_bed") && part == Some("head")).then_some(Poi::Home)
+}
+
 /// Which POI types a predicate accepts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum PoiFilter {
@@ -876,7 +880,11 @@ enum PoiFilter {
     Meeting,
 }
 fn poi_matches(m: &Mob, f: PoiFilter, p: Poi) -> bool {
-    let profession = m.extra.variant2;
+    if matches!(f, PoiFilter::Held | PoiFilter::Acquirable) && m.extra.profession.index().is_none()
+    {
+        return false;
+    }
+    let profession = m.extra.profession.index().unwrap_or(0);
     let employed = profession != super::villager::NONE && profession != super::villager::NITWIT;
     match (f, p) {
         (PoiFilter::Held, Poi::Job(j)) => employed && j == profession,
@@ -890,6 +898,14 @@ fn poi_matches(m: &Mob, f: PoiFilter, p: Poi) -> bool {
         (PoiFilter::Home, Poi::Home) | (PoiFilter::Meeting, Poi::Meeting) => true,
         _ => false,
     }
+}
+fn can_reset_profession(m: &Mob) -> bool {
+    m.extra.profession.index().is_some_and(|prof| {
+        prof != super::villager::NONE
+            && prof != super::villager::NITWIT
+            && super::villager::xp(m) == 0
+            && m.extra.villager_level <= 1
+    })
 }
 /// Tickets taken on a POI: by this villager's memories and by others'
 /// (counted once per search by [`others_tickets`]).
@@ -1915,6 +1931,9 @@ impl B {
             }
             B::PoiCompetitorScan(r) => one(
                 || {
+                    if m.extra.profession.index().is_none() {
+                        return false;
+                    }
                     let mm = mem(m);
                     let (Some(site), true) = (mm.job_site.value(), mm.mobs.present()) else {
                         return false;
@@ -1930,7 +1949,7 @@ impl B {
                             if s.species != Species::Villager || !s.alive || s.job != Some(site) {
                                 continue;
                             }
-                            if s.profession != m.extra.variant2 {
+                            if m.extra.profession.index() != s.profession {
                                 continue;
                             }
                             // selectWinner(first, second): the second wins ties.
@@ -2086,7 +2105,7 @@ impl B {
                     if mm.job_site.present() || !mm.mobs.present() {
                         return false;
                     }
-                    if m.is_baby() || m.extra.variant2 != super::villager::NONE {
+                    if m.is_baby() || m.extra.profession.index() != Some(super::villager::NONE) {
                         return false;
                     }
                     let Some(poi) = poi_at(cx.w, site[0], site[1], site[2]) else {
@@ -2100,7 +2119,7 @@ impl B {
                             continue;
                         }
                         let Poi::Job(j) = poi else { continue };
-                        if s.profession != j {
+                        if s.profession != Some(j) {
                             continue;
                         }
                         // A nearby villager of that profession takes it over.
@@ -2117,6 +2136,9 @@ impl B {
                 r,
             ),
             B::AssignProfession(r) => {
+                if m.extra.profession.index().is_none() {
+                    return false;
+                }
                 let Some(p) = mem(m).potential_job_site.value() else {
                     return false;
                 };
@@ -2128,7 +2150,7 @@ impl B {
                 mm.job_site.set(p);
                 happy_particles(m, cx);
                 *r = true;
-                if m.extra.variant2 != super::villager::NONE {
+                if m.extra.profession.index() != Some(super::villager::NONE) {
                     return true;
                 }
                 if let Some(Poi::Job(j)) = poi_at(cx.w, p[0], p[1], p[2]) {
@@ -2142,10 +2164,7 @@ impl B {
                     if mem(m).job_site.present() {
                         return false;
                     }
-                    let prof = m.extra.variant2;
-                    let can_be_fired =
-                        prof != super::villager::NONE && prof != super::villager::NITWIT;
-                    if can_be_fired && super::villager::xp(m) == 0 && m.extra.villager_level <= 1 {
+                    if can_reset_profession(m) {
                         super::villager::set_profession(m, super::villager::NONE);
                         cx.refresh = true;
                         true
@@ -3498,12 +3517,15 @@ fn villager_target_valid(m: &mut Mob, w: &MobWorld, which: Mem) -> bool {
 }
 /// `Villager.playWorkSound`.
 fn play_work_sound(m: &mut Mob, cx: &mut Bx) {
-    if let Some(sound) = super::villager::work_sound(m.extra.variant2) {
+    if let Some(sound) = super::villager::work_sound(m.extra.profession.index().unwrap_or(0)) {
         m.voice(sound, cx.events);
     }
 }
 /// `WorkAtPoi.start`'s restock.
 fn restock_if_due(m: &mut Mob, w: &MobWorld) {
+    if m.extra.profession.index().is_none() {
+        return;
+    }
     let day = w.day_time.div_euclid(24000);
     if let Some(t) = m.extra.trade.as_mut()
         && t.should_restock(w.game_time, day)
@@ -4600,4 +4622,37 @@ pub fn seen_memories(
         mm.golem_detected_recently.present(),
         mm.last_slept.value(),
     )
+}
+
+#[cfg(test)]
+mod poi_classification_tests {
+    use super::*;
+    use horizon_world::chunk::BlockState;
+
+    #[test]
+    fn unresolved_profession_does_not_claim_or_reset_a_job() {
+        let mut mob = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
+        mob.extra.profession = super::super::villager::ProfessionState::from_id("example:engineer");
+        assert!(!poi_matches(&mob, PoiFilter::Held, Poi::Job(5)));
+        assert!(!poi_matches(&mob, PoiFilter::Acquirable, Poi::Job(5)));
+        assert!(!can_reset_profession(&mob));
+        assert_eq!(mob.extra.profession.id(), "example:engineer");
+    }
+
+    #[test]
+    fn straw_bed_head_differs_between_runtime_and_saved_pois() {
+        for (name, part, runtime, saved) in [
+            ("minecraft:straw_bed", "head", true, false),
+            ("minecraft:straw_bed", "foot", false, false),
+            ("minecraft:red_bed", "head", true, true),
+            ("minecraft:red_bed", "foot", false, false),
+        ] {
+            let state = BlockState {
+                name: name.into(),
+                properties: [("part".into(), part.into())].into_iter().collect(),
+            };
+            assert_eq!(runtime_bed_poi(name, Some(part)).is_some(), runtime);
+            assert_eq!(horizon_world::poi::poi_type(&state).is_some(), saved);
+        }
+    }
 }

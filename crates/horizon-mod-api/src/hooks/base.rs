@@ -1335,13 +1335,11 @@ pub trait Hooks {
         host = "read"
     )]
     fn use_duration();
-    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
-    /// `animation` arrives with its consumable's (`eat`, `drink`), else
-    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
-    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
-    /// Asked each frame the hand draws an item in use, for an item with no
-    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
-    /// theirs). Client-side.
+    /// `Item.getUseAnimation` of `stack` in use, for first- and third-person
+    /// rendering. `animation` arrives with the item's vanilla answer; mods may
+    /// change it. A `Spear` override on an item without kinetic data is refused
+    /// as `None`. Asked on the client when each render consumer updates; answer
+    /// from the stack alone.
     #[hook(side = "client", contract = "listen", scope = "item", key = "stack")]
     fn use_animation();
     /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
@@ -1828,20 +1826,13 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/*.rs`
-    /// with the game's): container slot `slot` of the content mod menu type `menu`
-    /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
-    /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
-    /// `may_place` and `max_stack` hold the type's own answer (false on one of its
-    /// `results`, true elsewhere, and 99): change them for your own menu types.
-    /// `max_stack` is kept to 1 to 99,
-    /// and the item's own stack size still caps it. Asked on the server, for each
-    /// click, drag and shift-click that puts an item in a slot, several times for
-    /// one shift-click: answer from `stack` and `context` alone, and fast. `context`
-    /// holds the side, the registries and the settings of the resource generation;
-    /// a `/reload` builds the next one.
+    /// Slot placement and stack limits for a content mod menu. `slot` is the
+    /// backing container index, including player inventory slots. The slot's
+    /// own answers arrive first; the maximum is bounded to 1–99 and the item
+    /// limit. Runs in the restricted context during server clicks and client
+    /// prediction. Answer from the stack and context alone, and fast.
     #[hook(
-        side = "server",
+        side = "both",
         contract = "listen",
         scope = "menu",
         key = "menu",

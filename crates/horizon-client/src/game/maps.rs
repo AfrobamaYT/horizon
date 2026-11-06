@@ -1764,7 +1764,7 @@ impl Game<'_> {
                 let f = self.gui.atlas.font.width_text(&text);
                 if f > 0.0 {
                     let f1 = (25.0 / f).clamp(0.0, 6.0 / 9.0);
-                    let mut text_batch = HudBatch::new([1, 1]);
+                    let mut text_batch = HudBatch::scratch([1, 1]);
                     let behind =
                         text_batch.name_tag(&self.gui.atlas, &text, 0.0, 0xFFFF_FFFF, 0x8000_0000);
                     self.map_patches.append(&mut text_batch.patches);

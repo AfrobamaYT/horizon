@@ -299,8 +299,14 @@ impl Game<'_> {
     /// `ServerLevel.isSpawningMonsters`.
     pub(super) fn spawning_monsters(&self) -> bool {
         self.ui.difficulty != 0
-            && self.ui.rules.bool("spawn_mobs")
-            && self.ui.rules.bool("spawn_monsters")
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS)
     }
     /// Hearts that came with generated or loaded chunks get their block
     /// entity (`newBlockEntity`) the first time their chunk is seen lit.

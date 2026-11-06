@@ -220,7 +220,7 @@ impl Game<'_> {
         };
         if let Some(child) = self.mobs.iter_mut().find(|m| m.id == id) {
             child.extra.variant = variant;
-            child.extra.variant2 = villager::NONE;
+            child.extra.profession = Default::default();
             child.extra.age = -24000;
             child.extra.bed = Some(bed);
         }
@@ -362,7 +362,10 @@ impl Game<'_> {
     /// `Mob.aiStep` item pickup for villagers (`InventoryCarrier`): food,
     /// seeds and what their profession wants, from within a block.
     pub(super) fn villager_pickups(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         if self.dropped.is_empty() || (!griefing && !self.grief_hooked()) {
             return;
         }

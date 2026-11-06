@@ -1091,22 +1091,21 @@ impl HudAtlas {
         for folder in folders {
             walk(&textures.join(folder), &mut files);
         }
-        // Content mods' entity textures: their equipment assets name them as
-        // `<ns>:<path>`, and native mods draw their block entities with them
-        // (`native_draw_quad`: `<ns>:entity/...`); and their mob effects'
-        // icons, `<ns>:mob_effect/<path>`.
-        let namespaces = horizon_items::content_namespaces::namespaces(root);
-        for folder in ["entity", "mob_effect"] {
-            if folders.contains(&folder) {
-                for namespace in &namespaces {
-                    walk(
-                        &root.join(format!("assets/{namespace}/textures/{folder}")),
-                        &mut files,
-                    );
+        // Entity and effect resources can come from any namespace in the effective
+        // pack, including a native mod with no content-mod namespace marker.
+        let assets = root.join("assets");
+        if let Ok(namespaces) = fs::read_dir(&assets) {
+            for namespace in namespaces.flatten() {
+                if namespace.file_name() == "minecraft" {
+                    continue;
+                }
+                for folder in ["entity", "mob_effect"] {
+                    if folders.contains(&folder) {
+                        walk(&namespace.path().join("textures").join(folder), &mut files);
+                    }
                 }
             }
         }
-        let assets = root.join("assets");
         // A native mod's particle type names its textures `<ns>:particle/<path>`
         // and needn't ship content, so every namespace's folder is packed.
         if folders.contains(&"particle")
@@ -1514,9 +1513,13 @@ fn clip_polygon(poly: &[HudVertex], axis: usize, limit: f32, keep_below: bool) -
     }
     out
 }
-/// The GUI Scale option (0 = auto).
-pub static GUI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-pub static GUI_UNICODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Scale inputs for one view, copied from its owner's settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuiScale {
+    pub requested: u32,
+    pub unicode: bool,
+}
+
 /// One frame of overlay geometry in GUI pixels.
 pub struct HudBatch {
     pub vertices: Vec<HudVertex>,
@@ -1575,12 +1578,16 @@ pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
 impl HudBatch {
     /// Window.calculateScale: the largest scale keeping >= 320x240 GUI pixels,
     /// capped by the GUI Scale option (0 = auto).
-    pub fn new(window: [u32; 2]) -> Self {
-        let gui = horizon_client_input::window::GuiSize::new(
-            window,
-            GUI_SCALE.load(std::sync::atomic::Ordering::Relaxed),
-            GUI_UNICODE.load(std::sync::atomic::Ordering::Relaxed),
-        );
+    pub fn new(window: [u32; 2], inputs: GuiScale) -> Self {
+        let gui =
+            horizon_client_input::window::GuiSize::new(window, inputs.requested, inputs.unicode);
+        Self::with_gui_size(gui)
+    }
+    /// An offscreen or test batch, independent of the active view's settings.
+    pub fn scratch(window: [u32; 2]) -> Self {
+        Self::with_gui_size(horizon_client_input::window::GuiSize::new(window, 0, false))
+    }
+    fn with_gui_size(gui: horizon_client_input::window::GuiSize) -> Self {
         Self {
             vertices: Vec::new(),
             scale: gui.scale as f32,
@@ -2888,6 +2895,14 @@ impl HudRenderer {
 mod tests {
     use super::*;
 
+    #[test]
+    fn scratch_batch_ignores_view_settings() {
+        let batch = HudBatch::scratch([960, 720]);
+        let expected = horizon_client_input::window::GuiSize::new([960, 720], 0, false);
+        assert_eq!(batch.scale, expected.scale as f32);
+        assert_eq!([batch.width, batch.height], expected.size.map(|v| v as f32));
+    }
+
     /// The mod image slot is paid only by a game with a native mod loaded.
     #[test]
     fn the_mod_image_slot_exists_only_when_a_mod_is_loaded() {
@@ -3069,7 +3084,7 @@ mod tests {
 
     #[test]
     fn clip_since_keeps_the_visible_part_of_a_straddling_triangle() {
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         let start = batch.vertices.len();
         // A right triangle (a quad `a, b, c, c`) whose centre lies outside the rect.
         batch.quad(
@@ -3098,7 +3113,7 @@ mod tests {
 
     #[test]
     fn clip_since_moves_blend_ranges_with_their_vertices() {
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         let start = batch.vertices.len();
         let tri = |batch: &mut HudBatch, y: f32| {
             batch.quad(
@@ -3320,7 +3335,7 @@ mod tests {
         let effect = crate::effects::EffectInstance::new("gems:glow", 600, 0);
         let icon = crate::hud_overlays::EffectIcon::from(&effect);
         let draws = crate::hud_overlays::effects(320, false, &[icon]);
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         crate::hud_layout::paint(&mut batch, &atlas, &draws);
         assert!(batch.vertices.iter().any(|v| v.uv == [rect.u0, rect.v0]));
         let panels = {
@@ -3545,6 +3560,22 @@ mod tests {
         let static_badge = atlas.sprites["gui/sprites/icon/static_badge"];
         assert_eq!(static_badge.texels((atlas.width, atlas.height)), (16, 32));
     }
+    #[test]
+    fn arbitrary_namespace_entity_textures_are_packed_without_content_marker() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-atlas-entity-namespace-{}",
+            std::process::id()
+        ));
+        let file =
+            root.join("assets/example/textures/entity/villager/profession/nested/engineer.png");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        write_strip(&file, 16, 16, &[[12, 34, 56, 255]], None);
+        let atlas = HudAtlas::build(&root).unwrap();
+        let rect = atlas.sprites["example:entity/villager/profession/nested/engineer"];
+        assert_eq!(texel_at(&atlas, rect, 0, 0), [12, 34, 56, 255]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// A resource root with one plain item texture and these CIT files (relative path, contents).
     fn cit_root(name: &str, files: &[(&str, &str)]) -> PathBuf {
         let root =
@@ -3962,7 +3993,7 @@ texture=wide",
         let root = two_glyph_font("world-outline");
         let atlas = HudAtlas::build(&root).unwrap();
         let _ = fs::remove_dir_all(&root);
-        let mut batch = HudBatch::new([1, 1]);
+        let mut batch = HudBatch::scratch([1, 1]);
         let text = crate::text::Text::colored("ab", 0xff0000);
         let outline = rgba(1, 2, 3, 128);
         let (advance, front) =
@@ -4015,7 +4046,7 @@ texture=wide",
     fn component_shadow_color_overrides_text_call_shadow() {
         let root = two_glyph_font("component-shadow");
         let atlas = HudAtlas::build(&root).unwrap();
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         let text = crate::text::Text::styled(
             "a",
             crate::text::Style {
@@ -4067,7 +4098,7 @@ texture=wide",
             &serde_json::json!({"object":"player","player":{"id":"00000000-0000-0000-0000-000000000000"}}),
             &mut |_| crate::text::Text::empty(),
         );
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         assert_eq!(
             batch.text_styled(&atlas, &text, 10.0, 10.0, u32::MAX, false),
             8.0
@@ -4105,7 +4136,7 @@ texture=wide",
             }),
             &mut |_| crate::text::Text::empty(),
         );
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         let width = batch.text_styled(&atlas, &text, 10.0, 10.0, u32::MAX, false);
         assert_eq!(width, atlas.font.glyph('a').advance + 8.0);
         assert_eq!(batch.vertices.len(), 12); // glyph and one sprite
@@ -4143,7 +4174,7 @@ texture=wide",
         let atlas = HudAtlas::build(&root).unwrap();
         let _ = fs::remove_dir_all(&root);
         let text = crate::text::Text::literal("aй").bold();
-        let mut batch = HudBatch::new([1, 1]);
+        let mut batch = HudBatch::scratch([1, 1]);
         let behind = batch.name_tag(&atlas, &text, 0.0, u32::MAX, 0x3F00_0000);
         // Each quad's box: x0, y0, x1, y1.
         let boxes: Vec<[f32; 4]> = batch
@@ -4200,7 +4231,7 @@ texture=wide",
         let effect = EffectInstance::new("levitation", -1, 0);
         let icon = hud_overlays::EffectIcon::from(&effect);
         let draws = hud_overlays::effects(320, false, &[icon]);
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         hud_layout::paint(&mut batch, &atlas, &draws);
         // Both the background and the 18x18 effect icon must reach the batch.
         assert_eq!(batch.vertices.len(), 12);
@@ -4273,7 +4304,7 @@ texture=wide",
 
     #[test]
     fn gui_models_keep_separate_depth_runs_between_overlay_draws() {
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         batch.scale = 2.0;
         let p = [
             [0.0, 0.0, 2.0],
@@ -4319,7 +4350,7 @@ texture=wide",
 
     #[test]
     fn inverted_ranges_split_the_draws_in_order() {
-        let mut batch = HudBatch::new([854, 480]);
+        let mut batch = HudBatch::scratch([854, 480]);
         let quad = |b: &mut HudBatch| b.quad([[0.0; 2]; 4], [[0.0; 2]; 4], 0);
         quad(&mut batch);
         let start = batch.vertices.len();
@@ -4350,7 +4381,7 @@ texture=wide",
 
     #[test]
     fn blur_boundary_splits_blend_runs_without_losing_or_repeating_vertices() {
-        let mut batch = HudBatch::new([854, 480]);
+        let mut batch = HudBatch::scratch([854, 480]);
         for _ in 0..5 {
             batch.quad([[0.0; 2]; 4], [[0.0; 2]; 4], 0);
         }
