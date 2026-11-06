@@ -351,6 +351,8 @@ mod tests {
             }
             pub struct NativeClientInfo;
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub enum CameraType {}
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum ToastKind {
                 Advancement,
             }
