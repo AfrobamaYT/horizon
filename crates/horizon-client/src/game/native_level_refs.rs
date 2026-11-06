@@ -432,6 +432,53 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn shared_level_signal_reads_live_comparator_and_refuses_other_levels() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::geometry::Direction;
+        use mod_api::Host;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let y = game.world.bottom_y() + 1;
+            let registry = &game.pack.assets.registry;
+            let redstone = registry.default_state("minecraft:redstone_block").unwrap();
+            game.world.set(1, y, 1, redstone).unwrap();
+            let comparator = registry.default_state("minecraft:comparator").unwrap();
+            let mut comparator_state = registry.state(comparator).unwrap().clone();
+            comparator_state
+                .properties
+                .insert("powered".into(), "true".into());
+            comparator_state
+                .properties
+                .insert("facing".into(), "east".into());
+            let comparator = registry.resolve(&comparator_state).unwrap();
+            game.world.set(4, y, 4, comparator).unwrap();
+            game.block_ticks
+                .comparator_outputs
+                .insert(BlockPos::new(4, y, 4), 9);
+            let level = game.native_level(game.dim.id()).unwrap();
+            let host: &dyn Host = game;
+            assert_eq!(level.signal(host, [1, y, 1], Direction::East), Some(15));
+            assert_eq!(level.best_neighbor_signal(host, [2, y, 1]), Some(15));
+            assert!(level.has_neighbor_signal(host, [2, y, 1]));
+            assert_eq!(level.signal(host, [4, y, 4], Direction::East), Some(9));
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            let other = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            for unavailable in [stale, other] {
+                assert_eq!(unavailable.signal(host, [1, y, 1], Direction::East), None);
+                assert!(!unavailable.has_neighbor_signal(host, [2, y, 1]));
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn height_reads_server_levels_and_the_joined_client_level() {
         use super::super::execution_role::ExecutionRole;
         use horizon_client::chunk::LevelShape;
