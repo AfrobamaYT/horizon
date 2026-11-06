@@ -183,6 +183,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    use horizon_world::identifier::Identifier;
     use mod_api::__private::game::{Fields, sound_ref};
     use mod_api::{
         ClientHost, Flow, Hooks, ModEntry, RenderGuiPreEvent, SoundPlay, SoundRef, SoundState,
@@ -220,13 +221,11 @@ mod tests {
                 host.play_local_sound(&SoundPlay::ui("not an id"), 0)
                     .is_none()
             );
-            let events = host.sound_events();
-            assert!(
-                events
-                    .iter()
-                    .any(|e| e.to_string() == "minecraft:ui.button.click")
+            let _ = (
+                host.sound_events(),
+                host.audio_devices(),
+                host.audio_device(),
             );
-            let _ = (host.audio_devices(), host.audio_device());
             self.0.lock().unwrap().extend([stopped, faded]);
             Flow::Continue
         }
@@ -258,6 +257,16 @@ mod tests {
                 // Without an output device (a test machine) the engine starts nothing, so the
                 // faded loop is over here; with one it plays until its fade ends.
                 assert_ne!(game.native_sound_state(faded), Some(SoundState::Waiting));
+                // Every event the engine has, none dropped (prepared test resources may have
+                // no sounds at all).
+                let names = game.audio.event_names();
+                let events = game.native_sound_events();
+                assert_eq!(events.len(), names.len());
+                assert!(
+                    names
+                        .iter()
+                        .all(|name| events.contains(&Identifier::parse(name).unwrap()))
+                );
                 // A handle no play has, and a server.
                 let unknown = sound_ref(999_999);
                 assert_eq!(game.native_sound_state(unknown), Some(SoundState::Stopped));

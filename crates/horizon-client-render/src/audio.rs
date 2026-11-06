@@ -1421,16 +1421,9 @@ impl Audio {
             id
         }
     }
-    /// Where a client mod's sound (`SoundRef`) is: gone from the engine once it ended or was
-    /// stopped, playing while it holds a channel, waiting before that.
+    /// Where a client mod's sound (`SoundRef`) is.
     pub fn mod_sound_state(&self, id: InstanceId) -> mod_api::SoundState {
-        if self.engine.instance(id).is_none() {
-            mod_api::SoundState::Stopped
-        } else if self.engine.is_active(id) {
-            mod_api::SoundState::Playing
-        } else {
-            mod_api::SoundState::Waiting
-        }
+        self.engine.mod_sound_state(id)
     }
     /// A client mod's `SoundRef::stop`.
     pub fn stop_mod_sound(&mut self, id: InstanceId) {

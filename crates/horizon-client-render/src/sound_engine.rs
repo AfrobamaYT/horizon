@@ -1116,6 +1116,28 @@ impl SoundEngine {
             backend.stop(c);
         }
     }
+    /// Where a mod's sound is (`SoundRef::state`). `isActive` alone would not do: an instance
+    /// keeps its ended channel until its delete time, 20 ticks after it started.
+    pub fn mod_sound_state(&self, id: InstanceId) -> mod_api::SoundState {
+        use mod_api::SoundState::{Playing, Stopped, Waiting};
+        let Some(instance) = self.instances.get(&id) else {
+            return Stopped;
+        };
+        if instance.stopped {
+            return Stopped;
+        }
+        let channel = self.channel_of(id);
+        if self.loaded && channel.is_some_and(|handle| !self.handle_stopped(handle)) {
+            Playing
+        } else if self.queued.iter().any(|(queued, _)| *queued == id)
+            || self.queued_tickable.contains(&id)
+            || channel.is_none()
+        {
+            Waiting
+        } else {
+            Stopped
+        }
+    }
     /// A mod's `SoundRef::stop`: `stop`, and for good. A waiting instance leaves the queue and
     /// never starts, and a looping one never repeats; it is gone once its channel ends.
     pub fn stop_for_good(&mut self, id: InstanceId, backend: &mut impl Backend) {
