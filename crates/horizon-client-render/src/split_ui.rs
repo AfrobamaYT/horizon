@@ -1512,8 +1512,10 @@ mod tests {
     #[test]
     fn done_is_declared_off_while_a_player_is_held() {
         use crate::widgets::{Action, end_frame, last_actions, set_action_screen};
-        let atlas =
-            HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
         let mut ui = screen(2);
         ui.size = SIZE;
         let done = |ui: &SplitUi, frame: u64| {

@@ -413,7 +413,7 @@ impl GeneratorData {
                         read_optional_bundle(&dir, &ov, "processor_lists")?.unwrap_or_default(),
                         &tags,
                     )
-                    .with_pack_templates(ov.templates().clone()),
+                    .with_templates(ov.templates().clone()),
                 )))
             }
         })?;

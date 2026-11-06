@@ -892,7 +892,7 @@ pub struct Downloader {
     /// Skins and capes drawn from the atlas since `take_drawn`.
     drawn: std::collections::HashSet<String>,
     /// The resource packs' root, where a profile's `texture` patch is read.
-    resource_root: std::path::PathBuf,
+    resource_root: horizon_assets::resource_source::ResourceSource,
     /// How each `patch/` texture of the resource packs loaded, by location.
     resources: std::collections::HashMap<String, Download>,
     /// When each failed texture download was last tried, so it can be retried:
@@ -929,7 +929,9 @@ impl Downloader {
             images: Default::default(),
             image_order: Default::default(),
             drawn: Default::default(),
-            resource_root: Default::default(),
+            resource_root: horizon_assets::resource_source::ResourceSource::indexed(
+                Default::default(),
+            ),
             resources: Default::default(),
             failed: Default::default(),
             retry_after: std::time::Duration::from_secs(60),
@@ -937,11 +939,16 @@ impl Downloader {
     }
     /// The resource packs changed (or were first loaded) at `root`: patch
     /// textures load again from there.
-    pub fn set_resource_root(&mut self, root: std::path::PathBuf) {
-        for location in std::mem::take(&mut self.resources).into_keys() {
-            self.images.remove(&location);
-            self.image_order.retain(|l| *l != location);
-        }
+    pub fn set_resource_root(&mut self, root: horizon_assets::resource_source::ResourceSource) {
+        let previous = std::mem::take(&mut self.resources);
+        self.images
+            .retain(|location, _| !previous.contains_key(location));
+        self.image_order
+            .retain(|location| !previous.contains_key(location));
+        self.queued
+            .retain(|location| !previous.contains_key(location));
+        self.ready
+            .retain(|(location, _)| !previous.contains_key(location));
         self.resource_root = root;
     }
     /// `ClientAsset.ResourceTexture`: loads `<namespace>:textures/<path>.png`
@@ -957,10 +964,9 @@ impl Downloader {
             }
             None => {}
         }
-        let file = self
+        let image = self
             .resource_root
-            .join(format!("assets/{namespace}/textures/{path}.png"));
-        let image = std::fs::read(file)
+            .read(&format!("assets/{namespace}/textures/{path}.png"))
             .ok()
             .and_then(|b| crate::hud::decode_bytes(&b).ok())
             .and_then(|(w, h, rgba)| resample_64(w, h, &rgba));
@@ -1758,6 +1764,45 @@ mod tests {
         writer.write_image_data(&rgba).unwrap();
         writer.finish().unwrap();
         out
+    }
+
+    #[test]
+    fn resource_reload_replaces_pixels_and_drops_queued_old_generation_images() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = |color| {
+            ResourceSource::indexed(std::collections::BTreeMap::from([(
+                "assets/example/textures/player.png".into(),
+                Resource::bytes(png(color)),
+            )]))
+        };
+        let cache = std::env::temp_dir().join(format!(
+            "horizon-resource-skin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut downloads = super::Downloader::new(cache.clone());
+        downloads.set_resource_root(source([255, 0, 0, 255]));
+        downloads.resource("patch/player", "example", "player");
+        assert_eq!(
+            &downloads.image("patch/player").unwrap()[..4],
+            [255, 0, 0, 255]
+        );
+        assert_eq!(downloads.ready.len(), 1);
+        downloads.set_resource_root(source([0, 0, 255, 255]));
+        assert!(downloads.image("patch/player").is_none());
+        assert!(downloads.ready.is_empty());
+        assert!(!downloads.queued.contains("patch/player"));
+        downloads.resource("patch/player", "example", "player");
+        let ready = downloads.take_ready();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(&ready[0].1[..4], [0, 0, 255, 255]);
+        assert!(
+            !cache.exists(),
+            "resource images never enter the URL download cache"
+        );
     }
 
     /// A downloaded body reaches the disk cache only if it decodes; a broken
