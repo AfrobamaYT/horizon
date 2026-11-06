@@ -8,7 +8,8 @@ pub trait Hooks {
         context = "loop",
         cancellable = false,
         version = 2,
-        target = "horizon_client_lib::motion::native_player_stays_on_ground_surface"
+        target = "horizon_client_lib::motion::native_player_stays_on_ground_surface",
+        neoforge = "none (vanilla Player.isStayingOnGroundSurface; NeoForge adds no event or extension for it)"
     )]
     fn player_stays_on_ground_surface();
 }

@@ -8,7 +8,8 @@ pub trait Hooks {
         context = "loop",
         cancellable = false,
         version = 2,
-        target = "horizon_client_lib::motion::native_fluid_flow"
+        target = "horizon_client_lib::motion::native_fluid_flow",
+        neoforge = "none (vanilla FlowingFluid.getFlow; NeoForge adds no event or extension for it)"
     )]
     fn fluid_flow();
 }

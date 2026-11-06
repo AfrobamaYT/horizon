@@ -47,7 +47,6 @@ def page():
         for n, s, c in rows
         if c and c.lower().startswith("none")
     ]
-    unset = [(n, s, "not set") for n, s, c in rows if not c]
     return f"""# NeoForge counterparts
 
 Each hook's `neoforge = ...` key in `crates/horizon-mod-api/src/hooks/` names the NeoForge 26.3 event or method it
@@ -56,9 +55,12 @@ It is written by `tools/neoforge_counterparts.py` (run it again after changing a
 stale). A key names the event class (`PlayerEvent.Clone`) or the extension method (`IPlayerExtension.openMenu`);
 notes about cancelling or the event bus belong in the hook's `///` doc, not in the key.
 
-{len(rows)} hooks: {len(mapped)} name a counterpart, {len(none)} say they have none, {len(unset)} have no key yet.
-The names were checked for form, not yet against the NeoForge 26.3 Javadoc; the third table is the part of that
-check still to do ([#1029](https://github.com/arismoko/horizon/issues/1029)).
+{len(rows)} hooks: {len(mapped)} name a counterpart, {len(none)} say they have none.
+The names were checked against the NeoForge 26.3.0.101 sources (`neoforge-26.3.0.101-sources.jar` on
+maven.neoforged.net): each class or extension method named below exists there. A `none` says why no event or method
+matches; the keys naming FML classes (`FMLClientSetupEvent`, `ModConfigEvent`, `ModContainer`) or a vanilla one
+(`MapDecorationType`) are not in that jar and were not checked, and `screen_transparent_background` still carries its
+own note.
 
 ## Hooks with a counterpart
 
@@ -69,12 +71,6 @@ check still to do ([#1029](https://github.com/arismoko/horizon/issues/1029)).
 A hook with no NeoForge counterpart is judged on its merits like any other. The note is the key's own reason.
 
 {table(none, "Reason")}
-
-## Hooks with no key yet
-
-These declare no `neoforge` key. Each needs either its NeoForge name or a `none` with the reason.
-
-{table(unset, "NeoForge")}
 """
 
 

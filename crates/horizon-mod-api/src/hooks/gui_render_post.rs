@@ -8,6 +8,11 @@ pub trait Hooks {
     /// the panorama). `gui_hidden` is the F1 setting; `focused` is window focus.
     /// A mod decides whether its foreground indicator respects those flags.
     /// Client only; the host is read-only. API @API:gui_render_post@.
-    #[hook(side = "client", contract = "listen", cancellable = false)]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        cancellable = false,
+        neoforge = "RenderGuiEvent.Post"
+    )]
     fn gui_render_post();
 }

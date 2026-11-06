@@ -12,7 +12,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         host = "read",
-        neoforge = "EnderManAngerEvent",
+        neoforge = "EndermanAngerEvent",
         cancellable = true
     )]
     fn enderman_anger();

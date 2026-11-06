@@ -13,6 +13,11 @@ pub trait Hooks {
     /// Client-side, on any server, single player's own included.
     /// Every packet exposes its protocol type id. Custom payloads also expose
     /// their channel and raw bytes; no other decoded fields cross the API.
-    #[hook(side = "client", contract = "listen", cancellable = false)]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        cancellable = false,
+        neoforge = "none (NeoForge has no raw play-packet receive event)"
+    )]
     fn client_packet();
 }
