@@ -186,6 +186,15 @@ impl Game<'_> {
         }
     }
 
+    /// The existing portal decision for an available mob in the current level.
+    pub(super) fn native_mob_can_use_portal(&self, mob: MobRef) -> Option<bool> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        let mob = self.mobs.iter().find(|m| m.id == id)?;
+        Some(self.mob_can_use_portal(mob))
+    }
+
     /// `Mob.getTarget`. Brain-backed mobs read their attack memory; piglins
     /// and hoglins use Horizon's `ai.target` stand-in. Invalid targets, an
     /// unavailable mob or player binding, or a target without a living handle
@@ -415,6 +424,43 @@ mod tests {
         game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
         game.native_mob_ref(game.native_entity(id).unwrap())
             .unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_portal_eligibility_matches_gameplay() {
+        with_game(|game| {
+            let cow = add_mob(game, 12, "minecraft:cow");
+            let wither = add_mob(game, 13, "minecraft:wither");
+            let check = |game: &Game<'_>, handle: MobRef, expected| {
+                let mob = game
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == handle.entity().id())
+                    .unwrap();
+                assert_eq!(game.mob_can_use_portal(mob), expected);
+                let host: &dyn mod_api::Host = game;
+                assert_eq!(handle.can_use_portal(host), Some(expected));
+            };
+            check(game, cow, true);
+            check(game, wither, false);
+            game.mobs[0].extra.mount = Some(99);
+            check(game, cow, false);
+            game.mobs[0].extra.mount = None;
+            game.riding = Some(12);
+            check(game, cow, false);
+            game.riding = None;
+            check(game, cow, true);
+            let stale = MobRef::new(mod_api::EntityRef::new(NativeWorldEpoch::new(999), 12));
+            let host: &dyn mod_api::Host = game;
+            assert_eq!(stale.can_use_portal(host), None);
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            let host: &dyn mod_api::Host = game;
+            assert_eq!(cow.can_use_portal(host), None);
+            game.enter_command_level(super::super::Dim::Overworld)
+                .unwrap();
+            check(game, cow, true);
+        });
     }
 
     #[test]
