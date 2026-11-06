@@ -2596,14 +2596,23 @@ handle, an entity the client doesn't track and a level it doesn't show:
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
 - `living.attribute_value(host, id)` is `AttributeMap.getValue` and `attribute_base` is `getBaseValue`, for a
-  player, a guest, a mob, an armor stand and the dragon (`None` for an attribute the entity type lacks, a stale
-  handle, or on a client). A mob, a stand and the dragon answer from a live attribute map built from the type's
+  player, a guest, a mob, an armor stand and the dragon (`None` for an attribute the entity type lacks or a stale
+  handle). A mob, a stand and the dragon answer from a live attribute map built from the type's
   defaults, the saved `attributes` list (bases and permanent modifiers, with their ids), and the attribute modifiers
   of the items they hold and wear, put on and taken off slot by slot in `EquipmentSlot` order as
   `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
   behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits. An item's
   modifiers are the stack's own `attribute_modifiers` component or its item type's, as `item_attribute_modifier`
-  leaves them.
+  leaves them. On a client the reads answer for the local player only, from the client's own copy of the synced
+  instances (`ClientboundUpdateAttributes`, the type's defaults before the server sends any); every other entity
+  reads `None` there, the client keeping no attribute map of another entity's, only the few fields it draws
+  (`handleUpdateAttributes` for a mob extracts its maximum health and scale for the renderer).
+- `living.attributes(host)` lists the ids of the attributes the entity's type has (the holder's attribute set the
+  value and base reads answer from), in registry order. `living.attribute_modifiers(host, id)` is
+  `AttributeInstance.getModifiers`: the attribute's modifiers in the order they were added — a mod's transient and
+  permanent ones, the saved list's, and what the worn and held items grant. An attribute no modifier is on answers
+  an empty list; `None` for an attribute the entity type lacks, a stale handle, or on a client for any entity but
+  the local player. Diverges from upstream: new helpers.
 - The writes take players, guests (in their own turn), mobs and armor stands, and answer false for an attribute the
   type lacks, the dragon (`/attribute` refuses it, and nothing reads its attributes yet), a stale handle, or on a
   client. `living.add_attribute_modifier(host, id, modifier, lifetime)` is `AttributeInstance.addTransientModifier`
