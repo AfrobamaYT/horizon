@@ -1302,7 +1302,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
         for (k, v) in map {
             let key = k.to_string_lossy();
             if MODELLED.contains(&key.as_str())
-                && (key != "minecraft:damage" || damage == 0)
+                && key != "minecraft:damage"
                 && !data.sets_component(&key)
             {
                 data.other
@@ -2063,6 +2063,24 @@ mod tests {
 #[cfg(test)]
 mod carried_component_tests {
     use super::*;
+
+    #[test]
+    fn damage_keeps_its_existing_canonical_encoding() {
+        for damage in [0, 5] {
+            let original = Tag::compound([("minecraft:damage", Tag::Int(damage))]);
+            let (decoded, extra) = decode_components(Some(&original));
+            assert_eq!(decoded, damage as u32);
+            let encoded = components_tag(decoded, extra.as_deref());
+            if damage == 0 {
+                assert!(encoded.is_none());
+            } else {
+                assert_eq!(encoded, Some(original));
+            }
+        }
+        let removed = Tag::compound([("!minecraft:damage", Tag::Compound(Default::default()))]);
+        let (damage, extra) = decode_components(Some(&removed));
+        assert_eq!(components_tag(damage, extra.as_deref()), Some(removed));
+    }
 
     #[test]
     fn explicit_empty_and_preserved_values_are_carried() {
