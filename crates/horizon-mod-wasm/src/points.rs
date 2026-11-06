@@ -4,7 +4,7 @@
 //! list of listeners, exactly as a native mod does: its places fire it through
 //! `mod_points::wire::forwarded`, as hook calls within its group's limits.
 use crate::Refusal;
-use horizon_mods::manifest::{
+use horizon_mod_package::manifest::{
     InjectionKind, Manifest,
     inject::{Access, Inject, Kind},
 };

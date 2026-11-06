@@ -12,7 +12,7 @@ counter-lib = { path = "../../groups/counter_lib" }
 
 [build-dependencies]
 horizon-mod-api-gen = { path = "../../../../horizon-mod-api-gen" }
-horizon-mods = { path = "../../../../horizon-mods" }
+horizon-mod-package = { path = "../../../../horizon-mod-package" }
 
 # A mod is its own project, not a member of the game's workspace.
 [workspace]

@@ -317,7 +317,9 @@ fn a_point_filled_by_a_wasm_mod() {
     // The bench mod and its manifest-generated tick listener.
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let package = path("HORIZON_WASM_BENCH");
-    let manifest = horizon_mods::Package::read(&package).unwrap().manifest;
+    let manifest = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
     let mut loaded = horizon_mod_wasm::load(
         &horizon_mod_wasm::RuntimeConfig::default(),
         &std::fs::read(path("HORIZON_WASM_STD")).unwrap(),

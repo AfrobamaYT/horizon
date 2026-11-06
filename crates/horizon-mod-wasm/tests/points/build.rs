@@ -1,5 +1,5 @@
 use horizon_mod_api_gen::points::{GuestInject, guest_exports};
-use horizon_mods::manifest::{
+use horizon_mod_package::manifest::{
     Manifest,
     inject::{Access, Kind},
 };
