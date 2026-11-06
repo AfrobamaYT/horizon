@@ -2717,6 +2717,18 @@ impl Game<'_> {
     ) {
         self.fire_item_model_range_property(property, stack, value);
     }
+    /// Client-side value of a categorical item model property a mod registered
+    /// (`register_select_item_model_property`), asked each time a `minecraft:select` on it picks a
+    /// case. Set value only for a property your mod owns; left `None`, the model's fallback is drawn.
+    /// The borrowed stack is the one being resolved, including nested bundle items.
+    pub(super) fn native_item_model_select_property(
+        &self,
+        property: &str,
+        stack: &StackView,
+        value: &mut Option<String>,
+    ) {
+        self.fire_item_model_select_property(property, stack, value);
+    }
     /// The frame rate this window is about to be held to: Max Framerate after the
     /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
     /// window has focus, `minimized` whether it is minimised and `in_world` whether a world
@@ -3804,6 +3816,15 @@ impl Game<'_> {
         properties: &mut Vec<String>,
     ) {
         Self::fire_register_range_select_item_model_property(context, properties);
+    }
+    /// The categorical item model properties a mod adds (NeoForge's
+    /// `RegisterSelectItemModelPropertyEvent`): push each id, `<mod id>:<path>`.
+    /// Asked once at start on the client, before resources load.
+    pub(super) fn native_register_select_item_model_property(
+        context: &mod_api::RegistrationContext,
+        properties: &mut Vec<String>,
+    ) {
+        Self::fire_register_select_item_model_property(context, properties);
     }
     /// The buttons of mod `mod_id`'s settings page, under its keys: push
     /// their labels when it is yours. Asked again each time the page opens

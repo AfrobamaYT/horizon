@@ -280,6 +280,17 @@ pub(super) fn register_range_select_item_model_properties(role: ExecutionRole) {
     );
     horizon_assets::item_model::register_range_properties(properties);
 }
+/// The native mods' categorical item model properties
+/// (`native_register_select_item_model_property`), kept once at start, before resources
+/// load, so `select` models on them read the mod's value.
+pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut properties = Vec::new();
+    Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
+    horizon_assets::item_model::register_select_properties(properties);
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
