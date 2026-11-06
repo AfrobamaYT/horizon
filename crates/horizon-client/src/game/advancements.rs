@@ -853,6 +853,14 @@ impl Game<'_> {
         let tasks = std::mem::take(&mut host.hub.native_advancement_grants);
         for task in tasks {
             let mut fresh = Vec::new();
+            // Other players finish their tick criteria in their own ordinary turn.
+            // Their complete reward path requires their full player state.
+            if self.lan_acting != Some(task.conn) {
+                self.with_advancement_hub(|hub, owners| {
+                    hub.finish_native_first_tick(&task, &fresh, owners);
+                });
+                continue;
+            }
             for grant in &task.grants {
                 let Some(was_done) = self
                     .with_advancement_hub(|hub, owners| hub.grant_native_tick(&task, grant, owners))
@@ -887,9 +895,22 @@ impl Game<'_> {
                         },
                     );
                 }
-                self.with_advancement_hub(|hub, owners| {
-                    hub.reward_native_tick(&task, grant, was_done, owners);
-                });
+                let definition = task
+                    .sync
+                    .advancements
+                    .definition(&grant.advancement)
+                    .expect("granted advancement");
+                let done = self
+                    .with_advancement_hub(|hub, owners| {
+                        hub.advancement_task_progress(&task, owners, |progress| {
+                            progress.done(definition)
+                        })
+                    })
+                    .flatten()
+                    .unwrap_or(false);
+                if !was_done && done {
+                    self.award_definition(definition);
+                }
             }
             self.with_advancement_hub(|hub, owners| {
                 hub.finish_native_first_tick(&task, &fresh, owners);
@@ -1024,7 +1045,13 @@ impl Game<'_> {
             return;
         }
         let tree = self.adv.tree.clone();
-        let a = &tree.list[index];
+        self.award_definition(&tree.list[index]);
+    }
+
+    fn award_definition(&mut self, a: &adv::Advancement) {
+        if self.lan_acting_fake {
+            return;
+        }
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_advancement_done(player, &name, &a.id);
         }

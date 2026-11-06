@@ -36,9 +36,18 @@ impl Hooks for Observer {
                     "gamma": {"trigger": "minecraft:impossible"}
                 },
                 "requirements": [["alpha"], ["gamma"]],
-                "rewards": {"recipes": ["testmod:reward"]}
+                "rewards": {"recipes": ["testmod:reward"], "experience": 7,
+                    "loot": ["testmod:reward"], "function": "testmod:reward"}
             }"#
                 .to_vec(),
+            ));
+            event.files.push((
+                "loot_table/testmod:reward".into(),
+                br#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}]}]}"#.to_vec(),
+            ));
+            event.files.push((
+                "function/testmod:reward".into(),
+                b"give @s minecraft:diamond 1\n".to_vec(),
             ));
         }
     }
@@ -181,8 +190,8 @@ fn progress_events_capture_each_players_full_mutation_state() {
             assert!(progress.done);
             assert_eq!(
                 events.len(),
-                2,
-                "each player's grant uses their own storage"
+                1,
+                "only the acting guest is granted during reload"
             );
             for event in events.iter() {
                 assert_eq!(
@@ -193,8 +202,28 @@ fn progress_events_capture_each_players_full_mutation_state() {
             }
             let kept = first[0].progress.clone();
             drop(events);
+            {
+                let guest = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
+                assert!(!guest.advancements.has(ID, "alpha"));
+                assert_eq!(guest.xp_total, 0);
+            }
+            game.as_guest(13, |game| game.tick_advancements()).unwrap();
             for conn in [12, 13] {
                 let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+                assert_eq!(guest.xp_total, 7);
+                for item in ["minecraft:stone", "minecraft:diamond"] {
+                    assert_eq!(
+                        guest
+                            .inventory
+                            .iter()
+                            .flatten()
+                            .filter(|stack| stack.item.as_ref() == item)
+                            .map(|stack| stack.count as usize)
+                            .sum::<usize>(),
+                        1,
+                        "{conn}: {item}"
+                    );
+                }
                 assert!(
                     guest.advancements.has(ID, "alpha"),
                     "alpha survives leaving the turn"
@@ -211,6 +240,25 @@ fn progress_events_capture_each_players_full_mutation_state() {
                 2,
                 "a repeated reload makes no duplicate grant"
             );
+            for conn in [12, 13] {
+                game.as_guest(conn, |game| game.tick_advancements())
+                    .unwrap();
+                let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+                assert_eq!(guest.xp_total, 7);
+                for item in ["minecraft:stone", "minecraft:diamond"] {
+                    assert_eq!(
+                        guest
+                            .inventory
+                            .iter()
+                            .flatten()
+                            .filter(|stack| stack.item.as_ref() == item)
+                            .map(|stack| stack.count as usize)
+                            .sum::<usize>(),
+                        1,
+                        "{conn}: {item}"
+                    );
+                }
+            }
             assert_eq!(kept.criteria[1].obtained_at.as_deref(), Some(DATE));
             assert!(kept.done);
         } else if case == "acting" {
