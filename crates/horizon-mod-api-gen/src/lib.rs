@@ -1723,13 +1723,12 @@ mod tests {
             second_shipped.replace("self.fire_client_tick_pre();", "let _ = ();"),
         )
         .unwrap();
-        // A comment in another file must not become a second fill owner.
-        let decoy = root.join("crates/horizon-client/src/game/native_hooks/decoy.rs");
-        let comment = "// fn native_item_damaged(\n";
-        std::fs::write(&decoy, comment).unwrap();
+        let decoy = hooks.with_file_name("decoy.rs");
+        let decoy_source = "impl Game<'_> { /// mentions fn native_item_damaged(\n fn unrelated(&self) { let _ = self; } }\n";
+        std::fs::write(&decoy, decoy_source).unwrap();
         super::fill_hooks(&root).unwrap();
         assert_eq!(std::fs::read_to_string(&second).unwrap(), second_shipped);
-        assert_eq!(std::fs::read_to_string(&decoy).unwrap(), comment);
+        assert_eq!(std::fs::read_to_string(decoy).unwrap(), decoy_source);
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");
         assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&shipped));

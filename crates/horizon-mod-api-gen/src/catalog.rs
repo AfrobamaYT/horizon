@@ -604,8 +604,8 @@ impl Catalog {
             error: e.to_string(),
         };
         let mut modules = fs::read_dir(dir)
-            .map_err(|e| read_error(&dir, e))?
-            .map(|entry| entry.map_err(|e| read_error(&dir, e)))
+            .map_err(|e| read_error(dir, e))?
+            .map(|entry| entry.map_err(|e| read_error(dir, e)))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .filter_map(|entry| {
