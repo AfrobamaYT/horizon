@@ -12,8 +12,8 @@ pub trait Hooks {
     /// the tick are asked as they go out, at the end of the tick, with the state
     /// then. `/playsound` sends its packet directly and isn't asked, as in
     /// vanilla on the server. On the client, incoming sound packets ask before
-    /// playback, including `/playsound`; client-predicted level requests ask
-    /// here too. Canceling a sound does not cancel its action or prediction.
+    /// playback, including `/playsound`; client-predicted and game-event level
+    /// requests ask here too. Canceling a sound does not cancel its action or prediction.
     /// Server and client requests are separate:
     /// `HostSide` identifies which one is being edited. UI and sound-engine-only
     /// playback do not ask this hook. Both sides.

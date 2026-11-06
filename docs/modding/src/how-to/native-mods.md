@@ -26,6 +26,7 @@ still plays at the requested position; only a genuinely entity-bound sound
 | --- | --- | --- |
 | Placement confirmation, predicted doors/buttons/levers | AtPosition | `BlockItem.place`, block `useWithoutItem` → `Level.playSound` |
 | Waxing, tool transforms, bucket use | AtPosition | `HoneycombItem.useOn`, tool `useOn`, `BucketItem` → `Level.playSound` |
+| Game-event arrow hit (Players), pufferfish sting (Neutral), elder-guardian curse (Hostile) | AtPosition | `ClientPacketListener.handleGameEvent` → `Level.playSound` |
 | Own steps, swimming, splash, amethyst chime, honey slide, fall | AtEntity | `Entity`/`LivingEntity` → virtual `LocalPlayer.playSound` |
 | Own hurt/death, bundle menu clicks, consume effects | AtEntity | `LivingEntity`, `BundleItem`, `Consumable` → `LocalPlayer.playSound` |
 | Player-bound sounds, including the local goat horn | AtEntity | `Level.playSound(except, entity, ...)` |

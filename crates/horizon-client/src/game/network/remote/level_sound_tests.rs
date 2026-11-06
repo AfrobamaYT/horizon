@@ -52,6 +52,7 @@ struct Request {
     sound: String,
     source: SoundSource,
     emitter: Option<u32>,
+    position: Option<[f64; 3]>,
 }
 struct LocalTuner(Arc<Mutex<Vec<Request>>>);
 #[mod_api::__subscriptions]
@@ -66,6 +67,7 @@ impl mod_api::Hooks for LocalTuner {
             sound: e.sound.to_string(),
             source: *e.source,
             emitter: None,
+            position: Some(e.position),
         });
         Flow::Cancel
     }
@@ -80,6 +82,7 @@ impl mod_api::Hooks for LocalTuner {
             sound: sound.clone(),
             source: *e.source,
             emitter: Some(e.entity.id()),
+            position: None,
         });
         if sound == "minecraft:block.honey_block.slide" {
             Flow::Continue
@@ -156,21 +159,25 @@ fn local_level_requests_can_mute_sound_without_undoing_prediction() {
                     sound: "minecraft:block.wooden_door.open".into(),
                     source: SoundSource::Blocks,
                     emitter: None,
+                    position: Some([1.5, 64.5, 1.5]),
                 },
                 Request {
                     sound: horizon_client::bundle::INSERT_FAIL.into(),
                     source: SoundSource::Players,
                     emitter: Some(7),
+                    position: None,
                 },
                 Request {
                     sound: "minecraft:entity.generic.eat".into(),
                     source: SoundSource::Players,
                     emitter: Some(7),
+                    position: None,
                 },
                 Request {
                     sound: "minecraft:item.goat_horn.sound.0".into(),
                     source: SoundSource::Records,
                     emitter: Some(7),
+                    position: None,
                 },
             ];
             assert_eq!(*requests.lock().unwrap(), expected);
@@ -183,6 +190,78 @@ fn local_level_requests_can_mute_sound_without_undoing_prediction() {
             assert!(
                 game.audio.engine.bound_entities().is_empty(),
                 "LocalPlayer.playSound stays positional"
+            );
+        });
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn game_events_ask_client_level_before_playback() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![mod_api::ModEntry::new(
+        "game_event_tuner",
+        Box::new(LocalTuner(requests.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_client_game(|game| {
+            let _server = logged_client(game);
+            let mut player = PlayerMotion::new(game.motion, Vec3::new(1.0, 64.0, 1.0)).unwrap();
+            player.dimensions.eye_height = 1.25;
+            game.player = Some(player);
+            for event in [6, 9, 10] {
+                game.handle_packet(C::GameEvent(play::GameEvent { event, param: 1.0 }))
+                    .unwrap();
+            }
+            assert_eq!(
+                *requests.lock().unwrap(),
+                [
+                    Request {
+                        sound: "minecraft:entity.arrow.hit_player".into(),
+                        source: SoundSource::Players,
+                        emitter: None,
+                        position: Some([1.0, 65.25, 1.0])
+                    },
+                    Request {
+                        sound: "minecraft:entity.puffer_fish.sting".into(),
+                        source: SoundSource::Neutral,
+                        emitter: None,
+                        position: Some([1.0, 64.0, 1.0])
+                    },
+                    Request {
+                        sound: "minecraft:entity.elder_guardian.curse".into(),
+                        source: SoundSource::Hostile,
+                        emitter: None,
+                        position: Some([1.0, 64.0, 1.0])
+                    },
+                ]
+            );
+            assert!(
+                game.audio.heard.is_empty(),
+                "all three canceled requests stop before Audio"
+            );
+            game.handle_packet(C::GameEvent(play::GameEvent {
+                event: 10,
+                param: 0.0,
+            }))
+            .unwrap();
+            assert_eq!(
+                requests.lock().unwrap().len(),
+                3,
+                "a silent curse asks no sound hook"
+            );
+            let level = horizon_client::particles::ParticleLevel {
+                world: &game.world,
+                facts: game.res.facts(),
+                collision: game.collision,
+                player: None,
+            };
+            game.particles.tick(&level);
+            assert_eq!(
+                game.particles.elder_guardians().len(),
+                2,
+                "neither silent nor canceled sound suppresses the apparition"
             );
         });
     });

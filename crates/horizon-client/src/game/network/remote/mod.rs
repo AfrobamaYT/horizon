@@ -4612,11 +4612,14 @@ impl Game<'_> {
                     if p.param == 1.0
                         && let Some(at) = self.player.as_ref().map(|m| m.position)
                     {
-                        self.audio.play(
-                            "minecraft:entity.elder_guardian.curse",
-                            Some([at.x, at.y, at.z]),
-                            1.0,
-                            1.0,
+                        self.play_client_local_sound(
+                            LevelSound::new(
+                                "minecraft:entity.elder_guardian.curse",
+                                [at.x, at.y, at.z],
+                                1.0,
+                                1.0,
+                            )
+                            .in_source(mod_api::SoundSource::Hostile),
                         );
                     }
                 }
@@ -4649,8 +4652,10 @@ impl Game<'_> {
                 // plays ARROW_HIT_PLAYER at player eye height.
                 6 => {
                     if let Some(at) = self.eye_position() {
-                        self.audio
-                            .play("minecraft:entity.arrow.hit_player", Some(at), 0.18, 0.45);
+                        self.play_client_local_sound(
+                            LevelSound::new("minecraft:entity.arrow.hit_player", at, 0.18, 0.45)
+                                .in_source(mod_api::SoundSource::Players),
+                        );
                     }
                 }
                 // RAIN_LEVEL_CHANGE: ClientPacketListener.handleGameEvent.
@@ -4667,11 +4672,14 @@ impl Game<'_> {
                 // plays PUFFER_FISH_STING at player position.
                 9 => {
                     if let Some(at) = self.player.as_ref().map(|m| m.position) {
-                        self.audio.play(
-                            "minecraft:entity.puffer_fish.sting",
-                            Some([at.x, at.y, at.z]),
-                            1.0,
-                            1.0,
+                        self.play_client_local_sound(
+                            LevelSound::new(
+                                "minecraft:entity.puffer_fish.sting",
+                                [at.x, at.y, at.z],
+                                1.0,
+                                1.0,
+                            )
+                            .in_source(mod_api::SoundSource::Neutral),
                         );
                     }
                 }
