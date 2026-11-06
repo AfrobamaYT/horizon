@@ -18,7 +18,9 @@ use std::{
 
 mod component_predicate;
 mod foreign;
+mod mod_properties;
 mod special;
+pub use mod_properties::{is_range_property, register_range_properties};
 pub use special::{SpecialKind, SpecialModel};
 
 type Result<T> = std::result::Result<T, DecodeError>;
@@ -505,7 +507,9 @@ impl ItemModelNode {
                 }
             }
             "minecraft:range_dispatch" => {
-                let foreign_property = foreign::property_is_foreign(m)?;
+                // A mod's registered property is read per stack; any other foreign one is 0.
+                let foreign_property = foreign::property_is_foreign(m)?
+                    && !is_range_property(&ident(required(m, "property")?)?);
                 let mut entries = list(required(m, "entries")?)?
                     .iter()
                     .map(|e| {
@@ -833,6 +837,9 @@ impl PartialEq for NeedleState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum NumericProperty {
+    /// A property a native mod registered (`register_range_properties`), read through
+    /// [`ItemEnv::item_model_range_property`].
+    Custom(String),
     BundleFullness,
     Compass {
         wobble: bool,
@@ -861,7 +868,11 @@ pub enum NumericProperty {
 impl NumericProperty {
     fn decode(m: &Map<String, Value>) -> Result<Self> {
         let normalize = || get(m, "normalize").map_or(Ok(true), boolean);
-        Ok(match ident(required(m, "property")?)?.as_str() {
+        let property = ident(required(m, "property")?)?;
+        if is_range_property(&property) {
+            return Ok(Self::Custom(property));
+        }
+        Ok(match property.as_str() {
             "minecraft:custom_model_data" => {
                 Self::CustomModelData(get(m, "index").map_or(Ok(0), non_negative)?)
             }
@@ -995,6 +1006,10 @@ pub trait ItemEnv {
     /// A mod's namespaced conditional property, false when no mod supplies it.
     fn item_model_property(&self, _property: &str, _stack: &StackView) -> bool {
         false
+    }
+    /// A mod's registered numeric `range_dispatch` property, 0 when no mod answers.
+    fn item_model_range_property(&self, _property: &str, _stack: &StackView) -> f32 {
+        0.0
     }
     /// `PotionContents.getColorOr` for the potion/effects part: the mixed
     /// effect colour, or `None` when the contents have no visible effects.
@@ -1456,6 +1471,9 @@ impl Resolve<'_> {
     fn numeric(&self, property: &NumericProperty) -> f32 {
         let owner = self.ctx.owner;
         match property {
+            NumericProperty::Custom(property) => {
+                self.env.item_model_range_property(property, self.stack)
+            }
             NumericProperty::BundleFullness => {
                 self.env.bundle_fullness(self.stack, self.components)
             }

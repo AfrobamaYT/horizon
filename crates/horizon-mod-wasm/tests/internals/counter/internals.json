@@ -1,5 +1,17 @@
 [
   {
+    "path": "horizon_client::Small",
+    "kind": "struct",
+    "signature": "struct Small { count: u32 }",
+    "hash": "small-hash"
+  },
+  {
+    "path": "horizon_client::mutate_copies",
+    "kind": "fn",
+    "signature": "fn mutate_copies(n: &mut u32, small: &mut Small) -> u32",
+    "hash": "mutate-copies-hash"
+  },
+  {
     "path": "horizon_client::game::Game",
     "kind": "struct",
     "signature": "struct Game { left: i64, right: i64, hidden: Vec<i32> }",

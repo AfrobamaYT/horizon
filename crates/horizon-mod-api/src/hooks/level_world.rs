@@ -22,6 +22,13 @@ pub trait Helpers {
         target = "horizon_client::game::native_level_world::Game<'_>::native_level_difficulty"
     )]
     fn level_difficulty();
+    /// Read a registered boolean game rule.
+    #[helper(
+        side = "server",
+        receiver = "level",
+        target = "horizon_client::game::native_level_world::Game<'_>::native_level_game_rule_bool"
+    )]
+    fn level_game_rule_bool();
     #[helper(
         side = "server",
         receiver = "level",

@@ -1029,14 +1029,14 @@ use mod_api::{
     TooltipElement, UsePhase,
 };
 use mod_api::{BlockKey, DebugEntry, EffectKey};
+use mod_api::{
+    CameraType, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason,
+    Recipe, SoundPlay,
+};
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
     NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
     NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
-};
-use mod_api::{
-    MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe,
-    SoundPlay,
 };
 use std::{
     collections::HashMap,
@@ -2700,6 +2700,19 @@ impl Game<'_> {
     ) {
         self.fire_item_model_property(property, stack, value);
     }
+    /// Client-side value of a numeric item model property a mod registered
+    /// (`register_range_select_item_model_property`), asked each time a `minecraft:range_dispatch`
+    /// on it picks a branch. Set value only for a property your mod owns; unanswered it stays 0.
+    /// The model's `scale` is applied afterwards. The borrowed stack is the one being resolved,
+    /// including nested bundle items.
+    pub(super) fn native_item_model_range_property(
+        &self,
+        property: &str,
+        stack: &StackView,
+        value: &mut f32,
+    ) {
+        self.fire_item_model_range_property(property, stack, value);
+    }
     /// The frame rate this window is about to be held to: Max Framerate after the
     /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
     /// window has focus, `minimized` whether it is minimised and `in_world` whether a world
@@ -2935,6 +2948,24 @@ impl Game<'_> {
     pub(super) fn native_client_tick_post(&mut self) {
         self.fire_client_tick_post();
     }
+    /// `key.togglePerspective` (F5) cycles the camera type: `previous` is the type it
+    /// leaves, and `next` comes in as `CameraType.cycle` and may be set to another.
+    pub(super) fn native_camera_type_cycle(
+        &mut self,
+        previous: mod_api::CameraType,
+        next: &mut mod_api::CameraType,
+    ) {
+        self.fire_camera_type_cycle(previous, next);
+    }
+    /// The window's camera type (`Options.getCameraType`).
+    pub(super) fn native_camera_type(&self) -> CameraType {
+        self.camera_type
+    }
+    /// Sets the window's camera type (`Options.setCameraType`) as F5 does, without
+    /// cycling: a freelook mod switches to third person and back.
+    pub(super) fn native_set_camera_type(&mut self, camera_type: CameraType) {
+        self.set_camera_type(camera_type);
+    }
     /// The milliseconds a client tick lasts at this frame's clock advance
     /// (`Minecraft.getTickTargetMillis`), as a mod's `tick_target_millis` leaves it. An answer
     /// that is not a finite number above zero keeps the clock's own.
@@ -2963,6 +2994,14 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         self.fire_block_highlight(pos, state, partial, canceled);
+    }
+    /// After particle submission, before the renderer executes world draws.
+    pub(super) fn native_submit_custom_geometry(
+        &self,
+        view: &mod_api::WorldRenderView,
+        draw: &mut horizon_client::world_geometry::WorldGeometry,
+    ) {
+        self.fire_submit_custom_geometry(view, draw);
     }
     /// The world frame's local visual sources. Push requests; Horizon validates
     /// and limits them before rendering. Called only while a world is visible.
@@ -3381,6 +3420,18 @@ impl Game<'_> {
     ) {
         self.fire_mouse_button_pre(button, pressed, modifiers, canceled);
     }
+    /// A physical key or mouse button bound to the gameplay mapping `mapping` (`key.jump`) changes
+    /// state while playing, before the game acts on it (`pressed` for a press, repeats included,
+    /// and not for a release). Set `canceled` on a press to drop it for every mapping bound to its
+    /// input; `canceled` on a release is ignored, so the game always lets go of what it held.
+    pub(super) fn native_key_mapping_pre(
+        &mut self,
+        mapping: &str,
+        pressed: bool,
+        canceled: &mut bool,
+    ) {
+        self.fire_key_mapping_pre(mapping, pressed, canceled);
+    }
     /// The physical or scaled GUI dimensions changed.
     pub(super) fn native_window_resize(
         &mut self,
@@ -3723,6 +3774,15 @@ impl Game<'_> {
         entries: &mut Vec<DebugEntry>,
     ) {
         Self::fire_register_debug_entries(context, entries);
+    }
+    /// The numeric item model properties a mod adds (NeoForge's
+    /// `RegisterRangeSelectItemModelPropertyEvent`): push each id, `<mod id>:<path>`.
+    /// Asked once at start on the client, before resources load.
+    pub(super) fn native_register_range_select_item_model_property(
+        context: &mod_api::RegistrationContext,
+        properties: &mut Vec<String>,
+    ) {
+        Self::fire_register_range_select_item_model_property(context, properties);
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
@@ -8014,6 +8074,32 @@ impl Game<'_> {
     /// their channel and raw bytes; no other decoded fields cross the API.
     pub(super) fn native_client_packet(&mut self, packet: &ClientPacket) {
         self.fire_client_packet(packet);
+    }
+    /// Whether a mod cancelled `packet` on its way to the server (`client_packet_send`).
+    /// Builds the packet's view only when a mod listens.
+    pub(super) fn client_packet_send_canceled(
+        &self,
+        packet: &horizon_protocol::packets::play::Serverbound,
+    ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::ClientPacketSend) {
+            return false;
+        }
+        let mut canceled = false;
+        self.native_client_packet_send(&serverbound_packet_view(packet), &mut canceled);
+        canceled
+    }
+    /// A play packet the window's game is about to send to the server
+    /// (`Connection.send`): every packet of the play phase it sends, the
+    /// selected slot that goes out before an attack or a use included, in the
+    /// order it sends them. Not heard: what the network thread sends itself
+    /// (keep-alives, pongs, cookies, the configuration phase), the answers the
+    /// connection sends in whichever phase it is in (a resource pack's status, a
+    /// dialog's custom click action), and far terrain requests. Cancel drops the
+    /// packet: the game goes on as if it had been sent. Client-side, on any
+    /// server, single player's own included. Every packet exposes its protocol
+    /// type id; custom payloads also expose their channel and raw bytes.
+    pub(super) fn native_client_packet_send(&self, packet: &ClientPacket, canceled: &mut bool) {
+        self.fire_client_packet_send(packet, canceled);
     }
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
     /// posted in `MinecraftServer.createLevels`): before any of its chunks
@@ -12413,27 +12499,55 @@ fn client_packet_view(packet: &horizon_protocol::packets::play::Clientbound) -> 
     use mod_api::Identifier;
     use std::sync::LazyLock;
 
-    static TYPES: LazyLock<Vec<Identifier>> = LazyLock::new(|| {
-        horizon_protocol::ids::play::clientbound::NAMES
-            .iter()
-            .map(|name| Identifier::parse(name).expect("protocol packet type identifier"))
-            .collect()
-    });
-    static UNKNOWN: LazyLock<Identifier> =
-        LazyLock::new(|| Identifier::parse("horizon:unknown").unwrap());
-
-    let id = usize::try_from(packet.id())
-        .ok()
-        .and_then(|id| TYPES.get(id))
-        .unwrap_or(&UNKNOWN)
-        .clone();
+    static TYPES: LazyLock<Vec<Identifier>> =
+        LazyLock::new(|| packet_types(horizon_protocol::ids::play::clientbound::NAMES));
     let payload = match packet {
-        Clientbound::CustomPayload(payload) => Some(ClientPayload::new(
-            payload.channel.clone(),
-            payload.data.clone(),
-        )),
+        Clientbound::CustomPayload(payload) => Some(payload),
         _ => None,
     };
+    packet_view(&TYPES, packet.id(), payload)
+}
+
+/// `client_packet_send`'s view of a packet the game sends: as `client_packet_view`.
+fn serverbound_packet_view(packet: &horizon_protocol::packets::play::Serverbound) -> ClientPacket {
+    use horizon_protocol::packets::play::Serverbound;
+    use mod_api::Identifier;
+    use std::sync::LazyLock;
+
+    static TYPES: LazyLock<Vec<Identifier>> =
+        LazyLock::new(|| packet_types(horizon_protocol::ids::play::serverbound::NAMES));
+    let payload = match packet {
+        Serverbound::CustomPayload(payload) => Some(payload),
+        _ => None,
+    };
+    packet_view(&TYPES, packet.id(), payload)
+}
+
+/// One direction's packet type identifiers, by protocol id.
+fn packet_types(names: &[&str]) -> Vec<mod_api::Identifier> {
+    names
+        .iter()
+        .map(|name| mod_api::Identifier::parse(name).expect("protocol packet type identifier"))
+        .collect()
+}
+
+/// A packet's type, `horizon:unknown` outside the protocol's table, and its custom payload.
+fn packet_view(
+    types: &[mod_api::Identifier],
+    id: i32,
+    payload: Option<&horizon_protocol::packets::configuration::CustomPayload>,
+) -> ClientPacket {
+    use mod_api::Identifier;
+    use std::sync::LazyLock;
+
+    static UNKNOWN: LazyLock<Identifier> =
+        LazyLock::new(|| Identifier::parse("horizon:unknown").unwrap());
+    let id = usize::try_from(id)
+        .ok()
+        .and_then(|id| types.get(id))
+        .unwrap_or(&UNKNOWN)
+        .clone();
+    let payload = payload.map(|p| ClientPayload::new(p.channel.clone(), p.data.clone()));
     ClientPacket::new(id, payload)
 }
 
@@ -12465,6 +12579,33 @@ mod tests {
             assert_eq!(unknown.id.to_string(), "horizon:unknown");
             assert_eq!(unknown.custom_payload, None);
         }
+    }
+
+    #[test]
+    fn serverbound_packet_view_names_the_packets_the_game_sends() {
+        use horizon_protocol::packets::{
+            configuration::CustomPayload,
+            play::{Serverbound, SetCarriedItem},
+        };
+        let slot = super::serverbound_packet_view(&Serverbound::SetCarriedItem(SetCarriedItem {
+            slot: 3,
+        }));
+        assert_eq!(slot.id.to_string(), "minecraft:set_carried_item");
+        assert_eq!(slot.custom_payload, None);
+
+        let payload = super::serverbound_packet_view(&Serverbound::CustomPayload(CustomPayload {
+            channel: "example:message".into(),
+            data: vec![1, 2],
+        }));
+        assert_eq!(payload.id.to_string(), "minecraft:custom_payload");
+        let payload = payload.custom_payload.unwrap();
+        assert_eq!(
+            (payload.channel.as_str(), payload.data.as_slice()),
+            ("example:message", &[1, 2][..])
+        );
+
+        let unknown = super::serverbound_packet_view(&Serverbound::Unknown(-1, vec![9]));
+        assert_eq!(unknown.id.to_string(), "horizon:unknown");
     }
 
     #[test]
@@ -12687,7 +12828,7 @@ mod tests {
             return;
         }
         assert_eq!(keys.shared.get(), keys.own.get());
-        with_game_at(root.unwrap(), |game| {
+        with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -12974,11 +13115,12 @@ mod tests {
                 jars: Vec::new(),
             }],
             &root,
+            &horizon_mods::enabled::EnabledMods::new([("ruby".into(), horizon_mods::Side::Both)]),
         )
         .unwrap();
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -12998,7 +13140,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -13078,7 +13222,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -13098,7 +13242,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -13185,7 +13331,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -13204,7 +13350,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -13741,8 +13889,8 @@ mod tests {
 mod screen_open_tests {
     use super::*;
     use mod_api::{
-        ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, ModEntry, ScreenClosingEvent,
-        ScreenOpeningEvent, testing::with_mods,
+        ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, KeyMappingPreEvent, ModEntry,
+        ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
 
@@ -13828,6 +13976,116 @@ mod screen_open_tests {
             });
         });
         assert_eq!(take(&log), ["Attack", "Use", "PickBlock"]);
+    }
+
+    struct MappingProbe(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for MappingProbe {
+        fn key_mapping_pre(
+            &self,
+            _host: &mut dyn ClientHost,
+            event: &mut KeyMappingPreEvent,
+        ) -> Flow {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{}:{}", event.mapping, event.pressed));
+            Flow::Cancel
+        }
+    }
+
+    /// Cancels the second press it hears and no other: an allowed down, then a cancelled repeat.
+    struct CancelSecondPress(Arc<Mutex<usize>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for CancelSecondPress {
+        fn key_mapping_pre(
+            &self,
+            _host: &mut dyn ClientHost,
+            event: &mut KeyMappingPreEvent,
+        ) -> Flow {
+            let mut heard = self.0.lock().unwrap();
+            if event.pressed {
+                *heard += 1;
+                if *heard == 2 {
+                    return Flow::Cancel;
+                }
+            }
+            Flow::Continue
+        }
+    }
+
+    /// A cancelled repeat keeps the hold an accepted press made, while a cancelled first press
+    /// is never held, nor are its repeats.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_cancelled_repeat_keeps_the_hold_and_a_cancelled_first_press_is_never_held() {
+        use winit::keyboard::KeyCode;
+        let heard = Arc::new(Mutex::new(0));
+        let mods = vec![ModEntry::new(
+            "second",
+            Box::new(CancelSecondPress(heard.clone())),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                let space = KeyCode::Space;
+                // The first down is allowed and held; its repeat is cancelled but the hold stays.
+                game.physical_keys.insert(space);
+                assert!(!game.key_press_canceled(space, true, false));
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, true));
+                assert!(game.physical_keys.contains(&space));
+                assert!(!game.rejected_keys.contains(&space));
+            });
+        });
+        let mods = vec![ModEntry::new(
+            "mapping",
+            Box::new(MappingProbe(Arc::new(Mutex::new(Vec::new())))),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                let space = KeyCode::Space;
+                // A cancelled first press is not held, and neither is its repeat.
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, false));
+                assert!(!game.physical_keys.contains(&space));
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, true));
+                assert!(!game.physical_keys.contains(&space));
+                // Its release clears the rejection.
+                assert!(!game.key_press_canceled(space, false, false));
+                assert!(!game.rejected_keys.contains(&space));
+            });
+        });
+    }
+
+    /// A cancelled press of a mapping is dropped while playing, and only then asked; the
+    /// release of the same key is asked too but never canceled, so nothing stays held.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_cancelled_mapping_press_is_dropped_and_its_release_is_not() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new(
+            "mapping",
+            Box::new(MappingProbe(log.clone())),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                assert!(game.key_mapping_canceled(Some("key.keyboard.space"), true));
+                assert!(!game.key_mapping_canceled(Some("key.keyboard.space"), false));
+                game.screen = Screen::Inventory;
+                assert!(!game.key_mapping_canceled(Some("key.keyboard.space"), true));
+            });
+        });
+        assert_eq!(take(&log), ["key.jump:true", "key.jump:false"]);
     }
 
     struct Probe {
@@ -15364,6 +15622,140 @@ mod customize_chat_overlay_tests {
                 assert!(seen[1].2, "focused");
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod camera_type_tests {
+    use mod_api::{
+        CameraType, CameraTypeCycleEvent, ClientHost, Hooks, ModEntry, testing::with_mods,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// Skips the front view: F5 goes first person, behind, first person.
+    struct NoFront(Arc<Mutex<Vec<(CameraType, CameraType)>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for NoFront {
+        fn camera_type_cycle(&self, _: &mut dyn ClientHost, event: &mut CameraTypeCycleEvent<'_>) {
+            self.0.lock().unwrap().push((event.previous, *event.next));
+            if *event.next == CameraType::ThirdPersonFront {
+                *event.next = CameraType::FirstPerson;
+            }
+        }
+    }
+
+    /// `key.togglePerspective`: the mod hears each cycle with vanilla's next type and its
+    /// answer is the new type; setting the type does not cycle, and without a listener F5
+    /// cycles as vanilla does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_picks_the_camera_type_f5_cycles_to() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            let mut seen = Vec::new();
+            for _ in 0..3 {
+                game.cycle_camera();
+                seen.push(game.native_camera_type());
+            }
+            use CameraType::*;
+            assert_eq!(seen, [ThirdPersonBack, ThirdPersonFront, FirstPerson]);
+        });
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "no-front",
+            Box::new(NoFront(Arc::clone(&heard))),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                use CameraType::*;
+                game.options.execution_role = super::ExecutionRole::Client;
+                game.cycle_camera();
+                assert_eq!(game.native_camera_type(), ThirdPersonBack);
+                game.cycle_camera();
+                assert_eq!(
+                    game.native_camera_type(),
+                    FirstPerson,
+                    "the front view is skipped"
+                );
+                game.native_set_camera_type(ThirdPersonFront);
+                assert_eq!(game.native_camera_type(), ThirdPersonFront);
+            });
+        });
+        use CameraType::*;
+        assert_eq!(
+            *heard.lock().unwrap(),
+            [
+                (FirstPerson, ThirdPersonBack),
+                (ThirdPersonBack, ThirdPersonFront)
+            ],
+            "setting the type is not a cycle"
+        );
+    }
+}
+
+#[cfg(test)]
+mod client_packet_send_tests {
+    use horizon_protocol::packets::{
+        configuration::CustomPayload,
+        play::{Serverbound, SetCarriedItem},
+    };
+    use mod_api::{ClientHost, ClientPacketSendEvent, Flow, Hooks, ModEntry, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    /// Drops payloads on `example:secret`, logging every packet it hears.
+    struct Filter(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Filter {
+        fn client_packet_send(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ClientPacketSendEvent<'_>,
+        ) -> Flow {
+            self.0.lock().unwrap().push(event.packet.id.to_string());
+            match &event.packet.custom_payload {
+                Some(payload) if payload.channel == "example:secret" => Flow::Cancel,
+                _ => Flow::Continue,
+            }
+        }
+    }
+
+    fn payload(channel: &str) -> Serverbound {
+        Serverbound::CustomPayload(CustomPayload {
+            channel: channel.into(),
+            data: vec![7],
+        })
+    }
+
+    /// `Connection.send`: the mod hears each packet the game sends and cancels the one it
+    /// filters; without a listener nothing is cancelled.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_hears_and_cancels_packets_the_game_sends() {
+        let slot = Serverbound::SetCarriedItem(SetCarriedItem { slot: 2 });
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            assert!(!game.client_packet_send_canceled(&payload("example:secret")));
+        });
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("filter", Box::new(Filter(Arc::clone(&seen))))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                assert!(!game.client_packet_send_canceled(&slot));
+                assert!(game.client_packet_send_canceled(&payload("example:secret")));
+                assert!(!game.client_packet_send_canceled(&payload("example:open")));
+            });
+        });
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "minecraft:set_carried_item",
+                "minecraft:custom_payload",
+                "minecraft:custom_payload"
+            ]
+        );
     }
 }
 
