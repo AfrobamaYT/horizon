@@ -459,6 +459,7 @@ mod tests {
                     invulnerable: false,
                 });
                 game.cushions.push(horizon_client::entities::Cushion {
+                    attachment_lifetime: Default::default(),
                     join: Default::default(),
                     id: base + 5,
                     position: Vec3::ZERO,
@@ -469,6 +470,7 @@ mod tests {
                     custom_name: None,
                 });
                 game.paintings.push(horizon_client::entities::Painting {
+                    attachment_lifetime: Default::default(),
                     join: Default::default(),
                     id: base + 6,
                     pos: [0; 3],
@@ -479,6 +481,7 @@ mod tests {
                     check_interval: 0,
                 });
                 game.item_frames.push(horizon_client::entities::ItemFrame {
+                    attachment_lifetime: Default::default(),
                     join: Default::default(),
                     id: base + 7,
                     pos: [0; 3],
