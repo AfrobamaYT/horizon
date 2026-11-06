@@ -6862,8 +6862,13 @@ impl Game<'_> {
     }
 
     /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`).
-    pub(super) fn native_raid_state_change(&mut self, raid: i32, pos: [i32; 3], state: &str) {
+    /// `stopped`). The handle identifies its owning level, even if parked.
+    pub(super) fn native_raid_state_change(
+        &mut self,
+        raid: mod_api::RaidRef,
+        pos: [i32; 3],
+        state: &str,
+    ) {
         self.fire_raid_state_change(raid, pos, state);
     }
 

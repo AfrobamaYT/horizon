@@ -4247,8 +4247,9 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn raid_spawn_wave();
-    /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`).
+    /// A server raid at `pos` changed to `state` (`triggered`, `victory`,
+    /// `loss` or `stopped`). `raid` identifies its owning level, including a
+    /// parked level. A terminal raid already removed from storage cannot be read.
     #[hook(
         side = "server",
         contract = "listen",
