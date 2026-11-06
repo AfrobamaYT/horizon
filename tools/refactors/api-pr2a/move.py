@@ -288,6 +288,9 @@ use std::sync::{LazyLock, RwLock};
     text += '\nThe API owns these public names. Their engine-independent storage and query index\nlive in `horizon-mod-runtime`, which depends only on the shared vocabulary in\n`horizon-core`; world and game storage use the same implementation.\n'
     write(path, text)
     subprocess.run(["rustfmt", "--edition", "2024", "--config", "skip_children=true", *map(str, sorted(changed))], cwd=ROOT, check=True)
+    # Resolve the workspace graph without compiling. --no-deps does not refresh
+    # Cargo.lock's package edges, so use full metadata for the new runtime edge.
+    subprocess.run(["cargo", "metadata", "--format-version", "1"], cwd=ROOT, stdout=subprocess.DEVNULL, check=True)
     print(f"API PR 2a: moved attachment files and generic key tables; formatted {len(changed)} Rust files")
 
 
