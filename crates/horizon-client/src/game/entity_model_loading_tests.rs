@@ -242,41 +242,45 @@ fn armor_equipment_loads_without_an_entity_model_document() {
 }
 
 #[test]
-fn content_mods_equipment_loads_under_its_namespace() {
+fn equipment_assets_load_from_resource_namespaces_without_a_content_marker() {
+    use horizon_assets::resource_source::ResourceSource;
+    use std::io::Write;
     let root = FixtureRoot::new();
     let equipment = root.0.join("assets/gems/equipment");
     fs::create_dir_all(&equipment).unwrap();
-    fs::write(
-        equipment.join("ruby.json"),
-        serde_json::to_vec(&json!({"layers": {
-            "humanoid": [{"texture": "gems:ruby"}],
-            "humanoid_leggings": [{"texture": "gems:ruby"}]
-        }}))
-        .unwrap(),
-    )
+    let bytes = serde_json::to_vec(&json!({"layers": {
+        "humanoid": [{"texture": "gems:ruby"}],
+        "humanoid_leggings": [{"texture": "gems:ruby"}]
+    }}))
     .unwrap();
-    // Not a content root: other namespaces stay unread, as before.
+    fs::write(equipment.join("ruby.json"), &bytes).unwrap();
+    // EquipmentAssetManager lists equipment in every resource namespace;
+    // a resource pack needs no Horizon content-mod marker.
     assert!(
-        ArmorStandAssets::load(
-            &horizon_assets::resource_source::ResourceSource::directory(root.0.to_path_buf()),
-            None
-        )
-        .equipment
-        .is_empty()
+        !root
+            .0
+            .join(horizon_items::content_namespaces::MARKER)
+            .exists()
     );
-    fs::write(
-        root.0.join(horizon_items::content_namespaces::MARKER),
-        br#"["gems"]"#,
+    let archive = root.0.join("equipment.zip");
+    let mut zip = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+    zip.start_file(
+        "assets/gems/equipment/ruby.json",
+        zip::write::SimpleFileOptions::default(),
     )
     .unwrap();
-    let assets = ArmorStandAssets::load(
-        &horizon_assets::resource_source::ResourceSource::directory(root.0.to_path_buf()),
-        None,
-    );
-    assert_eq!(
-        assets.equipment["gems:ruby"]["humanoid_leggings"],
-        vec![("gems:entity/equipment/humanoid_leggings/ruby".into(), None)]
-    );
+    zip.write_all(&bytes).unwrap();
+    zip.finish().unwrap();
+    for source in [
+        ResourceSource::directory(root.0.clone()),
+        ResourceSource::archive(&archive).unwrap(),
+    ] {
+        let assets = ArmorStandAssets::load(&source, None);
+        assert_eq!(
+            assets.equipment["gems:ruby"]["humanoid_leggings"],
+            vec![("gems:entity/equipment/humanoid_leggings/ruby".into(), None)]
+        );
+    }
 }
 
 #[test]
