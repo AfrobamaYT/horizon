@@ -304,9 +304,12 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
 
-`MobRef::portal_cooldown` reads the current mob portal cooldown in ticks from the server's portal state.
-Zero means no cooldown; `None` means a stale, parked or otherwise unavailable mob, a client, or the separately
-modelled dragon. The read does not load levels.
+`EntityRef::portal_cooldown` takes `&dyn Host` and reads the remaining portal cooldown in ticks from the
+server's portal state: a player's own (the acting player inside its turn and other players outside it), and the
+level's for mobs, items, experience orbs, boats, minecarts, primed TNT, falling blocks, arrows and the thrown items
+and fireballs a chunk saves, fireworks and tridents; an ender pearl's comes from End gateways only. Zero means no
+cooldown; `None` means a kind with no portal cooldown (armor stands, wind charges, the separately modelled dragon and
+others), a client, or a stale, parked or otherwise unavailable handle. The read does not load levels.
 
 `MobRef::can_use_portal` reads the existing server portal decision for a mob in the current level, including mounts and player riders. It takes `&dyn Host`: `Some(false)` means the mob is ineligible, while `None` means a client, stale or unavailable handle, parked mob, or the separately modelled dragon. It does not load a level.
 

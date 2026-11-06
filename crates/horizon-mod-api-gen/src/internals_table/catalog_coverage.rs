@@ -105,7 +105,7 @@ fn real_catalog_has_compiling_host_and_guest_bindings() {
         let reason = if !entry.cfg.is_empty() {
             Some("conditional item")
         } else if bound {
-            internals_view::binding_skip(entry, &rule)
+            None
         } else {
             Some(
                 selected
