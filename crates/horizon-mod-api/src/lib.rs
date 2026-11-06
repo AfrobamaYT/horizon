@@ -4412,7 +4412,9 @@ pub use entity_capability::{
     ENTITY_AUTOMATION, ENTITY_ENERGY, ENTITY_FLUIDS, ENTITY_ITEMS, EntityCapabilityKey,
 };
 mod block_states;
-pub use block_states::{BlockStates, HostBlockStates};
+pub use block_states::{
+    BlockStateConstraint, BlockStateMatchError, BlockStateProperty, BlockStates, HostBlockStates,
+};
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
