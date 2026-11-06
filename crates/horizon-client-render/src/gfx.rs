@@ -12989,7 +12989,9 @@ mod sprite_upload_tests {
         {
             return;
         }
-        let mut sprites = crate::sprites::Sprites::default();
+        let mut sprites = crate::sprites::Sprites::new(
+            crate::resource_source::ResourceSource::directory(root.clone()),
+        );
         let layers: Vec<_> = [
             "rail",
             "powered_rail",
@@ -12997,11 +12999,7 @@ mod sprite_upload_tests {
             "detector_rail",
             "activator_rail",
         ]
-        .map(|name| {
-            sprites
-                .insert(&root, &format!("minecraft:block/{name}"))
-                .unwrap()
-        })
+        .map(|name| sprites.insert(&format!("minecraft:block/{name}")).unwrap())
         .into();
         sprites.finish();
         assert_eq!(sprites.size, 16);
@@ -13019,7 +13017,7 @@ mod sprite_upload_tests {
                 .0
             })
             .collect();
-        sprites.insert(&root, "minecraft:block/oak_sign").unwrap();
+        sprites.insert("minecraft:block/oak_sign").unwrap();
         sprites.finish();
         assert_eq!(sprites.size, 32);
         for (&layer, expected) in layers.iter().zip(native) {

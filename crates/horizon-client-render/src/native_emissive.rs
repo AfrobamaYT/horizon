@@ -23,7 +23,7 @@ pub fn load(root: &Path, sprites: &mut Sprites) {
     for name in names {
         let file = crate::atlas_sources::texture_path(root, &name, "textures");
         if std::fs::metadata(file).is_ok_and(|m| m.len() <= 1 << 20) {
-            let _ = sprites.insert(root, &name);
+            let _ = sprites.insert(&name);
         }
     }
 }
@@ -93,9 +93,9 @@ pub fn load_optifine(root: &Path, sprites: &mut Sprites) -> Vec<(String, String)
         }
         // A file that doesn't load would glow as the missing texture: no pair instead.
         let loaded = if overlay.starts_with("assets/") {
-            sprites.insert_file(root, &overlay)
+            sprites.insert_file(&overlay)
         } else {
-            sprites.try_insert(root, &overlay)
+            sprites.try_insert(&overlay)
         };
         match loaded {
             Ok(_) => pairs.push((base, overlay)),
@@ -188,7 +188,9 @@ mod tests {
             &root.join("assets/minecraft/textures/item/stick_e.png"),
             220,
         );
-        let mut sprites = Sprites::default();
+        let mut sprites = Sprites::new(crate::resource_source::ResourceSource::directory(
+            root.clone(),
+        ));
         for name in [
             "stone",
             "dirt",
@@ -197,12 +199,10 @@ mod tests {
             "diorite",
             "granite",
         ] {
-            sprites
-                .insert(&root, &format!("minecraft:block/{name}"))
-                .unwrap();
+            sprites.insert(&format!("minecraft:block/{name}")).unwrap();
         }
         // Items draw from the HUD atlas, not the terrain: no pair.
-        sprites.insert(&root, "minecraft:item/stick").unwrap();
+        sprites.insert("minecraft:item/stick").unwrap();
         // glowstone isn't loaded: its overlay pairs with nothing.
         let pairs = load_optifine(&root, &mut sprites);
         assert_eq!(
@@ -231,7 +231,7 @@ mod tests {
         );
         for tile in ["ctm/lamp/0", "ctm/lamp/1", "glass/2"] {
             sprites
-                .insert_file(&root, &format!("assets/minecraft/optifine/{tile}.png"))
+                .insert_file(&format!("assets/minecraft/optifine/{tile}.png"))
                 .unwrap();
         }
         let pairs = load_optifine(&root, &mut sprites);

@@ -222,22 +222,22 @@ pub fn list_textures(root: &Path) -> Vec<String> {
 /// resource path, wherever the folder: `directory` is not used for it. An id whose path would
 /// leave the root (a pack's model may write any) names a file that is never there.
 pub fn texture_path(root: &Path, texture: &str, directory: &str) -> PathBuf {
+    root.join(texture_resource(texture, directory))
+}
+/// Resource name of a texture, including Custom Item Textures outside `textures/`.
+pub fn texture_resource(texture: &str, directory: &str) -> String {
     // No file can have a NUL in its name, so this one is never there.
     const NOWHERE: &str = "assets/minecraft/textures/horizon/\0refused.png";
     if texture.starts_with("horizon_cit:") {
-        return root.join(
-            crate::cit_assets::resource(texture, "png")
-                .as_deref()
-                .unwrap_or(NOWHERE),
-        );
+        return crate::cit_assets::resource(texture, "png").unwrap_or_else(|| NOWHERE.to_owned());
     }
     let (namespace, path) = texture.split_once(':').unwrap_or(("minecraft", texture));
     let rel = format!("assets/{namespace}/{directory}/{path}.png");
-    root.join(if horizon_optifine::paths::valid(&rel) {
-        &rel
+    if horizon_optifine::paths::valid(&rel) {
+        rel
     } else {
-        NOWHERE
-    })
+        NOWHERE.to_owned()
+    }
 }
 
 /// `SpriteSourceList.list`: every sprite id of the atlas and its origin.

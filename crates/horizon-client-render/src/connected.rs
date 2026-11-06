@@ -150,7 +150,7 @@ impl ConnectedTextures {
                 _ => None,
             })
             .collect();
-        sprites.prefetch(root, tiles.iter().map(String::as_str));
+        sprites.prefetch(tiles.iter().map(String::as_str));
         let loaded = rules
             .into_iter()
             .filter_map(|rule| {
@@ -163,8 +163,8 @@ impl ConnectedTextures {
                         Tile::Texture(path) => {
                             // A tile among the textures is that sprite, under its own name.
                             let layer = match sprite_name(path) {
-                                name if name != *path => sprites.insert(root, &name)?,
-                                _ => sprites.insert_file(root, path)?,
+                                name if name != *path => sprites.insert(&name)?,
+                                _ => sprites.insert_file(path)?,
                             };
                             Ok(TileLayer::Layer {
                                 layer: u16::try_from(layer)?,

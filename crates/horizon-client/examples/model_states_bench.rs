@@ -92,7 +92,9 @@ impl Fixture {
     }
     fn load(&self, reuse: bool) -> Result<(StateModels, Sprites)> {
         // The first parse and block filtering match models::prepare in both paths.
-        let mut sprites = Sprites::default();
+        let mut sprites = Sprites::new(horizon_client::resource_source::ResourceSource::directory(
+            self.root.clone(),
+        ));
         let catalog = if reuse {
             let facts = self.facts()?;
             let blocks = self.block_names(facts.keys());
@@ -216,7 +218,9 @@ mod tests {
                 &fixture.root,
                 &fixture.registry,
                 &blocks,
-                &mut Sprites::default(),
+                &mut Sprites::new(horizon_client::resource_source::ResourceSource::directory(
+                    fixture.root.clone(),
+                )),
             )
             .err()
             .ok_or("expected load error")?
@@ -225,7 +229,9 @@ mod tests {
                 &fixture.root,
                 &fixture.registry,
                 &blocks,
-                &mut Sprites::default(),
+                &mut Sprites::new(horizon_client::resource_source::ResourceSource::directory(
+                    fixture.root.clone(),
+                )),
                 facts,
             )
             .err()
@@ -255,7 +261,9 @@ mod tests {
             &fixture.root,
             &fixture.registry,
             &blocks,
-            &mut Sprites::default(),
+            &mut Sprites::new(horizon_client::resource_source::ResourceSource::directory(
+                fixture.root.clone(),
+            )),
             &good,
         )?;
         assert!(
@@ -263,7 +271,9 @@ mod tests {
                 &fixture.root,
                 &fixture.registry,
                 &blocks,
-                &mut Sprites::default()
+                &mut Sprites::new(horizon_client::resource_source::ResourceSource::directory(
+                    fixture.root.clone()
+                ))
             )
             .is_err()
         );
@@ -273,7 +283,9 @@ mod tests {
                 &fixture.root,
                 &fixture.registry,
                 &blocks,
-                &mut Sprites::default()
+                &mut Sprites::new(horizon_client::resource_source::ResourceSource::directory(
+                    fixture.root.clone()
+                ))
             )
             .is_err()
         );
@@ -283,7 +295,9 @@ mod tests {
                 &fixture.root,
                 &fixture.registry,
                 &blocks,
-                &mut Sprites::default()
+                &mut Sprites::new(horizon_client::resource_source::ResourceSource::directory(
+                    fixture.root.clone()
+                ))
             )
             .is_err()
         );

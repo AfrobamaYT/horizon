@@ -387,8 +387,10 @@ mod tests {
             .unwrap();
     }
     fn sprite_pixels(root: &Path) -> Vec<u8> {
-        let mut sprites = crate::sprites::Sprites::with_disk_cache(root);
-        sprites.insert(root, "minecraft:block/x").unwrap();
+        let mut sprites = crate::sprites::Sprites::with_disk_cache(
+            &crate::resource_source::ResourceRoot::directory(root.to_owned()),
+        );
+        sprites.insert("minecraft:block/x").unwrap();
         sprites.save_disk_cache();
         sprites.finish();
         sprites.pixels

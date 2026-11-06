@@ -1382,7 +1382,9 @@ impl HudAtlas {
         // Every animated sprite animates: the packed strip is the raw first
         // frame, while the mcmeta's frame list may start anywhere, so each
         // animation's frame(0) overwrites its atlas rect before drawing.
-        let mut loaded = crate::sprites::Sprites::default();
+        let mut loaded = crate::sprites::Sprites::new(
+            crate::resource_source::ResourceSource::directory(root.to_owned()),
+        );
         let mut sprite_animations = Vec::new();
         animated.sort();
         for name in animated {
@@ -1395,7 +1397,7 @@ impl HudAtlas {
             } else {
                 format!("minecraft:{name}")
             };
-            let Ok(layer) = loaded.insert(root, &id) else {
+            let Ok(layer) = loaded.insert(&id) else {
                 continue;
             };
             let Some(animation) = loaded.animations.iter().find(|a| a.layer == layer).cloned()

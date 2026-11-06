@@ -315,9 +315,11 @@ impl RenderAssets {
         parsed: Option<crate::model_library::ParsedModels>,
     ) -> Result<Self> {
         let registry = assets.registry;
-        let mut sprites = crate::sprites::Sprites::with_disk_cache(root);
+        let mut sprites = crate::sprites::Sprites::with_disk_cache(
+            &crate::resource_source::ResourceRoot::directory(root.to_owned()),
+        );
         for name in MATERIALS {
-            sprites.insert(root, &format!("minecraft:block/{name}"))?;
+            sprites.insert(&format!("minecraft:block/{name}"))?;
         }
         // A server draws no block and no item: its block models (about 24 MB
         // baked) and item model library (7 MB) stay empty.
@@ -350,11 +352,11 @@ impl RenderAssets {
             "lava_still",
             "lava_flow",
         ] {
-            sprites.insert(root, &format!("minecraft:block/{name}"))?;
+            sprites.insert(&format!("minecraft:block/{name}"))?;
         }
         for stage in 0..10 {
-            sprites.insert(root, &format!("minecraft:block/destroy_stage_{stage}"))?;
-            sprites.insert(root, &format!("minecraft:block/destroy_oit_stage_{stage}"))?;
+            sprites.insert(&format!("minecraft:block/destroy_stage_{stage}"))?;
+            sprites.insert(&format!("minecraft:block/destroy_oit_stage_{stage}"))?;
         }
         let fusion = if draws {
             let _step = crate::spans::startup::step("core.fusion");

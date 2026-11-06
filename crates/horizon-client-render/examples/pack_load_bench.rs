@@ -376,15 +376,17 @@ fn main() {
                 }
             },
             || {
-                let mut sprites = Sprites::with_disk_cache(&root);
+                let mut sprites = Sprites::with_disk_cache(
+                    &horizon_client_render::resource_source::ResourceRoot::directory(root.clone()),
+                );
                 if prefetch {
-                    sprites.prefetch(&root, names.iter().map(String::as_str));
+                    sprites.prefetch(names.iter().map(String::as_str));
                 }
                 for name in names {
                     if files {
-                        sprites.insert_file(&root, name).unwrap();
+                        sprites.insert_file(name).unwrap();
                     } else {
-                        sprites.insert(&root, name).unwrap();
+                        sprites.insert(name).unwrap();
                     }
                 }
                 sprites.save_disk_cache();

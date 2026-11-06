@@ -63,18 +63,16 @@ fn key(variant: &Variant) -> VariantKey {
 }
 /// Bakes model `name` of `library`, turned and UV-locked as a variant says.
 fn bake_variant(
-    root: &Path,
     sprites: &mut Sprites,
     library: &horizon_assets::resolve::ModelLibrary,
     name: &str,
     turns: [u8; 3],
     lock: bool,
 ) -> Result<BakedModel> {
-    bake_resolved(root, sprites, &library.resolve(name)?, turns, lock)
+    bake_resolved(sprites, &library.resolve(name)?, turns, lock)
 }
 /// Bakes a resolved `model`, turned and UV-locked as a variant says.
 fn bake_resolved(
-    root: &Path,
     sprites: &mut Sprites,
     model: &horizon_assets::resolve::ResolvedCuboidModel,
     turns: [u8; 3],
@@ -82,12 +80,12 @@ fn bake_resolved(
 ) -> Result<BakedModel> {
     let particle = model
         .material("particle")?
-        .map(|material| sprites.insert(root, &material.sprite))
+        .map(|material| sprites.insert(&material.sprite))
         .transpose()?;
     let faces: Vec<BakedFace> = bake_block_model(model, BlockModelTransform::new(turns, lock))?
         .into_iter()
         .map(|quad| {
-            let layer = sprites.insert(root, &quad.material.sprite)?;
+            let layer = sprites.insert(&quad.material.sprite)?;
             // A model's `render_type` replaces the pass its sprite would pick.
             let (translucent, opaque) = match quad.render_type {
                 Some(RenderType::Translucent | RenderType::Tripwire) => (true, false),
@@ -340,7 +338,6 @@ impl StateModels {
         // Every texture the models name, decoded side by side before the bake adds them one
         // by one in its own order.
         sprites.prefetch(
-            root,
             resolved
                 .iter()
                 .flatten()
@@ -350,7 +347,7 @@ impl StateModels {
         let mut baked = Vec::with_capacity(variants.len());
         let mut index = BTreeMap::new();
         for ((name, turns, lock), model) in variants.into_iter().zip(resolved) {
-            let model = bake_resolved(root, sprites, &model?, turns, lock)?;
+            let model = bake_resolved(sprites, &model?, turns, lock)?;
             index.insert((name.clone(), turns, lock), baked.len() as u32);
             let variant = Variant {
                 model: name,
@@ -398,7 +395,7 @@ impl StateModels {
                     &crate::resource_source::ResourceSource::directory(root.to_owned()),
                     vec![name.clone()],
                 )
-                .and_then(|library| bake_variant(root, sprites, &library, name, [0; 3], false));
+                .and_then(|library| bake_variant(sprites, &library, name, [0; 3], false));
             match model {
                 Ok(model) => {
                     self.standalone
@@ -567,7 +564,9 @@ mod tests {
         );
         fixture.write("lanef:block/orphan", r#"{"parent":"lanef:block/absent"}"#);
         let mut models = StateModels::default();
-        let mut sprites = Sprites::default();
+        let mut sprites = Sprites::new(crate::resource_source::ResourceSource::directory(
+            fixture.0.clone(),
+        ));
         let names: Vec<String> = [
             "lanef:block/shaft_half",
             "lanef:block/cog",

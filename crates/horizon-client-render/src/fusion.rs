@@ -238,12 +238,7 @@ fn mcmeta_files(textures: &Path) -> Vec<PathBuf> {
 }
 
 /// `sprites`' tiles of the connecting texture `name`, and the predicates it joins by itself.
-fn sheet(
-    root: &Path,
-    sprites: &mut Sprites,
-    name: &str,
-    meta: Meta,
-) -> Option<(Sheet, Connection)> {
+fn sheet(sprites: &mut Sprites, name: &str, meta: Meta) -> Option<(Sheet, Connection)> {
     let Kind::Connecting {
         layout,
         connections,
@@ -254,7 +249,7 @@ fn sheet(
         return None;
     };
     let tiles = sprites
-        .insert_tiles(root, name, layout.grid(), per_tile_animation)
+        .insert_tiles(name, layout.grid(), per_tile_animation)
         .map_err(|e| log::warn!("Horizon: Fusion texture {name}: {e}"))
         .ok()?;
     // A layer past the mesher's `u16` leaves the sheet to vanilla.
@@ -317,7 +312,7 @@ impl FusionTextures {
                 // The sheet, cut into tiles on first use.
                 let sheet = *by_name.entry(sprite.clone()).or_insert_with(|| {
                     let meta = textures.remove(sprite)?;
-                    sheets.push(sheet(root, sprites, sprite, meta)?);
+                    sheets.push(sheet(sprites, sprite, meta)?);
                     Some(sheets.len() - 1)
                 });
                 let Some(sheet) = sheet else {
