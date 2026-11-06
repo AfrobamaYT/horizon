@@ -1,6 +1,8 @@
 //! Read-only projections of the connected client's existing state.
 
 use super::{Game, remote::Remote};
+#[cfg(test)]
+use mod_api::prelude::*;
 use mod_api::{BlockBreakingState, BlockPos, ClientFrameStats, ClientServer, PlayerRef};
 
 impl Game<'_> {
@@ -85,7 +87,6 @@ impl Game<'_> {
 pub(super) mod tests {
     use super::super::native_entity_refs::tests::with_client_game;
     use super::*;
-    use mod_api::ClientHost;
 
     pub(in crate::game) fn logged_client(
         game: &mut Game<'_>,

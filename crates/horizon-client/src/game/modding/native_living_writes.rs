@@ -175,7 +175,7 @@ impl Game<'_> {
     /// `LivingEntity.getUsedItemHand` while `isUsingItem`: the hand of the item
     /// a player or a mob uses, None when it uses none. On a client, the local
     /// player's only.
-    pub(super) fn native_living_used_item_hand(&self, living: LivingRef) -> Option<Hand> {
+    pub(in crate::game) fn native_living_used_item_hand(&self, living: LivingRef) -> Option<Hand> {
         match self.native_living_read_target(living)? {
             Target::Player => self.used_hand(),
             Target::Guest(conn) => self.lan.as_ref()?.play.get(&conn)?.used_hand(),
@@ -204,7 +204,11 @@ impl Game<'_> {
     /// `release_using_item` or a goal ends it. False for a piglin with
     /// something in its off hand and a drinking witch, whose counter is their
     /// own timer.
-    pub(super) fn native_living_start_using_item(&mut self, living: LivingRef, hand: Hand) -> bool {
+    pub(in crate::game) fn native_living_start_using_item(
+        &mut self,
+        living: LivingRef,
+        hand: Hand,
+    ) -> bool {
         match self.native_living_target(living) {
             Some(Target::Mob(id)) => self.start_mob_using_item(id, hand),
             Some(Target::Player | Target::Guest(_)) => self
@@ -222,7 +226,7 @@ impl Game<'_> {
     /// false when none runs, for armor stands and the dragon, and for a player
     /// other than the acting one while another player acts. A mob's bow or
     /// trident has no release of its own, as in vanilla.
-    pub(super) fn native_living_release_using_item(&mut self, living: LivingRef) -> bool {
+    pub(in crate::game) fn native_living_release_using_item(&mut self, living: LivingRef) -> bool {
         match self.native_living_target(living) {
             Some(Target::Mob(id)) => self.release_mob_using_item(id),
             Some(Target::Player | Target::Guest(_)) => self

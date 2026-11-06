@@ -8,7 +8,9 @@ use std::borrow::Cow;
 
 struct Host;
 impl mod_api::Host for Host {}
+mod_api::impl_host_areas!(Host);
 impl mod_api::ServerHost for Host {}
+mod_api::impl_server_host_areas!(Host);
 
 struct Listener(fn(PointId, PointHost<'_>, &mut dyn Record));
 impl Forward for Listener {
