@@ -1,5 +1,5 @@
 //! The whole submission against a mock GitHub: sign in, submit the sample
-//! signed mod (`crates/horizon-mods/tests/index`), and what lands on GitHub;
+//! signed mod (`crates/horizon-mod-package/tests/index`), and what lands on GitHub;
 //! then what is refused. Then ratings: who may rate what, and what is shown.
 use axum::{
     Json, Router,
@@ -9,8 +9,8 @@ use axum::{
     routing::{get, patch, post},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
+use horizon_mod_package::index::registry::Entry;
 use horizon_mod_registry::{App, Config, github, router};
-use horizon_mods::index::registry::Entry;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::{
@@ -192,7 +192,7 @@ async fn mock_github() -> (String, Shared) {
 }
 
 fn fixtures() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../horizon-mods/tests/index")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../horizon-mod-package/tests/index")
 }
 
 struct Client {
@@ -708,7 +708,7 @@ async fn what_the_form_refuses() {
     let (status, ..) = client.send(request).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     // Too big: past the file's own limit, and past the whole body's.
-    let max = horizon_mods::index::MAX_FILE as usize;
+    let max = horizon_mod_package::index::MAX_FILE as usize;
     for size in [max + 1, max + (200 << 10)] {
         let (status, json) = client.submit(&csrf, &form(), &vec![0; size]).await;
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{size}: {json}");
@@ -1048,7 +1048,7 @@ fn hmod(version: &str) -> Vec<u8> {
         ("Cargo.toml", b"[package]\nname='coords'\nversion='1'\n"),
         ("src/lib.rs", b"pub fn hooks() {}"),
     ];
-    horizon_mods::Package::write_files(&manifest, files).unwrap()
+    horizon_mod_package::Package::write_files(&manifest, files).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
