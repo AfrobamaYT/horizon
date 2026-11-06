@@ -202,7 +202,9 @@ impl Game<'_> {
         let item_crafted = std::mem::take(&mut menu.item_crafted);
         menu.drops.clear();
         let host = self.lan.as_mut()?;
-        store_player(menu, &mut host.hub.guests[gi]);
+        host.hub
+            .guests
+            .update(gi, |guest| store_player(menu, guest));
         let guest = &host.hub.guests[gi];
         let (conn, uuid, entity_id) = (guest.conn, guest.uuid, guest.entity_id);
         if !brewed.is_empty() || !brewed_potion_takes.is_empty() {
@@ -329,11 +331,12 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return true;
         };
-        let g = &mut host.hub.guests[gi];
-        for k in 0..4 {
-            g.craft_grid[k] = menu.slot(1 + k).cloned();
-        }
-        g.craft_result = menu.slot(0).cloned();
+        host.hub.guests.update(gi, |g| {
+            for k in 0..4 {
+                g.craft_grid[k] = menu.slot(1 + k).cloned();
+            }
+            g.craft_result = menu.slot(0).cloned();
+        });
         host.play.entry(conn).or_default().crafting.inventory = Some(menu);
         host.hub.inventory_clicked(conn, p, &self.world, &changed);
         true
@@ -587,11 +590,12 @@ impl Game<'_> {
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            let g = &mut host.hub.guests[gi];
-            for k in 0..4 {
-                g.craft_grid[k] = menu.slot(1 + k).cloned();
-            }
-            g.craft_result = menu.slot(0).cloned();
+            host.hub.guests.update(gi, |g| {
+                for k in 0..4 {
+                    g.craft_grid[k] = menu.slot(1 + k).cloned();
+                }
+                g.craft_result = menu.slot(0).cloned();
+            });
             host.play.entry(conn).or_default().crafting.inventory = Some(menu);
             host.hub.send_inventory(gi);
             placed
@@ -705,10 +709,11 @@ impl Game<'_> {
                 );
             if agreed {
                 // The inventory menu's sync isn't to send what the click settled.
-                let g = &mut host.hub.guests[gi];
-                for &s in changed.iter().filter(|&&s| s >= 10) {
-                    g.menu_sent[s - 1] = menu.slot(s).cloned();
-                }
+                host.hub.guests.update(gi, |g| {
+                    for &s in changed.iter().filter(|&&s| s >= 10) {
+                        g.menu_sent[s - 1] = menu.slot(s).cloned();
+                    }
+                });
             }
         }
         let Some(host) = self.lan.as_mut() else {
@@ -839,9 +844,10 @@ impl Game<'_> {
         let crafting = &mut host.play.entry(conn).or_default().crafting;
         let grid: Vec<ItemStack> = if window == Some(0) {
             crafting.inventory = None;
-            let g = &mut host.hub.guests[gi];
-            g.craft_result = None;
-            g.craft_grid.iter_mut().filter_map(Option::take).collect()
+            host.hub.guests.update(gi, |g| {
+                g.craft_result = None;
+                g.craft_grid.iter_mut().filter_map(Option::take).collect()
+            })
         } else {
             match crafting
                 .table

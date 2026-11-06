@@ -156,8 +156,7 @@ impl Game<'_> {
             Some(Target::Guest(conn)) => self
                 .lan
                 .as_mut()
-                .and_then(|lan| lan.hub.guest_mut(conn))
-                .and_then(|guest| guest.motion.as_deref_mut())
+                .and_then(|lan| lan.hub.guests.motion_mut(conn))
                 .is_some_and(|p| {
                     p.fire_ticks = ticks;
                     true
@@ -215,8 +214,7 @@ impl Game<'_> {
             Some(Target::Guest(conn)) => match self
                 .lan
                 .as_mut()
-                .and_then(|lan| lan.hub.guest_mut(conn))
-                .and_then(|guest| guest.motion.as_deref_mut())
+                .and_then(|lan| lan.hub.guests.motion_mut(conn))
             {
                 Some(player) => {
                     player.air = air;
@@ -296,8 +294,7 @@ impl Game<'_> {
             Some(Target::Guest(conn)) => self
                 .lan
                 .as_mut()
-                .and_then(|lan| lan.hub.guest_mut(conn))
-                .and_then(|guest| guest.motion.as_deref_mut())
+                .and_then(|lan| lan.hub.guests.motion_mut(conn))
                 .is_some_and(|p| {
                     p.ticks_frozen = ticks;
                     true

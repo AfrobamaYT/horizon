@@ -328,9 +328,10 @@ impl Game<'_> {
                 return;
             };
             if self.dim == Dim::End && !host.hub.guest(conn).is_some_and(|g| g.seen_credits) {
-                if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn) {
-                    g.seen_credits = true;
-                }
+                let _ = host
+                    .hub
+                    .guests
+                    .update_connection(conn, |g| g.seen_credits = true);
                 host.play.entry(conn).or_default().won_game = true;
                 // ClientboundGameEventPacket.WIN_GAME.
                 host.hub.send_to(

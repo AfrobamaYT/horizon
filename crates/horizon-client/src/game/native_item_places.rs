@@ -1015,7 +1015,10 @@ pub(super) mod tests {
             let title = horizon_world::nbt::Tag::String("new".into());
             let hub = &mut game.lan.as_mut().unwrap().hub;
             hub.open_native_menu(1, 1, title, vec![]).unwrap();
-            hub.guests[0].carried = Some(ItemStack::new("minecraft:stick", 1));
+            {
+                let value = Some(ItemStack::new("minecraft:stick", 1));
+                hub.guests.update(0, |guest| guest.carried = value);
+            }
             assert_eq!(stale.carried(game), None);
             assert_eq!(write(game, &stale.cursor(), "minecraft:stick", -1, true), 0);
             assert_eq!(write(game, &stale.cursor(), "minecraft:stick", 1, true), 0);

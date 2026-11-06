@@ -79,11 +79,11 @@ fn level_event_excludes_its_source_even_during_another_guests_turn() {
             uuid: 12,
             saved: None,
         });
-        for guest in &mut host.hub.guests {
+        host.hub.guests.update_all(|guest| {
             let (tx, rx) = std::sync::mpsc::channel();
             guest.sender = PlayerSender::new(tx, Arc::default());
             receivers.push(rx);
-        }
+        });
         game.audio.capture = Some(Vec::new());
         game.as_guest(13, |game| {
             game.lan_record_events(&[LevelEvent::LevelEvent {
@@ -165,9 +165,8 @@ fn another_guests_menu_and_push_work_during_a_turn() {
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .inventory[0] = Some(stone.clone());
+            .update_guest(13, |guest| guest.inventory[0] = Some(stone.clone()))
+            .unwrap();
         game.as_guest(12, |game| {
             assert!(game.native_menu_ref(a).is_none());
             assert_eq!(a_menu.slot_count(game), None);
@@ -254,17 +253,16 @@ fn another_guests_services_work_during_a_turn() {
         tree.by_id.insert("turns:probe".into(), 0);
         tree.by_trigger.insert("turns:probe".into(), vec![(0, 0)]);
         game.adv.tree = Arc::new(tree);
-        for guest in &mut game.lan.as_mut().unwrap().hub.guests {
+        game.lan.as_mut().unwrap().hub.guests.update_all(|guest| {
             guest.advancements_loaded = true;
-        }
+        });
         let stone = ItemStack::new("minecraft:stone", 4);
         game.lan
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .inventory[0] = Some(stone.clone());
+            .update_guest(13, |guest| guest.inventory[0] = Some(stone.clone()))
+            .unwrap();
         let a = game.native_player_ref(12).unwrap();
         let b = game.native_player_ref(13).unwrap();
         game.as_guest(12, |game| {
@@ -469,9 +467,8 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .vehicle = Some(42);
+            .update_guest(13, |guest| guest.vehicle = Some(42))
+            .unwrap();
         let horse = game.res.mob_types().get("minecraft:horse").unwrap().clone();
         game.mobs
             .push(Mob::new(42, horse, Vec3::new(3.0, 64.0, 5.0), 0.0));
@@ -517,15 +514,20 @@ fn a_mounted_guests_turn_publishes_its_teleport_without_dismounting() {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(13)
-                .unwrap()
-                .vehicle = vehicle;
+                .update_guest(13, |guest| guest.vehicle = vehicle)
+                .unwrap();
             if vehicle.is_some() {
                 game.guest_boarded(13, None);
             }
             let (tx, rx) = std::sync::mpsc::channel();
-            game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap().sender =
-                PlayerSender::new(tx, Arc::default());
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |guest| {
+                    guest.sender = PlayerSender::new(tx, Arc::default())
+                })
+                .unwrap();
             game.as_guest(13, |game| {
                 // The body left by a passenger transition, before the guest
                 // turn publishes it back to the hub and the connection.
@@ -798,9 +800,9 @@ fn tick_advancement_notice_precedes_recipe_reward() {
         );
         let reload = std::env::var("HORIZON_ADVANCEMENT_ORDER_CHILD").as_deref() == Ok("reload");
         let host = game.lan.as_mut().unwrap();
-        for guest in &mut host.hub.guests {
+        host.hub.guests.update_all(|guest| {
             guest.advancements_loaded = reload;
-        }
+        });
         host.hub.mods_loaded = reload;
         game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners));
         if reload {

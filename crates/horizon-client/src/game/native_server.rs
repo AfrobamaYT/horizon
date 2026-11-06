@@ -2844,9 +2844,8 @@ mod fake_action_tests {
                         .as_mut()
                         .unwrap()
                         .hub
-                        .guest_mut(fake_conn)
-                        .unwrap()
-                        .sneaking = sneaking;
+                        .update_guest(fake_conn, |guest| guest.sneaking = sneaking)
+                        .unwrap();
                     assert_eq!(
                         game.native_player_perform_action(player, interact),
                         Ok(ActionOutcome::Consumed)
@@ -2898,9 +2897,8 @@ mod fake_action_tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(real_conn)
-                .unwrap()
-                .position = [0.5, 64.0, 0.5];
+                .update_guest(real_conn, |guest| guest.position = [0.5, 64.0, 0.5])
+                .unwrap();
             assert_eq!(
                 game.guest_interact(real_conn, gi, 6110, Hand::Main, [2.5, 64.5, 0.5]),
                 Ok(true),

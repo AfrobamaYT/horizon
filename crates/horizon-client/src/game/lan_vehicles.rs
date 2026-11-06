@@ -259,7 +259,12 @@ impl Game<'_> {
                 .map(|m| m.position)
         });
         if let Some(p) = at {
-            host.hub.guests[gi].vehicle_good = Some([p.x, p.y, p.z]);
+            {
+                let value = Some([p.x, p.y, p.z]);
+                host.hub
+                    .guests
+                    .update(gi, |guest| guest.vehicle_good = value);
+            }
         }
         // Getting out goes through leave_guest, which tells the client and
         // teleports it (ServerPlayer.dismountTo).
@@ -320,7 +325,10 @@ impl Game<'_> {
         }
         // The host in the window rides it already.
         if self.riding == Some(vehicle) {
-            host.hub.guests[gi].vehicle = before;
+            {
+                let value = before;
+                host.hub.guests.update(gi, |guest| guest.vehicle = value);
+            }
             return;
         }
         let at = self

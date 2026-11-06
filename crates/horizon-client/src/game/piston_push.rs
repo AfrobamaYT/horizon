@@ -364,14 +364,14 @@ impl Game<'_> {
             .map_or(0.6, |v| v as f32);
         let mut guests = std::collections::HashMap::new();
         if let Some(host) = self.lan.as_mut() {
-            for g in &mut host.hub.guests {
+            host.hub.guests.update_all(|g| {
                 let step = g
                     .motion
                     .as_mut()
                     .and_then(|m| m.attribute("minecraft:step_height").ok())
                     .map_or(0.6, |v| v as f32);
                 guests.insert(g.conn, step);
-            }
+            });
         }
         StepHeights { player, guests }
     }

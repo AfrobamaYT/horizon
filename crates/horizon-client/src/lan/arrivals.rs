@@ -350,10 +350,12 @@ pub fn export_record(
     });
     if let Some(id) = id {
         let since = hub.ticks;
-        hub.guests[i].handover = Some(Handover {
-            id,
-            since,
-            record: record.clone(),
+        hub.guests.update(i, |g| {
+            g.handover = Some(Handover {
+                id,
+                since,
+                record: record.clone(),
+            });
         });
     }
     Ok(record)
@@ -644,7 +646,7 @@ pub fn release_request(hub: &mut Hub, args: &str) -> serde_json::Value {
     }
     match hub.handover_of(uuid, id) {
         Ok(i) => {
-            hub.guests[i].handover = None;
+            hub.guests.update(i, |g| g.handover = None);
             serde_json::json!({ "ok": true, "released": "abort" })
         }
         Err(why) => error(why),
@@ -1658,7 +1660,7 @@ mod hub_tests {
         assert_eq!(reply["freeze_ticks_left"], 550);
         assert_eq!(reply["record"], first);
         // Once it is over, a new freeze is a new hand-over.
-        hub.guests[i].handover = None;
+        hub.guests.update(i, |g| g.handover = None);
         let next = super::export_record(&mut hub, i, true, Default::default()).unwrap();
         assert_ne!(next["handover"], first["handover"]);
         assert_eq!(next["position"][0], 14.5);

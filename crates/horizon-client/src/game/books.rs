@@ -409,12 +409,12 @@ impl Game<'_> {
         // A cancelled edit leaves the client's own copy of the book: forget
         // what was sent so the next broadcast resends the server's stack.
         if cancelled == Some(true)
-            && let Some(g) = self
-                .lan
-                .as_mut()
-                .and_then(|host| host.hub.guests.iter_mut().find(|g| g.conn == conn))
+            && let Some(host) = self.lan.as_mut()
         {
-            g.menu_sent[menu_slot] = None;
+            let _ = host
+                .hub
+                .guests
+                .update_connection(conn, |g| g.menu_sent[menu_slot] = None);
         }
     }
     pub(super) fn book_key(&mut self, event: &KeyEvent) {

@@ -165,10 +165,10 @@ fn progress_events_capture_each_players_full_mutation_state() {
                 false,
                 None,
             );
-            for guest in &mut game.lan.as_mut().unwrap().hub.guests {
+            game.lan.as_mut().unwrap().hub.guests.update_all(|guest| {
                 guest.advancements_loaded = true;
                 guest.advancements.grant(ID, "gamma", DATE);
-            }
+            });
             game.lan.as_mut().unwrap().hub.mods_loaded = true;
             let reload = |game: &mut Game<'_>| {
                 assert!(game.run_guest_command(GuestCommand {
@@ -379,9 +379,9 @@ fn progress_events_capture_each_players_full_mutation_state() {
             );
             let reload = case == "reload";
             let host = game.lan.as_mut().unwrap();
-            for guest in &mut host.hub.guests {
+            host.hub.guests.update_all(|guest| {
                 guest.advancements_loaded = reload;
-            }
+            });
             host.hub
                 .guest_mut(13)
                 .unwrap()

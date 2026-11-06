@@ -911,9 +911,8 @@ mod tests {
                         .as_mut()
                         .unwrap()
                         .hub
-                        .guest_mut(13)
-                        .unwrap()
-                        .dimension = "minecraft:the_nether".into();
+                        .update_guest(13, |guest| guest.dimension = "minecraft:the_nether".into())
+                        .unwrap();
                     // Entity/living lookup intentionally still includes all
                     // server players; the sleep write must own the refusal.
                     assert_eq!(game.native_entity(13), Some(foreign.entity()));
@@ -1039,9 +1038,8 @@ mod tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(12)
-                .unwrap()
-                .fall_flying = true;
+                .update_guest(12, |guest| guest.fall_flying = true)
+                .unwrap();
             let vine = game
                 .pack
                 .assets
@@ -1122,9 +1120,8 @@ mod tests {
                     .as_mut()
                     .unwrap()
                     .hub
-                    .guest_mut(conn)
-                    .unwrap()
-                    .fall_flying = true;
+                    .update_guest(conn, |guest| guest.fall_flying = true)
+                    .unwrap();
                 game.as_guest(conn, |game| {
                     game.player.as_mut().unwrap().fall_fly_ticks = conn as i32
                 })

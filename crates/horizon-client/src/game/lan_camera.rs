@@ -193,7 +193,10 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        host.hub.guests[gi].watching = camera.is_some();
+        {
+            let value = camera.is_some();
+            host.hub.guests.update(gi, |guest| guest.watching = value);
+        }
         // teleportTo(level, camera.x, y, z): same look.
         host.hub.teleport(gi, at);
         host.hub.send_to(

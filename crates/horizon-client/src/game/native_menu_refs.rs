@@ -587,7 +587,10 @@ mod tests {
             let stone = ItemStack::new("minecraft:stone", 4);
             let host = game.lan.as_mut().unwrap();
             host.hub.guests[0].inventory[9] = Some(stone.clone());
-            host.hub.guests[0].carried = Some(stone.clone());
+            {
+                let value = Some(stone.clone());
+                host.hub.guests.update(0, |guest| guest.carried = value);
+            }
             let title = horizon_world::nbt::Tag::String("test".into());
             let window = host
                 .hub

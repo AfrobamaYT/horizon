@@ -1519,7 +1519,12 @@ pub(super) mod tests {
                 horizon_core::geometry::Vec3::new(3.0, 64.0, 5.0),
             )
             .unwrap();
-            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| guest.motion = Some(Box::new(motion)))
+                .unwrap();
             let player = game.native_player_ref(12).unwrap();
             assert_eq!(
                 player.inventory(game),
@@ -1536,7 +1541,12 @@ pub(super) mod tests {
                 Some(20.0)
             );
             assert_eq!(guest_living.max_health(host), Some(20.0));
-            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = None;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| guest.motion = None)
+                .unwrap();
             // Body and saddle are stored on a guest like on a mob.
             let living = game.native_living(player.fields().entity).unwrap();
             let saddle = ItemStack::new("minecraft:saddle", 1);
@@ -1786,9 +1796,8 @@ pub(super) mod tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(12)
-                .unwrap()
-                .dimension = "minecraft:the_nether".into();
+                .update_guest(12, |guest| guest.dimension = "minecraft:the_nether".into())
+                .unwrap();
             assert!(!game.native_entity_start_riding(guest, vehicle, true));
             assert!(!game.native_entity_start_riding(vehicle, guest, true));
             let _ = std::fs::remove_dir_all(root);
@@ -1948,7 +1957,10 @@ pub(super) mod tests {
             .unwrap();
             let host = game.lan.as_mut().unwrap();
             host.hub.guests = std::mem::take(&mut hub.guests);
-            host.hub.guests[1].position = [1600.0, 64.0, 0.0];
+            {
+                let value = [1600.0, 64.0, 0.0];
+                host.hub.guests.update(1, |guest| guest.position = value);
+            }
             game.lan_update_streaming();
             assert!(
                 game.streaming
