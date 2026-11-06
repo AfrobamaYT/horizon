@@ -172,7 +172,8 @@ impl Game<'_> {
             return;
         }
         let key = (home[0], home[1], home[2]);
-        let Some(BlockEntity::CreakingHeart(mut heart)) = self.world.block_entities.take(&key)
+        let Some((lease, BlockEntity::CreakingHeart(mut heart))) =
+            self.world.block_entities.take(&key)
         else {
             return;
         };
@@ -181,7 +182,7 @@ impl Game<'_> {
         });
         self.world
             .block_entities
-            .put(key, BlockEntity::CreakingHeart(heart));
+            .put(lease, BlockEntity::CreakingHeart(heart));
     }
     /// `Creaking.tearDown`: the crumble particles.
     pub(super) fn creaking_tear_down(&mut self, center: [f64; 3], spread: [f64; 3]) {
@@ -236,7 +237,8 @@ impl Game<'_> {
         ) {
             return;
         }
-        let Some(BlockEntity::CreakingHeart(mut heart)) = self.world.block_entities.take(&key)
+        let Some((lease, BlockEntity::CreakingHeart(mut heart))) =
+            self.world.block_entities.take(&key)
         else {
             return;
         };
@@ -264,13 +266,14 @@ impl Game<'_> {
         }
         self.world
             .block_entities
-            .put(key, BlockEntity::CreakingHeart(heart));
+            .put(lease, BlockEntity::CreakingHeart(heart));
     }
     /// `CreakingHeartBlockEntity.serverTick` of the heart at `key`. Its slot
     /// stays while uprooted, so that a heart whose block went away is still
     /// found here and lets go of its protector.
     pub(super) fn tick_creaking_heart(&mut self, key: Pos) -> Result<()> {
-        let Some(BlockEntity::CreakingHeart(mut heart)) = self.world.block_entities.take(&key)
+        let Some((lease, BlockEntity::CreakingHeart(mut heart))) =
+            self.world.block_entities.take(&key)
         else {
             return Ok(());
         };
@@ -293,7 +296,7 @@ impl Game<'_> {
         }
         self.world
             .block_entities
-            .put(key, BlockEntity::CreakingHeart(heart));
+            .put(lease, BlockEntity::CreakingHeart(heart));
         Ok(())
     }
     /// `ServerLevel.isSpawningMonsters`.
