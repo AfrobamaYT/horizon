@@ -337,7 +337,7 @@ pub fn resolve_blocks(
 }
 
 /// The current numeric mapping for a trusted key. None means this thread has no resolved
-/// world tables (startup, another owning thread, or a refused reload), not an unknown slot.
+/// world tables (startup or another owning thread), not an unknown slot.
 pub fn block(key: BlockKey) -> Option<ResolvedBlock> {
     BLOCKS.with(|blocks| {
         blocks
