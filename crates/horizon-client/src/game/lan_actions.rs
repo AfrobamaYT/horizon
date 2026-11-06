@@ -7091,7 +7091,13 @@ mod tests {
                 _: &dyn mod_api::LoopContext,
                 event: &mut MenuSlotRulesEvent<'_>,
             ) {
+                if &*event.stack.item == "minecraft:granite" && event.stack.count < 8 {
+                    event.may_place = false;
+                }
                 if event.slot == 0 {
+                    if &*event.stack.item == "minecraft:andesite" {
+                        event.max_stack = 3;
+                    }
                     if &*event.stack.item == "minecraft:dirt" {
                         event.may_place = false;
                     }
@@ -7156,12 +7162,14 @@ mod tests {
                         vec![None; 27],
                         None,
                     );
-                    let opened = host.hub.guests[0].menu.as_mut().unwrap();
-                    if is_mod {
-                        opened.registry_id = "test:menu".into();
-                        opened.mod_type = Some(menu_type);
-                    }
-                    let window = opened.window;
+                    host.hub.guests.update(0, |guest| {
+                        let opened = guest.menu.as_mut().unwrap();
+                        if is_mod {
+                            opened.registry_id = "test:menu".into();
+                            opened.mod_type = Some(menu_type);
+                        }
+                    });
+                    let window = host.hub.guests[0].menu.as_ref().unwrap().window;
                     for (item, expected) in [("minecraft:dirt", 0), ("minecraft:stone", 3)] {
                         let stack = ItemStack::new(item, 8);
                         let mut prediction = Menu::new(if is_mod {
@@ -7178,7 +7186,12 @@ mod tests {
                         prediction
                             .click(&game.menu_env(), 0, 0, Input::Pickup)
                             .unwrap();
-                        game.lan.as_mut().unwrap().hub.guests[0].carried = Some(stack);
+                        game.lan
+                            .as_mut()
+                            .unwrap()
+                            .hub
+                            .guests
+                            .update(0, |guest| guest.carried = Some(stack));
                         game.lan_guest_packet(
                             12,
                             Serverbound::ContainerClick(ContainerClick {
@@ -7204,6 +7217,65 @@ mod tests {
                                 .map_or(0, |s| s.count)
                         );
                     }
+                    // Both engines use the original cursor for every drag decision, and
+                    // return items when a listener cap is below an existing stack.
+                    for (item, existing, carried, expected) in [
+                        ("minecraft:granite", 0, 8, (4, 4, 0)),
+                        ("minecraft:andesite", 8, 8, (3, 4, 9)),
+                    ] {
+                        let slots = game.world.block_entities.get_mut(&pos).unwrap().slots_mut();
+                        slots[0] = (existing > 0).then(|| ItemStack::new(item, existing));
+                        slots[1] = None;
+                        let mut prediction = Menu::new(if is_mod {
+                            Kind::Mod(menu_type)
+                        } else {
+                            Kind::Chest(3)
+                        });
+                        prediction.set_registry_id(Some(if is_mod {
+                            "test:menu"
+                        } else {
+                            "minecraft:generic_9x3"
+                        }));
+                        prediction.load_slot(0, slots[0].clone());
+                        prediction.carried = Some(ItemStack::new(item, carried));
+                        game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                            guest.carried = Some(ItemStack::new(item, carried))
+                        });
+                        for (slot, button) in [(-999, 0), (0, 1), (1, 1), (-999, 2)] {
+                            prediction
+                                .click(&game.menu_env(), slot, button, Input::QuickCraft)
+                                .unwrap();
+                            game.lan_guest_packet(
+                                12,
+                                Serverbound::ContainerClick(ContainerClick {
+                                    container: window,
+                                    state: 0,
+                                    slot: slot as i16,
+                                    button: button as i8,
+                                    input: 5,
+                                    changed: Vec::new(),
+                                    carried: None,
+                                }),
+                            );
+                        }
+                        let slots = game.world.block_entities.get(&pos).unwrap().slots();
+                        let result = (
+                            slots[0].as_ref().map_or(0, |s| s.count),
+                            slots[1].as_ref().map_or(0, |s| s.count),
+                            game.lan.as_ref().unwrap().hub.guests[0]
+                                .carried
+                                .as_ref()
+                                .map_or(0, |s| s.count),
+                        );
+                        let predicted = (
+                            prediction.slot(0).map_or(0, |s| s.count),
+                            prediction.slot(1).map_or(0, |s| s.count),
+                            prediction.carried.as_ref().map_or(0, |s| s.count),
+                        );
+                        assert_eq!(result, expected, "{item} mod={is_mod}");
+                        assert_eq!(predicted, expected, "{item} mod={is_mod}");
+                        assert_eq!(result.0 + result.1 + result.2, existing + carried);
+                    }
                     // Vanilla moveItemStackTo tops up an existing stack before empty slots.
                     game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
                         Some(ItemStack::new("minecraft:dirt", 2));
@@ -7222,8 +7294,9 @@ mod tests {
                     prediction
                         .click(&game.menu_env(), 27, 0, Input::QuickMove)
                         .unwrap();
-                    game.lan.as_mut().unwrap().hub.guests[0].inventory[9] =
-                        Some(ItemStack::new("minecraft:dirt", 4));
+                    game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                        guest.inventory[9] = Some(ItemStack::new("minecraft:dirt", 4))
+                    });
                     game.lan_guest_packet(
                         12,
                         Serverbound::ContainerClick(ContainerClick {
@@ -7244,77 +7317,41 @@ mod tests {
                         2
                     );
                     assert_eq!(prediction.slot(0).unwrap().count, 2);
-                    // A refused stack cannot be partly transferred to a nearly full bundle.
-                    game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
-                        Some(ItemStack::new("minecraft:dirt", 8));
-                    let mut bundle = ItemStack::new("minecraft:bundle", 1);
-                    bundle.data_mut().bundle_contents = vec![ItemStack::new("minecraft:stone", 60)];
-                    game.lan.as_mut().unwrap().hub.guests[0].carried = Some(bundle);
+                    // Hotbar zero and its displayed slot are the same backing slot.
+                    game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                        guest.inventory.fill(None);
+                        guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 8));
+                    });
                     game.lan_guest_packet(
                         12,
                         Serverbound::ContainerClick(ContainerClick {
                             container: window,
                             state: 0,
-                            slot: 0,
+                            slot: 54,
                             button: 0,
-                            input: 0,
+                            input: 2,
                             changed: Vec::new(),
                             carried: None,
                         }),
                     );
+                    let guest = &game.lan.as_ref().unwrap().hub.guests[0];
                     assert_eq!(
-                        game.world.block_entities.get(&pos).unwrap().slots()[0]
-                            .as_ref()
-                            .unwrap()
-                            .count,
+                        guest
+                            .inventory
+                            .iter()
+                            .flatten()
+                            .map(|s| s.count)
+                            .sum::<u32>(),
                         8
                     );
-                    assert_eq!(
-                        game.lan.as_ref().unwrap().hub.guests[0]
-                            .carried
-                            .as_ref()
-                            .unwrap()
-                            .data()
-                            .unwrap()
-                            .bundle_contents[0]
-                            .count,
-                        60
-                    );
-                    // When the whole refused stack fits, safeTake moves all eight.
-                    game.lan.as_mut().unwrap().hub.guests[0].carried =
-                        Some(ItemStack::new("minecraft:bundle", 1));
-                    game.lan_guest_packet(
-                        12,
-                        Serverbound::ContainerClick(ContainerClick {
-                            container: window,
-                            state: 0,
-                            slot: 0,
-                            button: 0,
-                            input: 0,
-                            changed: Vec::new(),
-                            carried: None,
-                        }),
-                    );
-                    assert!(game.world.block_entities.get(&pos).unwrap().slots()[0].is_none());
-                    assert_eq!(
-                        game.lan.as_ref().unwrap().hub.guests[0]
-                            .carried
-                            .as_ref()
-                            .unwrap()
-                            .data()
-                            .unwrap()
-                            .bundle_contents[0]
-                            .count,
-                        8
-                    );
+                    assert_eq!(guest.inventory[0].as_ref().unwrap().count, 8);
                     // A capped occupied swap preserves both stacks and their total count.
                     game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
                         Some(ItemStack::new("minecraft:dirt", 2));
-                    game.lan.as_mut().unwrap().hub.guests[0]
-                        .inventory
-                        .fill(None);
-                    game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
-                        Some(ItemStack::new("minecraft:stone", 8));
+                    game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                        guest.inventory.fill(None);
+                        guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 8));
+                    });
                     game.lan_guest_packet(
                         12,
                         Serverbound::ContainerClick(ContainerClick {
@@ -7346,11 +7383,12 @@ mod tests {
                     game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
                         Some(limited.clone());
                     limited.count = 15;
-                    let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-                    guest.inventory.fill(None);
-                    guest.inventory[1] = Some(limited);
-                    guest.selected = 1;
-                    guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 8));
+                    game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                        guest.inventory.fill(None);
+                        guest.inventory[1] = Some(limited);
+                        guest.selected = 1;
+                        guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 8));
+                    });
                     game.lan_guest_packet(
                         12,
                         Serverbound::ContainerClick(ContainerClick {

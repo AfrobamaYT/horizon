@@ -1141,9 +1141,6 @@ fn quick_craft(
                 {
                     continue;
                 }
-                if !view.enabled(i) || !view.may_place(i, &carried, rules) {
-                    continue;
-                }
                 let existing = view.get(i).map_or(0, |s| s.count);
                 let max = item_max.min(view.slot_max(i, &carried, rules));
                 let new_count = crate::menu::quick_craft_count(
