@@ -828,7 +828,7 @@ hosts are small enough to implement whole. NeoForge's GameTest is the in-game co
 A new hook needs its declaration in the area file of `crates/horizon-mod-api/src/hooks/` (`///` lines and
 `#[hook(side = "server", contract = "cancel", out = "cancel")]` on `fn name();`; the argument list is in that folder's `mod.rs`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
-That command only replaces the placeholder in `native_hooks.rs` with the `dispatch_<hook>` call; commit
+That command only replaces the placeholder in `native_hooks/` with the `dispatch_<hook>` call; commit
 that source change and the declaration. The `horizon-mod-api-gen` build dependency generates the hook traits,
 `Host` methods and dispatch code into Cargo's `OUT_DIR` when the game and renderer build, including release
 builds. These generated Rust files are not kept in the source tree or committed, and no manual regeneration
