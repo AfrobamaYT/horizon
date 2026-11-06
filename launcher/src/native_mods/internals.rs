@@ -25,6 +25,7 @@ pub(super) struct Facade {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
+    Inject(horizon_mods::manifest::inject::InjectError),
     Missing {
         mod_id: String,
         path: String,
@@ -63,6 +64,7 @@ pub(super) enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
+            Self::Inject(error) => return error.fmt(f),
             Self::Missing { mod_id, path } => trf(
                 "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
                 &[("mod", mod_id), ("path", path)],
@@ -141,6 +143,7 @@ impl Catalog {
     }
 
     pub(super) fn check(&self, manifest: &horizon_mods::Manifest) -> Result<(), Error> {
+        super::slots::check(self, manifest).map_err(Error::Inject)?;
         let Some(native) = &manifest.native else {
             return Ok(());
         };
@@ -152,7 +155,7 @@ impl Catalog {
         }
         for injection in inject::raw_of(manifest) {
             if !self.points.iter().any(|point| {
-                point.target == injection.target
+                plain_path(&point.target) == plain_path(&injection.target)
                     && point.raw
                     && point.listener.is_some()
                     && point.return_listener.is_some()
@@ -184,11 +187,14 @@ impl Catalog {
     }
 
     pub(super) fn log_raw(&self, manifest: &horizon_mods::Manifest) -> Result<(), String> {
+        for decision in super::slots::report(manifest) {
+            super::append_log(&decision)?;
+        }
         for injection in inject::raw_of(manifest) {
             let point = self
                 .points
                 .iter()
-                .find(|point| point.target == injection.target)
+                .find(|point| plain_path(&point.target) == plain_path(&injection.target))
                 .expect("raw target checked");
             let place = point.place(injection.at_return);
             super::append_log(&trf(
@@ -261,7 +267,7 @@ impl Catalog {
             let point = self
                 .points
                 .iter()
-                .find(|point| point.target == injection.target)
+                .find(|point| plain_path(&point.target) == plain_path(&injection.target))
                 .expect("raw target checked");
             let listener = if injection.at_return {
                 &point.return_listener
@@ -299,6 +305,9 @@ impl Catalog {
             sites::find(&self.sites, injection)
                 .expect("site checked")
                 .facade(&mut exports, &mut constructors, &mut crates);
+        }
+        for (_, site) in super::slots::sites(&self.sites, manifest) {
+            site.facade(&mut exports, &mut constructors, &mut crates);
         }
         for export in exports {
             text.push_str(&export);

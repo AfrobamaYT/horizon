@@ -37,6 +37,7 @@ mod isolate;
 mod package;
 mod prebuilt;
 mod sites;
+mod slots;
 mod wasm_internals;
 
 pub use isolate::LeftOut;
