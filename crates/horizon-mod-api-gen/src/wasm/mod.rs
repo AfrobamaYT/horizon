@@ -917,7 +917,7 @@ mod tests {
             ] {
                 assert!(client.functions.contains_key(function), "{function}");
                 let unbound_name = format!("ClientHost::{name}");
-                assert!(!unbound.iter().any(|n| *n == unbound_name), "{name}");
+                assert!(!unbound.contains(&unbound_name), "{name}");
             }
         });
     }
