@@ -1,6 +1,6 @@
 //! Raw call-site routing and adapters; every kind uses the same typed wrap constructor.
 use super::internals::Error;
-use horizon_mods::{
+use horizon_mod_package::{
     manifest::{Injection, InjectionKind},
     Manifest,
 };

@@ -34,7 +34,7 @@ impl Registrar for PartRegistrar {
 
     fn declare_fluid(&mut self, path: &str) -> super::FluidKey {
         let id = format!("{}:{path}", self.mod_id);
-        if path.contains(':') || !horizon_mods::content::namespaced_id(&id) {
+        if path.contains(':') || !horizon_mod_package::content::namespaced_id(&id) {
             self.refused.push(format!(
                 "mod {}: invalid fluid declaration {id:?}",
                 self.mod_id
