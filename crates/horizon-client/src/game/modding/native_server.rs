@@ -1948,7 +1948,7 @@ mod tests {
 
     fn with_command_sources(test: impl FnOnce(&mut Game<'_>)) {
         use horizon_client::{
-            block_entities::BlockEntity, chunk::Chunk, command_block::CommandBlock,
+            chunk::Chunk, chunk::block_entity::BlockEntity, command_block::CommandBlock,
         };
         use horizon_core::geometry::Vec3;
         super::super::native_guest_turn_tests::with_guests(|game| {
@@ -1987,7 +1987,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn native_command_feedback_respects_track_output_and_silence() {
         use super::super::commands::execute::Source;
-        use horizon_client::block_entities::BlockEntity;
+        use horizon_client::chunk::block_entity::BlockEntity;
         with_command_sources(|game| {
             let source = Source {
                 block: Some((1, 64, 1)),
