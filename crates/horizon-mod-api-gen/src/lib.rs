@@ -973,7 +973,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             }
         }
         for (path, output) in outputs {
-            fs::write(path, output).map_err(|e| e.to_string())?;
+            fs::write(path, output).map_err(|e| format!("{}: {e}", path.display()))?;
         }
     }
     Ok(Sources {
