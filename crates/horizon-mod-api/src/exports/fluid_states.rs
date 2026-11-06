@@ -1,2 +1,3 @@
 mod fluid_states;
-pub use fluid_states::{FluidDefinition, FluidStateError, FluidStates, HostFluidStates};
+pub use crate::host::fluid_states::HostFluidStates;
+pub use fluid_states::{FluidDefinition, FluidStateError, FluidStates};

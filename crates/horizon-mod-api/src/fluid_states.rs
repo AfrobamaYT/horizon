@@ -1,5 +1,8 @@
 //! Read-only fluid-state definitions from the owning host's loaded registry.
-use crate::{Backend, BackendRef, FluidKey, FluidState, Host, StateConstraint, StateProperty};
+use crate::{
+    Backend, BackendRef, FluidKey, FluidState, Host, HostFluidStates, StateConstraint,
+    StateProperty,
+};
 
 /// A registered fluid's world-state definition, or an identity used only in tanks.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,11 +43,6 @@ impl crate::NoBackend for FluidStateError {
 pub struct FluidStates<'a> {
     backend: Option<&'a dyn Backend>,
 }
-/// Reaches fluid-state facts from any host.
-pub trait HostFluidStates {
-    /// Facts about registered world and tank-only fluids.
-    fn fluid_states(&self) -> FluidStates<'_>;
-}
 impl<H: Host + ?Sized> HostFluidStates for H {
     fn fluid_states(&self) -> FluidStates<'_> {
         FluidStates {
@@ -79,6 +77,7 @@ mod tests {
     fn carried_properties_and_unavailable_host() {
         struct Unavailable;
         impl Host for Unavailable {}
+        crate::impl_host_areas!(Unavailable);
         let key = FluidKey(0);
         assert_eq!(Unavailable.fluid_states().definition(key), None);
         assert_eq!(
