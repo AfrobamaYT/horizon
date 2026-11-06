@@ -9085,6 +9085,27 @@ impl Game<'_> {
             }
         }
     }
+    /// Asks the mods about each gameplay mapping a physical input (a key's or a mouse button's
+    /// name) is bound to, before the game acts on it: true when one cancels a press. Only while
+    /// playing, and nothing is asked with no mod listening.
+    fn key_mapping_canceled(&mut self, input: Option<&str>, pressed: bool) -> bool {
+        let Some(input) = input else {
+            return false;
+        };
+        if !mod_api::__private::listened(mod_api::HookId::KeyMappingPre)
+            || !gameplay_has_keyboard(self.screen, self.title.is_some(), self.dialog_open())
+        {
+            return false;
+        }
+        let names: Vec<&'static str> = self.settings.keys.translated_mappings(input).collect();
+        let mut canceled = false;
+        for name in names {
+            let mut this = false;
+            self.native_key_mapping_pre(name, pressed, &mut this);
+            canceled |= this;
+        }
+        canceled && pressed
+    }
     /// Apply a physical key to every mapping bound to it.
     fn mapped_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) -> Result<()> {
         for mapped in self.settings.keys.translate_all(key) {
@@ -20243,6 +20264,11 @@ impl Game<'_> {
                                 self.capture(true);
                                 return Ok(());
                             }
+                            let input = horizon_client::keybinds::mouse_name(button);
+                            if self.key_mapping_canceled(Some(input.as_str()), pressed) {
+                                self.physical_buttons.remove(&button);
+                                return Ok(());
+                            }
                             self.extras_mouse(button, pressed);
                             if pressed
                                 && self.settings.keys.get("key.smoothCamera")
@@ -20250,7 +20276,6 @@ impl Game<'_> {
                             {
                                 self.smooth_camera_action();
                             }
-                            let input = horizon_client::keybinds::mouse_name(button);
                             for mapped in self.settings.keys.translate_mouse_all(button) {
                                 match mapped {
                                     Err(b)
@@ -20656,6 +20681,12 @@ impl Game<'_> {
                     let PhysicalKey::Code(key) = event.physical_key else {
                         return Ok(());
                     };
+                    let pressed = event.state == ElementState::Pressed;
+                    if self.key_mapping_canceled(horizon_client::keybinds::key_name(key), pressed) {
+                        // The press did not happen: `restore_held_keys` must not hold it again.
+                        self.physical_keys.remove(&key);
+                        return Ok(());
+                    }
                     self.native_panel_key_event(
                         key,
                         event.state == ElementState::Pressed,

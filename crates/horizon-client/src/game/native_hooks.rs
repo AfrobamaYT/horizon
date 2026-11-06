@@ -3381,6 +3381,18 @@ impl Game<'_> {
     ) {
         self.fire_mouse_button_pre(button, pressed, modifiers, canceled);
     }
+    /// A physical key or mouse button bound to the gameplay mapping `mapping` (`key.jump`) changes
+    /// state while playing, before the game acts on it (`pressed` for a press, repeats included,
+    /// and not for a release). Set `canceled` on a press to drop it for every mapping bound to its
+    /// input; `canceled` on a release is ignored, so the game always lets go of what it held.
+    pub(super) fn native_key_mapping_pre(
+        &mut self,
+        mapping: &str,
+        pressed: bool,
+        canceled: &mut bool,
+    ) {
+        self.fire_key_mapping_pre(mapping, pressed, canceled);
+    }
     /// The physical or scaled GUI dimensions changed.
     pub(super) fn native_window_resize(
         &mut self,
@@ -13726,8 +13738,8 @@ mod tests {
 mod screen_open_tests {
     use super::*;
     use mod_api::{
-        ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, ModEntry, ScreenClosingEvent,
-        ScreenOpeningEvent, testing::with_mods,
+        ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, KeyMappingPreEvent, ModEntry,
+        ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
 
@@ -13813,6 +13825,46 @@ mod screen_open_tests {
             });
         });
         assert_eq!(take(&log), ["Attack", "Use", "PickBlock"]);
+    }
+
+    struct MappingProbe(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for MappingProbe {
+        fn key_mapping_pre(
+            &self,
+            _host: &mut dyn ClientHost,
+            event: &mut KeyMappingPreEvent,
+        ) -> Flow {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{}:{}", event.mapping, event.pressed));
+            Flow::Cancel
+        }
+    }
+
+    /// A cancelled press of a mapping is dropped while playing, and only then asked; the
+    /// release of the same key is asked too but never canceled, so nothing stays held.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_cancelled_mapping_press_is_dropped_and_its_release_is_not() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new(
+            "mapping",
+            Box::new(MappingProbe(log.clone())),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                assert!(game.key_mapping_canceled(Some("key.keyboard.space"), true));
+                assert!(!game.key_mapping_canceled(Some("key.keyboard.space"), false));
+                game.screen = Screen::Inventory;
+                assert!(!game.key_mapping_canceled(Some("key.keyboard.space"), true));
+            });
+        });
+        assert_eq!(take(&log), ["key.jump:true", "key.jump:false"]);
     }
 
     struct Probe {
