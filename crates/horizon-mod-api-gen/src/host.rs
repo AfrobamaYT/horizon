@@ -4,8 +4,10 @@ use heck::ToUpperCamelCase;
 /// The Backend reads a mob's goal tick answers from its read view (#1077): the
 /// ticking mob itself, the player the tick sees, and the tick's snapshot of the
 /// other entities. The generated view forwards these to the engine's
-/// `GoalCx::r_*` methods and refuses every other backend read its typed
-/// refusal; the handle docs of these carry the snapshot rule.
+/// `GoalCx::r_*` methods; every other backend read of entity data is refused
+/// its typed refusal (the handle docs of these carry the snapshot rule), and a
+/// read that is not entity data forwards to the real game backend the view
+/// carries, which answers it intact through the tick.
 pub(super) const GOAL_VIEW_READS: &[&str] = &[
     "entity_position",
     "entity_block_position",
@@ -21,6 +23,20 @@ pub(super) const GOAL_VIEW_READS: &[&str] = &[
     "living_health",
     "living_max_health",
     "living_alive",
+];
+
+/// The handle types whose backend reads are entity data (#1077): a read taking
+/// one first answers the tick's own view of that entity — the snapshot, the
+/// player the tick sees — and is refused where that carries it not. Every
+/// other backend read (a level, a chunk, a block entity, a registry key)
+/// names data the tick leaves in place, so the view forwards it to the real
+/// game backend instead of refusing it.
+const GOAL_VIEW_ENTITY_ARGS: &[&str] = &[
+    "EntityRef",
+    "LivingRef",
+    "MobRef",
+    "PlayerRef",
+    "ItemEntityRef",
 ];
 
 /// The `Host` methods that find entities (#1077): the goal view answers these
@@ -63,8 +79,10 @@ pub(super) fn generate(
     let mut backend_read_impl = String::new();
     let mut backend_write_impl = String::new();
     let mut client_backend_write_impl = String::new();
-    // Each backend read's name, signature, argument names and typed refusal, for the goal view.
-    let mut backend_read_list: Vec<(&str, String, String, &str)> = Vec::new();
+    // Each backend read's name, signature, argument names, typed refusal
+    // (None where only a String forwards) and whether it reads entity data,
+    // for the goal view.
+    let mut backend_read_list: Vec<(&str, String, String, Option<&str>, bool)> = Vec::new();
     // Each `Host` method's name, signature, argument names, return type and
     // mutability, for the goal view's own `Host` impl.
     let mut host_method_list: Vec<(&str, String, String, String, bool)> = Vec::new();
@@ -175,7 +193,7 @@ pub(super) fn generate(
                                 .last()
                                 .is_some_and(|seg| seg.ident == "Option") =>
                         {
-                            "None"
+                            Some("None")
                         }
                         syn::Type::Path(path)
                             if path
@@ -184,7 +202,7 @@ pub(super) fn generate(
                                 .last()
                                 .is_some_and(|seg| seg.ident == "bool") =>
                         {
-                            "false"
+                            Some("false")
                         }
                         syn::Type::Path(path)
                             if path.path.segments.last().is_some_and(|seg| {
@@ -194,7 +212,18 @@ pub(super) fn generate(
                                 )
                             }) =>
                         {
-                            "0"
+                            Some("0")
+                        }
+                        // A registry key's metadata: a read the goal view only
+                        // forwards — a host without a backend answers "".
+                        syn::Type::Path(path)
+                            if path
+                                .path
+                                .segments
+                                .last()
+                                .is_some_and(|seg| seg.ident == "String") =>
+                        {
+                            None
                         }
                         _ => {
                             return Err(format!(
@@ -203,7 +232,24 @@ pub(super) fn generate(
                         }
                     },
                 };
-                backend_read_list.push((name, sig.to_token_stream().to_string(), args, refusal));
+                backend_read_list.push((
+                    name,
+                    sig.to_token_stream().to_string(),
+                    args,
+                    refusal,
+                    // Entity data answers the tick's view; everything else
+                    // forwards to the real backend the view carries.
+                    matches!(
+                        method.sig.inputs.iter().skip(1).find_map(|arg| match arg {
+                            FnArg::Typed(arg) => Some(&*arg.ty),
+                            FnArg::Receiver(_) => None,
+                        }),
+                        Some(syn::Type::Path(ty))
+                            if ty.path.segments.len() == 1
+                                && GOAL_VIEW_ENTITY_ARGS
+                                    .contains(&ty.path.segments[0].ident.to_string().as_str())
+                    ),
+                ));
             }
             let (trait_methods, impl_methods) = if mutable && side == Side::Client {
                 (&mut client_backend_writes, &mut client_backend_write_impl)
@@ -368,28 +414,48 @@ pub(super) fn generate(
 }
 
 /// The goal view's generated impls (#1077): the `Backend` one forwards the
-/// snapshot-backed reads to the engine context's `r_*` methods and refuses
-/// every other backend read its typed refusal, as a host without a backend
-/// refuses it; the `Host` one answers the entity lookups by the tick's own
+/// snapshot-backed reads to the engine context's `r_*` methods, refuses its
+/// typed refusal for entity data the tick's view does not carry, and forwards
+/// every other backend read — the level's own: blocks, loaded chunks, time,
+/// height, weather, block entities — to the real backend of the game host the
+/// view carries; the `Host` one answers the entity lookups by the tick's own
 /// rules, refuses the mutable methods, and forwards everything else to the
 /// game host the view carries. The engine includes both beside its `GoalCx`.
 fn goal_view(
-    reads: &[(&str, String, String, &str)],
+    reads: &[(&str, String, String, Option<&str>, bool)],
     host_methods: &[(&str, String, String, String, bool)],
 ) -> Result<String, String> {
     let mut backend = String::new();
-    for (name, sig, args, refusal) in reads {
+    for (name, sig, args, refusal, entity_data) in reads {
+        // How a forwarded read answers a host without a backend: the typed
+        // refusal, or the empty string of a metadata read.
+        let forwarded = match *refusal {
+            Some("None") => ".flatten()".to_string(),
+            Some(refusal) => format!(".unwrap_or({refusal})"),
+            None => ".unwrap_or_default()".to_string(),
+        };
         let body = if GOAL_VIEW_READS.contains(name) {
             format!("self.r_{name}({args})")
-        } else if args.is_empty() {
-            (*refusal).to_string()
-        } else {
-            // The refusal touches none of its arguments.
-            if args.contains(',') {
+        } else if *entity_data {
+            let Some(refusal) = refusal else {
+                return Err(format!(
+                    "{name}: the goal view cannot refuse its return type"
+                ));
+            };
+            if args.is_empty() {
+                (*refusal).to_string()
+            } else if args.contains(',') {
                 format!("let _ = ({args}); {refusal}")
             } else {
                 format!("let _ = {args}; {refusal}")
             }
+        } else {
+            // The read names data the tick leaves in place, so the real
+            // backend answers it: `backend_read` holds the `None` a host
+            // without one answers.
+            format!(
+                "mod_api::__private::backend_read(self.host, |backend| backend.{name}({args})){forwarded}"
+            )
         };
         backend.push_str(&format!("{sig} {{ {body} }}\n"));
     }
@@ -410,7 +476,7 @@ fn goal_view(
         }
     }
     Ok(format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse mod_api::*;\nuse std::path::PathBuf;\nuse std::sync::Arc;\n/// The mob tick's read view (#1077), as the game generates it: the snapshot-backed\n/// reads forward to the engine context's own methods, every other backend read answers\n/// its typed refusal.\nimpl Backend for super::GoalCx<'_, '_> {{\n{backend}}}\n/// The same view as a host: the entity lookups answer the tick's own rules\n/// (the ticking mob, the player it sees, the snapshot, else None), the mutable\n/// methods stay out of reach of the shared host the view holds, and everything\n/// else - the level, its blocks, tags, recipes and settings - forwards to the\n/// game host the view carries.\nimpl Host for super::GoalCx<'_, '_> {{\n{host}}}"
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse mod_api::*;\nuse std::path::PathBuf;\nuse std::sync::Arc;\n/// The mob tick's read view (#1077), as the game generates it: the snapshot-backed\n/// reads forward to the engine context's own methods, entity data the view does\n/// not carry answers its typed refusal, and every other backend read forwards\n/// to the real backend of the game host the view carries.\nimpl Backend for super::GoalCx<'_, '_> {{\n{backend}}}\n/// The same view as a host: the entity lookups answer the tick's own rules\n/// (the ticking mob, the player it sees, the snapshot, else None), the mutable\n/// methods stay out of reach of the shared host the view holds, and everything\n/// else - the level, its blocks, tags, recipes and settings - forwards to the\n/// game host the view carries.\nimpl Host for super::GoalCx<'_, '_> {{\n{host}}}"
     ))
 }
 

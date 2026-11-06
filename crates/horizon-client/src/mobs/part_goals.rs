@@ -5,8 +5,9 @@
 //!
 //! The read view answers through the generated `Backend` impl at the bottom:
 //! the ticking mob itself, the player the tick sees and the tick's snapshot of
-//! the other entities; every other backend read is refused its typed refusal,
-//! as a host without a backend refuses it. The engine's own goals are
+//! the other entities; entity data the snapshot does not carry is refused its
+//! typed refusal, and every other backend read forwards to the real backend of
+//! the game host behind the tick. The engine's own goals are
 //! untouched, and a mob whose type no mod attached a part to pays nothing.
 use super::{
     Mob, MobWorld,
@@ -19,15 +20,12 @@ use mod_api::{
 
 /// The native side a mod goal runs against (the `mob_hooks` pattern): the
 /// game's facts for the tick's read view, and the one call that runs a goal
-/// with its live context, which only the game side can build. Handed to the
-/// mob tick once beside `mob_world_base`, `None` in `MobWorld::goal_host`
+/// with its live context, which only the game side can build. Handed to
+/// the mob tick once beside `mob_world_base`, `None` in `MobWorld::goal_host`
 /// wherever no mod attached an entity part — so no other side runs one.
 pub trait GoalHost {
     /// The handles' epoch: a handle of an earlier world refuses.
     fn epoch(&self) -> Option<NativeWorldEpoch>;
-    /// The game's own player, its uuid and entity id, when it stands in the
-    /// tick's view: a `PlayerView` carries no id of its own.
-    fn player(&self) -> Option<([i32; 4], u32)>;
     /// Run `goal`'s `op` on the mob in hand with the tick's `MobWorld`, naming
     /// `mod_id`'s `part` in a panic. None where this side runs no mod goals.
     fn run_goal(

@@ -3138,6 +3138,12 @@ pub struct MobWorld<'a> {
     pub suffocation: &'a horizon_world::suffocation::SuffocationRegistry<'a>,
     pub data: &'a MobData,
     pub player: Option<PlayerView>,
+    /// The uuid and entity id of the player whose view `player` is (#1077):
+    /// captured once where the tick lends its player — the game's own, or the
+    /// guest a server's mob sees — so a goal resolves that player without a
+    /// scan, and a fake player's view resolves as none. None when `player` is
+    /// None.
+    pub player_identity: Option<([i32; 4], u32)>,
     /// `getKnownMovement` of a mob's controlling player passenger, if any.
     pub controlling_player_movement: Option<Vec3>,
     /// `getNearestPlayer(mob, -1)`: where the nearest non-spectator of every
@@ -3295,7 +3301,25 @@ pub fn entity_random(id: u32, position: Vec3) -> LegacyRandom {
     random
 }
 impl Mob {
+    /// A mob as its authoritative side builds it — spawned, or loaded from a
+    /// chunk (`Mob.finalizeSpawn` runs around it): the species' own goals, then
+    /// the goals every mod part attached to its type (#1077), vanilla's
+    /// `registerGoals` moment.
     pub fn new(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
+        let mut mob = Self::new_remote(id, kind, position, yaw);
+        // The parts a mod attached to this entity type add their goals right
+        // after the species' own (#1077): vanilla's `registerGoals` moment,
+        // which belongs to the authoritative construction.
+        part_goals::attach(&mut mob);
+        mob
+    }
+    /// The same construction without the mod parts' goals: a client's copy of
+    /// a server's mob, from its spawn packet. The species' goals stand — the
+    /// client's own reads of its copy ask them — but a mod part's
+    /// `register_goals` runs nowhere here: the authoritative side already ran
+    /// it for the mob itself, and a copy's would only allocate goal state no
+    /// tick runs (#1077).
+    pub fn new_remote(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
         let random = entity_random(id, position);
         let mut mob = Self {
             join: Default::default(),
@@ -3410,9 +3434,6 @@ impl Mob {
         // The PathNavigation constructor: the base follow range.
         mob.ai.nav.max_visited_nodes = (mob.kind.follow_range * 16.0).floor() as i32;
         ai::register(&mut mob);
-        // The parts a mod attached to this entity type add their goals right
-        // after the species' own (#1077): vanilla's `registerGoals` moment.
-        part_goals::attach(&mut mob);
         mob
     }
     /// `Mob.canPickUpLoot`, with the overrides: an allay that holds

@@ -4594,6 +4594,7 @@ pub use part_table::{
 pub(crate) use part_table::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
 mod goals;
 pub use goals::{Goal, GoalContext, GoalFlags, GoalRegistrar, RegistrarMob};
+// hidden: the game's goal plumbing, not part of the mod surface
 #[doc(hidden)]
 pub use goals::{GoalCxBackend, GoalRegistrarBackend};
 

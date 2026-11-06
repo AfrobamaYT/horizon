@@ -187,6 +187,25 @@ impl Game<'_> {
         views
     }
 
+    /// The guest `conn`'s real identity — the uuid its lent view carries and
+    /// its entity id — when the guest is a player the tick can name: a fake
+    /// guest resolves as none, as the write handle refuses it (#1077).
+    pub(super) fn guest_identity(&self, conn: u32) -> Option<([i32; 4], u32)> {
+        let guest = self
+            .lan
+            .as_ref()?
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.conn == conn)?;
+        if guest.is_fake() {
+            return None;
+        }
+        let uuid = horizon_client::lan::playerdata::uuid_ints(guest.uuid);
+        let id = u32::try_from(guest.entity_id).ok()?;
+        Some((uuid, id))
+    }
+
     /// Runs `f` as each guest in play here, for what strikes every player in
     /// an area (`Level.getEntities`), not only the window's own.
     pub(super) fn each_guest_hit(&mut self, f: impl FnMut(&mut Self)) {

@@ -2,11 +2,13 @@
 //! goal makes through `GoalContext::host` answer the ticking mob itself, the
 //! player the tick sees and the tick's snapshot of the other entities — the
 //! entity lookups and snapshot-backed reads are the view's own (generated
-//! below), every other backend read is refused its typed refusal, and the
-//! level's own reads (blocks, tags, recipes, settings) forward to the game
-//! host the view carries. The writes a goal makes apply to the mob in hand
-//! through the engine's own paths (`nav_move_to`, `ai.target`), and the write
-//! handles a `ServerHost` takes do not exist here.
+//! below), entity data the snapshot does not carry is refused its typed
+//! refusal, and every other backend read — the level's own (blocks, tags,
+//! recipes, settings), time, height, weather, block entities — forwards to
+//! the real backend of the game host the view carries. The writes a goal
+//! makes apply to the mob in hand through the engine's own paths
+//! (`nav_move_to`, `ai.target`), behind the same input boundaries the mob
+//! handles take, and the write handles a `ServerHost` takes do not exist here.
 use super::Game;
 use crate::mobs::{self, Mob, MobWorld, Seen, Species, TargetInfo, Who, part_goals::GoalOp};
 use horizon_core::geometry::Axis;
@@ -39,8 +41,9 @@ enum Resolved<'a> {
 impl GoalCx<'_, '_> {
     /// Resolve `entity` in the tick's view, or None for a stale or foreign
     /// handle, an entity the snapshot does not carry, or a player the tick
-    /// does not stand in (a guest's view: its id lives in the hub, out of the
-    /// tick's reach).
+    /// does not stand in: the identity the tick captured where it lent its
+    /// player view names it — the game's own player, or the guest a server's
+    /// mob sees — and a fake player resolves as none.
     fn resolve(&self, entity: EntityRef) -> Option<Resolved<'_>> {
         let host = self.w.goal_host?;
         if host.epoch() != Some(entity.epoch()) {
@@ -50,10 +53,11 @@ impl GoalCx<'_, '_> {
         if id == self.m.id {
             return Some(Resolved::Own);
         }
-        if let Some(p) = self.w.player.as_ref()
-            && let Some((uuid, player)) = host.player()
-            && player == id
-            && p.uuid == uuid
+        if self.w.player.is_some()
+            && self
+                .w
+                .player_identity
+                .is_some_and(|(_, player)| player == id)
         {
             return Some(Resolved::Player);
         }
@@ -89,16 +93,21 @@ impl GoalCx<'_, '_> {
         self.resolve(entity).map(|_| LivingRef::new(entity))
     }
 
-    /// `Host::mob`: the handle resolves in the tick's view.
+    /// `Host::mob`: the handle resolves in the tick's view as a mob — the
+    /// ticking mob, a snapshot mob, the dragon — but never a player: a player
+    /// is no `MobRef`, as the write handle's own narrowing refuses it.
     pub(crate) fn lookup_mob(&self, entity: EntityRef) -> Option<MobRef> {
-        self.resolve(entity).map(|_| MobRef::new(entity))
+        match self.resolve(entity)? {
+            Resolved::Player => None,
+            _ => Some(MobRef::new(entity)),
+        }
     }
 
     /// `Host::player`: the player the tick sees, by uuid.
     pub(crate) fn lookup_player(&self, uuid: u128) -> Option<PlayerRef> {
         let host = self.w.goal_host?;
-        let (uuid_seen, id) = host.player()?;
         let epoch = host.epoch()?;
+        let (uuid_seen, id) = self.w.player_identity?;
         (uuid == horizon_client::lan::playerdata::ints_uuid(uuid_seen))
             .then(|| mod_api::__private::game::player_ref(EntityRef::new(epoch, id), uuid))
     }
@@ -270,6 +279,11 @@ impl GoalCxBackend for GoalCx<'_, '_> {
     }
 
     fn move_to(&mut self, at: [f64; 3], speed: f64) -> bool {
+        // The navigation handle's own boundary: numbers the pathfinder does
+        // not take refuse here as they refuse there.
+        if !super::native_mob_navigation::navigation_move_accepts(at, speed) {
+            return false;
+        }
         self.m.nav_move_to(self.w, at, speed)
     }
 
@@ -278,7 +292,10 @@ impl GoalCxBackend for GoalCx<'_, '_> {
     }
 
     fn look_at(&mut self, at: [f64; 3]) {
-        self.m.look_at(at);
+        // The look control's boundary, as the navigation handle takes it.
+        if super::native_mob_navigation::navigation_look_accepts(at) {
+            self.m.look_at(at);
+        }
     }
 
     fn set_target(&mut self, target: Option<LivingRef>) -> bool {
@@ -297,10 +314,44 @@ impl GoalCxBackend for GoalCx<'_, '_> {
             None => None,
             Some(living) => match self.resolve(living.entity()) {
                 Some(Resolved::Own) => Some(Who::Mob(self.m.id)),
-                Some(Resolved::Player) => Some(Who::Player),
+                Some(Resolved::Player) => {
+                    // The write handle's player rules over the tick's view:
+                    // its own refusals (`spares_target`, the difficulty and
+                    // tame rules), and a player that cannot fight.
+                    let Some(p) = self.w.player.as_ref() else {
+                        return false;
+                    };
+                    if !p.alive
+                        || p.creative
+                        || p.spectator
+                        || self.m.spares_target(self.w, Who::Player)
+                    {
+                        return false;
+                    }
+                    Some(Who::Player)
+                }
                 Some(Resolved::Seen(seen)) => {
+                    // `asValidTarget` over the tick-readable facts: a dead
+                    // or ghast target never stores, a breeze names only an
+                    // iron golem, an illager spares a baby villager, and the
+                    // species' own `canAttack` refusals (`spares_target`,
+                    // the golem's creeper among them) read the tick's world.
                     if !seen.alive
+                        || seen.species == Species::Ghast
+                        || (self.m.species() == Species::Breeze
+                            && seen.species != Species::IronGolem)
+                        || (matches!(
+                            self.m.species(),
+                            Species::Evoker
+                                | Species::Vindicator
+                                | Species::Illusioner
+                                | Species::Pillager
+                        ) && matches!(
+                            seen.species,
+                            Species::Villager | Species::WanderingTrader
+                        ) && seen.baby)
                         || (self.m.species() == Species::Creeper && seen.species == Species::Goat)
+                        || self.m.spares_target(self.w, Who::Mob(seen.id))
                     {
                         return false;
                     }
@@ -314,24 +365,16 @@ impl GoalCxBackend for GoalCx<'_, '_> {
     }
 
     fn jump(&mut self) {
-        self.m.ai.jumping = true;
+        // `JumpControl.jump`: the wish the control consumes on the mob's next
+        // own tick (it assigns `jumping` from `jump` there), as the mob jump
+        // handle writes it.
+        self.m.ai.jump = true;
     }
 }
 
 impl mobs::part_goals::GoalHost for Game<'_> {
     fn epoch(&self) -> Option<mod_api::NativeWorldEpoch> {
         self.native_lifecycle.epoch()
-    }
-
-    fn player(&self) -> Option<([i32; 4], u32)> {
-        // The game's own player: a guest's turn sees the guest's view, which
-        // the view's uuid check tells apart from this one.
-        if self.lan_acting_uuid.is_some() || self.player.is_none() {
-            return None;
-        }
-        let uuid = self.level.player_uuid?;
-        let id = u32::try_from(self.player.as_ref()?.entity_id).ok()?;
-        Some((uuid, id))
     }
 
     fn run_goal(

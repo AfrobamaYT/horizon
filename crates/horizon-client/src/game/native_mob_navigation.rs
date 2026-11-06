@@ -2,6 +2,24 @@
 use super::{Game, commands::Target};
 use mod_api::MobRef;
 
+/// The numbers a mod hands a mob's navigation (`moveTo(x, y, z, speed)`): a
+/// finite speed, and finite coordinates small enough for the pathfinder's
+/// block arithmetic. The mob handles' boundary, shared with a goal tick's own
+/// `move_to` (#1077) — one check, not a copy per caller.
+pub(super) fn navigation_move_accepts(at: [f64; 3], speed: f64) -> bool {
+    speed.is_finite()
+        && at
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= 2_000_000_000.0)
+}
+
+/// The coordinates a mod hands a mob's look control (`setLookAt(x, y, z)`):
+/// finite ones — the same boundary the navigation takes, for the control
+/// whose input it shares.
+pub(super) fn navigation_look_accepts(at: [f64; 3]) -> bool {
+    at.iter().all(|v| v.is_finite())
+}
+
 impl Game<'_> {
     /// `PathNavigation.moveTo(x, y, z, speed)`: true if a path was started.
     /// Refuses a stale or unavailable mob, a client, non-finite arguments,
@@ -9,11 +27,7 @@ impl Game<'_> {
     /// the mob's own goals may replace the path next tick. False for the
     /// dragon, which flies by its phase and keeps no navigation.
     pub(super) fn native_mob_move_to(&mut self, mob: MobRef, at: [f64; 3], speed: f64) -> bool {
-        if !speed.is_finite()
-            || at
-                .iter()
-                .any(|v| !v.is_finite() || v.abs() > 2_000_000_000.0)
-        {
+        if !navigation_move_accepts(at, speed) {
             return false;
         }
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {

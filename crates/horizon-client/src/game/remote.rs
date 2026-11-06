@@ -2793,7 +2793,9 @@ impl Game<'_> {
             });
         }
         if let Some(t) = mob_type {
-            let mut mob = Mob::new(id as u32, t, at, head);
+            // The window's copy of the server's mob: no mod part goals —
+            // their `register_goals` ran on the authoritative side (#1077).
+            let mut mob = Mob::new_remote(id as u32, t, at, head);
             super::remote_mob_data::client_defaults(&mut mob);
             (mob.yaw, mob.previous_yaw) = (yaw, yaw);
             (mob.head_pitch, mob.previous_head_pitch) = (pitch, pitch);

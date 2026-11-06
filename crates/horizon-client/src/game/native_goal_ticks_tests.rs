@@ -64,7 +64,9 @@ impl Goal for Counter {
         if let Some(other) = OTHER.lock().unwrap().as_ref().copied() {
             let health = LivingRef::new(other).health(cx.host());
             let position = other.position(cx.host());
-            let refused = LivingRef::new(other).potion_affected(cx.host(), "minecraft:poison");
+            // A read the view refuses: the snapshot carries no rotation of
+            // another mob (only the ticking mob's own answers).
+            let refused = other.rotation(cx.host()).is_some();
             READS.lock().unwrap().push((health, position, refused));
         }
     }
@@ -125,6 +127,19 @@ fn zombie(game: &mut super::super::Game<'_>, id: u32, at: [f64; 3]) {
 /// The zombie's goal selector ticks once, as `server_ai_step` ticks it: the
 /// world out of the game, the goal host beside it.
 fn tick_goals(game: &mut super::super::Game<'_>, index: usize) {
+    tick_goals_as(game, index, None, None);
+}
+
+/// The same tick with a player view lent, as a server's mob tick lends a
+/// guest's, and the identity captured beside it — what a goal resolves
+/// (#1077): the real guest's uuid and entity id, never a scan per read. A
+/// lent view with no identity is a fake player's: nothing resolves.
+fn tick_goals_as(
+    game: &mut super::super::Game<'_>,
+    index: usize,
+    player: Option<horizon_client::mobs::PlayerView>,
+    identity: Option<([i32; 4], u32)>,
+) {
     // The native-authoritative side, whose mob tick builds the goal host.
     game.options.dedicated = Some(Vec::new());
     let mut mobs = std::mem::take(&mut game.mobs);
@@ -142,6 +157,8 @@ fn tick_goals(game: &mut super::super::Game<'_>, index: usize) {
     {
         let mut w = game.mob_world_base(&snapshot);
         w.others_index = Some(&index_by_id);
+        w.player = player;
+        w.player_identity = identity;
         let mut selector = std::mem::take(&mut mobs[index].ai.goals);
         let mut cx = Cx {
             w: &w,
@@ -406,7 +423,16 @@ fn the_host_answers_without_panicking() {
             // The level's own reads forward to the game host behind the tick.
             let stone = host.block_state_id("minecraft:stone");
             let tagged = host.entity_type_in_tag("minecraft:zombie", "minecraft:undead");
-            let day_time = host.day_time();
+            // The time of day through the level handle, the canonical route
+            // since the Host rebuild (#1158): the handle's own backend read
+            // forwards through the view to the real backend.
+            let day_time = host
+                .level("minecraft:overworld")
+                .and_then(|level| level.day_time(host));
+            // A loaded chunk answers `is_loaded` through the same handle.
+            let loaded = host
+                .level("minecraft:overworld")
+                .is_some_and(|level| level.is_loaded(host, [3, 65, 3]));
             // The entity lookups answer the tick's own rules: the neighbour
             // comes back as a handle, and it reads from the snapshot.
             let other = OTHER.lock().unwrap().as_ref().copied();
@@ -418,10 +444,11 @@ fn the_host_answers_without_panicking() {
                 None => (false, None),
             };
             let line = format!(
-                "stone={:?} tagged={} day_time={} neighbour={:?} health={:?}",
+                "stone={:?} tagged={} day_time={:?} loaded={} neighbour={:?} health={:?}",
                 stone.is_some(),
                 tagged,
                 day_time,
+                loaded,
                 found,
                 health
             );
@@ -456,6 +483,11 @@ fn the_host_answers_without_panicking() {
         zombie(game, 70, [3.5, 65.0, 3.5]);
         zombie(game, 71, [13.5, 65.0, 13.5]);
         game.mobs[1].health = 12.5;
+        // A loaded chunk the level handle can vouch for (`is_loaded`).
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
         let other = game.native_entity(71).unwrap();
         set_other(other);
         // Only the reader goal, so nothing else races it.
@@ -475,7 +507,14 @@ fn the_host_answers_without_panicking() {
             .expect("the reader ran");
         assert!(line.contains("stone=true"), "{line}");
         assert!(line.contains("tagged=true"), "{line}");
-        assert!(line.contains("day_time="), "{line}");
+        assert!(
+            line.contains("day_time=Some("),
+            "the level's own time answers through the handle: {line}"
+        );
+        assert!(
+            line.contains("loaded=true"),
+            "a loaded chunk answers through the handle: {line}"
+        );
         assert!(line.contains("neighbour=true"), "{line}");
         assert!(line.contains("health=Some(12.5)"), "{line}");
         assert!(
@@ -483,6 +522,363 @@ fn the_host_answers_without_panicking() {
                 .iter()
                 .any(|(case, value)| *case == "host" && value == "by_id=true"),
             "the id lookup answers too"
+        );
+    });
+}
+
+/// A mob of `kind` in the game's list, as `Mob::new` builds it.
+fn mob_of(game: &mut super::super::Game<'_>, id: u32, kind: &str, at: [f64; 3]) {
+    let kind = game.res.mob_types().get(kind).unwrap().clone();
+    let mut m = Mob::new(id, kind, Vec3::new(at[0], at[1], at[2]), 0.0);
+    m.on_ground = true;
+    game.mobs.push(m);
+}
+
+/// A survival player standing at `at`, as mobs see one (`world::test_player`'s
+/// shape, local to these tests for the crate-split source tree).
+fn view_player(at: [f64; 3]) -> horizon_client::mobs::PlayerView {
+    use horizon_client::mobs::PlayerView;
+    PlayerView {
+        position: Vec3::new(at[0], at[1], at[2]),
+        bounds: horizon_core::geometry::Aabb::new(
+            Vec3::new(at[0] - 0.3, at[1], at[2] - 0.3),
+            Vec3::new(at[0] + 0.3, at[1] + 1.8, at[2] + 0.3),
+        ),
+        eye: [at[0], at[1] + 1.62, at[2]],
+        alive: true,
+        creative: false,
+        sneaking: false,
+        swimming: false,
+        look: [0.0; 3],
+        main_hand: None,
+        off_hand: None,
+        head: None,
+        chest: None,
+        legs: None,
+        feet: None,
+        armor_cover: 0.0,
+        invisible: false,
+        spectator: false,
+        gold_armor: false,
+        hurt_by: None,
+        last_hurt: None,
+        velocity: Vec3::ZERO,
+        yaw: 0.0,
+        sprinting: false,
+        riding: false,
+        hero: false,
+        effects: Vec::new(),
+        uuid: [1, 2, 3, 4],
+        allies: Default::default(),
+        remote: false,
+        sleeping: false,
+        sleep_timer: 0,
+        passenger: false,
+        riding_vehicle: None,
+        vehicle: None,
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_client_copy_registers_no_mod_goals() {
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        // The authoritative construction registers the part's goal…
+        zombie(game, 80, [3.5, 65.0, 3.5]);
+        assert!(
+            game.mobs[0]
+                .ai
+                .goals
+                .entries()
+                .any(|(_, name, _)| name == "Counter"),
+            "the authoritative construction runs register_goals"
+        );
+        // …the client's copy of a spawn packet does not: its `register_goals`
+        // moment stays on the authoritative side.
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:zombie")
+            .unwrap()
+            .clone();
+        let copy = Mob::new_remote(81, kind, Vec3::new(3.5, 65.0, 5.5), 0.0);
+        assert!(
+            !copy
+                .ai
+                .goals
+                .entries()
+                .any(|(_, name, _)| name == "Counter"),
+            "a client copy runs no register_goals"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_goal_jump_goes_through_the_jump_control_input() {
+    struct Jumper;
+    impl Goal for Jumper {
+        fn flags(&self) -> GoalFlags {
+            GoalFlags::MOVE
+        }
+        fn name(&self) -> &'static str {
+            "Jumper"
+        }
+        fn can_use(&mut self, _cx: &mut GoalContext<'_>) -> bool {
+            true
+        }
+        fn start(&mut self, cx: &mut GoalContext<'_>) {
+            cx.jump();
+        }
+    }
+    struct Jumpers;
+    #[mod_api::horizon_part]
+    impl EntityPart for Jumpers {
+        fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+            goals.add_goal(6, Jumper);
+        }
+    }
+    struct JumpMod;
+    #[mod_api::__subscriptions]
+    impl Hooks for JumpMod {
+        fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
+            r.entity_part("minecraft:zombie", Jumpers);
+        }
+    }
+    with_game(|game| {
+        mod_api::__private::install(vec![ModEntry::new("jumps", Box::new(JumpMod))].into());
+        mod_api::__private::install_parts(&[ModEntry::new("jumps", Box::new(JumpMod))]).unwrap();
+        game.resolve_parts().unwrap();
+        zombie(game, 82, [3.5, 65.0, 3.5]);
+        game.mobs[0].ai.goals.clear();
+        mobs::part_goals::attach(&mut game.mobs[0]);
+        tick_goals(game, 0);
+        // The goal asked the jump control, not its output: the production
+        // `jump_control_tick` assigns the output from this wish.
+        assert!(game.mobs[0].ai.jump, "the goal set the control's input");
+        assert!(!game.mobs[0].ai.jumping, "not its output");
+        game.mobs[0].jump_control_tick();
+        assert!(
+            game.mobs[0].ai.jumping,
+            "the control jumps on the mob's next own tick"
+        );
+        assert!(!game.mobs[0].ai.jump, "the wish is consumed");
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn set_target_refuses_what_the_write_handle_refuses() {
+    use horizon_client::mobs::Who;
+    /// What the `SetTarget` goal's call returned.
+    static ANSWERS: Mutex<Vec<bool>> = Mutex::new(Vec::new());
+    static TARGET: Mutex<Option<EntityRef>> = Mutex::new(None);
+    struct SetTarget;
+    impl Goal for SetTarget {
+        fn flags(&self) -> GoalFlags {
+            GoalFlags::MOVE
+        }
+        fn name(&self) -> &'static str {
+            "SetTarget"
+        }
+        // Never starts: every tick asks afresh, so each target is written once.
+        fn can_use(&mut self, cx: &mut GoalContext<'_>) -> bool {
+            let target = TARGET.lock().unwrap().as_ref().copied();
+            ANSWERS
+                .lock()
+                .unwrap()
+                .push(cx.set_target(target.map(LivingRef::new)));
+            false
+        }
+    }
+    struct Targets;
+    #[mod_api::horizon_part]
+    impl EntityPart for Targets {
+        fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+            goals.add_goal(5, SetTarget);
+        }
+    }
+    struct TargetMod;
+    #[mod_api::__subscriptions]
+    impl Hooks for TargetMod {
+        fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
+            r.entity_part("minecraft:iron_golem", Targets);
+        }
+    }
+    ANSWERS.lock().unwrap().clear();
+    with_game(|game| {
+        mod_api::__private::install(vec![ModEntry::new("golems", Box::new(TargetMod))].into());
+        mod_api::__private::install_parts(&[ModEntry::new("golems", Box::new(TargetMod))]).unwrap();
+        game.resolve_parts().unwrap();
+        mob_of(game, 90, "minecraft:iron_golem", [3.5, 65.0, 3.5]);
+        mob_of(game, 91, "minecraft:zombie", [13.5, 65.0, 13.5]);
+        mob_of(game, 92, "minecraft:creeper", [23.5, 65.0, 23.5]);
+        mob_of(game, 93, "minecraft:ghast", [33.5, 70.0, 33.5]);
+        // Only the writing goal, so no species goal races it.
+        game.mobs[0].ai.goals.clear();
+        game.mobs[0].ai.targets.clear();
+        mobs::part_goals::attach(&mut game.mobs[0]);
+        for id in [91, 92, 93] {
+            *TARGET.lock().unwrap() = Some(game.native_entity(id).unwrap());
+            tick_goals(game, 0);
+            // The write handle's valid-target rules, over the tick's facts:
+            // a zombie stores, a creeper (`IronGolem.canAttack`) and a ghast
+            // (`asValidTarget`) refuse.
+            assert_eq!(
+                ANSWERS.lock().unwrap().last().copied(),
+                Some(id == 91),
+                "target {id}"
+            );
+            if id == 91 {
+                assert_eq!(game.mobs[0].ai.target, Some(Who::Mob(91)));
+            } else {
+                assert_ne!(
+                    game.mobs[0].ai.target,
+                    Some(Who::Mob(id)),
+                    "a refused target does not store"
+                );
+            }
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn move_and_look_inputs_pass_the_navigation_boundary() {
+    /// The `move_to` answers, and what the look control ended up wanting.
+    static RESULTS: Mutex<Vec<(bool, bool, Option<[f64; 3]>)>> = Mutex::new(Vec::new());
+    struct Mover;
+    impl Goal for Mover {
+        fn flags(&self) -> GoalFlags {
+            GoalFlags::MOVE
+        }
+        fn name(&self) -> &'static str {
+            "Mover"
+        }
+        fn can_use(&mut self, _cx: &mut GoalContext<'_>) -> bool {
+            true
+        }
+        fn start(&mut self, cx: &mut GoalContext<'_>) {
+            // The navigation handle's own boundary: NaN and infinities refuse,
+            // the speed must be finite.
+            let nan_at = cx.move_to([f64::NAN, 65.0, 3.5], 1.0);
+            let inf_speed = cx.move_to([3.5, 65.0, 3.5], f64::INFINITY);
+            cx.look_at([10.5, 66.0, 0.0]);
+            RESULTS.lock().unwrap().push((nan_at, inf_speed, None));
+        }
+        fn tick(&mut self, cx: &mut GoalContext<'_>) {
+            // A look with a NaN refuses: the control keeps its last wish.
+            cx.look_at([f64::NAN, 66.0, 0.0]);
+        }
+    }
+    struct Movers;
+    #[mod_api::horizon_part]
+    impl EntityPart for Movers {
+        fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+            goals.add_goal(6, Mover);
+        }
+    }
+    struct MoveMod;
+    #[mod_api::__subscriptions]
+    impl Hooks for MoveMod {
+        fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
+            r.entity_part("minecraft:zombie", Movers);
+        }
+    }
+    RESULTS.lock().unwrap().clear();
+    with_game(|game| {
+        mod_api::__private::install(vec![ModEntry::new("moves", Box::new(MoveMod))].into());
+        mod_api::__private::install_parts(&[ModEntry::new("moves", Box::new(MoveMod))]).unwrap();
+        game.resolve_parts().unwrap();
+        zombie(game, 83, [3.5, 65.0, 3.5]);
+        game.mobs[0].ai.goals.clear();
+        mobs::part_goals::attach(&mut game.mobs[0]);
+        tick_goals(game, 0);
+        let (nan_at, inf_speed, _) = RESULTS.lock().unwrap().last().copied().unwrap();
+        assert!(!nan_at, "a NaN coordinate refuses");
+        assert!(!inf_speed, "an infinite speed refuses");
+        assert_eq!(game.mobs[0].ai.look.wanted, [10.5, 66.0, 0.0]);
+        // The tick's NaN look kept it.
+        tick_goals(game, 0);
+        assert_eq!(
+            game.mobs[0].ai.look.wanted,
+            [10.5, 66.0, 0.0],
+            "a NaN look refuses, the control keeps its wish"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn the_player_the_tick_sees_resolves_by_its_captured_identity() {
+    /// What each read of the tick's player found: by uuid, by id (and where
+    /// it stands), and whether it narrows to a mob handle.
+    static READS: Mutex<Vec<(bool, Option<[f64; 3]>, bool)>> = Mutex::new(Vec::new());
+    struct PlayerReader;
+    impl Goal for PlayerReader {
+        fn flags(&self) -> GoalFlags {
+            GoalFlags::MOVE
+        }
+        fn name(&self) -> &'static str {
+            "PlayerReader"
+        }
+        // Never starts: every tick reads the player afresh as a candidate.
+        fn can_use(&mut self, cx: &mut GoalContext<'_>) -> bool {
+            let host = cx.host();
+            let uuid = horizon_client::lan::playerdata::ints_uuid([1, 2, 3, 4]);
+            let by_uuid = host.player(uuid).is_some();
+            let entity = host.entity(5000);
+            let position = entity.and_then(|entity| entity.position(host));
+            let as_mob = entity.is_some_and(|entity| host.mob(entity).is_some());
+            READS.lock().unwrap().push((by_uuid, position, as_mob));
+            false
+        }
+    }
+    struct Readers;
+    #[mod_api::horizon_part]
+    impl EntityPart for Readers {
+        fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+            goals.add_goal(6, PlayerReader);
+        }
+    }
+    struct PlayerMod;
+    #[mod_api::__subscriptions]
+    impl Hooks for PlayerMod {
+        fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
+            r.entity_part("minecraft:zombie", Readers);
+        }
+    }
+    READS.lock().unwrap().clear();
+    with_game(|game| {
+        mod_api::__private::install(vec![ModEntry::new("players", Box::new(PlayerMod))].into());
+        mod_api::__private::install_parts(&[ModEntry::new("players", Box::new(PlayerMod))])
+            .unwrap();
+        game.resolve_parts().unwrap();
+        zombie(game, 84, [3.5, 65.0, 3.5]);
+        game.mobs[0].ai.goals.clear();
+        mobs::part_goals::attach(&mut game.mobs[0]);
+        // A server's tick lends a guest's view, with the guest's real
+        // identity captured beside it — no player of the game's own exists.
+        let view = view_player([9.5, 65.0, 9.5]);
+        tick_goals_as(game, 0, Some(view), Some(([1, 2, 3, 4], 5000)));
+        let reads = READS.lock().unwrap();
+        assert_eq!(
+            reads.last().copied(),
+            Some((true, Some([9.5, 65.0, 9.5]), false)),
+            "the guest resolves by uuid and id, reads from its view, and is no MobRef"
+        );
+        drop(reads);
+        // A view with no identity behind it — a fake player's — resolves as
+        // no player at all.
+        let fake = view_player([9.5, 65.0, 9.5]);
+        tick_goals_as(game, 0, Some(fake), None);
+        let reads = READS.lock().unwrap();
+        assert_eq!(
+            reads.last().copied(),
+            Some((false, None, false)),
+            "a view with no identity behind it resolves as no player"
         );
     });
 }

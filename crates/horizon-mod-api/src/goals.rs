@@ -65,6 +65,7 @@ use crate::{Host, LegacyRandom, LivingRef, MobRef};
 /// The MOVE, LOOK, JUMP and TARGET bits a [`Goal`] claims, as vanilla's
 /// `Goal.Flag` set does: at most one goal holding each flag runs at a time, and
 /// a goal's flags are what a higher priority interrupts.
+// exhaustive: its field is private, so mods cannot build or destructure it
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct GoalFlags(u8);
 impl GoalFlags {

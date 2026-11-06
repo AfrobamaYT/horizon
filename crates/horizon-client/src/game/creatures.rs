@@ -375,6 +375,18 @@ enum OrbOrder {
 }
 
 impl Game<'_> {
+    /// The game's own player's uuid and entity id — the identity behind
+    /// [`Self::player_view`], so a tick that lends no guest's view names its
+    /// player (#1077). None where the view stands for nobody: no player of
+    /// the game's own, a fake one, or a guest's turn acting in its place.
+    pub(super) fn player_identity(&self) -> Option<([i32; 4], u32)> {
+        if self.lan_acting_fake || self.lan_acting_uuid.is_some() || self.player.is_none() {
+            return None;
+        }
+        let uuid = self.level.player_uuid?;
+        let id = u32::try_from(self.player.as_ref()?.entity_id).ok()?;
+        Some((uuid, id))
+    }
     pub(super) fn player_view(&self) -> Option<PlayerView> {
         if self.lan_acting_fake {
             return None;
@@ -965,6 +977,7 @@ impl Game<'_> {
             controlling_player_movement: None,
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
             player,
+            player_identity: self.player_identity(),
             others,
             dragon: self.dragon_target(),
             leash_boats: &self.leash_boats,
@@ -1387,7 +1400,9 @@ impl Game<'_> {
                 let from = events.len();
                 // The guest's view is lent to the mob for its tick, not copied:
                 // the tick only reads it (`&MobWorld`), and it goes back to the
-                // guest's slot straight after.
+                // guest's slot straight after. Its identity is captured with
+                // it, once: the player a goal resolves is the one the tick
+                // sees — a guest on a server, the game's own otherwise (#1077).
                 let lent = seen_guest.and_then(|conn| guests.iter().position(|g| g.0 == conn));
                 let active_player = match (seen_guest, lent) {
                     (None, _) => base.player.take(),
@@ -1395,6 +1410,10 @@ impl Game<'_> {
                         .take()
                         .map(|stand_in| std::mem::replace(&mut guests[k].1, stand_in)),
                     (Some(_), None) => None,
+                };
+                let active_identity = match seen_guest {
+                    None => base.player_identity,
+                    Some(conn) => self.guest_identity(conn),
                 };
                 let mut w = MobWorld {
                     others: &snapshot,
@@ -1404,6 +1423,7 @@ impl Game<'_> {
                     difficulty,
                     nearest_player,
                     player: active_player,
+                    player_identity: active_identity,
                     teams: std::sync::Arc::clone(&base.teams),
                     ..base
                 };
@@ -9786,6 +9806,7 @@ mod pearl_tests {
             suffocation: &suffocation,
             data: &data,
             player: None,
+            player_identity: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],
