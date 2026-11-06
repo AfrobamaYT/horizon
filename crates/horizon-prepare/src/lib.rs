@@ -23,9 +23,9 @@ mod sounds;
 mod survival;
 mod worker;
 
-pub use check::{check, missing_extras, STAMP};
+pub use check::{STAMP, check, missing_extras};
 pub use files::clone_or_copy;
-pub use sounds::{add_assets, fonts, languages, packs, panorama, sounds, BUILT_IN_PACKS};
+pub use sounds::{BUILT_IN_PACKS, add_assets, fonts, languages, packs, panorama, sounds};
 
 use pyjson::Value;
 use sha2::Digest;
@@ -54,7 +54,7 @@ pub const SCHEMA: i64 = 7;
 /// the preparer and fails when the output is not the one output-versions.txt gives this number
 /// (`python3 tools/prepare_output.py check`). The launcher reads this line from the version
 /// folder's sources: keep it on one line, as it is.
-pub const OUTPUT_VERSION: u32 = 3;
+pub const OUTPUT_VERSION: u32 = 4;
 
 /// Digest of this crate's sources (build.rs): the launcher prepares a version in-process when
 /// that version ships these same sources, and runs the version's own binary otherwise.
@@ -1718,10 +1718,12 @@ mod tests {
                 read(&reports.join(name)).unwrap()
             );
         }
-        assert!(read_json(&root.join("items.json"))
-            .unwrap()
-            .get("minecraft:stone")
-            .is_some());
+        assert!(
+            read_json(&root.join("items.json"))
+                .unwrap()
+                .get("minecraft:stone")
+                .is_some()
+        );
         assert!(root.join("biome-parameters/overworld.json").is_file());
         for name in ["registries.json", "commands.json", "items.json"] {
             fs::remove_file(root.join(name)).unwrap();
