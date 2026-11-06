@@ -2028,7 +2028,7 @@ fn species_ai_step(
             super::sulfur_cube::ai_step(m, w, events);
         }
         Species::Nautilus | Species::ZombieNautilus => {
-            super::nautilus::ai_step(m, w, level_random, events)
+            super::nautilus::ai_step(m, w, level.random(), events)
         }
         Species::Chicken => farm::chicken_ai_step(m, w, events),
         Species::Parrot => super::parrot::calculate_flapping(m),
