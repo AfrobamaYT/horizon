@@ -15951,20 +15951,19 @@ impl Game<'_> {
             let ticks_used =
                 owner.use_duration as f32 - (owner.use_item_remaining_ticks as f32 - a + 1.0);
             use horizon_client::first_person::ItemPose;
-            // ItemUseAnimation.SPEAR.
-            let animation = using.then(|| self.item_use_animation(&stack));
+            use item_use::ItemUseState;
+            let state = using.then(|| self.item_use_state(&stack));
             use horizon_world::consumable::UseAnimation;
-            let pose = match animation {
-                Some(UseAnimation::Spear) => ItemPose::Spear {
-                    kinetic: horizon_client::spear::Kinetic::of(&stack.item)
-                        .expect("spear animation requires kinetic data"),
+            let pose = match state {
+                Some(ItemUseState::Spear(timing)) => ItemPose::Spear {
+                    timing,
                     time_held: ticks_used,
                     ticks_since_hit: self.kinetic_hit_ticks(a),
                 },
-                Some(UseAnimation::Bow) => ItemPose::Bow { ticks_used },
-                Some(UseAnimation::Crossbow) | None
+                Some(ItemUseState::Other(UseAnimation::Bow)) => ItemPose::Bow { ticks_used },
+                Some(ItemUseState::Other(UseAnimation::Crossbow)) | None
                     if &*stack.item == "minecraft:crossbow"
-                        || animation == Some(UseAnimation::Crossbow) =>
+                        || state.map(ItemUseState::animation) == Some(UseAnimation::Crossbow) =>
                 {
                     let charged = stack.data().is_some_and(|d| !d.charged.is_empty());
                     ItemPose::Crossbow {
@@ -15974,13 +15973,15 @@ impl Game<'_> {
                         charged: charged && hand == Hand::Main,
                     }
                 }
-                Some(UseAnimation::Trident) => ItemPose::Trident { ticks_used },
+                Some(ItemUseState::Other(UseAnimation::Trident)) => {
+                    ItemPose::Trident { ticks_used }
+                }
                 // ItemUseAnimation.BRUSH: applyBrushTransform.
-                Some(UseAnimation::Brush) => ItemPose::Brush {
+                Some(ItemUseState::Other(UseAnimation::Brush)) => ItemPose::Brush {
                     remaining: owner.use_item_remaining_ticks as f32,
                     partial: a,
                 },
-                Some(animation) => item_use::use_pose(
+                Some(ItemUseState::Other(animation)) => item_use::use_pose(
                     animation,
                     owner.use_item_remaining_ticks as f32,
                     owner.use_duration as f32,
