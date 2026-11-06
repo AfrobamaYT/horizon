@@ -1,8 +1,10 @@
 use super::super::native_guest_turn_tests::with_guests;
-use super::*;
 use horizon_core::nbt::{Compound, Tag};
-use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
-use mod_api::{AttachmentAccess, ServerHost};
+use horizon_world::attachments::{
+    AttachmentCodec, AttachmentError, AttachmentType, Holder, index::AttachmentIndex,
+};
+use mod_api::{AttachmentAccess, AttachmentHolder, ServerHost};
+use std::sync::{Arc, Mutex};
 
 const VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "player_test",
@@ -10,7 +12,7 @@ const VALUE: AttachmentType<i32> = AttachmentType {
     default: || 0,
     codec: Some(AttachmentCodec {
         encode: |value| Ok(Compound::from([("n".into(), Tag::Int(*value))])),
-        decode: |data| match data.get("n") {
+        decode: |data| match data.get(&"n".into()) {
             Some(Tag::Int(n)) => Ok(*n),
             _ => Err(AttachmentError::Decode),
         },
@@ -55,7 +57,7 @@ fn nested_player_turns_preserve_binding_and_rollback_whole_membership() {
             .update_all(|g| g.uuid += 100);
         let index = Arc::new(Mutex::new(AttachmentIndex::default()));
         let mut bindings = Vec::new();
-        for (uuid, value) in [(112, 7), (113, 8)] {
+        for (conn, uuid, value) in [(12, 112, 7), (13, 113, 8)] {
             let player = game.native_player_ref(uuid).unwrap();
             let map = game
                 .attachment_map_quiet(Holder::Player(uuid), AttachmentAccess::Existing)
@@ -64,7 +66,15 @@ fn nested_player_turns_preserve_binding_and_rollback_whole_membership() {
             if uuid == 112 {
                 OTHER.set(map, Holder::Level, 4).unwrap();
             }
-            bindings.push(map.bind_index(&index, AttachmentHolder::Player(player)));
+            let storage = game
+                .lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .attachments_mut(conn)
+                .unwrap();
+            bindings.push(storage.bind_index(&index, AttachmentHolder::Player(player)));
         }
         let mut saved = game
             .attachment_slot(Holder::Player(112), AttachmentAccess::Existing)
@@ -124,13 +134,20 @@ fn retained_player_records_and_save_snapshots_do_not_keep_residency() {
             .guests
             .update_all(|g| g.uuid += 100);
         let index = Arc::new(Mutex::new(AttachmentIndex::default()));
-        for uuid in [112, 113] {
+        for (conn, uuid) in [(12, 112), (13, 113)] {
             let player = game.native_player_ref(uuid).unwrap();
             let map = game
                 .attachment_slot(Holder::Player(uuid), AttachmentAccess::Existing)
                 .unwrap();
             VALUE.set(map, Holder::Level, uuid as i32).unwrap();
-            map.bind_index(&index, AttachmentHolder::Player(player));
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .attachments_mut(conn)
+                .unwrap()
+                .bind_index(&index, AttachmentHolder::Player(player));
         }
         let before = index
             .lock()

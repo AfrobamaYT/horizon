@@ -855,6 +855,10 @@ mod tests {
         save(&original, &dir);
         let mut loaded = guest();
         loaded.uuid = original.uuid;
+        let index = std::sync::Arc::new(std::sync::Mutex::new(
+            horizon_world::attachments::index::AttachmentIndex::default(),
+        ));
+        let binding = loaded.attachments.bind_index(&index, loaded.uuid);
         assert!(load(&mut loaded, &dir));
         let copy = loaded.attachments.copy_on_death().unwrap();
         loaded.attachments.replace_contents(copy);
@@ -865,6 +869,12 @@ mod tests {
             ),
             Ok(31)
         );
+        let rows = index
+            .lock()
+            .unwrap()
+            .snapshot(&("test".into(), "keep".into()));
+        assert_eq!(rows[0].entry.read(&keep), Ok(&31));
+        assert!(binding.unregister(), "load and respawn preserve authority");
         let _ = std::fs::remove_dir_all(dir);
     }
 

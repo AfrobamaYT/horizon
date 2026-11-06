@@ -191,20 +191,14 @@ impl GuestList {
 
     pub fn remove(&mut self, index: usize) -> Guest {
         let mut guest = self.take_for_save(index);
-        guest.attachments.unbind_index();
+        guest.attachments.retire();
         guest
     }
-    pub fn retain(&mut self, mut keep: impl FnMut(&Guest) -> bool) {
+    pub fn retain(&mut self, keep: impl FnMut(&Guest) -> bool) {
         // Vec::retain may have removed earlier rows when the predicate unwinds.
         // Publish the surviving order on both the success and unwind paths.
         let repair = Reindex(self);
-        repair.0.rows.retain_mut(|guest| {
-            let kept = keep(guest);
-            if !kept {
-                guest.attachments.unbind_index();
-            }
-            kept
-        });
+        repair.0.rows.retain(keep);
     }
     pub fn insert(&mut self, index: usize, guest: Guest) {
         self.rows.insert(index, guest);
@@ -213,12 +207,12 @@ impl GuestList {
     pub fn replace(&mut self, index: usize, guest: Guest) -> Guest {
         let mut old = std::mem::replace(&mut self.rows[index], guest);
         self.reindex();
-        old.attachments.unbind_index();
+        old.attachments.retire();
         old
     }
     pub fn clear(&mut self) {
         for guest in &mut self.rows {
-            guest.attachments.unbind_index();
+            guest.attachments.retire();
         }
         self.rows.clear();
         self.simulation.clear();
@@ -403,8 +397,10 @@ mod tests {
         list.insert(0, player);
         assert!(binding.unregister(), "the move did not replace the binding");
         list.attachments_mut(1).unwrap().bind_index(&index, 101);
+        let mut borrowed = std::mem::take(&mut **list.attachments_mut(1).unwrap());
         let player = list.take_for_save(0);
         drop(player);
+        VALUE.set(&mut borrowed, Holder::Level, 9).unwrap();
         assert!(index.lock().unwrap().snapshot(&key).is_empty());
     }
 

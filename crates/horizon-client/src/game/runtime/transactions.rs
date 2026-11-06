@@ -537,6 +537,10 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
+#[path = "transactions/player_tests.rs"]
+mod player_tests;
+
+#[cfg(test)]
 mod tests {
     use super::super::{Audio, BlockEntity, Game, Options, Progress, Settings, load_resources};
     use horizon_client::{chunk::Chunk, items::ItemStack};
