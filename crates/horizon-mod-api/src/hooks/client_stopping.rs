@@ -9,7 +9,7 @@ pub trait Hooks {
     /// it; a crash does not. A dedicated server has no client and never fires it
     /// (`server_stopping` is its stop), and neither does a splitscreen guest's game, as
     /// `client_setup` skips it. Fabric's `ClientLifecycleEvents.CLIENT_STOPPING`
-    /// fires earlier, before the integrated server stops, so is not a counterpart.
+    /// fires earlier, before the integrated server stops, so it is not a counterpart.
     /// NeoForge has no event for this moment. A listener is a pure function of its
     /// `ClientHost` reads and its own state.
     #[hook(side = "client", contract = "listen", cancellable = false)]
