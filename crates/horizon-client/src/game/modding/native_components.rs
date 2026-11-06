@@ -1,7 +1,7 @@
 //! Native item data component helpers.
 use super::Game;
 use horizon_client::items::ItemStack;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// Failure to access a native item component.
 #[derive(Debug)]

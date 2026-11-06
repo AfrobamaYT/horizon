@@ -993,7 +993,7 @@ impl Game<'_> {
             S::BlockEntityTagQuery(p) if permission >= 2 => {
                 let tag = self
                     .block_entity_tag(p.pos)
-                    .unwrap_or(horizon_world::nbt::Tag::End);
+                    .unwrap_or(horizon_core::nbt::Tag::End);
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
@@ -1091,7 +1091,7 @@ impl Game<'_> {
 
     /// `ServerLevel.getEntity(id)`'s `Entity.saveWithoutId`: the player or
     /// other entity of the level in place with that network id.
-    pub(super) fn level_entity_tag(&mut self, id: i32) -> Option<horizon_world::nbt::Tag> {
+    pub(super) fn level_entity_tag(&mut self, id: i32) -> Option<horizon_core::nbt::Tag> {
         use crate::game::commands::Target;
         let host = self.lan.as_ref()?;
         let player = host
@@ -1109,7 +1109,7 @@ impl Game<'_> {
                 self.entity_nbt(target)?
             }
         };
-        if let horizon_world::nbt::Tag::Compound(c) = &mut tag {
+        if let horizon_core::nbt::Tag::Compound(c) = &mut tag {
             c.remove(&"id".into());
         }
         Some(tag)

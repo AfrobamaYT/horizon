@@ -11,8 +11,8 @@ use horizon_client::{
     motion::PlayerMotion,
 };
 use horizon_core::geometry::Vec3;
+use horizon_core::nbt::Tag;
 use horizon_protocol::{connection::Pipe, packets::configuration::ClientInformation};
-use horizon_world::nbt::Tag;
 use mod_api::{
     self, BlockPart, ENTITY_ITEMS, Flow, Hooks, HostSide, HostTransaction, ItemPart, ItemResource,
     LogicalSide, NativeInteractionResult as Answer, NativeTriState, Registrar,

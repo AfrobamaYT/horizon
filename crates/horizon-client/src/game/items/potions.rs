@@ -24,11 +24,11 @@ use horizon_client::{
     projectiles::{Projectile, ProjectileKind},
     text::Text,
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{
     geometry::{Aabb, Axis, Direction, Vec3},
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::nbt::Tag;
 use mod_api::{EffectApplicable, EffectTickChange, EntityRef, LivingRef, NativePlayerFood};
 
 /// Per-cloud settings; natural lingering clouds keep their creation defaults.

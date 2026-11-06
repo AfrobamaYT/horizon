@@ -28,18 +28,6 @@
 //! chunk corner, then buried in the terrain or moved onto Nether land.
 //! Repurposed's overworld mineshafts are not centred: their top goes 15
 //! blocks under the terrain around the chunk.
-use super::{
-    BoundingBox, Rotation, StructureResources, StructureTemplate,
-    jigsaw::{
-        Free, JigsawConfig, Junction, PoolElement, PoolPiece, Pools, Projection, can_attach,
-        shuffle, step,
-    },
-    start::StartContext,
-};
-use crate::{
-    heightmap::HeightmapType, identifier::Identifier, java_hash_map::JavaHashMap,
-    worldgen::block_feature::FeatureBlockBindings,
-};
 use horizon_core::{
     position::ChunkPos,
     random::{LegacyRandom, RandomSource, WorldgenRandom},
@@ -50,6 +38,21 @@ use std::{
     collections::{HashSet, VecDeque},
     rc::Rc,
     sync::Arc,
+};
+use {
+    super::{
+        Rotation, StructureResources, StructureTemplate,
+        jigsaw::{
+            Free, JigsawConfig, Junction, PoolElement, PoolPiece, Pools, Projection, can_attach,
+            shuffle, step,
+        },
+        start::StartContext,
+    },
+    horizon_core::bounding_box::BoundingBox,
+};
+use {
+    crate::{heightmap::HeightmapType, worldgen::block_feature::FeatureBlockBindings},
+    horizon_core::{identifier::Identifier, java_hash_map::JavaHashMap},
 };
 
 /// Which mod's copy of the code: they differ in a few post-layout steps.

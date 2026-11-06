@@ -46,6 +46,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "AttachmentStore",
     "ServerReloadListeners",
     "ClientReloadListeners",
+    "PackFinders",
     "ServerReloadResources",
     "CriterionContext",
 ];
@@ -1154,6 +1155,40 @@ mod tests {
                         .any(|name| name.starts_with("Commands::")
                             || name.starts_with("Messages::")
                             || name.starts_with("Players::"))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn pack_finders_bind_the_scoped_mutable_repository() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let finder =
+                    &resolve.interfaces[resolve.packages[package].interfaces["pack-finders"]];
+                assert!(finder.functions.contains_key("pack-type"));
+                assert!(finder.functions.contains_key("add-pack-finders"));
+                assert!(wasm.host.contains("frame::pack_finders_mut()?"));
+                assert!(wasm.host.contains("frame.pack_finders_mut(&mut *p1.packs)"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name.starts_with("PackFinders::"))
                 );
             })
             .unwrap()

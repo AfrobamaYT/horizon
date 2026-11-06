@@ -44,7 +44,7 @@ pub enum Source {
 }
 
 /// A pack as the screen shows it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PackInfo {
     pub id: String,
     pub title: Text,

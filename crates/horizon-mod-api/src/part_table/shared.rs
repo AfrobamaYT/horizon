@@ -147,6 +147,7 @@ struct Installed {
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
     hook_bits: Vec<bool>,
+    tag_hook_bits: Vec<bool>,
 }
 
 pub(crate) fn requested_keys() -> &'static super::registry_keys::Requests {
@@ -184,6 +185,7 @@ thread_local! {
     static GAME_PARTS: RefCell<Option<Rc<Parts>>> = const { RefCell::new(None) };
     /// Whether a `Game` runs on this thread.
     static GAME_THREAD: Cell<bool> = const { Cell::new(false) };
+    static PRE_WORLD: Cell<bool> = const { Cell::new(false) };
 }
 
 fn installed() -> Option<&'static Installed> {
@@ -225,34 +227,61 @@ impl std::ops::Deref for PartsRef {
 
 /// The parts hook `hook` asks: this game thread's resolved table, then the shared key parts
 /// when there are no tag parts, then the off-thread path.
-pub fn parts(hook: &'static str) -> PartsRef {
+pub fn parts(hook: HookId, name: &'static str) -> PartsRef {
+    try_parts(hook, name).unwrap_or_else(|error| panic!("{error}"))
+}
+
+/// The engine asked for tag Parts on a thread without that world's table.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct MissingResolvedParts {
+    /// The dispatch that required the table.
+    pub hook: &'static str,
+    /// The thread that attempted the dispatch.
+    pub thread: String,
+}
+
+impl std::fmt::Display for MissingResolvedParts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "hook {} requires resolved Parts on thread {}",
+            self.hook, self.thread
+        )
+    }
+}
+
+fn try_parts(hook: HookId, name: &'static str) -> Result<PartsRef, MissingResolvedParts> {
     #[cfg(any(test, feature = "testing"))]
     TEST_PART_LOOKUPS.set(TEST_PART_LOOKUPS.get() + 1);
     let Some(installed) = installed() else {
-        return PartsRef::Shared(&NO_PARTS);
+        return Ok(PartsRef::Shared(&NO_PARTS));
     };
     if let Some(parts) = GAME_PARTS.with_borrow(Option::clone) {
-        return PartsRef::Game(parts);
+        return Ok(PartsRef::Game(parts));
     }
-    if installed.tags.blocks.is_empty() && installed.tags.items.is_empty() {
-        return PartsRef::Shared(&installed.keys);
+    if installed.tag_hook_bits[hook as usize] && !PRE_WORLD.get() {
+        return Err(MissingResolvedParts {
+            hook: name,
+            thread: std::thread::current()
+                .name()
+                .unwrap_or("unnamed")
+                .to_owned(),
+        });
     }
-    if !GAME_THREAD.get() {
-        let thread = std::thread::current();
-        let thread = thread.name().unwrap_or("unnamed");
-        debug_assert!(false, "hook {hook} dispatched off a game thread ({thread})");
-        if !OFF_THREAD_WARNED.swap(true, Ordering::Relaxed) {
-            log::warn!(
-                "Native hook {hook} ran off a game thread ({thread}): parts attached by tag are not asked"
-            );
-        }
-    }
-    PartsRef::Shared(&installed.keys)
+    Ok(PartsRef::Shared(&installed.keys))
+}
+
+/// Enter a worldless game context, discarding the previous world's table.
+pub fn clear_game_parts() {
+    GAME_PARTS.set(None);
+    PRE_WORLD.set(true);
 }
 
 /// Mark this thread as running a `Game`, whose dispatches read its own resolved parts.
 pub fn mark_game_thread() {
     GAME_THREAD.set(true);
+    clear_game_parts();
 }
 
 /// Refusals at the Parts load boundary.
@@ -338,6 +367,7 @@ pub fn prepare_parts(
 pub fn install_resolved_parts(parts: Option<Parts>) {
     if let Some(parts) = parts {
         GAME_PARTS.set(Some(Rc::new(parts)));
+        PRE_WORLD.set(false);
     }
 }
 
@@ -653,17 +683,20 @@ fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<String>> {
         controllers: registrar.controllers,
         structure_types: registrar.structure_types,
         hook_bits: Vec::new(),
+        tag_hook_bits: vec![false; HOOK_COUNT],
     };
     installed.keys.index_hooks();
     installed.hook_bits = installed.keys.hooks.iter().map(Option::is_some).collect();
     for (_, part) in &installed.tags.blocks {
         for hook in part.part.block_subscribed().iter().flatten() {
             installed.hook_bits[*hook as usize] = true;
+            installed.tag_hook_bits[*hook as usize] = true;
         }
     }
     for (_, part) in &installed.tags.items {
         for hook in part.part.item_subscribed().iter().flatten() {
             installed.hook_bits[*hook as usize] = true;
+            installed.tag_hook_bits[*hook as usize] = true;
         }
     }
     #[cfg(any(test, feature = "testing"))]

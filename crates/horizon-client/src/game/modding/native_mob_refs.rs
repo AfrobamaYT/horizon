@@ -1299,7 +1299,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_restriction_round_trips_through_the_handle_and_saves() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             let zombie = game
                 .res
@@ -1411,7 +1411,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn hand_and_loot_flags_live_on_the_mob_handle() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             let zombie = game
                 .res

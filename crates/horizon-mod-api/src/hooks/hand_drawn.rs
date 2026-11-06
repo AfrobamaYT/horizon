@@ -6,7 +6,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        target = "mod_api::render::native_hand_drawn"
+        target = "mod_api::render::native_hand_drawn",
+        neoforge = "RenderHandEvent"
     )]
     fn hand_drawn();
 }

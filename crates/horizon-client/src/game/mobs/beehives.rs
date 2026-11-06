@@ -13,7 +13,7 @@ use horizon_core::{
     geometry::{Aabb, Vec3},
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::{nbt::Tag, registry::BlockStateId};
+use {horizon_core::nbt::Tag, horizon_world::registry::BlockStateId};
 
 struct GameHive<'g, 'a> {
     game: &'g mut Game<'a>,

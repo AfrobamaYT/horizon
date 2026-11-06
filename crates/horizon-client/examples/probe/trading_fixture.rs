@@ -12,9 +12,9 @@ use horizon_client::{
     merchant::{self, Event, MerchantOffer, Session, TradeContext, TradeEnv, Trader, Trades},
     random_sequences::RandomSequences,
 };
+use horizon_core::nbt::Tag;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_world::loot::PackOverlay;
-use horizon_world::nbt::Tag;
 use std::{collections::HashMap, fmt::Write as _, fs, path::Path};
 
 const PLAYER: [i32; 4] = [0, 0x1234, 0, 0x5678];
@@ -349,7 +349,7 @@ pub fn main() -> horizon_client::Result<()> {
             }
             "nbt" => {
                 let text = snbt.get(name).ok_or("missing vanilla snbt")?;
-                let (tag, _) = horizon_world::nbt::parse_snbt(text)?;
+                let (tag, _) = horizon_core::nbt::parse_snbt(text)?;
                 let id = if kv["v"] == "wt" {
                     "minecraft:wandering_trader"
                 } else {
@@ -363,7 +363,7 @@ pub fn main() -> horizon_client::Result<()> {
                     entity_nbt::mob_from_nbt(&tag, &types, 1, None).ok_or("unreadable villager")?;
                 let back = entity_nbt::mob_to_nbt(&mob, [0; 4], None, None, |_| None);
                 writeln!(out, "{name} snbt {text}")?;
-                let mut kept = horizon_world::nbt::Compound::new();
+                let mut kept = horizon_core::nbt::Compound::new();
                 for key in [
                     "Offers",
                     "Xp",

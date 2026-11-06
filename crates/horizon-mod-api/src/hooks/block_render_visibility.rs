@@ -7,7 +7,8 @@ pub trait Hooks {
         contract = "collect",
         out = "hidden",
         scope = "block",
-        key = "state"
+        key = "state",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart)"
     )]
     fn block_render_visibility();
 }

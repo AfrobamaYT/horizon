@@ -3530,12 +3530,15 @@ fn portal_cube(m: Mat4, faces: &[Direction], layer: u32, out: &mut Vec<Vertex>) 
 mod tests {
     use super::*;
     use crate::assets::Assets;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     #[test]
     #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
     fn entity_block_particles_and_breaking_use_exported_models() -> Result<()> {
         use crate::{models::catalog::StateModels, sprites::Sprites};
-        use horizon_world::{DATA_VERSION, chunk::BlockState, nbt::Tag};
+        use {
+            horizon_core::nbt::Tag,
+            horizon_world::{DATA_VERSION, chunk::BlockState},
+        };
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
@@ -3569,7 +3572,7 @@ mod tests {
                 "defaults",
                 Tag::compound(names.iter().enumerate().map(|(id, name)| {
                     (
-                        horizon_world::nbt::JavaString::from(format!("minecraft:{name}").as_str()),
+                        horizon_core::nbt::JavaString::from(format!("minecraft:{name}").as_str()),
                         Tag::Int(id as i32),
                     )
                 })),

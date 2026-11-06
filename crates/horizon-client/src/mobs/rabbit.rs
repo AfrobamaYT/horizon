@@ -521,7 +521,7 @@ mod tests {
             .insert("rabbit_baby#main".into(), kind.model.clone());
         let types = HashMap::from([(kind.id.clone(), template.kind.clone())]);
         for (age, baby) in [(-24000, true), (-1, true), (0, false), (6000, false)] {
-            let (tag, _) = horizon_world::nbt::parse_snbt(&format!(
+            let (tag, _) = horizon_core::nbt::parse_snbt(&format!(
                 "{{id:\"minecraft:rabbit\",Pos:[0.0d,0.0d,0.0d],Age:{age}}}"
             ))
             .unwrap();
@@ -567,7 +567,7 @@ mod tests {
         let mut m = rabbit();
         m.extra.in_love = 570;
         let tag = crate::entity_nbt::mob_to_nbt(&m, [0, 0, 0, 1], None, None, |_| None);
-        assert_eq!(tag.get("InLove"), Some(&horizon_world::nbt::Tag::Int(570)));
+        assert_eq!(tag.get("InLove"), Some(&horizon_core::nbt::Tag::Int(570)));
         let types = HashMap::from([(m.kind.id.clone(), m.kind.clone())]);
         let back = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();
         assert_eq!(back.extra.in_love, 570);

@@ -3,10 +3,12 @@ use crate::{
     chunk::{Chunk, LevelShape},
     streaming::ChunkGenerator,
 };
-use horizon_world::{
-    nbt::Tag,
-    registry::{BlockRegistry, BlockStateId},
-    worldgen::feature::{BasicFeature, FeatureBlocks, FeatureWorld},
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        registry::{BlockRegistry, BlockStateId},
+        worldgen::feature::{BasicFeature, FeatureBlocks, FeatureWorld},
+    },
 };
 
 /// The layers of a flat generator, bottom up from the world's minimum Y.

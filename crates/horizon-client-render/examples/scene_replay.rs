@@ -36,12 +36,6 @@ use horizon_core::{
     biome::{BiomeZoom, obfuscate_seed},
     paletted::PalettedContainer,
 };
-use horizon_world::{
-    chunk::BlockState,
-    nbt::{Limits, NamedTag, Tag},
-    region::RegionFile,
-    registry::BlockRegistry,
-};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -56,6 +50,10 @@ use winit::{
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
+};
+use {
+    horizon_core::nbt::{Limits, NamedTag, Tag},
+    horizon_world::{chunk::BlockState, region::RegionFile, registry::BlockRegistry},
 };
 
 // The game's allocator, so that `--memory`'s footprint is the game's: the system heap kept

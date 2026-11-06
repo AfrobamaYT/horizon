@@ -172,7 +172,7 @@ pub(super) struct Minecart {
     pub synced_output: String,
     /// `AbstractMinecart.customDisplayBlockState` (`DisplayState`): the block
     /// state's NBT form, resolved against the registry where it draws.
-    pub custom_display: Option<horizon_world::nbt::Tag>,
+    pub custom_display: Option<horizon_core::nbt::Tag>,
     /// `AbstractMinecart.customDisplayOffset` (`DisplayOffset`), in sixteenths.
     pub custom_offset: Option<i32>,
 }
@@ -229,7 +229,7 @@ fn shown_unless_air(
 /// when the state does not decode: the cart forgets it (and no longer saves it).
 pub(super) fn forget_unreadable_display(
     c: &mut Minecart,
-    resolves: impl Fn(&horizon_world::nbt::Tag) -> bool,
+    resolves: impl Fn(&horizon_core::nbt::Tag) -> bool,
 ) {
     if c.custom_display.as_ref().is_some_and(|t| !resolves(t)) {
         c.custom_display = None;
@@ -2777,9 +2777,9 @@ impl Minecart {
     pub fn to_nbt(
         &self,
         uuid: [i32; 4],
-        raw: Option<&horizon_world::nbt::Tag>,
-    ) -> horizon_world::nbt::Tag {
-        use horizon_world::nbt::{JavaString, Tag};
+        raw: Option<&horizon_core::nbt::Tag>,
+    ) -> horizon_core::nbt::Tag {
+        use horizon_core::nbt::{JavaString, Tag};
         let mut tag = horizon_client::entity_nbt::vehicle_to_nbt(
             self.kind.id(),
             self.position,
@@ -2855,7 +2855,7 @@ impl Minecart {
         }
         tag
     }
-    pub fn from_nbt(tag: &horizon_world::nbt::Tag, id: u32, kind: CartKind) -> Option<Self> {
+    pub fn from_nbt(tag: &horizon_core::nbt::Tag, id: u32, kind: CartKind) -> Option<Self> {
         let (position, _, _) = horizon_client::entity_nbt::boat_from_nbt(tag)?;
         let mut c = Self::new(id, kind, position);
         c.load(tag)?;
@@ -2864,8 +2864,8 @@ impl Minecart {
     /// `Entity.load` on this cart: the saved fields are read over the live
     /// ones, the rest (riders, lerp, hurt state) stays; its kind never changes.
     /// `None`, with nothing changed, when the compound has no position.
-    pub fn load(&mut self, tag: &horizon_world::nbt::Tag) -> Option<()> {
-        use horizon_world::nbt::Tag;
+    pub fn load(&mut self, tag: &horizon_core::nbt::Tag) -> Option<()> {
+        use horizon_core::nbt::Tag;
         let (position, velocity, yaw) = horizon_client::entity_nbt::boat_from_nbt(tag)?;
         let kind = self.kind;
         let c = self;
@@ -3157,10 +3157,10 @@ mod tests {
         }
     }
 
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     fn saved_cart(kind: CartKind, extra: &[(&str, Tag)]) -> Tag {
-        use horizon_world::nbt::JavaString;
+        use horizon_core::nbt::JavaString;
         let mut tag = Minecart::new(1, kind, Vec3::ZERO).to_nbt([0; 4], None);
         if let Tag::Compound(map) = &mut tag {
             for (k, v) in extra {
@@ -3213,7 +3213,7 @@ mod tests {
         let mut cart = Minecart::new(7, CartKind::Chest, Vec3::new(1.5, 64.0, 2.5));
         cart.hurt_time = 5;
         let old = cart.to_nbt([0; 4], None);
-        let (patch, _) = horizon_world::nbt::parse_snbt(
+        let (patch, _) = horizon_core::nbt::parse_snbt(
             r#"{DisplayState:"minecraft:furnace",DisplayOffset:3,CustomName:"Cart",Pos:[1.5d,70.0d,2.5d]}"#,
         )
         .unwrap();
@@ -3250,7 +3250,7 @@ mod tests {
         tnt.fuse = 40;
         let mut hopper = Minecart::new(3, CartKind::Hopper, Vec3::ZERO);
         hopper.enabled = false;
-        let (patch, _) = horizon_world::nbt::parse_snbt(r#"{CustomName:"x"}"#).unwrap();
+        let (patch, _) = horizon_core::nbt::parse_snbt(r#"{CustomName:"x"}"#).unwrap();
         for cart in [furnace, tnt, hopper] {
             let mut merged_cart = cart.clone();
             let merged = horizon_client::data_cmd::merged(&cart.to_nbt([0; 4], None), &patch);
@@ -3348,7 +3348,7 @@ mod tests {
     /// spawner block.
     #[test]
     fn a_spawner_cart_keeps_its_spawner_and_drops_a_minecart() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let saved = Tag::compound([
             ("id", Tag::String("minecraft:spawner_minecart".into())),
             (
@@ -3432,7 +3432,7 @@ mod tests {
 
     #[test]
     fn a_cart_saves_as_never_ticked_until_it_ticks() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let generated = Tag::compound([
             ("id", Tag::String("minecraft:chest_minecart".into())),
             (
@@ -3458,7 +3458,7 @@ mod tests {
 
     #[test]
     fn a_command_cart_saves_its_base_command_block() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let saved = Tag::compound([
             (
                 "Pos",
@@ -3511,7 +3511,7 @@ mod tests {
 
     #[test]
     fn a_furnace_saves_its_push_without_y() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let generated = Tag::compound([
             ("id", Tag::String("minecraft:furnace_minecart".into())),
             (
