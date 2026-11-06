@@ -181,23 +181,6 @@ pub fn jeb_wool_rgb(age: f32) -> u32 {
 pub const VILLAGER_TYPES: [&str; 7] = [
     "plains", "desert", "jungle", "savanna", "snow", "swamp", "taiga",
 ];
-pub const PROFESSIONS: [&str; 15] = [
-    "none",
-    "armorer",
-    "butcher",
-    "cartographer",
-    "cleric",
-    "farmer",
-    "fisherman",
-    "fletcher",
-    "leatherworker",
-    "librarian",
-    "mason",
-    "nitwit",
-    "shepherd",
-    "toolsmith",
-    "weaponsmith",
-];
 fn baby_or<'a>(
     m: &Mob,
     adult: impl Into<Cow<'a, str>>,
@@ -236,6 +219,16 @@ fn interned(args: std::fmt::Arguments) -> Cow<'static, str> {
         Cow::Borrowed(name)
     })
 }
+/// Resolve the namespace of a profession to the shared atlas's sprite name.
+fn profession_texture(folder: &str, id: &str) -> Cow<'static, str> {
+    let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+    if namespace == "minecraft" {
+        interned(format_args!("{folder}/profession/{path}"))
+    } else {
+        interned(format_args!("{namespace}:{folder}/profession/{path}"))
+    }
+}
+
 fn climate(m: &Mob) -> &'static str {
     match m.extra.variant {
         1 => "warm",
@@ -964,12 +957,12 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                 white,
                 false,
             );
-            let prof = PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()];
+            let prof = super::villager::profession(m.extra.variant2).id;
             if !m.is_baby() && prof != "none" {
                 push(
                     &mut v,
                     model.clone(),
-                    interned(format_args!("{folder}/profession/{prof}")),
+                    profession_texture(folder, prof),
                     white,
                     false,
                 );
@@ -2167,7 +2160,7 @@ fn render_visible(
                 .split_once("/type/")
                 .or_else(|| layer.texture.split_once("/baby/"))
         {
-            let profession = PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()];
+            let profession = super::villager::profession(m.extra.variant2).id;
             data.villager_hats
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2680,6 +2673,18 @@ pub fn held_item_stack(extra: &super::Extra, off_hand: bool) -> Option<crate::it
 mod tests {
     use super::*;
 
+    #[test]
+    fn profession_texture_preserves_nested_namespaces() {
+        assert_eq!(
+            profession_texture("entity/villager", "minecraft:farmer"),
+            "entity/villager/profession/farmer"
+        );
+        assert_eq!(
+            profession_texture("entity/zombie_villager", "example:nested/engineer"),
+            "example:entity/zombie_villager/profession/nested/engineer"
+        );
+    }
+
     /// A baby zombie's armour reads the `humanoid_baby` textures for every
     /// slot, not the adult `humanoid`/`humanoid_leggings` ones (#7302).
     #[test]
@@ -2936,7 +2941,7 @@ mod tests {
             let kind = std::sync::Arc::new(types.types[kind].clone());
             for baby in [false, true] {
                 for t in 0..VILLAGER_TYPES.len() {
-                    for p in 0..PROFESSIONS.len() {
+                    for p in 0..crate::mobs::villager::PROFESSIONS.len() {
                         let mut m =
                             Mob::new(1, kind.clone(), horizon_core::geometry::Vec3::ZERO, 0.0);
                         m.extra.age = if baby { -24000 } else { 0 };

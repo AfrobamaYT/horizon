@@ -568,8 +568,9 @@ impl Game<'_> {
         // The response itself lists the server's available rules; the client
         // may not own this world's level.dat (including on the server thread).
         let features = if entries.iter().any(|e| {
-            horizon_client::gamerules::rule(&e.name)
-                .is_some_and(|r| r.name == horizon_client::gamerules::MAX_MINECART_SPEED.name)
+            horizon_client::gamerules::rule_registry()
+                .rule(&e.name)
+                .is_some_and(|r| r.name == "max_minecart_speed")
         }) {
             vec![horizon_client::gamerules::MINECART_IMPROVEMENTS.to_owned()]
         } else {

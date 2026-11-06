@@ -2,11 +2,7 @@
 use super::{Game, commands::Target};
 use horizon_client::{
     merchant::{MerchantOffer, Trader},
-    mobs::{
-        Species,
-        render::{PROFESSIONS, VILLAGER_TYPES},
-        villager,
-    },
+    mobs::{Species, render::VILLAGER_TYPES, villager},
 };
 use horizon_world::identifier::Identifier;
 use mod_api::{EntityRef, MerchantRef, PlayerRef};
@@ -211,7 +207,7 @@ impl Game<'_> {
     /// `minecraft:none`). None for a wandering trader.
     pub(super) fn native_villager_profession(&self, merchant: MerchantRef) -> Option<String> {
         let mob = &self.mobs[self.native_villager_index(merchant)?];
-        let name = PROFESSIONS[mob.extra.variant2 as usize % PROFESSIONS.len()];
+        let name = horizon_client::mobs::villager::profession(mob.extra.variant2).id;
         Some(format!("minecraft:{name}"))
     }
 
@@ -227,7 +223,11 @@ impl Game<'_> {
         let Some(index) = self.native_villager_index(merchant) else {
             return false;
         };
-        let Some(profession) = registry_index(profession, &PROFESSIONS) else {
+        let Some(profession) = Identifier::parse(profession)
+            .ok()
+            .filter(|id| id.namespace() == "minecraft")
+            .and_then(|id| villager::profession_index(id.path()))
+        else {
             return false;
         };
         let id = self.mobs[index].id;

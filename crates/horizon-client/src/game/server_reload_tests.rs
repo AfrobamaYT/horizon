@@ -94,6 +94,7 @@ fn write(path: &Path, bytes: impl AsRef<[u8]>) {
 }
 fn request(root: &Path) -> WorldRequest {
     WorldRequest {
+        rule_registry: std::sync::Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         save_root: root.to_owned(),
         folder: "test".into(),
         name: Some("test".into()),
