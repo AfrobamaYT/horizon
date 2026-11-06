@@ -10,7 +10,8 @@ fn admitted_raid_loses_removed_loaded_bed_without_erasing_memory() {
     let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(&root),
+        Vec::new(),
         None,
         &root,
         &settings,
@@ -30,7 +31,9 @@ fn admitted_raid_loses_removed_loaded_bed_without_erasing_memory() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            &root,
+        )),
         None,
     )
     .unwrap();
