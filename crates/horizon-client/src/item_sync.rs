@@ -10,6 +10,8 @@ use horizon_protocol::registry::{Builtin, Dynamic};
 use horizon_world::nbt::Tag;
 use std::sync::Arc;
 
+pub(crate) mod kinetic;
+
 /// A stack from the wire: its item by the built-in registry's id, its
 /// components by the synced registries' (enchantments, trims).
 pub fn from_network(s: &Stack, builtin: &Builtin, synced: &Dynamic) -> ItemStack {
@@ -193,6 +195,12 @@ fn components_tag(s: &Stack, builtin: &Builtin, synced: &Dynamic) -> Option<Tag>
                     continue;
                 };
                 text
+            }
+            Component::Raw(bytes) if *kind == component::KINETIC_WEAPON => {
+                let Some(kinetic) = kinetic::decode(bytes, builtin) else {
+                    continue;
+                };
+                kinetic
             }
             // Read past, not decoded: the item keeps its prototype's value.
             Component::Raw(_) => continue,
@@ -381,9 +389,11 @@ fn components_tag(s: &Stack, builtin: &Builtin, synced: &Dynamic) -> Option<Tag>
     let mut out = Tag::compound(entries);
     if let Tag::Compound(map) = &mut out {
         for id in &s.removed {
-            if *id == component::MAX_STACK_SIZE {
+            if matches!(*id, component::MAX_STACK_SIZE | component::KINETIC_WEAPON)
+                && let Some(name) = name(*id)
+            {
                 map.insert(
-                    "!minecraft:max_stack_size".into(),
+                    format!("!{name}").as_str().into(),
                     Tag::Compound(Default::default()),
                 );
             }
@@ -767,6 +777,116 @@ mod tests {
 
     /// An unbreakable damaged stack must keep both components through inventory
     /// sync, including the integrated server's window (#5721).
+    #[test]
+    fn kinetic_patches_survive_inventory_bytes() {
+        use horizon_protocol::{buf::Writer, item::Slot};
+        let mut components = vec![String::new(); component::KINETIC_WEAPON as usize + 1];
+        components[component::KINETIC_WEAPON as usize] = "minecraft:kinetic_weapon".into();
+        let builtin = Builtin {
+            registries: [
+                (
+                    "minecraft:item".into(),
+                    Ids::from_names(vec!["minecraft:air".into(), "minecraft:iron_spear".into()]),
+                ),
+                (
+                    "minecraft:data_component_type".into(),
+                    Ids::from_names(components),
+                ),
+                (
+                    "minecraft:sound_event".into(),
+                    Ids::from_names(vec!["minecraft:item.spear.use".into()]),
+                ),
+            ]
+            .into(),
+        };
+        for patch in [
+            "{}",
+            "{contact_cooldown_ticks:7,delay_ticks:40.0d,dismount_conditions:{max_duration_ticks:200.0f,min_speed:14.0f},knockback_conditions:{max_duration_ticks:400,min_relative_speed:5.0f},damage_conditions:{max_duration_ticks:600},forward_movement:0.5f,damage_multiplier:2.0f,sound:'minecraft:item.spear.use',hit_sound:{sound_id:'test:hit',range:12.0f}}",
+        ] {
+            let component = horizon_world::nbt::parse_snbt(patch).unwrap().0;
+            for removed in [false, true] {
+                let key = if removed {
+                    "!minecraft:kinetic_weapon"
+                } else {
+                    "minecraft:kinetic_weapon"
+                };
+                let (_, extra) = crate::item_data::decode_components(Some(&Tag::compound([(
+                    key,
+                    component.clone(),
+                )])));
+                let source = ItemStack {
+                    extra,
+                    ..ItemStack::new("minecraft:iron_spear", 1)
+                };
+                let sent = crate::lan::guest::stack_to_network(
+                    |_| 1,
+                    |registry, name| builtin.get(registry)?.id(name),
+                    &Some(source),
+                );
+                let mut w = Writer::new();
+                Slot::write(&sent, &mut w);
+                let mut r = Reader::new(&w.data);
+                let received = Slot::read(&mut r).unwrap().unwrap();
+                assert_eq!(r.remaining(), 0);
+                let back = from_network(&received, &builtin, &Dynamic::default());
+                let value = back.data().unwrap().other(key).unwrap();
+                if removed {
+                    assert!(received.removed.contains(&component::KINETIC_WEAPON));
+                } else {
+                    let ticks = |key| horizon_world::datafix::dynamic::as_int(value.get(key), -1);
+                    assert_eq!(ticks("delay_ticks"), if patch == "{}" { 0 } else { 40 });
+                    assert_eq!(
+                        ticks("contact_cooldown_ticks"),
+                        if patch == "{}" { 10 } else { 7 }
+                    );
+                    if patch != "{}" {
+                        assert_eq!(
+                            value
+                                .get("dismount_conditions")
+                                .unwrap()
+                                .get("max_duration_ticks"),
+                            Some(&Tag::Int(200))
+                        );
+                        assert_eq!(
+                            value
+                                .get("knockback_conditions")
+                                .unwrap()
+                                .get("min_relative_speed"),
+                            Some(&Tag::Float(5.0f32.to_bits()))
+                        );
+                        assert_eq!(
+                            value
+                                .get("damage_conditions")
+                                .unwrap()
+                                .get("max_duration_ticks"),
+                            Some(&Tag::Int(600))
+                        );
+                        assert_eq!(value.get("sound"), component.get("sound"));
+                        assert_eq!(value.get("hit_sound"), component.get("hit_sound"));
+                        assert_eq!(
+                            value.get("forward_movement"),
+                            component.get("forward_movement")
+                        );
+                        assert_eq!(
+                            value.get("damage_multiplier"),
+                            component.get("damage_multiplier")
+                        );
+                    }
+                    // Re-encoding the decoded saved component must reproduce the
+                    // actual stream bytes, including every non-pose field.
+                    let sent_again = crate::lan::guest::stack_to_network(
+                        |_| 1,
+                        |registry, name| builtin.get(registry)?.id(name),
+                        &Some(back),
+                    );
+                    let mut again = Writer::new();
+                    Slot::write(&sent_again, &mut again);
+                    assert_eq!(again.data, w.data);
+                }
+            }
+        }
+    }
+
     #[test]
     fn unbreakable_survives_inventory_sync() {
         use horizon_protocol::buf::{Codec, Reader, Writer};
