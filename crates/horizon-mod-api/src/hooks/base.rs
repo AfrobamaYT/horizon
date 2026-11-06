@@ -1826,17 +1826,13 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Slot placement and stack limits for the registered vanilla or mod menu
-    /// `menu`; mounts use `horizon:mount_inventory`. Player inventory and the
-    /// creative picker have no registered menu type and do not dispatch. `slot`
-    /// is the backing container index, including player inventory slots.
-    /// `may_place` and `max_stack` begin with the slot's own answers. The final
-    /// maximum is bounded to 1–99 and the item's stack limit. Asked during click,
-    /// drag and quick-move decisions, including top-ups. Answer from `stack` and
-    /// the restricted `context` alone, and fast. Context holds the resource
-    /// generation's side, registries and settings; `/reload` builds the next one.
+    /// Slot placement and stack limits for a content mod menu. `slot` is the
+    /// backing container index, including player inventory slots. The slot's
+    /// own answers arrive first; the maximum is bounded to 1–99 and the item
+    /// limit. Runs in the restricted context during server clicks and client
+    /// prediction. Answer from the stack and context alone, and fast.
     #[hook(
-        side = "server",
+        side = "both",
         contract = "listen",
         scope = "menu",
         key = "menu",

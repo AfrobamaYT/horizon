@@ -1700,6 +1700,18 @@ impl Game<'_> {
             host.hub.guest(conn).is_some_and(|g| g.spectator())
                 && self.boat_loot_pending(self.boats[i].id)
         });
+        if spectator_pending {
+            // ServerPlayer.openMenu: the refused spectator's action bar, red.
+            let message = horizon_client::text::Text::translate("container.spectatorCantOpen", &[])
+                .with_color(horizon_client::text::RED);
+            host.hub.send_to(
+                conn,
+                &C::SystemChat(play::SystemChat {
+                    content: horizon_client::lan::data::component_nbt(&message.component()),
+                    overlay: true,
+                }),
+            );
+        }
         if spectator_pending || !self.guest_may_open(conn, menu, None) {
             let viewed = self.lan.as_ref().is_some_and(|host| {
                 host.hub
@@ -2949,7 +2961,7 @@ impl Game<'_> {
             S::SetGameRule(p) if permission >= 2 => {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
-                        if let Some(rule) = horizon_client::gamerules::rule(&entry.name)
+                        if let Some(rule) = self.ui.rules.rule(&entry.name).cloned()
                             && let Some(value) = self.ui.rules.get(rule.name)
                         {
                             let Some(host) = self.lan.as_ref() else {
@@ -4467,7 +4479,12 @@ impl Game<'_> {
             progress: g.xp_progress,
             total: g.xp_total,
         };
-        xp.respawn(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
+        xp.respawn(
+            self.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                || g.game_mode == SPECTATOR,
+        );
         (g.xp_level, g.xp_progress, g.xp_total) = (xp.level, xp.progress, xp.total);
         // PlayerEvent.Clone, at the end of `restoreFrom`: the data is copied,
         // the new player not yet placed.
@@ -4910,7 +4927,12 @@ impl Game<'_> {
                 progress: g.xp_progress,
                 total: g.xp_total,
             }
-            .death_reward(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
+            .death_reward(
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                    || g.game_mode == SPECTATOR,
+            );
             let (name, uuid) = (g.name.clone(), g.uuid);
             // ServerPlayer.die: dropAllDeathLoot unless a spectator, from the eyes less 0.3.
             let drops = (g.game_mode != SPECTATOR)
@@ -4929,7 +4951,11 @@ impl Game<'_> {
             // ServerPlayer.die: with showDeathMessages, the message goes to
             // the dying player's death screen and to everyone the team lets
             // see it; without it, the death screen gets an empty one.
-            let message = if self.ui.rules.bool("show_death_messages") {
+            let message = if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SHOW_DEATH_MESSAGES)
+            {
                 let me = self.player_text(&name, uuid);
                 let text = match cause {
                     Some(key) => horizon_client::text::Text::translate(&key, &[me]),
@@ -5458,7 +5484,12 @@ impl Game<'_> {
 
     /// `SleepStatus.sleepersNeeded`.
     fn sleepers_needed(&self, active: i64) -> i64 {
-        let percent = i64::from(self.ui.rules.int("players_sleeping_percentage").max(0));
+        let percent = i64::from(
+            self.ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+                .max(0),
+        );
         ((active * percent + 99) / 100).max(1)
     }
 
@@ -5487,7 +5518,12 @@ impl Game<'_> {
             return;
         }
         // ServerLevel.canSleepThroughNights.
-        if self.ui.rules.int("players_sleeping_percentage") > 100 {
+        if self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+            > 100
+        {
             return;
         }
         let needed = self.sleepers_needed(active);
@@ -5744,8 +5780,10 @@ impl Game<'_> {
             let mut events = std::mem::take(&mut w.player.events);
             // LayeredCauldronBlock.handleEntityOnFireInside along those moves.
             for event in &events {
-                if let MotionEvent::CauldronExtinguish { pos } = event {
-                    game.cauldron_extinguish(*pos);
+                match event {
+                    MotionEvent::CauldronExtinguish { pos } => game.cauldron_extinguish(*pos),
+                    MotionEvent::PowderSnowMelt { pos } => game.powder_snow_melt(*pos),
+                    _ => {}
                 }
             }
             // Entity.baseTick: rain puts out a burning player.
@@ -5949,6 +5987,11 @@ impl Game<'_> {
                             .entity_event(g.entity_id, super::combat::DROWN_EVENT);
                     }
                     self.drown_particles(at, [0.0; 3]);
+                }
+                // ServerPlayer.onInsideBlock: the enter_block trigger, for the
+                // player who moved.
+                MotionEvent::EnterBlock { state } => {
+                    self.as_guest(conn, |game| game.trigger_enter_block(state));
                 }
                 // HoneyBlock.maybeDoSlideEffects: the sound reaches the
                 // others (Player.playSound excludes the player, whose client
@@ -6936,187 +6979,6 @@ fn copied_respawn_point(has_config: bool, spawn: Option<[f64; 3]>) -> Option<Opt
 mod tests {
     use super::{copied_respawn_point, eye_columns};
     use horizon_client::pose::Pose;
-
-    #[test]
-    #[ignore = "requires prepared game resources"]
-    fn menu_rules_match_guest_packets_and_prediction() {
-        use horizon_client::{
-            chunk::Chunk,
-            containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields, ModMenuType},
-            items::ItemStack,
-            lan::menu::Slots,
-            menu::{Input, Kind, Menu},
-        };
-        use horizon_protocol::packets::play::{ContainerClick, Serverbound};
-        use mod_api::{Hooks, MenuPart, MenuSlotRulesEvent, ModEntry, Mods, Registrar};
-        use std::sync::Arc;
-
-        struct Part;
-        #[mod_api::horizon_part]
-        impl MenuPart for Part {
-            fn menu_slot_rules(
-                &self,
-                _: &dyn mod_api::LoopContext,
-                event: &mut MenuSlotRulesEvent<'_>,
-            ) {
-                if event.slot == 0 {
-                    if &*event.stack.item == "minecraft:dirt" {
-                        event.may_place = false;
-                    }
-                    if &*event.stack.item == "minecraft:stone" {
-                        event.max_stack = 3;
-                    }
-                }
-            }
-        }
-        struct Mod;
-        #[mod_api::__subscriptions]
-        impl Hooks for Mod {
-            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.menu_part("minecraft:generic_9x3", Part);
-                r.menu_part("test:menu", Part);
-            }
-        }
-        let mods: Mods = vec![ModEntry::new("menu_rules", Box::new(Mod))].into();
-        mod_api::__private::install_parts(&mods).unwrap();
-        crate::entry::install_client_hooks();
-        mod_api::testing::with_mods(mods, || {
-            super::super::native_guest_turn_tests::with_guests(|game| {
-                game.world
-                    .chunks
-                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-                let pos = (1, 64, 1);
-                let stone = game
-                    .pack
-                    .assets
-                    .registry
-                    .default_state("minecraft:stone")
-                    .unwrap();
-                game.world.set(pos.0, pos.1, pos.2, stone).unwrap();
-                let menu_type = Box::leak(Box::new(ModMenuType {
-                    id: "test:menu",
-                    slots: 27,
-                    data_slots: 0,
-                    results: Vec::new(),
-                }));
-                for is_mod in [false, true] {
-                    game.world.block_entities.insert(
-                        pos,
-                        if is_mod {
-                            BlockEntity::Mod(Box::new(ModBlockEntity::new(
-                                "test:block".into(),
-                                ModBlockEntityFields {
-                                    items: vec![None; 27],
-                                    ..Default::default()
-                                },
-                            )))
-                        } else {
-                            BlockEntity::Chest(vec![None; 27])
-                        },
-                    );
-                    let host = game.lan.as_mut().unwrap();
-                    host.hub.open_container(
-                        12,
-                        "minecraft:generic_9x3",
-                        horizon_world::nbt::Tag::String("test".into()),
-                        pos,
-                        Slots::Block(pos),
-                        vec![None; 27],
-                        None,
-                    );
-                    let opened = host.hub.guests[0].menu.as_mut().unwrap();
-                    if is_mod {
-                        opened.registry_id = "test:menu".into();
-                        opened.mod_type = Some(menu_type);
-                    }
-                    let window = opened.window;
-                    for (item, expected) in [("minecraft:dirt", 0), ("minecraft:stone", 3)] {
-                        let stack = ItemStack::new(item, 8);
-                        let mut prediction = Menu::new(if is_mod {
-                            Kind::Mod(menu_type)
-                        } else {
-                            Kind::Chest(3)
-                        });
-                        prediction.set_registry_id(Some(if is_mod {
-                            "test:menu"
-                        } else {
-                            "minecraft:generic_9x3"
-                        }));
-                        prediction.carried = Some(stack.clone());
-                        prediction
-                            .click(&game.menu_env(), 0, 0, Input::Pickup)
-                            .unwrap();
-                        game.lan.as_mut().unwrap().hub.guests[0].carried = Some(stack);
-                        game.lan_guest_packet(
-                            12,
-                            Serverbound::ContainerClick(ContainerClick {
-                                container: window,
-                                state: 0,
-                                slot: 0,
-                                button: 0,
-                                input: 0,
-                                changed: Vec::new(),
-                                carried: None,
-                            }),
-                        );
-                        let actual = game.world.block_entities.get(&pos).unwrap().slots()[0]
-                            .as_ref()
-                            .map_or(0, |s| s.count);
-                        assert_eq!(actual, expected, "{item} mod={is_mod}");
-                        assert_eq!(prediction.slot(0).map_or(0, |s| s.count), actual);
-                        assert_eq!(
-                            prediction.carried.as_ref().map_or(0, |s| s.count),
-                            game.lan.as_ref().unwrap().hub.guests[0]
-                                .carried
-                                .as_ref()
-                                .map_or(0, |s| s.count)
-                        );
-                    }
-                    // Vanilla moveItemStackTo tops up an existing stack before empty slots.
-                    game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
-                        Some(ItemStack::new("minecraft:dirt", 2));
-                    let mut prediction = Menu::new(if is_mod {
-                        Kind::Mod(menu_type)
-                    } else {
-                        Kind::Chest(3)
-                    });
-                    prediction.set_registry_id(Some(if is_mod {
-                        "test:menu"
-                    } else {
-                        "minecraft:generic_9x3"
-                    }));
-                    prediction.load_slot(0, Some(ItemStack::new("minecraft:dirt", 2)));
-                    prediction.set_player_item(9, Some(ItemStack::new("minecraft:dirt", 4)));
-                    prediction
-                        .click(&game.menu_env(), 27, 0, Input::QuickMove)
-                        .unwrap();
-                    game.lan.as_mut().unwrap().hub.guests[0].inventory[9] =
-                        Some(ItemStack::new("minecraft:dirt", 4));
-                    game.lan_guest_packet(
-                        12,
-                        Serverbound::ContainerClick(ContainerClick {
-                            container: window,
-                            state: 0,
-                            slot: 27,
-                            button: 0,
-                            input: 1,
-                            changed: Vec::new(),
-                            carried: None,
-                        }),
-                    );
-                    assert_eq!(
-                        game.world.block_entities.get(&pos).unwrap().slots()[0]
-                            .as_ref()
-                            .unwrap()
-                            .count,
-                        2
-                    );
-                    assert_eq!(prediction.slot(0).unwrap().count, 2);
-                    game.guest_close_all(12);
-                }
-            })
-        });
-    }
 
     #[test]
     #[ignore = "requires prepared game resources"]

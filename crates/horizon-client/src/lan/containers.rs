@@ -351,7 +351,6 @@ impl Hub {
         g.menu = Some(Menu {
             window,
             kind,
-            registry_id: menu_kind.into(),
             pos: Some(pos),
             slots,
             size: items.len(),
@@ -410,7 +409,6 @@ impl Hub {
         g.menu = Some(Menu {
             window,
             kind,
-            registry_id: format!("minecraft:generic_9x{rows}").into_boxed_str(),
             pos: None,
             slots: Slots::Native,
             size,

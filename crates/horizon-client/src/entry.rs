@@ -252,11 +252,6 @@ pub fn main_with(
     logging::flush();
 }
 
-/// The JVM raises its open-file limit to the hard limit as it starts
-/// (`-XX:+MaxFDLimit`, on by default), so a vanilla server may hold as many
-/// sockets and region files as the host allows, not the soft default (often
-/// 1024 in a container). The same here; macOS caps it at `OPEN_MAX`, as the
-/// JVM does there.
 pub(crate) fn install_client_hooks() {
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |context, menu, slot, stack, may_place, max_stack| {
@@ -345,6 +340,11 @@ pub(crate) fn install_client_hooks() {
     }
 }
 
+/// The JVM raises its open-file limit to the hard limit as it starts
+/// (`-XX:+MaxFDLimit`, on by default), so a vanilla server may hold as many
+/// sockets and region files as the host allows, not the soft default (often
+/// 1024 in a container). The same here; macOS caps it at `OPEN_MAX`, as the
+/// JVM does there.
 fn raise_open_file_limit() {
     #[cfg(unix)]
     {

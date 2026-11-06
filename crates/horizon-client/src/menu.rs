@@ -555,10 +555,9 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Dispatch the registered menu's slot placement and maximum stack rules.
-/// The slot is its backing container index. Mount menus use
-/// `horizon:mount_inventory`; player inventory and creative picker have no
-/// registered type. The shared application bounds the final maximum.
+/// Dispatch a content mod menu's slot placement and maximum stack rules.
+/// The slot is its backing container index. The shared application bounds the
+/// final maximum.
 #[inline(always)]
 pub fn native_menu_slot_rules(
     context: &LoopContext,
@@ -1776,6 +1775,14 @@ impl Menu {
         partial
     }
 
+    // Enable registered vanilla menus here when the guest engine uses the same rules.
+    fn dispatch_id(&self) -> Option<&str> {
+        match self.kind {
+            Kind::Mod(kind) => Some(kind.id),
+            _ => None,
+        }
+    }
+
     fn slot_rules(
         &self,
         env: &Env,
@@ -1784,7 +1791,7 @@ impl Menu {
         own: bool,
         max: u32,
     ) -> (bool, u32) {
-        let Some(id) = self.registry_id() else {
+        let Some(id) = self.dispatch_id() else {
             return (own, max.min(Self::max_stack(env, stack)));
         };
         apply_menu_slot_rules(
@@ -1819,7 +1826,7 @@ impl Menu {
             | Role::BeaconPay => 1,
             // The lectern's bookAccess holds one.
             Role::Plain if self.kind == Kind::Lectern && self.slots[s].container == MAIN => 1,
-            Role::Fuel if Self::is_bucket(stack) => return 1,
+            Role::Fuel if Self::is_bucket(stack) => 1,
             Role::Mod | Role::ModResult => CONTAINER_MAX,
             // `Container.getMaxStackSize` is vanilla's 99, which no data pack's
             // item reaches; a native mod's item may, and its own size is the cap.
@@ -2420,7 +2427,7 @@ impl Menu {
                 // never aims at its result.
                 let refuses = if self.slots[dest].role == Role::Hidden {
                     true
-                } else if let Some(id) = self.registry_id() {
+                } else if let Some(id) = self.dispatch_id() {
                     !apply_menu_slot_rules(
                         env.loop_context,
                         id,
@@ -2783,7 +2790,7 @@ impl Menu {
                     }
                 } else {
                     // One item into the empty item slot (setByPlayer).
-                    if self.containers[MAIN][0].is_some() {
+                    if self.containers[MAIN][0].is_some() || !self.may_place(env, 0, &stack) {
                         return None;
                     }
                     let single = ItemStack {
