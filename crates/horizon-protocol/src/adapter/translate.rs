@@ -1018,13 +1018,13 @@ mod v26_1 {
             let mut w = Writer::new();
             w.string("red");
             w.i8(0);
-            w.nbt(&horizon_world::nbt::Tag::String("Red".into()));
+            w.nbt(&horizon_core::nbt::Tag::String("Red".into()));
             w.i8(3);
             w.varint(1);
             w.varint(2);
             w.varint(12); // RED
-            w.nbt(&horizon_world::nbt::Tag::String("[".into()));
-            w.nbt(&horizon_world::nbt::Tag::String("]".into()));
+            w.nbt(&horizon_core::nbt::Tag::String("[".into()));
+            w.nbt(&horizon_core::nbt::Tag::String("]".into()));
             w.varint(1);
             w.string("Steve");
             let body = team(&w.data).unwrap();
@@ -1038,7 +1038,7 @@ mod v26_1 {
             assert_eq!(params.color, Some(12));
             assert_eq!(params.options, 3);
             assert_eq!(params.name_tag_visibility, 1);
-            assert_eq!(params.prefix, horizon_world::nbt::Tag::String("[".into()));
+            assert_eq!(params.prefix, horizon_core::nbt::Tag::String("[".into()));
             assert_eq!(t.players, vec!["Steve".to_string()]);
         }
 
@@ -1047,13 +1047,13 @@ mod v26_1 {
             let mut w = Writer::new();
             w.string("t");
             w.i8(2);
-            w.nbt(&horizon_world::nbt::Tag::String("T".into()));
+            w.nbt(&horizon_core::nbt::Tag::String("T".into()));
             w.i8(0);
             w.varint(0);
             w.varint(0);
             w.varint(21); // RESET
-            w.nbt(&horizon_world::nbt::Tag::String("".into()));
-            w.nbt(&horizon_world::nbt::Tag::String("".into()));
+            w.nbt(&horizon_core::nbt::Tag::String("".into()));
+            w.nbt(&horizon_core::nbt::Tag::String("".into()));
             let body = team(&w.data).unwrap();
             let p =
                 play::Clientbound::decode(packet_ids::play::clientbound::SET_PLAYER_TEAM, &body)

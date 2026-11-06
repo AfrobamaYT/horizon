@@ -367,6 +367,7 @@ mod sprint_handle_tests {
                 std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
             let client_resources = super::super::load_resources(
                 horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+                Vec::new(),
                 None,
                 &root,
                 &super::super::Settings::default(),

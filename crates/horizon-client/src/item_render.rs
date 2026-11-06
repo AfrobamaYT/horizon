@@ -31,7 +31,7 @@ use horizon_assets::{
     palette::PalettedPermutations,
     resolve::{MISSING_MODEL, ModelLibrary},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},

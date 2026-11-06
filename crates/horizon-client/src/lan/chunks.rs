@@ -8,6 +8,7 @@ use crate::{
     mobs::spawner::{SpawnDataExt, SpawnerExt},
     section_mask::SectionMask,
 };
+use horizon_core::nbt::{Compound, Tag};
 use horizon_protocol::{
     buf::{BitSet, Codec, List, Writer, set_bit},
     chunk::{
@@ -16,7 +17,6 @@ use horizon_protocol::{
     packets::play::{ChunkBiomeData, LevelChunkWithLight},
     registry::{Builtin, ceil_log2},
 };
-use horizon_world::nbt::{Compound, Tag};
 use std::{
     collections::HashMap,
     sync::{
@@ -1511,8 +1511,8 @@ fn write_light(lights: &[(usize, SectionLight)], sky: bool, w: &mut Writer) {
 mod tests {
     use super::*;
     use crate::chunk::{MIN_Y, SECTIONS};
+    use horizon_core::nbt::JavaString;
     use horizon_protocol::packets::play;
-    use horizon_world::nbt::JavaString;
 
     #[test]
     fn block_entity_blocks_are_recognised() {
@@ -2388,7 +2388,7 @@ mod tests {
         let lone = entity_tag(&BlockEntity::CreakingHeart(Box::default()));
         assert_eq!(
             lone,
-            Some(Tag::Compound(horizon_world::nbt::Compound::new()))
+            Some(Tag::Compound(horizon_core::nbt::Compound::new()))
         );
     }
 }

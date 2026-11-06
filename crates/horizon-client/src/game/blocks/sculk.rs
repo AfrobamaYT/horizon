@@ -368,8 +368,8 @@ impl Game<'_> {
         let extra = self
             .level
             .player_extra
-            .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-        if let horizon_world::nbt::Tag::Compound(map) = extra {
+            .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+        if let horizon_core::nbt::Tag::Compound(map) = extra {
             map.insert("warden_spawn_tracker".into(), tag);
         }
     }

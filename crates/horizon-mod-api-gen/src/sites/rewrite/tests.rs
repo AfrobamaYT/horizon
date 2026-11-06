@@ -128,6 +128,35 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
 }
 
 #[test]
+fn site_fingerprint_changes_when_an_identical_call_is_inserted_earlier() {
+    let hash = |source: &str| {
+        rewrite(
+            source,
+            "horizon_client::game",
+            &entries(),
+            &[declaration(".step", Some(0))],
+        )
+        .unwrap()
+        .1
+        .remove(0)
+        .hash
+    };
+    let original = hash("impl Game { fn run(&mut self) { self.step(1); } }");
+    assert_ne!(
+        original,
+        hash("impl Game { fn run(&mut self) { self.step(1); self.step(1); } }")
+    );
+    assert_eq!(
+        original,
+        hash("impl Game { fn run(&mut self) { let ready = true; self.step(1); } }")
+    );
+    assert_eq!(
+        original,
+        hash("impl Game { fn run(&mut self) { self . step ( 1 ) ; } }")
+    );
+}
+
+#[test]
 fn site_rewrite_ordinals_hashes_and_refusals() {
     let run = |source: &str, declarations: &[Declaration]| {
         rewrite(source, "horizon_client::game", &entries(), declarations)

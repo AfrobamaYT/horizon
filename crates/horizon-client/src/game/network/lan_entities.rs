@@ -9,7 +9,7 @@ use horizon_client::lan::{
     playerdata::ints_uuid,
 };
 use horizon_protocol::entity_data::{Value, serializer};
-use horizon_world::{nbt::Tag, registry::BlockStateId};
+use {horizon_core::nbt::Tag, horizon_world::registry::BlockStateId};
 
 /// Allocate once: a native summon may need its id before the tracking tick.
 pub(super) fn assign_entity_id(next: &mut u32, id: &mut u32) -> u32 {
@@ -363,7 +363,7 @@ impl Game<'_> {
                     e.equipment.push((slot as u8, host.hub.stack(item)));
                 }
             }
-            e.attributes = self.stand_attributes(a.id, &a.equipment);
+            e.attributes = self.stand_attributes(&a.live);
             out.push(e);
         }
         for f in self.item_frames.iter().filter(|f| f.id > after) {

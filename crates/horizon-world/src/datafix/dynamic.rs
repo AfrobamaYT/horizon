@@ -1,7 +1,7 @@
 //! What DataFixerUpper's `Dynamic` over `NbtOps` does with values: number and
 //! string views, maps and lists, field edits. Fixes use these to stay close to
 //! the Java they port.
-use crate::nbt::{Compound, JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 
 pub fn key(s: &str) -> JavaString {
     JavaString::from(s)

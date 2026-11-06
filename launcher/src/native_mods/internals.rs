@@ -1,5 +1,5 @@
 //! Declared internals and typed raw listeners, shared by both native build routes.
-use super::{api, inject};
+use super::{api, inject, sites};
 use crate::i18n::trf;
 use horizon_mods::internals::{self, ListedInternal};
 use std::{
@@ -14,6 +14,7 @@ pub(super) const INTERNALS: &str = "internals.json";
 pub(super) struct Catalog {
     pub(super) internals: Vec<ListedInternal>,
     pub(super) points: Vec<inject::ListedPoint>,
+    pub(super) sites: Vec<sites::Site>,
     pub(super) discovery: bool,
 }
 
@@ -49,6 +50,14 @@ pub(super) enum Error {
     Path {
         path: String,
     },
+    NotSite {
+        mod_id: String,
+        line: String,
+    },
+    SiteKind {
+        mod_id: String,
+        injection: String,
+    },
 }
 
 impl std::fmt::Display for Error {
@@ -73,6 +82,14 @@ impl std::fmt::Display for Error {
             Self::NotRaw { mod_id, target } => trf(
                 "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.",
                 &[("mod", mod_id), ("target", target)],
+            ),
+            Self::NotSite { mod_id, line } => trf(
+                "E_NOT_SITE: {mod}: add `{line}` to crates/horizon-mod-api-gen/sites/{mod}.txt and rebuild the game; this call is not a compiled-in site.",
+                &[("mod", mod_id), ("line", line)],
+            ),
+            Self::SiteKind { mod_id, injection } => trf(
+                "E_SITE_KIND: {mod}: injection {injection}: WRAP_WITH_CONDITION requires a unit-returning call.",
+                &[("mod", mod_id), ("injection", injection)],
             ),
             Self::Path { path } => trf(
                 "E_INTERNAL_PATH: {path} cannot be re-exported as a declared internal; declare its types or free functions instead.",
@@ -114,9 +131,11 @@ impl From<internals::Error> for Error {
 impl Catalog {
     pub(super) fn read(dir: &Path) -> Result<Self, String> {
         let path = dir.join(INTERNALS);
+        let listed = inject::catalog(&dir.join(inject::POINTS))?;
         Ok(Self {
             internals: internals::read(&path)?,
-            points: inject::listed(&dir.join(inject::POINTS))?,
+            points: listed.points,
+            sites: listed.sites,
             discovery: false,
         })
     }
@@ -127,6 +146,9 @@ impl Catalog {
         };
         for declared in &native.internals {
             internals::check(&self.internals, &manifest.id, declared)?;
+        }
+        for injection in sites::of(manifest) {
+            sites::check(&self.sites, manifest, injection)?;
         }
         for injection in inject::raw_of(manifest) {
             if !self.points.iter().any(|point| {
@@ -172,6 +194,13 @@ impl Catalog {
             super::append_log(&trf(
                 "{mod} listens raw at {point}",
                 &[("mod", &manifest.id), ("point", &place)],
+            ))?;
+        }
+        for injection in sites::of(manifest) {
+            let site = sites::find(&self.sites, injection).expect("site checked");
+            super::append_log(&trf(
+                "{mod} listens raw at {point}",
+                &[("mod", &manifest.id), ("point", &site.name)],
             ))?;
         }
         Ok(())
@@ -266,6 +295,11 @@ impl Catalog {
                 "    /// Registers a function of this place's exact listener type.\n    pub const fn {constructor}(id: &'static str, f: {name}) -> mod_points::__private::RawListener {{\n        // SAFETY: `f` has this place's listener type, checked by the signature.\n        unsafe {{ mod_points::__private::RawListener::new(id, mod_points::PointId::{variant}, f as *const ()) }}\n    }}\n"
             ));
         }
+        for injection in sites::of(manifest) {
+            sites::find(&self.sites, injection)
+                .expect("site checked")
+                .facade(&mut exports, &mut constructors, &mut crates);
+        }
         for export in exports {
             text.push_str(&export);
         }
@@ -293,22 +327,7 @@ impl Catalog {
         } else {
             &entry.path
         };
-        // Generic arguments belong to a fingerprint, not to a `use` path.
-        let mut depth = 0;
-        let path: String = path
-            .chars()
-            .filter(|&c| match c {
-                '<' => {
-                    depth += 1;
-                    false
-                }
-                '>' => {
-                    depth -= 1;
-                    false
-                }
-                _ => depth == 0,
-            })
-            .collect();
+        let path = plain_path(path);
         syn::parse_str::<syn::Path>(&path).map_err(|_| invalid())?;
         if !member {
             return Ok(path);
@@ -341,6 +360,24 @@ impl Catalog {
         }
         Err(invalid())
     }
+}
+
+/// Generic arguments belong to a fingerprint, not to a use path or a site target's identity.
+pub(super) fn plain_path(path: &str) -> String {
+    let mut depth = 0;
+    path.chars()
+        .filter(|&c| match c {
+            '<' => {
+                depth += 1;
+                false
+            }
+            '>' => {
+                depth -= 1;
+                false
+            }
+            _ => depth == 0 && !c.is_whitespace(),
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -431,6 +468,7 @@ mod tests {
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         let catalog = Catalog {
             discovery: false,
+            sites: Vec::new(),
             internals: serde_json::from_value(serde_json::json!([
                 { "path": "horizon_client::game::Game", "kind": "struct", "signature": "struct Game<'a> { world: World }", "hash": "1234" },
                 { "path": "horizon_client::game::maps::dimension_id", "kind": "fn", "signature": "fn dimension_id() -> u8", "hash": "5678" },
@@ -499,6 +537,7 @@ pub mod raw {
             include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
             &[&bundle.manifest],
             &catalog.points,
+            &catalog.sites,
         );
         assert!(main.contains("#![forbid(unsafe_code)]"));
         assert!(main.contains(
@@ -604,7 +643,12 @@ pub mod raw {
             text.contains("pub const fn tick_return(id: &'static str, f: __TickReturnListener)")
         );
         assert!(text.contains("PointId::TickReturn"));
-        let main = api::main_rs("/* MOD_RAW */", &[&bundle.manifest], &catalog.points);
+        let main = api::main_rs(
+            "/* MOD_RAW */",
+            &[&bundle.manifest],
+            &catalog.points,
+            &catalog.sites,
+        );
         assert!(main.contains("mod_0_internals::raw::tick_return(\"example\", mod_0::count)"));
         fs::remove_dir_all(dir).unwrap();
     }

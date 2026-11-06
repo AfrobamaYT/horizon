@@ -6,7 +6,7 @@ use crate::{
     hud::rgba,
     items::{ItemInfo, ItemStack, Items},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 pub use mod_api::item_tooltip::TooltipDisplay;
 use mod_api::{ClientHost, TooltipAppendContext, TooltipAppender, TooltipPlacement};
 
@@ -520,7 +520,7 @@ pub fn honey_line(
     }
     let level = match stack.data().and_then(|d| d.other("minecraft:block_state")) {
         Some(Tag::Compound(state)) => {
-            match state.get(&horizon_world::nbt::JavaString::from("honey_level")) {
+            match state.get(&horizon_core::nbt::JavaString::from("honey_level")) {
                 Some(Tag::String(level)) => level.to_string_lossy().parse::<u32>().ok()?,
                 _ => return None,
             }

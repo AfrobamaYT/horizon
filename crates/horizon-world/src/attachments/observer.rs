@@ -69,7 +69,7 @@ where
 mod tests {
     use super::*;
     use crate::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
-    use crate::nbt::Tag;
+    use horizon_core::nbt::Tag;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

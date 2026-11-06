@@ -112,6 +112,7 @@ fn table() -> &'static Table {
                 hash: hash("horizon_client::game::Game"),
                 node: game,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
             Type {
@@ -119,6 +120,7 @@ fn table() -> &'static Table {
                 hash: hash("horizon_client::game::Child"),
                 node: child,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
             Type {
@@ -126,6 +128,7 @@ fn table() -> &'static Table {
                 hash: "",
                 node: record,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
         ])),

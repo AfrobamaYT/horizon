@@ -35,7 +35,7 @@ impl Game<'_> {
         };
         let first = raw.trim_start().chars().next().unwrap_or(' ');
         if first == '{' || first == '[' || first == '-' || first.is_ascii_digit() || first == '"' {
-            let (tag, _) = horizon_world::nbt::parse_snbt(&raw)
+            let (tag, _) = horizon_core::nbt::parse_snbt(&raw)
                 .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
             return Ok((None, horizon_client::scoreboard::tag_to_json(&tag)));
         }

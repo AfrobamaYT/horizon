@@ -1,5 +1,5 @@
 use super::*;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::{
     fs,
     sync::atomic::{AtomicUsize, Ordering},
@@ -2030,10 +2030,12 @@ fn a_world_opened_by_name_with_unreadable_level_data_shows_the_recovery_screen()
 }
 
 fn old_entity_chunk(f: &Fixture, folder: &str) -> PathBuf {
-    use horizon_world::{
-        compression::Compression,
-        nbt::{Limits, NamedTag},
-        region::{ChunkRecord, RegionFile},
+    use {
+        horizon_core::nbt::{Limits, NamedTag},
+        horizon_world::{
+            compression::Compression,
+            region::{ChunkRecord, RegionFile},
+        },
     };
     let file = f
         .title
@@ -2064,7 +2066,7 @@ fn old_entity_chunk(f: &Fixture, folder: &str) -> PathBuf {
 }
 
 fn chunk_version(file: &Path) -> i32 {
-    use horizon_world::{nbt::Limits, region::RegionFile};
+    use {horizon_core::nbt::Limits, horizon_world::region::RegionFile};
     let record = RegionFile::open(file)
         .unwrap()
         .read(horizon_core::position::ChunkPos::new(0, 0))
@@ -2759,7 +2761,7 @@ fn vanilla_creation_rules_keep_original_nbt_bytes() {
         panic!("creation")
     };
     let encode = |rules: &GameRules| {
-        horizon_world::nbt::write_named(&rules.to_nbt(), horizon_world::nbt::Limits::default())
+        horizon_core::nbt::write_named(&rules.to_nbt(), horizon_core::nbt::Limits::default())
             .unwrap()
     };
     assert_eq!(encode(&options.rules), encode(&GameRules::default()));

@@ -13,8 +13,8 @@ use horizon_client::{
     text::{ClickEvent, Style, Text},
 };
 use horizon_core::geometry::{Axis, Vec3};
+use horizon_core::nbt::Tag;
 use horizon_protocol::packets::play::{BlockEntityTagQuery, EntityTagQuery, Serverbound};
-use horizon_world::nbt::Tag;
 use winit::keyboard::KeyCode;
 
 /// `ChatFormatting.YELLOW` and `RED`.

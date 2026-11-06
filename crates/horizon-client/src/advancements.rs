@@ -606,7 +606,7 @@ pub trait World {
     fn smokey(&self, pos: [i32; 3]) -> bool;
     fn in_tag(&self, registry: &str, tag: &str, id: &str) -> bool;
     /// The block entity's `saveWithFullMetadata` at `pos`, `None` without one.
-    fn block_entity_nbt(&self, _pos: [i32; 3]) -> Option<horizon_world::nbt::Tag> {
+    fn block_entity_nbt(&self, _pos: [i32; 3]) -> Option<horizon_core::nbt::Tag> {
         None
     }
 }
@@ -658,7 +658,7 @@ pub struct EntityView {
     pub components: Vec<(String, String)>,
     /// The entity as saved (`NbtPredicate.getEntityTagToCompare`), for
     /// `minecraft:nbt`; built only when a criterion may ask (`Tree::tests_nbt`).
-    pub nbt: Option<horizon_world::nbt::Tag>,
+    pub nbt: Option<horizon_core::nbt::Tag>,
     /// `Entity.getTeam().getName()` (a tamed pet answers its owner's team);
     /// `None` without a team or where the identity is not bound.
     pub team: Option<String>,
@@ -863,7 +863,7 @@ pub fn block(v: &Value, pos: [i32; 3], w: &dyn World) -> bool {
     // `matchesBlockEntity`: the block entity's data holds the pattern
     // (`NbtPredicate.matches`, `NbtUtils.compareNbt`); no block entity fails.
     if let Some(nbt) = v["nbt"].as_str() {
-        let Ok((pattern, _)) = horizon_world::nbt::parse_snbt(nbt) else {
+        let Ok((pattern, _)) = horizon_core::nbt::parse_snbt(nbt) else {
             return false;
         };
         if !crate::nbt_path::compare_nbt(&pattern, w.block_entity_nbt(pos).as_ref()) {
@@ -1013,7 +1013,7 @@ pub fn entity(v: &Value, e: &EntityView, w: &dyn World, origin: [f64; 3]) -> boo
             // `EntityNbtPredicate.matches`: the entity's compound holds the
             // pattern (`NbtUtils.compareNbt`); no compound known fails.
             "minecraft:nbt" => p.as_str().is_some_and(|s| {
-                horizon_world::nbt::parse_snbt(s).is_ok_and(|(pattern, _)| {
+                horizon_core::nbt::parse_snbt(s).is_ok_and(|(pattern, _)| {
                     crate::nbt_path::compare_nbt(&pattern, e.nbt.as_ref())
                 })
             }),
@@ -1878,8 +1878,8 @@ mod tests {
             fn in_tag(&self, _: &str, _: &str, _: &str) -> bool {
                 false
             }
-            fn block_entity_nbt(&self, _: [i32; 3]) -> Option<horizon_world::nbt::Tag> {
-                horizon_world::nbt::parse_snbt(r#"{id:"minecraft:beacon",x:0,y:0,z:0,Levels:0}"#)
+            fn block_entity_nbt(&self, _: [i32; 3]) -> Option<horizon_core::nbt::Tag> {
+                horizon_core::nbt::parse_snbt(r#"{id:"minecraft:beacon",x:0,y:0,z:0,Levels:0}"#)
                     .ok()
                     .map(|(t, _)| t)
             }
@@ -2057,7 +2057,7 @@ mod tests {
     /// pattern (`NbtUtils.compareNbt(…, true)`); without one it fails.
     #[test]
     fn an_entity_predicates_nbt_tests_the_saved_compound() {
-        let snbt = |s: &str| horizon_world::nbt::parse_snbt(s).unwrap().0;
+        let snbt = |s: &str| horizon_core::nbt::parse_snbt(s).unwrap().0;
         let view = |kind: &str, nbt: &str| EntityView {
             kind: kind.into(),
             nbt: Some(snbt(nbt)),
