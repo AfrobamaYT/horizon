@@ -858,7 +858,7 @@ fn refused_import(error: wasmtime::Error) -> LoadError {
 pub struct Member {
     /// The mod's id.
     pub id: &'static str,
-    /// The prefix of its exports (`horizon_mods::manifest::export_prefix`).
+    /// The prefix of its exports (`horizon_mod_package::manifest::export_prefix`).
     pub exports: String,
 }
 

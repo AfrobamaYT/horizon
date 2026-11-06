@@ -20,11 +20,13 @@ use horizon_core::{
     nbt,
     nbt::{Compound, JavaString, Limits, Tag},
 };
-use horizon_mods::content::{
+use horizon_mod_package::content::{
     Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, FluidLook, MenuType,
     MobEffect, Rarity, StateProperty,
 };
-use horizon_mods::manifest::{JarInputsError, JarRef, collect_jar_requirements, missing_jars};
+use horizon_mod_package::manifest::{
+    JarInputsError, JarRef, collect_jar_requirements, missing_jars,
+};
 use serde::{Deserialize, Serialize, de};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -755,7 +757,7 @@ struct NewItem {
     components: Vec<(String, J)>,
     crafting_remainder: Option<String>,
     block: Option<String>,
-    arm_pose: Option<horizon_mods::content::ArmPose>,
+    arm_pose: Option<horizon_mod_package::content::ArmPose>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
 }
@@ -810,13 +812,13 @@ fn component_types(map: &J) -> BTreeSet<String> {
 /// `native_items`), joined to the content mods: each namespace's go into
 /// the content mod of that id when one is on (a native mod's own `.hmod`,
 /// with its models and textures), else into a content mod with no files of
-/// its own. Checked as files are ([`horizon_mods::Content::declare`],
+/// its own. Checked as files are ([`horizon_mod_package::Content::declare`],
 /// [`accept_mod`]); a namespace whose declarations are refused is left out
 /// whole, and its error returned.
 pub fn accept_declared(
     mods: &mut Vec<ContentMod>,
-    blocks: &[horizon_mods::content::Block],
-    items: &[horizon_mods::content::Item],
+    blocks: &[horizon_mod_package::content::Block],
+    items: &[horizon_mod_package::content::Item],
     types: &[BlockEntityType],
     known: &BTreeSet<String>,
 ) -> Vec<String> {
@@ -844,13 +846,13 @@ pub fn accept_declared(
         let types = types.iter().filter(|t| namespace(&t.id) == ns).cloned();
         let result = match mods.iter().position(|m| m.id == ns) {
             Some(i) => {
-                let mut content = horizon_mods::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&ns);
                 content.blocks.clone_from(&mods[i].content.blocks);
                 content.items.clone_from(&mods[i].content.items);
                 content
                     .declare(&blocks, &items)
                     .and_then(|()| {
-                        let mut added = horizon_mods::Content::declared(&ns);
+                        let mut added = horizon_mod_package::Content::declared(&ns);
                         added.blocks.clone_from(&blocks);
                         added.items.clone_from(&items);
                         validate_components(&added, known).map_err(|e| e.to_string())
@@ -862,7 +864,7 @@ pub fn accept_declared(
                     })
             }
             None => {
-                let mut content = horizon_mods::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&ns);
                 content.declare(&blocks, &items).and_then(|()| {
                     content.block_entity_types.extend(types);
                     let candidate = ContentMod {
@@ -894,7 +896,7 @@ pub fn accept_mod(
     );
     if let Some(error) = mods
         .iter()
-        .find_map(|c| horizon_mods::content::clash((&c.id, &c.content.namespaces), own))
+        .find_map(|c| horizon_mod_package::content::clash((&c.id, &c.content.namespaces), own))
     {
         return Err(error.into());
     }
@@ -902,7 +904,10 @@ pub fn accept_mod(
     Ok(())
 }
 
-fn validate_components(content: &horizon_mods::Content, known: &BTreeSet<String>) -> Result<()> {
+fn validate_components(
+    content: &horizon_mod_package::Content,
+    known: &BTreeSet<String>,
+) -> Result<()> {
     for (id, components) in content.items.iter().map(|i| (&i.id, &i.components)).chain(
         content
             .blocks
@@ -1803,7 +1808,7 @@ impl<'a> Plan<'a> {
                             && let Some(fields) = v.at("fields")
                         {
                             let color = b.decl.sign_text_color.as_deref().unwrap_or("black");
-                            let id = horizon_mods::content::DYE_COLORS
+                            let id = horizon_mod_package::content::DYE_COLORS
                                 .iter()
                                 .position(|name| *name == color)
                                 .unwrap_or_default();
@@ -2892,7 +2897,7 @@ pub fn build(
     jar_store: &Path,
     mods: &[ContentMod],
     out: &Path,
-    inventory: &horizon_mods::enabled::EnabledMods,
+    inventory: &horizon_mod_package::enabled::EnabledMods,
 ) -> Result<Vec<String>> {
     // Two mods owning one namespace would mix their files.
     for (i, a) in mods.iter().enumerate() {
@@ -2901,7 +2906,7 @@ pub fn build(
                 (b.id.as_str(), b.content.namespaces.as_slice()),
                 (a.id.as_str(), a.content.namespaces.as_slice()),
             );
-            if let Some(e) = horizon_mods::content::clash(b, a) {
+            if let Some(e) = horizon_mod_package::content::clash(b, a) {
                 return Err(e.into());
             }
         }
@@ -3147,7 +3152,7 @@ pub fn build(
         collect_jar_requirements(mods.iter().map(|m| (m.id.as_str(), m.jars.as_slice())))?;
     overlay.write(JAR_INPUTS, &serde_json::to_vec(&requirements)?)?;
     overlay.write(
-        horizon_mods::enabled::MARKER,
+        horizon_mod_package::enabled::MARKER,
         &serde_json::to_vec(inventory)?,
     )?;
     let remainders: BTreeMap<&str, &str> = plan
@@ -3172,7 +3177,7 @@ pub fn build(
             &serde_json::to_vec(&placed_blocks)?,
         )?;
     }
-    let arm_poses: BTreeMap<&str, horizon_mods::content::ArmPose> = plan
+    let arm_poses: BTreeMap<&str, horizon_mod_package::content::ArmPose> = plan
         .items
         .iter()
         .filter_map(|i| Some((i.rename.to.as_str(), i.arm_pose?)))
@@ -3318,7 +3323,7 @@ pub fn resource_root(
     jar_store: &Path,
     mods: &[ContentMod],
     cache: &Path,
-    inventory: &horizon_mods::enabled::EnabledMods,
+    inventory: &horizon_mod_package::enabled::EnabledMods,
 ) -> Result<PathBuf> {
     let has_content = mods.iter().any(|m| {
         !m.jars.is_empty()
@@ -3334,8 +3339,8 @@ pub fn resource_root(
     let roots = cache.join("mod-content");
     let out = roots.join(&stamp[..ROOT_NAME]);
     if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes())
-        && fs::read(out.join(horizon_mods::enabled::MARKER)).is_ok_and(|bytes| {
-            serde_json::from_slice::<horizon_mods::enabled::EnabledMods>(&bytes)
+        && fs::read(out.join(horizon_mod_package::enabled::MARKER)).is_ok_and(|bytes| {
+            serde_json::from_slice::<horizon_mod_package::enabled::EnabledMods>(&bytes)
                 .is_ok_and(|loaded| &loaded == inventory)
         })
     {
@@ -3356,7 +3361,7 @@ pub fn resource_root(
         let base = std::path::absolute(base)?;
         let overlay = Overlay::new(&base, &out)?;
         overlay.write(
-            horizon_mods::enabled::MARKER,
+            horizon_mod_package::enabled::MARKER,
             &serde_json::to_vec(inventory)?,
         )?;
         overlay.write(GENERATED_FILES, b"[]")?;
@@ -3473,8 +3478,9 @@ pub fn check_jars(root: &Path, jar_store: &Path) -> std::result::Result<(), JarI
         path: path.clone(),
         source,
     })?;
-    let requirements: Vec<horizon_mods::manifest::JarRequirement> = serde_json::from_slice(&bytes)
-        .map_err(|source| JarInputsError::Invalid { path, source })?;
+    let requirements: Vec<horizon_mod_package::manifest::JarRequirement> =
+        serde_json::from_slice(&bytes)
+            .map_err(|source| JarInputsError::Invalid { path, source })?;
     let missing = missing_jars(jar_store, &requirements).map_err(|source| JarInputsError::Io {
         path: jar_store.to_owned(),
         source,
@@ -3492,7 +3498,7 @@ fn stamp(
     base: &Path,
     jar_store: &Path,
     mods: &[ContentMod],
-    inventory: &horizon_mods::enabled::EnabledMods,
+    inventory: &horizon_mod_package::enabled::EnabledMods,
 ) -> Result<String> {
     use sha2::{Digest, Sha256};
     let meta = |path: &Path| -> Result<String> {

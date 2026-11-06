@@ -5,8 +5,8 @@ Horizon's registry lists what is made for Horizon and reviewed: content mods (`.
 [shaders.md](../../../shaders.md)). A project is listed by a reviewed pull request in
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods); new versions are submitted as files and pinned by SHA-256. Legacy entries may still follow their repositories. The launcher and the
 website read one file, `index.json`, which that repository's CI builds. The Rust types and every check below are
-`horizon_mods::index` and `horizon_mods::modpack` (feature `index`); the sample is
-`crates/horizon-mods/tests/index/index-v1.json`, read by the tests with the files it lists.
+`horizon_mod_package::index` and `horizon_mod_package::modpack` (feature `index`); the sample is
+`crates/horizon-mod-package/tests/index/index-v1.json`, read by the tests with the files it lists.
 
 Level: preview ([API stability](../../../api/stability.md)). Schema 1.
 
@@ -102,7 +102,7 @@ them into the profile's game folder.
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) holds one `mods/<id>.toml` per project and
 `revoked.toml`. An entry is **a page and its pinned versions**: new versions are submitted as files and checked. Legacy entries may name a repository whose releases are read as below; new repository-following entries are refused. What an entry can't vouch for is read from the file by the kind's own
 check (`index::inspect`): a mod's API, side and capabilities, a modpack's mods, the size. Types and rules:
-`horizon_mods::index::registry`.
+`horizon_mod_package::index::registry`.
 
 Every listed project's resolved page requires a description of 50–10,000 characters after trimming,
 1–3 categories and an icon stored in the registry. Icons and optional screenshots are registry-local

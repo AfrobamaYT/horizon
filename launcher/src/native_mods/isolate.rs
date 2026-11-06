@@ -4,7 +4,7 @@
 //! which mods were left out and why.
 use super::Bundle;
 use crate::i18n::trf;
-use horizon_mods::dependencies::Dependency;
+use horizon_mod_package::dependencies::Dependency;
 use std::collections::BTreeSet;
 
 /// Why a mod was left out of a build.
