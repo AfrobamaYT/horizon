@@ -58,7 +58,10 @@ horizon_client_core::text::Text
 horizon_client::game::lan_actions::GuestCommand
 
 # Game.keys uses HeldKeys/KeyCode (winit): opaque, so ShiftLeft needs a typed input hook.
-# Game::with_level and game::sculk::Game::with_player_actor take generic closures and cannot cross.
+# Game::with_level takes a generic closure and cannot cross.
+# The non-closure actor scope mirrors with_player_actor's save/set/restore of plain data.
+horizon_client::game::Game<'_>::sculk
+horizon_client::game::sculk::SculkState::actor
 # The can_survive closure inside with_level cannot be sent over wasm; use a typed survival hook.
 # The original guest_command adapter took &mut LanHost; current guest_command has no host argument.
 # Standard collections, Arc/Option, atomics and mod-owned settings/runtime are not manifest items.
