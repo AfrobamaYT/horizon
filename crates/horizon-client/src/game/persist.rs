@@ -801,7 +801,7 @@ impl Game<'_> {
             self.next_entity += 1;
             let id = self.next_entity;
             self.remember(id, uuid, tag);
-            self.paintings.push(horizon_client::entities::Painting {
+            let mut painting = horizon_client::entities::Painting {
                 attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id,
@@ -811,7 +811,9 @@ impl Game<'_> {
                 width: v.width,
                 height: v.height,
                 check_interval: 0,
-            });
+            };
+            self.bind_saved_entity_attachments(id, &mut painting.attachment_lifetime);
+            self.paintings.push(painting);
         } else {
             self.persist.unknown.entry(key).or_default().push(tag);
         }
