@@ -3,11 +3,11 @@ use alloc::{borrow::ToOwned, vec};
 use pp_rs::token::PreprocessorError;
 
 use super::{
+    Frontend, Options, Span,
     ast::Profile,
     error::ExpectedToken,
     error::{Error, ErrorKind, ParseErrors},
     token::TokenValue,
-    Frontend, Options, Span,
 };
 use crate::ShaderStage;
 
@@ -84,7 +84,7 @@ fn version() {
                 Error {
                     kind: ErrorKind::InvalidToken(
                         TokenValue::Identifier("version".into()),
-                        vec![ExpectedToken::Eof]
+                        vec![TokenValue::Semicolon.into(), ExpectedToken::Eof]
                     ),
                     meta: Span::new(28, 35)
                 }

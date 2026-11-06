@@ -13,12 +13,12 @@ use core::iter;
 
 use arrayvec::ArrayVec;
 use half::f16;
-use num_traits::{real::Real, FromPrimitive, One, ToPrimitive, Zero};
+use num_traits::{FromPrimitive, One, ToPrimitive, Zero, real::Real};
 
 use crate::{
-    arena::{Arena, Handle, HandleVec, UniqueArena},
     ArraySize, BinaryOperator, Constant, Expression, Literal, Override, RelationalFunction,
     ScalarKind, Span, Type, TypeInner, UnaryOperator,
+    arena::{Arena, Handle, HandleVec, UniqueArena},
 };
 
 #[cfg(feature = "wgsl-in")]
@@ -943,11 +943,11 @@ pub enum ConstantEvaluatorError {
     #[error("Expected boolean vector for condition arg., got something else")]
     SelectConditionNotAVecBool,
     #[error(
-        "Expected same number of vector components between condition, accept, and reject args., got something else",
+        "Expected same number of vector components between condition, accept, and reject args., got something else"
     )]
     SelectConditionVecSizeMismatch,
     #[error(
-        "Expected reject and accept args. to be scalars of vectors of the same type, got something else",
+        "Expected reject and accept args. to be scalars of vectors of the same type, got something else"
     )]
     SelectAcceptRejectTypeMismatch,
     #[error("Cooperative operations can't be constant")]
@@ -1154,12 +1154,17 @@ impl<'a> ConstantEvaluator<'a> {
                 // point. If we failed to, then that probably means we just
                 // haven't implemented that part of constant evaluation. Work
                 // around this by simply emitting it as a run-time expression.
+                // In a GLSL function, a value no literal can hold (an infinity) is GLSL's
+                // arithmetic at run time, as GL drivers compute it; WGSL forbids it.
+                let glsl_overflow = matches!(self.behavior, Behavior::Glsl(_))
+                    && matches!(eval_result, Err(ConstantEvaluatorError::Overflow(_)));
                 if self.behavior.has_runtime_restrictions()
-                    && matches!(
-                        eval_result,
-                        Err(ConstantEvaluatorError::NotImplemented(_)
-                            | ConstantEvaluatorError::InvalidBinaryOpArgs,)
-                    )
+                    && (glsl_overflow
+                        || matches!(
+                            eval_result,
+                            Err(ConstantEvaluatorError::NotImplemented(_)
+                                | ConstantEvaluatorError::InvalidBinaryOpArgs,)
+                        ))
                 {
                     Ok(self.append_expr(expr, span, ExpressionKind::Runtime))
                 } else {
@@ -2047,8 +2052,16 @@ impl<'a> ConstantEvaluator<'a> {
 
         let product = match (a, b) {
             (
-                [Li::AbstractInt(a0), Li::AbstractInt(a1), Li::AbstractInt(a2)],
-                [Li::AbstractInt(b0), Li::AbstractInt(b1), Li::AbstractInt(b2)],
+                [
+                    Li::AbstractInt(a0),
+                    Li::AbstractInt(a1),
+                    Li::AbstractInt(a2),
+                ],
+                [
+                    Li::AbstractInt(b0),
+                    Li::AbstractInt(b1),
+                    Li::AbstractInt(b2),
+                ],
             ) => {
                 // `cross` has no overload for AbstractInt, so AbstractInt
                 // arguments are automatically converted to AbstractFloat. Since
@@ -2065,8 +2078,16 @@ impl<'a> ConstantEvaluator<'a> {
                 ]
             }
             (
-                [Li::AbstractFloat(a0), Li::AbstractFloat(a1), Li::AbstractFloat(a2)],
-                [Li::AbstractFloat(b0), Li::AbstractFloat(b1), Li::AbstractFloat(b2)],
+                [
+                    Li::AbstractFloat(a0),
+                    Li::AbstractFloat(a1),
+                    Li::AbstractFloat(a2),
+                ],
+                [
+                    Li::AbstractFloat(b0),
+                    Li::AbstractFloat(b1),
+                    Li::AbstractFloat(b2),
+                ],
             ) => {
                 let p = cross_product([a0, a1, a2], [b0, b1, b2]);
                 [
@@ -2922,14 +2943,22 @@ impl<'a> ConstantEvaluator<'a> {
                                 .ok_or(ConstantEvaluatorError::ShiftedMoreThan32Bits)?,
                             _ => return Err(ConstantEvaluatorError::InvalidBinaryOpArgs),
                         }),
-                        (Literal::F32(a), Literal::F32(b)) => Literal::F32(match op {
-                            BinaryOperator::Add => a + b,
-                            BinaryOperator::Subtract => a - b,
-                            BinaryOperator::Multiply => a * b,
-                            BinaryOperator::Divide => a / b,
-                            BinaryOperator::Modulo => a % b,
-                            _ => return Err(ConstantEvaluatorError::InvalidBinaryOpArgs),
-                        }),
+                        (Literal::F32(a), Literal::F32(b)) => {
+                            let result = match op {
+                                BinaryOperator::Add => a + b,
+                                BinaryOperator::Subtract => a - b,
+                                BinaryOperator::Multiply => a * b,
+                                BinaryOperator::Divide => a / b,
+                                BinaryOperator::Modulo => a % b,
+                                _ => return Err(ConstantEvaluatorError::InvalidBinaryOpArgs),
+                            };
+                            // An infinity or NaN can't be a literal; in a function, GLSL's
+                            // arithmetic gives it at run time (`try_eval_and_append`).
+                            if !result.is_finite() {
+                                return Err(ConstantEvaluatorError::Overflow(format!("{op:?}")));
+                            }
+                            Literal::F32(result)
+                        }
                         (Literal::AbstractInt(a), Literal::U32(b)) => {
                             Literal::AbstractInt(match op {
                                 BinaryOperator::ShiftLeft => {
@@ -3576,8 +3605,8 @@ impl<'a> ConstantEvaluator<'a> {
         &self,
         expr: Handle<Expression>,
     ) -> Result<crate::proc::TypeResolution, ConstantEvaluatorError> {
-        use crate::proc::TypeResolution as Tr;
         use crate::Expression as Ex;
+        use crate::proc::TypeResolution as Tr;
         let resolution = match self.expressions[expr] {
             Ex::Literal(ref literal) => Tr::Value(literal.ty_inner()),
             Ex::Constant(c) => Tr::Handle(self.constants[c].ty),
@@ -3613,11 +3642,7 @@ impl<'a> ConstantEvaluator<'a> {
         let select_single_component =
             |this: &mut Self, reject_scalar, reject, accept, condition| {
                 let accept = this.cast(accept, reject_scalar, span)?;
-                if condition {
-                    Ok(accept)
-                } else {
-                    Ok(reject)
-                }
+                if condition { Ok(accept) } else { Ok(reject) }
             };
 
         match (&self.expressions[reject], &self.expressions[accept]) {

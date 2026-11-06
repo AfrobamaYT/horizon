@@ -7,17 +7,17 @@ use alloc::{
 use core::iter;
 
 use super::{
+    Frontend, Result,
     ast::*,
     builtins::{inject_builtin, sampled_to_depth},
     context::{Context, ExprPos, StmtContext},
     error::{Error, ErrorKind},
     types::scalar_components,
-    Frontend, Result,
 };
 use crate::{
-    front::glsl::types::type_power, proc::ensure_block_returns, AddressSpace, Block, EntryPoint,
-    Expression, Function, FunctionArgument, FunctionResult, Handle, Literal, LocalVariable, Scalar,
-    ScalarKind, Span, Statement, StructMember, Type, TypeInner,
+    AddressSpace, Block, EntryPoint, Expression, Function, FunctionArgument, FunctionResult,
+    Handle, Literal, LocalVariable, Scalar, ScalarKind, Span, Statement, StructMember, Type,
+    TypeInner, front::glsl::types::type_power, proc::ensure_block_returns,
 };
 
 /// Struct detailing a store operation that must happen after a function call
@@ -352,6 +352,40 @@ impl Frontend {
                     }
                 }
             }
+            // A vector with a component for each of the matrix's (`mat2(vec4)`) fills it column
+            // by column, as several arguments do (GLSL 4.60, 5.4.2).
+            TypeInner::Vector { size, .. } if size as u32 >= columns as u32 * rows as u32 => {
+                let vector_ty = ctx.module.types.insert(
+                    Type {
+                        name: None,
+                        inner: TypeInner::Vector {
+                            size: rows,
+                            scalar: element_scalar,
+                        },
+                    },
+                    meta,
+                );
+                for c in 0..columns as u32 {
+                    let column = (0..rows as u32)
+                        .map(|r| {
+                            ctx.add_expression(
+                                Expression::AccessIndex {
+                                    base: value,
+                                    index: c * rows as u32 + r,
+                                },
+                                meta,
+                            )
+                        })
+                        .collect::<Result<_>>()?;
+                    components.push(ctx.add_expression(
+                        Expression::Compose {
+                            ty: vector_ty,
+                            components: column,
+                        },
+                        meta,
+                    )?);
+                }
+            }
             _ => {
                 components = iter::repeat_n(value, columns as usize).collect();
             }
@@ -475,7 +509,7 @@ impl Frontend {
                 None
             }
             TypeInner::Vector { size, scalar } => {
-                return self.vector_constructor(ctx, ty, size, scalar, &args, meta)
+                return self.vector_constructor(ctx, ty, size, scalar, &args, meta);
             }
             TypeInner::Array { base, .. } => {
                 for (mut arg, meta) in args.iter().copied() {
@@ -498,7 +532,7 @@ impl Frontend {
                 return Err(Error {
                     kind: ErrorKind::SemanticError("Constructor: Too many arguments".into()),
                     meta,
-                })
+                });
             }
         };
 

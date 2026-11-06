@@ -1,18 +1,18 @@
 use alloc::{vec, vec::Vec};
 
-use crate::front::glsl::context::ExprPos;
-use crate::front::glsl::Span;
 use crate::Literal;
+use crate::front::glsl::Span;
+use crate::front::glsl::context::ExprPos;
 use crate::{
+    Block, Expression, Statement, SwitchCase, UnaryOperator,
     front::glsl::{
+        Error, ErrorKind, Frontend, Result,
         ast::ParameterQualifier,
         context::Context,
         parser::ParsingContext,
         token::{Token, TokenValue},
         variables::VarDeclaration,
-        Error, ErrorKind, Frontend, Result,
     },
-    Block, Expression, Statement, SwitchCase, UnaryOperator,
 };
 
 impl ParsingContext<'_> {
@@ -259,7 +259,7 @@ impl ParsingContext<'_> {
                         loop {
                             match self.expect_peek(frontend)?.value {
                                 TokenValue::Case | TokenValue::Default | TokenValue::RightBrace => {
-                                    break
+                                    break;
                                 }
                                 _ => {
                                     self.parse_statement(
@@ -626,9 +626,21 @@ impl ParsingContext<'_> {
             return Ok(());
         }
 
+        // A precision qualifier (`highp vec2 p`), before or after the parameter qualifier:
+        // it changes nothing here, as in every other declaration.
+        let skip_precision = |parser: &mut Self, frontend: &mut Frontend| {
+            while parser
+                .peek(frontend)
+                .is_some_and(|t| matches!(t.value, TokenValue::PrecisionQualifier(_)))
+            {
+                let _ = parser.bump(frontend);
+            }
+        };
         loop {
+            skip_precision(self, frontend);
             if self.peek_type_name(frontend) || self.peek_parameter_qualifier(frontend) {
                 let qualifier = self.parse_parameter_qualifier(frontend);
+                skip_precision(self, frontend);
                 let mut ty = self.parse_type_non_void(frontend, ctx)?.0;
 
                 match self.expect_peek(frontend)?.value {
