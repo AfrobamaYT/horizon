@@ -20,6 +20,6 @@ pub use horizon_world::{
 };
 // hidden: the game's maps behind the store, not part of the mod surface
 #[doc(hidden)]
-pub use horizon_world::attachments::{AttachmentHost, Attachments};
+pub use horizon_world::attachments::{AttachmentAccess, AttachmentHost, Attachments};
 /// The structure box a piece's `bounding_box` answers, in world blocks.
 pub use horizon_world::worldgen::structure::BoundingBox;
