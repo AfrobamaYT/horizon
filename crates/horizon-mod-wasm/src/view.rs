@@ -1038,50 +1038,49 @@ mod tests {
         let mut game = world();
         let declared = [Resolved::Member { owner: 0, field: 1 }];
         run(frame(&mut game), &declared, || {
-                let root = View.root(0).unwrap();
-                group.exports.load(|store| {
-                    macro_rules! invoke {
-                        ($trait:ident::$method:ident $(, $arg:expr)*) => {
-                            <View as $trait<State>>::$method(Access::new(store.as_context_mut(), |_| View) $(, $arg)*)
-                        };
-                    }
-                    let writes = || vec![(borrow(&root), 1, vec![wire::Cell::B(true)]), (borrow(&root), 1, vec![wire::Cell::B(true)])];
-                    let initial = 1000;
-                    store.set_fuel(initial)?;
-                    for _ in 0..2 {
-                        invoke!(HostNodeWithStore::set, borrow(&root), 1, vec![wire::Cell::B(true)])?.unwrap();
-                    }
-                    let single_set = initial - store.get_fuel()?;
-                    store.set_fuel(initial)?;
-                    invoke!(HostWithStore::set_many, writes())?;
-                    assert_eq!(
-                        initial - store.get_fuel()?,
-                        single_set,
-                        "every entry pays its base charge, even refusals"
-                    );
-                    store.set_fuel(initial)?;
-                    for _ in 0..2 {
-                        invoke!(HostNodeWithStore::get, borrow(&root), 1)?.unwrap();
-                    }
-                    let single_get = initial - store.get_fuel()?;
-                    store.set_fuel(initial)?;
-                    invoke!(HostWithStore::get_many, vec![(borrow(&root), 1), (borrow(&root), 1)])?;
-                    assert_eq!(initial - store.get_fuel()?, single_get);
-                    let pending = journal_cost();
-                    store.set_fuel(1)?;
-                    assert!(invoke!(HostWithStore::set_many, writes()).is_err());
-                    let bad = || (Resource::new_borrow(0), 0, Vec::new());
-                    assert!(invoke!(HostWithStore::set_many, vec![bad(), bad()]).is_err());
-                    store.set_fuel(initial)?;
-                    let many = || (0..13).map(|_| (borrow(&root), 1));
-                    assert!(invoke!(HostWithStore::get_many, many().collect()).is_err());
-                    assert!(invoke!(HostWithStore::set_many, many().map(|(n, f)| (n, f, vec![wire::Cell::B(true)])).collect()).is_err());
-                    assert_eq!(journal_cost(), pending);
-                    Ok(())
-                }).unwrap();
+            let root = View.root(0).unwrap();
+            group.exports.load(|store| {
+                macro_rules! invoke {
+                    ($trait:ident::$method:ident $(, $arg:expr)*) => {
+                        <View as $trait<State>>::$method(Access::new(store.as_context_mut(), |_| View) $(, $arg)*)
+                    };
+                }
+                let writes = || vec![(borrow(&root), 1, vec![wire::Cell::B(true)]), (borrow(&root), 1, vec![wire::Cell::B(true)])];
+                let initial = 1000;
+                store.set_fuel(initial)?;
+                for _ in 0..2 {
+                    invoke!(HostNodeWithStore::set, borrow(&root), 1, vec![wire::Cell::B(true)])?.unwrap();
+                }
+                let single_set = initial - store.get_fuel()?;
+                store.set_fuel(initial)?;
+                invoke!(HostWithStore::set_many, writes())?;
+                assert_eq!(
+                    initial - store.get_fuel()?,
+                    single_set,
+                    "every entry pays its base charge, even refusals"
+                );
+                store.set_fuel(initial)?;
+                for _ in 0..2 {
+                    invoke!(HostNodeWithStore::get, borrow(&root), 1)?.unwrap();
+                }
+                let single_get = initial - store.get_fuel()?;
+                store.set_fuel(initial)?;
+                invoke!(HostWithStore::get_many, vec![(borrow(&root), 1), (borrow(&root), 1)])?;
+                assert_eq!(initial - store.get_fuel()?, single_get);
+                let pending = journal_cost();
+                store.set_fuel(1)?;
+                assert!(invoke!(HostWithStore::set_many, writes()).is_err());
+                let bad = || (Resource::new_borrow(0), 0, Vec::new());
+                assert!(invoke!(HostWithStore::set_many, vec![bad(), bad()]).is_err());
+                store.set_fuel(initial)?;
+                let many = || (0..13).map(|_| (borrow(&root), 1));
+                assert!(invoke!(HostWithStore::get_many, many().collect()).is_err());
+                assert!(invoke!(HostWithStore::set_many, many().map(|(n, f)| (n, f, vec![wire::Cell::B(true)])).collect()).is_err());
+                assert_eq!(journal_cost(), pending);
                 Ok(())
-            },
-        )
+            }).unwrap();
+            Ok(())
+        })
         .unwrap();
     }
 
