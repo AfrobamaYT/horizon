@@ -101,6 +101,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn existing_game_exports_keep_their_visibility() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../horizon-client/src");
+        let code = declarations(&src.join("game")).unwrap();
+        for (name, visibility) in [
+            ("cushions", "pub(crate)"),
+            ("mods", "pub(crate)"),
+            ("native_block_entity_draw", "pub"),
+            ("native_client_services", "pub"),
+        ] {
+            assert!(code.contains(&format!("{visibility} mod {name};")));
+        }
+        assert!(
+            crate::points::game_files(&src, true)
+                .unwrap()
+                .iter()
+                .any(|file| file.module == "horizon_client::game::game_tests")
+        );
+    }
+
+    #[test]
     fn discovery_preserves_scope_cfg_and_visibility_and_rejects_drift() {
         let root = std::env::temp_dir().join(format!("game-areas-{}", std::process::id()));
         let game = root.join("game");

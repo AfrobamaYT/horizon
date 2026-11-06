@@ -155,6 +155,15 @@ def main():
                 changed.append(new)
     if args.verify:
         assert removed == added
+        build = 'crates/horizon-mod-api-gen/src/build.rs'
+        blocks = []
+        for text, end in [(git('show', f'{args.verify}:{build}'), 'fs::write(out_dir.join("native_hook_modules.rs")'),
+                          (Path(build).read_text(), '    Ok(modules)')]:
+            start = text.index('let mut modules = String::new();')
+            blocks.append(text[start:text.index(end, start)])
+        tokens = re.compile(r'"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z_0-9]*|[^\s]')
+        assert tokens.findall(blocks[0]) == tokens.findall(blocks[1]), 'changed native module discovery loop'
+        print(f'Native discovery: {len(blocks[0].splitlines())} removed / {len(blocks[1].splitlines())} added loop lines retain every token (only indentation/rustfmt changed)')
         print(f'{len(moves)} files; {sum(removed.values())} normalized moved lines; removed/added multisets equal')
     else:
         for group in {area(Path(p).stem) for p in metadata} | {Path(p).parts[4] for p in moves.values()}:

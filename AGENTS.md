@@ -221,15 +221,10 @@ state stays separate from the library tests. This compiles gameplay twice for ex
 
 ## How `Game` is organised
 
-- `struct Game` (game.rs) holds everything. Its methods live in physical area folders under `game/`:
-  administration, blocks, entities, interface, items, mobs, modding, network, runtime and world.
-  An area has a `.game-area` marker. Add a leaf `<feature>.rs`, or `<feature>/mod.rs` for a feature with
-  children; the build derives the declarations without editing a list. These remain logical children
-  of `game`, not area namespaces, so `super` and visibility keep their meaning. Reference metadata is
-  local: `// game-module-visibility: pub` or `pub(crate)` when needed; `_tests` roots are test-only
-  unless marked `// game-module-cfg: always`. `native_hooks/` owns its separate generated list.
-  game.rs keeps the core loop and fields. Each feature adds an `impl Game<'_>` block and state types.
-  Fields stay private to the gameplay module and descendants. Gameplay tests stay separate from reusable-library tests.
+- `struct Game` (game.rs) keeps the core loop and fields. Features live in `game/<area>/<feature>.rs`
+  or `game/<area>/<feature>/mod.rs` when they have children. An area's `.game-area` marker enables
+  build-derived declarations: add the source file, not a shared list entry. Logical modules remain
+  direct children of `game`, preserving `super`, privacy and every existing target path.
 - Find a feature's code: `grep -rn "fn tick_<thing>\|fn <verb>_<thing>" crates/horizon-client/src/game*`;
   the file is usually `game/<area>/<thing>s.rs` or `game/<area>/<thing>s/mod.rs`. Who calls it:
   grep the name in game.rs's `fn tick` / `fn tick_world`.
