@@ -36,6 +36,7 @@ mod internals_sync;
 mod isolate;
 mod package;
 mod prebuilt;
+mod sites;
 mod wasm_internals;
 
 pub use isolate::LeftOut;
@@ -2260,6 +2261,7 @@ fn pipeline(
                 "internals": m.native().internals,
                 "raw": m.native().injection.iter().filter(|injection| injection.raw.is_some()).map(|injection| serde_json::json!({
                     "id": injection.id, "target": injection.target, "kind": injection.kind,
+                    "selector": injection.selector, "ordinal": injection.ordinal, "fingerprint": injection.fingerprint,
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
