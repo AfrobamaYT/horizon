@@ -2714,9 +2714,10 @@ fn a_level_can_answer_for_a_blocks_signal() {
     let stone = w.id("stone", &[]);
     w.set(source, gold);
     w.set(conductor, stone);
-    let read = |w: &mut World, pos| {
+    let read = |w: &World, pos| {
         w.f.behaviours
-            .best_neighbor_signal(&mut w.level, &mut w.ticks, pos)
+            .signals(&w.level, &w.ticks)
+            .best_neighbor_signal(pos)
     };
     assert_eq!(read(&mut w, beside), 0, "gold gives nothing by itself");
 
@@ -2758,7 +2759,8 @@ fn a_level_can_answer_for_a_blocks_comparator_output() {
             w.full_tick();
         }
         w.f.behaviours
-            .best_neighbor_signal(&mut w.level, &mut w.ticks, after)
+            .signals(&w.level, &w.ticks)
+            .best_neighbor_signal(after)
     };
     let gold = w.id("gold_block", &[]);
     w.level.analog.insert(block, 9);

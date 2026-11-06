@@ -3078,6 +3078,33 @@ pub mod tests {
         mods
     }
 
+    /// Install a signal part on glass for a real-game query.
+    pub fn signal_game_thread() {
+        struct Signal;
+        #[mod_api::horizon_part]
+        impl BlockPart for Signal {
+            fn block_signal(&self, level: &dyn LevelHost, event: &mut BlockSignalEvent) {
+                assert_eq!(
+                    level.block_state([event.pos.x, event.pos.y, event.pos.z]),
+                    event.state
+                );
+                event.signal = if event.direct { -2 } else { 20 };
+            }
+        }
+        struct SignalMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for SignalMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                r.block_part("minecraft:glass", Signal);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("signal_test", Box::new(SignalMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// Install a weak-power part on glass for a real-game query.
     pub fn weak_power_game_thread() {
         struct WeakPower;

@@ -1155,6 +1155,8 @@ impl Game<'_> {
     /// The entity phase of `tick_creatures`: every mob's tick, deaths, and the
     /// projectiles and effects that follow from them.
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
+        // Its steps as spans for `horizon-report` (nothing is read while spans are off).
+        let mut laps = horizon_client::spans::laps();
         // LivingEntity.die runs when the killing blow lands: mobs killed
         // since the last tick (by the player, explosions...) die first.
         let killed: Vec<Mob> = self
@@ -1197,7 +1199,10 @@ impl Game<'_> {
         let mut died = std::mem::take(&mut self.died);
         let ticking = self.entity_ticking_area();
         // With guests on, each mob sees its nearest player (game/lan_mobs.rs).
-        let guests = self.lan_guest_views();
+        let mut guests = self.lan_guest_views();
+        // What stands in a guest's slot while a mob holds that guest's view for
+        // its tick (see `lent` below).
+        let mut spare = guests.first().map(|g| g.1.clone());
         let players = self.level_players();
         let nearest = super::natural_spawning::NearestPlayers::new(&players);
         let mut bindings = match self.lan.as_mut() {
@@ -1260,6 +1265,7 @@ impl Game<'_> {
                     villager_slots.push(i as u32);
                 }
             }
+            laps.lap("creature_prepare");
             let mut cached_difficulty: Option<((i32, i32), spawning::LocalDifficulty)> = None;
             for i in 0..mobs.len() {
                 let m = &mut mobs[i];
@@ -1286,20 +1292,6 @@ impl Game<'_> {
                 let nearest_player = nearest
                     .nearest(m.position.x, m.position.y, m.position.z)
                     .map(|p| p.position);
-                let controlling_player_movement = horizon_client::mobs::equine::controlled(m)
-                    .then(|| {
-                        base.player
-                            .as_ref()
-                            .filter(|p| p.riding_vehicle == Some(m.id))
-                            .map(|p| p.velocity)
-                            .or_else(|| {
-                                guests
-                                    .iter()
-                                    .find(|(_, p)| p.riding_vehicle == Some(m.id))
-                                    .map(|(_, p)| p.velocity)
-                            })
-                    })
-                    .flatten();
                 // `MobDespawnEvent`, before `checkDespawn`'s own draws; one branch
                 // with no listener. Cleared below: the tick may not reach the check.
                 // The wither overrides `checkDespawn` without `super`, so the
@@ -1323,28 +1315,21 @@ impl Game<'_> {
                 }
                 // ServerLevel.tick: every loaded entity checks despawning, but
                 // only those in entity-ticking chunks (within the simulation
-                // distance) tick.
+                // distance) tick. The despawn check reads the nearest player
+                // and the difficulty, not the player the mob sees.
                 if !ticking(bx, bz) {
-                    let active_player = match seen_guest {
-                        Some(conn) => guests.iter().find(|g| g.0 == conn).map(|g| g.1.clone()),
-                        None => base.player.take(),
-                    };
-                    let mut w = MobWorld {
+                    let w = MobWorld {
                         others: &snapshot,
                         others_grid: Some(&grid),
                         others_index: Some(&index),
                         others_villagers: Some(&villager_slots),
                         nearest_player,
-                        player: active_player,
+                        player: None,
                         teams: std::sync::Arc::clone(&base.teams),
                         ..base
                     };
-                    w.controlling_player_movement = controlling_player_movement;
                     let kept = horizon_client::mobs::ai::despawn_check(m, &w);
                     m.despawn = mod_api::NativeDespawn::default();
-                    if seen_guest.is_none() {
-                        base.player = w.player;
-                    }
                     if !kept {
                         died.remove(&m.id);
                         snapshot[i].alive = false;
@@ -1352,6 +1337,20 @@ impl Game<'_> {
                     keep.push(kept);
                     continue;
                 }
+                let controlling_player_movement = horizon_client::mobs::equine::controlled(m)
+                    .then(|| {
+                        base.player
+                            .as_ref()
+                            .filter(|p| p.riding_vehicle == Some(m.id))
+                            .map(|p| p.velocity)
+                            .or_else(|| {
+                                guests
+                                    .iter()
+                                    .find(|(_, p)| p.riding_vehicle == Some(m.id))
+                                    .map(|(_, p)| p.velocity)
+                            })
+                    })
+                    .flatten();
                 // A mod canceled its tick: it stays as it is.
                 if round.canceled(m.id) {
                     m.despawn = mod_api::NativeDespawn::default();
@@ -1373,9 +1372,16 @@ impl Game<'_> {
                 horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
                 horizon_client::mobs::blocks_changed(m, &path_changes);
                 let from = events.len();
-                let active_player = match seen_guest {
-                    Some(conn) => guests.iter().find(|g| g.0 == conn).map(|g| g.1.clone()),
-                    None => base.player.take(),
+                // The guest's view is lent to the mob for its tick, not copied:
+                // the tick only reads it (`&MobWorld`), and it goes back to the
+                // guest's slot straight after.
+                let lent = seen_guest.and_then(|conn| guests.iter().position(|g| g.0 == conn));
+                let active_player = match (seen_guest, lent) {
+                    (None, _) => base.player.take(),
+                    (Some(_), Some(k)) => spare
+                        .take()
+                        .map(|stand_in| std::mem::replace(&mut guests[k].1, stand_in)),
+                    (Some(_), None) => None,
                 };
                 let mut w = MobWorld {
                     others: &snapshot,
@@ -1404,6 +1410,8 @@ impl Game<'_> {
                 }
                 if seen_guest.is_none() {
                     base.player = w.player;
+                } else if let Some(k) = lent {
+                    spare = w.player.map(|v| std::mem::replace(&mut guests[k].1, v));
                 }
                 // A killed mob's body is removed: its effects that act on
                 // death run (`LivingEntity.remove` with KILLED).
@@ -1454,6 +1462,7 @@ impl Game<'_> {
                 grid.update(i, snapshot[i].bounds);
                 horizon_client::mobs::apply_brain_events(&mut mobs, &mut level, &mut events, from);
             }
+            laps.lap("creature_loop");
             let mut flags = keep.into_iter();
             mobs.retain(|_| flags.next().unwrap_or(true));
             for m in &mut mobs {
@@ -1488,6 +1497,7 @@ impl Game<'_> {
             self.lan_entity_event(id as i32, 60, at);
             self.death_poof(at, width, height);
         }
+        laps.lap("creature_retain");
         self.tick_boarding();
         self.sync_riders();
         self.tick_skeleton_traps();
@@ -1495,6 +1505,7 @@ impl Game<'_> {
         self.villager_reputation_tick();
         self.villager_item_sense();
         self.villager_pickups();
+        laps.lap("creature_villagers");
         for m in dead {
             self.mob_died(&m);
         }
@@ -1511,10 +1522,12 @@ impl Game<'_> {
         self.handle_mob_events(events)?;
         self.lan_guest_mob_events(guest_events);
         self.drain_entity_inside();
+        laps.lap("creature_events");
         self.ordered_before(super::ordered_tick::Batch::Projectiles)?;
         self.tick_projectiles()?;
         self.drain_entity_inside();
         self.tick_fangs();
+        laps.lap("creature_projectiles");
         self.tick_allays();
         self.tick_pandas();
         self.tick_foxes();
@@ -1525,12 +1538,14 @@ impl Game<'_> {
         self.piglin_pickups();
         self.sulfur_cube_pickups();
         self.sulfur_cube_power_priming();
+        laps.lap("creature_systems");
         // Hurt and death sounds of damage dealt outside the mob ticks.
         let mut queued = Vec::new();
         for m in &mut self.mobs {
             queued.append(&mut m.outbox);
         }
         self.handle_mob_events(queued)?;
+        laps.lap("creature_outbox");
         Ok(())
     }
     /// `LivingEntity.makePoofParticles` (entity event 60) about a mob's box.
