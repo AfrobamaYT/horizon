@@ -11309,7 +11309,7 @@ impl Game<'_> {
         actor: Option<&GameRuleActor<'_>>,
     ) {
         if mod_api::__private::listened(mod_api::HookId::GameRuleChanged) {
-            self.native_game_rule_changed(&["minecraft:", name].concat(), value, actor);
+            self.native_game_rule_changed(name, value, actor);
         }
     }
     /// `MobSplitEvent` for the dying cube mob `m`, which made `count`

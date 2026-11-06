@@ -897,7 +897,7 @@ impl Game<'_> {
                     "enchants": horizon_client::mobs::gear::gear(m).map(|g| g.slots.iter().map(|s| s.iter().map(|(e, l)| format!("{e}:{l}")).collect::<Vec<_>>()).collect::<Vec<_>>()),
                     "ints": m.extra.ints,
                     "pois": [m.extra.home, m.extra.bed, m.extra.meeting],
-                    "profession": m.extra.variant2,
+                    "profession": m.extra.profession.index(),
                     "targets": m.ai.targets.running_names(),
                     "path": m.ai.nav.path.as_ref().map(|p| p.nodes.len() - p.next.min(p.nodes.len())),
                     "on_ground": m.on_ground,

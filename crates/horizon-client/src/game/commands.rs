@@ -3406,8 +3406,8 @@ impl Game<'_> {
         value: Value,
         actor: Option<&mod_api::GameRuleActor<'_>>,
     ) {
-        if self.ui.rules.set(rule.name, value) {
-            self.game_rule_changed(rule.name, value, actor);
+        if self.ui.rules.set(&rule.name, value) {
+            self.game_rule_changed(&rule.name, value, actor);
         }
         self.sync_rules();
         if self.options.dedicated.is_some() {
@@ -3418,7 +3418,7 @@ impl Game<'_> {
             super::dedicated::events::record_server(
                 "gamerule",
                 serde_json::json!({
-                    "key": format!("minecraft:{}", rule.name),
+                    "key": rule.name.clone(),
                     "valueType": value_type,
                     "value": json,
                 }),
@@ -3432,7 +3432,7 @@ impl Game<'_> {
         let Some(rule) = self.ui.rules.rule(&name).cloned() else {
             return Ok(0);
         };
-        let current = self.ui.rules.get(rule.name).unwrap_or(rule.default);
+        let current = self.ui.rules.get(&rule.name).unwrap_or(rule.default);
         let value = match ctx.get("value") {
             Some(Arg::Bool(b)) => Value::Bool(*b),
             Some(Arg::Int(i)) => Value::Int(*i),

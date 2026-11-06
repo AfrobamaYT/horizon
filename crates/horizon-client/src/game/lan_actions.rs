@@ -2950,8 +2950,8 @@ impl Game<'_> {
                             .rules
                             .available_rules()
                             .map(|r| play::GameRuleEntry {
-                                name: format!("minecraft:{}", r.name),
-                                value: self.ui.rules.get(r.name).unwrap_or(r.default).to_string(),
+                                name: r.name.clone(),
+                                value: self.ui.rules.get(&r.name).unwrap_or(r.default).to_string(),
                             })
                             .collect(),
                     }),
@@ -2961,7 +2961,7 @@ impl Game<'_> {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
                         if let Some(rule) = self.ui.rules.rule(&entry.name).cloned()
-                            && let Some(value) = self.ui.rules.get(rule.name)
+                            && let Some(value) = self.ui.rules.get(&rule.name)
                         {
                             let Some(host) = self.lan.as_ref() else {
                                 return;
@@ -2974,7 +2974,7 @@ impl Game<'_> {
                                 entity_id,
                                 name: &name,
                             };
-                            self.game_rule_changed(rule.name, value, Some(&actor));
+                            self.game_rule_changed(&rule.name, value, Some(&actor));
                         }
                         let message = horizon_client::text::Text::tr(
                             "commands.gamerule.set",
@@ -7229,9 +7229,12 @@ mod tests {
                 r.block_part(block_key, self.user.clone());
                 let block_key = r.block_key("minecraft:cake");
                 r.block_part(block_key, self.user.clone());
-                r.item_part("minecraft:stick", self.user.clone());
-                r.item_part("minecraft:water_bucket", self.user.clone());
-                r.item_part("minecraft:stone", self.user.clone());
+                let item = r.item_key("minecraft:stick");
+                r.item_part(item, self.user.clone());
+                let item = r.item_key("minecraft:water_bucket");
+                r.item_part(item, self.user.clone());
+                let item = r.item_key("minecraft:stone");
+                r.item_part(item, self.user.clone());
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));

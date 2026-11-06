@@ -317,7 +317,7 @@ pub fn breed_offspring(m: &mut Mob, partner: &Seen) -> Option<Offspring> {
         variant2 = if mk < 2 {
             m.extra.variant2
         } else if mk < 4 {
-            partner.profession
+            partner.secondary_variant
         } else {
             r.next_int_bound(5).unwrap_or(0) as u8
         };

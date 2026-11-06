@@ -1826,20 +1826,13 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/*.rs`
-    /// with the game's): container slot `slot` of the content mod menu type `menu`
-    /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
-    /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
-    /// `may_place` and `max_stack` hold the type's own answer (false on one of its
-    /// `results`, true elsewhere, and 99): change them for your own menu types.
-    /// `max_stack` is kept to 1 to 99,
-    /// and the item's own stack size still caps it. Asked on the server, for each
-    /// click, drag and shift-click that puts an item in a slot, several times for
-    /// one shift-click: answer from `stack` and `context` alone, and fast. `context`
-    /// holds the side, the registries and the settings of the resource generation;
-    /// a `/reload` builds the next one.
+    /// Slot placement and stack limits for a content mod menu. `slot` is the
+    /// backing container index, including player inventory slots. The slot's
+    /// own answers arrive first; the maximum is bounded to 1–99 and the item
+    /// limit. Runs in the restricted context during server clicks and client
+    /// prediction. Answer from the stack and context alone, and fast.
     #[hook(
-        side = "server",
+        side = "both",
         contract = "listen",
         scope = "menu",
         key = "menu",

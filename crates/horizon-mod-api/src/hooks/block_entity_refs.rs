@@ -104,4 +104,20 @@ pub trait Helpers {
         target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_set_data_slot"
     )]
     fn block_entity_set_data_slot();
+    /// Declare or replace a mod block entity's menu data slots on the server.
+    /// Creation and loading start with no data slots; call this with their initial
+    /// values to size the vector, instead of assigning a mutable tick payload's
+    /// data field. Use `set_data_slot` for later scalar changes without resizing.
+    /// Joins the current journal: abort restores the previous vector; a committed
+    /// change calls setChanged and the normal menu broadcast sends its values.
+    /// Returns Ok(true) for a change, Ok(false) for identical values, or a typed
+    /// BlockEntityDataError for an unavailable holder or too many slots (currently
+    /// 256, the mod-menu limit). No values are clamped. Resolution follows the
+    /// existing level-and-position handle, including replacement at that position.
+    #[helper(
+        side = "server",
+        receiver = "block_entity",
+        target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_set_data_slots"
+    )]
+    fn block_entity_set_data_slots();
 }
