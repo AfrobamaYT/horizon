@@ -523,6 +523,10 @@ impl Game<'_> {
             self.settings.gui_scale,
             std::sync::atomic::Ordering::Relaxed,
         );
+        horizon_client::hud::GUI_UNICODE.store(
+            self.settings.force_unicode,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         if horizon_client_render::mipmap::set_dither_cutouts(
             self.settings.horizon.dither_cutout_mips,
         ) {
@@ -598,17 +602,25 @@ impl Game<'_> {
     pub(super) fn resize_state_of(&self, size: winit::dpi::PhysicalSize<u32>) -> ResizeState {
         ResizeState {
             size,
-            gui_scale: self.settings.gui_scale,
-            fullscreen: self.settings.fullscreen,
-            force_unicode: self.settings.force_unicode,
+            gui_size: horizon_client::window::GuiSize::new(
+                [size.width, size.height],
+                self.settings.gui_scale,
+                self.settings.force_unicode,
+            )
+            .size,
         }
     }
-    /// Fires `window_resize` once when the physical size or a GUI setting differs from the last report.
+    /// Fires `window_resize` once when the physical or GUI-scaled dimensions change.
     pub(super) fn notify_window_resize(&mut self) {
         let Some(window) = &self.window else { return };
         let now = self.resize_state_of(window.inner_size());
         if now.differs_from(&mut self.resize_state) {
-            self.native_window_resize(now.size.width, now.size.height);
+            self.native_window_resize(
+                now.size.width,
+                now.size.height,
+                now.gui_size[0],
+                now.gui_size[1],
+            );
         }
     }
     /// `Window.updateFullscreenState`: a fullscreen change made by the window
@@ -757,12 +769,10 @@ mod resize_state_tests {
     use super::ResizeState;
     use winit::dpi::PhysicalSize;
 
-    fn state(width: u32, fullscreen: bool) -> ResizeState {
+    fn state(width: u32, unicode: bool) -> ResizeState {
         ResizeState {
-            size: PhysicalSize::new(width, 480),
-            gui_scale: 2,
-            fullscreen,
-            force_unicode: false,
+            size: PhysicalSize::new(width, 720),
+            gui_size: horizon_client::window::GuiSize::new([width, 720], 3, unicode).size,
         }
     }
 
@@ -779,9 +789,33 @@ mod resize_state_tests {
     /// A settings-only change at an unchanged physical size still reports.
     #[test]
     fn a_settings_only_change_reports() {
-        let mut last = Some(state(640, false));
-        assert!(!state(640, false).differs_from(&mut last));
-        assert!(state(640, true).differs_from(&mut last));
+        let mut last = Some(state(960, false));
+        assert!(!state(960, false).differs_from(&mut last));
+        assert!(state(960, true).differs_from(&mut last));
+    }
+    #[test]
+    fn settings_that_leave_dimensions_unchanged_do_not_report() {
+        let size = PhysicalSize::new(1280, 960);
+        let before = ResizeState {
+            size,
+            gui_size: horizon_client::window::GuiSize::new([1280, 960], 2, false).size,
+        };
+        let mut last = Some(before);
+        let unicode = ResizeState {
+            size,
+            gui_size: horizon_client::window::GuiSize::new([1280, 960], 2, true).size,
+        };
+        assert!(!unicode.differs_from(&mut last));
+        let automatic = ResizeState {
+            size,
+            gui_size: horizon_client::window::GuiSize::new([1280, 960], 0, false).size,
+        };
+        assert!(automatic.differs_from(&mut last));
+        let larger_limit = ResizeState {
+            size,
+            gui_size: horizon_client::window::GuiSize::new([1280, 960], 100, false).size,
+        };
+        assert!(!larger_limit.differs_from(&mut last));
     }
 }
 

@@ -2795,13 +2795,11 @@ struct QueuedLevelEvent {
     source: Option<horizon_world::level::LevelEventPlayer>,
 }
 
-/// The inputs of the scaled GUI size, compared so `window_resize` fires once per change.
+/// Physical and scaled GUI dimensions last reported by `window_resize`.
 #[derive(Clone, Copy, PartialEq)]
 struct ResizeState {
     size: winit::dpi::PhysicalSize<u32>,
-    gui_scale: u32,
-    fullscreen: bool,
-    force_unicode: bool,
+    gui_size: [u32; 2],
 }
 
 impl ResizeState {
@@ -23306,6 +23304,10 @@ impl Loading {
             stop.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
+        horizon_client::hud::GUI_UNICODE.store(
+            self.settings.force_unicode,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         self.window = Some(window);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
@@ -23349,6 +23351,10 @@ impl Loading {
         ) {
             Ok(r) => {
                 horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
+                horizon_client::hud::GUI_UNICODE.store(
+                    self.settings.force_unicode,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 self.renderer = Some(r);
             }
             Err(e) => self.error = Some(e),
