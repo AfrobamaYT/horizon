@@ -382,6 +382,11 @@ impl SyncData {
                 }
                 let mut decoded = Vec::new();
                 for (id, bytes) in files {
+                    let value: Value = serde_json::from_slice(&bytes)
+                        .map_err(|e| format!("damage type {id}: {e}"))?;
+                    if !overlay.conditions.allows(&value) {
+                        continue;
+                    }
                     let definition =
                         horizon_world::damage_source::Definition::from_json(&id, &bytes)
                             .map_err(|e| format!("damage type {id}: {e}"))?;
@@ -396,6 +401,7 @@ impl SyncData {
             } else if PACK_REGISTRIES.contains(key) {
                 pack_entries(path, overlay, &mut entries);
             }
+            entries.retain(|(_, value, _)| overlay.conditions.allows(value));
             if *key == BIOME_REGISTRY
                 && let Some(table) = biomes.filter(|b| b.has_packs())
             {

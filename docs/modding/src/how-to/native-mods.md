@@ -381,20 +381,29 @@ that introduces a dependency not listed there is refused.
 
 ### Conditional data
 
-Recipe files and tag layers handled by content-root composition and world-table
-loading can carry a `neoforge:conditions` array. Every condition
-must hold; a false or unknown condition omits the recipe or tag layer. Tags are
-checked before merging or applying `replace`, so an omitted layer leaves lower
-entries intact.
+Server JSON files can carry a `neoforge:conditions` array. Supported readers are
+recipes, loot tables, item modifiers, predicates, enchantments, jukebox songs,
+instruments, damage types, advancements, synchronized registry JSON, world-table
+tags (including loot and damage tags), and native item/block data maps.
+Every condition must hold; a false or unsupported condition omits the file.
 
-`neoforge:mod_loaded` asks the owning resource generation's enabled server-mod IDs,
-including active code-only native and WebAssembly mods, plus `minecraft` always.
-Client-only, disabled and refused packages are absent; resource namespaces are not
-mod IDs. `neoforge:true`, `neoforge:not`, `neoforge:and` and `neoforge:or` combine
-conditions. Successful reloads publish changed enabled IDs together with the data
-generation. Other non-recipe readers still need their own condition integration, including
-the separate tag readers used by loot contexts and damage-resource loading
-([#814](https://github.com/arismoko/horizon/issues/814)).
+Ordinary JSON resources select the winning pack file first, then evaluate its
+conditions before decoding the data. If the winner is omitted, a lower pack's
+version does not return. Tags and data maps evaluate each layer before merging,
+`replace`, or `remove`, so an omitted layer leaves lower entries intact. A damage
+registry is frozen at world open; reloading reevaluates its tags, not its type
+definitions. Generated item default components retain their existing prototype
+lifetime and are not conditional data files.
+
+`neoforge:mod_loaded` asks the owning resource generation's captured enabled
+server-mod IDs, including active code-only native and WebAssembly mods, plus
+`minecraft` always. Client-only, disabled and refused packages are absent;
+resource namespaces are not mod IDs. Other supported forms are `neoforge:true`,
+`neoforge:not` (`value`), and `neoforge:and` / `neoforge:or` (`values`). An unknown
+kind anywhere in these trees omits the file, including beneath `not` or `or`.
+A file without the conditions array loads normally. Successful reloads publish
+changed enabled IDs together with the data generation; retained readers keep
+their old snapshot. Recipe selection and its condition evaluator are unchanged.
 
 ### Reading recipe rules
 
