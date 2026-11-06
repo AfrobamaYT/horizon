@@ -20744,13 +20744,14 @@ impl<'a> Game<'a> {
         audio: Audio,
         prepared: Option<GameCpuResources>,
     ) -> Result<Self> {
-        let mod_phase = mod_api::__private::PhaseOwner::new(if cfg!(test) {
-            mod_api::__private::ModPhase::World
-        } else if mod_api::__private::current_phase() == mod_api::__private::ModPhase::Packages {
-            mod_api::__private::ModPhase::Setup
-        } else {
-            mod_api::__private::current_phase()
-        });
+        let phase = match mod_api::__private::current_phase() {
+            mod_api::__private::ModPhase::Packages if cfg!(test) => {
+                mod_api::__private::ModPhase::World
+            }
+            mod_api::__private::ModPhase::Packages => mod_api::__private::ModPhase::Setup,
+            phase => phase,
+        };
+        let mod_phase = mod_api::__private::PhaseOwner::new(phase);
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
         let loop_side = options.execution_role.loop_side();

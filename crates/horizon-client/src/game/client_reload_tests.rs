@@ -673,3 +673,136 @@ fn an_arm_pose_answer_replaces_the_pose_the_item_gives() {
         });
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn client_completion_reads_published_resources_without_world_access() {
+    use crate::game::native_entity_refs::tests::with_client_game;
+    use mod_api::__private::{ModPhase, PhaseOwner};
+    use mod_api::{ClientHost, ClientResourcesReloadedEvent, Hooks, ModEntry};
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Mutex,
+    };
+
+    struct Probe(Arc<Mutex<Vec<u64>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Probe {
+        fn client_resources_reloaded(
+            &self,
+            host: &mut dyn ClientHost,
+            _: &mut ClientResourcesReloadedEvent,
+        ) {
+            assert!(host.block_sprites(&["minecraft:stone"])[0].is_some());
+            assert!(host.texture_sprites(&["minecraft:block/stone"])[0].is_some());
+            let version = host.block_sprites_version();
+            let refused =
+                catch_unwind(AssertUnwindSafe(|| host.level("minecraft:overworld"))).unwrap_err();
+            let text = refused
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| refused.downcast_ref::<&str>().copied())
+                .unwrap();
+            assert!(text.contains("Reloading"), "{text}");
+            self.0.lock().unwrap().push(version);
+        }
+    }
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "published_client",
+        Box::new(Probe(seen.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_client_game(|game| {
+            let version = game.native_block_sprites_version();
+            for entering in [ModPhase::Setup, ModPhase::World] {
+                game.mod_phase = PhaseOwner::new(entering);
+                game.native_client_resources_reloaded();
+                assert_eq!(mod_api::__private::current_phase(), entering);
+            }
+            assert_eq!(*seen.lock().unwrap(), [version, version]);
+        })
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn client_startup_finishes_configs_before_the_first_runtime_callback() {
+    use crate::game::{
+        Audio, UiResources, native_entity_refs::tests::with_client_game, start_game,
+    };
+    use mod_api::__private::{ModPhase, PhaseOwner};
+    use mod_api::{
+        ClientHost, ClientSetupEvent, ClientTickPreEvent, ConfigLoadingEvent, Hooks, HostSide,
+        ModEntry, NativeConfig, NativeConfigKind, RegisterConfigsEvent,
+    };
+    use std::{sync::Mutex, time::Instant};
+
+    struct Probe(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Probe {
+        fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
+            event.configs.push(NativeConfig::new(
+                "startup_client",
+                NativeConfigKind::Client,
+                "enabled = true\n",
+            ));
+            event.configs.push(NativeConfig::new(
+                "startup_common",
+                NativeConfigKind::Common,
+                "enabled = true\n",
+            ));
+        }
+        fn client_setup(&self, _: &mut dyn ClientHost, _: &mut ClientSetupEvent) {
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::Setup);
+            self.0.lock().unwrap().push("setup".into());
+        }
+        fn config_loading(&self, _: HostSide<'_>, event: &mut ConfigLoadingEvent<'_>) {
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::Config);
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{:?}", event.config.kind));
+        }
+        fn client_tick_pre(&self, host: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {
+            assert!(host.level("minecraft:overworld").is_none());
+            assert!(host.entity(1).is_none());
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::World);
+            self.0.lock().unwrap().push("tick".into());
+        }
+    }
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "startup_phase",
+        Box::new(Probe(seen.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_client_game(|game| {
+            let resources = game.res.clone();
+            let options = game.options.clone();
+            let root = options.resources.clone();
+            let gui = UiResources::server(&root).unwrap();
+            let _setup = PhaseOwner::scope(ModPhase::Setup);
+            let mut started = start_game(
+                &resources,
+                game.pack.clone(),
+                gui,
+                options,
+                None,
+                Audio::silent(&root),
+                root,
+                Instant::now(),
+                None,
+                Some(game.settings.clone()),
+                None,
+                Vec::new(),
+            )
+            .unwrap()
+            .unwrap();
+            started.tick().unwrap();
+            assert_eq!(*seen.lock().unwrap(), ["setup", "Client", "Common", "tick"]);
+        })
+    });
+}
