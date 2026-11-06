@@ -227,7 +227,8 @@ fn progress_events_capture_each_players_full_mutation_state() {
             for conn in [12, 13] {
                 let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
                 assert_eq!(guest.xp_total, if conn == 12 { 7 } else { 0 });
-                for item in ["minecraft:stone"] {
+                {
+                    let item = "minecraft:stone";
                     assert_eq!(
                         guest
                             .inventory
@@ -288,7 +289,8 @@ fn progress_events_capture_each_players_full_mutation_state() {
                         0
                     }
                 );
-                for item in ["minecraft:stone"] {
+                {
+                    let item = "minecraft:stone";
                     assert_eq!(
                         guest
                             .inventory
