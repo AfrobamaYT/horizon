@@ -2641,6 +2641,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-assets"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "horizon-core",
+ "log",
+ "serde",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
 name = "horizon-bench"
 version = "0.1.0"
 dependencies = [
@@ -2892,6 +2904,7 @@ name = "horizon-world"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "horizon-assets",
  "horizon-core",
  "libm",
  "log",
