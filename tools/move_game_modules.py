@@ -161,9 +161,10 @@ def main():
                           (Path(build).read_text(), '    Ok(modules)')]:
             start = text.index('let mut modules = String::new();')
             blocks.append(text[start:text.index(end, start)])
-        tokens = re.compile(r'"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z_0-9]*|[^\s]')
-        assert tokens.findall(blocks[0]) == tokens.findall(blocks[1]), 'changed native module discovery loop'
-        print(f'Native discovery: {len(blocks[0].splitlines())} removed / {len(blocks[1].splitlines())} added loop lines retain every token (only indentation/rustfmt changed)')
+        normalized = [subprocess.check_output(['rustfmt', '--edition', '2024', '--emit', 'stdout'],
+                      input=('fn proof() {\n' + block + '\n}').encode()).decode() for block in blocks]
+        assert normalized[0] == normalized[1], 'changed native module discovery loop'
+        print(f'Native discovery: {len(blocks[0].splitlines())} removed / {len(blocks[1].splitlines())} added loop lines match after declared indentation/rustfmt normalization')
         print(f'{len(moves)} files; {sum(removed.values())} normalized moved lines; removed/added multisets equal')
     else:
         for group in {area(Path(p).stem) for p in metadata} | {Path(p).parts[4] for p in moves.values()}:
