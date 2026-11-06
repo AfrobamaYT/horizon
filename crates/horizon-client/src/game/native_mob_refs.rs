@@ -1174,6 +1174,53 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_extreme_restriction_answers_as_vanilla() {
+        with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(12, zombie, Vec3::new(3.5, 65.0, 3.5), 0.0));
+            let mob = game
+                .native_mob_ref(game.native_entity(12).unwrap())
+                .unwrap();
+            // `Vec3i.distSqr` in doubles: the far corner of the int range is
+            // outside, with no overflow on the way.
+            assert!(game.native_mob_restrict_to(mob, [i32::MIN, 0, 0], 6));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [i32::MAX, 0, 0]),
+                Some(false)
+            );
+            assert!(game.native_mob_restrict_to(mob, [i32::MIN, i32::MIN, i32::MIN], 6));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [i32::MAX, i32::MAX, i32::MAX]),
+                Some(false)
+            );
+            // The radius squares as a Java `int`: 65 536² wraps to 0, so not
+            // even the center is within.
+            assert!(game.native_mob_restrict_to(mob, [0, 0, 0], 65_536));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [0, 0, 0]),
+                Some(false)
+            );
+            // The largest radius that squares without wrapping still holds.
+            assert!(game.native_mob_restrict_to(mob, [0, 0, 0], 46_340));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [46_339, 0, 0]),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [46_340, 0, 0]),
+                Some(false)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn hand_and_loot_flags_live_on_the_mob_handle() {
         use horizon_world::nbt::Tag;
         with_game(|game| {
