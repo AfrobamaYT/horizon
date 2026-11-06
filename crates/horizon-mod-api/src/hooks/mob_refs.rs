@@ -14,6 +14,16 @@ pub trait Helpers {
         target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_portal_cooldown"
     )]
     fn mob_portal_cooldown();
+
+    /// The current level's mob portal eligibility decision, including riders and mounts.
+    /// `Some(false)` means ineligible; `None` means a stale, parked or unavailable
+    /// handle, a client, or the separately modelled dragon. Does not load a level.
+    #[helper(
+        side = "both",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_can_use_portal"
+    )]
+    fn mob_can_use_portal();
     #[helper(
         side = "server",
         receiver = "mob",
