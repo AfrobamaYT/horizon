@@ -132,6 +132,7 @@ impl Game<'_> {
         }
         self.journal_block_entity(key);
         self.world.set_block_lock(key, &Tag::Compound(tag));
+        self.after_commit(After::Updated(key));
         self.after_commit(After::Changed(key));
         true
     }
