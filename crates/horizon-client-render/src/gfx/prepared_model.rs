@@ -65,15 +65,17 @@ pub struct EntityRangePass<'a> {
     pub vertices: &'a wgpu::Buffer,
     pub indices: &'a wgpu::Buffer,
     pub hdr: bool,
-    pub vertex_count: u32,
-    pub posed: u32,
 }
 
 /// CPU ranges, then the prepared draw that sits at each cut. Cuts are entity-stream vertices.
-pub fn ordered_entity_ranges(vertices: u32, cuts: &[u32]) -> Vec<(u32, u32, Option<usize>)> {
+pub fn fill_ordered_ranges(
+    vertices: u32,
+    cuts: impl IntoIterator<Item = u32>,
+    ranges: &mut Vec<(u32, u32, Option<usize>)>,
+) {
+    ranges.clear();
     let mut cursor = 0;
-    let mut ranges = Vec::with_capacity(cuts.len() * 2 + 1);
-    for (index, cut) in cuts.iter().copied().enumerate() {
+    for (index, cut) in cuts.into_iter().enumerate() {
         let cut = cut.min(vertices);
         if cut > cursor {
             ranges.push((cursor, cut, None));
@@ -84,7 +86,6 @@ pub fn ordered_entity_ranges(vertices: u32, cuts: &[u32]) -> Vec<(u32, u32, Opti
     if vertices > cursor {
         ranges.push((cursor, vertices, None));
     }
-    ranges
 }
 
 /// Draw entity ranges and prepared copies in stream order. An HDR mark follows its color draw.
@@ -94,12 +95,9 @@ pub fn draw_ordered<'a>(
     models: Option<&'a PreparedModels>,
     instances: &'a wgpu::Buffer,
     draws: &[PreparedModelDraw],
+    ranges: &[(u32, u32, Option<usize>)],
 ) {
-    let cuts: Vec<u32> = draws
-        .iter()
-        .map(|draw| draw.cpu_vertices.saturating_add(entities.posed))
-        .collect();
-    for (start, end, draw) in ordered_entity_ranges(entities.vertex_count, &cuts) {
+    for &(start, end, draw) in ranges {
         if end / 4 > start / 4 {
             let (first, last) = (start / 4 * 6, end / 4 * 6);
             pass.set_pipeline(entities.pipeline);
@@ -390,7 +388,8 @@ mod tests {
 
     #[test]
     fn prepared_draws_keep_the_entity_stream_order() {
-        let ranges = ordered_entity_ranges(16, &[4, 8]);
+        let mut ranges = Vec::new();
+        fill_ordered_ranges(16, [4, 8], &mut ranges);
         assert_eq!(
             ranges,
             vec![

@@ -1364,6 +1364,10 @@ pub struct Renderer {
     /// when the draw is not kept, spinning, or claimed by a shader pack.
     prepared_models: Option<PreparedModels>,
     prepared_draws: Vec<PreparedModelDraw>,
+    prepared_ranges: Vec<(u32, u32, Option<usize>)>,
+    prepared_uploaded: Vec<PreparedModelInstance>,
+    prepared_instance_buffer: wgpu::Buffer,
+    prepared_instance_capacity: u64,
     /// The entity resources with the hand's projection (`hand_globals`).
     hand_group: wgpu::BindGroup,
     hand_globals: wgpu::Buffer,
@@ -2609,9 +2613,10 @@ impl Renderer {
             .map(|models| models.generation())
     }
 
-    /// This frame's prepared copies, in entity-stream order. Replaces any not yet drawn.
-    pub fn stage_prepared_draws(&mut self, draws: Vec<PreparedModelDraw>) {
-        self.prepared_draws = draws;
+    /// This frame's prepared copies, in entity-stream order. The stored list keeps its capacity.
+    pub fn stage_prepared_draws(&mut self, draws: &[PreparedModelDraw]) {
+        self.prepared_draws.clear();
+        self.prepared_draws.extend_from_slice(draws);
     }
 
     pub async fn new(
@@ -3408,6 +3413,13 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let prepared_instance_capacity = 64;
+        let prepared_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Prepared model instances"),
+            size: prepared_instance_capacity * std::mem::size_of::<PreparedModelInstance>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let outline = device.create_buffer(&wgpu::BufferDescriptor {
@@ -4711,6 +4723,10 @@ impl Renderer {
             entity_bindings,
             prepared_models: None,
             prepared_draws: Vec::new(),
+            prepared_ranges: Vec::new(),
+            prepared_uploaded: Vec::new(),
+            prepared_instance_buffer,
+            prepared_instance_capacity,
             static_entity_group,
             static_entity_transform,
             static_entity_camera: None,
@@ -7153,17 +7169,6 @@ impl Renderer {
     }
     /// `checks`: the error scopes of a scaled screenshot's frame, checked before its PNG is written.
     fn draw_frame(&mut self, frame: &Frame, checks: Option<GpuChecks>) -> Result<bool> {
-        let prepared_draws = std::mem::take(&mut self.prepared_draws);
-        let prepared_instances = (!prepared_draws.is_empty()).then(|| {
-            let uploaded: Vec<PreparedModelInstance> =
-                prepared_draws.iter().map(|draw| draw.instance).collect();
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Prepared model instances"),
-                    contents: bytemuck::cast_slice(&uploaded),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-        });
         // Its steps as spans (HORIZON_SPIKES): each lap names the step that just ended.
         let mut laps = crate::spans::laps();
         let landing = Instant::now();
@@ -8619,6 +8624,43 @@ impl Renderer {
                 bytemuck::cast_slice(all_entities),
             );
         }
+        if pack_entities {
+            // The pack replaced `frame.entities`. A staged cut indexes the original stream,
+            // and the game does not stage one while that pack is loaded.
+            self.prepared_draws.clear();
+        }
+        let prepared_count = self.prepared_draws.len() as u64;
+        if prepared_count > self.prepared_instance_capacity {
+            self.prepared_instance_capacity = prepared_count.next_power_of_two().max(64);
+            self.prepared_instance_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Prepared model instances"),
+                size: self.prepared_instance_capacity
+                    * std::mem::size_of::<PreparedModelInstance>() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if prepared_count > 0 {
+            self.prepared_uploaded.clear();
+            self.prepared_uploaded
+                .extend(self.prepared_draws.iter().map(|draw| draw.instance));
+            self.uploads.buffer(
+                &mut encoder,
+                &self.prepared_instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.prepared_uploaded),
+            );
+        }
+        self.prepared_ranges.clear();
+        if prepared_count > 0 {
+            prepared_model::fill_ordered_ranges(
+                entity_quads * 4,
+                self.prepared_draws
+                    .iter()
+                    .map(|draw| draw.cpu_vertices.saturating_add(posed)),
+                &mut self.prepared_ranges,
+            );
+        }
         if let (Some(skinner), Some(skin)) = (&mut self.entity_skin, skin) {
             if pack_skin {
                 let target = self
@@ -9886,22 +9928,17 @@ impl Renderer {
                 pass.set_bind_group(0, &self.group, &[]);
             }
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            let prepared_draws = if pack_entities {
-                Vec::new()
-            } else {
-                prepared_draws
-            };
-            if entity_quads > 0 || !prepared_draws.is_empty() {
+            if entity_quads > 0 || !self.prepared_draws.is_empty() {
                 pass.set_pipeline(&self.entity_pipeline);
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                if prepared_draws.is_empty() {
+                if self.prepared_draws.is_empty() {
                     pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
                     if self.hdr.is_some() {
                         pass.set_pipeline(&self.hdr_mark_pipeline);
                         pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
                     }
-                } else if let Some(instances) = &prepared_instances {
+                } else {
                     prepared_model::draw_ordered(
                         &mut pass,
                         &prepared_model::EntityRangePass {
@@ -9910,12 +9947,11 @@ impl Renderer {
                             vertices: &self.entity_buffer,
                             indices: &self.indices,
                             hdr: self.hdr.is_some(),
-                            vertex_count: entity_quads * 4,
-                            posed,
                         },
                         self.prepared_models.as_ref(),
-                        instances,
-                        &prepared_draws,
+                        &self.prepared_instance_buffer,
+                        &self.prepared_draws,
+                        &self.prepared_ranges,
                     );
                 }
                 pass.set_bind_group(0, &self.group, &[]);

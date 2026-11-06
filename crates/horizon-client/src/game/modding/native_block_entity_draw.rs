@@ -206,6 +206,16 @@ pub(super) fn prepared_tint(rgb: u32) -> [f32; 4] {
     .map(|byte| byte as f32 / 255.0)
 }
 
+/// An Iris pack (`pack_ids`) or one of Horizon's own packs owns the CPU entity stream.
+pub(super) fn prepared_route(
+    iris_pack: bool,
+    native_pack: bool,
+    uploaded: Option<u64>,
+    generation: u64,
+) -> bool {
+    !iris_pack && !native_pack && uploaded == Some(generation)
+}
+
 pub(super) fn prepared_instance(
     pose: Mat4,
     origin: DVec3,
@@ -339,7 +349,7 @@ impl BlockEntityDraw {
     }
 
     fn bake_recorded(&mut self, slots: &[Option<Vec<super::minecarts::PreparedModelFace>>]) {
-        for record in std::mem::take(&mut self.records).into_iter().rev() {
+        while let Some(record) = self.records.pop() {
             let Some(faces) = slots.get(record.slot as usize).and_then(Option::as_deref) else {
                 continue;
             };
@@ -361,20 +371,28 @@ impl BlockEntityDraw {
         }
     }
 
-    fn take_instances(
+    fn push_instances(
         &mut self,
         origin: DVec3,
         camera: DVec3,
-    ) -> Vec<horizon_client::gfx::PreparedModelDraw> {
-        std::mem::take(&mut self.records)
-            .into_iter()
-            .map(|record| horizon_client::gfx::PreparedModelDraw {
-                cpu_vertices: record.at as u32,
-                generation: record.generation,
-                slot: record.slot,
-                instance: prepared_instance(record.pose, origin, camera, record.tint, record.light),
-            })
-            .collect()
+        out: &mut Vec<horizon_client::gfx::PreparedModelDraw>,
+    ) {
+        out.extend(
+            self.records
+                .drain(..)
+                .map(|record| horizon_client::gfx::PreparedModelDraw {
+                    cpu_vertices: record.at as u32,
+                    generation: record.generation,
+                    slot: record.slot,
+                    instance: prepared_instance(
+                        record.pose,
+                        origin,
+                        camera,
+                        record.tint,
+                        record.light,
+                    ),
+                }),
+        );
     }
     /// The vertices drawn, with those it was made with first.
     pub(super) fn into_vertices(self) -> Vec<Vertex> {
@@ -663,12 +681,14 @@ impl Game<'_> {
             vertices: std::mem::take(out),
             kept: false,
             spins: Vec::new(),
-            prepared: self.pack_ids.is_none()
-                && self
-                    .renderer
+            prepared: prepared_route(
+                self.pack_ids.is_some(),
+                !self.native_shaders.picked.is_empty(),
+                self.renderer
                     .as_ref()
-                    .and_then(|renderer| renderer.prepared_generation())
-                    == Some(self.standalone_geometry.generation()),
+                    .and_then(|renderer| renderer.prepared_generation()),
+                self.standalone_geometry.generation(),
+            ),
             records: Vec::new(),
         };
         let now = self.world.game_time;
@@ -784,9 +804,7 @@ impl Game<'_> {
         if draw.kept || !draw.spins.is_empty() {
             draw.bake_recorded(&self.standalone_geometry.slots);
         } else {
-            self.prepared_model_draws
-                .borrow_mut()
-                .extend(draw.take_instances(origin, camera));
+            draw.push_instances(origin, camera, &mut self.prepared_model_draws.borrow_mut());
         }
     }
 }
@@ -1299,6 +1317,18 @@ mod tests {
     }
 
     #[test]
+    fn prepared_route_stays_cpu_for_either_shader_pack() {
+        assert!(super::prepared_route(false, false, Some(4), 4));
+        assert!(!super::prepared_route(true, false, Some(4), 4), "iris pack");
+        assert!(
+            !super::prepared_route(false, true, Some(4), 4),
+            "horizon pack"
+        );
+        assert!(!super::prepared_route(false, false, None, 4));
+        assert!(!super::prepared_route(false, false, Some(3), 4));
+    }
+
+    #[test]
     fn prepared_models_stay_ordered_and_cpu_inside_the_block_span() {
         use super::super::minecarts::{PreparedModelFace, emit_model_faces};
         let mut quad = bake_flat_face(
@@ -1331,7 +1361,8 @@ mod tests {
         gpu.vertices.extend((0..4).map(|i| marker(10.0 + i as f32)));
         let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
         let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
-        let instances = gpu.take_instances(origin, camera);
+        let mut instances = Vec::new();
+        gpu.push_instances(origin, camera, &mut instances);
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].cpu_vertices, span as u32);
         assert_eq!(gpu.vertices.len(), 8, "a prepared copy is not in the span");

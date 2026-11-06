@@ -17946,15 +17946,17 @@ impl Game<'_> {
         pr.lap("pr_frame");
         // Renderer encoding and GPU waiting belong to render, not prepare.
         drop(prepare);
-        let prepared = std::mem::take(&mut *self.prepared_model_draws.borrow_mut());
+        let mut prepared_draws = std::mem::take(&mut *self.prepared_model_draws.borrow_mut());
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
                 renderer.set_pass_timing(self.debug || self.gpu_passes);
-                renderer.stage_prepared_draws(prepared);
+                renderer.stage_prepared_draws(&prepared_draws);
                 consume(renderer, &frame)
             }
             None => Err("renderer".into()),
         };
+        prepared_draws.clear();
+        *self.prepared_model_draws.borrow_mut() = prepared_draws;
         let _cleanup = spans::guard("pr_cleanup");
         // A frame the surface refused (occluded, lost, timed out) is `Ok(false)`.
         self.frame_drawn = matches!(result, Ok(true));
