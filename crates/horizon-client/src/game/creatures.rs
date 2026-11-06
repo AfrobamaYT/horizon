@@ -986,10 +986,22 @@ impl Game<'_> {
             block_tags: &self.items().block_tags,
             landing: &self.motion.landing,
             biomes: world_biomes!(self),
-            mob_griefing: self.ui.rules.bool("mob_griefing"),
-            universal_anger: self.ui.rules.bool("universal_anger"),
-            mob_drops: self.ui.rules.bool("mob_drops"),
-            max_entity_cramming: self.ui.rules.int("max_entity_cramming"),
+            mob_griefing: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+            universal_anger: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::UNIVERSAL_ANGER),
+            mob_drops: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS),
+            max_entity_cramming: self
+                .ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::MAX_ENTITY_CRAMMING),
             end: self.dim == Dim::End,
             world_seed: self.level.seed,
             sea_level: if self.dim == Dim::Nether { 32 } else { 63 },
@@ -1147,7 +1159,11 @@ impl Game<'_> {
         let from = self.lan_synced_from();
         horizon_client::spans::time("spawn_natural", || self.spawn_natural());
         // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
-        if self.ui.rules.bool("spawn_mobs") {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+        {
             self.tick_custom_spawners();
         }
         self.tick_raids();
@@ -1966,7 +1982,10 @@ impl Game<'_> {
             player: by_player.then(player),
             luck: 0.0,
             vehicle,
-            mob_drops: self.ui.rules.bool("mob_drops"),
+            mob_drops: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS),
             world_seed: self.level.seed,
         };
         let raider = horizon_client::mobs::raider::is_raider(m.species());
@@ -3270,7 +3289,10 @@ impl Game<'_> {
                                 .get(old)
                                 .name
                                 .starts_with("minecraft:infested_")
-                            && self.ui.rules.bool("block_drops")
+                            && self
+                                .ui
+                                .rules
+                                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
                         {
                             let at = [
                                 f64::from(pos[0]) + 0.5,
@@ -3567,7 +3589,10 @@ impl Game<'_> {
                     if matches!(
                         table,
                         "minecraft:gameplay/turtle_grow" | "minecraft:gameplay/panda_sneeze"
-                    ) && !self.ui.rules.bool("mob_drops")
+                    ) && !self
+                        .ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS)
                     {
                         continue;
                     }
@@ -3671,7 +3696,10 @@ impl Game<'_> {
     /// `Animal.finalizeSpawnChildFromBreeding`'s single experience orb, drawn
     /// from the breeding parent after the rule check.
     fn award_breeding_experience(&mut self, parent: u32, at: [f64; 3]) {
-        let mob_drops = self.ui.rules.bool("mob_drops");
+        let mob_drops = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS);
         if let Some(amount) = self
             .mobs
             .iter_mut()
@@ -3737,7 +3765,12 @@ impl Game<'_> {
     /// host's player) hear it.
     pub(super) fn tell_neutral_mobs_player_died(&mut self, feet: [f64; 3], conn: Option<u32>) {
         // A client of someone else's world has the server's mobs only to show.
-        if self.remote.is_some() || !self.ui.rules.bool("forgive_dead_players") {
+        if self.remote.is_some()
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::FORGIVE_DEAD_PLAYERS)
+        {
             return;
         }
         let block = feet.map(f64::floor);
@@ -4494,7 +4527,10 @@ impl Game<'_> {
             let guest_entities = self.lan_guest_entities();
             // ThrownEnderpearl.tick: a dead player's pearl is discarded in
             // place of its tick while ender_pearls_vanish_on_death is on.
-            let vanish = self.ui.rules.bool("ender_pearls_vanish_on_death");
+            let vanish = self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ENDER_PEARLS_VANISH_ON_DEATH);
             let host_dead = self.player_view().is_some_and(|p| !p.alive);
             let dead_guests: Vec<u32> = self.lan.as_ref().map_or_else(Vec::new, |h| {
                 h.hub
@@ -4896,7 +4932,13 @@ impl Game<'_> {
             Some(Who::Mob(_)) => false,
             None => true,
         };
-        if !impact || !shooter_may_break || !self.ui.rules.bool("projectiles_can_break_blocks") {
+        if !impact
+            || !shooter_may_break
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::PROJECTILES_CAN_BREAK_BLOCKS)
+        {
             return;
         }
         let state = self.world.block(pos[0], pos[1], pos[2]);
@@ -5039,8 +5081,14 @@ impl Game<'_> {
             fluids: &self.motion.fluids,
             loop_context: &self.loop_context,
             raining: rain,
-            mob_griefing: self.ui.rules.bool("mob_griefing"),
-            tnt_explodes: self.ui.rules.bool("tnt_explodes"),
+            mob_griefing: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+            tnt_explodes: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES),
             mob_hooks: self
                 .grief_hooked()
                 .then_some(self as &dyn horizon_client::mobs::MobHooks),
@@ -5708,7 +5756,10 @@ impl Game<'_> {
                     // ThrownEnderpearl: 5% endermite where the player was
                     // (when monsters spawn), teleport, 5 damage.
                     if self.world.random.next_float() < 0.05
-                        && self.ui.rules.bool("spawn_monsters")
+                        && self
+                            .ui
+                            .rules
+                            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS)
                         && self.ui.difficulty != 0
                         && let Some(pl) = self.player.as_ref()
                     {
@@ -8483,7 +8534,10 @@ impl Game<'_> {
     /// which a mod may change for `entity` (`EntityMobGriefingEvent`). No
     /// entity: the rule alone, as NeoForge.
     pub(super) fn can_entity_grief(&self, entity: Option<u32>) -> bool {
-        let rule = self.ui.rules.bool("mob_griefing");
+        let rule = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         entity.map_or(rule, |entity| self.entity_grief(entity, rule))
     }
     /// Whether a large fireball's blast lights fire (`LargeFireball.onHit`):
@@ -8563,7 +8617,11 @@ mod mob_griefing_tests {
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
                 open_to_lan(game);
-                assert!(game.ui.rules.bool("mob_griefing"));
+                assert!(
+                    game.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+                );
                 assert!(!game.can_entity_grief(Some(denied)));
                 assert!(game.can_entity_grief(Some(other)));
                 assert!(game.can_entity_grief(None));

@@ -685,8 +685,8 @@ impl Game<'_> {
             return;
         }
         for (name, value) in changes {
-            if self.ui.rules.set(name, value) {
-                self.game_rule_changed(name, value, None);
+            if self.ui.rules.set(&name, value) {
+                self.game_rule_changed(&name, value, None);
             }
             self.system_message(Text::tr("commands.gamerule.set", &[&name, &value]));
         }

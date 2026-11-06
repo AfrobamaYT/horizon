@@ -396,7 +396,12 @@ impl Game<'_> {
             1.0,
         );
         self.cushion_break_particles(&c);
-        if !self.ui.rules.bool("entity_drops") || (by_player && self.creative) {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            || (by_player && self.creative)
+        {
             return;
         }
         let stack = c.item_stack_with_data();

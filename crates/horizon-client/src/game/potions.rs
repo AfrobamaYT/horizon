@@ -264,7 +264,10 @@ impl Game<'_> {
         if effects.contains(&"oozing") {
             // OozingMobEffect.numberOfSlimesToSpawn: two, fewer when the
             // slimes close by already fill the cramming limit.
-            let limit = self.ui.rules.int("max_entity_cramming");
+            let limit = self
+                .ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::MAX_ENTITY_CRAMMING);
             let mut count = 2;
             if limit >= 1 {
                 let near = bounds.inflate(Vec3::new(2.0, 2.0, 2.0));
@@ -293,7 +296,13 @@ impl Game<'_> {
                 }
             }
         }
-        if effects.contains(&"weaving") && (player || self.ui.rules.bool("mob_griefing")) {
+        if effects.contains(&"weaving")
+            && (player
+                || self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING))
+        {
             self.spawn_cobwebs_around(
                 [
                     feet.x.floor() as i32,
@@ -3004,7 +3013,7 @@ mod tests {
                     game.potions.effects.list = vec![EffectInstance::new(case.id, 450, 1)];
                     let left = 102 + image_width;
                     let origin = (100.0, 50.0);
-                    let mut batch = HudBatch::new([(left + case.room) as u32, 480]);
+                    let mut batch = HudBatch::scratch([(left + case.room) as u32, 480]);
                     game.cursor = ((left + 7) as f32, 57.0);
                     let vanilla = if case.default_tooltip {
                         vec![
@@ -3084,7 +3093,7 @@ mod tests {
                                         .is_none()
                                 );
                             });
-                            let mut narrow = HudBatch::new([(left + 31) as u32, 480]);
+                            let mut narrow = HudBatch::scratch([(left + 31) as u32, 480]);
                             assert!(
                                 game.draw_inventory_effects(&mut narrow, origin, image_width)
                                     .is_none()

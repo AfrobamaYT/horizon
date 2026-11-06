@@ -895,7 +895,11 @@ impl Game<'_> {
     /// `NewMinecartBehavior.getMaxSpeed`: the game rule over water's half,
     /// every cart alike (`cart_max_speed` cuts a furnace minecart's).
     fn max_speed_new(&self, c: &Minecart) -> f64 {
-        f64::from(self.ui.rules.int("max_minecart_speed")) * if c.in_water { 0.5 } else { 1.0 }
+        f64::from(
+            self.ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::MAX_MINECART_SPEED),
+        ) * if c.in_water { 0.5 } else { 1.0 }
             / 20.0
     }
     /// `AbstractMinecart.getRedstoneDirection` (over the old port's
@@ -1487,7 +1491,11 @@ impl Game<'_> {
     /// (`EntityEvent.TNT_PRIME`, 70) and `SoundEvents.TNT_PRIMED`. A client
     /// that receives 70 only sets the fuse (`handleEntityEvent`).
     pub(super) fn prime_cart(&mut self, c: &mut Minecart) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         c.fuse = 80;
@@ -1512,7 +1520,11 @@ impl Game<'_> {
         }
     }
     fn explode_cart(&mut self, c: &Minecart, speed_sqr: f64) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         let speed = speed_sqr.sqrt().min(5.0);
@@ -1527,7 +1539,8 @@ impl Game<'_> {
         self.release_vehicle_container(c.id);
         self.carts.retain(|x| x.id != c.id);
         // ExplosionInteraction.TNT: the tnt_explosion_drop_decay rule.
-        let interaction = self.destroy_type("tnt_explosion_drop_decay");
+        let interaction =
+            self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY);
         // MinecartTNT.isPrimed (fuse > -1): a cart that ran into a wall or
         // fell unprimed blows rails up like any blast.
         self.combat.rail_proof_blast = c.fuse >= 0;
@@ -2437,7 +2450,11 @@ impl Game<'_> {
                 self.carts.insert(i, c);
             } else {
                 let at = [c.position.x, c.position.y, c.position.z];
-                if self.ui.rules.bool("entity_drops") {
+                if self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+                {
                     for s in c.items.iter().flatten() {
                         self.spawn_item(s.clone(), at, [0.0, 0.1, 0.0], 10);
                     }
@@ -2996,7 +3013,11 @@ mod tests {
             game.level.enabled_features = features.into();
             game.ui.rules =
                 horizon_client::gamerules::GameRules::with_features(&game.level.enabled_features);
-            let rule = f64::from(game.ui.rules.int("max_minecart_speed")) / 20.0;
+            let rule = f64::from(
+                game.ui
+                    .rules
+                    .int_at(horizon_client::gamerules::vanilla::MAX_MINECART_SPEED),
+            ) / 20.0;
             assert_eq!(rule, 0.4);
             game.world.chunks.insert(
                 (0, 0),
