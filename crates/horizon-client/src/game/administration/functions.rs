@@ -1253,6 +1253,8 @@ mod tests {
             );
             // The command path also prepares the replacement before publishing
             // its canonical selection or persisting the player's pack settings.
+            assert!(game.run_command("datapack disable \"file/candidate\""));
+            assert!(game.run_command("datapack enable \"file/candidate\""));
             game.save_datapack_settings();
             let settings = std::fs::read(root.join("datapacks.json")).unwrap();
             let enabled = game.fns.enabled.clone();
