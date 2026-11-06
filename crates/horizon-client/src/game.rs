@@ -66,6 +66,7 @@ pub mod points {
         super::execution_role::host_side(game)
     }
 }
+mod host;
 mod native_hooks;
 use event_loop::EventLoopCtl;
 // `Action` here is the title screen's buttons (`title::Action`).

@@ -142,7 +142,9 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for Empty {}
     impl Host for Empty {}
+    mod_api::impl_host_areas!(Empty);
     impl ClientHost for Empty {}
+    mod_api::impl_client_host_areas!(Empty);
     impl WorldDrawContext for Empty {}
     #[test]
     fn world_geometry_dispatch_skips_unsubscribed_and_disabled_mods() {

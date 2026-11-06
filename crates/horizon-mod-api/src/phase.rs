@@ -180,6 +180,13 @@ pub enum LoadAccess {
     PublishedResources,
 }
 
+/// The default body of a host method: a test double that does not implement it gets the access
+/// check, then a panic naming the method.
+pub(crate) fn unprovided(method: &'static str, operation: &'static str, access: LoadAccess) -> ! {
+    check_access(operation, access);
+    unimplemented!("{}", method)
+}
+
 /// One cell read at the generated API boundary, not a tick scan or registry lookup.
 /// A refused mod call panics so a listener cannot ignore a Result and continue.
 #[inline]
@@ -409,7 +416,7 @@ impl LoadedMods {
 ///
 /// ```compile_fail
 /// use mod_api::{Host, RegistrationContext};
-/// fn registration(context: &RegistrationContext) { let _ = Host::entity(context, 1); }
+/// fn registration(context: &RegistrationContext) { let _ = EntityHandlesHost::entity(context, 1); }
 /// ```
 ///
 /// ```compile_fail
@@ -447,7 +454,7 @@ impl RegistrationContext {
 ///
 /// ```compile_fail
 /// use mod_api::{DataLoadContext, Host};
-/// fn load(context: &dyn DataLoadContext) { let _ = Host::entity(context, 1); }
+/// fn load(context: &dyn DataLoadContext) { let _ = EntityHandlesHost::entity(context, 1); }
 /// ```
 ///
 /// ```compile_fail
@@ -618,7 +625,9 @@ mod tests {
         }
         struct Server;
         impl Host for Server {}
+        mod_api::impl_host_areas!(Server);
         impl ServerHost for Server {}
+        mod_api::impl_server_host_areas!(Server);
         let declarations: Vec<_> = ["z", "lib", "a"].into_iter().map(|id| {
             let deps = if id == "lib" { "" } else { "[dependencies]\nlib='^1'" };
             horizon_mods::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{deps}")).unwrap()
@@ -761,10 +770,12 @@ mod tests {
 
     #[test]
     fn early_world_handle_and_transaction_calls_panic_naming_the_phase() {
-        use crate::{Host, HostTransaction, ServerHost};
+        use crate::{Host, HostTransaction, ServerHost, prelude::*};
         struct HostDouble;
         impl Host for HostDouble {}
+        mod_api::impl_host_areas!(HostDouble);
         impl ServerHost for HostDouble {}
+        mod_api::impl_server_host_areas!(HostDouble);
         for phase in [
             ModPhase::Registration,
             ModPhase::Config,

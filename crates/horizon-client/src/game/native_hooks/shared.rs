@@ -3804,7 +3804,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_trait_mod_measures_text_through_its_draw_context() {
-        use super::super::mod_api_host::generated::GameDrawContext;
+        use super::super::host::draw::GameDrawContext;
         use super::super::native_entity_refs::tests::with_game;
         use mod_api::DrawContext;
 
@@ -4085,14 +4085,15 @@ mod tests {
     fn client_host_reads_current_pause_state() {
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             game.pause = false;
-            assert!(!ClientHost::is_paused(game));
+            assert!(!mod_api::prelude::ClientPauseReadClientHost::is_paused(
+                game
+            ));
             game.pause = true;
-            assert!(ClientHost::is_paused(game));
+            assert!(mod_api::prelude::ClientPauseReadClientHost::is_paused(game));
         });
     }
 
@@ -4102,27 +4103,36 @@ mod tests {
         use super::super::Screen;
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::ClientHost;
+
         use winit::keyboard::KeyCode;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             game.screen = Screen::Playing;
-            assert!(ClientHost::playing(game));
+            assert!(mod_api::prelude::ClientInputReadsClientHost::playing(game));
             game.screen = Screen::Chat;
-            assert!(!ClientHost::playing(game));
+            assert!(!mod_api::prelude::ClientInputReadsClientHost::playing(game));
 
             // Vanilla's default bindings: forward is W, attack the left mouse button.
-            let forward = ClientHost::mapping(game, "key.forward").unwrap();
+            let forward =
+                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.forward").unwrap();
             assert_eq!(
                 (forward.down, forward.label.plain()),
                 (false, "W".to_owned())
             );
             game.keys.insert(KeyCode::KeyW);
-            assert!(ClientHost::mapping(game, "key.forward").unwrap().down);
-            let attack = ClientHost::mapping(game, "key.attack").unwrap();
+            assert!(
+                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.forward")
+                    .unwrap()
+                    .down
+            );
+            let attack =
+                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.attack").unwrap();
             assert_eq!(attack.label.plain(), "Left Button");
-            assert!(ClientHost::mapping(game, "key.mymod.boost").is_none());
+            assert!(
+                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.mymod.boost")
+                    .is_none()
+            );
         });
     }
 
@@ -5261,7 +5271,7 @@ pub(super) mod particle_count_tests {
                     "live guardian, pickup and ordinary particles draw"
                 );
                 game.native_render_gui_pre(&mut false);
-                assert_eq!(ClientHost::particle_count(game), 0);
+                assert_eq!(mod_api::prelude::BaseClientHost::particle_count(game), 0);
                 let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, Vec::new());
                 game.client_particle_geometry(camera, 0.0, 70.0, &mut after);
                 assert!(

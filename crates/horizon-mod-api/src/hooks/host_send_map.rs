@@ -1,6 +1,6 @@
 //! Map image delivery through a validated player handle.
 
-pub trait Helpers {
+pub trait Notes {
     #[notes = r#"## Sending a map image
 
 `PlayerRef::send_map` sends a complete 128-by-128 map image through a
@@ -8,10 +8,5 @@ pub trait Helpers {
 players; a connectionless actor never produces a protocol packet. The image
 uses map colour bytes and is not saved in the world's map storage. Send it
 again after a player reconnects if no saved map owns that id."#]
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_inventories::Game<'_>::native_send_map"
-    )]
     fn player_send_map();
 }
