@@ -1164,15 +1164,8 @@ impl<'r> Gen<'r> {
                     }
                     args.push(quote!(#arg));
                 }
-                (Shape::Ref { mutable: true, to }, Crossing::Copy(_)) if buildable(to, rule) => {
-                    let value = self.decode(to, quote!(I::value(#arg)?));
-                    lets.push(quote!(let mut #arg = #value;));
-                    args.push(quote!(&mut #arg));
-                    updates.push(self.encode(to, quote!((&#arg))));
-                    nodes.push(quote!(::std::option::Option::None));
-                }
-                (Shape::Ref { mutable: false, to }, Crossing::Copy(_)) => {
-                    if matches!(**to, Shape::Scalar(Scalar::Str)) {
+                (Shape::Ref { mutable, to }, Crossing::Copy(_)) => {
+                    if !*mutable && matches!(**to, Shape::Scalar(Scalar::Str)) {
                         let value =
                             self.decode(&Shape::Scalar(Scalar::String), quote!(I::value(#arg)?));
                         lets.push(quote!(let #arg: ::std::string::String = #value;));
@@ -1180,8 +1173,12 @@ impl<'r> Gen<'r> {
                         nodes.push(quote!(::std::option::Option::None));
                     } else if buildable(to, rule) {
                         let value = self.decode(to, quote!(I::value(#arg)?));
-                        lets.push(quote!(let #arg = #value;));
-                        args.push(quote!(&#arg));
+                        let mutability = mutable.then(|| quote!(mut));
+                        lets.push(quote!(let #mutability #arg = #value;));
+                        args.push(quote!(&#mutability #arg));
+                        if *mutable {
+                            updates.push(self.encode(to, quote!((&#arg))));
+                        }
                         nodes.push(quote!(::std::option::Option::None));
                     } else {
                         return None;
