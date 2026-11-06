@@ -34,6 +34,7 @@ pub(super) fn main_rs(
     template: &str,
     mods: &[&horizon_mods::Manifest],
     listed: &[super::inject::ListedPoint],
+    sites: &[super::sites::Site],
 ) -> String {
     let entries = mods
         .iter()
@@ -62,6 +63,9 @@ pub(super) fn main_rs(
             let place = point.place(injection.at_return);
             format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}), // injection {:?}\n", manifest.id, injection.method, injection.id)
         })
+    }).collect::<String>();
+    let raw = raw + &mods.iter().enumerate().flat_map(|(index, manifest)| {
+        super::sites::of(manifest).map(move |injection| super::sites::find(sites, injection).expect("site checked").registration(index, manifest, injection))
     }).collect::<String>();
     template
         .replace("/* MOD_RAW */", &raw)
@@ -447,7 +451,7 @@ pub(super) fn stage(
         .collect();
     fs::write(
         game.join("src/main.rs"),
-        main_rs(&template, &manifests, &catalog.points),
+        main_rs(&template, &manifests, &catalog.points, &catalog.sites),
     )
     .map_err(|e| e.to_string())?;
     let root = stage.join("Cargo.toml");
@@ -544,7 +548,7 @@ mod tests {
         extra.side = horizon_mods::Side::Client;
         let mods = [&base, &extra];
         for count in 0..=2 {
-            let text = main_rs(template, &mods[..count], &[]);
+            let text = main_rs(template, &mods[..count], &[], &[]);
             let facts: Vec<_> = text
                 .lines()
                 .filter(|line| line.contains(" => mod_"))
