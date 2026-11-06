@@ -13,8 +13,8 @@ pub struct AdvancementState<'a> {
 }
 
 /// Active turns, in entry order, and the current turn's live storage. Other
-/// players keep their state in their own record; an outer active turn keeps it
-/// in the next nested guest's record, as `enter_guest` and `leave_guest` swap it.
+/// players use their hub record, including suspended turns whose record holds
+/// displaced progress; resolving those turns fully is tracked separately.
 #[derive(Default)]
 pub struct AdvancementOwners<'a> {
     turns: &'a [u32],
@@ -29,8 +29,7 @@ impl<'a> AdvancementOwners<'a> {
         }
     }
 
-    /// `index` names the player, not necessarily the record holding their state.
-    /// Inactive players use that index directly; only nested turns need a lookup.
+    /// Use the live storage for the acting player; other players use their hub record.
     pub fn state<'b>(
         &'b mut self,
         guests: &'b mut [Guest],
