@@ -1388,6 +1388,7 @@ pub(super) mod tests {
             assert_eq!(game.mobs[0].equipment_stacks()[6], Some(held.clone()));
             game.mobs.clear();
             game.mobs.push(Mob::new(13, kind, Vec3::ZERO, 0.0));
+            game.creatures.ticked.insert(13);
             game.spawn_item(
                 ItemStack {
                     count: 3,
