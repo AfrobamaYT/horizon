@@ -282,6 +282,8 @@ mod native_level_refs;
 mod native_level_signals;
 mod native_level_world;
 mod native_lifecycle;
+#[cfg(test)]
+mod native_live_holder_tests;
 mod native_living_effects;
 mod native_living_flags;
 mod native_living_refs;
