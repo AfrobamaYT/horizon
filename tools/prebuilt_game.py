@@ -193,13 +193,13 @@ def smoke(out: Path) -> None:
         template = (out / TEMPLATE).read_text()
         main = template.replace("/* MOD_ENTRIES */", '        "smoke" => mod_0::hooks,\n').replace(
             "/* BUILT_MODS */",
-            '    horizon_mods::runtime::BuiltMod { id: "smoke", version: "0.1.0", side: horizon_mods::Side::Both },\n',
+            '    horizon_mod_package::runtime::BuiltMod { id: "smoke", version: "0.1.0", side: horizon_mod_package::Side::Both },\n',
         )
         (scratch / "main.rs").write_text(main)
         link_args = json.loads((out / IDENTITY).read_text())["link_args"]
         run(["rustc", *common, "--crate-type", "bin", "--crate-name", "horizon_client_smoke",
              *(flag for arg in link_args for flag in ("-C", f"link-arg={arg}")),
-             "--extern", f"horizon_client={dylib(deps, 'horizon_client')}", *extern("mod_api"), *extern("horizon_mods"),
+             "--extern", f"horizon_client={dylib(deps, 'horizon_client')}", *extern("mod_api"), *extern("horizon_mod_package"),
              "--extern", f"mod_0={scratch / 'libmod_0.rlib'}", "-L", f"dependency={scratch}",
              "-o", str(scratch / "horizon-client"), str(scratch / "main.rs")])
     print(f"smoke: the starter mod and the game executable built against {out} alone")

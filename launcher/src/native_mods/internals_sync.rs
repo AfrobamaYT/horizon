@@ -1,7 +1,7 @@
 //! Compiler-driven discovery uses an isolated, per-pin source and metadata cache.
 use super::{api, dependencies, internals, rust_toolchain};
 use crate::i18n::trf;
-use horizon_mods::internals::{self as catalog, ListedInternal};
+use horizon_mod_package::internals::{self as catalog, ListedInternal};
 use serde::Deserialize;
 use std::{
     collections::BTreeSet,

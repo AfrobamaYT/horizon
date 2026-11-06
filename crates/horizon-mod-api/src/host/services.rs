@@ -40,7 +40,7 @@ pub trait ServicesServerHost {
         )
     }
 }
-/// The client host's methods of the `services` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `services` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ServicesClientHost {
     /// The client_session service.
     /// Not on wasm: a frame resource; its methods are the imports.
@@ -97,6 +97,20 @@ pub trait ClientSession {
 }
 /// The commands service, reached through its host.
 pub trait Commands {
+    /// Side: server.
+    /// A mod changed the commands it registers (`native_register_commands`):
+    /// at the start of the next server tick every mod is asked again, the
+    /// commands players may run are rebuilt, and every player on the server is
+    /// sent their tree again, after `native_player_commands_sent`. Nothing
+    /// happens where no world is open to players, and nothing for a server
+    /// whose mods never call it. API @API:refresh_commands@.
+    fn refresh_commands(&mut self) {
+        crate::phase::unprovided(
+            "Commands::refresh_commands",
+            "refresh_commands",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
     /// Side: server.
     /// A command's success feedback, routed to its originating source using
     /// vanilla's silence, send-command-feedback and block/cart track-output rules.

@@ -88,7 +88,7 @@ pub mod tests {
 
         assert!(EffectKey::from_slot(u32::MAX).is_err());
         struct Table;
-        impl mod_api::prelude::BlockStateIdsBackend for Table {
+        impl mod_api::prelude::KeysBackend for Table {
             fn effect_key_id(&self, key: EffectKey) -> String {
                 crate::registry_keys::effect_id(key)
                     .expect("invalid effect key slot")
@@ -96,7 +96,7 @@ pub mod tests {
             }
         }
         impl Backend for Table {}
-        mod_api::impl_backend_areas!(Table, except(block_state_ids));
+        mod_api::impl_backend_areas!(Table, except(keys));
         impl Host for Table {
             fn backend(&self) -> Option<BackendRef<'_>> {
                 Some(BackendRef::of(self))
