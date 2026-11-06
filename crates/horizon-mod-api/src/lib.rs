@@ -22,6 +22,18 @@ pub use registry_keys::UnknownFluid;
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
 
+/// Why a game rule category declaration was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GameRuleError {
+    /// The identifier is invalid.
+    InvalidId,
+    /// The namespace does not belong to the declaring mod.
+    ForeignNamespace,
+    /// The category is already declared.
+    Duplicate,
+}
+
 /// A load-owned fluid identity requested through [`Registrar::fluid_key`] or resolved through
 /// [`DataLoadContext::fluid_key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

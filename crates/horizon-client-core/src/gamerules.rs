@@ -168,6 +168,7 @@ pub const MINECART_IMPROVEMENTS: &str = "minecraft:minecart_improvements";
 #[derive(Debug, PartialEq)]
 pub struct RuleRegistry {
     rules: Vec<Rule>,
+    categories: Vec<String>,
 }
 impl Default for RuleRegistry {
     fn default() -> Self {
@@ -178,12 +179,28 @@ impl RuleRegistry {
     /// Create a fresh vanilla-backed registry for a session.
     pub fn vanilla() -> Self {
         Self {
+            categories: [
+                "chat", "drops", "misc", "mobs", "player", "spawning", "updates",
+            ]
+            .into_iter()
+            .map(|s| format!("minecraft:{s}"))
+            .collect(),
             rules: RULES
                 .iter()
                 .chain(std::iter::once(&MAX_MINECART_SPEED))
                 .map(Rule::from)
                 .collect(),
         }
+    }
+    /// Build a fresh session registry from validated category declarations.
+    pub fn with_categories(categories: &[String]) -> Self {
+        let mut registry = Self::vanilla();
+        registry.categories.extend_from_slice(categories);
+        registry
+    }
+    /// The categories in this session.
+    pub fn categories(&self) -> &[String] {
+        &self.categories
     }
     pub fn available_rules(&self, minecart_improvements: bool) -> impl Iterator<Item = &Rule> {
         self.rules

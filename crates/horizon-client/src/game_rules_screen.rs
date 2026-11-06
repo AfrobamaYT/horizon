@@ -761,6 +761,29 @@ mod tests {
     }
 
     #[test]
+    fn categories_without_matching_rules_are_hidden() {
+        let registry = std::sync::Arc::new(crate::gamerules::RuleRegistry::with_categories(&[
+            "example:machines".into(),
+        ]));
+        let mut screen = RulesScreen::new(&GameRules::with_registry(registry, &[]));
+        assert!(
+            !screen
+                .rows()
+                .contains(&Row::Category("example:machines".into()))
+        );
+        screen.search.set_value("minecraft:updates");
+        assert!(screen.rows().is_empty());
+        screen.search.set_value("random_tick_speed");
+        assert_eq!(
+            screen.rows(),
+            [
+                Row::Category("minecraft:updates".into()),
+                Row::Rule("minecraft:random_tick_speed".into())
+            ]
+        );
+    }
+
+    #[test]
     fn search_filters_rules_and_categories() {
         let mut screen = RulesScreen::new(&GameRules::default());
         screen.search.set_value("random_tick_speed");

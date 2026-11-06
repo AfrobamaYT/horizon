@@ -34,6 +34,7 @@ impl WorldRequest {
         seed: Option<i64>,
         creative: bool,
         create: Option<&horizon_client::title::WorldOptions>,
+        rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
     ) -> Result<Self> {
         Ok(Self {
             save_root: std::env::current_dir()?.join("saves").join(folder),
@@ -42,7 +43,7 @@ impl WorldRequest {
             seed,
             creative,
             create: create.cloned(),
-            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+            rule_registry,
         })
     }
 
