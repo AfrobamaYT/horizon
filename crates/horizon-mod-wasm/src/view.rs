@@ -598,6 +598,28 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_thread_cannot_use_the_callers_internals_frame() {
+        let mut game = world();
+        run(frame(&mut game), &[], || {
+            std::thread::spawn(|| {
+                assert!(matches!(View.root(0), Err(wire::Refusal::Gone(_))));
+                assert!(matches!(
+                    View.get(Resource::new_borrow(0), 0),
+                    Err(wire::Refusal::Gone(_))
+                ));
+            })
+            .join()
+            .unwrap();
+            assert!(
+                View.root(0).is_ok(),
+                "the owning thread still has its frame"
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn a_thunk_cannot_reenter_its_listeners_view() {
         unsafe fn reenter(
             _: Option<*mut ()>,

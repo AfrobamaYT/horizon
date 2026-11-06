@@ -12,6 +12,8 @@ use mod_api::{Hooks, Host, LevelRef, NativeWorldEpoch, ServerChatEvent, ServerHo
 
 #[path = "bench/src/lib.rs"]
 mod bench_mod;
+#[path = "bench/internals.rs"]
+mod internals_bench;
 
 /// One overworld, and nothing else.
 struct World;

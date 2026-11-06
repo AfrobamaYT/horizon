@@ -320,10 +320,59 @@ impl<'t> Frame<'t> {
         if args.len() != thunk.args.len() {
             return Err(Refusal::Changed("an argument count".into()));
         }
+        // Rust separates every mutable borrow from both mutable and shared arguments. Paths
+        // prove separation without trusting cached pointers or aliases returned by thunks.
+        let borrowed = receiver
+            .map(|receiver| (receiver, thunk.writes & 1 != 0))
+            .into_iter()
+            .chain(args.iter().enumerate().filter_map(|(index, arg)| {
+                if let Call::Node(node) = arg {
+                    Some((*node, thunk.writes >> (index + 1) & 1 != 0))
+                } else {
+                    None
+                }
+            }));
+        for (index, (left, left_written)) in borrowed.clone().enumerate() {
+            for (right, right_written) in borrowed.clone().skip(index + 1) {
+                if !left_written && !right_written {
+                    continue;
+                }
+                let left_root = self.live_root(left.path.root)?;
+                let right_root = self.live_root(right.path.root)?;
+                let disjoint = if left_root.born.is_some() || right_root.born.is_some() {
+                    false
+                } else if left.path.root != right.path.root {
+                    true
+                } else {
+                    left.path
+                        .steps
+                        .iter()
+                        .zip(&right.path.steps)
+                        .find_map(|(a, b)| {
+                            if a == b {
+                                return None;
+                            }
+                            Some(match (a, b) {
+                                (Step::Field(a), Step::Field(b)) => a != b,
+                                (Step::Index(a), Step::Index(b)) => a != b,
+                                (Step::Key(a), Step::Key(b)) => a != b,
+                                _ => false,
+                            })
+                        })
+                        .unwrap_or(false)
+                };
+                if !disjoint {
+                    return Err(not_here("arguments overlap"));
+                }
+            }
+        }
         // The writes go first, as if the function ran after the listener's code before it; then
         // every node resolves again, since a write may have moved what it points into.
+        let wrote = !self.journal.is_empty();
         let refused = self.apply();
-        self.generation += 1;
+        if wrote {
+            self.generation += 1;
+        }
         let check = |node: &Node, ty: u32, written: bool| -> Result<*mut (), Refusal> {
             let at = self.resolve(node)?;
             if at.ty != ty {
@@ -339,8 +388,6 @@ impl<'t> Frame<'t> {
             (None, None) => None,
             _ => return Err(Refusal::Changed("a receiver".into())),
         };
-        let mut written: Vec<*mut ()> =
-            this.filter(|_| thunk.writes & 1 != 0).into_iter().collect();
         let mut lowered = Vec::with_capacity(args.len());
         for (i, (arg, ty)) in args.into_iter().zip(thunk.args).enumerate() {
             let writes = thunk.writes >> (i + 1) & 1 != 0;
@@ -348,9 +395,6 @@ impl<'t> Frame<'t> {
                 (Call::Value(value), None) => Arg::Value(value),
                 (Call::Node(node), Some(ty)) => {
                     let ptr = check(node, *ty, writes)?;
-                    if writes {
-                        written.push(ptr);
-                    }
                     Arg::Node(ptr)
                 }
                 _ => {
@@ -360,17 +404,12 @@ impl<'t> Frame<'t> {
                 }
             });
         }
-        // Rust keeps two `&mut` parameters apart; so must the mod's nodes.
-        let count = written.len();
-        written.sort_unstable();
-        written.dedup();
-        if written.len() != count {
-            return Err(not_here("one place written through two parameters"));
-        }
         // SAFETY: each node was resolved in this generation to a live value of the thunk's
-        // parameter type, writable where the thunk writes, and no two written ones alias.
-        let reply = unsafe { (thunk.call)(this, lowered) }?;
+        // parameter type, writable where the thunk writes, and each written one is disjoint
+        // from every other node parameter.
+        let reply = unsafe { (thunk.call)(this, lowered) };
         self.generation += 1;
+        let reply = reply?;
         let reached = match reply {
             Reply::Node(ptr, ty, writable) => {
                 self.roots.push(Root {
@@ -504,7 +543,11 @@ pub(crate) mod tests {
             node: player,
         },
     ];
-    static THUNKS: [Thunk; 4] = [
+    unsafe fn inspect_player(_: Option<*mut ()>, _: Vec<Arg>) -> Result<Reply, Refusal> {
+        panic!("an overlapping receiver and argument must be refused before the thunk");
+    }
+
+    static THUNKS: [Thunk; 5] = [
         Thunk {
             path: "Game::kick",
             hash: "kick-hash",
@@ -536,6 +579,14 @@ pub(crate) mod tests {
             args: &[],
             writes: 1,
             call: heal_player,
+        },
+        Thunk {
+            path: "Game::inspect_player",
+            hash: "inspect-player-hash",
+            receiver: Some(GAME),
+            args: &[Some(PLAYER)],
+            writes: 1,
+            call: inspect_player,
         },
     ];
     pub(crate) static TABLE: Table = Table {
@@ -666,6 +717,38 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_returned_reference_can_be_the_next_calls_receiver() {
+        let mut game = world();
+        let mut frame = frame(&mut game);
+        let root = frame.root(0).unwrap();
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        frame.call(3, Some(&first), Vec::new()).unwrap();
+        assert!(matches!(frame.get(&first, 0), Err(Refusal::Gone(_))));
+        drop(frame);
+        assert_eq!(game.players[0].health, 20);
+        assert_eq!(game.players[1].health, 11);
+    }
+
+    #[test]
+    fn pending_writes_expire_a_returned_reference_before_the_next_call() {
+        let mut game = world();
+        let mut frame = frame(&mut game);
+        let root = frame.root(0).unwrap();
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        frame.set(&root, 1, Value::B(true)).unwrap();
+        assert!(matches!(
+            frame.call(3, Some(&first), Vec::new()),
+            Err(Refusal::Gone(_))
+        ));
+        drop(frame);
+        assert!(
+            game.flag,
+            "the pending journal still applies before the refused call"
+        );
+        assert_eq!(game.players[0].health, 10, "the thunk did not run");
+    }
+
+    #[test]
     fn a_call_refuses_the_wrong_type_and_one_place_written_twice() {
         let mut game = world();
         let mut frame = frame(&mut game);
@@ -673,7 +756,7 @@ pub(crate) mod tests {
         let players = frame.field(&root, 0).unwrap();
         let a = node(frame.index(&players, 0).unwrap());
         let b = node(frame.index(&players, 1).unwrap());
-        let wrong = frame.call(2, None, vec![Call::Node(&a), Call::Node(&players)]);
+        let wrong = frame.call(0, Some(&a), Vec::new());
         assert!(matches!(wrong, Err(Refusal::Changed(_))));
         let twice = frame.call(2, None, vec![Call::Node(&a), Call::Node(&a)]);
         assert!(matches!(twice, Err(Refusal::NotHere(_))));
@@ -689,6 +772,104 @@ pub(crate) mod tests {
             ],
             [20, 20, 12]
         );
+    }
+
+    #[test]
+    fn a_receiver_and_its_child_refuse_before_applying_the_journal() {
+        let mut game = world();
+        let mut frame = frame(&mut game);
+        let root = frame.root(0).unwrap();
+        let players = frame.field(&root, 0).unwrap();
+        let first = node(frame.index(&players, 0).unwrap());
+        frame.set(&root, 1, Value::B(true)).unwrap();
+        assert!(
+            matches!(frame.call(4, Some(&root), vec![Call::Node(&first)]),
+            Err(Refusal::NotHere(why)) if why == "arguments overlap")
+        );
+        drop(frame);
+        assert!(
+            !game.flag,
+            "overlap refuses before even the pending set applies"
+        );
+    }
+
+    #[test]
+    fn a_returned_reference_beside_its_receiver_is_not_provably_disjoint() {
+        let mut game = world();
+        let mut frame = frame(&mut game);
+        let root = frame.root(0).unwrap();
+        let first = node(frame.call(1, Some(&root), Vec::new()).unwrap().0);
+        assert!(
+            matches!(frame.call(4, Some(&root), vec![Call::Node(&first)]),
+            Err(Refusal::NotHere(why)) if why == "arguments overlap")
+        );
+    }
+
+    #[test]
+    fn two_disjoint_mutable_fields_of_one_root_are_allowed() {
+        struct Fields {
+            left: Player,
+            right: Player,
+        }
+        unsafe fn fields(ptr: *mut (), writable: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            // SAFETY: the sole root below is a live Fields and each field has type Player.
+            let fields = unsafe { &mut *ptr.cast::<Fields>() };
+            match op {
+                Op::Field(0) => Ok(Reply::Node((&raw mut fields.left).cast(), PLAYER, writable)),
+                Op::Field(1) => Ok(Reply::Node(
+                    (&raw mut fields.right).cast(),
+                    PLAYER,
+                    writable,
+                )),
+                _ => Err(not_here("not a field")),
+            }
+        }
+        static FIELD_TYPES: [Type; 3] = [
+            Type {
+                path: "Fields",
+                hash: "fields-hash",
+                node: fields,
+            },
+            Type {
+                path: "Vec<Player>",
+                hash: "",
+                node: players,
+            },
+            Type {
+                path: "Player",
+                hash: "player-hash",
+                node: player,
+            },
+        ];
+        let table = Table {
+            types: &FIELD_TYPES,
+            ..TABLE
+        };
+        let mut fields = Fields {
+            left: Player { health: 1 },
+            right: Player { health: 2 },
+        };
+        // SAFETY: only this frame accesses the live Fields until it is dropped.
+        let mut frame = unsafe {
+            Frame::new(
+                &table,
+                vec![Root {
+                    ptr: (&raw mut fields).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        let root = frame.root(0).unwrap();
+        let left = frame.field(&root, 0).unwrap();
+        let right = frame.field(&root, 1).unwrap();
+        frame
+            .call(2, None, vec![Call::Node(&left), Call::Node(&right)])
+            .unwrap();
+        drop(frame);
+        assert_eq!((fields.left.health, fields.right.health), (20, 20));
     }
 
     #[test]
