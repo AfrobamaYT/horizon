@@ -1435,7 +1435,7 @@ mod tests {
             name: Some(name), seed: Some(42), creative: true, create: Some(_), ..
         }) if name == "My world")
         );
-        let mut batch = HudBatch::new([1280, 720]);
+        let mut batch = HudBatch::scratch([1280, 720]);
         loading.draw_menu(&mut batch);
         assert!(
             !batch.vertices.is_empty(),

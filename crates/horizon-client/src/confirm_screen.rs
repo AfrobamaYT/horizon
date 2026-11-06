@@ -286,7 +286,7 @@ mod tests {
         ];
         let drawn = |frame: u64, draw: &dyn Fn(&mut HudBatch)| {
             widgets::set_action_screen(7);
-            draw(&mut HudBatch::new([480, 270]));
+            draw(&mut HudBatch::scratch([480, 270]));
             widgets::end_frame(frame);
             widgets::last_actions(7)
         };

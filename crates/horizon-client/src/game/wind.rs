@@ -272,7 +272,12 @@ impl Game<'_> {
         blocks: &[[i32; 3]],
     ) -> Vec<(u32, [f64; 3])> {
         // ServerExplosion.shouldAffectBlocklikeEntities
-        let blocklike = !breeze && !wind_charge && self.ui.rules.bool("mob_griefing");
+        let blocklike = !breeze
+            && !wind_charge
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         let diameter = f64::from(radius * 2.0);
         let distance = |p: [f64; 3]| {
             ((p[0] - center[0]).powi(2) + (p[1] - center[1]).powi(2) + (p[2] - center[2]).powi(2))
@@ -319,7 +324,11 @@ impl Game<'_> {
         // out where its `ignoreExplosion` says (items and visible stands for a
         // charge, vehicles for a mob's burst with mob griefing off).
         let burst = Blast {
-            vehicles_ignore: breeze && !self.ui.rules.bool("mob_griefing"),
+            vehicles_ignore: breeze
+                && !self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
             items_ignore: !blocklike,
             spared: None,
         };
@@ -510,7 +519,12 @@ impl Game<'_> {
         let pushed = self.wind_knockback(center, radius, multiplier, breeze, wind_charge, &targets);
         let block_count = targets.len();
         // Explosion.canTriggerBlocks: a breeze's charge needs mob griefing.
-        if !breeze || self.ui.rules.bool("mob_griefing") {
+        if !breeze
+            || self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+        {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {
                 let swap = self.world.random.next_int_bound(i as i32).unwrap_or(0) as usize;
