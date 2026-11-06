@@ -6,6 +6,12 @@ pub(crate) fn installed_dimension_list() -> &'static [crate::dimension::Dimensio
     installed().map_or(&[], |installed| installed.dimensions.as_slice())
 }
 
+/// The chunk generators registered at startup, for the executable to hand to the engine.
+pub(crate) fn installed_chunk_generator_list()
+-> &'static [crate::chunk_generator::ChunkGeneratorInfo] {
+    installed().map_or(&[], |installed| installed.chunk_generators.as_slice())
+}
+
 /// The levels every world has, which no mod's can be.
 const VANILLA_DIMENSIONS: [&str; 3] = [
     "minecraft:overworld",
@@ -19,7 +25,9 @@ impl PartRegistrar {
     pub(crate) fn refuse_unknown_dimension_generators(&mut self) {
         for dimension in &self.dimensions {
             let generator = &dimension.settings.generator;
-            if generator != crate::dimension::NOISE_GENERATOR {
+            if generator != crate::dimension::NOISE_GENERATOR
+                && !self.chunk_generators.iter().any(|g| *g.id == **generator)
+            {
                 self.refused.push(format!(
                     "{} registered dimension {} with the unknown generator {generator:?}",
                     dimension.mod_id, dimension.id
@@ -42,6 +50,16 @@ impl dyn Registrar + '_ {
     pub fn register_dimension(&mut self, name: &str, settings: crate::DimensionSettings) {
         self.add_dimension(name, settings);
     }
+    /// Register chunk generator `name` (`void` or `mymod:void`) once at
+    /// startup: a level whose stem names `mymod:void` then has the terrain of
+    /// `generator`, whose [`fill_from_noise`](crate::ChunkGenerator::fill_from_noise)
+    /// runs on the worldgen worker threads. The level gets no surface, carvers
+    /// or features. The id is in the calling mod's namespace; another mod's
+    /// namespace, an empty name, a name that is no folder of the world and an id
+    /// registered twice refuse the mods at startup, naming the mod.
+    pub fn register_chunk_generator<T: crate::ChunkGenerator>(&mut self, name: &str, generator: T) {
+        self.add_chunk_generator(name, Arc::new(generator));
+    }
 }
 
 /// Registrar operations for dimensions.
@@ -49,6 +67,18 @@ pub trait DimensionsRegistrar {
     /// Register dimension `name` with `settings`; mods reach it through
     /// `register_dimension`.
     fn add_dimension(&mut self, name: &str, settings: crate::DimensionSettings);
+    /// Register chunk generator `name` with `generator`; mods reach it through
+    /// `register_chunk_generator`.
+    ///
+    /// Not on wasm: a generator is code that runs on the game's worldgen worker threads, which a
+    /// wasm mod's cannot hand over; a wasm mod's dimension names the game's own generators.
+    fn add_chunk_generator(&mut self, name: &str, generator: Arc<dyn crate::ChunkGenerator>) {
+        let _ = generator;
+        panic!(
+            "chunk generator {name:?}: a wasm mod cannot register a chunk generator, only name \
+             the game's own in its dimension's settings"
+        );
+    }
 }
 
 impl DimensionsRegistrar for PartRegistrar {
@@ -96,6 +126,46 @@ impl DimensionsRegistrar for PartRegistrar {
             id: id.into(),
             settings,
         });
+    }
+    fn add_chunk_generator(&mut self, name: &str, generator: Arc<dyn crate::ChunkGenerator>) {
+        let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
+        let id = format!("{}:{}", self.mod_id, path);
+        let refusal = if namespace != self.mod_id {
+            Some(format!(
+                "{} registered chunk generator {name:?} in the namespace {namespace:?}, which is not its own",
+                self.mod_id
+            ))
+        } else if path.is_empty() {
+            Some(format!(
+                "{} registered a chunk generator with no name",
+                self.mod_id
+            ))
+        } else if !valid_level_id(&id) {
+            Some(format!(
+                "{} registered chunk generator {id:?}, whose name must be lowercase letters, \
+                 digits and _ . - with / between segments, none empty, `.` or `..`",
+                self.mod_id
+            ))
+        } else if id == crate::dimension::NOISE_GENERATOR {
+            Some(format!(
+                "{} registered chunk generator {id}, which is the game's own",
+                self.mod_id
+            ))
+        } else {
+            self.chunk_generators
+                .iter()
+                .any(|g| *g.id == *id)
+                .then(|| format!("{} registered chunk generator {id} twice", self.mod_id))
+        };
+        if let Some(refusal) = refusal {
+            self.refused.push(refusal);
+            return;
+        }
+        self.chunk_generators
+            .push(crate::chunk_generator::ChunkGeneratorInfo {
+                id: id.into(),
+                generator: Arc::new(crate::chunk_generator::Adapter(generator)),
+            });
     }
 }
 
@@ -215,6 +285,159 @@ pub mod tests {
         assert!(errors[4].contains("test:low_ceiling"));
         assert!(errors[5].contains("test:too_tall"));
         assert!(errors[6].contains("test:custom with the unknown generator \"test:void\""));
+    }
+
+    #[cfg(test)]
+    struct Void;
+    #[cfg(test)]
+    impl mod_api::ChunkGenerator for Void {
+        fn fill_from_noise(&self, _: &mut dyn mod_api::ChunkAccess) {}
+    }
+
+    /// A generator's name is held to the same rule, so `Void` or `../x` refuses the mods too.
+    #[test]
+    fn a_generator_name_that_is_no_folder_refuses_registration() {
+        const BAD: [&str; 6] = ["../x", "a//b", "/abs", "Void", "my void", "."];
+        struct Invalid;
+        #[mod_api::__subscriptions]
+        impl Hooks for Invalid {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                for name in BAD {
+                    r.register_chunk_generator(name, Void);
+                }
+                r.register_chunk_generator("gen/void_2", Void);
+            }
+        }
+        let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
+        assert_eq!(errors.len(), BAD.len(), "{errors:?}");
+        for (error, name) in errors.iter().zip(BAD) {
+            assert!(error.contains(&format!("test:{name}\"")), "{name}: {error}");
+        }
+    }
+
+    /// Each generator a mod may not register: every one is refused at startup,
+    /// naming the mod.
+    #[test]
+    fn invalid_chunk_generators_refuse_registration() {
+        struct Invalid;
+        #[mod_api::__subscriptions]
+        impl Hooks for Invalid {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.register_chunk_generator("void", Void);
+                r.register_chunk_generator("void", Void);
+                r.register_chunk_generator("other:void", Void);
+                r.register_chunk_generator("", Void);
+            }
+        }
+        let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors[0].contains("test registered chunk generator test:void twice"));
+        assert!(errors[1].contains("test registered chunk generator \"other:void\""));
+        assert!(errors[2].contains("test registered a chunk generator with no name"));
+    }
+
+    /// A mod with vanilla's id can't take over every noise level.
+    #[test]
+    fn the_noise_generator_refuses_registration() {
+        struct Noise;
+        #[mod_api::__subscriptions]
+        impl Hooks for Noise {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.register_chunk_generator("noise", Void);
+            }
+        }
+        let errors = install_parts(&[ModEntry::new("minecraft", Box::new(Noise))]).unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("minecraft:noise, which is the game's own"));
+    }
+
+    /// The generator check runs after every mod registered.
+    #[test]
+    fn a_later_mods_generator_satisfies_an_earlier_mods_dimension() {
+        struct Dimension;
+        #[mod_api::__subscriptions]
+        impl Hooks for Dimension {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.register_dimension(
+                    "pocket",
+                    mod_api::DimensionSettings {
+                        generator: "later:void".into(),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        struct Generator;
+        #[mod_api::__subscriptions]
+        impl Hooks for Generator {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.register_chunk_generator("void", Void);
+            }
+        }
+        install_parts(&[
+            ModEntry::new("earlier", Box::new(Dimension)),
+            ModEntry::new("later", Box::new(Generator)),
+        ])
+        .unwrap();
+        let dimensions = mod_api::__private::installed_dimensions();
+        let stem: serde_json::Value = serde_json::from_str(&dimensions[0].stem).unwrap();
+        assert_eq!(stem["generator"]["type"], "later:void");
+        let generators = mod_api::__private::installed_chunk_generators();
+        assert!(generators.contains_key("later:void"));
+    }
+
+    /// What the engine calls is the mod's own code, under its namespaced id.
+    #[test]
+    fn a_registered_generator_reaches_the_engine() {
+        use mod_api::{ChunkAccess, ChunkPos};
+        // The engine's chunk: what the worker threads hand the generator.
+        use horizon_world::registry::BlockStateId;
+        use horizon_world::worldgen::mod_generators::ChunkAccess as EngineChunk;
+        struct Marker;
+        impl mod_api::ChunkGenerator for Marker {
+            fn fill_from_noise(&self, chunk: &mut dyn ChunkAccess) {
+                let state = chunk.state("stone");
+                chunk.set_block([1, chunk.min_y(), 2], state);
+            }
+        }
+        struct Writes;
+        #[mod_api::__subscriptions]
+        impl Hooks for Writes {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.register_chunk_generator("test:marker", Marker);
+            }
+        }
+        #[derive(Default)]
+        struct Written(Vec<([i32; 3], BlockStateId)>);
+        impl EngineChunk for Written {
+            fn pos(&self) -> ChunkPos {
+                ChunkPos::new(0, 0)
+            }
+            fn seed(&self) -> i64 {
+                0
+            }
+            fn min_y(&self) -> i32 {
+                -64
+            }
+            fn height(&self) -> i32 {
+                384
+            }
+            fn state(&self, _: &str) -> BlockStateId {
+                BlockStateId(9)
+            }
+            fn state_with(&self, _: &str, _: &[(&str, &str)]) -> BlockStateId {
+                BlockStateId(9)
+            }
+            fn set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
+                self.0.push((pos, state));
+                true
+            }
+        }
+        install_parts(&[ModEntry::new("test", Box::new(Writes))]).unwrap();
+        let generators = mod_api::__private::installed_chunk_generators();
+        let mut chunk = Written::default();
+        generators["test:marker"].fill_from_noise(&mut chunk);
+        assert_eq!(chunk.0, [([1, -64, 2], BlockStateId(9))]);
     }
 
     /// The vanilla levels are in the `minecraft` namespace, so only a mod with
