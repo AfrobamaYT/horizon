@@ -3,7 +3,7 @@
 //! all of them), set up when the batch starts and torn down after it. The
 //! definitions are the data pack's `test_environment` entries, or inline.
 use super::Game;
-use horizon_client::gamerules::{self, Value};
+use horizon_client::gamerules::{GameRules, Value};
 use serde_json::Value as Json;
 
 /// `Weather.Type`.
@@ -78,12 +78,13 @@ pub(super) fn parse(
     json: &Json,
     load: &dyn Fn(&str) -> Option<Json>,
     depth: u32,
+    rules: &GameRules,
 ) -> Option<Environment> {
     if depth > 16 {
         return None;
     }
     if let Some(id) = json.as_str() {
-        return parse(&load(id)?, load, depth + 1);
+        return parse(&load(id)?, load, depth + 1, rules);
     }
     let kind = json.get("type")?.as_str()?;
     let kind = kind.strip_prefix("minecraft:").unwrap_or(kind);
@@ -92,7 +93,7 @@ pub(super) fn parse(
             json.get("definitions")?
                 .as_array()?
                 .iter()
-                .map(|d| parse(d, load, depth + 1))
+                .map(|d| parse(d, load, depth + 1, rules))
                 .collect::<Option<_>>()?,
         ),
         "clock_time" => Environment::ClockTime {
@@ -117,7 +118,7 @@ pub(super) fn parse(
                 .as_object()?
                 .iter()
                 .map(|(name, v)| {
-                    let rule = gamerules::rule(name)?;
+                    let rule = rules.rule(name)?;
                     let value = match (v.as_bool(), v.as_i64()) {
                         (Some(b), _) => Value::Bool(b),
                         (_, Some(i)) => Value::Int(i32::try_from(i).ok()?),
@@ -153,6 +154,7 @@ impl Game<'_> {
             &Json::String(id.to_owned()),
             &|i| self.read_test_environment_json(i),
             0,
+            &self.ui.rules,
         )
     }
 
@@ -198,7 +200,7 @@ impl Game<'_> {
                 let original = rules
                     .iter()
                     .filter_map(|(name, _)| {
-                        let rule = gamerules::rule(name)?;
+                        let rule = self.ui.rules.rule(name)?;
                         Some((
                             rule.name.to_owned(),
                             self.ui.rules.get(rule.name).unwrap_or(rule.default),
@@ -261,7 +263,7 @@ impl Game<'_> {
     /// `GameRules.setAll`.
     fn set_environment_rules(&mut self, rules: &[(String, Value)]) {
         for (name, value) in rules {
-            if let Some(rule) = gamerules::rule(name)
+            if let Some(rule) = self.ui.rules.rule(name).cloned()
                 && self.ui.rules.set(rule.name, *value)
             {
                 self.game_rule_changed(rule.name, *value, None);
@@ -333,7 +335,7 @@ mod tests {
                 {"type": "minecraft:function", "setup": "test:on"}
             ]
         });
-        let Some(Environment::AllOf(all)) = parse(&json, &load, 0) else {
+        let Some(Environment::AllOf(all)) = parse(&json, &load, 0, &GameRules::default()) else {
             panic!("not all_of");
         };
         assert_eq!(
@@ -357,13 +359,25 @@ mod tests {
 
     #[test]
     fn unknown_or_invalid_definitions_do_not_parse() {
-        assert_eq!(parse(&json!("minecraft:missing"), &load, 0), None);
-        assert_eq!(parse(&json!({"type": "minecraft:nothing"}), &load, 0), None);
+        assert_eq!(
+            parse(&json!("minecraft:missing"), &load, 0, &GameRules::default()),
+            None
+        );
+        assert_eq!(
+            parse(
+                &json!({"type": "minecraft:nothing"}),
+                &load,
+                0,
+                &GameRules::default()
+            ),
+            None
+        );
         assert_eq!(
             parse(
                 &json!({"type": "minecraft:clock_time", "clock": "c", "time": -1}),
                 &load,
-                0
+                0,
+                &GameRules::default()
             ),
             None
         );
