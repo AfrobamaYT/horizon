@@ -20525,7 +20525,8 @@ impl Game<'_> {
                     let updated = Instant::now();
                     self.track_toggle_screens();
                     self.heal_hold_latches();
-                    let steps = self.clock.advance(elapsed);
+                    let target = self.tick_target_millis();
+                    let steps = self.clock.advance(elapsed, target);
                     for _ in 0..steps {
                         let started = Instant::now();
                         // Minecraft.tick: every client tick, paused or not, in menus too.
