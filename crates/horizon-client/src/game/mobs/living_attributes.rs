@@ -20,6 +20,7 @@ use std::sync::Arc;
 /// full stacks with their components compared, as the tick's pass and a write
 /// both run it. The map is taken out so the seed can read the mob.
 fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
+    horizon_client::mobs::armor::prepare(m, catalog);
     let mut live = std::mem::take(&mut m.extra.live);
     let seed = || {
         horizon_client::entity_nbt::attribute_entries(m)
@@ -27,18 +28,6 @@ fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
             .map(|(_, entry)| entry)
             .collect()
     };
-    // A base write can invalidate an unequipped shulker's map too. Restore
-    // its saved shell modifier before the next same-tick damage read.
-    if m.species() == horizon_client::mobs::Species::Shulker {
-        live.read(
-            catalog,
-            &m.kind.id,
-            "minecraft:armor",
-            horizon_world::attribute_map::ValueKind::Computed,
-            &seed,
-        )
-        .expect("a shulker has an armor attribute");
-    }
     let changed =
         live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, seed);
     warn_failed(m.id, &m.kind.id, changed);
@@ -584,6 +573,16 @@ mod tests {
                     },
                 )
                 .unwrap();
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            let loaded_id = game.load_mob(saved.clone(), None).unwrap();
+            let loaded = game.mobs.iter().find(|m| m.id == loaded_id).unwrap();
+            assert_eq!(horizon_client::mobs::armor::values(loaded), (20.0, 0.0));
+            game.apply_entity_nbt(Target::Mob(12), saved).unwrap();
+            assert_eq!(
+                horizon_client::mobs::armor::values(&game.mobs[0]),
+                (20.0, 0.0)
+            );
             let shulker = living(game, 12);
             assert!(shulker.set_attribute_base(game, "minecraft:max_health", 40.0));
             // No handle read in between: damage must not need a read to restore the map.

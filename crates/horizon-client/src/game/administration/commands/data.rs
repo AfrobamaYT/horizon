@@ -343,6 +343,7 @@ impl Game<'_> {
                     Some(self.pack.assets.registry),
                 )
                 .ok_or_else(stale)?;
+                horizon_client::mobs::armor::prepare(&new, &self.motion.attributes);
                 self.warn_missing_profession(&new);
                 let unresolved = new.extra.profession.index().is_none();
                 if let Some(slot) = self.mobs.iter_mut().find(|m| m.id == id) {

@@ -874,6 +874,7 @@ impl Game<'_> {
                 horizon_client::mobs::spawn_rules::Reason::Structure,
             );
         }
+        horizon_client::mobs::armor::prepare(&m, &self.motion.attributes);
         let id = m.id;
         self.remember(id, uuid, tag);
         self.mobs.push(m);

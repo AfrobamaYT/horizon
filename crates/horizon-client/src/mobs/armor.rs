@@ -1,6 +1,33 @@
 //! Effective mob armor and toughness at the damage boundary.
 use super::Mob;
-use horizon_world::attributes::{Definition, entity::EntityAttributes};
+use horizon_world::attribute_map::ValueKind;
+use horizon_world::attributes::{
+    Definition,
+    entity::{Catalog, EntityAttributes},
+};
+use std::sync::Arc;
+
+/// Restore saved shulker armor at admission and after invalidating writes,
+/// before damage can read it without an attribute query or equipment tick.
+pub fn prepare(mob: &Mob, catalog: &Arc<Catalog>) {
+    if mob.species() == super::Species::Shulker {
+        mob.extra
+            .live
+            .read(
+                catalog,
+                &mob.kind.id,
+                "minecraft:armor",
+                ValueKind::Computed,
+                || {
+                    crate::entity_nbt::attribute_entries(mob)
+                        .into_iter()
+                        .map(|(_, entry)| entry)
+                        .collect()
+                },
+            )
+            .expect("a shulker has an armor attribute");
+    }
+}
 
 fn effective(map: Option<&EntityAttributes>, name: &str, base: f64, maximum: f64) -> f64 {
     if let Some(map) = map
