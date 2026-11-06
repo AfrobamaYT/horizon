@@ -45,9 +45,21 @@ pub fn listened(hook: HookId) -> bool {
 pub use crate::generated::calls::*;
 pub use crate::part_table::{
     HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, block_entity_types,
-    block_listens, game_rule_registry, has_part_hook, has_scoped_hook, install_parts,
-    mark_game_thread, parts, resolve_parts,
+    block_listens, entity_parts, game_rule_registry, has_entity_parts, has_part_hook,
+    has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
 };
+/// A read backend wrapper for a host the game builds narrowed: the mob tick's
+/// goal view hands itself out as its own backend (#1077).
+pub fn backend_ref(inner: &dyn Backend) -> crate::BackendRef<'_> {
+    crate::BackendRef::of(inner)
+}
+/// Call `read` on `host`'s real backend, or `None` where the host has none:
+/// the mob tick's goal view forwards the level's own reads — blocks, loaded
+/// chunks, time, height, weather, block entities — through it (#1077); the
+/// entity data its snapshot does not carry stays refused.
+pub fn backend_read<R>(host: &dyn crate::Host, read: impl FnOnce(&dyn Backend) -> R) -> Option<R> {
+    host.backend().map(|backend| read(backend.open()))
+}
 pub use crate::phase::{
     LoadAccess, ModPhase, PhaseError, PhaseOwner, check_access, current_phase, install_packages,
 };

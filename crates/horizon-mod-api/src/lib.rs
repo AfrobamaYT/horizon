@@ -4729,6 +4729,11 @@ pub use part_table::{
     ProvidedBy, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
+mod goals;
+pub use goals::{Goal, GoalContext, GoalFlags, GoalRegistrar, RegistrarMob};
+// hidden: the game's goal plumbing, not part of the mod surface
+#[doc(hidden)]
+pub use goals::{GoalCxBackend, GoalRegistrarBackend};
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -4740,7 +4745,7 @@ mod wasm_refused;
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
 }
-pub use generated::Hooks;
+pub use generated::{EntityPart, Hooks};
 impl FallOnEvent<'_> {
     /// Ask for a write at the block the entity landed on. It is applied once the entity's
     /// batch has ticked, in the order asked, if the block is still the state it landed on.

@@ -1,24 +1,7 @@
 //! Mob handles for native server mods.
 use super::{Game, commands::Target};
-use horizon_client::mobs::{self, Mob, Species, Who};
+use horizon_client::mobs::{self, Mob, Species, Who, ai::brain_target};
 use mod_api::{EntityRef, LivingRef, MobLeashHolder, MobRef};
-
-/// Brain-backed vanilla `getTarget` overrides. Piglins and hoglins use
-/// Horizon's `ai.target` as the stand-in for their brain memory.
-fn brain_target(mob: &Mob) -> Option<Option<Who>> {
-    Some(match mob.species() {
-        Species::Warden => mobs::warden::brain_target(mob),
-        Species::Breeze | Species::Creaking => mobs::monster_brain::attack_target(mob),
-        Species::Axolotl => mob
-            .extra
-            .animal_brain
-            .as_ref()
-            .and_then(|b| b.mem.attack_target.value()),
-        Species::Frog => mobs::frog::attack_target(mob),
-        Species::Piglin | Species::PiglinBrute | Species::Hoglin | Species::Zoglin => mob.ai.target,
-        _ => return None,
-    })
-}
 
 /// What decides whether a player can be a mob's target.
 pub(super) struct PlayerFacts {
@@ -72,7 +55,9 @@ enum MobFlag {
 }
 
 impl Game<'_> {
-    /// `Mob.asValidTarget` and the modeled `canAttack` overrides.
+    /// `Mob.asValidTarget` and the modeled `canAttack` overrides: the game's
+    /// own state as the target's facts, through the one rule set
+    /// [`Mob::valid_target`] (#1175) a goal tick's view shares.
     fn native_mob_valid_target(&self, mob: &Mob, target: Target) -> bool {
         if mob.species() == Species::Warden {
             return self.native_warden_valid_target(mob, target);
@@ -82,24 +67,17 @@ impl Game<'_> {
                 let Some(other) = self.mobs.iter().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
-                if !other.alive() || other.invulnerable_flag || other.species() == Species::Ghast {
-                    return false;
-                }
-                if mob.species() == Species::Breeze && other.species() != Species::IronGolem {
-                    return false;
-                }
-                if matches!(
-                    mob.species(),
-                    Species::Evoker | Species::Vindicator | Species::Illusioner | Species::Pillager
-                ) && matches!(
-                    other.species(),
-                    Species::Villager | Species::WanderingTrader
-                ) && other.is_baby()
-                {
-                    return false;
-                }
                 let seen = [super::creatures::seen(other, self.level.player_uuid)];
-                !mob.spares_target(&self.mob_world_base(&seen), Who::Mob(id))
+                mob.valid_target(
+                    &self.mob_world_base(&seen),
+                    &mobs::goals::TargetFacts::Mob {
+                        id,
+                        species: other.species(),
+                        alive: other.alive(),
+                        invulnerable: other.invulnerable_flag,
+                        baby: other.is_baby(),
+                    },
+                )
             }
             Target::Player | Target::Guest(_) => {
                 let Some(PlayerFacts {
@@ -111,16 +89,18 @@ impl Game<'_> {
                 else {
                     return false;
                 };
-                alive
-                    && !invulnerable
-                    && mode != 1
-                    && mode != 3
-                    && self.difficulty_id() != 0
-                    && !mob.built_by_player()
-                    && !(mob.is_tamable_animal()
-                        && mob.extra.tame
-                        && mobs::tame::owned_by(mob.extra.owner, uuid))
-                    && !(mob.species() == Species::Dolphin && mob.is_baby())
+                mob.valid_target(
+                    &self.mob_world_base(&[]),
+                    &mobs::goals::TargetFacts::Player {
+                        alive,
+                        invulnerable,
+                        // The game modes a target cannot be attacked in:
+                        // creative (1) and spectator (3).
+                        creative: mode == 1,
+                        spectator: mode == 3,
+                        uuid,
+                    },
+                )
             }
             _ => false,
         }
@@ -281,22 +261,14 @@ impl Game<'_> {
         let Some(mob_state) = self.mobs.iter().find(|m| m.id == id) else {
             return false;
         };
-        if brain_target(mob_state).is_some()
-            || matches!(
-                mob_state.species(),
-                Species::Fox | Species::Enderman | Species::ZombifiedPiglin
-            )
-        {
+        if mob_state.refuses_set_target() {
             return false;
         }
         if let Some(target) = target {
             let Some(target_kind) = self.native_entity_target(target.entity()) else {
                 return false;
             };
-            if !self.native_mob_valid_target(mob_state, target_kind)
-                || (mob_state.species() == Species::Creeper
-                    && matches!(target_kind, Target::Mob(other) if self.mobs.iter().any(|m| m.id == other && m.species() == Species::Goat)))
-            {
+            if !self.native_mob_valid_target(mob_state, target_kind) {
                 return false;
             }
         }

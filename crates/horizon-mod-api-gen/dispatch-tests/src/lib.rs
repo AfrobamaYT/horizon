@@ -496,6 +496,12 @@ mod tests {
         }
     }
     trait Registrar {}
+    /// The goal registrar of the generated `EntityPart`, as the fixture sees
+    /// it: no methods, its type is all the generated trait asks of the scope.
+    #[expect(dead_code)]
+    struct GoalRegistrar<'a> {
+        _lifetime: std::marker::PhantomData<&'a ()>,
+    }
     /// The parts every thing in a scope has, whatever its key: a test's own, or none.
     #[derive(Default)]
     struct Parts {
