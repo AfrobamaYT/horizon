@@ -118,13 +118,15 @@ def main():
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     if args.apply:
-        assert (ROOT / OLD_PATH).is_dir() and not (ROOT / NEW_PATH).exists(), "run the rename on unsplit main"
+        move = (ROOT / OLD_PATH).is_dir()
+        assert move != (ROOT / NEW_PATH).is_dir(), "expected exactly one crate directory"
         for path in sorted(text_paths() - OWN_FILES):
             original = (ROOT / path).read_bytes()
             updated = normalized(path, original)
             if updated != original:
                 (ROOT / path).write_bytes(updated)
-        run("git", "mv", OLD_PATH, NEW_PATH)
+        if move:
+            run("git", "mv", OLD_PATH, NEW_PATH)
         for manifest in ["Cargo.toml", "launcher/Cargo.toml", "crates/horizon-mod-registry/Cargo.toml"]:
             run("cargo", "metadata", "--offline", "--format-version", "1", "--manifest-path", manifest)
     else:
