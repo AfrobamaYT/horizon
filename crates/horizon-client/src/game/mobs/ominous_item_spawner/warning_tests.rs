@@ -69,7 +69,7 @@ fn warning_dispatch_uses_neutral_at_tick_four() {
         [4, 6]
     );
     game.audio.capture.as_mut().unwrap().clear();
-    let (tag, _) = horizon_world::nbt::parse_snbt(r#"{id:"minecraft:ominous_item_spawner",UUID:[I;128,0,0,1],Pos:[6.25d,102.75d,4.875d],item:{id:"minecraft:diamond",count:1},spawn_item_after_ticks:40L}"#).unwrap();
+    let (tag, _) = horizon_core::nbt::parse_snbt(r#"{id:"minecraft:ominous_item_spawner",UUID:[I;128,0,0,1],Pos:[6.25d,102.75d,4.875d],item:{id:"minecraft:diamond",count:1},spawn_item_after_ticks:40L}"#).unwrap();
     game.load_ominous_item_spawner(tag);
     assert_eq!(game.ominous_spawners.len(), 1);
     let s = &game.ominous_spawners[0];

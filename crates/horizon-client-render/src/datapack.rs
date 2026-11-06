@@ -3,13 +3,16 @@
 //! line continuation), function tags and predicates.
 use crate::resource_source::ResourceSource;
 use crate::zip::Zip;
-use horizon_world::{
-    nbt::Tag,
-    worldgen::overrides::{self, PackFile, WorldgenOverrides},
-};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
+};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::worldgen::{
+        overrides,
+        overrides::{PackFile, WorldgenOverrides},
+    },
 };
 
 /// A pack on disk.
@@ -893,12 +896,14 @@ mod tests {
 
     #[test]
     fn structure_templates_read_archive_generations_without_extraction() {
-        use horizon_world::{
-            nbt::{Limits, NamedTag},
-            registry::BlockRegistry,
-            worldgen::structure::{StateTransforms, StructureResources},
-        };
         use std::io::Write;
+        use {
+            horizon_core::nbt::{Limits, NamedTag},
+            horizon_world::{
+                registry::BlockRegistry,
+                worldgen::structure::{StateTransforms, StructureResources},
+            },
+        };
         let root =
             std::env::temp_dir().join(format!("horizon-template-source-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -936,7 +941,7 @@ mod tests {
                 ),
                 ("entities", Tag::List(Vec::new())),
             ]);
-            let bytes = horizon_world::nbt::write_named(
+            let bytes = horizon_core::nbt::write_named(
                 &NamedTag {
                     name: "".into(),
                     tag,
@@ -1114,7 +1119,7 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
-    use horizon_world::nbt::parse_snbt;
+    use horizon_core::nbt::parse_snbt;
 
     #[test]
     fn parses_comments_continuations_and_macros() {

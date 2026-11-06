@@ -188,7 +188,7 @@ impl WorldOptions {
             .then_some(self.single_biome.as_str())
     }
     /// The custom layers, as `write_world_gen_settings_with` takes them.
-    pub fn flat_settings(&self) -> Option<horizon_world::nbt::Tag> {
+    pub fn flat_settings(&self) -> Option<horizon_core::nbt::Tag> {
         self.flat_settings
             .as_ref()
             .map(super::flat::FlatSettings::to_tag)

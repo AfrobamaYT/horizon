@@ -8,7 +8,6 @@
 //! maps are kept as found (structure search is not run); conditions that
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
-use crate::{lazy_json::LazyJson, native_load_context::LoadContext, nbt::Tag};
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{
@@ -17,6 +16,10 @@ use std::{
     fs, io,
     path::Path,
     sync::{Arc, Mutex, Weak},
+};
+use {
+    crate::{lazy_json::LazyJson, native_load_context::LoadContext},
+    horizon_core::nbt::Tag,
 };
 
 /// Raw files a world's data packs add over the game's own data, by

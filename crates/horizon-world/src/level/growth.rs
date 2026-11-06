@@ -33,7 +33,7 @@ impl Behaviours {
         reference: [i32; 3],
         keep_jigsaws: bool,
         assemble: impl FnOnce() -> Option<crate::worldgen::generator::JigsawPieces>,
-    ) -> (bool, Vec<crate::nbt::Compound>) {
+    ) -> (bool, Vec<horizon_core::nbt::Compound>) {
         let Some(features) = self.live_features() else {
             return (false, Vec::new());
         };
@@ -49,7 +49,7 @@ impl Behaviours {
                 entities: Vec::new(),
             };
             let unbounded =
-                crate::worldgen::structure::BoundingBox::new([i32::MIN; 3], [i32::MAX; 3]);
+                horizon_core::bounding_box::BoundingBox::new([i32::MIN; 3], [i32::MAX; 3]);
             for piece in &jigsaw.pieces {
                 let mut place_feature =
                     |w: &mut LevelFeatureWorld<'_, '_, L>,
@@ -85,7 +85,7 @@ impl Behaviours {
         level: &mut L,
         ticks: &mut super::Ticks,
         start: &crate::worldgen::structure::start::StructureStart,
-    ) -> (bool, Vec<crate::nbt::Compound>) {
+    ) -> (bool, Vec<horizon_core::nbt::Compound>) {
         let Some(features) = self.live_features() else {
             return (false, Vec::new());
         };
@@ -116,7 +116,7 @@ impl Behaviours {
                  p: [i32; 3]| { Ok(features.place_placed(name, w, r, p)) };
             for cx in cx0..=cx1 {
                 for cz in cz0..=cz1 {
-                    let chunk_box = crate::worldgen::structure::BoundingBox::new(
+                    let chunk_box = horizon_core::bounding_box::BoundingBox::new(
                         [cx * 16, low_y, cz * 16],
                         [cx * 16 + 15, high_y, cz * 16 + 15],
                     );

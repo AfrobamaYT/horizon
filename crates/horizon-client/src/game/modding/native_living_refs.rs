@@ -69,8 +69,8 @@ fn slot_name(slot: EquipmentSlot) -> &'static str {
     }
 }
 
-fn world_equipment_slot(slot: EquipmentSlot) -> horizon_world::player_inventory::EquipmentSlot {
-    use horizon_world::player_inventory::EquipmentSlot as WorldSlot;
+fn world_equipment_slot(slot: EquipmentSlot) -> horizon_core::equipment_slot::EquipmentSlot {
+    use horizon_core::equipment_slot::EquipmentSlot as WorldSlot;
     match slot {
         EquipmentSlot::MainHand => WorldSlot::MainHand,
         EquipmentSlot::OffHand => WorldSlot::OffHand,
@@ -910,7 +910,7 @@ impl Game<'_> {
         let equip_slot = super::dispenser::Slot::from_name(&name)?;
         let sound = match stack.data().and_then(|d| d.other("minecraft:equippable")) {
             Some(component) => match component.get("equip_sound") {
-                Some(horizon_world::nbt::Tag::String(sound)) => Some(sound.to_string_lossy()),
+                Some(horizon_core::nbt::Tag::String(sound)) => Some(sound.to_string_lossy()),
                 _ => None,
             },
             None => self
@@ -1107,7 +1107,7 @@ mod tests {
             let mut unbreakable = stack.clone();
             unbreakable.data_mut().set_other(
                 "minecraft:unbreakable",
-                Some(horizon_world::nbt::Tag::Byte(1)),
+                Some(horizon_core::nbt::Tag::Byte(1)),
             );
             game.inventory[game.selected] = Some(unbreakable.clone());
             assert!(
@@ -1164,7 +1164,7 @@ mod tests {
                 let sound = ["minecraft:entity.item.break", "minecraft:block.anvil.break"][i];
                 stack.data_mut().set_other(
                     "minecraft:break_sound",
-                    Some(horizon_world::nbt::Tag::String(sound.into())),
+                    Some(horizon_core::nbt::Tag::String(sound.into())),
                 );
                 armor[i] = Some(stack);
             }
@@ -1959,7 +1959,7 @@ mod tests {
             ));
             let mut body = ItemStack::new("minecraft:diamond_horse_armor", 3);
             body.damage = 9;
-            body.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("armor".into()));
+            body.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("armor".into()));
             assert!(game.native_living_set_equipment(
                 horse,
                 EquipmentSlot::Body,
@@ -1990,7 +1990,7 @@ mod tests {
                 assert_eq!(game.native_living_equipment(zombie, slot), None);
             }
             let mut saddle = ItemStack::new("minecraft:saddle", 3);
-            saddle.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("saddle".into()));
+            saddle.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("saddle".into()));
             assert!(game.native_living_set_equipment(
                 horse,
                 EquipmentSlot::Saddle,
@@ -2037,7 +2037,7 @@ mod tests {
                     let mut stack = ItemStack::new("minecraft:stone", 3);
                     stack.damage = 5 + slot as u32;
                     stack.data_mut().custom_name =
-                        Some(horizon_world::nbt::Tag::String(slot_name(slot).into()));
+                        Some(horizon_core::nbt::Tag::String(slot_name(slot).into()));
                     assert!(game.native_living_set_equipment(living, slot, Some(stack.clone())));
                     assert_eq!(game.native_living_equipment(living, slot), Some(stack));
                 }
@@ -2072,7 +2072,7 @@ mod tests {
             let owner = Owner::Entity(Target::Player);
             let mut body = ItemStack::new("minecraft:diamond_horse_armor", 1);
             body.damage = 4;
-            body.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("armor".into()));
+            body.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("armor".into()));
             let saddle = ItemStack::new("minecraft:saddle", 1);
             game.player = Some(
                 horizon_client::motion::PlayerMotion::new(

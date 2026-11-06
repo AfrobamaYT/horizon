@@ -3046,9 +3046,9 @@ fn connecting_blocks_join_themselves_and_their_tag() {
 #[ignore = "full content root: CI and pr_ready run it"]
 fn an_old_chunks_saved_village_comes_back_with_its_pieces() {
     use horizon_core::position::ChunkPos;
-    use horizon_world::{
-        nbt::Tag,
-        worldgen::blending::{OldWorld, SavedStart},
+    use {
+        horizon_core::nbt::Tag,
+        horizon_world::worldgen::blending::{OldWorld, SavedStart},
     };
     let Some(base) = prepared() else {
         return;

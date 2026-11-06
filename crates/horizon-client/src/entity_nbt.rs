@@ -16,12 +16,14 @@ use crate::{
     },
 };
 use horizon_core::geometry::Vec3;
-use horizon_world::{
-    chunk::BlockState,
-    nbt::{Compound, Tag},
-    registry::{BlockRegistry, BlockStateId},
-};
 use std::{collections::HashMap, sync::Arc};
+use {
+    horizon_core::nbt::{Compound, Tag},
+    horizon_world::{
+        chunk::BlockState,
+        registry::{BlockRegistry, BlockStateId},
+    },
+};
 
 /// Saved data carried by `ConversionType.convertCommon` outside the modelled
 /// mob fields. The converted entity has its own identity and type-specific data;
@@ -553,14 +555,14 @@ pub fn mob_to_nbt(
         if on {
             map.insert(key.into(), Tag::Byte(1));
         } else {
-            map.remove(&horizon_world::nbt::JavaString::from(key));
+            map.remove(&horizon_core::nbt::JavaString::from(key));
         }
     }
     // LivingEntity.addAdditionalSaveData: `active_effects` only when there are
     // any (MobEffectInstance.CODEC; a mob's effects are never ambient, and one
     // given with `hideParticles` shows neither particles nor its icon).
     if m.extra.effects.is_empty() {
-        map.remove(&horizon_world::nbt::JavaString::from("active_effects"));
+        map.remove(&horizon_core::nbt::JavaString::from("active_effects"));
     } else {
         let effects = m.extra.effects.iter().map(|effect| {
             let (effect, duration, amplifier) = (effect.id, effect.duration, effect.amplifier);
@@ -604,12 +606,12 @@ pub fn mob_to_nbt(
         "HurtByTimestamp",
         "Leashed",
     ] {
-        map.remove(&horizon_world::nbt::JavaString::from(key));
+        map.remove(&horizon_core::nbt::JavaString::from(key));
     }
     if m.ticks_frozen > 0 {
         map.insert("TicksFrozen".into(), Tag::Int(m.ticks_frozen));
     } else {
-        map.remove(&horizon_world::nbt::JavaString::from("TicksFrozen"));
+        map.remove(&horizon_core::nbt::JavaString::from("TicksFrozen"));
     }
     for (key, value) in [
         ("AbsorptionAmount", Tag::Float(0)),
@@ -721,7 +723,7 @@ pub fn mob_to_nbt(
                     map.insert("stew_effects".into(), Tag::List(list.collect()));
                 }
                 None => {
-                    map.remove(&horizon_world::nbt::JavaString::from("stew_effects"));
+                    map.remove(&horizon_core::nbt::JavaString::from("stew_effects"));
                 }
             }
         }
@@ -3196,7 +3198,7 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
     put(&mut tag, "Invisible", Tag::Byte(i8::from(f.invisible)));
     put(&mut tag, "Fixed", Tag::Byte(i8::from(f.fixed)));
     if let Tag::Compound(map) = &mut tag {
-        map.remove(&horizon_world::nbt::JavaString::from("Item"));
+        map.remove(&horizon_core::nbt::JavaString::from("Item"));
     }
     if let Some(item) = &f.item {
         put(&mut tag, "Item", item_to_nbt(item));
@@ -6961,7 +6963,7 @@ mod held_item_name_tests {
         zombie.set_saddle(Some(saddle.clone()));
         let mut offhand = crate::items::ItemStack::new("minecraft:shield", 2);
         offhand.damage = 11;
-        offhand.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Shield".into()));
+        offhand.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Shield".into()));
         crate::mobs::finalize::set_item_stack(
             &mut zombie,
             crate::mobs::finalize::OFFHAND,
@@ -6978,7 +6980,7 @@ mod held_item_name_tests {
         );
         let mut armor = crate::items::ItemStack::new("minecraft:diamond_horse_armor", 3);
         armor.damage = 7;
-        armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Body".into()));
+        armor.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Body".into()));
         horse.extra.set_body_stack(Some(armor.clone()));
         let stacks = horse.equipment_stacks();
         assert_eq!(
@@ -7049,7 +7051,7 @@ mod held_item_name_tests {
         let mut mob = Mob::new(1, Arc::clone(&types["minecraft:zombie"]), Vec3::ZERO, 0.0);
         let mut helmet = crate::items::ItemStack::new("minecraft:iron_helmet", 1);
         helmet.damage = 40;
-        helmet.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Hat".into()));
+        helmet.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Hat".into()));
         helmet.data_mut().trim = Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")));
         assert!(mob.set_equipment_stack(5, Some(helmet.clone())));
         assert!(mob.set_equipment_stack(0, Some(helmet)));
@@ -7097,7 +7099,7 @@ mod held_item_name_tests {
             .collect();
         let mut mob = Mob::new(1, Arc::clone(&types["minecraft:zombie"]), Vec3::ZERO, 0.0);
         let mut sword = crate::items::ItemStack::new("minecraft:diamond_sword", 1);
-        sword.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Old Sword".into()));
+        sword.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Old Sword".into()));
         mob.extra.set_main_hand_stack(Some(sword));
         let raw = mob_to_nbt(&mob, [1, 2, 3, 4], None, None, |_| None);
         let mut loaded = mob_from_nbt(&raw, &types, 2, None).unwrap();

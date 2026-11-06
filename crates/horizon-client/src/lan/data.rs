@@ -3,11 +3,11 @@
 //! pack) and the tags of every registry, loaded from the prepared resources
 //! (`data/minecraft/...`) and the registries report.
 use crate::chunk::LevelShapes;
+use horizon_core::nbt::{JavaString, Tag};
 use horizon_protocol::{
     packets::configuration::{RegistryData, RegistryEntry, RegistryTags, TagEntry, UpdateTags},
     registry::{Builtin, Dynamic},
 };
-use horizon_world::nbt::{JavaString, Tag};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -1161,7 +1161,7 @@ mod tests {
         let packets = sync.registry_packets(false, &LevelShapes::VANILLA);
         let data = packets[0].entries[0].data.as_ref().unwrap();
         let encoded =
-            horizon_world::nbt::write_network(data, horizon_world::nbt::Limits::default()).unwrap();
+            horizon_core::nbt::write_network(data, horizon_core::nbt::Limits::default()).unwrap();
         // Compound, string key/type, 21-byte value, compound end.
         let mut expected = vec![10, 8, 0, 4, b't', b'y', b'p', b'e', 0, 21];
         expected.extend_from_slice(b"minecraft:dialog_list");
@@ -1215,7 +1215,7 @@ mod tests {
 #[cfg(test)]
 mod component_tests {
     use super::*;
-    use horizon_world::nbt::{Limits, read_network, write_network};
+    use horizon_core::nbt::{Limits, read_network, write_network};
 
     /// `/give`'s reply: a count, then components. On the wire each element is wrapped
     /// once, and read back (ListTag.addAndUnwrap) it is the number again.

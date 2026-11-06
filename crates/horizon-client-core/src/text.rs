@@ -52,11 +52,11 @@ pub enum ClickEvent {
     CopyToClipboard(String),
     /// `ClickEvent.ShowDialog`: a `minecraft:dialog` registry id, or the
     /// dialog itself as the component carried it.
-    ShowDialog(horizon_world::nbt::Tag),
+    ShowDialog(horizon_core::nbt::Tag),
     /// `ClickEvent.Custom`: a server-defined action with an optional NBT payload.
     Custom {
         id: String,
-        payload: Option<horizon_world::nbt::Tag>,
+        payload: Option<horizon_core::nbt::Tag>,
     },
     /// A local file to open with the system handler.
     /// Only allow this in locally constructed messages, never server/LAN text.

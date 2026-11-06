@@ -10,7 +10,7 @@ use horizon_client::{
     snbt,
     text::Text,
 };
-use horizon_world::nbt::{Compound, JavaString, Tag, parse_snbt};
+use horizon_core::nbt::{Compound, JavaString, Tag, parse_snbt};
 
 /// A `DataAccessor`.
 #[derive(Clone, Debug, PartialEq)]
@@ -1339,7 +1339,7 @@ mod tests {
 mod orb_uuid_tests {
     use super::Target;
     use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -1419,7 +1419,7 @@ mod orb_uuid_tests {
 mod wolf_live_anger_tests {
     use super::Target;
     use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -1527,7 +1527,7 @@ mod loot_table_tests {
         items::ItemStack,
         save::{self, ChunkExtras, RolledLoot},
     };
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     use std::sync::Arc;
 
     const TABLE: &str = "minecraft:chests/simple_dungeon";

@@ -14,7 +14,7 @@ use horizon_client::{
     scoreboard::bracketed,
     text::{self, Text},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use mod_api::__private::reload::ReloadStageError;
 use std::sync::Arc;
 
@@ -604,7 +604,7 @@ impl Game<'_> {
             Some(tag)
         } else if let Some(Arg::Str(text)) = ctx.get("arguments") {
             Some(
-                horizon_world::nbt::parse_snbt(text)
+                horizon_core::nbt::parse_snbt(text)
                     .map_err(|e| err("argument.nbt.invalid", &[&e]))?
                     .0,
             )
@@ -1087,7 +1087,7 @@ impl Game<'_> {
         // ResourceOrIdArgument retains either an inline value or a named id.
         // Both use the same evaluator and command-source context below.
         let json = if id.starts_with('{') {
-            let (tag, _) = horizon_world::nbt::parse_snbt(id)
+            let (tag, _) = horizon_core::nbt::parse_snbt(id)
                 .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
             horizon_client::scoreboard::tag_to_json(&tag)
         } else {
@@ -1206,11 +1206,11 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn pack_changes_publish_the_new_zip_generation_for_template_reads() {
-        use horizon_world::{
-            compression::Compression,
-            nbt::{self, Limits},
-        };
         use std::{io::Write, path::PathBuf};
+        use {
+            horizon_core::{nbt, nbt::Limits},
+            horizon_world::compression::Compression,
+        };
         let root = std::env::temp_dir().join(format!(
             "template-pack-change-{}-{}",
             std::process::id(),

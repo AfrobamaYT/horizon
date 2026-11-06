@@ -334,7 +334,7 @@ pub fn anvil_result(
             if n != hover_name {
                 naming_cost = 1;
                 price += 1;
-                result.data_mut().custom_name = Some(horizon_world::nbt::Tag::String(n.into()));
+                result.data_mut().custom_name = Some(horizon_core::nbt::Tag::String(n.into()));
             }
         }
         _ => {
@@ -756,10 +756,10 @@ impl StationRecipes {
                                 match (key.as_str(), value) {
                                     (
                                         "minecraft:max_stack_size",
-                                        horizon_world::nbt::Tag::Int(n),
+                                        horizon_core::nbt::Tag::Int(n),
                                     ) => max_stack = *n as u32,
                                     ("!minecraft:max_stack_size", _) => max_stack = 1,
-                                    ("minecraft:max_damage", horizon_world::nbt::Tag::Int(n)) => {
+                                    ("minecraft:max_damage", horizon_core::nbt::Tag::Int(n)) => {
                                         max_damage = *n as u32
                                     }
                                     ("!minecraft:max_damage", _) => max_damage = 0,
@@ -1287,7 +1287,7 @@ mod tests {
         assert_eq!(asset_id, "example:wave");
         assert_eq!(
             description.get("translate"),
-            Some(&horizon_world::nbt::Tag::String("trim.example.wave".into()))
+            Some(&horizon_core::nbt::Tag::String("trim.example.wave".into()))
         );
         assert!(decal);
     }

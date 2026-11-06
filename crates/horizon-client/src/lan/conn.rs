@@ -48,7 +48,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// resource pack downloads in configuration).
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// Vanilla's server-side disconnect during login is a JSON component.
-fn login_disconnect(c: &mut Connection, reason: &horizon_world::nbt::Tag) {
+fn login_disconnect(c: &mut Connection, reason: &horizon_core::nbt::Tag) {
     let json = component_json(reason);
     let _ =
         c.send(&login::Clientbound::Disconnect(login::Disconnect { reason_json: json }).encode());
@@ -57,12 +57,12 @@ fn login_disconnect(c: &mut Connection, reason: &horizon_world::nbt::Tag) {
 /// A component as ComponentSerialization.CODEC writes it with JsonOps (and
 /// Gson without HTML escaping): plain text collapses to a string, the
 /// content fields come first, then `extra`, then the style.
-pub fn component_json(tag: &horizon_world::nbt::Tag) -> String {
+pub fn component_json(tag: &horizon_core::nbt::Tag) -> String {
     component_value(tag).compact()
 }
-fn component_value(tag: &horizon_world::nbt::Tag) -> crate::server::json::Json {
+fn component_value(tag: &horizon_core::nbt::Tag) -> crate::server::json::Json {
     use crate::server::json::Json;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     const ORDER: &[&str] = &[
         "type",
         "text",
@@ -102,7 +102,7 @@ fn component_value(tag: &horizon_world::nbt::Tag) -> crate::server::json::Json {
         Tag::List(items) => Json::Array(items.iter().map(component_value).collect()),
         Tag::Compound(map) => {
             if map.len() == 1
-                && let Some(Tag::String(t)) = map.get(&horizon_world::nbt::JavaString::from("text"))
+                && let Some(Tag::String(t)) = map.get(&horizon_core::nbt::JavaString::from("text"))
             {
                 return Json::String(t.to_string_lossy());
             }
@@ -111,7 +111,7 @@ fn component_value(tag: &horizon_world::nbt::Tag) -> crate::server::json::Json {
             Json::Object(
                 keys.into_iter()
                     .map(|k| {
-                        let v = &map[&horizon_world::nbt::JavaString::from(k.as_str())];
+                        let v = &map[&horizon_core::nbt::JavaString::from(k.as_str())];
                         let value = match v {
                             Tag::Byte(b) => Json::Bool(*b != 0),
                             Tag::Int(i) => Json::Number(i.to_string()),
@@ -133,9 +133,9 @@ fn component_value(tag: &horizon_world::nbt::Tag) -> crate::server::json::Json {
 /// prompt) as ComponentSerialization.CODEC writes it with NbtOps. An array is
 /// its first component with the rest appended (`createFromList`); a list of
 /// components mixing plain strings and objects has the strings as `{text}`.
-pub fn component_tag(v: &crate::server::json::Json) -> horizon_world::nbt::Tag {
+pub fn component_tag(v: &crate::server::json::Json) -> horizon_core::nbt::Tag {
     use crate::server::json::Json;
-    use horizon_world::nbt::{JavaString, Tag};
+    use horizon_core::nbt::{JavaString, Tag};
     fn list(items: &[Json]) -> Tag {
         same_kind(items.iter().map(component_tag).collect())
     }
@@ -342,7 +342,7 @@ impl PlayerSender {
     }
     /// Send a play disconnect with this reason after what was sent before,
     /// then close.
-    pub fn disconnect(&self, reason: horizon_world::nbt::Tag) {
+    pub fn disconnect(&self, reason: horizon_core::nbt::Tag) {
         self.flush();
         match &self.to {
             To::Disabled => {}
@@ -600,7 +600,7 @@ fn refuse(
     shared: &Shared,
     thread: &str,
     user: &str,
-    reason: &horizon_world::nbt::Tag,
+    reason: &horizon_core::nbt::Tag,
 ) -> String {
     let text = shared
         .config
@@ -1035,7 +1035,7 @@ fn login_and_configure(
         && !shared.config.older_clients_play
     {
         let text = super::OLDER_CLIENTS_UNFINISHED;
-        let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(text));
+        let reason = horizon_core::nbt::Tag::String(horizon_core::nbt::JavaString::from(text));
         let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
         if let Some(log) = &shared.config.log {
             let line = format!(
@@ -1099,7 +1099,7 @@ fn login_and_configure(
         } else {
             crate::content_identity::MISMATCH
         };
-        let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(text));
+        let reason = horizon_core::nbt::Tag::String(horizon_core::nbt::JavaString::from(text));
         let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
         if let Some(log) = &shared.config.log {
             let line =
@@ -1135,7 +1135,7 @@ fn login_and_configure(
             }
         }
         if !content_match {
-            let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(
+            let reason = horizon_core::nbt::Tag::String(horizon_core::nbt::JavaString::from(
                 crate::content_identity::MISMATCH,
             ));
             let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
@@ -1234,7 +1234,7 @@ fn mod_list_unreadable(error: &horizon_protocol::Error) -> crate::text::Text {
 
 /// ServerCommonPacketListenerImpl.handleResourcePackResponse: a player who
 /// declined the required pack is disconnected. The reason and its text.
-fn pack_rejected(shared: &Shared, name: &str, pack: u128) -> (horizon_world::nbt::Tag, String) {
+fn pack_rejected(shared: &Shared, name: &str, pack: u128) -> (horizon_core::nbt::Tag, String) {
     let reason = translatable("multiplayer.requiredTexturePrompt.disconnect", &[]);
     let Some(log) = &shared.config.log else {
         return (reason, String::new());
@@ -1251,7 +1251,7 @@ fn pack_rejected(shared: &Shared, name: &str, pack: u128) -> (horizon_world::nbt
 /// RateKickingConnection: a player whose packets a second passed rate-limit
 /// is disconnected ("disconnect.exceeded_packet_rate") with a WARN, as
 /// vanilla's kick logs it.
-fn rate_exceeded(shared: &Shared, average: f32) -> (horizon_world::nbt::Tag, String) {
+fn rate_exceeded(shared: &Shared, average: f32) -> (horizon_core::nbt::Tag, String) {
     let reason = translatable("disconnect.exceeded_packet_rate", &[]);
     let Some(log) = &shared.config.log else {
         return (reason, String::new());
@@ -1460,7 +1460,7 @@ impl io_pool::Session for PlayConn {
     /// required resource pack declined, a rate-limit excess, a malformed packet.
     fn packet(&mut self, id: i32, payload: Vec<u8>) -> io_pool::Verdict {
         use io_pool::Verdict;
-        let kick = |(reason, text): (horizon_world::nbt::Tag, String)| {
+        let kick = |(reason, text): (horizon_core::nbt::Tag, String)| {
             let body = play::Clientbound::Disconnect(cfg::Disconnect { reason }).encode();
             Verdict::Kick(text, body)
         };
@@ -2186,7 +2186,7 @@ mod tests {
         sender.send(vec![9]);
         drop(holding);
         flush_all([&sender]);
-        sender.disconnect(horizon_world::nbt::Tag::Byte(0));
+        sender.disconnect(horizon_core::nbt::Tag::Byte(0));
         let next = || unpack(rx.recv_timeout(Duration::from_secs(10)).unwrap());
         assert_eq!(next(), [vec![9]]);
         assert_eq!(next(), [b"disconnect".to_vec()]);
@@ -2273,7 +2273,7 @@ mod tests {
         assert_eq!(bodies(&rx), [vec![vec![2], vec![3]], vec![vec![4]]]);
         let holding = Holding::start();
         sender.send(vec![5]);
-        sender.disconnect(horizon_world::nbt::Tag::Byte(0));
+        sender.disconnect(horizon_core::nbt::Tag::Byte(0));
         drop(holding);
         sender.flush();
         assert_eq!(bodies(&rx), [vec![vec![5]], vec![b"disconnect".to_vec()]]);

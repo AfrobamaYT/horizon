@@ -1837,7 +1837,7 @@ impl Game<'_> {
         vehicle: Option<u32>,
         others: &[u32],
         remove: bool,
-    ) -> Option<(horizon_world::nbt::Tag, [i32; 4])> {
+    ) -> Option<(horizon_core::nbt::Tag, [i32; 4])> {
         vehicle?;
         let back = self.dim;
         let theirs = super::Dim::from_id(dim);
@@ -1884,8 +1884,8 @@ impl Game<'_> {
         };
         let saved = guest
             .saved
-            .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-        if let horizon_world::nbt::Tag::Compound(p) = saved {
+            .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+        if let horizon_core::nbt::Tag::Compound(p) = saved {
             p.insert("RootVehicle".into(), tag);
         }
         guest.saved_vehicle = Some(attach);
@@ -1928,7 +1928,7 @@ impl Game<'_> {
             host.hub.seat_order += 1;
             let order = host.hub.seat_order;
             host.hub.guests.update(i, |g| {
-                if let Some(horizon_world::nbt::Tag::Compound(p)) = &mut g.saved {
+                if let Some(horizon_core::nbt::Tag::Compound(p)) = &mut g.saved {
                     p.remove(&"RootVehicle".into());
                 }
                 g.vehicle = Some(id);
@@ -3449,10 +3449,10 @@ impl Game<'_> {
     /// itself, the sound and the crumbs are played here.
     pub(super) fn player_equipment_broke(
         &mut self,
-        slot: horizon_world::player_inventory::EquipmentSlot,
+        slot: horizon_core::equipment_slot::EquipmentSlot,
         stack: &horizon_client::items::ItemStack,
     ) {
-        use horizon_world::player_inventory::EquipmentSlot;
+        use horizon_core::equipment_slot::EquipmentSlot;
         let event = match slot {
             EquipmentSlot::MainHand => 47,
             EquipmentSlot::OffHand => 48,
@@ -3815,8 +3815,8 @@ pub(super) fn living_flags(using: Option<(usize, u32)>) -> i8 {
 
 /// The name a mod hears for an equipment slot (the armor stand hook's names, plus
 /// the two slots a mount's gear uses).
-fn equipment_slot_name(slot: horizon_world::player_inventory::EquipmentSlot) -> &'static str {
-    use horizon_world::player_inventory::EquipmentSlot;
+fn equipment_slot_name(slot: horizon_core::equipment_slot::EquipmentSlot) -> &'static str {
+    use horizon_core::equipment_slot::EquipmentSlot;
     match slot {
         EquipmentSlot::MainHand => "mainhand",
         EquipmentSlot::OffHand => "offhand",
@@ -4648,7 +4648,7 @@ mod tests {
     /// The names a mod matches on for a broken item's slot (a contract).
     #[test]
     fn a_broken_items_slot_is_named_for_mods() {
-        use horizon_world::player_inventory::EquipmentSlot::*;
+        use horizon_core::equipment_slot::EquipmentSlot::*;
         let named: Vec<_> = [MainHand, OffHand, Head, Chest, Legs, Feet, Body, Saddle]
             .map(equipment_slot_name)
             .to_vec();

@@ -11,7 +11,7 @@ use horizon_client::{
     items::ItemStack,
     mesher::Vertex,
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 pub use mod_api::game::{NativeMapDecoration, NativeMapInfo};
 use std::collections::HashMap;
 

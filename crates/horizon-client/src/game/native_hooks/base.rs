@@ -4923,7 +4923,7 @@ impl Game<'_> {
         let mut data = horizon_client::item_data::StackData::default();
         data.set_other(
             "minecraft:item_model",
-            Some(horizon_world::nbt::Tag::String(model.into())),
+            Some(horizon_core::nbt::Tag::String(model.into())),
         );
         stack.extra = Some(Box::new(data));
         let start = batch.vertices.len();

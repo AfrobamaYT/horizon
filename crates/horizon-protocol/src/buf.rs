@@ -2,7 +2,7 @@
 //! VarLong, ByteBufCodecs) and the `Codec` building blocks packets are
 //! composed from, mirroring `StreamCodec.composite`.
 use crate::{Error, Result};
-use horizon_world::nbt::{self, Tag};
+use horizon_core::{nbt, nbt::Tag};
 use std::marker::PhantomData;
 
 /// Vanilla's default NBT quota for network tags (NbtAccounter.defaultQuota).

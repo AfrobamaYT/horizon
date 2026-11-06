@@ -11,7 +11,7 @@ use crate::game::{
     test_instances::TestDef,
 };
 use horizon_client::text::{self, Text};
-use horizon_world::worldgen::structure::BoundingBox;
+use horizon_core::bounding_box::BoundingBox;
 use horizon_world::worldgen::structure::Rotation;
 
 type Pos = (i32, i32, i32);

@@ -9,7 +9,7 @@ use super::{
     commands::{Target, place_summoned},
 };
 use horizon_core::geometry::Vec3;
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 
 /// Whether a position is one `/summon` takes.
 fn position_ok(pos: [f64; 3]) -> bool {

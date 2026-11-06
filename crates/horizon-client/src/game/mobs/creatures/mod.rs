@@ -594,7 +594,7 @@ impl Game<'_> {
     /// when it breaks the slot empties and `onEquippedItemBroken` broadcasts
     /// the break event.
     fn wear_sun_protection(&mut self, id: u32) {
-        use horizon_world::player_inventory::EquipmentSlot;
+        use horizon_core::equipment_slot::EquipmentSlot;
         let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
@@ -637,7 +637,7 @@ impl Game<'_> {
     /// pieces reach). A fire hit leaves a fire-resistant piece alone
     /// (`ItemStack.canBeHurtBy`).
     fn hurt_mob_armor(&mut self, id: u32, damage: f32, kind: horizon_client::mobs::DamageKind) {
-        use horizon_world::player_inventory::EquipmentSlot;
+        use horizon_core::equipment_slot::EquipmentSlot;
         if damage <= 0.0 {
             return;
         }
@@ -3104,7 +3104,7 @@ impl Game<'_> {
                     let mut horn = ItemStack::new("minecraft:goat_horn", 1);
                     horn.data_mut().set_other(
                         "minecraft:instrument",
-                        Some(horizon_world::nbt::Tag::String(instrument.into())),
+                        Some(horizon_core::nbt::Tag::String(instrument.into())),
                     );
                     // Goat.dropHorn's ItemEntity constructor leaves pickupDelay at
                     // 0 (no setDefaultPickUpDelay).
@@ -10457,8 +10457,8 @@ mod armor_destroy_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn body_armor_guards_and_break_event_are_preserved() {
         use horizon_client::mobs::{DamageKind, Mob};
+        use horizon_core::equipment_slot::EquipmentSlot;
         use horizon_core::geometry::Vec3;
-        use horizon_world::player_inventory::EquipmentSlot;
         with_game(|game| {
             let kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
             game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
@@ -10488,8 +10488,8 @@ mod armor_destroy_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn sun_protection_uses_mob_draw_and_broadcasts_break() {
         use horizon_client::mobs::Mob;
+        use horizon_core::equipment_slot::EquipmentSlot;
         use horizon_core::{geometry::Vec3, random::RandomSource};
-        use horizon_world::player_inventory::EquipmentSlot;
         with_game(|game| {
             let kind = game
                 .res
@@ -10655,7 +10655,7 @@ mod armor_destroy_tests {
 mod conversion_tag_tests {
     use super::*;
     use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
