@@ -83,7 +83,7 @@ struct Gen<'r> {
     /// Each walked type's id, by its spelling.
     ids: HashMap<String, u32>,
     /// Each walked type, in id order: its spelling and node function.
-    nodes: Vec<(String, String, TokenStream)>,
+    nodes: Vec<(String, String, TokenStream, Vec<u32>, bool)>,
     /// Each listed copy type's codec, by path: already generated.
     codecs: HashMap<String, bool>,
     items: Vec<TokenStream>,
@@ -478,7 +478,42 @@ impl<'r> Gen<'r> {
                 .unwrap_or((path.clone(), String::new())),
             _ => (ty, String::new()),
         };
-        self.nodes.push((path, hash, TokenStream::new()));
+        self.nodes
+            .push((path, hash, TokenStream::new(), Vec::new(), false));
+        // Wrapper traversal must also be raw before a field/index can prove separation.
+        fn raw(shape: &Shape) -> bool {
+            match shape {
+                Shape::Ref { to, .. } | Shape::Wrapped(Wrapper::Box, to) => raw(to),
+                Shape::Wrapped(..) => false,
+                _ => true,
+            }
+        }
+        let fields = match shape {
+            Shape::Named(path, _) => {
+                let named = self.rule.named(path).expect("listed");
+                self.rule
+                    .fields(path)
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, f)| {
+                        (f.case.is_none() && raw(&self.rule.shape(&named.module, Some(path), f.ty)))
+                            .then_some(i as u32)
+                    })
+                    .collect()
+            }
+            Shape::Tuple(parts) => parts
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| raw(p).then_some(i as u32))
+                .collect(),
+            _ => Vec::new(),
+        };
+        self.nodes[id as usize].3 = fields;
+        self.nodes[id as usize].4 = match shape {
+            Shape::Array(elem, _) | Shape::Slice(elem) => raw(elem),
+            Shape::Collection(Collection::Vec, args) => raw(&args[0]),
+            _ => false,
+        };
         let body = self.node_body(shape);
         let name = format_ident!("node_{id}");
         self.items.push(quote! {
@@ -496,11 +531,10 @@ impl<'r> Gen<'r> {
     /// a node that may not is never reached through a `&mut`.
     fn step(&mut self, shape: &Shape, q: TokenStream, w: TokenStream) -> TokenStream {
         let through = |this: &mut Self, ty: TokenStream, to: &Shape, mutable: bool, owned: bool| {
-            let inner = spell(to).expect("crossable");
             let next = if owned || mutable {
-                quote!(if w { &mut **(q as *mut #ty) as *mut #inner as *mut () } else { &**(q as *const #ty) as *const #inner as *mut () })
+                quote!(if w { &raw mut **(q as *mut #ty) as *mut () } else { &raw const **(q as *const #ty) as *mut () })
             } else {
-                quote!(&**(q as *const #ty) as *const #inner as *mut ())
+                quote!(&raw const **(q as *const #ty) as *mut ())
             };
             let w_next = if owned || mutable {
                 quote!(w)
@@ -542,7 +576,12 @@ impl<'r> Gen<'r> {
                 let read = self.encode(shape, quote!(r));
                 let write = if buildable(shape, self.rule) {
                     let value = self.decode(shape, quote!(value));
-                    quote!(I::Op::Set(#i, value) => {
+                    let shape_rust = spell(shape).expect("copy");
+                    quote!(I::Op::Check(#i, value) => {
+                        let value = value.clone();
+                        let _: #shape_rust = #value;
+                        Ok(I::Reply::Done)
+                    }, I::Op::Set(#i, value) => {
                         if !w { return Err(I::not_here("a read-only node")); }
                         let value = #value;
                         let r = #set;
@@ -661,11 +700,15 @@ impl<'r> Gen<'r> {
                 }
             }
             Shape::Array(elem, _) | Shape::Slice(elem) => {
-                let index = self.indexed(&rust, elem, quote!(get(i)), quote!(get_mut(i)));
+                let index = self.raw_indexed(&rust, elem, false);
                 quote!(#len #index)
             }
             Shape::Collection(collection, args) => match collection {
-                Collection::Vec | Collection::VecDeque => {
+                Collection::Vec => {
+                    let index = self.raw_indexed(&rust, &args[0], true);
+                    quote!(#len #index)
+                }
+                Collection::VecDeque => {
                     let index = self.indexed(&rust, &args[0], quote!(get(i)), quote!(get_mut(i)));
                     quote!(#len #index)
                 }
@@ -706,6 +749,24 @@ impl<'r> Gen<'r> {
             }
             Crossing::Handle => self.step(shape, quote!(q), quote!(w)),
             Crossing::Opaque => quote!(Err(I::not_here("an element that can't cross"))),
+        }
+    }
+
+    fn raw_indexed(&mut self, rust: &TokenStream, elem: &Shape, vector: bool) -> TokenStream {
+        let element = self.element(elem);
+        let ty = spell(elem).expect("element");
+        let ptr = if vector {
+            quote!(if w { (*(p as *mut #rust)).as_mut_ptr() } else { (*(p as *const #rust)).as_ptr() as *mut #ty })
+        } else {
+            quote!(p.cast::<#ty>())
+        };
+        quote! {
+            I::Op::Index(i) => {
+                let i = usize::try_from(i).unwrap_or(usize::MAX);
+                if i >= (&*(p as *const #rust)).len() { return Err(I::not_here("an index past the end")); }
+                let q = (#ptr).add(i).cast::<()>();
+                #element
+            }
         }
     }
 
@@ -807,7 +868,8 @@ impl<'r> Gen<'r> {
         let key = rust.to_string();
         let id = self.nodes.len() as u32;
         self.ids.insert(key.clone(), id);
-        self.nodes.push((key, String::new(), TokenStream::new()));
+        self.nodes
+            .push((key, String::new(), TokenStream::new(), Vec::new(), false));
         let arms: Vec<_> = fields
             .iter()
             .enumerate()
@@ -847,7 +909,8 @@ impl<'r> Gen<'r> {
             let id = self.nodes.len() as u32;
             let node = format_ident!("node_{id}");
             let path = format!("{module}::{}ReturnPlace", shape.raw_record());
-            self.nodes.push((path, String::new(), quote!(#node)));
+            self.nodes
+                .push((path, String::new(), quote!(#node), Vec::new(), false));
             let arm = self.part(
                 0,
                 &returned,
@@ -1299,6 +1362,23 @@ pub(crate) fn select<'a>(
         ..Counts::default()
     };
     let mut selection = Selection::default();
+    // Index field identities once: catalog-wide coverage selects thousands of fields.
+    let fields: HashMap<_, _> = rule
+        .paths()
+        .flat_map(|owner| {
+            rule.fields(owner)
+                .into_iter()
+                .enumerate()
+                .map(move |(index, field)| {
+                    let member = field.member.to_token_stream().to_string();
+                    let path = match field.case {
+                        Some((_, case)) => format!("{owner}::{case}::{member}"),
+                        None => format!("{owner}::{member}"),
+                    };
+                    (path, (owner, index, field))
+                })
+        })
+        .collect();
     let mut functions = Vec::new();
     let mut members = Vec::new();
     let mut exposed = HashSet::new();
@@ -1348,20 +1428,9 @@ pub(crate) fn select<'a>(
                 }
                 "field" => {
                     // An enum field's manifest path includes its case; numbering spans all cases.
-                    let field = rule.paths().find_map(|owner| {
-                        rule.fields(owner)
-                            .into_iter()
-                            .enumerate()
-                            .find_map(|(index, field)| {
-                                use quote::ToTokens;
-                                let member = field.member.to_token_stream().to_string();
-                                let field_path = match field.case {
-                                    Some((_, case)) => format!("{owner}::{case}::{member}"),
-                                    None => format!("{owner}::{member}"),
-                                };
-                                (bare(path) == field_path).then_some((owner, index, field))
-                            })
-                    });
+                    let field = fields
+                        .get(&bare(path))
+                        .map(|(owner, index, field)| (*owner, *index, field));
                     if let Some((owner, index, field)) = field {
                         let named = rule.named(owner).expect("listed");
                         let shape = rule.shape(&named.module, Some(owner), field.ty);
@@ -1495,7 +1564,7 @@ pub fn table_with_points(
     let types = generator
         .nodes
         .iter()
-        .map(|(path, hash, node)| quote!(I::Type { path: #path, hash: #hash, node: #node },));
+        .map(|(path, hash, node, fields, index)| quote!(I::Type { path: #path, hash: #hash, node: #node, raw_fields: &[#(#fields),*], raw_index: #index },));
     let items = &generator.items;
     let code = quote! {
         #![allow(unsafe_code, unused_unsafe, unused_parens, non_snake_case, dead_code)]
@@ -2103,7 +2172,7 @@ pub(crate) mod tests {
         let (code, counts) = all_table(&[internal(
             "horizon_client::Fields",
             "struct",
-            "struct Fields { slice: &'static [u8], map: HashMap<String, u8, UnknownHasher>, tuple: (u8, Unknown) }",
+            "struct Fields { slice: &'static [u8], map: std::collections::HashMap<String, u8, UnknownHasher>, tuple: (u8, Unknown) }",
         )]);
         assert_eq!(counts.types, 1);
         assert!(!code.contains("I :: Op :: Field"));
@@ -2130,12 +2199,12 @@ pub(crate) mod tests {
             internal(
                 "horizon_client::g::World",
                 "struct",
-                "struct World { players : Vec < Player > , spawn : Option < Pos > , by_name : HashMap < String , Player > , lock : RefCell < u8 > , }",
+                "struct World { players : Vec < Player > , spawn : Option < Pos > , by_name : std::collections::HashMap < String , Player > , lock : RefCell < u8 > , }",
             ),
             internal(
                 "horizon_client::g::Game",
                 "struct",
-                "struct Game < 'a > { world : Box < World > , shared : Arc < World > , res : & 'a World , }",
+                "struct Game < 'a > { world : Box < World > , shared : std::sync::Arc < World > , res : & 'a World , }",
             ),
             internal(
                 "horizon_client::g::Game<'_>::spawn",

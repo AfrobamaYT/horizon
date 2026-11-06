@@ -279,7 +279,6 @@ mod tests {
 
     #[test]
     fn erased_registration_runs_after_native_and_commits_its_journal() {
-        use mod_points::internals::bindings::horizon::mod_internals::view::{Host, HostNode};
         use mod_points::internals::{Op, Reply, Type, Value};
         use wasmtime::component::Resource;
         unsafe fn counter(
@@ -290,6 +289,7 @@ mod tests {
             // SAFETY: this synthetic slot passes its exclusively borrowed i64 record.
             let value = unsafe { &mut *ptr.cast::<i64>() };
             match op {
+                Op::Check(0, Value::S(_)) => Ok(Reply::Done),
                 Op::Get(0) => Ok(Reply::Value(Value::S(*value))),
                 Op::Set(0, Value::S(next)) => {
                     *value = next;
@@ -303,6 +303,8 @@ mod tests {
                 path: "Counter",
                 hash: "hash",
                 node: counter,
+                raw_fields: &[0, 1],
+                raw_index: true,
             }],
             thunks: &[],
             members: &[],

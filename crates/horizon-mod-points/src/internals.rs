@@ -47,6 +47,8 @@ pub enum Op<'v> {
     Get(u32),
     /// Writes a copy-typed field.
     Set(u32, Value),
+    /// Checks a copy field with its codec without changing game state.
+    Check(u32, &'v Value),
     /// A list's element: answers its node.
     Index(u64),
     /// A map's entry by key: answers its node.
@@ -106,6 +108,10 @@ pub struct Type {
     /// Empty for a wrapper or collection, reached only through a checked named type.
     pub hash: &'static str,
     pub node: NodeFn,
+    /// Fields whose step creates no reference to the parent (including wrappers).
+    pub raw_fields: &'static [u32],
+    /// Index steps create no reference to the parent or its elements.
+    pub raw_index: bool,
 }
 
 /// A raw point's receiver and record, as roots of a call.
@@ -208,7 +214,7 @@ pub fn node(arg: Arg) -> Result<*mut (), Refusal> {
 /// The generic internals interface, generated from the same WIT on host and guest.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub mod bindings {
-    wasmtime::component::bindgen!({ path: "wit/internals.wit", world: "internals" });
+    wasmtime::component::bindgen!({ path: "wit/internals.wit", world: "internals", imports: { default: store | trappable } });
 }
 #[cfg(target_arch = "wasm32")]
 pub mod bindings {

@@ -142,6 +142,9 @@ impl Active<'_> {
     }
 
     fn keep(&mut self, node: Node) -> Result<Resource<wire::Node>, wire::Refusal> {
+        if self.nodes.len() >= 4096 {
+            return Err(wire::Refusal::NotHere("internals budget".into()));
+        }
         let rep = NEXT_NODE
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
             .map_err(|_| gone("node resource ids exhausted"))?;
@@ -181,10 +184,13 @@ pub fn run<T>(
         declared,
     };
     let scope = Scope(CURRENT.replace((&raw mut active).cast()));
-    let result = f();
+    let result = contain(f);
     drop(scope);
     if result.is_ok() {
-        log_refused(active.frame.apply());
+        contain(|| {
+            log_refused(active.frame.apply());
+            Ok(())
+        })?;
     }
     result
 }
@@ -213,8 +219,172 @@ pub fn add_to_linker(linker: &mut Linker<State>) {
         .expect("the game's internals imports are defined once");
 }
 
-impl wire::HostNode for View {
+fn contain<T>(f: impl FnOnce() -> wasmtime::Result<T>) -> wasmtime::Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|panic| {
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("unknown panic");
+        log::error!("wasm internals panic: {message}");
+        Err(wasmtime::Error::msg(format!(
+            "wasm internals panic: {message}"
+        )))
+    })
+}
+
+fn charge(
+    host: &mut wasmtime::component::Access<'_, State, View>,
+    cost: usize,
+) -> wasmtime::Result<()> {
+    use wasmtime::AsContextMut;
+    let mut store = host.as_context_mut();
+    if let Ok(fuel) = store.get_fuel() {
+        let left = fuel
+            .checked_sub(cost as u64)
+            .ok_or_else(|| wasmtime::Error::msg("internals fuel exhausted"))?;
+        store.set_fuel(left)?;
+    }
+    Ok(())
+}
+
+fn import<T>(
+    mut host: wasmtime::component::Access<'_, State, View>,
+    cells: usize,
+    f: impl FnOnce() -> Result<T, wire::Refusal>,
+    output: impl FnOnce(&T) -> usize,
+) -> wasmtime::Result<Result<T, wire::Refusal>> {
+    contain(|| {
+        charge(&mut host, 1 + cells)?;
+        let result = f();
+        if let Ok(value) = &result {
+            charge(&mut host, output(value))?;
+        }
+        Ok(result)
+    })
+}
+
+fn reached_cells(value: &wire::Reached) -> usize {
+    match value {
+        wire::Reached::Value(v) => v.len(),
+        _ => 0,
+    }
+}
+
+impl wire::HostNode for View {}
+impl wire::Host for View {}
+impl wire::HostNodeWithStore<State> for View {
     fn field(
+        host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+        n: u32,
+    ) -> wasmtime::Result<Result<Resource<wire::Node>, wire::Refusal>> {
+        import(host, 0, || View.field(node, n), |_| 0)
+    }
+    fn get(
+        host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+        n: u32,
+    ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
+        import(host, 0, || View.get(node, n), Vec::len)
+    }
+    fn set(
+        host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+        n: u32,
+        v: Vec<wire::Cell>,
+    ) -> wasmtime::Result<Result<(), wire::Refusal>> {
+        import(host, v.len(), || View.set(node, n, v), |_| 0)
+    }
+    fn index(
+        host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+        i: u64,
+    ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
+        import(host, 0, || View.index(node, i), reached_cells)
+    }
+    fn key(
+        host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+        k: Vec<wire::Cell>,
+    ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
+        import(host, k.len(), || View.key(node, k), reached_cells)
+    }
+    fn len(
+        host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+    ) -> wasmtime::Result<Result<u64, wire::Refusal>> {
+        import(host, 0, || View.len(node), |_| 0)
+    }
+    fn case(
+        host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+    ) -> wasmtime::Result<Result<u32, wire::Refusal>> {
+        import(host, 0, || View.case(node), |_| 0)
+    }
+    fn read(
+        host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+    ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
+        import(host, 0, || View.read(node), Vec::len)
+    }
+    fn drop(
+        mut host: wasmtime::component::Access<'_, State, Self>,
+        node: Resource<wire::Node>,
+    ) -> wasmtime::Result<()> {
+        contain(|| {
+            charge(&mut host, 1)?;
+            View.drop(node)
+        })
+    }
+}
+impl wire::HostWithStore<State> for View {
+    fn root(
+        host: wasmtime::component::Access<'_, State, Self>,
+        n: u32,
+    ) -> wasmtime::Result<Result<Resource<wire::Node>, wire::Refusal>> {
+        import(host, 0, || View.root(n), |_| 0)
+    }
+    fn call(
+        host: wasmtime::component::Access<'_, State, Self>,
+        declared: u32,
+        receiver: Option<Resource<wire::Node>>,
+        args: Vec<wire::Arg>,
+    ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
+        let cells = args
+            .iter()
+            .map(|a| match a {
+                wire::Arg::Value(v) => v.len(),
+                _ => 0,
+            })
+            .sum::<usize>();
+        import(
+            host,
+            1000 + cells,
+            || View.call(declared, receiver, args),
+            reached_cells,
+        )
+    }
+}
+
+fn decode(cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
+    if cells.len() > 65_536
+        || cells
+            .iter()
+            .map(|c| match c {
+                wire::Cell::Str(s) => s.len(),
+                _ => 0,
+            })
+            .sum::<usize>()
+            > 1_048_576
+    {
+        return Err(wire::Refusal::NotHere("internals budget".into()));
+    }
+    unflatten(cells).map_err(Into::into)
+}
+
+impl View {
+    pub fn field(
         &mut self,
         node: Resource<wire::Node>,
         n: u32,
@@ -224,14 +394,14 @@ impl wire::HostNode for View {
             a.keep(next)
         })
     }
-    fn get(
+    pub fn get(
         &mut self,
         node: Resource<wire::Node>,
         n: u32,
     ) -> Result<Vec<wire::Cell>, wire::Refusal> {
         current(|a| Ok(flatten(a.frame.get(a.node(&node)?, n)?)))
     }
-    fn set(
+    pub fn set(
         &mut self,
         node: Resource<wire::Node>,
         n: u32,
@@ -242,10 +412,10 @@ impl wire::HostNode for View {
                 .nodes
                 .get(&node.rep())
                 .ok_or_else(|| gone("the node's call is over"))?;
-            a.frame.set(node, n, unflatten(v)?).map_err(Into::into)
+            a.frame.set(node, n, decode(v)?).map_err(Into::into)
         })
     }
-    fn index(
+    pub fn index(
         &mut self,
         node: Resource<wire::Node>,
         i: u64,
@@ -255,26 +425,26 @@ impl wire::HostNode for View {
             a.reached(next)
         })
     }
-    fn key(
+    pub fn key(
         &mut self,
         node: Resource<wire::Node>,
         k: Vec<wire::Cell>,
     ) -> Result<wire::Reached, wire::Refusal> {
         current(|a| {
-            let next = a.frame.key(a.node(&node)?, unflatten(k)?)?;
+            let next = a.frame.key(a.node(&node)?, decode(k)?)?;
             a.reached(next)
         })
     }
-    fn len(&mut self, node: Resource<wire::Node>) -> Result<u64, wire::Refusal> {
+    pub fn len(&mut self, node: Resource<wire::Node>) -> Result<u64, wire::Refusal> {
         current(|a| a.frame.len(a.node(&node)?).map_err(Into::into))
     }
-    fn case(&mut self, node: Resource<wire::Node>) -> Result<u32, wire::Refusal> {
+    pub fn case(&mut self, node: Resource<wire::Node>) -> Result<u32, wire::Refusal> {
         current(|a| a.frame.case(a.node(&node)?).map_err(Into::into))
     }
-    fn read(&mut self, node: Resource<wire::Node>) -> Result<Vec<wire::Cell>, wire::Refusal> {
+    pub fn read(&mut self, node: Resource<wire::Node>) -> Result<Vec<wire::Cell>, wire::Refusal> {
         current(|a| Ok(flatten(a.frame.read(a.node(&node)?)?)))
     }
-    fn drop(&mut self, node: Resource<wire::Node>) -> wasmtime::Result<()> {
+    pub fn drop(&mut self, node: Resource<wire::Node>) -> wasmtime::Result<()> {
         let _ = current(|a| {
             a.nodes.remove(&node.rep());
             Ok(())
@@ -283,14 +453,14 @@ impl wire::HostNode for View {
     }
 }
 
-impl wire::Host for View {
-    fn root(&mut self, n: u32) -> Result<Resource<wire::Node>, wire::Refusal> {
+impl View {
+    pub fn root(&mut self, n: u32) -> Result<Resource<wire::Node>, wire::Refusal> {
         current(|a| {
             let node = a.frame.root(n)?;
             a.keep(node)
         })
     }
-    fn call(
+    pub fn call(
         &mut self,
         declared: u32,
         receiver: Option<Resource<wire::Node>>,
@@ -316,7 +486,7 @@ impl wire::Host for View {
             let args = args
                 .into_iter()
                 .map(|arg| match arg {
-                    wire::Arg::Value(v) => Ok(Call::Value(unflatten(v)?)),
+                    wire::Arg::Value(v) => Ok(Call::Value(decode(v)?)),
                     wire::Arg::Node(r) => node(&r).map(Call::Node),
                 })
                 .collect::<Result<Vec<_>, wire::Refusal>>()?;
@@ -334,8 +504,168 @@ impl wire::Host for View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frame::Root;
     use crate::frame::tests::{TABLE, frame, world};
-    use wire::{Host, HostNode};
+
+    #[test]
+    fn live_nodes_and_wire_values_are_bounded() {
+        let mut game = world();
+        run(frame(&mut game), &[], || {
+            for _ in 0..4096 { View.root(0).unwrap(); }
+            assert!(matches!(View.root(0), Err(wire::Refusal::NotHere(why)) if why == "internals budget"));
+            Ok(())
+        }).unwrap();
+        assert!(matches!(
+            decode(vec![wire::Cell::Str("x".repeat(1_048_577))]),
+            Err(wire::Refusal::NotHere(_))
+        ));
+        assert!(matches!(
+            decode(vec![wire::Cell::None; 65_537]),
+            Err(wire::Refusal::NotHere(_))
+        ));
+    }
+
+    mod fixture {
+        include!("../tests/internals/host.rs");
+    }
+
+    type FixtureFire = wasmtime::component::TypedFunc<(u32, mod_points::internals::bindings::exports::horizon::mod_internals::raw_listeners::HostKind), ()>;
+    struct FixtureGroup {
+        exports: mod_api::__private::wasm_host::Exports,
+        fire: FixtureFire,
+        declared: Vec<Resolved>,
+    }
+    fn fixture_group() -> FixtureGroup {
+        use mod_api::__private::wasm_host::{Member, instantiate};
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_WASM_INTERNALS").expect("fixture directory"),
+        );
+        let package = root.join("counter/target/horizon-mod/internals_counter.hmod");
+        let manifest = horizon_mods::Package::read(&package).unwrap().manifest;
+        let package = crate::WasmPackage {
+            manifest,
+            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+        };
+        let std = std::fs::read(std::env::var_os("HORIZON_WASM_STD").expect("std member")).unwrap();
+        let config = crate::RuntimeConfig::default();
+        let engine = crate::engine(&config).unwrap();
+        let component =
+            crate::component(&engine, &config, &std, std::slice::from_ref(&package), &[0]).unwrap();
+        let exports = instantiate(
+            &engine,
+            &component,
+            &[Member {
+                id: "internals_counter",
+                exports: horizon_mods::manifest::export_prefix("internals_counter"),
+            }],
+            config.budgets,
+            |linker| {
+                add_to_linker(linker);
+            },
+        )
+        .unwrap()
+        .remove(0)
+        .exports;
+        let interface = format!(
+            "{}-raw-listeners",
+            horizon_mods::manifest::export_prefix("internals_counter")
+        );
+        let listed = exports
+            .func::<(), (Vec<(String, String)>,)>(&interface, "declared")
+            .unwrap();
+        let listed = exports.load(|store| Ok(listed.call(store, ())?.0)).unwrap();
+        let declared = resolve(
+            fixture::table(),
+            "internals_counter",
+            &listed
+                .iter()
+                .map(|(p, h)| (p.as_str(), h.as_str()))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let fire = exports.func(&interface, "fire").unwrap();
+        FixtureGroup {
+            exports,
+            fire,
+            declared,
+        }
+    }
+
+    fn fixture_call(group: &FixtureGroup, game: &mut fixture::Game, message: &str) -> Option<()> {
+        use mod_api::__private::wasm_host::CallHost;
+        use mod_points::internals::bindings::exports::horizon::mod_internals::raw_listeners::HostKind;
+        let mut record = fixture::Record {
+            message: message.into(),
+            cancel: false,
+        };
+        let table = fixture::table();
+        let frame = unsafe {
+            Frame::new(
+                table,
+                vec![
+                    Root {
+                        ptr: (game as *mut fixture::Game).cast(),
+                        ty: 0,
+                        writable: true,
+                        receiver: true,
+                        born: None,
+                    },
+                    Root {
+                        ptr: (&raw mut record).cast(),
+                        ty: 1,
+                        writable: true,
+                        receiver: false,
+                        born: None,
+                    },
+                ],
+            )
+        };
+        group.exports.call(CallHost::None, |store| {
+            run(frame, &group.declared, || {
+                group.fire.call(store, (0, HostKind::None))
+            })
+        })
+    }
+
+    fn fixture_game() -> fixture::Game {
+        fixture::Game {
+            left: 1,
+            right: 10,
+            hidden: vec![],
+        }
+    }
+
+    fn refuses_group_but_not_another(mode: &str, expected_left: i64) {
+        let broken = fixture_group();
+        let healthy = fixture_group();
+        let mut game = fixture_game();
+        assert!(fixture_call(&broken, &mut game, mode).is_none());
+        assert!(broken.exports.stopped());
+        assert_eq!((game.left, game.right), (expected_left, 10));
+        assert!(fixture_call(&broken, &mut game, "before").is_none());
+        let mut other = fixture_game();
+        assert_eq!(fixture_call(&healthy, &mut other, "before"), Some(()));
+        assert!(!healthy.exports.stopped());
+        assert_eq!((other.left, other.right), (8, 13));
+    }
+
+    #[test]
+    #[ignore = "needs compiled internals fixture and std member"]
+    fn thunk_panic_stops_only_its_group_after_flushing_prior_writes() {
+        refuses_group_but_not_another("panic_thunk", 42);
+    }
+
+    #[test]
+    #[ignore = "needs compiled internals fixture and std member"]
+    fn final_apply_panic_stops_only_its_group_and_never_unwinds_into_game() {
+        refuses_group_but_not_another("panic_apply", 1);
+    }
+
+    #[test]
+    #[ignore = "needs compiled internals fixture and std member"]
+    fn guest_journal_overflow_refuses_without_affecting_another_group() {
+        refuses_group_but_not_another("budget", 1);
+    }
 
     fn borrow(node: &Resource<wire::Node>) -> Resource<wire::Node> {
         Resource::new_borrow(node.rep())

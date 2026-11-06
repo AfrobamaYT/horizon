@@ -31,6 +31,7 @@ unsafe fn game(ptr: *mut (), writable: bool, op: Op<'_>) -> Result<Reply, Refusa
     // SAFETY: this test's descriptor names exactly the live Game supplied to fire_raw.
     let game = unsafe { &mut *ptr.cast::<Game>() };
     match op {
+        Op::Check(0, Value::S(_)) => Ok(Reply::Done),
         Op::Get(0) => Ok(Reply::Value(Value::S(game.copy))),
         Op::Set(0, Value::S(n)) if writable => {
             game.copy = n;
@@ -44,6 +45,7 @@ unsafe fn child(ptr: *mut (), _: bool, op: Op<'_>) -> Result<Reply, Refusal> {
     // SAFETY: only the Game's child step supplies this node.
     let child = unsafe { &*ptr.cast::<Child>() };
     match op {
+        Op::Check(0, Value::S(_)) => Ok(Reply::Done),
         Op::Get(0) => Ok(Reply::Value(Value::S(child.value))),
         _ => Err(I::not_here("not a benchmark child field")),
     }
@@ -52,6 +54,7 @@ unsafe fn record(ptr: *mut (), writable: bool, op: Op<'_>) -> Result<Reply, Refu
     // SAFETY: the descriptor below names this exact raw record layout.
     let record = unsafe { &mut *ptr.cast::<Record>() };
     match op {
+        Op::Check(0, Value::S(_)) => Ok(Reply::Done),
         Op::Get(0) => Ok(Reply::Value(Value::Str(record.message.clone()))),
         Op::Get(1) => Ok(Reply::Value(Value::B(record.cancel))),
         Op::Set(0, Value::Str(message)) if writable => {
@@ -100,16 +103,22 @@ fn table() -> &'static Table {
                 path: "horizon_client::game::Game",
                 hash: hash("horizon_client::game::Game"),
                 node: game,
+                raw_fields: &[0, 1],
+                raw_index: true,
             },
             Type {
                 path: "horizon_client::game::Child",
                 hash: hash("horizon_client::game::Child"),
                 node: child,
+                raw_fields: &[0, 1],
+                raw_index: true,
             },
             Type {
                 path: "fixture::Raw",
                 hash: "",
                 node: record,
+                raw_fields: &[0, 1],
+                raw_index: true,
             },
         ])),
         members: Box::leak(Box::new([

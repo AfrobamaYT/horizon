@@ -69,6 +69,9 @@ pub struct Frame<'t> {
     allowed_members: BTreeSet<(u32, u32)>,
     /// Bumped by every game function call: every cached pointer is stale after it.
     generation: u64,
+    cache_generation: Cell<u64>,
+    journal_cells: usize,
+    journal_entries: usize,
 }
 
 fn gone(what: &str) -> Refusal {
@@ -77,6 +80,25 @@ fn gone(what: &str) -> Refusal {
 
 fn not_here(what: &str) -> Refusal {
     Refusal::NotHere(what.to_owned())
+}
+
+/// Validates the size of an untrusted value once, before retaining or decoding it.
+pub(crate) fn value_cells(value: &Value) -> Result<usize, Refusal> {
+    let mut pending = vec![value];
+    let mut cells = 0;
+    let mut bytes = 0;
+    while let Some(value) = pending.pop() {
+        cells += 1;
+        match value {
+            Value::Str(s) => bytes += s.len(),
+            Value::Seq(v) | Value::Rec(v) | Value::Var(_, v) => pending.extend(v),
+            _ => {}
+        }
+        if cells > 65_536 || bytes > 1_048_576 {
+            return Err(not_here("internals budget"));
+        }
+    }
+    Ok(cells)
 }
 
 impl<'t> Frame<'t> {
@@ -93,6 +115,9 @@ impl<'t> Frame<'t> {
             journal: Journal::default(),
             allowed_members: BTreeSet::new(),
             generation: 0,
+            cache_generation: Cell::new(0),
+            journal_cells: 0,
+            journal_entries: 0,
         }
     }
 
@@ -132,9 +157,55 @@ impl<'t> Frame<'t> {
             .types
             .get(at.ty as usize)
             .ok_or_else(|| gone("no such type"))?;
+        if !self.raw_step(at.ty, &op) {
+            self.cache_generation.set(self.cache_generation.get() + 1);
+        }
         // SAFETY: `at` was resolved in this generation from a root by the table's own steps, so it
         // points to a live value of type `at.ty`, writable only when `at.writable`.
         unsafe { (ty.node)(at.ptr, at.writable, op) }
+    }
+
+    fn raw_step(&self, ty: u32, op: &Op<'_>) -> bool {
+        let ty = &self.table.types[ty as usize];
+        match op {
+            Op::Field(n) => ty.raw_fields.contains(n),
+            Op::Index(_) => ty.raw_index,
+            _ => false,
+        }
+    }
+
+    fn disjoint(&self, left: &Node, right: &Node) -> Result<bool, Refusal> {
+        let l = self.live_root(left.path.root)?;
+        let r = self.live_root(right.path.root)?;
+        if l.born.is_some() || r.born.is_some() {
+            return Ok(false);
+        }
+        if left.path.root != right.path.root {
+            return Ok(true);
+        }
+        let mut prefix = Path {
+            root: left.path.root,
+            steps: Vec::new(),
+        };
+        for (a, b) in left.path.steps.iter().zip(&right.path.steps) {
+            let at = self.walk(&prefix)?;
+            let op = match a {
+                Step::Field(n) => Op::Field(*n),
+                Step::Index(i) => Op::Index(*i),
+                Step::Key(k) => Op::Key(k),
+            };
+            if !self.raw_step(at.ty, &op) {
+                return Ok(false);
+            }
+            if a != b {
+                return Ok(matches!(
+                    (a, b),
+                    (Step::Field(_), Step::Field(_)) | (Step::Index(_), Step::Index(_))
+                ));
+            }
+            prefix.steps.push(a.clone());
+        }
+        Ok(false)
     }
 
     /// Where `path` leads now, step by step from its root.
@@ -164,12 +235,12 @@ impl<'t> Frame<'t> {
     /// Where `node` is, from its cache when nothing has moved since.
     pub fn resolve(&self, node: &Node) -> Result<Resolved, Refusal> {
         if let Some((generation, at)) = node.at.get()
-            && generation == self.generation
+            && generation == self.cache_generation.get()
         {
             return Ok(at);
         }
         let at = self.walk(&node.path)?;
-        node.at.set(Some((self.generation, at)));
+        node.at.set(Some((self.cache_generation.get(), at)));
         Ok(at)
     }
 
@@ -196,8 +267,10 @@ impl<'t> Frame<'t> {
         Ok(match reply {
             Reply::Node(ptr, ty, writable) => {
                 let next = Node::new(path, false);
-                next.at
-                    .set(Some((self.generation, Resolved { ptr, ty, writable })));
+                next.at.set(Some((
+                    self.cache_generation.get(),
+                    Resolved { ptr, ty, writable },
+                )));
                 Reached::Node(next)
             }
             Reply::Value(value) => Reached::Value(value),
@@ -220,7 +293,16 @@ impl<'t> Frame<'t> {
 
     /// A map's entry by `key`: its node, or its copy for a scalar.
     pub fn key(&self, node: &Node, key: Value) -> Result<Reached, Refusal> {
-        self.step(node, Step::Key(key))
+        fn canonical(value: Value) -> Value {
+            match value {
+                Value::S(n) if n >= 0 => Value::U(n as u64),
+                Value::Rec(v) => Value::Rec(v.into_iter().map(canonical).collect()),
+                Value::Seq(v) => Value::Seq(v.into_iter().map(canonical).collect()),
+                Value::Var(c, v) => Value::Var(c, v.into_iter().map(canonical).collect()),
+                v => v,
+            }
+        }
+        self.step(node, Step::Key(canonical(key)))
     }
 
     /// A copy-typed field of `node`, as this call last wrote it, else as the game has it.
@@ -238,9 +320,22 @@ impl<'t> Frame<'t> {
     /// Writes a copy-typed field of `node` when the listener returns, or before its next game
     /// function call.
     pub fn set(&mut self, node: &Node, field: u32, value: Value) -> Result<(), Refusal> {
-        if !self.field_access(node, field)?.writable {
+        let at = self.field_access(node, field)?;
+        if !at.writable {
             return Err(not_here("a read-only node"));
         }
+        let mut cells = value_cells(&value)?;
+        for step in &node.path.steps {
+            if let Step::Key(key) = step {
+                cells += value_cells(key)?;
+            }
+        }
+        if self.journal_entries >= 4096 || self.journal_cells + cells > 65_536 {
+            return Err(not_here("internals budget"));
+        }
+        self.op(at, Op::Check(field, &value))?;
+        self.journal_entries += 1;
+        self.journal_cells += cells;
         self.journal.set(node.path.clone(), field, value);
         Ok(())
     }
@@ -284,6 +379,8 @@ impl<'t> Frame<'t> {
     /// Applies the call's writes, in order: before a game function call, and when the listener
     /// returns. Answers the writes whose path led nowhere, each with its field and why.
     pub fn apply(&mut self) -> Vec<(Path<Value>, u32, Refusal)> {
+        self.journal_entries = 0;
+        self.journal_cells = 0;
         let mut refused = Vec::new();
         let mut journal = std::mem::take(&mut self.journal);
         let gone = journal.apply(|path, field, value| {
@@ -337,30 +434,7 @@ impl<'t> Frame<'t> {
                 if !left_written && !right_written {
                     continue;
                 }
-                let left_root = self.live_root(left.path.root)?;
-                let right_root = self.live_root(right.path.root)?;
-                let disjoint = if left_root.born.is_some() || right_root.born.is_some() {
-                    false
-                } else if left.path.root != right.path.root {
-                    true
-                } else {
-                    left.path
-                        .steps
-                        .iter()
-                        .zip(&right.path.steps)
-                        .find_map(|(a, b)| {
-                            if a == b {
-                                return None;
-                            }
-                            Some(match (a, b) {
-                                (Step::Field(a), Step::Field(b)) => a != b,
-                                (Step::Index(a), Step::Index(b)) => a != b,
-                                (Step::Key(a), Step::Key(b)) => a != b,
-                                _ => false,
-                            })
-                        })
-                        .unwrap_or(false)
-                };
+                let disjoint = self.disjoint(left, right)?;
                 if !disjoint {
                     return Err(not_here("arguments overlap"));
                 }
@@ -372,6 +446,7 @@ impl<'t> Frame<'t> {
         let refused = self.apply();
         if wrote {
             self.generation += 1;
+            self.cache_generation.set(self.cache_generation.get() + 1);
         }
         let check = |node: &Node, ty: u32, written: bool| -> Result<*mut (), Refusal> {
             let at = self.resolve(node)?;
@@ -407,8 +482,15 @@ impl<'t> Frame<'t> {
         // SAFETY: each node was resolved in this generation to a live value of the thunk's
         // parameter type, writable where the thunk writes, and each written one is disjoint
         // from every other node parameter.
-        let reply = unsafe { (thunk.call)(this, lowered) };
+        let reply = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+            (thunk.call)(this, lowered)
+        }))
+        .unwrap_or_else(|panic| {
+            log::error!("wasm internals thunk panicked: {}", thunk.path);
+            std::panic::resume_unwind(panic)
+        });
         self.generation += 1;
+        self.cache_generation.set(self.cache_generation.get() + 1);
         let reply = reply?;
         let reached = match reply {
             Reply::Node(ptr, ty, writable) => {
@@ -464,6 +546,7 @@ pub(crate) mod tests {
         unsafe {
             match op {
                 Op::Field(0) => Ok(Reply::Node(&raw mut (*game).players as *mut (), PLAYERS, w)),
+                Op::Check(1, Value::B(_)) => Ok(Reply::Done),
                 Op::Get(1) => Ok(Reply::Value(Value::B((*game).flag))),
                 Op::Set(1, Value::B(b)) => {
                     (*game).flag = b;
@@ -477,16 +560,18 @@ pub(crate) mod tests {
         let players = unsafe { &mut *(p as *mut Vec<Player>) };
         match op {
             Op::Len => Ok(Reply::Value(Value::U(players.len() as u64))),
-            Op::Index(i) => players
-                .get_mut(i as usize)
-                .map(|p| Reply::Node(p as *mut Player as *mut (), PLAYER, w))
-                .ok_or_else(|| not_here("an index past the end")),
+            Op::Index(i) if (i as usize) < players.len() => Ok(Reply::Node(
+                unsafe { players.as_mut_ptr().add(i as usize) }.cast(),
+                PLAYER,
+                w,
+            )),
             _ => Err(not_here("not on this node")),
         }
     }
     unsafe fn player(p: *mut (), _: bool, op: Op<'_>) -> Result<Reply, Refusal> {
         let player = unsafe { &mut *(p as *mut Player) };
         match op {
+            Op::Check(0, Value::S(_)) => Ok(Reply::Done),
             Op::Get(0) => Ok(Reply::Value(Value::S(player.health))),
             Op::Set(0, Value::S(n)) => {
                 player.health = n;
@@ -531,16 +616,22 @@ pub(crate) mod tests {
             path: "Game",
             hash: "game-hash",
             node: game,
+            raw_fields: &[0, 1],
+            raw_index: true,
         },
         Type {
             path: "Vec<Player>",
             hash: "",
             node: players,
+            raw_fields: &[0, 1],
+            raw_index: true,
         },
         Type {
             path: "Player",
             hash: "player-hash",
             node: player,
+            raw_fields: &[0, 1],
+            raw_index: true,
         },
     ];
     unsafe fn inspect_player(_: Option<*mut ()>, _: Vec<Arg>) -> Result<Reply, Refusal> {
@@ -813,15 +904,21 @@ pub(crate) mod tests {
         }
         unsafe fn fields(ptr: *mut (), writable: bool, op: Op<'_>) -> Result<Reply, Refusal> {
             // SAFETY: the sole root below is a live Fields and each field has type Player.
-            let fields = unsafe { &mut *ptr.cast::<Fields>() };
-            match op {
-                Op::Field(0) => Ok(Reply::Node((&raw mut fields.left).cast(), PLAYER, writable)),
-                Op::Field(1) => Ok(Reply::Node(
-                    (&raw mut fields.right).cast(),
-                    PLAYER,
-                    writable,
-                )),
-                _ => Err(not_here("not a field")),
+            let fields = ptr.cast::<Fields>();
+            unsafe {
+                match op {
+                    Op::Field(0) => Ok(Reply::Node(
+                        (&raw mut (*fields).left).cast(),
+                        PLAYER,
+                        writable,
+                    )),
+                    Op::Field(1) => Ok(Reply::Node(
+                        (&raw mut (*fields).right).cast(),
+                        PLAYER,
+                        writable,
+                    )),
+                    _ => Err(not_here("not a field")),
+                }
             }
         }
         static FIELD_TYPES: [Type; 3] = [
@@ -829,16 +926,22 @@ pub(crate) mod tests {
                 path: "Fields",
                 hash: "fields-hash",
                 node: fields,
+                raw_fields: &[0, 1],
+                raw_index: true,
             },
             Type {
                 path: "Vec<Player>",
                 hash: "",
                 node: players,
+                raw_fields: &[0, 1],
+                raw_index: true,
             },
             Type {
                 path: "Player",
                 hash: "player-hash",
                 node: player,
+                raw_fields: &[0, 1],
+                raw_index: true,
             },
         ];
         let table = Table {
@@ -870,6 +973,169 @@ pub(crate) mod tests {
             .unwrap();
         drop(frame);
         assert_eq!((fields.left.health, fields.right.health), (20, 20));
+    }
+
+    #[test]
+    fn map_keys_cannot_prove_disjointness_and_integer_keys_share_writes() {
+        unsafe fn map(p: *mut (), w: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            let map = unsafe { &mut *p.cast::<std::collections::BTreeMap<u32, Player>>() };
+            match op {
+                Op::Key(k) => {
+                    let key = mod_points::internals::int::<u32>(k.clone())?;
+                    let value = map.get_mut(&key).ok_or_else(|| not_here("key"))?;
+                    Ok(Reply::Node((value as *mut Player).cast(), PLAYER, w))
+                }
+                _ => Err(not_here("map")),
+            }
+        }
+        let table = Table {
+            types: Box::leak(Box::new([
+                Type {
+                    path: "map",
+                    hash: "",
+                    node: map,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+                Type {
+                    path: "unused",
+                    hash: "",
+                    node: players,
+                    raw_fields: &[],
+                    raw_index: true,
+                },
+                Type {
+                    path: "Player",
+                    hash: "",
+                    node: player,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+            ])),
+            ..TABLE
+        };
+        let mut map = std::collections::BTreeMap::from([
+            (1, Player { health: 4 }),
+            (2, Player { health: 5 }),
+        ]);
+        let mut frame = unsafe {
+            Frame::new(
+                &table,
+                vec![Root {
+                    ptr: (&raw mut map).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        let root = frame.root(0).unwrap();
+        let signed = node(frame.key(&root, Value::S(1)).unwrap());
+        let unsigned = node(frame.key(&root, Value::U(1)).unwrap());
+        let other = node(frame.key(&root, Value::U(2)).unwrap());
+        for b in [&unsigned, &other] {
+            assert!(
+                matches!(frame.call(2, None, vec![Call::Node(&signed), Call::Node(b)]), Err(Refusal::NotHere(why)) if why == "arguments overlap")
+            );
+        }
+        frame.set(&signed, 0, Value::S(17)).unwrap();
+        assert_eq!(frame.get(&unsigned, 0).unwrap(), Value::S(17));
+    }
+
+    #[test]
+    fn reborrow_invalidates_sibling_caches_not_their_paths() {
+        enum Choice {
+            Players(Vec<Player>),
+        }
+        unsafe fn choice(p: *mut (), w: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            match op {
+                Op::Field(0) => {
+                    let Choice::Players(v) = unsafe { &mut *p.cast::<Choice>() };
+                    Ok(Reply::Node((v as *mut Vec<Player>).cast(), PLAYERS, w))
+                }
+                _ => Err(not_here("choice")),
+            }
+        }
+        let table = Table {
+            types: Box::leak(Box::new([
+                Type {
+                    path: "Choice",
+                    hash: "",
+                    node: choice,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+                Type {
+                    path: "Vec",
+                    hash: "",
+                    node: players,
+                    raw_fields: &[],
+                    raw_index: true,
+                },
+                Type {
+                    path: "Player",
+                    hash: "",
+                    node: player,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+            ])),
+            ..TABLE
+        };
+        let mut value = Choice::Players(vec![Player { health: 1 }, Player { health: 2 }]);
+        let mut frame = unsafe {
+            Frame::new(
+                &table,
+                vec![Root {
+                    ptr: (&raw mut value).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        let root = frame.root(0).unwrap();
+        let v = frame.field(&root, 0).unwrap();
+        let a = node(frame.index(&v, 0).unwrap());
+        let b = node(frame.index(&v, 1).unwrap());
+        let _again = frame.field(&root, 0).unwrap();
+        frame.set(&a, 0, Value::S(7)).unwrap();
+        frame.set(&b, 0, Value::S(8)).unwrap();
+        assert_eq!(frame.get(&a, 0).unwrap(), Value::S(7));
+        assert_eq!(frame.get(&b, 0).unwrap(), Value::S(8));
+        frame.apply();
+        assert_eq!(frame.get(&a, 0).unwrap(), Value::S(7));
+        assert_eq!(frame.get(&b, 0).unwrap(), Value::S(8));
+        // A shared enum prefix reborrows, so it is deliberately not provably disjoint.
+        assert!(
+            frame
+                .call(2, None, vec![Call::Node(&a), Call::Node(&b)])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn writes_are_typed_and_bounded_before_journaling() {
+        let mut game = world();
+        let mut frame = frame(&mut game);
+        let root = frame.root(0).unwrap();
+        assert!(frame.set(&root, 1, Value::S(1)).is_err());
+        assert!(
+            frame
+                .set(&root, 1, Value::Str("x".repeat(1_048_577)))
+                .is_err()
+        );
+        for _ in 0..4096 {
+            frame.set(&root, 1, Value::B(true)).unwrap();
+        }
+        assert_eq!(
+            frame.set(&root, 1, Value::B(true)),
+            Err(not_here("internals budget"))
+        );
+        drop(frame);
+        assert!(!game.flag);
     }
 
     #[test]

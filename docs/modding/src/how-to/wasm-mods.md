@@ -103,9 +103,10 @@ Guest copies own their data: a native borrowed or shared copy is represented by 
 Small named copies are plain structs or enums; their node form, when used as a receiver, has
 `Node` appended to its name. Same-named types retain their fully qualified generated names;
 an unambiguous type also gets a short alias such as `Game` unless it conflicts with the view's
-runtime types. Functions taking a mutable reference to a copy argument are not generated yet:
+runtime types. Functions taking a mutable reference to a copy argument are refused at build:
 the host exposes copy fields as values, not as nodes that could supply that argument. The
-generated file records the omitted function and this reason in a comment.
+catalog coverage job lists these paths and their reason explicitly. Sets are opaque, not indexed
+sequences.
 
 A function returning `Result<T, E>` (including a written `Result<T>` alias) can expose a copyable
 `T` even when its error is opaque. Its view method returns `Result<Result<T, GameError>, Refusal>`:
@@ -117,8 +118,9 @@ that next function's receiver. Pending writes apply first and expire returned re
 the function's receiver and arguments are resolved.
 
 A function that writes through a node requires that node to be separate from every other node
-argument, including a shared one. Distinct fields, sequence indices or map keys can prove that;
-an object and its child cannot. A returned-reference root is conservatively treated as overlapping
+argument, including a shared one. Distinct struct fields or Vec/array indices can prove that
+only when the entire shared path uses raw-pointer steps. Map keys, enum/Option variants and
+VecDeque indices never prove separation; an object and its child cannot either. A returned-reference root is conservatively treated as overlapping
 any other root. Unproved separation returns `NotHere("arguments overlap")` before applying writes.
 Calls into the game cannot reenter a listener in the same wasm group. A native callback that needs
 that synchronous reentry must stay native rather than silently deferring its work.
@@ -129,6 +131,23 @@ last function call and stops the dependency group; it does not undo calls that a
 Nodes are valid for one listener call only. A changed layout or missing declared internal refuses
 the package at load, rather than guessing a new field number. No game rebuild is needed when
 the declared layouts and functions are unchanged.
+
+### Internals budgets and trust boundary
+
+Each listener call can retain at most 4,096 live nodes and journal 4,096 writes totaling 65,536
+value cells. A value can contain at most 1 MiB of string or byte data. A write is checked against
+its field's codec before entering the journal. Exceeding these limits returns
+`NotHere("internals budget")`. With fuel enabled, every import costs 1 plus its input and output
+cells; a native thunk call also costs a fixed 1,000 fuel units.
+
+**Native work inside a thunk is not interruptible.** Fuel and deadlines limit the wasm listener,
+not the duration of a native function it calls. Daily prebuilts contain thunks only for paths in
+committed, reviewed `wasm-internals/<mod>.txt` files. Reviewers must put unbounded functions
+(for example, loops whose work scales with a guest argument) in `native-only.txt`. Building an
+instance from source instead exposes the installed mods' declarations: choosing that build
+trusts those functions to finish. A wasm-only instance can use this source-build route without
+installing a native mod. A native panic is contained and stops the calling dependency group;
+already-applied writes and native side effects are not rolled back.
 
 ## Calls into the game
 

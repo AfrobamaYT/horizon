@@ -468,6 +468,17 @@ impl NoAnswer for crate::Flow {
     }
 }
 
+struct CallScope {
+    frame: *mut Frame,
+    caller: Option<Arc<Running>>,
+}
+impl Drop for CallScope {
+    fn drop(&mut self) {
+        CURRENT.set(self.frame);
+        CALLER.set(self.caller.take());
+    }
+}
+
 impl Running {
     /// Runs one `call` with `frame`'s hosts, within its group's limits for it. A refused call
     /// or a trap answers `no_answer()`; a trap stops the whole group.
@@ -489,6 +500,10 @@ impl Running {
         self.group.budgets.arm(store, call);
         let previous = CURRENT.replace(&mut frame);
         let caller = CALLER.replace(Some(self.clone()));
+        let scope = CallScope {
+            frame: previous,
+            caller,
+        };
         let released =
             std::mem::take(&mut *self.released.lock().unwrap_or_else(|e| e.into_inner()));
         let result = match released.is_empty() {
@@ -499,8 +514,7 @@ impl Running {
                 .call_release_handlers(store, released),
         }
         .and_then(|()| f(&self.exports, store));
-        CALLER.set(caller);
-        CURRENT.set(previous);
+        drop(scope);
         // Stopped before the group is let go, so no call waiting for it runs on.
         if result.is_err() {
             self.group.poisoned.store(true, Ordering::Relaxed);
@@ -949,6 +963,22 @@ mod glue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn call_scope_restores_tls_on_unwind() {
+        let previous = CURRENT.get();
+        let mut frame = Frame::default();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _scope = CallScope {
+                frame: CURRENT.replace(&mut frame),
+                caller: CALLER.replace(None),
+            };
+            panic!("fixture unwind");
+        }));
+        assert!(result.is_err());
+        assert_eq!(CURRENT.get(), previous);
+        assert!(CALLER.take().is_none());
+    }
 
     fn group(wait: Duration) -> Arc<Group> {
         let engine = wasmtime::Engine::default();

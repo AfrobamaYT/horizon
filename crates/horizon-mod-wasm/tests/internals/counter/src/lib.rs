@@ -10,6 +10,25 @@ impl mod_api::Hooks for Mod {}
 // The name also verifies that runtime imports do not shadow a raw listener.
 fn call(raw: HandleChatInputRaw, game: Option<Game>) {
     let game = game.expect("a method receiver");
+    match raw.message().unwrap().as_str() {
+        "panic_thunk" => {
+            game.set_left(42).unwrap();
+            let _ = game.add(-999);
+            game.set_right(999).unwrap();
+            return;
+        }
+        "panic_apply" => {
+            game.set_left(-777).unwrap();
+            return;
+        }
+        "budget" => {
+            for _ in 0..4097 {
+                game.set_left(42).unwrap();
+            }
+            return;
+        }
+        _ => {}
+    }
     game.set_left(game.left().unwrap() + 2).unwrap();
     game.set_right(game.right().unwrap() + 3).unwrap();
     assert_eq!(game.left().unwrap(), 3, "read sees the journal");
