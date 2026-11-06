@@ -13,7 +13,7 @@
 use crate::crossing::{Collection, Crossing, Rule, Scalar, Shape, Wrapper, bare};
 use crate::internals::Internal;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::{ToTokens, format_ident, quote};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// The game's crate.
@@ -40,9 +40,9 @@ pub struct Counts {
 /// A field owner or receiver exposes only declared fields. A type reached below a field,
 /// or through a function's arguments/result, exposes its whole crossable layout.
 #[derive(Clone, Default)]
-struct Selection {
-    full: HashSet<String>,
-    owners: BTreeMap<String, BTreeSet<usize>>,
+pub(crate) struct Selection {
+    pub(crate) full: HashSet<String>,
+    pub(crate) owners: BTreeMap<String, BTreeSet<usize>>,
 }
 
 impl Selection {
@@ -77,6 +77,7 @@ impl Selection {
 
 struct Gen<'r> {
     rule: &'r Rule,
+    guest: bool,
     hashes: &'r HashMap<String, (&'r str, &'r str)>,
     selection: Selection,
     /// Each walked type's id, by its spelling.
@@ -213,6 +214,7 @@ impl<'r> Gen<'r> {
     ) -> Self {
         Self {
             rule,
+            guest: false,
             hashes,
             selection,
             ids: HashMap::new(),
@@ -297,9 +299,16 @@ impl<'r> Gen<'r> {
                 Scalar::String => {
                     quote!(match #expr { V::Str(s) => s, _ => return Err(I::changed("a string")) })
                 }
+                Scalar::Str if self.guest => {
+                    quote!(match #expr { V::Str(s) => s, _ => return Err(I::changed("a string")) })
+                }
                 Scalar::Str => unreachable!("not buildable"),
             },
             Shape::Unit => quote!(()),
+            Shape::Ref { to: inner, .. } | Shape::Wrapped(_, inner) if self.guest => {
+                let inner = self.decode(inner, expr);
+                quote!(::std::boxed::Box::new(#inner))
+            }
             Shape::Wrapped(Wrapper::Box, inner) => {
                 let inner = self.decode(inner, expr);
                 quote!(::std::boxed::Box::new(#inner))
@@ -346,17 +355,26 @@ impl<'r> Gen<'r> {
             return;
         }
         let rule = self.rule;
-        let build = buildable(&Shape::Named(path.into(), 0), rule);
+        let build = self.guest || buildable(&Shape::Named(path.into(), 0), rule);
         self.codecs.insert(path.to_owned(), build);
         let named = rule.named(path).expect("listed");
-        let ty = spell(&Shape::Named(path.into(), named.lifetimes)).expect("named");
+        let ty = if self.guest {
+            crate::internals_view::name(path).into_token_stream()
+        } else {
+            spell(&Shape::Named(path.into(), named.lifetimes)).expect("named")
+        };
         let fields = rule.fields(path);
         let shapes: Vec<Shape> = fields
             .iter()
             .map(|f| rule.shape(&named.module, Some(path), f.ty))
             .collect();
         let (enc, dec) = codec_names(path);
-        let path_ty = path_tokens(path);
+        let path_ty = if self.guest {
+            let name = crate::internals_view::name(path);
+            quote!(#name)
+        } else {
+            path_tokens(path)
+        };
         let (encode, decode) = match &named.item {
             syn::Item::Struct(item) => {
                 let binds: Vec<_> = (0..fields.len()).map(|i| format_ident!("f{i}")).collect();
@@ -868,28 +886,9 @@ impl<'r> Gen<'r> {
         }
         self.skip_reason = "unresolved or opaque owner";
         let path = bare(&internal.path);
-        let (owner, name) = path.rsplit_once("::")?;
+        let (_, name) = path.rsplit_once("::")?;
         let name = format_ident!("{name}");
-        let (module, this) = match internal.kind {
-            "method" => {
-                let (module, ty) = owner.rsplit_once("::")?;
-                let written: syn::Path = syn::parse_str(ty).ok()?;
-                let ty = match rule.shape(
-                    module,
-                    None,
-                    &syn::Type::Path(syn::TypePath {
-                        qself: None,
-                        path: written,
-                    }),
-                ) {
-                    Shape::Named(path, _) => path,
-                    _ => return None,
-                };
-                (module.to_owned(), Some(ty))
-            }
-            "fn" => (owner.to_owned(), None),
-            _ => return None,
-        };
+        let (module, this) = function_scope(rule, internal)?;
         self.skip_reason = "static or bounded input lifetime";
         struct StaticInput(bool);
         impl<'ast> syn::visit::Visit<'ast> for StaticInput {
@@ -1123,9 +1122,36 @@ struct Callee<'c> {
     receiver: Option<(TokenStream, u32)>,
 }
 
+/// Resolve the receiver exactly where its method signature is written.
+pub(crate) fn function_scope(rule: &Rule, internal: &Internal) -> Option<(String, Option<String>)> {
+    let path = bare(&internal.path);
+    let (owner, _) = path.rsplit_once("::")?;
+    let (module, this) = match internal.kind {
+        "method" => {
+            let (module, ty) = owner.rsplit_once("::")?;
+            let written: syn::Path = syn::parse_str(ty).ok()?;
+            let ty = match rule.shape(
+                module,
+                None,
+                &syn::Type::Path(syn::TypePath {
+                    qself: None,
+                    path: written,
+                }),
+            ) {
+                Shape::Named(path, _) => path,
+                _ => return None,
+            };
+            (module.to_owned(), Some(ty))
+        }
+        "fn" => (owner.to_owned(), None),
+        _ => return None,
+    };
+    Some((module, this))
+}
+
 /// The manifest records impl bounds as well as the method signature. A bounded or type-generic
 /// impl is not callable on every receiver, even when the method itself has no generics.
-fn signature(written: &str) -> Option<syn::Signature> {
+pub(crate) fn signature(written: &str) -> Option<syn::Signature> {
     use syn::parse::Parser;
     let parser = |input: syn::parse::ParseStream<'_>| {
         if input.peek(syn::Token![impl]) {
@@ -1149,25 +1175,53 @@ fn signature(written: &str) -> Option<syn::Signature> {
     parser.parse_str(written).ok()
 }
 
-/// The `__internals` module for the union of declared manifest paths, and what it holds.
-/// Missing or unsupported declarations are reported, not fatal: the loader refuses that mod.
-pub fn table(internals: &[Internal], declared: &[String]) -> (String, Counts) {
-    table_with_points(internals, declared, &[])
+/// Plain guest copies use the exact same value encoding as the table's native copies.
+pub(crate) fn guest_codecs(rule: &Rule, shapes: &[Shape]) -> TokenStream {
+    let hashes = HashMap::new();
+    let mut generator = Gen::new(rule, &hashes, Selection::default());
+    generator.guest = true;
+    let mut impls = Vec::new();
+    for shape in shapes {
+        let ty = crate::internals_view::spell(shape, rule);
+        let encode = generator.encode(shape, quote!(self));
+        let decode = generator.decode(shape, quote!(value));
+        impls.push(quote! {
+            impl CopyValue for #ty {
+                fn to_value(&self) -> V { #encode }
+                fn from_value(value: V) -> Result<Self, Refusal> {
+                    (|| -> Result<Self, I::Refusal> { Ok(#decode) })().map_err(wire_refusal)
+                }
+            }
+            impl ViewType for #ty {
+                fn from_reached(reached: Reached) -> Result<Self, Refusal> {
+                    match reached {
+                        Reached::Value(cells) => Self::from_value(unflatten(cells).map_err(wire_refusal)?),
+                        Reached::Node(n) => Self::from_value(unflatten(n.read()?).map_err(wire_refusal)?),
+                    }
+                }
+            }
+        });
+    }
+    let items = generator.items;
+    quote!(#(#items)* #(#impls)*)
 }
 
-/// The table, including the declared raw injection places of the staged game.
-pub fn table_with_points(
-    internals: &[Internal],
-    declared: &[String],
-    points: &[crate::points::GamePoint],
-) -> (String, Counts) {
-    let hashes: HashMap<_, _> = internals
-        .iter()
-        .filter(|i| matches!(i.kind, "struct" | "enum") && i.cfg.is_empty())
-        .map(|i| (bare(&i.path), (i.path.as_str(), i.hash.as_str())))
-        .collect();
-    let rule = Rule::new(internals);
-    let declared: BTreeSet<_> = declared.iter().map(String::as_str).collect();
+/// Shared layout reach and callable validation for the game's table and the mod's view.
+pub(crate) struct Selected<'a> {
+    pub(crate) selection: Selection,
+    pub(crate) counts: Counts,
+    pub(crate) accepted: Vec<&'a Internal>,
+    pub(crate) raw: Vec<(&'a Internal, &'a crate::points::GamePoint)>,
+    pub(crate) members: Vec<(&'a Internal, String, u32)>,
+}
+
+pub(crate) fn select<'a>(
+    internals: &'a [Internal],
+    declared: BTreeSet<&str>,
+    points: &'a [crate::points::GamePoint],
+    rule: &Rule,
+    hashes: &HashMap<String, (&str, &str)>,
+) -> Selected<'a> {
     let mut counts = Counts {
         declared: declared.len(),
         ..Counts::default()
@@ -1290,6 +1344,43 @@ pub fn table_with_points(
                 .insert(internal.path.clone(), probe.skip_reason);
         }
     }
+    counts.refused.retain(|path, _| !exposed.contains(path));
+    counts.skipped = counts.refused.len();
+    Selected {
+        selection,
+        counts,
+        accepted,
+        raw,
+        members,
+    }
+}
+
+/// The `__internals` module for the union of declared manifest paths, and what it holds.
+/// Missing or unsupported declarations are reported, not fatal: the loader refuses that mod.
+pub fn table(internals: &[Internal], declared: &[String]) -> (String, Counts) {
+    table_with_points(internals, declared, &[])
+}
+
+/// The table, including the declared raw injection places of the staged game.
+pub fn table_with_points(
+    internals: &[Internal],
+    declared: &[String],
+    points: &[crate::points::GamePoint],
+) -> (String, Counts) {
+    let hashes: HashMap<_, _> = internals
+        .iter()
+        .filter(|i| matches!(i.kind, "struct" | "enum") && i.cfg.is_empty())
+        .map(|i| (bare(&i.path), (i.path.as_str(), i.hash.as_str())))
+        .collect();
+    let rule = Rule::new(internals);
+    let declared: BTreeSet<_> = declared.iter().map(String::as_str).collect();
+    let Selected {
+        selection,
+        mut counts,
+        accepted,
+        raw,
+        members,
+    } = select(internals, declared, points, &rule, &hashes);
     let mut roots: BTreeSet<_> = selection.full.iter().cloned().collect();
     roots.extend(selection.owners.keys().cloned());
     let mut generator = Gen::new(&rule, &hashes, selection);
@@ -1322,8 +1413,6 @@ pub fn table_with_points(
             quote!(I::Member { path: #path, hash: #hash, owner: #id, field: #field },)
         })
         .collect();
-    counts.refused.retain(|path, _| !exposed.contains(path));
-    counts.skipped = counts.refused.len();
     counts.types = generator.nodes.len();
     counts.thunks = thunks.len();
     let types = generator

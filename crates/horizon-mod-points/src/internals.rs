@@ -209,10 +209,18 @@ pub mod bindings {
 }
 #[cfg(target_arch = "wasm32")]
 pub mod bindings {
-    wit_bindgen::generate!({ path: "wit/internals.wit", world: "internals" });
+    wit_bindgen::generate!({
+        path: "wit/internals.wit", world: "internals",
+        runtime_path: "mod_points::internals::rt",
+        pub_export_macro: true,
+        export_macro_name: "export_raw_listeners",
+        default_bindings_module: "mod_points::internals::bindings",
+    });
 }
 #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
 pub use bindings::horizon::mod_internals::view::Cell;
+#[cfg(target_arch = "wasm32")]
+pub use wit_bindgen::rt;
 
 /// A plain value as pre-order cells. Compound counts count children, not all descendants.
 #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]

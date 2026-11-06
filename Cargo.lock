@@ -1941,6 +1941,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-internals"
+version = "0.1.0"
+dependencies = [
+ "horizon-mod-api-gen",
+ "horizon-mod-points",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "horizon-mod-point-shape"
 version = "0.1.0"
 dependencies = [

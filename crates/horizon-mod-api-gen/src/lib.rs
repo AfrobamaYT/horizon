@@ -956,6 +956,7 @@ mod dispatch;
 mod host_param;
 pub mod internals;
 pub mod internals_table;
+pub mod internals_view;
 pub mod points;
 mod wasm;
 pub use build::{generate, generate_points};
