@@ -581,7 +581,7 @@ mod tests {
         assert!(!m.base.runs_normally());
     }
     #[test]
-    fn the_tick_length_paces_the_clock_and_follows_the_tick_rate() {
+    fn the_tick_length_given_paces_the_clock() {
         let mut clock = FixedStep::client();
         assert_eq!(clock.tick_target_millis(), 50.0);
         // 200 ms of frames: four 50 ms ticks, or eight when a tick lasts 25 ms.
@@ -598,18 +598,11 @@ mod tests {
             10,
             "ten a frame at most"
         );
-        // A server's client only ever slows down (`Minecraft.getTickTargetMillis`).
+        // A frozen level paces at the default length, whatever its rate.
         clock.set_rate(10.0);
-        assert_eq!(clock.tick_target_millis(), 100.0);
-        clock.set_rate(40.0);
+        clock.set_frozen(true);
+        clock.world_runs();
         assert_eq!(clock.tick_target_millis(), 50.0);
-        // The window's own simulation follows the rate both ways; frozen, the default.
-        let mut own = FixedStep::new(false);
-        own.set_rate(40.0);
-        assert_eq!(own.tick_target_millis(), 25.0);
-        own.set_frozen(true);
-        own.world_runs();
-        assert_eq!(own.tick_target_millis(), 50.0);
     }
     #[test]
     fn the_camera_keeps_interpolating_in_a_frozen_level() {
@@ -699,14 +692,17 @@ mod tests {
         let quarter = std::time::Duration::from_millis(250);
         let mut client = FixedStep::client();
         client.set_rate(40.0);
-        assert_eq!(client.advance(quarter), 5, "still 20 a second");
+        let target = client.tick_target_millis();
+        assert_eq!(client.advance(quarter, target), 5, "still 20 a second");
         let mut slow = FixedStep::client();
         slow.set_rate(10.0);
-        assert_eq!(slow.advance(quarter * 2), 5, "10 a second");
+        let target = slow.tick_target_millis();
+        assert_eq!(slow.advance(quarter * 2, target), 5, "10 a second");
         let mut local = FixedStep::default();
         local.set_rate(40.0);
+        let target = local.tick_target_millis();
         assert_eq!(
-            local.advance(quarter),
+            local.advance(quarter, target),
             10,
             "the integrated loop runs at the rate"
         );
