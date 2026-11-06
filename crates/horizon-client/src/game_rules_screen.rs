@@ -55,7 +55,7 @@ pub struct RulesScreen {
 }
 
 fn name_key(r: &Rule) -> String {
-    format!("gamerule.minecraft.{}", r.name)
+    format!("gamerule.{}", r.name.replace(':', "."))
 }
 fn category_key(category: &str) -> String {
     format!("gamerule.category.minecraft.{category}")
@@ -750,7 +750,7 @@ mod tests {
             screen.rows(),
             vec![
                 Row::Category("updates".into()),
-                Row::Rule("random_tick_speed".into())
+                Row::Rule("minecraft:random_tick_speed".into())
             ]
         );
     }
@@ -783,18 +783,18 @@ mod tests {
         let mut s = RulesScreen::new(&GameRules::default());
         assert!(s.changes().is_empty());
         s.unfocus();
-        s.number("random_tick_speed").unwrap().focused = true;
+        s.number("minecraft:random_tick_speed").unwrap().focused = true;
         s.edit(|b| b.set_value("10"));
         assert_eq!(
             s.changes(),
-            vec![("random_tick_speed".to_owned(), Value::Int(10))]
+            vec![("minecraft:random_tick_speed".to_owned(), Value::Int(10))]
         );
         s.edit(|b| b.set_value("ten"));
         assert!(s.invalid());
         // The last valid value stays, as the responder left it.
         assert_eq!(
             s.changes(),
-            vec![("random_tick_speed".to_owned(), Value::Int(10))]
+            vec![("minecraft:random_tick_speed".to_owned(), Value::Int(10))]
         );
         // Leaving with changes asks; No returns, Yes discards.
         assert_eq!(s.escape(), None);
