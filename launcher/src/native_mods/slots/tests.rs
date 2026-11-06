@@ -3,7 +3,7 @@ use super::*;
 
 fn fixture() -> (Manifest, Catalog) {
     let pin = "a".repeat(40);
-    let manifest = Manifest::parse(&format!("id='example'\nname='Example'\nversion='1.0.0'\n[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n")).unwrap();
+    let manifest = Manifest::parse(&format!("id='example'\nname='Example'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n")).unwrap();
     let catalog = Catalog {
         internals: serde_json::from_value(serde_json::json!([{
             "path":"game::run", "kind":"fn", "signature":"fn run()", "hash":"signature", "cfg":"", "shape_only":false

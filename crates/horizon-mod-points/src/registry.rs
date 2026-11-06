@@ -299,7 +299,7 @@ pub fn seal() {
     for (place, function) in raw_list {
         raw[place].push(function);
     }
-    for site in &mut raw[POINT_COUNT..] {
+    for site in &mut raw {
         site.sort_by(|a, b| {
             b.priority
                 .cmp(&a.priority)
