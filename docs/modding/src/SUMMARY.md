@@ -17,6 +17,7 @@
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+- [Game rule categories](how-to/game-rule-categories.md)
 - [Declaring a machine's menu data](how-to/block-entities.md)
 - [Controlling spawns](how-to/spawning.md)
 - [Slowing or boosting entities on a block](how-to/movement-factors.md)

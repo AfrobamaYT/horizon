@@ -329,6 +329,7 @@ struct TagParts {
 /// What every mod's [`Hooks::register`](super::Hooks::register) attached.
 #[derive(Default)]
 struct Installed {
+    game_rule_categories: Vec<String>,
     keys: Parts,
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
@@ -886,6 +887,11 @@ fn attached<'a, 'k, P: ?Sized>(
 /// Mods call the generic methods on `dyn Registrar` (`r.item_part("mymod:wrench", Wrench)`);
 /// they reach the trait's own methods, one implementation for native and wasm mods.
 pub trait Registrar {
+    /// Declare a game rule category in the calling mod's namespace. Invalid,
+    /// foreign or duplicate IDs refuse mod loading even if the error is ignored.
+    /// Categories appear in the host's game rules screen; remote clients do not
+    /// receive them in this version.
+    fn game_rule_category(&mut self, id: &str) -> Result<(), super::GameRuleError>;
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey;
     /// Request a block by canonical registry id. All mods' declarations are checked at load.
@@ -1118,6 +1124,7 @@ impl dyn Registrar + '_ {
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
+    game_rule_categories: Vec<String>,
     mod_id: &'static str,
     mod_index: usize,
     /// Parts registered so far, by every mod: the next part's `order`.
@@ -1135,6 +1142,7 @@ pub struct PartRegistrar {
 impl PartRegistrar {
     fn new(mod_id: &'static str) -> Self {
         Self {
+            game_rule_categories: Vec::new(),
             mod_id,
             mod_index: 0,
             registered: 0,
@@ -1326,6 +1334,32 @@ impl PartRegistrar {
 }
 
 impl Registrar for PartRegistrar {
+    fn game_rule_category(&mut self, id: &str) -> Result<(), super::GameRuleError> {
+        let result = (|| {
+            let id = if id.contains(':') {
+                id.to_owned()
+            } else {
+                format!("{}:{id}", self.mod_id)
+            };
+            if !horizon_mods::content::namespaced_id(&id) {
+                return Err(super::GameRuleError::InvalidId);
+            }
+            if id.split_once(':').unwrap().0 != self.mod_id {
+                return Err(super::GameRuleError::ForeignNamespace);
+            }
+            if self.game_rule_categories.contains(&id) {
+                return Err(super::GameRuleError::Duplicate);
+            }
+            self.game_rule_categories.push(id);
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            self.refused
+                .push(format!("mod {} category {id:?}: {error:?}", self.mod_id));
+        }
+        result
+    }
+
     fn add_structure_type(&mut self, name: &str, ty: Arc<dyn super::StructureType>) {
         let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
         let id = format!("{}:{}", self.mod_id, path);
@@ -1657,6 +1691,7 @@ fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
         return Err(registrar.refused);
     }
     let mut installed = Installed {
+        game_rule_categories: registrar.game_rule_categories,
         keys: registrar.parts,
         tags: registrar.tags,
         block_entity_types: registrar.block_entity_types,
@@ -1691,11 +1726,43 @@ fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
     Ok(())
 }
 
+/// Construct a fresh registry from the immutable installed category snapshot.
+// hidden: the game owns session registry construction.
+#[doc(hidden)]
+pub fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {
+    horizon_client_core::gamerules::RuleRegistry::with_categories(
+        installed().map_or(&[], |parts| &parts.game_rule_categories),
+    )
+}
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
     use super::super::*;
     use super::mark_game_thread;
+    #[test]
+    fn category_registration_refuses_ignored_errors_and_installs_snapshot() {
+        use super::Registrar;
+        let mut refused = super::PartRegistrar::new("example");
+        let _ = refused.game_rule_category("foreign:machines");
+        let _ = refused.game_rule_category("bad path");
+        assert!(super::install_registrar(refused).is_err());
+        let mut good = super::PartRegistrar::new("example");
+        assert_eq!(good.game_rule_category("machines"), Ok(()));
+        assert!(super::install_registrar(good).is_ok());
+        assert!(
+            super::game_rule_registry()
+                .categories()
+                .contains(&"example:machines".to_owned())
+        );
+        let mut duplicate = super::PartRegistrar::new("example");
+        duplicate.game_rule_category("machines").unwrap();
+        assert_eq!(
+            duplicate.game_rule_category("machines"),
+            Err(crate::GameRuleError::Duplicate)
+        );
+        assert!(super::install_registrar(duplicate).is_err());
+    }
+
     #[cfg(test)]
     use super::{Attached, KnownIds, resolve_parts};
     #[cfg(test)]

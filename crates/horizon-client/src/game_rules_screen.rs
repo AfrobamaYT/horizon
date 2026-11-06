@@ -186,7 +186,13 @@ impl RulesScreen {
     fn rows(&self) -> Vec<Row> {
         let filter = self.search.value.to_lowercase();
         let has = |s: &str| s.to_lowercase().contains(&filter);
-        let mut categories: Vec<(&str, Vec<&Rule>)> = Vec::new();
+        let mut categories: Vec<(&str, Vec<&Rule>)> = self
+            .values
+            .categories()
+            .iter()
+            .filter(|category| has(category) || has(&lang::get(&category_key(category))))
+            .map(|category| (category.as_str(), Vec::new()))
+            .collect();
         for r in self.values.available_rules() {
             let key = name_key(r);
             let description = format!("{key}.description");
@@ -202,6 +208,12 @@ impl RulesScreen {
                 None => categories.push((&r.category, vec![r])),
             }
         }
+        categories.retain(|(category, rules)| {
+            !rules.is_empty()
+                || filter.is_empty()
+                || has(category)
+                || has(&lang::get(&category_key(category)))
+        });
         // By the categories' ids, then the rules' description ids.
         categories.sort_by_key(|(c, _)| *c);
         categories
@@ -758,6 +770,21 @@ mod tests {
             category_key("example:machines"),
             "gamerule.category.example.machines"
         );
+    }
+
+    #[test]
+    fn registered_empty_category_appears_and_searches() {
+        let registry = std::sync::Arc::new(crate::gamerules::RuleRegistry::with_categories(&[
+            "example:machines".into(),
+        ]));
+        let mut screen = RulesScreen::new(&GameRules::with_registry(registry, &[]));
+        assert!(
+            screen
+                .rows()
+                .contains(&Row::Category("example:machines".into()))
+        );
+        screen.search.set_value("machines");
+        assert_eq!(screen.rows(), [Row::Category("example:machines".into())]);
     }
 
     #[test]

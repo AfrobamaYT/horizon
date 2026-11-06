@@ -1030,6 +1030,7 @@ impl Game<'_> {
             Some(props.seed),
             game_mode == 1,
             None,
+            Arc::new(mod_api::__private::game_rule_registry()),
         )?)?;
         if new_world {
             self.level.hardcore = props.hardcore;
