@@ -475,42 +475,6 @@ pub struct SaveTables {
     /// The POI type and its max tickets of each state (`PoiTypes`).
     poi: Vec<Option<(&'static str, i32)>>,
 }
-/// `PoiTypes.register`: the POI type of a block state and its max tickets.
-pub fn poi_type(state: &horizon_world::chunk::BlockState) -> Option<(&'static str, i32)> {
-    let name = state.name.strip_prefix("minecraft:")?;
-    Some(match name {
-        "blast_furnace" => ("minecraft:armorer", 1),
-        "smoker" => ("minecraft:butcher", 1),
-        "cartography_table" => ("minecraft:cartographer", 1),
-        "brewing_stand" => ("minecraft:cleric", 1),
-        "composter" => ("minecraft:farmer", 1),
-        "barrel" => ("minecraft:fisherman", 1),
-        "fletching_table" => ("minecraft:fletcher", 1),
-        "cauldron" | "lava_cauldron" | "water_cauldron" | "powder_snow_cauldron" => {
-            ("minecraft:leatherworker", 1)
-        }
-        "lectern" => ("minecraft:librarian", 1),
-        "stonecutter" => ("minecraft:mason", 1),
-        "loom" => ("minecraft:shepherd", 1),
-        "smithing_table" => ("minecraft:toolsmith", 1),
-        "grindstone" => ("minecraft:weaponsmith", 1),
-        "bell" => ("minecraft:meeting", 32),
-        "beehive" => ("minecraft:beehive", 0),
-        "bee_nest" => ("minecraft:bee_nest", 0),
-        "nether_portal" => ("minecraft:nether_portal", 0),
-        "lodestone" => ("minecraft:lodestone", 0),
-        "test_instance_block" => ("minecraft:test_instance", 0),
-        // PoiTypes.BEDS is the sixteen colours: no straw bed.
-        bed if bed.ends_with("_bed") && bed != "straw_bed" => {
-            if state.properties.get("part").map(String::as_str) != Some("head") {
-                return None;
-            }
-            ("minecraft:home", 1)
-        }
-        rod if rod.ends_with("lightning_rod") => ("minecraft:lightning_rod", 0),
-        _ => return None,
-    })
-}
 impl SaveTables {
     pub fn new(assets: &crate::assets::Assets) -> Self {
         let registry = assets.registry;
@@ -539,7 +503,11 @@ impl SaveTables {
             heightmaps: assets.properties.clone(),
             air: registry.default_state("minecraft:air").map_or(0, |s| s.0),
             poi: (0..registry.len())
-                .map(|id| registry.state(BlockStateId(id as u32)).and_then(poi_type))
+                .map(|id| {
+                    registry
+                        .state(BlockStateId(id as u32))
+                        .and_then(horizon_world::poi::poi_type)
+                })
                 .collect(),
         }
     }
@@ -2210,10 +2178,14 @@ fn compress_records(
     records: &[((i32, i32), &Record)],
     timestamp: u32,
 ) -> Vec<std::io::Result<Option<ChunkRecord>>> {
+    // `RegionFile.getVersion`: the version `region-file-compression` selected
+    // (`RegionFileVersion.getSelected`), zlib unless a dedicated server said
+    // otherwise.
+    let compression = Compression::selected();
     let compress = |record: &Record| {
         record
             .tag()
-            .map(|tag| ChunkRecord::from_nbt(&tag, Compression::Zlib, timestamp, Limits::saved()))
+            .map(|tag| ChunkRecord::from_nbt(&tag, compression, timestamp, Limits::saved()))
             .transpose()
     };
     let helpers = horizon_threads::worker_count()
@@ -6253,6 +6225,39 @@ mod tests {
         assert_eq!(share_out(0, 4, squares, || true), Vec::<usize>::new());
     }
 
+    /// `RegionFile.getVersion` writes a chunk with the version
+    /// `region-file-compression` selected: `compress_records` asks
+    /// `Compression::selected()` for every record it encodes, so a server told
+    /// to write lz4, gzip or uncompressed regions does
+    /// (`RegionFileVersion.configure`).
+    #[test]
+    fn a_chunk_is_written_with_the_selected_region_version() {
+        use super::{Record, compress_records};
+        let tag = Arc::new(NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("xPos", Tag::Int(3))]),
+        });
+        let records = [((3, 4), Record::Tag(Arc::clone(&tag)))];
+        let refs: Vec<_> = records.iter().map(|(k, r)| (*k, r)).collect();
+        for name in ["none", "lz4", "gzip", "deflate"] {
+            assert!(Compression::configure(name), "{name}");
+            let written = compress_records(&refs, 99)
+                .pop()
+                .expect("one record")
+                .expect("an encoded record")
+                .expect("a chunk, not a deletion");
+            assert_eq!(
+                written.compression,
+                Compression::selected(),
+                "written with {name}"
+            );
+            // The bytes are that codec's, and read back as the chunk.
+            assert_eq!(written.nbt(Limits::default()).unwrap(), *tag);
+        }
+        // Leave the default behind for the rest of this process's tests.
+        assert!(Compression::configure("deflate"));
+    }
+
     #[test]
     fn records_compressed_on_helpers_match_one_thread_in_order() {
         use super::{Record, compress_records};
@@ -6279,7 +6284,9 @@ mod tests {
         for ((_, record), got) in records.iter().zip(compressed) {
             let want = record
                 .tag()
-                .map(|t| ChunkRecord::from_nbt(&t, Compression::Zlib, 1234, Limits::default()))
+                .map(|t| {
+                    ChunkRecord::from_nbt(&t, Compression::selected(), 1234, Limits::default())
+                })
                 .transpose()
                 .unwrap();
             let got = got.unwrap();

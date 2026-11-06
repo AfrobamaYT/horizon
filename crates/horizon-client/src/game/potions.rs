@@ -2258,7 +2258,14 @@ impl Game<'_> {
                     }
                 };
                 let m = &mut self.mobs[i];
-                if harm {
+                if harm && m.species() == horizon_client::mobs::Species::Enderman {
+                    // `Enderman.hurtServer` for a thrown potion: only water hurts
+                    // (`hurtWithCleanWater`), then `repeatedlyTryToTeleport`, which
+                    // the AI step runs and which does nothing while it rides.
+                    if m.alive() && !m.extra.passenger {
+                        m.extra.counter2 = 64;
+                    }
+                } else if harm {
                     // HealOrHarmMobEffect.applyInstantaneousEffect: indirectMagic(potion, owner).
                     let harm = (intensity * f64::from(6 << amp) + 0.5) as i32 as f32;
                     let source = Damage::indirect_magic(owner.who(), [at.x, at.y, at.z]);
@@ -3006,7 +3013,7 @@ mod tests {
                     game.potions.effects.list = vec![EffectInstance::new(case.id, 450, 1)];
                     let left = 102 + image_width;
                     let origin = (100.0, 50.0);
-                    let mut batch = HudBatch::new([(left + case.room) as u32, 480]);
+                    let mut batch = HudBatch::scratch([(left + case.room) as u32, 480]);
                     game.cursor = ((left + 7) as f32, 57.0);
                     let vanilla = if case.default_tooltip {
                         vec![
@@ -3086,7 +3093,7 @@ mod tests {
                                         .is_none()
                                 );
                             });
-                            let mut narrow = HudBatch::new([(left + 31) as u32, 480]);
+                            let mut narrow = HudBatch::scratch([(left + 31) as u32, 480]);
                             assert!(
                                 game.draw_inventory_effects(&mut narrow, origin, image_width)
                                     .is_none()

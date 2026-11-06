@@ -11,7 +11,7 @@ use horizon_core::random::RandomSource;
 use std::f32::consts::PI;
 
 // Villager state: `variant` type, `variant2` profession (index into
-// `render::PROFESSIONS`), `villager_level` level, `home` the claimed job site,
+// `villager::PROFESSIONS`), `villager_level` level, `home` the claimed job site,
 // `bed` and `meeting` the claimed bed head and bell, `ints[0]` the unhappy
 // counter, `ints[1]` the bed's facing while asleep (1 north, 2 south,
 // 3 west, 4 east), `trade` the offers, experience and restocks.
@@ -19,24 +19,63 @@ use std::f32::consts::PI;
 pub const NONE: u8 = 0;
 pub const NITWIT: u8 = 11;
 
-/// `PoiTypes`: the job site block of each profession.
-pub fn job_site_profession(block: &str) -> Option<u8> {
-    Some(match block.trim_start_matches("minecraft:") {
-        "blast_furnace" => 1,
-        "smoker" => 2,
-        "cartography_table" => 3,
-        "brewing_stand" => 4,
-        "composter" => 5,
-        "barrel" => 6,
-        "fletching_table" => 7,
-        "cauldron" | "water_cauldron" | "lava_cauldron" | "powder_snow_cauldron" => 8,
-        "lectern" => 9,
-        "stonecutter" => 10,
-        "loom" => 12,
-        "smithing_table" => 13,
-        "grindstone" => 14,
-        _ => return None,
-    })
+/// Vanilla profession metadata. The table order is the existing saved and rendered index.
+#[derive(Debug)]
+pub struct Profession {
+    pub id: &'static str,
+    pub job_sites: &'static [&'static str],
+    pub trade_set: Option<&'static str>,
+    pub render_index: u8,
+}
+
+// Generate the match from the same data as the table: no hash or scan on the
+// per-villager job-site search, and no second list of workstation mappings.
+macro_rules! professions {
+    ($(($id:literal, $index:literal, [$($site:literal),*], $trades:expr)),* $(,)?) => {
+        /// Built-in professions in their existing render and storage order.
+        pub static PROFESSIONS: [Profession; 15] = [
+            $(Profession { id: $id, job_sites: &[$($site),*], trade_set: $trades, render_index: $index }),*
+        ];
+
+        /// `PoiTypes`: the profession for a job-site block.
+        pub fn job_site_profession(block: &str) -> Option<u8> {
+            match block.trim_start_matches("minecraft:") {
+                $($($site => Some($index),)*)*
+                _ => None,
+            }
+        }
+    };
+}
+
+professions! {
+    ("none", 0, [], None),
+    ("armorer", 1, ["blast_furnace"], Some("armorer")),
+    ("butcher", 2, ["smoker"], Some("butcher")),
+    ("cartographer", 3, ["cartography_table"], Some("cartographer")),
+    ("cleric", 4, ["brewing_stand"], Some("cleric")),
+    ("farmer", 5, ["composter"], Some("farmer")),
+    ("fisherman", 6, ["barrel"], Some("fisherman")),
+    ("fletcher", 7, ["fletching_table"], Some("fletcher")),
+    ("leatherworker", 8, ["cauldron", "water_cauldron", "lava_cauldron", "powder_snow_cauldron"], Some("leatherworker")),
+    ("librarian", 9, ["lectern"], Some("librarian")),
+    ("mason", 10, ["stonecutter"], Some("mason")),
+    ("nitwit", 11, [], None),
+    ("shepherd", 12, ["loom"], Some("shepherd")),
+    ("toolsmith", 13, ["smithing_table"], Some("toolsmith")),
+    ("weaponsmith", 14, ["grindstone"], Some("weaponsmith")),
+}
+
+/// Existing u8 adapter; invalid values retain the historic wrapping behavior.
+pub fn profession(index: u8) -> &'static Profession {
+    &PROFESSIONS[index as usize % PROFESSIONS.len()]
+}
+
+/// Finds the existing storage index for a bare profession name.
+pub fn profession_index(name: &str) -> Option<u8> {
+    PROFESSIONS
+        .iter()
+        .find(|p| p.id == name)
+        .map(|p| p.render_index)
 }
 
 pub fn register(m: &mut Mob) {
@@ -333,8 +372,8 @@ pub fn set_profession(m: &mut Mob, profession: u8) {
     }
 }
 /// `VillagerProfession.workSound`.
-pub fn work_sound(profession: u8) -> Option<&'static str> {
-    Some(match super::render::PROFESSIONS[profession as usize % 15] {
+pub fn work_sound(index: u8) -> Option<&'static str> {
+    Some(match profession(index).id {
         "armorer" => "entity.villager.work_armorer",
         "butcher" => "entity.villager.work_butcher",
         "cartographer" => "entity.villager.work_cartographer",
@@ -382,7 +421,7 @@ pub fn gift_table(m: &Mob) -> String {
     if m.is_baby() {
         return "minecraft:gameplay/hero_of_the_village/baby_gift".into();
     }
-    let profession = super::render::PROFESSIONS[m.extra.variant2 as usize % 15];
+    let profession = profession(m.extra.variant2).id;
     let name = match profession {
         "none" | "nitwit" => "unemployed",
         other => other,
@@ -415,14 +454,14 @@ pub fn farmer_items() -> &'static [&'static str] {
 }
 /// A villager's `requestedItems` by profession.
 pub fn requested_items(m: &Mob) -> &'static [&'static str] {
-    if super::render::PROFESSIONS[m.extra.variant2 as usize % 15] == "farmer" {
+    if profession(m.extra.variant2).id == "farmer" {
         farmer_items()
     } else {
         &[]
     }
 }
 pub fn is_farmer(m: &Mob) -> bool {
-    super::render::PROFESSIONS[m.extra.variant2 as usize % 15] == "farmer"
+    profession(m.extra.variant2).id == "farmer"
 }
 /// `SimpleContainer(8)`: stacks the villager carries.
 const INVENTORY_SLOTS: usize = 8;
@@ -893,6 +932,64 @@ pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 26.3 VillagerProfession.bootstrap, PoiTypes.bootstrap and TradeSets.
+    #[test]
+    fn vanilla_profession_table_and_job_sites() {
+        let cases = [
+            ("none", &[][..]),
+            ("armorer", &["blast_furnace"][..]),
+            ("butcher", &["smoker"][..]),
+            ("cartographer", &["cartography_table"][..]),
+            ("cleric", &["brewing_stand"][..]),
+            ("farmer", &["composter"][..]),
+            ("fisherman", &["barrel"][..]),
+            ("fletcher", &["fletching_table"][..]),
+            (
+                "leatherworker",
+                &[
+                    "cauldron",
+                    "water_cauldron",
+                    "lava_cauldron",
+                    "powder_snow_cauldron",
+                ][..],
+            ),
+            ("librarian", &["lectern"][..]),
+            ("mason", &["stonecutter"][..]),
+            ("nitwit", &[][..]),
+            ("shepherd", &["loom"][..]),
+            ("toolsmith", &["smithing_table"][..]),
+            ("weaponsmith", &["grindstone"][..]),
+        ];
+        for (index, (name, sites)) in cases.iter().enumerate() {
+            let index = index as u8;
+            assert_eq!(profession(index).id, *name);
+            assert_eq!(profession_index(name), Some(index));
+            assert_eq!(profession(index).render_index, index);
+            assert_eq!(profession(index).job_sites, *sites);
+            for site in *sites {
+                assert_eq!(job_site_profession(site), Some(index));
+                assert_eq!(
+                    job_site_profession(&format!("minecraft:{site}")),
+                    Some(index)
+                );
+            }
+            for level in 1..=5 {
+                assert_eq!(
+                    crate::merchant::Trades::set_for(name, level),
+                    format!("minecraft:{name}/level_{level}")
+                );
+            }
+        }
+        assert_eq!(profession(255).id, "none");
+        assert_eq!(job_site_profession("other:composter"), None);
+        assert_eq!(job_site_profession("stone"), None);
+        assert_eq!(profession_index("other:farmer"), None);
+        assert_eq!(
+            crate::merchant::Trades::set_for("other:farmer", 2),
+            "minecraft:other:farmer/level_2"
+        );
+    }
 
     fn villager() -> Mob {
         use crate::mobs::{Anim, Brain, Flags, MobType, Part, Species};

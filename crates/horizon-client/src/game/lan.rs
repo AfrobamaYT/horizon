@@ -924,7 +924,7 @@ pub(super) fn mob_meta(
         }
         // Villager.DATA_VILLAGER_DATA and ZombieVillager's (after Zombie's three).
         "minecraft:villager" | "minecraft:zombie_villager" => {
-            use horizon_client::mobs::render::{PROFESSIONS, VILLAGER_TYPES};
+            use horizon_client::mobs::render::VILLAGER_TYPES;
             if kind == "minecraft:villager" {
                 unhappy_counter(m, meta, defaults);
             } else {
@@ -935,7 +935,7 @@ pub(super) fn mob_meta(
                 defaults.push((19, serializer::BOOLEAN, Value::Bool(false)));
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
-            let profession = PROFESSIONS[e.variant2 as usize % PROFESSIONS.len()];
+            let profession = horizon_client::mobs::villager::profession(e.variant2).id;
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),

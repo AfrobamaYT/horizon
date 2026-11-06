@@ -14,6 +14,7 @@ struct Missing {
     /// The pointer in physical pixels.
     pointer: (f64, f64),
     api: horizon_client::graphics::GraphicsApi,
+    settings: Settings,
     error: Option<Box<dyn std::error::Error>>,
 }
 
@@ -29,9 +30,10 @@ pub(super) fn show(looked_in: &std::path::Path, settings: &Settings) -> Result<(
         screen: NoResources::new(looked_in),
         pointer: (0.0, 0.0),
         api: settings.horizon.api,
+        settings: settings.clone(),
         error: None,
     };
-    horizon_client::hud::GUI_SCALE.store(settings.gui_scale, Ordering::Relaxed);
+
     EventLoop::new()?.run_app(&mut app)?;
     app.error.map_or(Ok(()), Err)
 }
@@ -60,7 +62,7 @@ impl Missing {
     }
 
     fn draw(&mut self) {
-        let mut batch = HudBatch::new(self.size());
+        let mut batch = HudBatch::new(self.size(), self.settings.gui_scale_inputs());
         self.with_ui(&mut batch, |ui| self.screen.draw(ui));
         let Some(renderer) = &mut self.renderer else {
             return;
@@ -79,7 +81,7 @@ impl Missing {
     }
 
     fn click(&mut self, event_loop: &ActiveEventLoop) {
-        let mut batch = HudBatch::new(self.size());
+        let mut batch = HudBatch::new(self.size(), self.settings.gui_scale_inputs());
         match self.with_ui(&mut batch, |ui| self.screen.click(ui)) {
             Some(Action::Download) => packs::open_uri(DOWNLOAD_URL),
             Some(Action::Quit) => event_loop.exit(),

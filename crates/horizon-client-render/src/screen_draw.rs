@@ -1194,7 +1194,7 @@ mod button_label_tests {
             assert_eq!(draws[3], Draw::NoScissor);
             assert_eq!(draws.len(), 4);
             // Painted, no vertex of the label leaves the box.
-            let mut batch = HudBatch::new([320, 240]);
+            let mut batch = HudBatch::scratch([320, 240]);
             paint(&mut batch, &atlas, &draws[1..]);
             assert!(!batch.vertices.is_empty());
             for v in &batch.vertices {
@@ -1252,7 +1252,7 @@ mod button_label_tests {
             for w in [-5, 0, 1, 2, 3, 4, 5, 150] {
                 for ms in [0, 1, 1499, 1500, 123_456_789] {
                     let draws = draw(&m, &text, w, ms);
-                    let mut batch = HudBatch::new([320, 240]);
+                    let mut batch = HudBatch::scratch([320, 240]);
                     paint(&mut batch, &atlas, &draws);
                     if let Some([x0, _, x1, _]) = scissor_of(&draws) {
                         // Whatever scrolled is clipped to the (maybe empty) box.
@@ -1275,7 +1275,7 @@ mod button_label_tests {
 
     /// The vertices of the button's sprite alone.
     fn sprite_vertices(atlas: &HudAtlas, w: i32) -> usize {
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         let mut out = Vec::new();
         sprite(&mut out, "widget/button", 10, 20, w, 20);
         paint(&mut batch, atlas, &out);

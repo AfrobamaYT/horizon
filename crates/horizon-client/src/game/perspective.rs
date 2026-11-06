@@ -487,11 +487,7 @@ impl Game<'_> {
         let use_animation = self
             .using
             .and_then(|(slot, _)| self.stack_in(slot))
-            .and_then(|stack| self.items().get(&stack.item))
-            .map_or_else(
-                Default::default,
-                horizon_client::first_person::item_use_animation,
-            );
+            .map_or_else(Default::default, |stack| self.item_use_animation(stack));
         let held_arm_pose = self.held_arm_poses(
             self.own_entity_id() as u32,
             [self.selected, super::shield::OFFHAND_SLOT].map(|slot| self.stack_in(slot)),
@@ -1558,7 +1554,7 @@ mod preview_tests {
         let verts = face([1.0, 1.0, -1.0, -1.0]).chain(face([0.0; 4])).collect();
         let quads = player_preview_quads(verts, glam::Mat4::IDENTITY, None, &Default::default());
         assert_eq!(quads.len(), 2);
-        let mut batch = HudBatch::new([320, 240]);
+        let mut batch = HudBatch::scratch([320, 240]);
         for (_, p, uv, color) in quads {
             batch.quad_3d(p, uv, color);
         }

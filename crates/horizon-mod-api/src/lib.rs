@@ -6,12 +6,19 @@
 #![deny(missing_docs)]
 extern crate self as mod_api;
 mod registry_keys;
+pub use registry_keys::UnknownFluid;
 
 /// A block requested once through [`Registrar::block_key`]. Its load-owned slot survives reload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
+
+/// A fluid requested once through [`Registrar::fluid_key`]. Its slot is load-owned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only the registration table creates keys
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct FluidKey(u32);
 
 /// An effect requested once through [`Registrar::effect_key`]. The registry is fixed until restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -4593,7 +4600,7 @@ pub use entity_capability::{
 };
 mod block_states;
 pub use block_states::{
-    BlockStateConstraint, BlockStateMatchError, BlockStateProperty, BlockStates, HostBlockStates,
+    BlockStates, HostBlockStates, StateConstraint, StateMatchError, StateProperty,
 };
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
