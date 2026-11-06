@@ -700,15 +700,21 @@ mod tests {
 
     #[test]
     fn numbers_parse_like_brigadier_within_the_rule() {
-        let r = gamerules::rule("max_snow_accumulation_height").unwrap();
-        assert_eq!(parse(r, "8"), Some(8));
-        assert_eq!(parse(r, "9"), None);
-        assert_eq!(parse(r, "-1"), None);
+        let r = gamerules::rule_registry()
+            .rule("max_snow_accumulation_height")
+            .unwrap()
+            .clone();
+        assert_eq!(parse(&r, "8"), Some(8));
+        assert_eq!(parse(&r, "9"), None);
+        assert_eq!(parse(&r, "-1"), None);
         for s in ["", "+3", " 3", "3 ", "3.0", "x"] {
-            assert_eq!(parse(r, s), None, "{s:?}");
+            assert_eq!(parse(&r, s), None, "{s:?}");
         }
-        let r = gamerules::rule("fire_spread_radius_around_player").unwrap();
-        assert_eq!(parse(r, "-1"), Some(-1));
+        let r = gamerules::rule_registry()
+            .rule("fire_spread_radius_around_player")
+            .unwrap()
+            .clone();
+        assert_eq!(parse(&r, "-1"), Some(-1));
     }
 
     #[test]

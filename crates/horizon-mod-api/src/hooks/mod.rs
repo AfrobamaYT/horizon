@@ -290,6 +290,7 @@ mod structure_template;
 mod sweep_attack;
 mod tag_fluid_reads;
 mod teleport_command;
+mod tick_target_millis;
 mod toast_add;
 mod tooltip_color;
 mod transactions;
