@@ -23,7 +23,8 @@ pub fn render(
         eprintln!("entity pixel test: no software Vulkan adapter; skipped");
         return None;
     }
-    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
+        .expect("software Vulkan device request failed");
     let texture = |width, height, format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {
             label: None,
@@ -77,7 +78,7 @@ pub fn render(
     );
     queue.write_texture(
         lightmap.as_image_copy(),
-        &[255; 16 * 16 * 4],
+        &[128, 192, 255, 255].repeat(16 * 16),
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(64),

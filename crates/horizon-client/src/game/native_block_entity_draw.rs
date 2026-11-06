@@ -1127,11 +1127,10 @@ mod tests {
                 .chunks_exact(4)
                 .filter(|p| p[0] != 0 || p[1] != 0 || p[2] != 0)
                 .count();
-            eprintln!(
-                "coverage {coverage}, sample {:?}",
-                rendered.chunks_exact(4).find(|p| p[0] != 0)
-            );
-            assert!(coverage > 200 && coverage < 1200);
+            let pixel = |x: usize, y: usize| &rendered[(y * 64 + x) * 4..(y * 64 + x + 1) * 4];
+            assert_eq!(pixel(32, 32), [48, 107, 47, 255]);
+            assert_eq!(pixel(0, 0), [0, 0, 0, 255]);
+            assert!((950..1050).contains(&coverage), "coverage was {coverage}");
         });
     }
 
