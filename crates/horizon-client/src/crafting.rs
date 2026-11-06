@@ -2470,6 +2470,104 @@ mod tests {
         assert_eq!(custom.json["value"], 42);
     }
 
+    #[test]
+    fn all_special_rule_variants_project_from_loaded_recipes() {
+        let cases = [
+            (
+                "crafting_special_bannerduplicate",
+                r#"{"banner":"test:banner","result":"test:banner"}"#,
+            ),
+            (
+                "crafting_special_shielddecoration",
+                r#"{"banner":"test:banner","target":"test:shield","result":"test:shield"}"#,
+            ),
+            (
+                "crafting_dye",
+                r#"{"target":"test:target","dye":"test:dye","result":"test:result"}"#,
+            ),
+            (
+                "crafting_imbue",
+                r#"{"source":"test:source","material":"test:material","result":"test:result"}"#,
+            ),
+            (
+                "crafting_special_bookcloning",
+                r#"{"source":"test:source","material":"test:material","allowed_generations":{"min":0,"max":2},"result":"test:result"}"#,
+            ),
+            (
+                "crafting_special_firework_rocket",
+                r#"{"shell":"test:shell","fuel":"test:fuel","star":"test:star","result":"test:result"}"#,
+            ),
+            (
+                "crafting_special_firework_star",
+                r#"{"dye":"test:dye","fuel":"test:fuel","trail":"test:trail","twinkle":"test:twinkle","shapes":{"star":"test:shape"},"result":"test:result"}"#,
+            ),
+            (
+                "crafting_special_firework_star_fade",
+                r#"{"dye":"test:dye","target":"test:target","result":"test:result"}"#,
+            ),
+            (
+                "crafting_special_mapextending",
+                r#"{"map":"test:map","material":"test:material","result":"test:result"}"#,
+            ),
+            (
+                "crafting_decorated_pot",
+                r#"{"back":"test:back","left":"test:left","right":"test:right","front":"test:front","result":"test:result"}"#,
+            ),
+            ("crafting_special_repairitem", "{}"),
+        ];
+        let sources = ResolvedSources {
+            recipes: cases
+                .iter()
+                .map(|(kind, json)| {
+                    let mut v: Value = serde_json::from_str(json).unwrap();
+                    v["type"] = format!("minecraft:{kind}").into();
+                    let file = Arc::new(v);
+                    ResolvedRecipe {
+                        name: format!("test:{kind}"),
+                        resolved: file.clone(),
+                        file,
+                    }
+                })
+                .collect(),
+            ..ResolvedSources::default()
+        };
+        let items = Items::for_tests(HashMap::new());
+        let recipes =
+            Recipes::from_resolved(&std::env::temp_dir(), &items, &PackOverlay::NONE, &sources)
+                .unwrap();
+        for (kind, _) in cases {
+            let entries = &recipes.by_type[&format!("minecraft:{kind}")];
+            assert_eq!(entries.len(), 1, "{kind}");
+            let rule = entries[0].rule.as_ref().expect(kind);
+            use mod_api::RecipeRule as R;
+            assert!(
+                matches!(
+                    (kind, rule),
+                    (
+                        "crafting_special_bannerduplicate",
+                        R::BannerDuplicate { .. }
+                    ) | (
+                        "crafting_special_shielddecoration",
+                        R::ShieldDecoration { .. }
+                    ) | ("crafting_dye", R::Dye { .. })
+                        | ("crafting_imbue", R::Imbue { .. })
+                        | ("crafting_special_bookcloning", R::BookCloning { .. })
+                        | ("crafting_special_firework_rocket", R::FireworkRocket { .. })
+                        | ("crafting_special_firework_star", R::FireworkStar { .. })
+                        | (
+                            "crafting_special_firework_star_fade",
+                            R::FireworkStarFade { .. }
+                        )
+                        | ("crafting_special_mapextending", R::MapExtending { .. })
+                        | ("crafting_decorated_pot", R::DecoratedPot { .. })
+                        | ("crafting_special_repairitem", R::RepairItem)
+                ),
+                "{kind}: {rule:?}"
+            );
+            assert!(entries[0].results.is_empty(), "{kind} is dynamic");
+        }
+    }
+
     /// NeoForge's standard ingredient shapes resolve to their flat item
     /// lists; a kind the loader doesn't know still fails the file.
     #[test]

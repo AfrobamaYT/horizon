@@ -948,6 +948,50 @@ mod glue {
 mod tests {
     use super::*;
 
+    #[test]
+    fn recipe_rule_generated_wire_roundtrip() {
+        use crate::{Ingredient, Recipe, RecipeRule, RecipeTemplate, Tag};
+        let mut recipe = Recipe::new(
+            "test:rule",
+            "minecraft:crafting_transmute",
+            Arc::new(serde_json::json!({"custom": 42})),
+        );
+        recipe.rule = Some(RecipeRule::Transmute {
+            input: Ingredient::of(vec!["test:input".into()]),
+            material: Ingredient::of(vec!["test:material".into()]),
+            min: 2,
+            max: 4,
+            add_count: true,
+            result: RecipeTemplate::new(
+                None,
+                3,
+                Some(Tag::compound([("!test:removed", Tag::Int(0))])),
+            ),
+        });
+        let output = glue::recipe_roundtrip(&recipe).unwrap();
+        assert_eq!(output.id, recipe.id);
+        assert_eq!(*output.json, *recipe.json);
+        let Some(RecipeRule::Transmute {
+            input,
+            material,
+            min,
+            max,
+            add_count,
+            result,
+        }) = output.rule
+        else {
+            panic!("wrong generated recipe rule")
+        };
+        assert_eq!(input.order, ["test:input"]);
+        assert_eq!(material.order, ["test:material"]);
+        assert_eq!((min, max, add_count), (2, 4, true));
+        assert_eq!((result.item, result.count), (None, 3));
+        assert!(matches!(
+            result.components.unwrap().get("!test:removed"),
+            Some(Tag::Int(0))
+        ));
+    }
+
     fn group(wait: Duration) -> Arc<Group> {
         let engine = wasmtime::Engine::default();
         let limits = wasmtime::StoreLimitsBuilder::new().build();

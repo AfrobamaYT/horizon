@@ -773,6 +773,9 @@ pub(super) fn conversions(
                 Kind::Opaque(_) => unreachable!(),
             };
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn lift_{id}(w: {wire}) -> Result<{path}, Refused> {{ Ok({body}) }}").unwrap();
+            if def.rust == "mod_api::Recipe" {
+                writeln!(code, "#[cfg(test)] pub(super) fn recipe_roundtrip(v: &{rust}) -> Result<{path}, Refused> {{ lift_{id}(lower_{id}(v)?) }}").unwrap();
+            }
         }
         // An event's written-back fields, both ways.
         if outs.contains(&id)
