@@ -19902,6 +19902,15 @@ impl Game<'_> {
                 self.mapped_key_event(key, false, false)?;
                 return Ok(());
             }
+            if let WindowEvent::KeyboardInput { event, .. } = &event
+                && event.state == ElementState::Released
+                && self.screen == Screen::Options
+                && let PhysicalKey::Code(key) = event.physical_key
+            {
+                self.ui.options.modifiers = self.native_modifiers().bits;
+                let events = self.ui.options.key_released(&mut self.settings, key);
+                self.handle_option_events(events)?;
+            }
             // ScreenEvent.MouseButtonPressed.Pre / MouseButtonReleased.Pre:
             // the open screen hears of the press before anything reads it, and
             // a cancelled one goes no further — no hotbar key, no slot, no

@@ -87,6 +87,23 @@ pub enum Shape {
     Opaque(Option<String>),
 }
 
+impl Shape {
+    /// Whether a value may contain a borrow that a call-site result cannot respell safely.
+    /// Lifetime-bearing names include omitted lifetimes; opaque layouts are conservatively refused.
+    pub fn may_borrow(&self) -> bool {
+        match self {
+            Self::Ref { .. } | Self::Opaque(_) | Self::Wrapped(Wrapper::Cow, _) => true,
+            Self::Named(_, lifetimes) => *lifetimes != 0,
+            Self::Tuple(parts) | Self::Collection(_, parts) => parts.iter().any(Self::may_borrow),
+            Self::Array(inner, _)
+            | Self::Slice(inner)
+            | Self::Option(inner)
+            | Self::Wrapped(_, inner) => inner.may_borrow(),
+            Self::Scalar(_) | Self::Unit => false,
+        }
+    }
+}
+
 /// Scalars by name.
 const SCALARS: &[(&str, Scalar)] = &[
     ("bool", Scalar::Bool),
