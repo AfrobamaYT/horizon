@@ -59,6 +59,13 @@ impl ClientSession for Game<'_> {
     }
 }
 impl Commands for Game<'_> {
+    fn refresh_commands(&mut self) {
+        mod_api::__private::check_access(
+            "refresh_commands",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_refresh_commands()
+    }
     fn feedback(&mut self, line: Text) {
         mod_api::__private::check_access("feedback", mod_api::__private::LoadAccess::WorldOnly);
         self.native_feedback(line)
