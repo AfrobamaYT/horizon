@@ -1,5 +1,5 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
-use super::{Catalog, Target, free_function_source, sources};
+use super::{Catalog, Target, free_function_source, native_hook_files, sources};
 use quote::ToTokens;
 use std::{fs, path::Path};
 
@@ -10,22 +10,17 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
         Target::Client => {
-            let dir = root.join("crates/horizon-client/src/game/native_hooks");
-            let mut paths = fs::read_dir(&dir)
-                .map_err(|e| e.to_string())?
-                .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
-                .collect::<Result<Vec<_>, _>>()?;
-            paths.retain(|path| {
-                path.extension().is_some_and(|ext| ext == "rs")
-                    && !matches!(
-                        path.file_stem().and_then(|s| s.to_str()),
-                        Some("mod" | "shared" | "fire")
-                    )
-            });
-            paths.sort();
             let mut modules = String::new();
-            for path in paths {
-                let module = path.file_stem().unwrap().to_str().unwrap();
+            for path in native_hook_files(root)? {
+                let module = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .ok_or_else(|| {
+                        format!("{}: invalid native hook module name", path.display())
+                    })?;
+                if matches!(module, "mod" | "shared") {
+                    continue;
+                }
                 syn::parse_str::<syn::Ident>(module).map_err(|e| e.to_string())?;
                 let path = fs::canonicalize(&path).map_err(|e| e.to_string())?;
                 modules.push_str(&format!("#[path = {path:?}] mod {module};\n"));
