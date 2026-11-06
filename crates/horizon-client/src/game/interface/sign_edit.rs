@@ -121,6 +121,7 @@ impl Game<'_> {
             store: None,
             dimension: self.dim,
             origin_dimension: self.dim,
+            origin_player: self.player.is_some(),
             level: None,
             block: None,
             cart: None,
