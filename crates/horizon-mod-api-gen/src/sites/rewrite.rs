@@ -9,6 +9,63 @@ fn digest(text: String) -> String {
     format!("{:x}", Sha256::digest(text.as_bytes()))[..16].to_owned()
 }
 
+fn covers(span: proc_macro2::Span, expr: &Expr) -> bool {
+    let (start, end) = (expr.span().start(), expr.span().end());
+    let (from, to) = (span.start(), span.end());
+    (from.line < start.line || (from.line == start.line && from.column <= start.column))
+        && (to.line > end.line || (to.line == end.line && to.column >= end.column))
+}
+
+/// Statement tokens plus the if/match/block path. Token text ignores source formatting.
+fn call_context(body: &syn::Block, expr: &Expr) -> String {
+    fn block(body: &syn::Block, expr: &Expr, path: &str) -> Option<String> {
+        for stmt in &body.stmts {
+            if !covers(stmt.span(), expr) {
+                continue;
+            }
+            if let syn::Stmt::Expr(inner, _) = stmt {
+                if let Some(found) = nested(inner, expr, path) {
+                    return Some(found);
+                }
+            }
+            return Some(format!("{path}|{}", stmt.to_token_stream()));
+        }
+        None
+    }
+    fn nested(expr: &Expr, target: &Expr, path: &str) -> Option<String> {
+        match expr {
+            Expr::If(item) => {
+                block(&item.then_branch, target, &format!("{path}/t")).or_else(|| {
+                    item.else_branch
+                        .as_ref()
+                        .and_then(|(_, branch)| match branch.as_ref() {
+                            Expr::Block(item) => block(&item.block, target, &format!("{path}/e")),
+                            other => nested(other, target, &format!("{path}/e")),
+                        })
+                })
+            }
+            Expr::Match(item) => {
+                item.arms
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, arm)| match arm.body.as_ref() {
+                        Expr::Block(item) => {
+                            block(&item.block, target, &format!("{path}/a{index}"))
+                        }
+                        other => nested(other, target, &format!("{path}/a{index}")),
+                    })
+            }
+            Expr::Block(item) => block(&item.block, target, &format!("{path}/b")),
+            Expr::Unsafe(item) => block(&item.block, target, &format!("{path}/b")),
+            Expr::Loop(item) => block(&item.body, target, &format!("{path}/b")),
+            Expr::While(item) => block(&item.body, target, &format!("{path}/b")),
+            Expr::ForLoop(item) => block(&item.body, target, &format!("{path}/b")),
+            _ => None,
+        }
+    }
+    block(body, expr, "").unwrap_or_default()
+}
+
 pub(crate) fn name(declaration: &Declaration, ordinal: usize) -> String {
     format!(
         "S{}",
@@ -143,16 +200,35 @@ pub fn rewrite(
                         ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #record| #original)
                     } else { #expr }
                 };
+                // `nth` is this call's index among the same resolved callee. Identical
+                // statements share a context, so the callee's call count is part of the
+                // fingerprint: an earlier clone moves ordinal 0 without changing its context.
+                let mut nth = 0;
+                let mut same = 0;
+                for call in &calls {
+                    let Ok(other) = resolve(call, enclosing, found.sig, &lexical, entries, &rule)
+                    else {
+                        continue;
+                    };
+                    if plain_path(&other.callee.path) != plain_path(&callee.path) {
+                        continue;
+                    }
+                    if std::ptr::eq(*call, expr) {
+                        nth = same;
+                    }
+                    same += 1;
+                }
                 let site = Site {
                     name,
                     target: declaration.target.clone(),
                     selector: declaration.selector.clone(),
                     ordinal,
                     hash: digest(format!(
-                        "{}|{}|{}",
+                        "{}|{}|{}|{nth}|{same}|{}",
                         enclosing.signature,
                         callee.signature,
-                        expr.to_token_stream()
+                        expr.to_token_stream(),
+                        call_context(found.body, expr)
                     )),
                     listener: format!("{}::{listener}", found.module),
                     record: format!("{}::{record}", found.module),
