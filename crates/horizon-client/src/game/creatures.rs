@@ -7030,10 +7030,7 @@ impl Game<'_> {
                 extra: None,
             };
             if let Some(effects) = give_stew {
-                stack.extra = Some(Box::new(horizon_client::item_data::StackData {
-                    stew_effects: effects,
-                    ..Default::default()
-                }));
+                stack.data_mut().stew_effects = effects;
             }
             if self.stack_in(selected).is_none() {
                 *self.stack_in_mut(selected) = Some(stack);

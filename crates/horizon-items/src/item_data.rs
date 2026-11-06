@@ -56,6 +56,7 @@ use std::sync::Arc;
 pub type Levels = Vec<(Arc<str>, u32)>;
 
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct StackData {
     /// `minecraft:enchantments`.
     pub enchantments: Levels,
