@@ -14,7 +14,7 @@ SUPPORT = {'agent_navigation': 'agent', 'mod_inventory_tests': 'mods'}
 
 
 def area(name):
-    if name.startswith(('native_', 'mod_api_')) or name in {'mods', 'attachment_sync'}:
+    if name.startswith(('native_', 'mod_api_', 'attachment_')) or name == 'mods':
         return 'modding'
     if name.startswith(('lan', 'remote', 'net_')) or name in {'prediction', 'friends', 'server_links', 'social'}:
         return 'network'
