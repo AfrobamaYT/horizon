@@ -452,9 +452,16 @@ impl Game<'_> {
             .iter()
             .flat_map(|host| host.hub.guests.simulation_iter())
             .filter(|g| {
+                // The acting guest's mode is live in `Game` during its turn; the hub
+                // hears of a change only in `leave_guest`.
+                let spectator = if self.lan_acting_uuid == Some(g.uuid) {
+                    self.spectator()
+                } else {
+                    g.spectator()
+                };
                 g.participates_online()
                     && g.placed
-                    && !g.spectator()
+                    && !spectator
                     && g.dimension == level.dimension()
                     && g.menu.as_ref().is_some_and(|m| menu_holds(m, key))
             })
@@ -848,6 +855,20 @@ mod tests {
             })
             .unwrap();
             game.guest_close_all(12);
+
+            // A guest that turns spectator during its own turn stops being a viewer then,
+            // though the hub still has the old mode until the turn ends.
+            assert!(guest12.open_menu(game, single));
+            game.as_guest(12, |game| {
+                assert!(game.set_game_mode(horizon_client::command::args::GameMode::Spectator));
+                assert_eq!(single.viewers(game), Some(vec![]));
+            })
+            .unwrap();
+            game.guest_close_all(12);
+            game.as_guest(12, |game| {
+                assert!(game.set_game_mode(horizon_client::command::args::GameMode::Survival));
+            })
+            .unwrap();
 
             // A double chest's menu holds both halves, whichever was opened.
             assert!(guest12.open_menu(game, right));
