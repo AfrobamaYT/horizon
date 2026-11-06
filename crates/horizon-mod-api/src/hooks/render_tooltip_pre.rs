@@ -8,6 +8,8 @@ pub trait Hooks {
     /// left them (a tooltip with no item has only lines), and are read-only here. `stack` is the
     /// item the tooltip describes, `None` for a text tooltip. Set `cancel` and nothing is drawn,
     /// and no `tooltip_color` is asked. Asked each frame a tooltip shows, only while a mod listens.
+    /// `draw` is the tooltip's GUI drawing context. Custom drawing stays visible even when
+    /// the tooltip is cancelled; `draw.gui_draw_item_with` draws a stack with optional count text.
     /// Client-side.
     #[hook(
         side = "client",
@@ -16,5 +18,13 @@ pub trait Hooks {
         neoforge = "RenderTooltipEvent.Pre",
         cancellable = true
     )]
-    fn render_tooltip_pre();
+    fn render_tooltip_pre(
+        draw: &mut dyn DrawContext,
+        stack: Option<&ItemStack>,
+        screen_width: i32,
+        screen_height: i32,
+        elements: &[TooltipElement],
+        place: &mut TooltipPlace,
+        cancel: &mut bool,
+    );
 }

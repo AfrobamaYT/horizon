@@ -315,6 +315,48 @@ mod tests {
     use super::*;
     use horizon_world::native_load_context::DataLoadOrigin;
 
+    #[test]
+    fn structure_zombie_preserves_unknown_profession() {
+        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES").map(PathBuf::from) else {
+            return;
+        };
+        let item_data =
+            crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
+        let hook = StructureMobFinalizer::new(root, "minecraft:overworld", item_data);
+        let mut nbt = match Tag::compound([
+            ("id", Tag::String("minecraft:zombie_villager".into())),
+            (
+                "Pos",
+                Tag::List(vec![
+                    Tag::Double(0.0_f64.to_bits()),
+                    Tag::Double(64.0_f64.to_bits()),
+                    Tag::Double(0.0_f64.to_bits()),
+                ]),
+            ),
+            (
+                "VillagerData",
+                Tag::compound([
+                    ("type", Tag::String("minecraft:plains".into())),
+                    ("profession", Tag::String("example:engineer".into())),
+                    ("level", Tag::Int(1)),
+                ]),
+            ),
+        ]) {
+            Tag::Compound(c) => c,
+            _ => unreachable!(),
+        };
+        assert!(hook.finalize(
+            &mut nbt,
+            "minecraft:plains",
+            &[],
+            &mut LegacyRandom::new(12345)
+        ));
+        let result = Tag::Compound(nbt);
+        assert!(
+            matches!(result.get("VillagerData").and_then(|v| v.get("profession")), Some(Tag::String(s)) if s.to_string_lossy() == "example:engineer")
+        );
+    }
+
     /// The bastion's crossbow piglin keeps its crossbow (STRUCTURE skips
     /// createSpawnWeapon) and saves what Piglin.addAdditionalSaveData writes.
     #[test]

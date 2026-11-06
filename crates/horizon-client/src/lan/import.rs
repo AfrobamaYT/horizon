@@ -555,8 +555,7 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
     // for a player loaded into an empty guest and wrong here: the held player holds what its
     // own file gave it on this server, and an imported inventory REPLACES that, a slot the
     // record leaves empty being empty afterwards.
-    {
-        let g = &mut hub.guests[i];
+    hub.guests.update(i, |g| {
         if request.parts.contains(&"inventory") {
             g.inventory.iter_mut().for_each(|slot| *slot = None);
             g.armor = Default::default();
@@ -566,12 +565,9 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
         if request.parts.contains(&"ender_chest") {
             g.ender_items.iter_mut().for_each(|slot| *slot = None);
         }
-    }
-    playerdata::apply(&mut hub.guests[i], &level);
-    kept.restore(&mut hub.guests[i], &request.parts);
-    // What the request says of where the player stands wins over the record.
-    {
-        let g = &mut hub.guests[i];
+        playerdata::apply(g, &level);
+        kept.restore(g, &request.parts);
+        // What the request says of where the player stands wins over the record.
         let a = &request.arrival;
         if let Some(p) = a.position {
             g.position = p;
@@ -590,18 +586,21 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
         {
             body.velocity = velocity;
         }
-    }
+    });
     // Everything the import changed reaches the client now, so that a proxy sees the
     // player as it will be; the player stays held until it is placed or dropped.
     let recentered = hub.send_arrival_state(i);
-    let g = &mut hub.guests[i];
-    // A retry of this hand-over's import finds the view already moved: it still answers that
-    // the chunks around the new place are on their way, as the first reply did.
-    let recentered = recentered || (g.arrival_handover == Some(handover) && g.arrival_recentered);
-    g.arrival_recentered = recentered;
-    g.imported = true;
-    g.arrival_announce = request.announce;
-    g.arrival_handover = Some(handover);
+    let recentered = hub.guests.update(i, |g| {
+        // A retry of this hand-over's import finds the view already moved: it still answers that
+        // the chunks around the new place are on their way, as the first reply did.
+        let recentered =
+            recentered || (g.arrival_handover == Some(handover) && g.arrival_recentered);
+        g.arrival_recentered = recentered;
+        g.imported = true;
+        g.arrival_announce = request.announce;
+        g.arrival_handover = Some(handover);
+        recentered
+    });
     let records = |key: &str| {
         request
             .parts

@@ -185,7 +185,7 @@ impl Game<'_> {
             .is_some();
         if closed
             && let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn)
-            && let Some(carried) = host.hub.guests[gi].carried.take()
+            && let Some(carried) = host.hub.guests.update(gi, |g| g.carried.take())
         {
             self.lan_place_back(gi, vec![carried]);
         }

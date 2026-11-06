@@ -10,11 +10,12 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 use toml_edit::{DocumentMut, Item, Value};
 
-const USAGE: &str = "usage: cargo horizon-mod internals sync | add <path>… [--kind <kind>]";
+const USAGE: &str =
+    "usage: cargo horizon-mod internals sync [--repo <path>] | add <path>… [--kind <kind>]";
 const CATALOG: &str = "internals.json";
 const CATALOG_LIMIT: u64 = 64 << 20;
 const ARCHIVE_LIMIT: u64 = 4 << 30;
@@ -24,10 +25,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
         return Err(USAGE.into());
     };
     if command == "sync" {
-        if !args.is_empty() {
-            return Err(USAGE.into());
-        }
-        return sync(Path::new("."));
+        let repo = match args {
+            [] => None,
+            [flag, path] if flag == "--repo" && !path.starts_with('-') => Some(Path::new(path)),
+            _ => return Err(USAGE.into()),
+        };
+        return sync(Path::new("."), repo);
     }
     let mut paths = Vec::new();
     let mut kind = None;
@@ -56,11 +59,13 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
-    let native = manifest
-        .native
-        .as_ref()
-        .ok_or("internals add needs a [native] mod")?;
-    let catalog = load(dir, &native.horizon)?;
+    let (declared, catalog) = if let Some(wasm) = &manifest.wasm {
+        (wasm.internals(), internals::read(&wasm_catalog(dir)?)?)
+    } else if let Some(native) = &manifest.native {
+        (native.internals.as_slice(), load(dir, &native.horizon)?)
+    } else {
+        return Err("internals add needs a [native] or [wasm] mod".into());
+    };
     // Resolve every request before editing: any unavailable or ambiguous path leaves the file alone.
     let entries = paths
         .iter()
@@ -71,20 +76,20 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     let mut doc: DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    upsert(&mut doc, native, &entries)?;
+    upsert(&mut doc, declared, &entries)?;
     for entry in entries {
         println!("Added internal {}", entry.path);
     }
     fs::write(&path, doc.to_string()).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Adds or refreshes `entries` in `[native].internals`, which also holds a `[wasm]` mod's.
 fn upsert(
     doc: &mut DocumentMut,
-    native: &horizon_mods::manifest::Native,
+    declared: &[horizon_mods::manifest::Internal],
     entries: &[&ListedInternal],
 ) -> Result<(), String> {
-    let mut listed: BTreeMap<_, _> = native
-        .internals
+    let mut listed: BTreeMap<_, _> = declared
         .iter()
         .enumerate()
         .map(|(index, entry)| ((entry.path.as_str(), entry.kind.as_deref()), index))
@@ -130,14 +135,70 @@ fn upsert(
 }
 
 /// The launcher owns source staging and compiler diagnostics; this tool owns manifest edits.
-fn sync(dir: &Path) -> Result<(), String> {
+fn sync(dir: &Path, repo: Option<&Path>) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let original = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&original)?;
+    if let Some(wasm) = &manifest.wasm {
+        let repo = match repo {
+            Some(repo) => repo.to_path_buf(),
+            None => dir
+                .canonicalize()
+                .map_err(|e| e.to_string())?
+                .ancestors()
+                .find(|path| {
+                    path.join("Cargo.toml").is_file()
+                        && path.join("crates/horizon-mod-api-gen").is_dir()
+                })
+                .ok_or("Could not find a Horizon workspace; pass --repo <path>")?
+                .to_path_buf(),
+        };
+        let directory = repo.join("crates/horizon-mod-api-gen/wasm-internals");
+        if !repo.join("Cargo.toml").is_file() || !directory.is_dir() {
+            return Err(format!("{}: not a Horizon workspace", repo.display()));
+        }
+        let output = directory.join(format!("{}.txt", manifest.id));
+        let paths: BTreeSet<&str> = wasm
+            .internals()
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .chain(
+                wasm.points()
+                    .iter()
+                    .filter(|entry| entry.raw.is_some())
+                    .filter_map(|entry| entry.target.as_deref()),
+            )
+            .collect();
+        let mut contents = format!(
+            "# {}: written by cargo horizon-mod internals sync from horizon-mod.toml\n",
+            manifest.id
+        );
+        for path in paths {
+            contents.push_str(path);
+            contents.push('\n');
+        }
+        let changed = match fs::read(&output) {
+            Ok(old) => old != contents.as_bytes(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(error) => return Err(format!("{}: {error}", output.display())),
+        };
+        if changed {
+            atomic_write(&output, contents)?;
+        }
+        println!(
+            "{}: {}",
+            output.display(),
+            if changed { "changed" } else { "unchanged" }
+        );
+        return Ok(());
+    }
+    if repo.is_some() {
+        return Err(USAGE.into());
+    }
     manifest
         .native
         .as_ref()
-        .ok_or("internals sync needs a [native] mod")?;
+        .ok_or("internals sync needs a [native] or [wasm] mod")?;
     let launcher =
         std::env::var_os("HORIZON_LAUNCHER").unwrap_or_else(|| "horizon-launcher".into());
     let output = std::process::Command::new(launcher)
@@ -155,16 +216,19 @@ fn sync(dir: &Path) -> Result<(), String> {
     if fs::read_to_string(&path).map_err(|e| e.to_string())? != original {
         return Err("horizon-mod.toml changed during discovery; run cargo horizon-mod internals sync again.".into());
     }
-    // Replace by rename so a failed write leaves the old manifest whole.
+    atomic_write(&path, candidate)?;
+    print!("{report}");
+    Ok(())
+}
+
+fn atomic_write(path: &Path, contents: String) -> Result<(), String> {
     let temporary = path.with_extension("toml.sync");
-    fs::write(&temporary, candidate)
-        .and_then(|()| fs::rename(&temporary, &path))
+    fs::write(&temporary, contents)
+        .and_then(|()| fs::rename(&temporary, path))
         .map_err(|e| {
             let _ = fs::remove_file(&temporary);
             format!("{}: {e}", path.display())
-        })?;
-    print!("{report}");
-    Ok(())
+        })
 }
 
 fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), String> {
@@ -236,7 +300,7 @@ fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), S
     let entries: Vec<_> = entries.iter().collect();
     upsert(
         &mut doc,
-        retained.native.as_ref().expect("native manifest"),
+        &retained.native.as_ref().expect("native manifest").internals,
         &entries,
     )?;
     Ok((doc.to_string(), report))
@@ -327,6 +391,24 @@ pub fn set_string(value: &mut Value, text: &str) {
     let decor = value.decor().clone();
     *value = Value::from(text);
     *value.decor_mut() = decor;
+}
+
+/// The catalog a pinless wasm build uses, shared by `internals add` and the guest view build.
+/// An explicit catalog is useful for a build against a staged game instead of a daily release.
+pub(crate) fn wasm_catalog(dir: &Path) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("HORIZON_MOD_INTERNALS_CATALOG") {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() {
+            return Err("HORIZON_MOD_INTERNALS_CATALOG must be an absolute path".into());
+        }
+        return Ok(path);
+    }
+    let revision = crate::pin(None)?;
+    load(dir, &revision)?;
+    Ok(dir
+        .join("target/horizon-mod/prebuilt")
+        .join(revision)
+        .join(CATALOG))
 }
 
 /// The same release tags and archive layout the launcher reads. Keep each pin's catalog in

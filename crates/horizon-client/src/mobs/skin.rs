@@ -600,7 +600,7 @@ mod tests {
                         id.as_str(),
                         "minecraft:villager" | "minecraft:zombie_villager"
                     ) {
-                        m.extra.variant2 = 5;
+                        m.extra.profession = crate::mobs::villager::ProfessionState::from_index(5);
                         m.extra.villager_level = 3;
                     }
                     // White field markings (`entityTranslucent`).

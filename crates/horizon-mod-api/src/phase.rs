@@ -192,6 +192,7 @@ pub fn check_access(operation: &str, access: LoadAccess) {
         operation,
         "on" | "is_loaded"
             | "block_key_id"
+            | "item_key_id"
             | "effect_key_id"
             | "block_states_of"
             | "block_item"
@@ -461,6 +462,9 @@ pub trait DataLoadContext {
     /// Registry names in ID order, from this resource generation's snapshot.
     fn registry(&self, name: &str) -> Option<Arc<[String]>>;
 
+    /// Resolve a fluid name against this load's registered fluid identities.
+    fn fluid_key(&self, id: &str) -> Option<crate::FluidKey>;
+
     /// The fluid tags this load's resources hold (`data/<ns>/tags/fluid`):
     /// each tag id to the fluids it names, in the sources' order — what a
     /// recipe's fluid ingredient resolves its `#tag`s with. `None` where the
@@ -500,6 +504,9 @@ impl DataLoadContext for OwningLoad<'_> {
     }
     fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.source.registry(name)
+    }
+    fn fluid_key(&self, id: &str) -> Option<crate::FluidKey> {
+        crate::registry_keys::fluid_key(id)
     }
     fn fluid_tags(&self) -> Option<Arc<[(String, Arc<[String]>)]>> {
         Some(self.source.fluid_tags().clone())
