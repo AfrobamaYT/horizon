@@ -184,6 +184,9 @@ pub enum FallEvent {
     Broadcast(u8),
     Write {
         position: BlockPos,
+        /// The block it replaced, so a mod that cancels the change
+        /// (`native_entity_change_block_pre`) can have it put back.
+        from: BlockStateId,
         state: BlockStateId,
         flags: u32,
     },
@@ -269,6 +272,7 @@ impl FallEvent {
                 position,
                 state,
                 flags,
+                ..
             } => format!("write {} {} {}", p(position), state.0, flags),
             Self::Destroy {
                 position, drops, ..
@@ -635,9 +639,11 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
         Ok(true)
     }
     fn set_block(&mut self, position: BlockPos, state: BlockStateId, flags: u32) -> Result<bool> {
+        let from = self.scene.block(position.x, position.y, position.z);
         self.scene.set(position.x, position.y, position.z, state)?;
         self.fall_event(FallEvent::Write {
             position,
+            from,
             state,
             flags,
         });
@@ -756,7 +762,11 @@ mod tests {
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let files = vec![

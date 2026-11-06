@@ -7,8 +7,8 @@
 use super::ticket_controller::{self, ControllerInfo};
 use super::{
     BlockEntityPart, BlockPart, BlockSide, BlockStateId, Capability, CapabilityKey,
-    EntityCapabilityKey, EntityRef, HOOK_COUNT, HookId, Host, ItemCapabilityKey, ItemPart,
-    ItemPlace, MenuPart, ModEntry, PlaceProvider, ServerHost, TicketController,
+    EntityCapabilityKey, EntityPart, EntityRef, HOOK_COUNT, HookId, Host, ItemCapabilityKey,
+    ItemPart, ItemPlace, MenuPart, ModEntry, PlaceProvider, ServerHost, TicketController,
 };
 use horizon_mods::content::BlockEntityType;
 use std::{
@@ -49,6 +49,21 @@ impl<P: ?Sized> Attached<P> {
             part,
         }
     }
+    // hidden: the game's goal registration reads these (#1077)
+    #[doc(hidden)]
+    pub fn mod_id(&self) -> &'static str {
+        self.mod_id
+    }
+    // hidden: the game's goal registration reads these (#1077)
+    #[doc(hidden)]
+    pub fn type_name(&self) -> &'static str {
+        self.type_name
+    }
+    // hidden: the game's goal registration reads these (#1077)
+    #[doc(hidden)]
+    pub fn part(&self) -> &Arc<P> {
+        &self.part
+    }
 }
 
 impl<P: ?Sized> Clone for Attached<P> {
@@ -88,6 +103,10 @@ pub struct Parts {
     block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
     menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
+    /// Entity parts by entity type id (`minecraft:zombie`), for the goal
+    /// registration at every `Mob` construction (#1077). They carry no scoped
+    /// hook, so they never enter `hooks`.
+    entities: HashMap<Box<str>, Vec<Attached<dyn EntityPart>>>,
     /// Capability providers by capability name, then by block entity type, in registration
     /// order.
     capabilities: Capabilities<BlockProviderOf>,
@@ -329,6 +348,9 @@ struct TagParts {
 /// What every mod's [`Hooks::register`](super::Hooks::register) attached.
 #[derive(Default)]
 struct Installed {
+    game_rule_categories: Vec<String>,
+    game_rules: Vec<horizon_client_core::gamerules::Rule>,
+    game_rule_slots: Vec<u32>,
     keys: Parts,
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
@@ -442,6 +464,35 @@ pub fn has_scoped_hook(hook: HookId) -> bool {
     !super::mods().is_empty() && has_part_hook(hook)
 }
 
+/// Whether any mod attached an entity part, so `Mob` construction asks for
+/// goals and the mob tick builds a goal read view.
+pub fn has_entity_parts() -> bool {
+    !super::mods().is_empty()
+        && installed().is_some_and(|installed| !installed.keys.entities.is_empty())
+}
+
+/// The entity parts attached to entity type `id` (`minecraft:zombie`), in
+/// dispatch order, for the goal registration at every `Mob` construction
+/// (#1077).
+pub fn entity_parts() -> PartsRef {
+    let Some(installed) = installed() else {
+        return PartsRef::Shared(&NO_PARTS);
+    };
+    if let Some(parts) = GAME_PARTS.with_borrow(Option::clone) {
+        return PartsRef::Game(parts);
+    }
+    if !GAME_THREAD.get() {
+        let thread = std::thread::current();
+        let thread = thread.name().unwrap_or("unnamed");
+        if !OFF_THREAD_WARNED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "Native entity parts asked off a game thread ({thread}): a mob built there keeps no mod goals"
+            );
+        }
+    }
+    PartsRef::Shared(&installed.keys)
+}
+
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
 #[non_exhaustive]
 pub enum PartsRef {
@@ -493,6 +544,26 @@ pub fn mark_game_thread() {
     GAME_THREAD.set(true);
 }
 
+/// An item registration request that the loaded item registry cannot resolve.
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ItemKeyError {
+    /// The requesting mod.
+    pub mod_id: &'static str,
+    /// The canonical requested item id.
+    pub id: String,
+}
+
+/// Refusals at the Parts load boundary.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ResolvePartsError {
+    /// An item key names no loaded item.
+    ItemKeys(Vec<ItemKeyError>),
+    /// Legacy block or item Part registration refusals.
+    Parts(Vec<String>),
+}
+
 /// The ids a game knows, which a part's key must name.
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct KnownIds<'a> {
@@ -514,16 +585,25 @@ pub fn resolve_parts(
     block_tags: &HashMap<String, HashSet<String>>,
     item_tags: &HashMap<String, HashSet<String>>,
     known: KnownIds<'_>,
-) -> Result<(), Vec<String>> {
+) -> Result<(), ResolvePartsError> {
     let Some(installed) = installed() else {
         return Ok(());
     };
+    if let Err(errors) = installed.registry_keys.items.resolve(
+        |id| (known.item)(id).then_some(()),
+        |mod_id, id| ItemKeyError {
+            mod_id,
+            id: id.to_owned(),
+        },
+    ) {
+        return Err(ResolvePartsError::ItemKeys(errors));
+    }
     let mut unknown: Vec<String> = unknown_keys(&installed.keys.blocks, known.block, "block")
         .chain(unknown_keys(&installed.keys.items, known.item, "item"))
         .collect();
     if !unknown.is_empty() {
         unknown.sort();
-        return Err(unknown);
+        return Err(ResolvePartsError::Parts(unknown));
     }
     let mut parts = installed.keys.clone();
     add_tagged(
@@ -656,6 +736,12 @@ impl HookParts {
 impl Parts {
     pub(crate) fn for_hook(&self, hook: HookId) -> Option<&HookParts> {
         self.hooks.get(hook as usize).and_then(Option::as_ref)
+    }
+    /// The entity parts attached to entity type `id` (`minecraft:zombie`), in
+    /// dispatch order, for the goal registration at every `Mob` construction
+    /// (#1077).
+    pub fn entity_parts(&self, id: &str) -> &[Attached<dyn EntityPart>] {
+        self.entities.get(id).map_or(&[], Vec::as_slice)
     }
     fn index_hooks(&mut self) {
         self.hooks = vec![None; HOOK_COUNT];
@@ -883,13 +969,28 @@ fn attached<'a, 'k, P: ?Sized>(
 /// declares its block entity types and ticket controllers on. A thing takes one part of each
 /// kind: the same kind twice on one thing refuses the mods at startup, naming both.
 ///
-/// Mods call the generic methods on `dyn Registrar` (`r.item_part("mymod:wrench", Wrench)`);
+/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
 /// they reach the trait's own methods, one implementation for native and wasm mods.
 pub trait Registrar {
+    /// Declare a game rule category in the calling mod's namespace. Invalid,
+    /// foreign or duplicate IDs refuse mod loading even if the error is ignored.
+    /// Categories appear in the host's game rules screen; remote clients do not
+    /// receive them in this version.
+    fn game_rule_category(&mut self, id: &str) -> Result<(), super::GameRuleError>;
+    /// Declare a boolean game rule in this mod's namespace. Category references are
+    /// resolved after all mods register; an unknown category refuses installation then.
+    fn game_rule_bool(
+        &mut self,
+        id: &str,
+        category: &str,
+        default: bool,
+    ) -> Result<super::BoolGameRuleKey, super::GameRuleError>;
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey;
     /// Request a block by canonical registry id. All mods' declarations are checked at load.
     fn block_key(&mut self, id: &str) -> super::BlockKey;
+    /// Request an item by registry id, validated after all declarations.
+    fn item_key(&mut self, id: &str) -> super::ItemKey;
     /// Request an effect by canonical registry id. All mods' declarations are checked at load.
     fn effect_key(&mut self, id: &str) -> super::EffectKey;
     /// Request a fluid by canonical registry id, checked when the registry loads.
@@ -927,7 +1028,22 @@ pub trait Registrar {
         part: Arc<dyn BlockEntityPart>,
     ) -> Result<(), super::BlockEntityPartError>;
     /// Attach `part`, of kind `kind`, to item `item`.
-    fn attach_item_part(&mut self, item: &str, kind: &'static str, part: Arc<dyn ItemPart>);
+    fn attach_item_part(
+        &mut self,
+        item: super::ItemKey,
+        kind: &'static str,
+        part: Arc<dyn ItemPart>,
+    );
+    /// Attach `part`, of kind `kind`, to the entity type `entity`
+    /// (`minecraft:zombie`, `mymod:golem`): its `register_goals` runs at every
+    /// `Mob` construction of that type (#1077).
+    ///
+    /// Not on wasm: the goal surface a part's `register_goals` hands the game
+    /// does not cross yet (#1077); entity parts are a native mod's for now.
+    /// The gate keeps a wasm mod's call a compile error, not a runtime one;
+    /// the generator still keeps the method off the wasm world by this doc.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>);
     /// Attach `part`, of kind `kind`, to the mod menu type `menu`.
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>);
     /// Attach `part`, of kind `kind`, to every block in tag `tag`.
@@ -1013,8 +1129,16 @@ impl dyn Registrar + '_ {
         self.attach_item_part_tag(tag, type_name::<P>(), Arc::new(part));
     }
     /// Attach `part` to item `item` (`mymod:wrench`).
-    pub fn item_part<P: ItemPart>(&mut self, item: &str, part: P) {
+    pub fn item_part<P: ItemPart>(&mut self, item: super::ItemKey, part: P) {
         self.attach_item_part(item, type_name::<P>(), Arc::new(part));
+    }
+    /// Attach `part` to the entity type `entity` (`minecraft:zombie`): its
+    /// [`EntityPart::register_goals`] runs at every `Mob` construction of that
+    /// type, spawning or loading, and its goals join the mob's selectors
+    /// beside vanilla's (#1077).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn entity_part<P: EntityPart>(&mut self, entity: &str, part: P) {
+        self.attach_entity_part(entity, type_name::<P>(), Arc::new(part));
     }
     /// Attach `part` to the mod menu type `menu`.
     pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {
@@ -1118,6 +1242,8 @@ impl dyn Registrar + '_ {
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
+    game_rule_categories: Vec<String>,
+    game_rules: Vec<horizon_client_core::gamerules::Rule>,
     mod_id: &'static str,
     mod_index: usize,
     /// Parts registered so far, by every mod: the next part's `order`.
@@ -1135,6 +1261,8 @@ pub struct PartRegistrar {
 impl PartRegistrar {
     fn new(mod_id: &'static str) -> Self {
         Self {
+            game_rule_categories: Vec::new(),
+            game_rules: Vec::new(),
             mod_id,
             mod_index: 0,
             registered: 0,
@@ -1147,6 +1275,21 @@ impl PartRegistrar {
             structure_types: Vec::new(),
             refused: Vec::new(),
         }
+    }
+
+    fn game_rule_id(&self, id: &str) -> Result<String, super::GameRuleError> {
+        let id = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("{}:{id}", self.mod_id)
+        };
+        if !horizon_mods::content::namespaced_id(&id) {
+            return Err(super::GameRuleError::InvalidId);
+        }
+        if id.split_once(':').unwrap().0 != self.mod_id {
+            return Err(super::GameRuleError::ForeignNamespace);
+        }
+        Ok(id)
     }
 
     fn expand_block_entity_parts(&mut self) {
@@ -1326,6 +1469,54 @@ impl PartRegistrar {
 }
 
 impl Registrar for PartRegistrar {
+    fn game_rule_category(&mut self, id: &str) -> Result<(), super::GameRuleError> {
+        let result = (|| {
+            let id = self.game_rule_id(id)?;
+            if self.game_rule_categories.contains(&id) {
+                return Err(super::GameRuleError::Duplicate);
+            }
+            self.game_rule_categories.push(id);
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            self.refused
+                .push(format!("mod {} category {id:?}: {error:?}", self.mod_id));
+        }
+        result
+    }
+
+    fn game_rule_bool(
+        &mut self,
+        id: &str,
+        category: &str,
+        default: bool,
+    ) -> Result<super::BoolGameRuleKey, super::GameRuleError> {
+        let result = (|| {
+            let id = self.game_rule_id(id)?;
+            if self.game_rules.iter().any(|r| r.name == id) {
+                return Err(super::GameRuleError::Duplicate);
+            }
+            let slot = self
+                .registry_keys
+                .borrow_mut()
+                .game_rules
+                .request(self.mod_id, &id)
+                .map_err(|_| super::GameRuleError::InvalidId)?;
+            self.game_rules.push(horizon_client_core::gamerules::Rule {
+                name: id,
+                category: category.into(),
+                default: horizon_client_core::gamerules::Value::Bool(default),
+                min: 0,
+                max: 0,
+            });
+            Ok(super::BoolGameRuleKey(slot))
+        })();
+        if let Err(error) = &result {
+            self.refused
+                .push(format!("mod {} rule {id:?}: {error:?}", self.mod_id));
+        }
+        result
+    }
     fn add_structure_type(&mut self, name: &str, ty: Arc<dyn super::StructureType>) {
         let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
         let id = format!("{}:{}", self.mod_id, path);
@@ -1383,6 +1574,21 @@ impl Registrar for PartRegistrar {
             Err(error) => {
                 self.refused.push(error);
                 super::BlockKey(u32::MAX)
+            }
+        }
+    }
+
+    fn item_key(&mut self, id: &str) -> super::ItemKey {
+        match self
+            .registry_keys
+            .borrow_mut()
+            .items
+            .request(self.mod_id, id)
+        {
+            Ok(slot) => super::ItemKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::ItemKey(u32::MAX)
             }
         }
     }
@@ -1509,8 +1715,31 @@ impl Registrar for PartRegistrar {
         }
     }
 
-    fn attach_item_part(&mut self, item: &str, kind: &'static str, part: Arc<dyn ItemPart>) {
-        self.attach(|p| &mut p.items, kind, item, part);
+    fn attach_item_part(
+        &mut self,
+        item: super::ItemKey,
+        kind: &'static str,
+        part: Arc<dyn ItemPart>,
+    ) {
+        let id = self
+            .registry_keys
+            .borrow()
+            .items
+            .id(item.0)
+            .map(str::to_owned);
+        let Some(id) = id else {
+            self.refused.push(format!(
+                "mod {}: invalid item key slot {}",
+                self.mod_id, item.0
+            ));
+            return;
+        };
+        self.attach(|p| &mut p.items, kind, &id, part);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>) {
+        self.attach(|p| &mut p.entities, kind, entity, part);
     }
 
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>) {
@@ -1652,11 +1881,43 @@ pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     install_registrar(register_all(mods))
 }
 
-fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
+fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<String>> {
+    let registry = horizon_client_core::gamerules::RuleRegistry::with_bool_rules(
+        &registrar.game_rule_categories,
+        &registrar.game_rules,
+    )
+    .map_err(|errors| {
+        registrar.refused.extend(
+            errors
+                .into_iter()
+                .map(|error| {
+                    let owner = match &error {
+                        horizon_client_core::gamerules::RuleRegistryError::UnknownCategory {
+                            rule,
+                            ..
+                        }
+                        | horizon_client_core::gamerules::RuleRegistryError::Duplicate(rule) => {
+                            rule.split_once(':').map_or("unknown", |(owner, _)| owner)
+                        }
+                    };
+                    format!("mod {owner}: {error:?}")
+                })
+                .collect::<Vec<_>>(),
+        );
+        registrar.refused.clone()
+    })?;
     if !registrar.refused.is_empty() {
         return Err(registrar.refused);
     }
+    let game_rule_slots = registrar
+        .game_rules
+        .iter()
+        .map(|rule| registry.position(&rule.name).unwrap())
+        .collect();
     let mut installed = Installed {
+        game_rule_slots,
+        game_rules: registrar.game_rules,
+        game_rule_categories: registrar.game_rule_categories,
         keys: registrar.parts,
         tags: registrar.tags,
         block_entity_types: registrar.block_entity_types,
@@ -1691,11 +1952,148 @@ fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
     Ok(())
 }
 
+/// Construct a fresh registry from the immutable installed category snapshot.
+// hidden: the game owns session registry construction.
+#[doc(hidden)]
+pub fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {
+    let Some(parts) = installed() else {
+        return horizon_client_core::gamerules::RuleRegistry::vanilla();
+    };
+    horizon_client_core::gamerules::RuleRegistry::with_bool_rules(
+        &parts.game_rule_categories,
+        &parts.game_rules,
+    )
+    .expect("validated at registration")
+}
+/// Dense position for a validated rule key.
+// hidden: the game resolves load-owned keys to dense positions.
+#[doc(hidden)]
+pub fn game_rule_bool_slot(key: super::BoolGameRuleKey) -> Option<u32> {
+    installed()?.game_rule_slots.get(key.0 as usize).copied()
+}
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
     use super::super::*;
     use super::mark_game_thread;
+    #[test]
+    fn cross_mod_categories_resolve_after_all_registration() {
+        use super::Registrar;
+        struct Rule;
+        #[mod_api::__subscriptions]
+        impl Hooks for Rule {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.game_rule_bool("active", "later:machines", true).unwrap();
+            }
+        }
+        struct Category;
+        #[mod_api::__subscriptions]
+        impl Hooks for Category {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.game_rule_category("machines").unwrap();
+            }
+        }
+        let mods = [
+            ModEntry::new("first", Box::new(Rule)),
+            ModEntry::new("later", Box::new(Category)),
+        ];
+        super::install_parts(&mods).unwrap();
+        assert!(super::game_rule_registry().rule("first:active").is_some());
+    }
+    #[test]
+    fn unknown_category_reports_rule_category_and_owner_without_installing() {
+        use super::Registrar;
+        struct Rule;
+        #[mod_api::__subscriptions]
+        impl Hooks for Rule {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.game_rule_bool("active", "missing:machines", true)
+                    .unwrap();
+            }
+        }
+        let mods = [
+            ModEntry::new("first", Box::new(Rule)),
+            ModEntry::new("second", Box::new(Rule)),
+        ];
+        let errors = super::install_parts(&mods).unwrap_err();
+        assert_eq!(errors.len(), 2);
+        assert!(errors[0].contains("first:active"));
+        assert!(errors[1].contains("second:active"));
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.contains("missing:machines"))
+        );
+        assert!(super::game_rule_registry().rule("first:active").is_none());
+    }
+
+    #[test]
+    fn bool_rule_declarations_validate_slots_and_fail_atomically() {
+        use super::Registrar;
+        let mut refused = super::PartRegistrar::new("example");
+        refused
+            .game_rule_bool("active", "missing:machines", true)
+            .unwrap();
+        let _ = refused.game_rule_bool("foreign:bad", "example:machines", true);
+        let errors = super::install_registrar(refused).unwrap_err().join(" ");
+        assert!(
+            errors.contains("ForeignNamespace")
+                && errors.contains("example:active")
+                && errors.contains("missing:machines")
+        );
+        let mut good = super::PartRegistrar::new("example");
+        let _key = good
+            .game_rule_bool("active", "example:machines", true)
+            .unwrap();
+        good.game_rule_category("machines").unwrap();
+        assert_eq!(
+            good.game_rule_bool("active", "example:machines", true),
+            Err(crate::GameRuleError::Duplicate)
+        );
+        assert!(super::install_registrar(good).is_err());
+        let mut good = super::PartRegistrar::new("example");
+        let key = good
+            .game_rule_bool("active", "example:machines", true)
+            .unwrap();
+        good.game_rule_category("machines").unwrap();
+        super::install_registrar(good).unwrap();
+        assert!(crate::BoolGameRuleKey::from_slot(key.0).is_ok());
+        assert!(crate::BoolGameRuleKey::from_slot(key.0 + 1).is_err());
+        assert!(super::game_rule_bool_slot(key).is_some());
+    }
+
+    #[test]
+    fn category_registration_refuses_ignored_errors_and_installs_snapshot() {
+        use super::Registrar;
+        let mut foreign = super::PartRegistrar::new("example");
+        assert_eq!(
+            foreign.game_rule_category("foreign:machines"),
+            Err(crate::GameRuleError::ForeignNamespace)
+        );
+        assert!(super::install_registrar(foreign).is_err());
+        let mut invalid = super::PartRegistrar::new("example");
+        assert_eq!(
+            invalid.game_rule_category("bad path"),
+            Err(crate::GameRuleError::InvalidId)
+        );
+        assert!(super::install_registrar(invalid).is_err());
+        let mut good = super::PartRegistrar::new("example");
+        assert_eq!(good.game_rule_category("machines"), Ok(()));
+        assert!(super::install_registrar(good).is_ok());
+        assert!(
+            super::game_rule_registry()
+                .categories()
+                .contains(&"example:machines".to_owned())
+        );
+        let mut duplicate = super::PartRegistrar::new("example");
+        duplicate.game_rule_category("machines").unwrap();
+        assert_eq!(
+            duplicate.game_rule_category("example:machines"),
+            Err(crate::GameRuleError::Duplicate)
+        );
+        assert!(super::install_registrar(duplicate).is_err());
+    }
+
     #[cfg(test)]
     use super::{Attached, KnownIds, resolve_parts};
     #[cfg(test)]
@@ -1713,6 +2111,14 @@ pub mod tests {
         }
         super::install_registrar(registrar).unwrap();
         crate::registry_keys::resolve_effects().unwrap();
+        crate::registry_keys::resolve_fluids(&[
+            "minecraft:empty",
+            "minecraft:water",
+            "minecraft:flowing_water",
+            "minecraft:lava",
+            "minecraft:flowing_lava",
+        ])
+        .unwrap();
         if let Some(types) = horizon_client_core::block_entity_types::current() {
             crate::registry_keys::resolve_block_entity_types(types).unwrap();
         }
@@ -1780,6 +2186,43 @@ pub mod tests {
     }
 
     #[test]
+    fn entity_parts_refuse_unnamespaced_ids_and_doubles() {
+        struct Once;
+        #[mod_api::horizon_part]
+        impl super::EntityPart for Once {
+            fn register_goals(&self, goals: &mut crate::GoalRegistrar<'_>) {
+                let _ = goals;
+            }
+        }
+        struct Twice;
+        #[mod_api::horizon_part]
+        impl super::EntityPart for Twice {
+            fn register_goals(&self, goals: &mut crate::GoalRegistrar<'_>) {
+                let _ = goals;
+            }
+        }
+        struct Invalid;
+        #[mod_api::__subscriptions]
+        impl super::super::Hooks for Invalid {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                r.entity_part("zombie", Twice);
+                r.entity_part("minecraft:zombie", Once);
+                r.entity_part("minecraft:zombie", Once);
+            }
+        }
+        let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(
+            errors[0].contains("to \"zombie\", which is not a namespaced id"),
+            "{errors:?}"
+        );
+        assert!(
+            errors[1].contains("attached to minecraft:zombie twice"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
     fn invalid_and_duplicate_fluid_declarations_are_refused() {
         let mut registrar = super::PartRegistrar::new("maker");
         registrar.declare_fluid("wrong:namespace");
@@ -1823,11 +2266,76 @@ pub mod tests {
                 id: "minecraft:water".to_owned()
             }]
         );
-        resolve_fluids(&["minecraft:water"]).unwrap();
+        resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
         let chocolate = fluid_key("maker:chocolate").unwrap();
         assert_eq!(fluid_id(chocolate), Some("maker:chocolate"));
+        for name in ["minecraft:water", "minecraft:lava", "maker:chocolate"] {
+            let key = fluid_key(name).unwrap();
+            assert_eq!(
+                crate::registry_keys::fluid_key_utf16(&name.encode_utf16().collect::<Vec<_>>()),
+                Some(key)
+            );
+            assert_eq!(fluid_id(key), Some(name));
+        }
+        for path in ["water", "lava"] {
+            assert_eq!(
+                crate::registry_keys::fluid_key_utf16(&path.encode_utf16().collect::<Vec<_>>()),
+                fluid_key(path)
+            );
+        }
         assert_eq!(FluidKey::from_slot(chocolate.0), Ok(chocolate));
         assert!(fluid_key("missing:fluid").is_none());
+    }
+
+    #[test]
+    fn item_keys_validate_forward_references_and_reused_slots() {
+        struct Keys(Arc<std::sync::Mutex<Vec<crate::ItemKey>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Keys {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let vanilla = r.item_key("stick");
+                assert_eq!(vanilla, r.item_key("minecraft:stick"));
+                let later = r.item_key("later:widget");
+                assert_eq!(crate::ItemKey::from_slot(vanilla.0), Ok(vanilla));
+                assert!(crate::ItemKey::from_slot(later.0 + 1).is_err());
+                *self.0.lock().unwrap() = vec![vanilla, later];
+            }
+        }
+        let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods: Mods = vec![ModEntry::new("requester", Box::new(Keys(keys.clone())))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        let check = |known: &dyn Fn(&str) -> bool| {
+            resolve_parts(
+                &HashMap::new(),
+                &HashMap::new(),
+                KnownIds {
+                    block: &|_| false,
+                    item: known,
+                    state_count: 0,
+                    state_block: &|_| unreachable!(),
+                },
+            )
+        };
+        check(&|id| ["minecraft:stick", "later:widget"].contains(&id)).unwrap();
+        let keys = keys.lock().unwrap();
+        assert_eq!(
+            crate::registry_keys::item_id(keys[0]),
+            Some("minecraft:stick")
+        );
+        assert_eq!(crate::registry_keys::item_id(keys[1]), Some("later:widget"));
+        let super::ResolvePartsError::ItemKeys(errors) =
+            check(&|id| id == "minecraft:stick").unwrap_err()
+        else {
+            panic!("wrong refusal")
+        };
+        assert_eq!(
+            errors,
+            [super::ItemKeyError {
+                mod_id: "requester",
+                id: "later:widget".into()
+            }]
+        );
     }
 
     #[test]
@@ -3482,8 +3990,12 @@ pub mod tests {
             1
         }
         fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<FluidResource> {
-            (self.amount(host, 0) > 0)
-                .then(|| FluidResource::of(&FluidStack::new("minecraft:water", 1)))
+            (self.amount(host, 0) > 0).then(|| {
+                FluidResource::of(&FluidStack::new(
+                    crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                    1,
+                ))
+            })
         }
         fn amount(&self, host: &mut dyn ServerHost, _: usize) -> u32 {
             ROBOT_FLUID
@@ -3492,7 +4004,12 @@ pub mod tests {
                 .unwrap_or(0)
         }
         fn capacity(&self, _: &mut dyn ServerHost, index: usize, resource: &FluidResource) -> u32 {
-            if index == 0 && resource == &FluidResource::of(&FluidStack::new("minecraft:water", 1))
+            if index == 0
+                && resource
+                    == &FluidResource::of(&FluidStack::new(
+                        crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                        1,
+                    ))
             {
                 1000
             } else {
@@ -3564,6 +4081,7 @@ pub mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+            r.declare_fluid("potion");
             for id in CAPABILITY_TYPES {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
@@ -3594,6 +4112,14 @@ pub mod tests {
         .into();
         super::super::install(mods.clone());
         install_parts(&mods).unwrap();
+        crate::registry_keys::resolve_fluids(&[
+            "minecraft:water",
+            "minecraft:lava",
+            "minecraft:flowing_water",
+            "minecraft:flowing_lava",
+            "minecraft:empty",
+        ])
+        .unwrap();
         mark_game_thread();
         mods
     }
@@ -3848,7 +4374,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// Resolve this thread's parts with tag `test:gauged` holding `members`.
-    fn resolve(members: &[&str]) -> Result<(), Vec<String>> {
+    fn resolve(members: &[&str]) -> Result<(), super::ResolvePartsError> {
         let tags = HashMap::from([(
             "test:gauged".to_owned(),
             members.iter().map(|m| m.to_string()).collect(),
@@ -4029,6 +4555,9 @@ pub mod tests {
             },
         )
         .unwrap_err();
+        let super::ResolvePartsError::Parts(refused) = refused else {
+            panic!("wrong refusal")
+        };
         assert_eq!(refused.len(), 1, "{refused:?}");
         assert!(refused[0].starts_with("doubler attached "));
         assert!(refused[0].contains("Gauge to block test:gauge, which this game does not have"));
@@ -5784,13 +6313,14 @@ pub mod tests {
 
     #[cfg(test)]
     fn potion(amount: u32, potion: &str) -> FluidStack {
-        let components = horizon_items::item_data::StackData {
-            potion: Some(Arc::from(potion)),
-            ..Default::default()
-        };
+        let mut components = horizon_items::item_data::StackData::default();
+        components.potion = Some(Arc::from(potion));
         FluidStack {
             components: Some(Box::new(components)),
-            ..FluidStack::new("test:potion", amount)
+            ..FluidStack::new(
+                crate::registry_keys::fluid_key("test:potion").unwrap(),
+                amount,
+            )
         }
     }
 
@@ -5812,7 +6342,7 @@ pub mod tests {
         // The same fluid with other components, or another fluid, doesn't go in.
         for other in [
             potion(500, "minecraft:poison"),
-            FluidStack::new("test:potion", 500),
+            FluidStack::new(crate::registry_keys::fluid_key("test:potion").unwrap(), 500),
         ] {
             world.tank(SOURCE, Some(other.clone()), true);
             assert_eq!(world.moved((SOURCE, None), (TANK, None), 4000), Ok(0));
@@ -5820,7 +6350,10 @@ pub mod tests {
             assert_eq!(world.held(TANK), Some(potion(600, "minecraft:healing")));
         }
         // A drain-only tank has no capacity, and nothing moves.
-        let water = FluidStack::new("minecraft:water", 1000);
+        let water = FluidStack::new(
+            crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+            1000,
+        );
         world.tank(SOURCE, Some(water.clone()), true);
         world.tank(TANK, None, false);
         let host: &mut dyn ServerHost = &mut world;
@@ -5833,7 +6366,12 @@ pub mod tests {
     #[test]
     fn a_fluid_move_tries_again_with_what_the_target_took_and_loses_nothing() {
         game_thread();
-        let water = |amount| FluidStack::new("minecraft:water", amount);
+        let water = |amount| {
+            FluidStack::new(
+                crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                amount,
+            )
+        };
         type Setup = fn(&mut GameTank, &mut GameTank);
         let cases: [(&str, Setup, u32); 6] = [
             // Half of each offer: no request is ever taken whole, so nothing moves.
@@ -5881,7 +6419,12 @@ pub mod tests {
     #[test]
     fn a_handler_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_fluid() {
         game_thread();
-        let water = |amount| Some(FluidStack::new("minecraft:water", amount));
+        let water = |amount| {
+            Some(FluidStack::new(
+                crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                amount,
+            ))
+        };
         for (liar, at) in [("test:gives_more", SOURCE), ("test:takes_more", TANK)] {
             let mut world = TankWorld::default();
             world.tank(SOURCE, water(1000), true);

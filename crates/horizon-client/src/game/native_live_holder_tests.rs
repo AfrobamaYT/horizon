@@ -60,7 +60,7 @@ fn thousand_live_block_entity_ticks() {
         mod_api::__private::mark_game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = super::mods::content_root(&base, &Default::default()).unwrap();
-        super::native_entity_refs::tests::with_game_at(root, |game| {
+        super::native_entity_refs::tests::with_game_at(root.prepared().to_path_buf(), |game| {
             for x in 0..4 {
                 for z in 0..4 {
                     game.world
@@ -103,6 +103,130 @@ fn thousand_live_block_entity_ticks() {
                 times[228],
                 times[237]
             );
+        });
+    });
+}
+
+pub(super) fn with_mod_parts(test: impl FnOnce(std::path::PathBuf)) {
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "live_bench",
+        Box::new(BenchMod("none")),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods.clone(), || {
+        mod_api::__private::install_parts(&mods).unwrap();
+        mod_api::__private::mark_game_thread();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        test(
+            super::mods::content_root(&base, &Default::default())
+                .unwrap()
+                .prepared()
+                .to_owned(),
+        );
+    });
+}
+
+pub(super) fn mod_holder(game: &mut super::Game<'_>) -> mod_api::BlockEntityRef {
+    game.options.dedicated = Some(Vec::new());
+    game.world
+        .chunks
+        .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+    let stone = game
+        .pack
+        .assets
+        .registry
+        .default_state("minecraft:stone")
+        .unwrap();
+    game.world.set(1, 64, 1, stone).unwrap();
+    let holder = ModBlockEntity::new("live_bench:ticker".into(), Default::default());
+    game.world
+        .block_entities
+        .insert((1, 64, 1), BlockEntity::Mod(Box::new(holder)));
+    let level = game.native_level("minecraft:overworld").unwrap();
+    game.native_block_entity_ref(level, [1, 64, 1]).unwrap()
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
+    use mod_api::BlockEntityDataError;
+    with_mod_parts(|root| {
+        super::native_entity_refs::tests::with_game_at(root, |game| {
+            let entity = mod_holder(game);
+            let pos = (1, 64, 1);
+            assert_eq!(entity.data_slots(game), Some(vec![]));
+            assert!(
+                !entity.set_data_slot(game, 0, 1),
+                "scalar writes cannot declare slots"
+            );
+            assert_eq!(entity.set_data_slots(game, vec![0]), Ok(true));
+            let revision = |game: &super::Game<'_>| {
+                let BlockEntity::Mod(entity) = game.world.block_entities.get(&pos).unwrap() else {
+                    panic!("mod holder missing")
+                };
+                entity.revision()
+            };
+            let before_revision = revision(game);
+            game.world.modified.clear();
+            assert!(!entity.set_data_slot(game, 0, 0));
+            assert!(!entity.set_data_slot(game, 1, 1));
+            assert_eq!(entity.set_data_slots(game, vec![0]), Ok(false));
+            assert_eq!(revision(game), before_revision);
+            assert!(
+                game.world.modified.is_empty(),
+                "no-op sends no Changed notice"
+            );
+            assert_eq!(entity.data_slots(game), Some(vec![0]));
+            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
+                assert_eq!(entity.set_data_slots(host, vec![30, 40]), Ok(true));
+                host.transaction(|host, _| {
+                    assert!(entity.set_data_slot(host, 0, 50));
+                    Ok(())
+                })?;
+                Err(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert_eq!(entity.data_slots(game), Some(vec![0]));
+            assert!(game.transactions.is_empty());
+            assert_eq!(entity.set_data_slots(game, vec![0; 256]), Ok(true));
+            assert!(entity.set_data_slot(game, 255, 7));
+            let before = entity.data_slots(game).unwrap();
+            let before_revision = revision(game);
+            game.world.modified.clear();
+            assert_eq!(
+                entity.set_data_slots(game, vec![0; 257]),
+                Err(BlockEntityDataError::TooManySlots {
+                    count: 257,
+                    limit: 256
+                })
+            );
+            assert_eq!(entity.data_slots(game), Some(before));
+            assert_eq!(revision(game), before_revision);
+            assert!(
+                game.world.modified.is_empty(),
+                "refusal sends no Changed notice"
+            );
+            let saved = horizon_client::save::encode_block_entity(
+                pos,
+                game.world.block_entities.get(&pos).unwrap(),
+                "minecraft:stone",
+            );
+            let (loaded_pos, loaded) = horizon_client::save::decode_block_entity(&saved).unwrap();
+            game.world.block_entities.remove(&pos);
+            assert_eq!(
+                entity.set_data_slots(game, vec![8]),
+                Err(BlockEntityDataError::Unavailable)
+            );
+            assert_eq!(loaded_pos, pos);
+            game.world.block_entities.insert(loaded_pos, loaded);
+            assert_eq!(
+                entity.data_slots(game),
+                Some(vec![]),
+                "menu data is transient, not saved NBT"
+            );
+            assert_eq!(entity.set_data_slots(game, vec![0]), Ok(true));
+            assert!(entity.set_data_slot(game, 0, 1));
+            assert_eq!(entity.data_slots(game), Some(vec![1]));
         });
     });
 }

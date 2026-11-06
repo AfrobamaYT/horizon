@@ -293,14 +293,20 @@ impl Game<'_> {
         };
         let host = self.lan.as_mut().expect("checked");
         if let Side::Live(i) = a {
-            set_guest_slots(&mut host.hub.guests[i], from_kind, src);
+            host.hub
+                .guests
+                .update(i, |g| set_guest_slots(g, from_kind, src));
             if b.is_none() {
-                set_guest_slots(&mut host.hub.guests[i], to_kind, dst);
+                host.hub
+                    .guests
+                    .update(i, |g| set_guest_slots(g, to_kind, dst));
                 return Ok(());
             }
         }
         if let Some(Side::Live(i)) = b {
-            set_guest_slots(&mut host.hub.guests[i], to_kind, dst);
+            host.hub
+                .guests
+                .update(i, |g| set_guest_slots(g, to_kind, dst));
         }
         Ok(())
     }

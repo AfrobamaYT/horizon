@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Niy mōg ôdczytać dziynnika budowy: {error}",
   "Could not read the saved sign-in.": "Niy mōg ôdczytać zapisanego logowanio.",
   "Could not read the saved sign-in. Sign in again.": "Niy mōg ôdczytać zapisanego logowanio. Zalogowaj sie zaś.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Niy mōg ôdczytać {name}: {error}",
   "Could not run {program}: {error}": "Niy mōg sie uruchomić {program}: {error}",
   "Could not save the renewed sign-in.": "Niy mōg zapisać ôdnowiōnego zalogowanio.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Pobrania, zalogowanie i aktualizacyje przechodzōm bez tyn proxy (http://host:port, socks5://host:port). Prōżne ôznaczo żodne: HTTPS_PROXY je używane zamiast tego, kej ôdpalacz bōł uruchomiōny z jednym.",
   "{name} was left out: made for another Horizon version": "{name} zostoł pominiynty: zrobiōny do inkszyj wersyje Horizona",
   "{name} was left out: clashes with {other}": "{name} zostoł pominiynty: koliduje ze {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} zostoł pominiynty: potrzebuje {other}, kery zostoł pominiynty"
+  "{name} was left out: it needs {other}, which was left out": "{name} zostoł pominiynty: potrzebuje {other}, kery zostoł pominiynty",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Enweghị ike ịgụ ndekọ ihe owuwu: {error}",
   "Could not read the saved sign-in.": "Enweghị ike ịgụ nbanye echekwara.",
   "Could not read the saved sign-in. Sign in again.": "Enweghị ike ịgụ nbanye echekwara. Banye ọzọ.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Enweghị ike ịgụ {name}: {error}",
   "Could not run {program}: {error}": "Enweghị ike ịgba ọsọ {program}: {error}",
   "Could not save the renewed sign-in.": "Enweghị ike ichekwa nbanye ọhụrụ ahụ.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Nbudata, nbanye na mmelite na-aga site na proxy a (http://host:port, socks5://host:port). Ihe efu pụtara enweghị nke ọ bụla: HTTPS_PROXY na-eji kama mgbe ejiri otu malite onye nrụpụta.",
   "{name} was left out: made for another Horizon version": "A hapụrụ {name}: e mere ya maka ụdị Horizon ọzọ",
   "{name} was left out: clashes with {other}": "A hapụrụ {name}: ọ na-emegide {other}",
-  "{name} was left out: it needs {other}, which was left out": "A hapụrụ {name}: ọ chọrọ {other}, nke a hapụrụ"
+  "{name} was left out: it needs {other}, which was left out": "A hapụrụ {name}: ọ chọrọ {other}, nke a hapụrụ",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

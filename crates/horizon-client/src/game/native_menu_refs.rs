@@ -38,6 +38,38 @@ impl Game<'_> {
         self.remote_menu_ops(&ops)
     }
 
+    /// Close the local player's open container screen as Escape does
+    /// (`AbstractContainerScreen.onClose`, `LocalPlayer.closeContainer`): the
+    /// server is told (`ContainerClose`) and the screen goes. Refuses stale
+    /// menus, non-client hosts and a menu whose screen is not open, such as
+    /// the inventory menu while playing.
+    pub(super) fn native_menu_close(&mut self, menu: MenuRef) -> bool {
+        if self.is_logical_server()
+            || self.screen != super::Screen::Inventory
+            || self.native_client_menu_name(menu).is_none()
+        {
+            return false;
+        }
+        self.close_container();
+        self.set_screen(super::Screen::Playing);
+        self.capture(true);
+        true
+    }
+
+    /// Press button `button` of the local player's open menu as a click on
+    /// one of its buttons does (`MultiPlayerGameMode.handleInventoryButtonClick`,
+    /// `ContainerButtonClick`): the server's menu decides what it does
+    /// (`clickMenuButton`, and `menu_button` for a mod's menu). For a client
+    /// mod's own input on a menu's screen where `screen_click` doesn't come,
+    /// such as a key or the wheel; no sound, that is the screen's. Refuses
+    /// stale menus, non-client hosts and the inventory menu, which no server
+    /// opened. True means sent, not that the menu took it.
+    pub(super) fn native_menu_click_button(&mut self, menu: MenuRef, button: i32) -> bool {
+        !self.is_logical_server()
+            && self.native_client_menu_name(menu).is_some()
+            && self.remote_button_click(button)
+    }
+
     fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {
         let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
         let epoch = self.native_lifecycle.epoch()?;
@@ -307,19 +339,16 @@ impl Game<'_> {
         slot: usize,
     ) -> Option<&mut Option<ItemStack>> {
         let backing = self.native_menu_slot_backing(menu, slot)?;
-        let mut guests = self
-            .lan
-            .iter_mut()
-            .flat_map(|host| host.hub.guests.iter_mut());
-        let g = guests.find(|g| {
+        let guests = &mut self.lan.as_mut()?.hub.guests;
+        let index = guests.iter().position(|g| {
             g.placed
                 && g.uuid == menu.fields().player.uuid()
                 && g.entity_id as u32 == menu.fields().player.entity().id()
         })?;
         match backing {
-            MenuSlotBacking::Ender(n) => g.ender_items.get_mut(n),
-            MenuSlotBacking::CraftGrid(n) => g.craft_grid.get_mut(n),
-            MenuSlotBacking::Native(n) => g.native_menu.get_mut(n),
+            MenuSlotBacking::Ender(n) => guests.ender_items_mut(index)?.get_mut(n),
+            MenuSlotBacking::CraftGrid(n) => guests.craft_grid_mut(index)?.get_mut(n),
+            MenuSlotBacking::Native(n) => guests.native_menu_mut(index)?.get_mut(n),
             _ => None,
         }
     }
@@ -587,8 +616,14 @@ mod tests {
             assert_eq!(inventory.slot(game, 46), None);
             let stone = ItemStack::new("minecraft:stone", 4);
             let host = game.lan.as_mut().unwrap();
-            host.hub.guests[0].inventory[9] = Some(stone.clone());
-            host.hub.guests[0].carried = Some(stone.clone());
+            {
+                let value = Some(stone.clone());
+                host.hub.guests.update(0, |g| g.inventory[9] = value);
+            }
+            {
+                let value = Some(stone.clone());
+                host.hub.guests.update(0, |guest| guest.carried = value);
+            }
             let title = horizon_world::nbt::Tag::String("test".into());
             let window = host
                 .hub

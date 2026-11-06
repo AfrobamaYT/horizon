@@ -3,6 +3,7 @@
 //! (flint and steel / fire charge).
 use super::{Game, entity::Entity};
 use horizon_client::entity_rules::EntityRules;
+use horizon_client::lan::playerdata::uuid_ints;
 use horizon_client::{
     Result, collisions::SceneCollisions, items::ItemStack, mesher::Vertex, mobs::Who, text::Text,
 };
@@ -290,7 +291,13 @@ impl Game<'_> {
                 t.position.z,
             ];
             let bounds = t.bounds();
-            let (owner, guest, power) = (t.owner, t.guest, t.power);
+            let (id, owner, guest, power) = (t.id, t.owner, t.guest, t.power);
+            let (owner, guest) = match owner {
+                Some(_) => (owner, guest),
+                None => self
+                    .loaded_tnt_owner(id)
+                    .map_or((None, None), |(w, g)| (Some(w), g)),
+            };
             let in_water = self.bounds_in_water(bounds);
             self.tnts.remove(i);
             // PrimedTnt.tick: with `tnt_explodes` off it goes away without exploding.
@@ -321,6 +328,57 @@ impl Game<'_> {
             result?;
         }
         Ok(())
+    }
+    /// The saved compound of primed TNT `i`: chunk saves, `/data get`, portals.
+    pub(super) fn tnt_nbt(&mut self, i: usize) -> horizon_world::nbt::Tag {
+        let id = self.tnts[i].id;
+        let uuid = self.uuid_for(id);
+        let owner = self.tnt_owner_uuid(self.tnts[i].owner, self.tnts[i].guest);
+        let t = &self.tnts[i];
+        horizon_client::entity_nbt::tnt_to_nbt(
+            t.position,
+            t.velocity,
+            t.on_ground,
+            t.fuse,
+            t.power,
+            t.block_state_nbt(self.pack.assets.registry),
+            t.rotation,
+            uuid,
+            owner,
+            self.persist.raw.get(&id),
+        )
+    }
+    /// `EntityReference.of(owner)`: the UUID of the player or mob that lit it.
+    fn tnt_owner_uuid(&mut self, owner: Option<Who>, guest: Option<u32>) -> Option<[i32; 4]> {
+        match owner? {
+            Who::Player => match guest {
+                Some(conn) => self
+                    .lan
+                    .as_ref()?
+                    .hub
+                    .guest(conn)
+                    .map(|g| uuid_ints(g.uuid)),
+                None => self.level.player_uuid,
+            },
+            Who::Mob(id) if self.mobs.iter().any(|m| m.id == id) => Some(self.uuid_for(id)),
+            Who::Mob(id) => self.persist.uuids.get(&id).copied(),
+        }
+    }
+    /// `PrimedTnt.getOwner` for TNT loaded with an `owner`: looked up when
+    /// asked, so a player who joined or a mob loaded since is found.
+    fn loaded_tnt_owner(&self, id: u32) -> Option<(Who, Option<u32>)> {
+        let uuid = horizon_client::entity_nbt::tnt_owner(self.persist.raw.get(&id)?)?;
+        let guest = self.lan.as_ref().and_then(|host| {
+            let mut guests = host.hub.guests.iter();
+            guests.find(|g| uuid_ints(g.uuid) == uuid).map(|g| g.conn)
+        });
+        if guest.is_some() {
+            return Some((Who::Player, guest));
+        }
+        if self.level.player_uuid == Some(uuid) {
+            return Some((Who::Player, None));
+        }
+        self.mob_by_uuid(uuid).map(|m| (Who::Mob(m), None))
     }
     /// `TntBlock.useItemOn`: flint and steel or a fire charge primes TNT.
     pub(super) fn ignite_tnt(&mut self, stack: &ItemStack) -> Result<bool> {
@@ -607,6 +665,7 @@ mod tests {
                 tnt.block_state_nbt(&registry),
                 [0.0, 0.0],
                 [221, 0, 0, 1],
+                None,
                 Some(&raw),
             );
             assert_eq!(saved.get("block_state"), Some(&expected));
@@ -671,7 +730,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -733,7 +796,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -803,7 +870,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -949,7 +1020,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -1055,7 +1130,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -1153,7 +1232,7 @@ mod tests {
         }
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1174,7 +1253,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

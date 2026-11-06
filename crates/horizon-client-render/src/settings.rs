@@ -893,7 +893,11 @@ mod tests {
             assert_eq!(sound_source(event), source, "{event}");
         }
         // Explicit sources still take precedence, including H331's arrow route.
-        let mut audio = crate::audio::Audio::silent(Path::new("/nonexistent/h068-audio"));
+        let mut audio = crate::audio::Audio::silent(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                Path::new("/nonexistent/h068-audio").to_path_buf(),
+            ),
+        );
         audio.capture = Some(Vec::new());
         audio.play_on(6, "minecraft:entity.arrow.hit", Some([1.0; 3]), 1.0, 1.0);
         audio.play_on(4, "minecraft:entity.warden.hurt", Some([1.0; 3]), 1.0, 1.0);

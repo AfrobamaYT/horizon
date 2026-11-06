@@ -1153,7 +1153,8 @@ pub trait Hooks {
     /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
     /// survival and entity obstruction checks. A trait mod returns
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
-    /// `None` to leave the answer to the next mod or vanilla.
+    /// `None` to leave the answer to the next mod or vanilla. Changes to the event's fluid
+    /// copy are mod-provided data forwarded to later Parts, never consumed by the engine.
     /// Authoritative servers only.
     #[hook(
         side = "server",
@@ -1826,20 +1827,15 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/*.rs`
-    /// with the game's): container slot `slot` of the content mod menu type `menu`
-    /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
-    /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
-    /// `may_place` and `max_stack` hold the type's own answer (false on one of its
-    /// `results`, true elsewhere, and 99): change them for your own menu types.
-    /// `max_stack` is kept to 1 to 99,
-    /// and the item's own stack size still caps it. Asked on the server, for each
-    /// click, drag and shift-click that puts an item in a slot, several times for
-    /// one shift-click: answer from `stack` and `context` alone, and fast. `context`
-    /// holds the side, the registries and the settings of the resource generation;
-    /// a `/reload` builds the next one.
+    /// Slot placement and stack limits for registered vanilla and mod menus;
+    /// mounts use `horizon:mount_inventory`, while player inventory and the
+    /// creative picker have no registered type. `slot` is the backing index,
+    /// including player inventory slots. The slot's own answers arrive first;
+    /// the maximum is bounded to 1–99 and the item limit. Refusal also prevents
+    /// quick-move top-ups. Runs in the restricted context on server and client
+    /// prediction; answer from the stack and context alone, and fast.
     #[hook(
-        side = "server",
+        side = "both",
         contract = "listen",
         scope = "menu",
         key = "menu",
@@ -4096,7 +4092,9 @@ pub trait Hooks {
     fn player_shield_disable();
     /// A statistic is about to be awarded to a server player, before its count and scoreboard criteria
     /// change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, and
-    /// `value` the amount. Set `cancel` to award nothing. Server-side.
+    /// `value` the amount. Set `cancel` to award nothing. Server-side. Ordinary interactions
+    /// fire at vanilla's award point; inside a transaction, the award and this hook wait until
+    /// the outermost successful commit, after tentative world and inventory writes.
     #[hook(
         side = "server",
         contract = "cancel",

@@ -4496,7 +4496,13 @@ impl Renderer {
                 on_off(gpu_timer.is_some()),
             ));
         }
-        let world_primitives = world_primitives::WorldPrimitives::new(&device, frame_format);
+        let mut world_primitives = world_primitives::WorldPrimitives::new(&device, frame_format);
+        world_primitives.reserve(
+            &device,
+            &mut |buffer, bytes| queue.write_buffer(buffer, 0, bytes),
+            world_primitives::DEFAULT_CAPACITY,
+            world_primitives::DEFAULT_CAPACITY,
+        );
         Ok(Self {
             display: DisplayWatch::default(),
             display_fresh: false,
@@ -6629,17 +6635,11 @@ impl Renderer {
             if let Some(atlas) = &mut atlas {
                 atlas.separate_ao = self.separate_ao;
             }
-            self.pack_material_atlases = atlas.as_ref().and_then(|_| {
+            self.pack_material_atlases = atlas.as_ref().and_then(|colour| {
                 let maps = self.pbr_maps.as_ref()?;
                 let make = |kind: usize, encoder: &mut wgpu::CommandEncoder| {
                     let arrays: Vec<_> = maps.iter().map(|pair| pair[kind].clone()).collect();
-                    pack_atlas::PackAtlas::material(
-                        &self.device,
-                        encoder,
-                        &arrays,
-                        self.sprite_split,
-                        layers,
-                    )
+                    colour.material_for(&self.device, encoder, &arrays, layers)
                 };
                 Some([make(0, &mut encoder)?, make(1, &mut encoder)?])
             });
@@ -13045,7 +13045,9 @@ mod sprite_upload_tests {
         {
             return;
         }
-        let mut sprites = crate::sprites::Sprites::default();
+        let mut sprites = crate::sprites::Sprites::new(
+            crate::resource_source::ResourceSource::directory(root.clone()),
+        );
         let layers: Vec<_> = [
             "rail",
             "powered_rail",
@@ -13053,11 +13055,7 @@ mod sprite_upload_tests {
             "detector_rail",
             "activator_rail",
         ]
-        .map(|name| {
-            sprites
-                .insert(&root, &format!("minecraft:block/{name}"))
-                .unwrap()
-        })
+        .map(|name| sprites.insert(&format!("minecraft:block/{name}")).unwrap())
         .into();
         sprites.finish();
         assert_eq!(sprites.size, 16);
@@ -13075,7 +13073,7 @@ mod sprite_upload_tests {
                 .0
             })
             .collect();
-        sprites.insert(&root, "minecraft:block/oak_sign").unwrap();
+        sprites.insert("minecraft:block/oak_sign").unwrap();
         sprites.finish();
         assert_eq!(sprites.size, 32);
         for (&layer, expected) in layers.iter().zip(native) {

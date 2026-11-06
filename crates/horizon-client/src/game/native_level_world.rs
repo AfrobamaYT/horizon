@@ -9,7 +9,7 @@ use horizon_core::position::BlockPos;
 use horizon_core::random::LegacyRandom;
 use horizon_world::level::{Dimension as LevelDimension, LevelAccess};
 use horizon_world::registry::BlockStateId;
-use mod_api::{FeatureFlags, GameRuleValue, LevelDimensionShape, LevelRef};
+use mod_api::{BoolGameRuleKey, FeatureFlags, GameRuleValue, LevelDimensionShape, LevelRef};
 use std::sync::Arc;
 
 fn weather_for_level(
@@ -119,6 +119,17 @@ impl Game<'_> {
         self.native_level_world(level)?;
         DIFFICULTIES.get(usize::from(self.ui.difficulty)).copied()
     }
+    /// Read a registered boolean game rule.
+    pub(super) fn native_level_game_rule_bool(
+        &self,
+        level: LevelRef,
+        key: BoolGameRuleKey,
+    ) -> Option<bool> {
+        self.native_level_world(level)?;
+        self.ui
+            .rules
+            .bool_slot(mod_api::__private::game_rule_bool_slot(key)?)
+    }
     /// Game rule `rule` (`minecraft:keep_inventory` or `keep_inventory`), as
     /// `/gamerule` queries it: None for an unknown rule.
     pub(super) fn native_level_game_rule(
@@ -141,7 +152,7 @@ impl Game<'_> {
         Some(
             rules
                 .available_rules()
-                .filter_map(|r| Some((["minecraft:", &r.name].concat(), rules.get(&r.name)?)))
+                .filter_map(|r| Some((r.name.clone(), rules.get(&r.name)?)))
                 .collect(),
         )
     }
@@ -334,6 +345,38 @@ mod tests {
             game.with_level(|_, host, _| {
                 assert_eq!(host.enabled_features().iter().collect::<Vec<_>>(), ids);
             });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn native_mod_reads_registered_bool_rule_by_key() {
+        use std::sync::OnceLock;
+        static KEY: OnceLock<mod_api::BoolGameRuleKey> = OnceLock::new();
+        struct RuleMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for RuleMod {
+            fn register(
+                &self,
+                registrar: &mut dyn mod_api::Registrar,
+                _: &mod_api::RegistrationContext,
+            ) {
+                registrar.game_rule_category("machines").unwrap();
+                let key = registrar
+                    .game_rule_bool("enabled", "example:machines", true)
+                    .unwrap();
+                let _ = KEY.set(key);
+            }
+        }
+        let mods: mod_api::Mods = vec![ModEntry::new("example", Box::new(RuleMod))].into();
+        with_mods(mods, || {
+            with_game(|game| {
+                let registry = Arc::new(mod_api::__private::game_rule_registry());
+                game.level.rule_registry = registry.clone();
+                game.ui.rules = gamerules::GameRules::with_registry(registry, &[]);
+                let level = game.native_level("minecraft:overworld").unwrap();
+                assert_eq!(level.game_rule_bool(game, *KEY.get().unwrap()), Some(true));
+            })
         });
     }
 

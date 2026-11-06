@@ -443,12 +443,13 @@ impl Game<'_> {
                     on_ground: false,
                 }));
                 if let Some(placed) = rotation {
-                    let g = &mut host.hub.guests[i];
-                    let [yaw, pitch] =
-                        passenger_rotation(placed.before, placed.after, [g.yaw, g.pitch]);
-                    g.yaw = yaw;
-                    g.head_yaw = yaw;
-                    g.pitch = pitch;
+                    host.hub.guests.update(i, |g| {
+                        let [yaw, pitch] =
+                            passenger_rotation(placed.before, placed.after, [g.yaw, g.pitch]);
+                        g.yaw = yaw;
+                        g.head_yaw = yaw;
+                        g.pitch = pitch;
+                    });
                 }
                 let g = host.hub.guests[i].position;
                 let at = passenger_destination(old, new, Vec3::new(g[0], g[1], g[2]));

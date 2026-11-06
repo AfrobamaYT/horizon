@@ -40,6 +40,15 @@ impl ItemEnv for Env<'_, '_> {
             .native_item_model_property(property, stack, &mut value);
         value
     }
+    fn item_model_range_property(&self, property: &str, stack: &StackView) -> f32 {
+        if !mod_api::__private::listened(mod_api::HookId::ItemModelRangeProperty) {
+            return 0.0;
+        }
+        let mut value = 0.0;
+        self.game
+            .native_item_model_range_property(property, stack, &mut value);
+        value
+    }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
     }
@@ -659,11 +668,29 @@ impl Game<'_> {
             let pose = glam::Mat4::from_translation(pos.as_vec3())
                 * glam::Mat4::from_translation(glam::Vec3::new(0.0, bob + min_offset_y, 0.0))
                 * glam::Mat4::from_rotation_y(spin);
-            let packed = self.world.light(
-                q.x.floor() as i32,
-                (q.y + 0.1).floor() as i32,
-                q.z.floor() as i32,
-            );
+            // `EntityRenderer.getPackedLightCoords`: an item entity is lit from
+            // the block its light probe (its eye, 0.2125 up) is in, at 15 block
+            // light while it burns. A pickup particle is not an entity and keeps
+            // the cell it is drawn in.
+            let packed = if entity {
+                // The shared extraction already interpolated the drawn position in f64.
+                let probe = [
+                    at[0],
+                    at[1] + horizon_client::entities::ItemEntity::EYE_HEIGHT,
+                    at[2],
+                ];
+                item.render_light(self.world.light(
+                    probe[0].floor() as i32,
+                    probe[1].floor() as i32,
+                    probe[2].floor() as i32,
+                ))
+            } else {
+                vertex_light(self.world.light(
+                    q.x.floor() as i32,
+                    (q.y + 0.1).floor() as i32,
+                    q.z.floor() as i32,
+                ))
+            };
             let seed = i64::from(self.pack.item_renderer.item_id(&item.stack.item))
                 + i64::from(item.stack.damage);
             let copies = item_render::cluster_poses(
@@ -703,11 +730,11 @@ impl Game<'_> {
             let outline = self.thing_outline(item.id, "minecraft:item");
             // Posed on the GPU when every layer can be, its silhouette too when it glows.
             let skinned = skinning
-                .then(|| self.submit_item_skinned(&state, &copies, vertex_light(packed), lights))
+                .then(|| self.submit_item_skinned(&state, &copies, packed, lights))
                 .flatten();
             if skinned.is_none() {
                 for &copy in &copies {
-                    self.submit_item_world(&state, copy, vertex_light(packed), out);
+                    self.submit_item_world(&state, copy, packed, out);
                 }
             }
             if let Some(rgb) = outline {
@@ -790,6 +817,63 @@ mod tests {
             });
         });
         assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
+
+    struct Fill;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Fill {
+        fn register_range_select_item_model_property(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterRangeSelectItemModelPropertyEvent<'_>,
+        ) {
+            event.properties.push("example:fill".into());
+        }
+        fn item_model_range_property(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::ItemModelRangePropertyEvent<'_>,
+        ) {
+            if event.property == "example:fill" {
+                event.value = event.stack.count as f32 / 64.0;
+            }
+        }
+    }
+
+    /// A mod registers its numeric property once at start.
+    #[test]
+    fn a_mod_registers_its_range_select_item_model_property() {
+        use mod_api::__private::game::*;
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("fill", Box::new(Fill))].into();
+        mod_api::testing::with_mods(mods, || {
+            let mut properties = Vec::new();
+            Game::native_register_range_select_item_model_property(
+                &mod_api::RegistrationContext::new(),
+                &mut properties,
+            );
+            assert_eq!(properties, ["example:fill"]);
+        });
+    }
+
+    /// The resolver reads a mod's number for its property, 0 for another's or with no mod.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn item_model_range_property_reads_the_mods_number() {
+        let stack = StackView::new("minecraft:stick", 16);
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("fill", Box::new(Fill))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert_eq!(env.item_model_range_property("example:fill", &stack), 0.25);
+                assert_eq!(env.item_model_range_property("other:fill", &stack), 0.0);
+            });
+        });
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert_eq!(env.item_model_range_property("example:fill", &stack), 0.0);
+            });
+        });
     }
 
     #[test]

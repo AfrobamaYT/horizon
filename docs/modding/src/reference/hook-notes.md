@@ -19,6 +19,31 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Custom world geometry
+
+`Hooks::submit_custom_geometry` runs on the client after particles, before rendering. Its
+`WorldRenderView` holds camera, partial tick and game time; `WorldDrawContext::lines` and `quads`
+accept unlit world-space ARGB geometry with depth testing or through walls. Batches fail atomically
+for invalid inputs or overflow. `usage()` reports shared limits (4,096 of each by default);
+output clears every view. Submit extracted state, without world writes or resource loading.
+
+## Transparent screen backgrounds and landing changes
+
+`Hooks::screen_transparent_background` runs immediately before an in-game screen's
+translucent gradient. Returning `Flow::Cancel` suppresses that gradient, not the
+screen's contents. Its `batch` is a `DrawContext`: custom drawing survives
+cancellation. `ClientHost::apply_screen_blur()` requests the normal menu blur
+at most once per frame; `menu_blur_radius()` reads the configured radius.
+`DrawContext::draw_menu_background` and `tiled_sprite` draw menu textures through
+the same atlas. The whole-screen `screen_render_pre` remains a separate moment.
+
+`Hooks::entity_change_block_pre` can cancel a player's landing block change before
+its neighbour notifications and level events. The resident write is restored
+before those consumers run, so a crop above cancelled farmland stays untouched.
+The event identifies the player, position and old/new block names. This veto is
+separate from `entity_change_block`, the existing post-change mob notification,
+and from `farmland_trample`, the farmland-specific in-write event.
+
 ## Client window and screen state
 
 `ClientHost::window_focused()` reports the last focus state from the window
@@ -84,6 +109,14 @@ The hook cannot cancel or replace a packet. It also observes chunk packets
 handled by the batching path, once each. Configuration packets and the network
 thread's own handling (including keep-alives and resource pack messages) do not fire it.
 
+`Hooks::client_packet_send` is the other direction: a `ClientPacketSendEvent` with the same
+`ClientPacket` view for each play packet the window's game is about to send (`Connection.send`),
+in order, including the selected slot sent before an attack or a use. Setting `canceled` drops
+the packet, and the game goes on as if it had been sent. Packets the network thread sends itself
+(keep-alives, pongs, cookies, configuration), the phase-dependent answers (resource pack status,
+a dialog's custom click action) and far terrain requests do not fire it. With no listener the
+send path checks one flag and builds nothing.
+
 ## Conditional item model properties
 
 A client mod supplies its own namespaced `minecraft:condition` property by implementing
@@ -116,6 +149,34 @@ item draws as its `base` model, and the log says so once per type. A mod gets th
 JSON: a `minecraft:model` leaf naming a model file with `elements` and `display` draws cuboids with a
 transformation per display context, `tints` colours them, and `minecraft:select`, `condition` and
 `range_dispatch` on a property the mod answers through `item_model_property` pick between variants.
+
+## Numeric item model properties
+
+A client mod adds a numeric `minecraft:range_dispatch` property (NeoForge's
+`RegisterRangeSelectItemModelPropertyEvent`) in two steps. `Hooks::register_range_select_item_model_property`
+pushes its id once at start, before resources load; `Hooks::item_model_range_property` answers the number
+for each stack while a model picks a branch.
+
+```rust,ignore
+fn register_range_select_item_model_property(
+    &self,
+    _context: &RegistrationContext,
+    event: &mut RegisterRangeSelectItemModelPropertyEvent<'_>,
+) {
+    event.properties.push("example:fill".into());
+}
+
+fn item_model_range_property(&self, _host: &dyn ClientHost, event: &mut ItemModelRangePropertyEvent<'_>) {
+    if event.property == "example:fill" {
+        event.value = event.stack.count as f32 / 64.0;
+    }
+}
+```
+
+Use `"property": "example:fill"` in the item's `minecraft:range_dispatch`: the model's `scale` multiplies the
+number, then the highest threshold at or below it wins, else `fallback`, as for vanilla's properties. A
+resource reload keeps reading the mod's number. An id in vanilla's namespace, not `<namespace>:<path>`, or
+registered twice is logged and left out. A property no mod registers reads 0, decided once at load.
 
 ## Item frame rendering
 
@@ -269,11 +330,11 @@ requires a farmer at work and `mob_griefing` enabled.
   (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `LevelRef::block`,
   `LevelRef::block_property` and `native_cursor`. A mod inserts items through the block's item capability,
   `level.capability(host, &ITEMS, pos, side)`.
-- `click_menu_button(button)`, a client helper, presses button `button` of the open menu as a click on one of its buttons does
+- `menu.click_button(host, button)`, on a client `MenuRef`, presses button `button` of the open menu as a click on one of its buttons does
   (`MultiPlayerGameMode.handleInventoryButtonClick`, `ServerboundContainerButtonClickPacket`); the server's menu decides what it does
   (`clickMenuButton`, and `menu_button` for a mod's menu). It is for a client mod's own input on a menu's screen where `screen_click`
-  doesn't come, such as a key or the wheel (`screen_key_pressed_pre`, `screen_mouse_scrolled_pre`). It is refused while no menu the
-  server opened is open.
+  doesn't come, such as a key or the wheel (`screen_key_pressed_pre`, `screen_mouse_scrolled_pre`). It returns `false` for a stale
+  handle and for the inventory menu, which no server opened.
 
 - What a server mod needs to guard land and move players. `native_right_click_block` hears a player's right
   click on a block before the block's own use (a chest, a door, a lever) and the item's, and may cancel it
@@ -1214,7 +1275,7 @@ registration path.
 
 - `native_block_entity` gives a block a block entity whatever its template: a mod's stone casing or thin part can use any template. The engine removes it when its block is broken or replaced, no piston moves it, and a mod that draws it (`native_block_entity_submit`) is asked for it.
 
-- Slot rules a mod decides in code for its content menu types: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)`, in `horizon-client`'s `menu.rs`, is given the type's own answer (false on one of its `results`, [making a content mod](../how-to/content-mods.md#menu-types), true elsewhere, and 99) and may change both, as a NeoForge mod overrides `Slot.mayPlace` and `Slot.getMaxStackSize`. A mod menu type's clicks run on the vanilla menu engine (`menu::Kind::Mod`).
+- Slot rules for registered vanilla and mod menu types: `menu_slot_rules` starts with the slot's own answers and may change both, as a NeoForge mod overrides `Slot.mayPlace` and `Slot.getMaxStackSize`.
 
 - An item's use tick and release, as vanilla's `Item.onUseTick` and `releaseUsing` and NeoForge's `LivingEntityUseItemEvent.Tick` and `.Stop`. Each tick of a use, `native_living_entity_use_item_tick` may change the ticks left: at 0 or less, or on a cancel, the server finishes the use, as NeoForge's code does, and an item used on release stays frozen until let go. `native_on_use_tick` is what a mod's own item does then (cook, charge). When the player lets go early, `native_living_entity_use_item_stop` may skip the release, and `native_release_using` acts with the ticks left (a bow-like item shoots by its charge); setting `used` starts the item's cooldown. All four run on both sides, as vanilla's do, and take the using entity, None for a player; the tick and stop take the hand too. Change the world only where this game runs the world, not on a server's client.
 
@@ -1231,6 +1292,8 @@ registration path.
 - An entity getting on or off a vehicle, which a mod can cancel, through `native_entity_mount` (NeoForge's `EntityMountEvent`): the rider's id and type (`minecraft:player`, `minecraft:zombie`), the vehicle's id and type (`minecraft:oak_boat`, `minecraft:horse`), whether it is mounting, and a `canceled` flag. Set `canceled` and the rider does not board, or keeps riding; a `/ride` that is canceled fails. It is told for a player boarding a boat, minecart, cushion or mount (pig, strider, horse and its kin, llama, nautilus, happy ghast) and getting off by their own input, `/ride`, a stab, a buck, a teleport or spectator mode, and for the mobs Horizon seats on a vehicle (jockeys, raiders on a ravager, `/ride`) and lets off one with `/ride` or a stab. It is not told for a rider whose vehicle is gone or dies, nor for riders loaded with a save. On the single player server thread and on a dedicated server.
 
 - `native_interaction_key_mapping_triggered(key, hand, swing_hand, canceled)` fires while playing when an interaction key is about to act on the crosshair (NeoForge's `InputEvent.InteractionKeyMappingTriggered`): `key` is `InteractionKey::Attack` (when an attack is allowed, and each tick a held key keeps digging a block), `Use` (once for each hand tried, main first, before the hand's target and item) or `PickBlock` (only with a block or entity aimed at). Set `canceled` to skip the action; a cancelled use ends the click, so the other hand gets no turn. A cancelled attack or use still swings `hand` unless the mod clears `swing_hand` (true on entry). A single player's window and a server's player (any window that plays on a server).
+
+- `native_key_mapping_pre(mapping, pressed, canceled)` is asked while playing, before the game acts on a physical key or mouse button bound to a gameplay mapping (`key.jump`, `key.attack`...), once for each mapping bound to it. `pressed` is true for a press (a key's repeats too) and false for its release. Set `canceled` on a press to drop it for every mapping bound to that input: the mapping is not held, nothing acts on it, and a mouse press is not counted as a click. A cancel on a release is ignored, so what the game holds is always let go. A release is asked too, while playing: a screen that opens lets go of what it holds without asking. A key bound to two mappings (forward and sprint) is canceled as one. It is asked for the window's keys and mouse buttons, agent control's included, after the window's own shortcuts (fullscreen, screenshot, debug keys) and with no screen open. A controller's presses are not asked.
 
 - `native_gui_layer_pre(layer, batch, canceled)` and `native_gui_layer_post(layer, batch)` fire around each vanilla HUD layer Horizon draws, in its paint order, so a mod places its own drawing below a layer (in `pre`) or above it (in `post`), NeoForge's `RegisterGuiLayersEvent` registerBelow/registerAbove, and hides a layer by setting `canceled` in `pre` (`RenderGuiLayerEvent.Pre`). Layer ids: `minecraft:crosshair`, `hotbar`, `effects`, `boss_overlay`, `vehicle_health` (riding a mount), `contextual_info_bar` (the jump bar, locator bar or experience bar with the level number), `player_health` (health, armor, food and air rows, one pass), `selected_item_name`, `sleep_overlay`, `overlay_message` (action bar), `title`, `scoreboard_sidebar`, `subtitle_overlay`, `chat` (the unfocused lines) and `tab_list`. F1 hides the layers it hides in vanilla, and then nothing fires for them. The camera overlays (drawn by the screen-effects pass) and the debug screen are not layers. A hidden layer still runs its game logic (the health rows' blink, the bubble pop sound) and `post` still fires.
 
@@ -1262,7 +1325,7 @@ registration path.
 
 - A player finishing a sign: `native_sign_changed(player, name, dimension, pos, front, lines, cancel)` is heard when a player sends the text they wrote on a sign they were editing, right before it goes on the sign, once the checks have passed, on a server, with the player's state swapped in (`PlayerRef::tell` reaches them). A mod may rewrite `lines` (four lines of plain text) or set `cancel` so the sign keeps its old text; a waxed sign is not told.
 
-- Models no blockstate names, as NeoForge's `ModelEvent.RegisterStandalone`: `native_standalone_models(context, models)`, asked once at client startup (not on integrated or dedicated servers), takes the ids of models a block entity or a mob draws as parts (`mymod:block/shaft_half`, from `assets/mymod/models/block/shaft_half.json`), and every resource load, a pack reload included, bakes them beside the block models. `BlockEntityDrawContext::model(model, tint)` draws one under `draw`'s pose in `native_block_entity_submit` or `native_mob_submit`, as `native_draw_block` draws a block's model, with `tint` (0xRRGGBB) on its tinted faces. A model that doesn't read is logged and left out, and drawing it gives false; no block has to be registered just to bake a part's model.
+- Models no blockstate names, as NeoForge's `ModelEvent.RegisterStandalone`: `native_standalone_models(context, models)`, asked once at client startup (not on integrated or dedicated servers), takes the ids of models a block entity or a mob draws as parts (`mymod:block/shaft_half`, from `assets/mymod/models/block/shaft_half.json`), and every resource load, a pack reload included, bakes them beside the block models. Resolve its `Identifier` once through `host.render_assets().model(&id)` in `client_setup` and again in `client_resources_reloaded`, retaining the opaque `ModelRef` between frames. `BlockEntityDrawContext::model(model, tint)` consumes that handle under `draw`'s pose in `native_block_entity_submit` or `native_mob_submit`, as `native_draw_block` draws a block's model, with `tint` (0xRRGGBB) on its tinted faces. Missing or unbaked names return `ModelError::UnknownModel`. Every successful resource replacement, including model-only edits, invalidates old handles with `ModelError::StaleModel`; failed reloads keep them usable. A drawing error appends no geometry. Models use the shared pack stack, including overrides and other namespaces; lookup never reads files or bakes. No block has to be registered just to bake a part's model.
 
 - A player opening and closing any menu on a server, on the single player server thread and on a dedicated server: `native_player_container_open(player, name, dimension, menu, pos)` and `native_player_container_close(...)` (NeoForge's `PlayerContainerEvent.Open` and `.Close`), with the menu type's name and, for a block's menu, its position. They run with the player's state swapped in. Unlike the viewer count of a mod container (`native_mod_container_viewers`) they name the player and cover every menu: chests, furnaces, crafting tables, trades, a mod's own. A menu is heard once a tick, so one opened and closed inside a tick is not; each open has one close, also when the player leaves.
 
@@ -1316,6 +1379,13 @@ registration path.
 
 - The in-world HUD's two moments, as NeoForge's `RenderGuiEvent.Pre` and `.Post`: `render_gui_pre(host, event)` runs once a frame in a world, before any vanilla HUD layer, and a mod that returns `Flow::Cancel` hides the whole HUD as F1 does (no layer, no `gui_layer_pre` or `gui_layer_post`, no `render_gui_post`, no chat or toasts); it is not heard under F1 or while a server dialog or the connection screen covers the window. `render_gui_post(host, draw, corners)` is the old `hud` hook, unchanged: it draws after the minimap, so a mod that implemented `hud` implements `render_gui_post`. Client side; a frame with no listener costs one branch each.
 - Lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1.
+- The camera type F5 cycles to: `camera_type_cycle(host, event)` runs when `key.togglePerspective` cycles the window's
+  camera type (`Minecraft.handleKeybinds`), with `previous` and vanilla's `next` (first person, third person behind, third
+  person in front); a mod may set `next` to skip or keep a type, and the camera entity's post effect follows the answer.
+  `camera_type()` reads the type and `set_camera_type(type)` sets it as F5 does, without a cycle, for a freelook mod that
+  switches to third person and back; with `camera_pose` moving the drawn camera, that is a camera independent of the
+  player. The game's two copies of `CameraType` are now one, `mod_api::CameraType`. Client side.
+
 - A client tick's two moments, as NeoForge's `ClientTickEvent.Pre` and `.Post`: `client_tick_pre(host, event)` runs at the start of every client tick (`Minecraft.tick`), paused or not and on the title screen too, and `client_tick_post` at its end. They replace the single `tick` hook, which also fired on a server's own `Game`: the server's tick is `server_tick` (`ServerTickEvent`), so a mod that implemented `tick` implements `client_tick_pre` and, for a server, `server_tick`. Window only, client side; a tick with no listener costs one branch.
 - How long a client tick lasts, a "timer": `tick_target_millis(host, event)` gets the milliseconds the window's
   `DeltaTracker.Timer` divides each frame's time by (`Minecraft.getTickTargetMillis`), vanilla's 50 at 20 ticks a
@@ -2467,9 +2537,6 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player; the player and those around see it. Horizon keeps no
   such count for mobs (None, false). `set_arrow_removal_ticks` and `set_stinger_removal_ticks` set the ticks until the
   next one falls out (`removeArrowTime`, `removeStingerTime`; at 0 or less the timer restarts at `20 * (30 - count)`).
-- `living.left_handed(host)` / `set_left_handed` (`Mob.setLeftHanded`, the mob flags in its entity data) and
-  `can_pick_up_loot` / `set_can_pick_up_loot` (`Mob.setCanPickUpLoot`; an allay and a sulfur cube decide for
-  themselves) work on mobs; players and the other kinds read None and write false.
 - `living.item_use_remaining(host)` / `set_item_use_remaining(host, ticks)` (`useItemRemaining`) read and move the end of
   the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
@@ -2655,8 +2722,12 @@ to a complete gesture. All actions are validated before the first is predicted o
 normal `ContainerClick` path. A stale handle, invalid slot/hotbar index, creative-only action in survival,
 spectator, non-client host or creative inventory screen returns `false` without side effects.
 `true` is submission, not server acceptance; authoritative slot/cursor corrections still win.
+`menu.close(host)` closes the menu's open screen as Escape does (`AbstractContainerScreen.onClose`,
+`LocalPlayer.closeContainer`, which sends `ServerboundContainerClosePacket`), and `menu.click_button(host, button)`
+sends `ServerboundContainerButtonClickPacket`. Both return `false` for a stale handle or a non-client host; `close` also
+while the menu's screen is not open, and `click_button` for the inventory menu.
 See [A menu's slots](../concepts/trait-mods.md#a-menus-slots) for actions and an example.
-Diverges from upstream: new helper.
+Diverges from upstream: new helpers.
 
 ### Mob AI goals
 
@@ -2691,6 +2762,37 @@ These methods reuse built-in goal kinds; they do not define arbitrary goal callb
 `Mob.registerGoals` moment. [Custom mob goals at construction](https://github.com/arismoko/horizon/issues/1077)
 tracks a typed goal registrar and callbacks on `MobRef` and Parts, shared by native and wasm mods. NeoForge has
 no bus event at this moment. The upstream raw-`Mob` `register_goals` interface is not part of this fork's API.
+
+### Mob AI controls
+
+`crates/horizon-client/src/game/native_mob_refs.rs` and `native_mob_navigation.rs` (#938's mob AI controls): a `MobRef`
+steers a mob through the engine's own controls, each a momentary wish the mob's own AI may replace next tick, as
+`move_to`'s path is. Reads take the host by `&dyn Host` and writes by `&mut dyn ServerHost`.
+
+- `mob.look_at(host, [x, y, z])` is `LookControl.setLookAt`: the mob's look control rotates its head toward the position
+  over the next ticks. Non-finite coordinates are refused. `mob.jump(host)` is `JumpControl.jump`: the mob jumps on its
+  next own tick by its own jump path — no velocity is written. No species refuses either: vanilla's brains themselves
+  write through these controls (a brain species' `LookAtTargetSink` calls the same `lookAt`), so a mod's wish and the
+  mob's own are one flag, not a brain memory a write could miss (which is why `set_target` refuses brain species). A
+  creaking being looked at, an angry bee and an axolotl playing dead hold their look control, and a held creaking its
+  jump control, as in vanilla: the wish waits until the control runs again.
+- `mob.navigation_speed(host)` / `set_navigation_speed(host, speed)` read and set `PathNavigation.speedModifier`, the
+  multiplier the current path is followed at (1.0 is the mob's normal speed; 0 until a path sets one) — not the mob's
+  movement-speed attribute. `move_to`'s speed argument sets the same modifier, and the mob's own next `moveTo` (a goal's
+  or a brain species') sets its own again, as in vanilla. Non-finite speeds are refused.
+- `mob.restrict_to(host, [x, y, z], radius)` is `Mob.restrictTo(pos, radius)`: the home area the mob keeps to — its own
+  stroll and wander goals pick their positions inside it, as a lead's and a guardian's home do. It is saved with the mob
+  (`home_pos`, `home_radius`). `restrict_center(host)` (`getRestrictCenter`; the last live one after a clear, `[0, 0, 0]`
+  for a mob that never had one), `restrict_radius(host)` (`getRestrictRadius`; `-1` without a restriction),
+  `has_restriction(host)` (`hasRestriction`), `clear_restriction(host)` (`clearRestriction`; the center stays) and
+  `is_within_restriction(host, pos)` (`isWithinRestriction`; true everywhere without a restriction) read and change it.
+  Radius `-1` in `restrict_to` clears the restriction while keeping the position as the center.
+- `mob.left_handed(host)` / `set_left_handed` (`Mob.setLeftHanded`, the mob flags in its entity data, saved as
+  `LeftHanded`) and `can_pick_up_loot` / `set_can_pick_up_loot` (`Mob.setCanPickUpLoot`, saved as `CanPickUpLoot`;
+  an allay and a sulfur cube decide for themselves) moved here from the flat `living_*` helpers of #938's first round:
+  vanilla keeps both on `Mob`, so `MobRef` is their home. The flat helpers are gone, with no aliases.
+- All of these answer `None`/`false` for a stale handle, a client, the dragon (no `Mob` state), and a mob whose copy is
+  held out of the level.
 
 ### Mobs drawn by a mod
 
@@ -2995,21 +3097,9 @@ Look blocks up once and keep what you need (a few words a block for your own sha
 
 ### Menu slot rules
 
-`crates/horizon-client/src/menu.rs`: `native_menu_slot_rules(context, menu, slot, stack, may_place, max_stack)`, a free function
-a bundle targets as `horizon_client::menu::native_menu_slot_rules`. A content mod menu type's container slot `slot`
-(from 0) is asked whether it takes `stack` (`Slot.mayPlace`) and how many it holds (`Slot.getMaxStackSize`), as a
-NeoForge mod's own `Slot` overrides them. `may_place` and `max_stack` come in with the type's own answer (false on one
-of its `results` ([making a content mod](../how-to/content-mods.md#menu-types)), true elsewhere, and 99): change them for your own menu types.
-`max_stack` is kept to 1 to 99, and the item's own stack size still caps it. It runs inside a click, a drag or a
-shift-click (several times for one), with no level or player at hand: answer from the stack and the `LoopContext` it
-is given, and fast. The context's `side()` is `LoopSide::Server`, and a mod's setting read through it is the one captured
-when the server last loaded its data: a `/reload` builds the next context, which the next call sees. The hook's contract
-version is `2`: a mod written for `1` takes the context as a new first argument of `Hooks::menu_slot_rules` and
-`MenuPart::menu_slot_rules`. It is asked
-only for a server's players (single player's server thread, LAN guests, a dedicated server), and vanilla's menus
-never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
-shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
-slot from filling that way, lower `max_stack`.
+`menu_slot_rules` asks the registered vanilla or mod menu's scoped `MenuPart` whether a slot takes a stack and how many it holds, on both client prediction and server. Mount inventories use `horizon:mount_inventory`; unregistered player inventory and creative picker menus do not dispatch. `slot` is the backing container index. The slot's own answers arrive first; the final maximum is clamped to 1–99 and the item's stack limit. Rules also apply to quick-move top-ups.
+
+The hook runs during clicks, drags and shift-clicks in the restricted loop context, without a level or player; answer from the stack and context alone, and fast. It runs on the server and during client prediction. The context carries the resource generation's side, registries and settings; `/reload` builds the next context.
 
 ### Shift-click in a mod container
 
@@ -3195,3 +3285,20 @@ or block entity submit hook received. There is no separate Host drawing helper. 
 are texels, +y down and the front towards -z; convert the mob's frame with scale
 `[1.0, -1.0, -1.0]` then translation `[0.0, -1.501, 0.0]`, as `LivingEntityRenderer` does.
 The sprite is the entity texture ID and the tint is `0xRRGGBB`.
+
+## Debug screen entries
+
+`Hooks::register_debug_entries` is the client registration-phase counterpart of NeoForge
+26.3's `RegisterDebugEntriesEvent`. It receives a `RegistrationContext`, once at client
+startup, and collects a `DebugEntry` per entry: an id `<mod id>:<path>` and the `DebugGroup`
+whose vanilla group its lines join (`Position`, `Light`, `Memory`, `LookingAtBlock`,
+`LookingAtEntity`, `LookingAtFluid` or `ChunkGeneration`). An id in vanilla's namespace, not
+of that form, or registered already is logged and left out.
+
+An entry is listed in the debug options' text section, sorted by its id with vanilla's, and
+is switched like them (`alwaysOn`, `inOverlay`, `never`), saved in `debug-profile.json` under
+its full id. On the overlay, its group comes after vanilla's groups.
+Its lines are asked for each frame the overlay draws it, and only while it is on:
+`Hooks::debug_entry_lines` receives the entry's id and a `&mut Vec<String>` to push lines to,
+with legacy colour codes (§) working. A disabled entry, or one with no lines, costs nothing.
+Nothing is uploaded or recorded: the lines are drawn on the local screen only.

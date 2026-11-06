@@ -237,7 +237,7 @@ fn variant(m: &Mob, regs: &SpawnRegistries, v: &mut Vec<String>) {
         S::Villager => v.push(format!(
             "minecraft:{}/minecraft:{}/{}",
             VILLAGER_TYPES[m.extra.variant as usize % 7],
-            horizon_client::mobs::villager::profession(m.extra.variant2).id,
+            horizon_client::mobs::villager::profession(m.extra.profession.index().unwrap_or(0)).id,
             m.extra.villager_level.max(1)
         )),
         S::ZombieVillager => v.push(format!(
@@ -412,7 +412,10 @@ pub fn main() -> horizon_client::Result<()> {
     let halloween = args.get(4).is_some_and(|h| h == "true");
     let assets = Assets::load(root)?;
     let facts = BlockFacts::load(root, assets.registry)?;
-    let mob_data = MobData::load(root, &facts);
+    let mob_data = MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::tags_only(root, &PackOverlay::NONE, &defaults)?;
     let enchantments = Enchantments::load(root, &defaults);

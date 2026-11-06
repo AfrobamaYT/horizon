@@ -440,7 +440,8 @@ mod tests {
                     "minecraft:wooden_spear",
                     "minecraft:stick",
                 ] {
-                    r.item_part(id, Part(self.0.clone()));
+                    let item = r.item_key(id);
+                    r.item_part(item, Part(self.0.clone()));
                 }
             }
         }
@@ -680,7 +681,7 @@ mod interact_vibration_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES")?);
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -700,7 +701,9 @@ mod interact_vibration_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

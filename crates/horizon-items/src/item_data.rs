@@ -55,7 +55,11 @@ use std::sync::Arc;
 /// Enchantment id and level, in insertion order.
 pub type Levels = Vec<(Arc<str>, u32)>;
 
+/// A stack's modelled and preserved components. Start with `Default` (or
+/// `ItemStack::data_mut`) and use the fields and setters; component storage may
+/// gain private decoded data alongside its saved form.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct StackData {
     /// `minecraft:enchantments`.
     pub enchantments: Levels,
@@ -429,6 +433,17 @@ impl ItemStack {
     }
     pub fn custom_name(&self) -> Option<String> {
         self.data()?.custom_name_plain()
+    }
+    /// Non-empty slots of a `minecraft:container` component.
+    pub fn container(&self) -> &[(u8, ItemStack)] {
+        self.data().map_or(&[], |d| &d.container)
+    }
+    /// The `minecraft:custom_data` compound if present.
+    pub fn custom_data(&self) -> Option<&horizon_world::nbt::Compound> {
+        match self.data()?.other("minecraft:custom_data")? {
+            Tag::Compound(map) => Some(map),
+            _ => None,
+        }
     }
     /// `ResolvableProfile.name`: a bare profile string or its `name` field.
     pub fn profile_name(&self) -> Option<String> {
@@ -830,6 +845,12 @@ fn canonical_other_component(id: &str, tag: &Tag) -> Tag {
 /// A filled map's empty decorations equal its prototype (`Items.mapProperties`).
 pub fn encode_components(stack: &ItemStack) -> Option<Tag> {
     let mut components = components_tag(stack.damage, stack.data())?;
+    // LodestoneTracker.CODEC: optionalFieldOf("tracked", true).
+    if let Some(Tag::Compound(tracker)) = components.get_mut("minecraft:lodestone_tracker")
+        && tracker.get(&JavaString::from("tracked")) == Some(&Tag::Byte(1))
+    {
+        tracker.remove(&JavaString::from("tracked"));
+    }
     if &*stack.item == "minecraft:filled_map"
         && matches!(components.get("minecraft:map_decorations"), Some(Tag::Compound(entries)) if entries.is_empty())
         && let Tag::Compound(entries) = &mut components
@@ -1326,6 +1347,102 @@ mod tests {
         assert!(one.matches(&ItemStack::new("minecraft:diamond_sword", 1)));
         assert!(!one.matches(&ItemStack::new("minecraft:diamond_sword", 2)));
         assert!(!one.matches(&stack));
+    }
+
+    fn check_lodestone_saved_default(decoded: bool) {
+        const TRACKER: &str = "minecraft:lodestone_tracker";
+        const CUSTOM: &str = "minecraft:custom_data";
+        let target = Tag::compound([
+            ("dimension", Tag::String("minecraft:overworld".into())),
+            ("pos", Tag::IntArray(vec![12, 200, 12])),
+        ]);
+        let custom = Tag::compound([("keep", Tag::Int(17))]);
+        assert_eq!(
+            encode_components(&ItemStack::new("minecraft:compass", 1)),
+            None
+        );
+        let mut only_custom = ItemStack::new("minecraft:compass", 1);
+        only_custom
+            .data_mut()
+            .set_other(CUSTOM, Some(custom.clone()));
+        assert_eq!(
+            encode_components(&only_custom),
+            Some(Tag::compound([(CUSTOM, custom.clone())]))
+        );
+        // The valid false and absent controls precede the old true-default failure.
+        for (tracked, has_target) in [
+            (Some(false), true),
+            (None, true),
+            (Some(true), true),
+            (Some(true), false),
+        ] {
+            let mut fields = Vec::new();
+            let mut expected_fields = Vec::new();
+            if has_target {
+                fields.push(("target", target.clone()));
+                expected_fields.push(("target", target.clone()));
+            }
+            if let Some(value) = tracked {
+                fields.push(("tracked", Tag::Byte(i8::from(value))));
+                if !value {
+                    expected_fields.push(("tracked", Tag::Byte(0)));
+                }
+            }
+            let source = Tag::compound(fields);
+            let input = Tag::compound([(TRACKER, source.clone()), (CUSTOM, custom.clone())]);
+            let expected = Tag::compound([
+                (TRACKER, Tag::compound(expected_fields)),
+                (CUSTOM, custom.clone()),
+            ]);
+            let stack = if decoded {
+                let (damage, extra) = decode_components(Some(&input));
+                ItemStack {
+                    damage,
+                    extra,
+                    ..ItemStack::new("minecraft:compass", 1)
+                }
+            } else {
+                let mut fresh = ItemStack::new("minecraft:compass", 1);
+                assert!(fresh.extra.is_none());
+                fresh.data_mut().set_other(TRACKER, Some(source.clone()));
+                fresh.data_mut().set_other(CUSTOM, Some(custom.clone()));
+                fresh
+            };
+            {
+                assert_eq!(stack.data().unwrap().other(TRACKER), Some(&source));
+                assert_eq!(encode_components(&stack), Some(expected.clone()));
+                assert_eq!(components_tag(0, stack.data()), Some(input.clone()));
+                let saved = crate::item_nbt::item_to_nbt(&stack);
+                assert_eq!(saved.get("components"), Some(&expected));
+                assert_eq!(
+                    saved.get("id"),
+                    Some(&Tag::String("minecraft:compass".into()))
+                );
+                assert_eq!(saved.get("count"), Some(&Tag::Int(1)));
+                assert_eq!(stack.data().unwrap().other(TRACKER), Some(&source));
+            }
+        }
+        let mut targetless = ItemStack::new("minecraft:compass", 1);
+        targetless
+            .data_mut()
+            .set_other(TRACKER, Some(Tag::compound([("tracked", Tag::Byte(1))])));
+        assert_eq!(
+            encode_components(&targetless),
+            Some(Tag::compound([(
+                TRACKER,
+                Tag::Compound(Default::default())
+            )]))
+        );
+    }
+
+    #[test]
+    fn lodestone_tracker_saved_default_decoded() {
+        check_lodestone_saved_default(true);
+    }
+
+    #[test]
+    fn lodestone_tracker_saved_default_fresh_model() {
+        check_lodestone_saved_default(false);
     }
 
     #[test]

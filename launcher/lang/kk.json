@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Құрастыру журналын оқу мүмкін болмады: {error}",
   "Could not read the saved sign-in.": "Сақталған кіруді оқу мүмкін емес.",
   "Could not read the saved sign-in. Sign in again.": "Сақталған кіруді оқу мүмкін емес. Жүйеге қайта кіріңіз.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "{name} оқу мүмкін емес: {error}",
   "Could not run {program}: {error}": "{program} іске қосылмады: {error}",
   "Could not save the renewed sign-in.": "Жаңартылған кіруді сақтау мүмкін болмады.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Жүктеп алулар, кірулер және жаңартулар осы проксиі (http://host:port, socks5://host:port) арқылы өтеді. Бос ешбір дегенді білдіреді: HTTPS_PROXY оның орнына іске қосу құралы біреуімен іске қосылғанда пайдаланылады.",
   "{name} was left out: made for another Horizon version": "{name} алынып тасталды: Horizon-ның басқа нұсқасына жасалған",
   "{name} was left out: clashes with {other}": "{name} алынып тасталды: {other} модымен қайшылықта",
-  "{name} was left out: it needs {other}, which was left out": "{name} алынып тасталды: оған {other} керек, ол алынып тасталды"
+  "{name} was left out: it needs {other}, which was left out": "{name} алынып тасталды: оған {other} керек, ол алынып тасталды",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

@@ -31,7 +31,9 @@ pub fn main() -> horizon_client::Result<()> {
     let sky_light = !args.iter().any(|a| a == "--nether");
     let assets = Assets::load(&root)?;
     let facts = BlockFacts::load(&root, assets.registry)?;
-    let biomes = Biomes::load(&root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let tables = if args.iter().any(|a| a == "--no-shapes") {
         LightTables::new(&facts)
     } else {

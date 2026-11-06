@@ -350,12 +350,12 @@ impl Goal for AvoidLlamas {
         if !self.0.can_use(m, cx) {
             return false;
         }
-        // Seen.profession is the llama's strength (`variant2`).
+        // Seen.secondary_variant is the llama's strength (`variant2`).
         let Some(strength) = self
             .0
             .found
             .and_then(|id| cx.w.seen(id))
-            .map(|s| s.profession)
+            .map(|s| s.secondary_variant)
         else {
             return false;
         };

@@ -45,6 +45,10 @@ pub(super) struct StartupMenu {
     key_synthetic: bool,
     /// The screen the keyboard's focus is on (`key_screen`).
     key_screen: u64,
+    /// The screen (`Self::key_screen`) the title's click focus belongs to:
+    /// another one in front drops it, as `Gui.setScreen` drops the focus of
+    /// the screen it leaves (`Screen.clearFocus`).
+    focus_screen: u64,
     pub pending: Option<PendingWorldEntry>,
     pub reload_packs: bool,
     /// Browse mods' worker (`mod_browser`).
@@ -86,9 +90,13 @@ impl StartupMenu {
     }
 
     pub(super) fn set_root(&mut self, root: PathBuf, settings: &Settings) {
-        horizon_client::ui::load_metadata(&root);
+        horizon_client::ui::load_metadata(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        );
         horizon_client::lang::set(horizon_client::lang::Language::load(
-            &[&root],
+            &[&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )],
             &settings.language,
         ));
         self.root = root;
@@ -357,7 +365,8 @@ pub(super) fn spawn_loader(
     let (sender, receiver) = std::sync::mpsc::channel();
     let settings = settings.clone();
     let vanilla_root = vanilla_root.to_path_buf();
-    let mod_sources = options.mods.clone();
+    let mut mod_sources = options.mods.clone();
+    mod_sources.capture_code_switches(&settings.mods.disabled);
     let world = launch_world(options).map(str::to_owned);
     let role = options.execution_role;
     let progress = progress.clone();
@@ -517,7 +526,9 @@ impl Loading {
 
     fn open_menu_options(&mut self, page: Page) {
         self.menu.options.open_at(false, page);
-        self.menu.options.languages = horizon_client::lang::available(&[&self.menu.root]);
+        self.menu.options.languages = horizon_client::lang::available(&[
+            &horizon_assets::resource_source::ResourceSource::directory(self.menu.root.clone()),
+        ]);
         self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[]);
         self.menu.options.pack_selection = self.settings.resource_packs.clone();
         self.menu.options.pack_screen = None;
@@ -542,7 +553,9 @@ impl Loading {
                 }
                 Event::Language(code) => {
                     horizon_client::lang::set(horizon_client::lang::Language::load(
-                        &[&self.menu.root],
+                        &[&horizon_assets::resource_source::ResourceSource::directory(
+                            self.menu.root.clone(),
+                        )],
                         &code,
                     ));
                     self.save_menu_settings();
@@ -623,7 +636,9 @@ impl Loading {
                         );
                         let screen = horizon_client::win_screen::WinScreen::new(
                             false,
-                            &self.menu.root,
+                            &horizon_assets::resource_source::ResourceSource::directory(
+                                self.menu.root.clone(),
+                            ),
                             &name,
                             &gui.atlas.font,
                         );
@@ -1206,6 +1221,16 @@ impl Loading {
             horizon_client::ui_theme::draw_boot(&self.boot, batch, &logs);
             return;
         };
+        // `Gui.setScreen` clears the focus of the screen it leaves
+        // (`Screen.clearFocus`): the title behind the options, and the one
+        // that comes back, start with no button highlighted.
+        let screen = self.menu.key_screen();
+        if super::pad_menu::another_screen_is_front(&mut self.menu.focus_screen, screen) {
+            self.menu.options.clear_click_focus();
+            if let Some(title) = self.menu.title.as_mut() {
+                title.focused_button = None;
+            }
+        }
         if self.menu.pending.is_some() {
             horizon_client::level_loading::draw_loading_overlay(
                 batch,
@@ -1309,7 +1334,10 @@ mod tests {
 
     fn gui(root: &std::path::Path) -> UiResources {
         UiResources {
-            atlas: HudAtlas::fonts(root).unwrap(),
+            atlas: HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([
                 96, 110, 111, 255,
             ])),

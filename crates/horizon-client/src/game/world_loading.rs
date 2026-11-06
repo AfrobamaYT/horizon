@@ -34,6 +34,7 @@ impl WorldRequest {
         seed: Option<i64>,
         creative: bool,
         create: Option<&horizon_client::title::WorldOptions>,
+        rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
     ) -> Result<Self> {
         Ok(Self {
             save_root: std::env::current_dir()?.join("saves").join(folder),
@@ -42,7 +43,7 @@ impl WorldRequest {
             seed,
             creative,
             create: create.cloned(),
-            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+            rule_registry,
         })
     }
 
@@ -354,6 +355,7 @@ static PRELOAD: std::sync::Mutex<Preload> = std::sync::Mutex::new(Preload::Idle)
 pub(super) fn preload_world_data(
     on_world_screens: bool,
     resources: &std::path::Path,
+    data_source: &horizon_assets::resource_source::ResourceSource,
     registry: &'static horizon_world::registry::BlockRegistry,
     item_data: &Arc<ItemData>,
 ) {
@@ -362,15 +364,18 @@ pub(super) fn preload_world_data(
         Preload::Used => {}
         Preload::Idle if on_world_screens => {
             let resources = resources.to_owned();
+            let data_source = data_source.clone();
             let item_data = Arc::clone(item_data);
             let spawned = std::thread::Builder::new()
                 .name("World data preload".into())
                 .spawn(move || {
                     horizon_threads::behind_server();
                     // Errors are left for the world opening to report.
-                    if let Ok(data) = horizon_client::vanillagen::shared_data(
+                    if let Ok(data) = horizon_client::vanillagen::shared_data_from(
                         &resources.join("worldgen"),
+                        &Default::default(),
                         registry,
+                        &data_source,
                     ) {
                         // The Overworld's feature decoration, which every
                         // seed shares: about 140 ms off opening the world.
@@ -419,6 +424,7 @@ pub(super) fn preload_world_data(
 pub(super) fn preload_launch_world(
     folder: &str,
     resources: &std::path::Path,
+    data_source: &horizon_assets::resource_source::ResourceSource,
     registry: &'static horizon_world::registry::BlockRegistry,
     biomes: Arc<horizon_client::biome::Biomes>,
     item_data: Arc<ItemData>,
@@ -432,6 +438,7 @@ pub(super) fn preload_launch_world(
     };
     let world_root = dir.join("saves").join(folder);
     let resources = resources.to_owned();
+    let data_source = data_source.clone();
     let spawned = std::thread::Builder::new()
         .name("World data preload".into())
         .spawn(move || {
@@ -444,10 +451,11 @@ pub(super) fn preload_launch_world(
                 .unwrap_or_default();
             let (overrides, _) =
                 worldgen_overrides_of(&world_root, &resources, &biomes, &enabled_features);
-            if let Ok(data) = horizon_client::vanillagen::shared_data_with(
+            if let Ok(data) = horizon_client::vanillagen::shared_data_from(
                 &resources.join("worldgen"),
                 &overrides,
                 registry,
+                &data_source,
             ) {
                 let preset = horizon_client::save::WorldGen::preset(&world_root);
                 let _ = data.prepare_decoration(preset, "minecraft:overworld");
@@ -651,6 +659,7 @@ pub(super) fn make_streaming(
         horizon_client::save::dimension_dir(world_root, dim.id()),
         shape,
     );
+    save.enable_trusted_fluid_load();
     save.set_loot_source(loot.clone());
     let save = Arc::new(save);
     if dim == Dim::End {
@@ -670,6 +679,7 @@ pub(super) fn make_streaming(
     );
     let worldgen_dir = options.resources.join("worldgen");
     let terrain_resources = TerrainResources {
+        data: Some(&pack.data_changes),
         dir: &worldgen_dir,
         registry: pack.assets.registry,
         biomes: &biomes,

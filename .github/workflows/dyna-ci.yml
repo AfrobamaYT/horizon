@@ -189,6 +189,7 @@ jobs:
         id: native-lint
         run: |
           cargo +stable fmt --all -- --check
+          rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api/src/hooks/*.rs
           cargo +stable clippy $JOBS --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
         if: steps.rust.outputs.required != 'false'
@@ -249,8 +250,18 @@ jobs:
           # are cached once rather than in seven independent target directories.
           workspaces: .
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: The mod API and the points crate build for wasm32
-        run: cargo +1.99.1 check -p horizon-mod-api -p horizon-mod-points --target wasm32-unknown-unknown
+      - name: The mod API, points and internals crates build for wasm32
+        run: cargo +1.99.1 check -p horizon-mod-api -p horizon-mod-points -p horizon-mod-internals --target wasm32-unknown-unknown
+      - name: Generated internals copies, containers and functions compile for wasm32
+        env:
+          HORIZON_MOD_INTERNALS_MANIFEST: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals/coverage.toml
+          HORIZON_MOD_INTERNALS_CATALOG: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals/coverage.json
+        run: cargo +1.99.1 check -p horizon-mod-internals --target wasm32-unknown-unknown
+      - name: Every crossable real internal has compiling host and guest bindings
+        run: |
+          export HORIZON_COVERAGE_WASM_CARGO="$(rustup which --toolchain 1.99.1 cargo)"
+          export HORIZON_COVERAGE_WASM_RUSTC="$(rustup which --toolchain 1.99.1 rustc)"
+          cargo +stable test -j4 -p horizon-mod-api-gen --lib real_catalog_has_compiling_host_and_guest_bindings -- --ignored --nocapture
       - name: Build all wasm fixtures and the std member in one shared target
         run: |
           cargo +stable build -p cargo-horizon-mod -p xtask
@@ -261,6 +272,10 @@ jobs:
             ln -s "$GITHUB_WORKSPACE/target" "$mod/target/horizon-mod"
             (cd "$mod" && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
           done
+          mod=crates/horizon-mod-wasm/tests/internals/counter
+          mkdir -p "$mod/target"
+          ln -s "$GITHUB_WORKSPACE/target" "$mod/target/horizon-mod"
+          (cd "$mod" && HORIZON_MOD_INTERNALS_CATALOG="$GITHUB_WORKSPACE/$mod/internals.json" "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
           (cd docs/modding/examples/wasm-hello && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm")
       - name: Build the runtime tests once
         # Run the resulting binaries below: a separate Cargo invocation can rerun the API's
@@ -288,6 +303,16 @@ jobs:
           HORIZON_WASM_POINTS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/points
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: '"$WASM_TEST_POINTS" --ignored'
+      - name: A generated internals view commits its raw listener's journal and calls its thunk
+        env:
+          HORIZON_WASM_INTERNALS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: '"$WASM_TEST_INTERNALS" --ignored'
+      - name: Internals panics and journal overflow stop only the calling group
+        env:
+          HORIZON_WASM_INTERNALS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: 'cargo +stable test -j4 -p horizon-mod-wasm --lib "view::tests::" -- --ignored'
       - name: A listener refused with its library keeps nothing of their group
         env:
           HORIZON_WASM_GROUPS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/groups
@@ -337,19 +362,26 @@ jobs:
           shared-key: wasm-bench
           workspaces: |
             .
-            crates/horizon-mod-wasm/tests/bench -> target/horizon-mod
+            crates/horizon-mod-wasm/tests/bench/hook -> target/horizon-mod
+            crates/horizon-mod-wasm/tests/bench/internals -> target/horizon-mod
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build the benchmark mod to mod.wasm, and the std member
         run: |
           cargo +stable build -p cargo-horizon-mod
-          cd crates/horizon-mod-wasm/tests/bench
-          ../../../../target/debug/cargo-horizon-mod horizon-mod build --wasm
-          ../../../../target/debug/cargo-horizon-mod horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm"
+          cd crates/horizon-mod-wasm/tests/bench/hook
+          ../../../../../target/debug/cargo-horizon-mod horizon-mod build --wasm
+          ../../../../../target/debug/cargo-horizon-mod horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm"
+          cd ../internals
+          HORIZON_MOD_INTERNALS_CATALOG="$PWD/internals.json" ../../../../../target/debug/cargo-horizon-mod horizon-mod build --wasm
       - name: The same hook native and as mod.wasm
         env:
-          HORIZON_WASM_BENCH: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/bench/target/horizon-mod/bench_mod.hmod
+          HORIZON_WASM_BENCH: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/bench/hook/target/horizon-mod/bench_mod.hmod
+          HORIZON_WASM_INTERNALS_BENCH: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/bench/internals/target/horizon-mod/internals_bench.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1
+        # The internals bench seals the process-wide hook registry, so it runs alone, as its #[ignore] note says.
+        run: |
+          cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1 --skip internals_bench
+          cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1 internals_bench
 
   verify:
     needs: changes
@@ -393,8 +425,6 @@ jobs:
           fi
       - name: Check duplicate public native functions
         run: python3 tools/sync_upstream.py --check
-      - name: Test offline research tooling
-        run: python3 -m unittest discover -s tests -v
       - name: Install Dyna runner dependencies without root
         if: steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
@@ -442,6 +472,10 @@ jobs:
       - name: Test Rust documentation examples
         if: steps.rust.outputs.required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
+      # Last, and whatever happened above: a tooling failure must never skip the Rust tests.
+      - name: Test offline research tooling
+        if: ${{ !cancelled() }}
+        run: python3 -m unittest discover -s tests -v
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known

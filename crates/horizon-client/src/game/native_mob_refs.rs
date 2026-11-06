@@ -1,24 +1,7 @@
 //! Mob handles for native server mods.
 use super::{Game, commands::Target};
-use horizon_client::mobs::{self, Mob, Species, Who};
+use horizon_client::mobs::{self, Mob, Species, Who, ai::brain_target};
 use mod_api::{EntityRef, LivingRef, MobLeashHolder, MobRef};
-
-/// Brain-backed vanilla `getTarget` overrides. Piglins and hoglins use
-/// Horizon's `ai.target` as the stand-in for their brain memory.
-fn brain_target(mob: &Mob) -> Option<Option<Who>> {
-    Some(match mob.species() {
-        Species::Warden => mobs::warden::brain_target(mob),
-        Species::Breeze | Species::Creaking => mobs::monster_brain::attack_target(mob),
-        Species::Axolotl => mob
-            .extra
-            .animal_brain
-            .as_ref()
-            .and_then(|b| b.mem.attack_target.value()),
-        Species::Frog => mobs::frog::attack_target(mob),
-        Species::Piglin | Species::PiglinBrute | Species::Hoglin | Species::Zoglin => mob.ai.target,
-        _ => return None,
-    })
-}
 
 /// What decides whether a player can be a mob's target.
 pub(super) struct PlayerFacts {
@@ -72,7 +55,9 @@ enum MobFlag {
 }
 
 impl Game<'_> {
-    /// `Mob.asValidTarget` and the modeled `canAttack` overrides.
+    /// `Mob.asValidTarget` and the modeled `canAttack` overrides: the game's
+    /// own state as the target's facts, through the one rule set
+    /// [`Mob::valid_target`] (#1175) a goal tick's view shares.
     fn native_mob_valid_target(&self, mob: &Mob, target: Target) -> bool {
         if mob.species() == Species::Warden {
             return self.native_warden_valid_target(mob, target);
@@ -82,24 +67,17 @@ impl Game<'_> {
                 let Some(other) = self.mobs.iter().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
-                if !other.alive() || other.invulnerable_flag || other.species() == Species::Ghast {
-                    return false;
-                }
-                if mob.species() == Species::Breeze && other.species() != Species::IronGolem {
-                    return false;
-                }
-                if matches!(
-                    mob.species(),
-                    Species::Evoker | Species::Vindicator | Species::Illusioner | Species::Pillager
-                ) && matches!(
-                    other.species(),
-                    Species::Villager | Species::WanderingTrader
-                ) && other.is_baby()
-                {
-                    return false;
-                }
                 let seen = [super::creatures::seen(other, self.level.player_uuid)];
-                !mob.spares_target(&self.mob_world_base(&seen), Who::Mob(id))
+                mob.valid_target(
+                    &self.mob_world_base(&seen),
+                    &mobs::goals::TargetFacts::Mob {
+                        id,
+                        species: other.species(),
+                        alive: other.alive(),
+                        invulnerable: other.invulnerable_flag,
+                        baby: other.is_baby(),
+                    },
+                )
             }
             Target::Player | Target::Guest(_) => {
                 let Some(PlayerFacts {
@@ -111,16 +89,18 @@ impl Game<'_> {
                 else {
                     return false;
                 };
-                alive
-                    && !invulnerable
-                    && mode != 1
-                    && mode != 3
-                    && self.difficulty_id() != 0
-                    && !mob.built_by_player()
-                    && !(mob.is_tamable_animal()
-                        && mob.extra.tame
-                        && mobs::tame::owned_by(mob.extra.owner, uuid))
-                    && !(mob.species() == Species::Dolphin && mob.is_baby())
+                mob.valid_target(
+                    &self.mob_world_base(&[]),
+                    &mobs::goals::TargetFacts::Player {
+                        alive,
+                        invulnerable,
+                        // The game modes a target cannot be attacked in:
+                        // creative (1) and spectator (3).
+                        creative: mode == 1,
+                        spectator: mode == 3,
+                        uuid,
+                    },
+                )
             }
             _ => false,
         }
@@ -184,15 +164,6 @@ impl Game<'_> {
             Target::Mob(_) | Target::Dragon(_) => Some(MobRef::new(entity)),
             _ => None,
         }
-    }
-
-    /// The active mob's portal cooldown, or zero when no portal state exists.
-    pub(super) fn native_mob_portal_cooldown(&self, mob: MobRef) -> Option<i32> {
-        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
-            return None;
-        };
-        self.mobs.iter().find(|m| m.id == id)?;
-        Some(self.portals.entities.get(&id).map_or(0, |p| p.cooldown))
     }
 
     /// The existing portal decision for an available mob in the current level.
@@ -269,8 +240,9 @@ impl Game<'_> {
     /// can be stored in the current level are supported; armor stands are
     /// refused. The dragon stores a mob or a player, which its flight ignores
     /// and its save does not keep (vanilla keeps no target either). Brain-backed mobs refuse writes: vanilla's setter
-    /// does not update their brain memory. Foxes, endermen and zombified
-    /// piglins also refuse writes until their setter side effects are modeled.
+    /// does not update their brain memory (#934). A fox, an enderman or a
+    /// zombified piglin stores the target with its own `setTarget` side
+    /// effects (`Mob::set_target`).
     /// Invalid targets are refused (false, mob unchanged); vanilla instead
     /// stores `asValidTarget(target)`, clearing the target when it is invalid.
     /// False also means a stale handle, client, or an unavailable mob/player.
@@ -281,22 +253,14 @@ impl Game<'_> {
         let Some(mob_state) = self.mobs.iter().find(|m| m.id == id) else {
             return false;
         };
-        if brain_target(mob_state).is_some()
-            || matches!(
-                mob_state.species(),
-                Species::Fox | Species::Enderman | Species::ZombifiedPiglin
-            )
-        {
+        if mob_state.refuses_set_target() {
             return false;
         }
         if let Some(target) = target {
             let Some(target_kind) = self.native_entity_target(target.entity()) else {
                 return false;
             };
-            if !self.native_mob_valid_target(mob_state, target_kind)
-                || (mob_state.species() == Species::Creeper
-                    && matches!(target_kind, Target::Mob(other) if self.mobs.iter().any(|m| m.id == other && m.species() == Species::Goat)))
-            {
+            if !self.native_mob_valid_target(mob_state, target_kind) {
                 return false;
             }
         }
@@ -329,7 +293,7 @@ impl Game<'_> {
         let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return false;
         };
-        mob.ai.target = who;
+        mob.set_target(who);
         true
     }
 
@@ -455,6 +419,216 @@ impl Game<'_> {
         mobs::finalize::set_baby(mob, baby);
         true
     }
+
+    /// `LookControl.setLookAt`, by the mob's `lookAt` path: the wanted
+    /// position its look control rotates the head toward over the next
+    /// ticks. As `move_to`'s path, the mob's own AI — a goal's look, or a
+    /// brain species' `LookAtTargetSink`, which writes through this same
+    /// control — may issue its own and replace this one; no species refuses.
+    /// A creaking being looked at, an angry bee and an axolotl playing dead
+    /// hold their look control, as in vanilla: the wanted position waits
+    /// until it runs again. False for non-finite coordinates, a stale or
+    /// unavailable mob, a client, and the dragon.
+    pub(super) fn native_mob_look_at(&mut self, mob: MobRef, at: [f64; 3]) -> bool {
+        if at.iter().any(|v| !v.is_finite()) {
+            return false;
+        }
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.look_at(at))
+            .is_some()
+    }
+
+    /// `JumpControl.jump`: the mob jumps on its next own tick by its own
+    /// jump path — no velocity is written, and the control consumes the
+    /// wish on that tick (a rabbit's jump control reads it too). The mob's
+    /// own wishes (a slime's hop, a swimming brain's) are the same flag; no
+    /// species refuses. A creaking being looked at holds its jump control,
+    /// as in vanilla: the wish waits until it runs again. False for a stale
+    /// or unavailable mob, a client, and the dragon.
+    pub(super) fn native_mob_jump(&mut self, mob: MobRef) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.ai.jump = true)
+            .is_some()
+    }
+
+    /// `Mob.restrictTo(pos, radius)`: the home area the mob keeps to — its
+    /// own stroll and wander goals pick their positions inside it, as a
+    /// lead's and a guardian's home do. Radius `-1` clears the restriction
+    /// while keeping `pos` as the center, `clear_restriction`'s shape. The
+    /// area is saved with the mob (`home_pos`, `home_radius`). False for a
+    /// stale or unavailable mob, a client, and the dragon.
+    pub(super) fn native_mob_restrict_to(
+        &mut self,
+        mob: MobRef,
+        at: [i32; 3],
+        radius: i32,
+    ) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.ai.restore_home(at, radius))
+            .is_some()
+    }
+
+    /// `Mob.getRestrictCenter`: the restriction's block position, kept
+    /// after `clear_restriction` and after a load (`[0, 0, 0]` for a mob
+    /// that never had one, vanilla's `ZERO`). None for a stale or
+    /// unavailable mob, a client, and the dragon.
+    pub(super) fn native_mob_restrict_center(&self, mob: MobRef) -> Option<[i32; 3]> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(
+            self.mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)?
+                .ai
+                .home_position(),
+        )
+    }
+
+    /// `Mob.getRestrictRadius`: `-1` while the mob has no restriction.
+    /// None for a stale or unavailable mob, a client, and the dragon.
+    pub(super) fn native_mob_restrict_radius(&self, mob: MobRef) -> Option<i32> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(
+            self.mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)?
+                .ai
+                .home
+                .map_or(-1, |(_, radius)| radius),
+        )
+    }
+
+    /// `Mob.hasRestriction`. None for a stale or unavailable mob, a client,
+    /// and the dragon.
+    pub(super) fn native_mob_has_restriction(&self, mob: MobRef) -> Option<bool> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(
+            self.mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)?
+                .ai
+                .home
+                .is_some(),
+        )
+    }
+
+    /// `Mob.clearRestriction`: the restriction goes, the center stays (its
+    /// own goals read no restriction, as vanilla's `-1` radius). False for
+    /// a stale or unavailable mob, a client, and the dragon.
+    pub(super) fn native_mob_clear_restriction(&mut self, mob: MobRef) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.ai.clear_home())
+            .is_some()
+    }
+
+    /// `Mob.isWithinRestriction(pos)`: whether the block position is inside
+    /// the home area; a mob without a restriction is within everywhere, as
+    /// in vanilla. None for a stale or unavailable mob, a client, and the
+    /// dragon.
+    pub(super) fn native_mob_is_within_restriction(
+        &self,
+        mob: MobRef,
+        at: [i32; 3],
+    ) -> Option<bool> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(
+            self.mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)?
+                .ai
+                .is_within_home(at),
+        )
+    }
+
+    /// `Mob.isLeftHanded`: whether the mob holds things in its left hand
+    /// (the mob flags in its entity data). None for anything but a mob.
+    pub(super) fn native_mob_left_handed(&self, mob: MobRef) -> Option<bool> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(
+            self.mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)?
+                .extra
+                .left_handed,
+        )
+    }
+
+    /// `Mob.setLeftHanded`: sets the mob flag the players around get with
+    /// the mob's next entity data and see in its swing and held items.
+    /// Saved with the mob as `LeftHanded`. False for anything but a mob.
+    pub(super) fn native_mob_set_left_handed(&mut self, mob: MobRef, left_handed: bool) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.extra.left_handed = left_handed)
+            .is_some()
+    }
+
+    /// `Mob.canPickUpLoot`, with the overrides of an allay (holding
+    /// something) and a sulfur cube (with no block). None for anything but
+    /// a mob.
+    pub(super) fn native_mob_can_pick_up_loot(&self, mob: MobRef) -> Option<bool> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(
+            self.mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)?
+                .can_pick_up_loot(),
+        )
+    }
+
+    /// `Mob.setCanPickUpLoot`: whether the mob picks up the items it sees
+    /// (saved with it as `CanPickUpLoot`; clients are not told, as in
+    /// vanilla). An allay and a sulfur cube decide for themselves. False
+    /// for anything but a mob.
+    pub(super) fn native_mob_set_can_pick_up_loot(
+        &mut self,
+        mob: MobRef,
+        can_pick_up: bool,
+    ) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.extra.pick_up_loot = can_pick_up)
+            .is_some()
+    }
 }
 
 #[cfg(test)]
@@ -541,7 +715,12 @@ mod tests {
             assert_eq!(cow.leash_holder(game), Some(MobLeashHolder::Unleashed));
             let motion =
                 horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
-            game.lan.as_mut().unwrap().hub.guest_mut(20).unwrap().motion = Some(Box::new(motion));
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(20, |guest| guest.motion = Some(Box::new(motion)))
+                .unwrap();
             game.as_guest(20, |game| {
                 assert!(game.interact_leash(0, "minecraft:lead"));
                 assert_eq!(
@@ -570,41 +749,6 @@ mod tests {
             assert_eq!(stale.leash_holder(game), None);
             game.enter_level(super::super::Dim::Nether).unwrap();
             assert_eq!(cow.leash_holder(game), None);
-        });
-    }
-
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn mob_portal_cooldown_tracks_ticks_and_refuses_unavailable_handles() {
-        use super::super::Dim;
-        use horizon_client::nether_portal::ENTITY_DELAY;
-
-        with_game(|game| {
-            let mob = add_mob(game, 12, "minecraft:cow");
-            assert_eq!(mob.portal_cooldown(game), Some(0));
-            game.set_portal_cooldown(12);
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY));
-            game.handle_entity_portals();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 1));
-            game.handle_entity_portals();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 2));
-
-            let stale = MobRef::new(EntityRef::new(
-                NativeWorldEpoch::new(mob.entity().epoch().get() + 1),
-                12,
-            ));
-            assert_eq!(stale.portal_cooldown(game), None);
-            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
-            dragon.id = 15;
-            game.dragon = Some(dragon);
-            let dragon = game
-                .native_mob_ref(game.native_entity(15).unwrap())
-                .unwrap();
-            assert_eq!(dragon.portal_cooldown(game), None);
-            game.enter_level(Dim::Nether).unwrap();
-            assert_eq!(mob.portal_cooldown(game), None);
-            game.enter_level(Dim::Overworld).unwrap();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 2));
         });
     }
 
@@ -870,17 +1014,100 @@ mod tests {
             assert!(mob.set_target(game, Some(player)));
             assert_eq!(mob.target(game), Some(player));
             assert_eq!(game.lan.as_ref().unwrap().mob_players.get(&12), Some(&1));
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 1;
+            {
+                let value = 1;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
             assert!(!mob.set_target(game, Some(player)));
             assert_eq!(mob.target(game), None);
             assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 0;
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            {
+                let value = 0;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             assert!(!mob.set_target(game, Some(player)));
             assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
             game.lan.as_mut().unwrap().mob_players.clear();
             assert_eq!(mob.target(game), None);
             assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fox_enderman_and_zombified_piglin_take_targets_with_their_side_effects() {
+        with_game(|game| {
+            for (id, name) in [
+                (12, "minecraft:fox"),
+                (13, "minecraft:enderman"),
+                (14, "minecraft:zombified_piglin"),
+                (15, "minecraft:zombie"),
+            ] {
+                let kind = game.res.mob_types().get(name).unwrap().clone();
+                game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+            }
+            let handle = |game: &Game<'_>, id| {
+                game.native_mob_ref(game.native_entity(id).unwrap())
+                    .unwrap()
+            };
+            let (fox, enderman, piglin) = (handle(game, 12), handle(game, 13), handle(game, 14));
+            let other = game.native_living(game.native_entity(15).unwrap()).unwrap();
+            let state =
+                |game: &Game<'_>, id| game.mobs.iter().find(|m| m.id == id).unwrap().clone();
+
+            // Fox.setTarget: a target leaves defending as it is; clearing ends it.
+            game.mobs
+                .iter_mut()
+                .find(|m| m.id == 12)
+                .unwrap()
+                .extra
+                .ints[0] |= mobs::fox::DEFENDING;
+            assert!(fox.set_target(game, Some(other)));
+            assert_eq!(fox.target(game), Some(other));
+            assert!(mobs::fox::flag(&state(game, 12), mobs::fox::DEFENDING));
+            assert!(fox.set_target(game, None));
+            assert_eq!(fox.target(game), None);
+            assert!(!mobs::fox::flag(&state(game, 12), mobs::fox::DEFENDING));
+
+            // Enderman.setTarget: the open mouth, targetChangeTime and the
+            // attack speed modifier follow the target.
+            game.mobs.iter_mut().find(|m| m.id == 13).unwrap().age = 1234;
+            assert!(enderman.set_target(game, Some(other)));
+            let m = state(game, 13);
+            assert!(m.extra.flag, "DATA_CREEPY");
+            assert_eq!(m.extra.counter, 1234, "targetChangeTime");
+            assert!(mobs::enderman::attacking_speed(&m) > 0.0);
+            assert!(enderman.set_target(game, None));
+            let m = state(game, 13);
+            assert!(!m.extra.flag);
+            assert_eq!(m.extra.counter, 0);
+            assert_eq!(mobs::enderman::attacking_speed(&m), 0.0);
+
+            // ZombifiedPiglin.setTarget: stored; its anger, sound delay and
+            // alert interval start on the AI step that first sees it.
+            assert!(piglin.set_target(game, Some(other)));
+            assert_eq!(piglin.target(game), Some(other));
+            assert!(piglin.set_target(game, None));
+            assert_eq!(piglin.target(game), None);
         });
     }
 
@@ -983,6 +1210,239 @@ mod tests {
             game.mobs = taken;
             assert!(game.native_mob_set_target(mob, None));
             assert_eq!(game.native_mob_target(mob), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn look_and_jump_go_through_the_mobs_own_controls() {
+        with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(12, zombie, Vec3::new(3.5, 65.0, 3.5), 0.0));
+            let creaking = game
+                .res
+                .mob_types()
+                .get("minecraft:creaking")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(16, creaking, Vec3::new(9.5, 65.0, 9.5), 0.0));
+            let mob = game
+                .native_mob_ref(game.native_entity(12).unwrap())
+                .unwrap();
+            assert!(game.native_mob_look_at(mob, [10.5, 66.0, -2.5]));
+            let (wanted, cooldown, speed) = {
+                let control = &game.mobs[0].ai.look;
+                (control.wanted, control.cooldown, control.y_max_rot_speed)
+            };
+            assert_eq!(wanted, [10.5, 66.0, -2.5]);
+            assert_eq!(cooldown, 2);
+            assert_eq!(speed, game.mobs[0].kind.head_rot_speed);
+            assert!(!game.native_mob_look_at(mob, [f64::NAN, 66.0, 0.0]));
+            assert_eq!(game.mobs[0].ai.look.wanted, [10.5, 66.0, -2.5]);
+            // A brain species writes through the same look control, so its
+            // handle takes the wish too.
+            let brain = game
+                .native_mob_ref(game.native_entity(16).unwrap())
+                .unwrap();
+            assert!(game.native_mob_look_at(brain, [0.0, 66.0, 0.0]));
+            assert_eq!(game.mobs[1].ai.look.wanted, [0.0, 66.0, 0.0]);
+            assert!(game.native_mob_jump(brain));
+            assert!(game.mobs[1].ai.jump);
+            assert!(game.native_mob_jump(mob));
+            assert!(game.mobs[0].ai.jump);
+            // JumpControl.tick consumes the wish as the next tick's jump.
+            game.mobs[0].jump_control_tick();
+            assert!(game.mobs[0].ai.jumping);
+            assert!(!game.mobs[0].ai.jump);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_restriction_round_trips_through_the_handle_and_saves() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(12, zombie, Vec3::new(3.5, 65.0, 3.5), 0.0));
+            let mob = game
+                .native_mob_ref(game.native_entity(12).unwrap())
+                .unwrap();
+            assert_eq!(game.native_mob_restrict_center(mob), Some([0, 0, 0]));
+            assert_eq!(game.native_mob_restrict_radius(mob), Some(-1));
+            assert_eq!(game.native_mob_has_restriction(mob), Some(false));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [900, 90, 900]),
+                Some(true),
+                "an unrestricted mob is within everywhere"
+            );
+            assert!(game.native_mob_restrict_to(mob, [10, 64, -5], 6));
+            assert_eq!(game.native_mob_has_restriction(mob), Some(true));
+            assert_eq!(game.native_mob_restrict_center(mob), Some([10, 64, -5]));
+            assert_eq!(game.native_mob_restrict_radius(mob), Some(6));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [12, 64, -2]),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [20, 64, 0]),
+                Some(false)
+            );
+            // The home area is saved with the mob.
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            assert_eq!(
+                saved.get("home_pos"),
+                Some(&Tag::IntArray(vec![10, 64, -5]))
+            );
+            assert_eq!(saved.get("home_radius"), Some(&Tag::Int(6)));
+            // clearRestriction keeps the center; every position is within
+            // again.
+            assert!(game.native_mob_clear_restriction(mob));
+            assert_eq!(game.native_mob_has_restriction(mob), Some(false));
+            assert_eq!(game.native_mob_restrict_center(mob), Some([10, 64, -5]));
+            assert_eq!(game.native_mob_restrict_radius(mob), Some(-1));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [20, 64, 0]),
+                Some(true)
+            );
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            assert!(saved.get("home_pos").is_none());
+            assert!(saved.get("home_radius").is_none());
+            // restrictTo with radius -1 clears while keeping the new center.
+            assert!(game.native_mob_restrict_to(mob, [1, 2, 3], -1));
+            assert_eq!(game.native_mob_has_restriction(mob), Some(false));
+            assert_eq!(game.native_mob_restrict_center(mob), Some([1, 2, 3]));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_extreme_restriction_answers_as_vanilla() {
+        with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(12, zombie, Vec3::new(3.5, 65.0, 3.5), 0.0));
+            let mob = game
+                .native_mob_ref(game.native_entity(12).unwrap())
+                .unwrap();
+            // `Vec3i.distSqr` in doubles: the far corner of the int range is
+            // outside, with no overflow on the way.
+            assert!(game.native_mob_restrict_to(mob, [i32::MIN, 0, 0], 6));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [i32::MAX, 0, 0]),
+                Some(false)
+            );
+            assert!(game.native_mob_restrict_to(mob, [i32::MIN, i32::MIN, i32::MIN], 6));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [i32::MAX, i32::MAX, i32::MAX]),
+                Some(false)
+            );
+            // The radius squares as a Java `int`: 65 536² wraps to 0, so not
+            // even the center is within.
+            assert!(game.native_mob_restrict_to(mob, [0, 0, 0], 65_536));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [0, 0, 0]),
+                Some(false)
+            );
+            // The largest radius that squares without wrapping still holds.
+            assert!(game.native_mob_restrict_to(mob, [0, 0, 0], 46_340));
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [46_339, 0, 0]),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_mob_is_within_restriction(mob, [46_340, 0, 0]),
+                Some(false)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn hand_and_loot_flags_live_on_the_mob_handle() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 15;
+            game.dragon = Some(dragon);
+            let entity = game.native_entity(12).unwrap();
+            let mob = game.native_mob_ref(entity).unwrap();
+            assert_eq!(game.native_mob_left_handed(mob), Some(false));
+            assert!(game.native_mob_set_left_handed(mob, true));
+            assert!(game.mobs[0].extra.left_handed && game.mobs[0].main_arm_left());
+            assert_eq!(game.native_mob_left_handed(mob), Some(true));
+            assert!(game.native_mob_set_can_pick_up_loot(mob, true));
+            assert!(game.mobs[0].extra.pick_up_loot);
+            assert_eq!(game.native_mob_can_pick_up_loot(mob), Some(true));
+            // Saved as LeftHanded / CanPickUpLoot.
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            assert_eq!(saved.get("LeftHanded"), Some(&Tag::Byte(1)));
+            assert_eq!(saved.get("CanPickUpLoot"), Some(&Tag::Byte(1)));
+            assert!(game.native_mob_set_left_handed(mob, false));
+            assert!(game.native_mob_set_can_pick_up_loot(mob, false));
+            assert_eq!(game.native_mob_left_handed(mob), Some(false));
+            assert_eq!(game.native_mob_can_pick_up_loot(mob), Some(false));
+            // The dragon is not a Mob for these.
+            let dragon = game
+                .native_mob_ref(game.native_entity(15).unwrap())
+                .unwrap();
+            assert_eq!(game.native_mob_left_handed(dragon), None);
+            assert!(!game.native_mob_set_left_handed(dragon, true));
+            assert_eq!(game.native_mob_can_pick_up_loot(dragon), None);
+            assert!(!game.native_mob_set_can_pick_up_loot(dragon, true));
+            assert!(!game.native_mob_look_at(dragon, [0.0; 3]));
+            assert!(!game.native_mob_jump(dragon));
+            assert!(!game.native_mob_restrict_to(dragon, [0, 0, 0], 5));
+            assert_eq!(game.native_mob_has_restriction(dragon), None);
+            // A stale handle changes no other entity.
+            let stale = MobRef::new(EntityRef::new(
+                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                12,
+            ));
+            assert_eq!(game.native_mob_left_handed(stale), None);
+            assert!(!game.native_mob_set_left_handed(stale, true));
+            assert_eq!(game.native_mob_can_pick_up_loot(stale), None);
+            assert!(!game.native_mob_set_can_pick_up_loot(stale, true));
+            assert!(!game.native_mob_look_at(stale, [0.0; 3]));
+            assert!(!game.native_mob_jump(stale));
+            assert!(!game.native_mob_restrict_to(stale, [0, 0, 0], 5));
+            assert!(!game.native_mob_clear_restriction(stale));
+            assert_eq!(game.native_mob_restrict_center(stale), None);
+            assert_eq!(game.native_mob_restrict_radius(stale), None);
+            assert_eq!(game.native_mob_has_restriction(stale), None);
+            assert_eq!(
+                game.native_mob_is_within_restriction(stale, [0, 0, 0]),
+                None
+            );
+            assert!(!game.mobs[0].extra.left_handed);
+            assert!(!game.mobs[0].extra.pick_up_loot);
         });
     }
 }

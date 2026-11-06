@@ -297,7 +297,7 @@ impl Game<'_> {
                 fx.vignette_brightness,
                 self.border.warning_strength(p.position.x, p.position.z),
             )),
-            first_person: self.camera_type.first_person(),
+            first_person: self.camera_type.is_first_person(),
             scoping: self.scoping(),
             game_time_delta: 0.0,
             equipment: match &self.armor[0] {
@@ -412,7 +412,7 @@ impl Game<'_> {
         // ModelBakery.FIRE_1, told to mods as the fire block at the player's block.
         let feet = [p.position.x, p.position.y, p.position.z].map(|c| c.floor() as i32);
         let fire = || self.pack.assets.registry.default_state("minecraft:fire");
-        let on_fire = self.camera_type.first_person()
+        let on_fire = self.camera_type.is_first_person()
             && !spectator
             && p.fire_ticks > 0
             && (!modded
@@ -665,7 +665,7 @@ impl Game<'_> {
         let scope_eye = self
             .player
             .as_ref()
-            .filter(|_| self.camera_type.first_person() && self.scoping())
+            .filter(|_| self.camera_type.is_first_person() && self.scoping())
             .map(|p| {
                 [
                     p.position.x,

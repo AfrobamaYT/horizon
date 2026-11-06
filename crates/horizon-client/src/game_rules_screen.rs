@@ -55,10 +55,10 @@ pub struct RulesScreen {
 }
 
 fn name_key(r: &Rule) -> String {
-    format!("gamerule.minecraft.{}", r.name)
+    format!("gamerule.{}", r.name.replace(':', "."))
 }
 fn category_key(category: &str) -> String {
-    format!("gamerule.category.minecraft.{category}")
+    format!("gamerule.category.{}", category.replace(':', "."))
 }
 /// GameRule.deserialize of an integer rule: Brigadier's readInt (digits,
 /// '.' and '-' only, nothing after), then the rule's range.
@@ -726,7 +726,7 @@ mod tests {
             rows.len(),
             gamerules::rule_registry().available_rules(false).count() + 7
         );
-        assert_eq!(rows[0], Row::Category("chat".to_owned()));
+        assert_eq!(rows[0], Row::Category("minecraft:chat".to_owned()));
         let categories: Vec<_> = rows
             .iter()
             .filter_map(|r| match r {
@@ -737,7 +737,72 @@ mod tests {
         assert_eq!(
             categories,
             [
-                "chat", "drops", "misc", "mobs", "player", "spawning", "updates"
+                "minecraft:chat",
+                "minecraft:drops",
+                "minecraft:misc",
+                "minecraft:mobs",
+                "minecraft:player",
+                "minecraft:spawning",
+                "minecraft:updates"
+            ]
+        );
+    }
+
+    #[test]
+    fn category_translation_uses_its_namespace() {
+        assert_eq!(
+            category_key("minecraft:updates"),
+            "gamerule.category.minecraft.updates"
+        );
+        assert_eq!(
+            category_key("example:machines"),
+            "gamerule.category.example.machines"
+        );
+    }
+
+    #[test]
+    fn registered_rule_is_grouped_under_its_category() {
+        let rule = Rule {
+            name: "example:enabled".into(),
+            category: "example:machines".into(),
+            default: Value::Bool(true),
+            min: 0,
+            max: 0,
+        };
+        let registry = std::sync::Arc::new(
+            crate::gamerules::RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule])
+                .unwrap(),
+        );
+        let mut screen = RulesScreen::new(&GameRules::with_registry(registry, &[]));
+        screen.search.set_value("example:enabled");
+        assert_eq!(
+            screen.rows(),
+            [
+                Row::Category("example:machines".into()),
+                Row::Rule("example:enabled".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn categories_without_matching_rules_are_hidden() {
+        let registry = std::sync::Arc::new(crate::gamerules::RuleRegistry::with_categories(&[
+            "example:machines".into(),
+        ]));
+        let mut screen = RulesScreen::new(&GameRules::with_registry(registry, &[]));
+        assert!(
+            !screen
+                .rows()
+                .contains(&Row::Category("example:machines".into()))
+        );
+        screen.search.set_value("minecraft:updates");
+        assert!(screen.rows().is_empty());
+        screen.search.set_value("random_tick_speed");
+        assert_eq!(
+            screen.rows(),
+            [
+                Row::Category("minecraft:updates".into()),
+                Row::Rule("minecraft:random_tick_speed".into())
             ]
         );
     }
@@ -749,8 +814,8 @@ mod tests {
         assert_eq!(
             screen.rows(),
             vec![
-                Row::Category("updates".into()),
-                Row::Rule("random_tick_speed".into())
+                Row::Category("minecraft:updates".into()),
+                Row::Rule("minecraft:random_tick_speed".into())
             ]
         );
     }
@@ -783,18 +848,18 @@ mod tests {
         let mut s = RulesScreen::new(&GameRules::default());
         assert!(s.changes().is_empty());
         s.unfocus();
-        s.number("random_tick_speed").unwrap().focused = true;
+        s.number("minecraft:random_tick_speed").unwrap().focused = true;
         s.edit(|b| b.set_value("10"));
         assert_eq!(
             s.changes(),
-            vec![("random_tick_speed".to_owned(), Value::Int(10))]
+            vec![("minecraft:random_tick_speed".to_owned(), Value::Int(10))]
         );
         s.edit(|b| b.set_value("ten"));
         assert!(s.invalid());
         // The last valid value stays, as the responder left it.
         assert_eq!(
             s.changes(),
-            vec![("random_tick_speed".to_owned(), Value::Int(10))]
+            vec![("minecraft:random_tick_speed".to_owned(), Value::Int(10))]
         );
         // Leaving with changes asks; No returns, Yes discards.
         assert_eq!(s.escape(), None);

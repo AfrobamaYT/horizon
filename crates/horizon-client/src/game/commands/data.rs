@@ -112,7 +112,22 @@ impl Game<'_> {
                 // `saveWithoutId` writes the entity as saved, riders under
                 // `Passengers`: `/data get` reads the same tree persistence does (#1519).
                 let i = self.mobs.iter().position(|m| m.id == id)?;
-                self.mob_tree_nbt(i)
+                let mut tag = self.mob_tree_nbt(i);
+                let session = self
+                    .lan_trade_conn(id)
+                    .and_then(|conn| self.lan_trade_session(conn))
+                    .or_else(|| {
+                        self.station
+                            .as_ref()
+                            .and_then(|s| s.merchant.as_ref())
+                            .filter(|m| m.mob == Some(id))
+                            .map(|m| &*m.session)
+                    });
+                if let (Some(session), Tag::Compound(data)) = (session, &mut tag) {
+                    data.insert("Offers".into(), entity_nbt::offers_to_nbt(&session.offers));
+                    data.insert("Xp".into(), Tag::Int(session.xp));
+                }
+                tag
             }
             Target::Item(id) => {
                 let uuid = self.uuid_for(id);
@@ -201,19 +216,8 @@ impl Game<'_> {
                 crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
             Target::Tnt(id) => {
-                let uuid = self.uuid_for(id);
-                let t = self.tnts.iter().find(|t| t.id == id)?;
-                entity_nbt::tnt_to_nbt(
-                    t.position,
-                    t.velocity,
-                    t.on_ground,
-                    t.fuse,
-                    t.power,
-                    t.block_state_nbt(self.pack.assets.registry),
-                    t.rotation,
-                    uuid,
-                    self.persist.raw.get(&id),
-                )
+                let i = self.tnts.iter().position(|t| t.id == id)?;
+                self.tnt_nbt(i)
             }
             Target::Falling(id) => {
                 let f = self.falling.iter().find(|f| f.id == id)?.clone();
@@ -339,6 +343,8 @@ impl Game<'_> {
                     Some(self.pack.assets.registry),
                 )
                 .ok_or_else(stale)?;
+                self.warn_missing_profession(&new);
+                let unresolved = new.extra.profession.index().is_none();
                 if let Some(slot) = self.mobs.iter_mut().find(|m| m.id == id) {
                     // LivingEntity.readAdditionalSaveData only replaces a decoded
                     // Brain. Keep the Allay's modeled LIKED_PLAYER when the
@@ -373,6 +379,9 @@ impl Game<'_> {
                             self.world.game_time,
                         );
                     }
+                }
+                if unresolved {
+                    self.close_opaque_merchant(id);
                 }
             }
             Target::Other(id) => {
@@ -472,9 +481,8 @@ impl Game<'_> {
                 .as_mut()?
                 .hub
                 .guests
-                .iter_mut()
-                .find(|g| g.conn == conn)
-                .map(|g| g.saved.get_or_insert_with(empty)),
+                .saved_data_mut(conn)
+                .map(|saved| saved.get_or_insert_with(empty)),
             Target::Mob(id)
             | Target::Item(id)
             | Target::Stand(id)
@@ -1339,7 +1347,7 @@ mod orb_uuid_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1359,7 +1367,9 @@ mod orb_uuid_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -1417,7 +1427,7 @@ mod wolf_live_anger_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1437,7 +1447,9 @@ mod wolf_live_anger_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -1554,7 +1566,7 @@ mod loot_table_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1574,7 +1586,9 @@ mod loot_table_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();

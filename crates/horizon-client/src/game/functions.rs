@@ -53,6 +53,7 @@ pub(super) enum Outcome {
 /// enabled ids from `datapacks.json` (`PackRepository.reload`).
 pub(super) struct PackStack {
     pub builtin: Option<DataPack>,
+    content: DataPack,
     pub packs: Vec<Arc<DataPack>>,
     pub enabled: Vec<String>,
 }
@@ -68,13 +69,17 @@ impl PackStack {
 pub(super) fn pack_stack(
     world_root: &std::path::Path,
     resources: &std::path::Path,
+    builtin_source: &horizon_assets::resource_source::ResourceSource,
+    content_source: &horizon_assets::resource_source::ResourceSource,
     vanilla_disabled: bool,
     enabled_features: &[String],
 ) -> PackStack {
-    let builtin = (!vanilla_disabled).then(|| DataPack::builtin(resources));
+    let builtin = (!vanilla_disabled)
+        .then(|| DataPack::from_source("vanilla".into(), builtin_source.clone()));
     let packs = datapack::discover_with_features(world_root, resources);
     let enabled = datapack::enabled_ids(world_root, &packs, enabled_features);
     PackStack {
+        content: DataPack::from_source("horizon-content".into(), content_source.clone()),
         builtin,
         packs: packs.into_iter().map(Arc::new).collect(),
         enabled,
@@ -85,7 +90,9 @@ pub(super) fn pack_stack(
 /// `advancement/`, `tags/…`) for the tables to merge over the resource
 /// root's own. Empty when the world has no packs.
 pub(super) fn content_overlay(stack: &PackStack) -> Vec<(String, Vec<Vec<u8>>)> {
-    let packs: Vec<&DataPack> = stack.enabled_packs().collect();
+    let packs: Vec<&DataPack> = std::iter::once(&stack.content)
+        .chain(stack.enabled_packs())
+        .collect();
     if packs.is_empty() {
         return Vec::new();
     }
@@ -103,35 +110,44 @@ pub(super) fn overlay_files(
     stack: &PackStack,
     contributed: Vec<(String, Vec<u8>)>,
 ) -> Vec<(String, Vec<Vec<u8>>)> {
-    let mut files = content_overlay(stack);
     if contributed.is_empty() {
-        return files;
+        return content_overlay(stack);
     }
-    // A path's mod files in contribution order, under the pack files.
-    let mut mods: std::collections::BTreeMap<String, Vec<Vec<u8>>> = Default::default();
+    // Passive content replaces prepared data, native contributions sit over
+    // it, and the world's selected packs retain the highest priority.
+    let mut files = DataStore::load(&[&stack.content]).files;
     for (path, bytes) in contributed {
-        // One bad file would fail its whole table and drop the world's pack
-        // content with it, so it is skipped alone: every kind is JSON.
         if let Err(e) = serde_json::from_slice::<Box<serde_json::value::RawValue>>(&bytes) {
             log::warn!("Horizon: a native mod's data pack file {path} is not JSON, skipped: {e}");
             continue;
         }
-        mods.entry(path).or_default().push(bytes);
+        files.entry(path).or_default().push(bytes);
     }
-    for (path, versions) in files.iter_mut() {
-        let Some(under) = mods.remove(path.as_str()) else {
-            continue;
-        };
-        let mut merged = under;
-        merged.append(versions);
-        *versions = merged;
+    let packs = stack.enabled_packs().collect::<Vec<_>>();
+    for (path, versions) in DataStore::load(&packs).files {
+        files.entry(path).or_default().extend(versions);
     }
-    // The paths only a mod has.
-    files.extend(mods);
-    files
+    files.into_iter().collect()
 }
 
 impl FnState {
+    /// The highest enabled world pack providing this data resource.
+    pub(super) fn data_resource(
+        &self,
+        name: &str,
+    ) -> Option<horizon_assets::resource_source::Resource> {
+        self.enabled
+            .iter()
+            .rev()
+            .filter_map(|id| self.packs.iter().find(|pack| &pack.id == id))
+            .find_map(|pack| {
+                let source = pack.source();
+                source.contains(name).then(|| {
+                    horizon_assets::resource_source::Resource::file(source.clone(), name.to_owned())
+                })
+            })
+    }
+
     /// Enabled pack ids, in load order (later overrides earlier).
     #[cfg(test)]
     pub(super) fn enabled(&self) -> &[String] {
@@ -164,13 +180,38 @@ impl Game<'_> {
         run_load: bool,
         enabled_features: &[String],
     ) -> Result<PackStack, ReloadStageError> {
+        horizon_client::mod_content::check_jars(
+            &self.options.resources,
+            &horizon_client::logging::game_home().join("jars"),
+        )
+        .map_err(ReloadStageError::OriginalJars)?;
+        let next_root = self
+            .stage_enabled_inventory()
+            .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
+        let resources = next_root
+            .as_ref()
+            .map_or(self.options.resources.as_path(), |root| root.prepared());
+        let data = next_root
+            .as_ref()
+            .map_or(&self.pack.data_source, |root| root.data());
+        let changes = next_root
+            .as_ref()
+            .map_or(&self.pack.data_changes, |root| root.data_changes());
         let stack = pack_stack(
             &self.world_root,
-            &self.options.resources,
+            resources,
+            data,
+            changes,
             self.cmds.vanilla_disabled,
             enabled_features,
         );
         let prepared = self.prepare_server_reload(&stack)?;
+        if let Some(root) = next_root {
+            self.options.resources = root.prepared().to_owned();
+            self.pack.data_source = root.data().clone();
+            self.pack.data_changes = root.data_changes().clone();
+            self.mods.data_switched = true;
+        }
         if !run_load {
             self.fns = Default::default();
         }
@@ -969,6 +1010,8 @@ impl Game<'_> {
         let mut stack = pack_stack(
             &self.world_root,
             &self.options.resources,
+            &self.pack.data_source,
+            &self.pack.data_changes,
             self.cmds.vanilla_disabled,
             &self.level.enabled_features,
         );
@@ -982,6 +1025,7 @@ impl Game<'_> {
             }
         };
         self.save_datapack_settings();
+        self.fns.packs = stack.packs.clone();
         self.apply_server_reload(prepared, &stack);
         self.fns.load_pending = true;
         self.reload_world_tables(&stack);
@@ -1033,6 +1077,80 @@ const FEATURE_PACKS: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn pack_changes_publish_the_new_zip_generation_for_template_reads() {
+        use horizon_world::{
+            compression::Compression,
+            nbt::{self, Limits},
+        };
+        use std::{io::Write, path::PathBuf};
+        let root = std::env::temp_dir().join(format!(
+            "template-pack-change-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("datapacks")).unwrap();
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let scratch = Scratch(root);
+        let archive = scratch.0.join("datapacks/templates.zip");
+        let publish = |marker: &str| {
+            let named = nbt::NamedTag {
+                name: "".into(),
+                tag: Tag::compound([("marker", Tag::String(marker.into()))]),
+            };
+            let bytes = Compression::Gzip
+                .encode(&nbt::write_named(&named, Limits::templates()).unwrap())
+                .unwrap();
+            let next = archive.with_extension("next");
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&next).unwrap());
+            zip.start_file("pack.mcmeta", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"{}").unwrap();
+            zip.start_file(
+                "data/generation_test/structure/probe.nbt",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            zip.write_all(&bytes).unwrap();
+            zip.finish().unwrap();
+            std::fs::rename(next, &archive).unwrap();
+        };
+        publish("old");
+        let mut ran = false;
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            ran = true;
+            game.world_root = scratch.0.clone();
+            game.set_allow_commands(true);
+            game.reload_datapacks(false, &[]).unwrap();
+            let marker = |game: &Game<'_>| {
+                game.read_template_tag("generation_test:probe")
+                    .and_then(|tag| tag.get("marker").cloned())
+            };
+            assert_eq!(marker(game), Some(Tag::String("old".into())));
+            publish("new");
+            assert!(game.run_command("datapack disable \"file/templates.zip\""));
+            assert_eq!(marker(game), None);
+            assert!(game.run_command("datapack enable \"file/templates.zip\""));
+            assert_eq!(marker(game), Some(Tag::String("new".into())));
+            assert!(
+                !scratch
+                    .0
+                    .join("data/generation_test/structure/probe.nbt")
+                    .exists()
+            );
+        });
+        assert!(ran, "the prepared-resource fixture must run this case");
+    }
 
     #[test]
     #[ignore = "needs prepared resources"]
@@ -1174,7 +1292,14 @@ mod tests {
             }
             let json = serde_json::json!({"enabled": order, "disabled": []});
             std::fs::write(dir.join("datapacks.json"), json.to_string()).unwrap();
-            let stack = pack_stack(&dir, std::path::Path::new(""), true, &[]);
+            let stack = pack_stack(
+                &dir,
+                std::path::Path::new(""),
+                &Default::default(),
+                &Default::default(),
+                true,
+                &[],
+            );
             let files = content_overlay(&stack);
             let (_, versions) = files.iter().find(|(id, _)| id == "recipe/x:r").unwrap();
             let last = versions.last().unwrap();
@@ -1206,14 +1331,55 @@ mod tests {
         let settings = serde_json::json!({"enabled": ["file/pack"], "disabled": []});
         std::fs::write(dir.join("datapacks.json"), settings.to_string()).unwrap();
         let tag = |entry: &str| format!(r#"{{"values": ["{entry}"]}}"#).into_bytes();
-        let stack = pack_stack(&dir, std::path::Path::new(""), true, &[]);
+        std::fs::create_dir_all(pack.join("data/pkg/recipe")).unwrap();
+        std::fs::write(
+            pack.join("data/pkg/recipe/shared.json"),
+            br#"{"result":"world"}"#,
+        )
+        .unwrap();
+        let passive = horizon_assets::resource_source::ResourceSource::indexed(
+            ["shared", "native_only"]
+                .map(|name| {
+                    (
+                        format!("data/pkg/recipe/{name}.json"),
+                        horizon_assets::resource_source::Resource::bytes(
+                            br#"{"result":"passive"}"#.to_vec(),
+                        ),
+                    )
+                })
+                .into_iter()
+                .collect(),
+        );
+        let stack = pack_stack(
+            &dir,
+            std::path::Path::new(""),
+            &Default::default(),
+            &passive,
+            true,
+            &[],
+        );
         let files = overlay_files(
             &stack,
             vec![
                 ("tags/pkg:item/both".to_owned(), tag("pkg:from_mod")),
                 ("tags/pkg:item/mod_only".to_owned(), tag("pkg:only_mod")),
+                (
+                    "recipe/pkg:shared".into(),
+                    br#"{"result":"native"}"#.to_vec(),
+                ),
+                (
+                    "recipe/pkg:native_only".into(),
+                    br#"{"result":"native"}"#.to_vec(),
+                ),
             ],
         );
+        let recipe_result = |id: &str| {
+            let (_, versions) = files.iter().find(|(key, _)| key == id).unwrap();
+            serde_json::from_slice::<serde_json::Value>(versions.last().unwrap()).unwrap()["result"]
+                .clone()
+        };
+        assert_eq!(recipe_result("recipe/pkg:shared"), "world");
+        assert_eq!(recipe_result("recipe/pkg:native_only"), "native");
         // The pack's file is the path's last (`PackOverlay::top`), and its
         // `replace` drops what the mod put below it.
         let (_, versions) = files

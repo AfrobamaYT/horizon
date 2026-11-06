@@ -638,7 +638,12 @@ pub(super) mod tests {
         }
         let _mods = mod_api::__private::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        Some(super::super::mods::content_root(&base, &Default::default()).unwrap())
+        Some(
+            super::super::mods::content_root(&base, &Default::default())
+                .unwrap()
+                .prepared()
+                .to_path_buf(),
+        )
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
@@ -676,7 +681,7 @@ pub(super) mod tests {
 
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -696,7 +701,9 @@ pub(super) mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -820,6 +827,32 @@ pub(super) mod tests {
             let level = game.native_level(game.dim.id()).unwrap();
             assert_eq!(level.best_neighbor_signal(game, [4, 64, 5]), Some(0));
             assert_eq!(level.signal(game, [5, 64, 5], West), Some(0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_can_survive_asks_the_blocks_own_rule() {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let grass = registry.default_state("minecraft:grass_block").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let sapling = registry.default_state("minecraft:oak_sapling").unwrap();
+            game.world.set(0, 64, 0, grass).unwrap();
+            assert!(game.level_can_survive([0, 65, 0], sapling));
+            game.world.set(0, 64, 0, stone).unwrap();
+            assert!(!game.level_can_survive([0, 65, 0], sapling));
+            assert!(
+                !game
+                    .level_can_survive([0, 65, 0], horizon_world::registry::BlockStateId(u32::MAX))
+            );
+            assert!(!game.level_can_survive([100, 65, 100], sapling));
         });
     }
 
@@ -1519,7 +1552,12 @@ pub(super) mod tests {
                 horizon_core::geometry::Vec3::new(3.0, 64.0, 5.0),
             )
             .unwrap();
-            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| guest.motion = Some(Box::new(motion)))
+                .unwrap();
             let player = game.native_player_ref(12).unwrap();
             assert_eq!(
                 player.inventory(game),
@@ -1536,7 +1574,12 @@ pub(super) mod tests {
                 Some(20.0)
             );
             assert_eq!(guest_living.max_health(host), Some(20.0));
-            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = None;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| guest.motion = None)
+                .unwrap();
             // Body and saddle are stored on a guest like on a mob.
             let living = game.native_living(player.fields().entity).unwrap();
             let saddle = ItemStack::new("minecraft:saddle", 1);
@@ -1745,18 +1788,27 @@ pub(super) mod tests {
             // default mode (survival) they get its abilities.
             let root = std::env::temp_dir().join(format!("abilities-force-{}", std::process::id()));
             game.world_root = root.clone();
-            let g = game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap();
-            g.game_mode = 1;
-            g.abilities.update_for_mode(1);
-            assert!(g.abilities.may_fly && g.abilities.instabuild);
-            horizon_client::lan::playerdata::save(g, &root);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |g| {
+                    g.game_mode = 1;
+                    g.abilities.update_for_mode(1);
+                    assert!(g.abilities.may_fly && g.abilities.instabuild);
+                    horizon_client::lan::playerdata::save(g, &root);
+                })
+                .unwrap();
             let joined = |game: &mut super::super::Game<'_>, force| {
                 let host = game.lan.as_mut().unwrap();
                 host.hub.config.default_game_mode = 0;
                 host.hub.config.force_game_mode = force;
-                let g = host.hub.guest_mut(13).unwrap();
-                g.game_mode = 0;
-                g.abilities = Default::default();
+                host.hub
+                    .update_guest(13, |g| {
+                        g.game_mode = 0;
+                        g.abilities = Default::default();
+                    })
+                    .unwrap();
                 game.lan_guest_joined(13, &[], [0.0, 64.0, 0.0]);
                 let g = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
                 (
@@ -1786,9 +1838,8 @@ pub(super) mod tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(12)
-                .unwrap()
-                .dimension = "minecraft:the_nether".into();
+                .update_guest(12, |guest| guest.dimension = "minecraft:the_nether".into())
+                .unwrap();
             assert!(!game.native_entity_start_riding(guest, vehicle, true));
             assert!(!game.native_entity_start_riding(vehicle, guest, true));
             let _ = std::fs::remove_dir_all(root);
@@ -1948,7 +1999,10 @@ pub(super) mod tests {
             .unwrap();
             let host = game.lan.as_mut().unwrap();
             host.hub.guests = std::mem::take(&mut hub.guests);
-            host.hub.guests[1].position = [1600.0, 64.0, 0.0];
+            {
+                let value = [1600.0, 64.0, 0.0];
+                host.hub.guests.update(1, |guest| guest.position = value);
+            }
             game.lan_update_streaming();
             assert!(
                 game.streaming
@@ -2181,12 +2235,36 @@ pub(super) mod tests {
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid(), 1);
             // A fake record in the Nether does not keep that level ticking.
-            game.lan.as_mut().unwrap().hub.guests[1].dimension = "minecraft:the_nether".into();
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(1, |guest| guest.dimension = value);
+            }
             let ticking = game.levels_to_tick();
             assert!(!ticking.contains(&super::super::Dim::Nether));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             assert!(game.levels_to_tick().contains(&super::super::Dim::Nether));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:overworld".into();
+            {
+                let value = "minecraft:overworld".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             game.lan_acting = Some(real_id);
             let selector = horizon_client::command::args::Selector {
                 kind: 'a',
@@ -2915,7 +2993,7 @@ pub(super) mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -2935,7 +3013,9 @@ pub(super) mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -3077,7 +3157,7 @@ pub(super) mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -3098,7 +3178,9 @@ pub(super) mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
