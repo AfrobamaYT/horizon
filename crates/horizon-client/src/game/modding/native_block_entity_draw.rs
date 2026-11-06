@@ -904,7 +904,7 @@ impl Game<'_> {
     ) -> Result<(), ModelError> {
         use mod_api::__private::game::Fields;
         let fields = model.fields();
-        if fields.generation != self.standalone_geometry.generation {
+        if fields.generation != self.standalone_geometry.generation() {
             return Err(ModelError::StaleModel);
         }
         let faces = self
