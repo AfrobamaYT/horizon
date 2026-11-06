@@ -380,9 +380,21 @@ impl FixedStep {
     pub fn tick_duration(&self) -> std::time::Duration {
         std::time::Duration::from_nanos(self.manager.base.nanoseconds_per_tick().max(1) as u64)
     }
-    /// Feed one frame's elapsed time; returns the ticks to run (at most ten,
-    /// or a sprint frame's worth).
-    pub fn advance(&mut self, elapsed: std::time::Duration) -> u32 {
+    /// The milliseconds one tick lasts at the next `advance` (`Minecraft.getTickTargetMillis`
+    /// with the timer's default of 50): the level's tick rate when it runs normally (a server's
+    /// client only ever slows down), else the default.
+    pub fn tick_target_millis(&self) -> f32 {
+        let default = self.timer.ms_per_tick;
+        if !self.manager.base.runs_normally() {
+            return default;
+        }
+        let mspt = self.manager.base.milliseconds_per_tick();
+        if self.client { default.max(mspt) } else { mspt }
+    }
+    /// Feed one frame's elapsed time, with `target_millis` the length of a tick
+    /// (`tick_target_millis`, or what a mod made of it); returns the ticks to run (at most
+    /// ten, or a sprint frame's worth).
+    pub fn advance(&mut self, elapsed: std::time::Duration, target_millis: f32) -> u32 {
         self.now += elapsed;
         let now_ms = self.now_ms();
         if self.manager.is_sprinting() {
@@ -392,16 +404,7 @@ impl FixedStep {
             // One extra pass lets the sprint finish and report.
             return (remaining + 1).min(SPRINT_PER_FRAME) as u32;
         }
-        let runs = self.manager.base.runs_normally();
-        let mspt = self.manager.base.milliseconds_per_tick();
-        let client = self.client;
-        let ticks = self
-            .timer
-            .advance_game_time(now_ms, |default| match (runs, client) {
-                (true, true) => default.max(mspt),
-                (true, false) => mspt,
-                (false, _) => default,
-            });
+        let ticks = self.timer.advance_game_time(now_ms, |_| target_millis);
         ticks.clamp(0, 10) as u32
     }
     /// Restart pacing from now (after loading, so no backlog replays).
@@ -578,11 +581,43 @@ mod tests {
         assert!(!m.base.runs_normally());
     }
     #[test]
+    fn the_tick_length_paces_the_clock_and_follows_the_tick_rate() {
+        let mut clock = FixedStep::client();
+        assert_eq!(clock.tick_target_millis(), 50.0);
+        // 200 ms of frames: four 50 ms ticks, or eight when a tick lasts 25 ms.
+        assert_eq!(
+            clock.advance(std::time::Duration::from_millis(200), 50.0),
+            4
+        );
+        assert_eq!(
+            clock.advance(std::time::Duration::from_millis(200), 25.0),
+            8
+        );
+        assert_eq!(
+            clock.advance(std::time::Duration::from_millis(5000), 25.0),
+            10,
+            "ten a frame at most"
+        );
+        // A server's client only ever slows down (`Minecraft.getTickTargetMillis`).
+        clock.set_rate(10.0);
+        assert_eq!(clock.tick_target_millis(), 100.0);
+        clock.set_rate(40.0);
+        assert_eq!(clock.tick_target_millis(), 50.0);
+        // The window's own simulation follows the rate both ways; frozen, the default.
+        let mut own = FixedStep::new(false);
+        own.set_rate(40.0);
+        assert_eq!(own.tick_target_millis(), 25.0);
+        own.set_frozen(true);
+        own.world_runs();
+        assert_eq!(own.tick_target_millis(), 50.0);
+    }
+    #[test]
     fn the_camera_keeps_interpolating_in_a_frozen_level() {
         let mut clock = FixedStep::default();
         clock.set_frozen(true);
         clock.world_runs();
-        clock.advance(std::time::Duration::from_millis(25));
+        let target = clock.tick_target_millis();
+        clock.advance(std::time::Duration::from_millis(25), target);
         clock.end_frame(false);
         assert_eq!(clock.fraction(), 1.0, "frozen entities stay put");
         assert_eq!(clock.camera_fraction(), 0.5, "the player does not");
@@ -592,7 +627,8 @@ mod tests {
         let mut clock = FixedStep::new(true);
         clock.world_runs();
         assert!(!clock.runs_normally(), "frozen before the first tick");
-        clock.advance(std::time::Duration::from_millis(25));
+        let target = clock.tick_target_millis();
+        clock.advance(std::time::Duration::from_millis(25), target);
         clock.end_frame(false);
         assert_eq!(clock.fraction(), 1.0);
         assert_eq!(clock.camera_fraction(), 1.0);
