@@ -19,11 +19,11 @@ use horizon_client::{
 };
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use mod_api::LevelRef;
+pub(crate) use mod_api::NativeCommand;
 use mod_api::{
     ActionOutcome, ActionRefused, FakeEffect, GameMode, NativePlayerAbilities, NativePlayerFood,
     PlayerAction, PlayerActionSetup, PlayerRef, ScopedActionResult,
 };
-pub(crate) use mod_api::{NativeCommand, NativeServerPlayer};
 use serde_json::{Map, Value, json};
 use std::sync::{
     Mutex, PoisonError,

@@ -68,9 +68,9 @@ use mod_api::{
     ClientGuiOptions, ClientInputOptions, ClientModifiers, ClientReloadListeners,
     CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LayerDefinition,
     LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
-    NativeLifecycleContext, NativeNoteBlockChange, NativeServerPlayer, PathComputationType,
-    Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    NativeLifecycleContext, NativeNoteBlockChange, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
