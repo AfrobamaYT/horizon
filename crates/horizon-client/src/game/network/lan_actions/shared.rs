@@ -132,6 +132,7 @@ pub(super) enum TurnRefused {
 /// The game's own state while a guest's is swapped in (`enter_guest`), and
 /// the guest's records that live outside `Guest`.
 pub(super) struct GuestSwap {
+    attachments: horizon_mod_runtime::attachments::ResidentAttachments,
     conn: u32,
     i: usize,
     play: GuestPlay,
@@ -417,10 +418,28 @@ fn copied_respawn_point(has_config: bool, spawn: Option<[f64; 3]>) -> Option<Opt
     (!has_config).then(|| spawn.map(|s| s.map(|c| c.floor() as i32)))
 }
 
+/// ServerPlayer.swingAndResetAttackStrength resets only when a use starts a swing.
+fn reset_use_attack_strength(ticker: &mut u32, before: u32, after: u32) {
+    if before != after {
+        *ticker = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{copied_respawn_point, eye_columns};
+    use super::{copied_respawn_point, eye_columns, reset_use_attack_strength};
     use horizon_client::pose::Pose;
+    #[test]
+    fn use_swing_resets_attack_charge_only_when_started() {
+        let mut ticker = 20;
+        reset_use_attack_strength(&mut ticker, 3, 4);
+        // A sword's attack speed is 1.6: vanilla's (ticker + 0.5) / 12.5.
+        assert_eq!((ticker as f32 + 0.5) / 12.5, 0.04);
+
+        ticker = 8;
+        reset_use_attack_strength(&mut ticker, 4, 4);
+        assert_eq!(ticker, 8); // No swing, or a swing rejected in its first half.
+    }
 
     #[test]
     #[ignore = "requires prepared game resources"]

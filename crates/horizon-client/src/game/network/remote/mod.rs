@@ -768,6 +768,8 @@ const BACKLOG_LIMIT: Duration = Duration::from_millis(50);
 /// The open menu name of a server's horse inventory, then its chest's
 /// columns (the packet names no `MenuType`).
 const MOUNT_MENU: &str = "horizon:mount";
+/// ServerboundPlayerInputPacket's shift bit.
+const SHIFT_INPUT: u8 = 1 << 5;
 
 fn face_direction(face: [i32; 3]) -> u8 {
     match face {
@@ -1389,6 +1391,14 @@ impl Game<'_> {
         {
             r.session.send(packet);
         }
+    }
+    /// `LocalPlayer.isShiftKeyDown` (and so `isSecondaryUseActive`): the input as of the player's
+    /// last tick (`input.keyPresses`, what the last ServerboundPlayerInputPacket said), not the key
+    /// now: a sneak pressed in the frame of a click acts from the next tick, as on the server.
+    fn remote_shift_down(&self) -> bool {
+        self.remote
+            .as_ref()
+            .is_some_and(|r| r.last_input & SHIFT_INPUT != 0)
     }
     fn next_sequence(&mut self) -> i32 {
         let r = self.remote.as_mut().expect("remote");
@@ -7939,7 +7949,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.use_target = None;
         }
-        let sneaking = self.keys.held(Action::Sneak);
+        let sneaking = self.remote_shift_down();
         // A boat, minecart, item frame, armor stand or painting nearer than
         // any mob: the server uses it (AbstractBoat.interact boards it).
         if let Some(hit) = self.remote_object_hit(false)
@@ -8120,7 +8130,7 @@ impl Game<'_> {
             }
             // Player.isSecondaryUseActive with something in either hand
             // keeps the block from reacting.
-            let sneaking = self.keys.held(Action::Sneak);
+            let sneaking = self.remote_shift_down();
             let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
             let block_used = canceled.is_none() && use_block.or(!(sneaking && hands_full));
             let cooldown_forced = use_item == NativeTriState::True;
@@ -8720,7 +8730,7 @@ impl Game<'_> {
             inside: hit.face == [0; 3],
             yaw: self.yaw,
             pitch: self.pitch,
-            sneaking: self.keys.held(Action::Sneak),
+            sneaking: self.remote_shift_down(),
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
@@ -8788,7 +8798,7 @@ impl Game<'_> {
         let pos = horizon_core::position::BlockPos::new(target[0], target[1], target[2]);
         let [x, y, z] = hit.beside();
         let beside = Some(horizon_core::position::BlockPos::new(x, y, z));
-        let sneaking = self.keys.held(Action::Sneak);
+        let sneaking = self.remote_shift_down();
         let creative = self.creative;
         self.with_level(|b, level, ticks| {
             let mut level = DryLevel::new(level);
