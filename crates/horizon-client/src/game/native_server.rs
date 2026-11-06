@@ -2195,6 +2195,9 @@ mod tests {
                 event.commands.extend([
                     NativeCommand::op("foo [value:integer]", 4),
                     NativeCommand::new("foo bar"),
+                    NativeCommand::op("choice <a:integer>", 4),
+                    NativeCommand::new("choice <a:integer> bar"),
+                    NativeCommand::new("choice <b:word>"),
                 ]);
             }
             fn perform_command(
@@ -2227,7 +2230,21 @@ mod tests {
                 assert!(game.perform_native_command(1, 0, "foo bar"));
                 assert!(game.perform_native_command(1, 4, "foo"));
                 assert!(game.perform_native_command(1, 4, "foo 7"));
-                assert_eq!(*heard.lock().unwrap(), ["foo bar", "foo", "foo 7"]);
+                for line in ["choice 7", "choice 7 bar", "choice text"] {
+                    assert!(game.perform_native_command(1, 0, line));
+                }
+                assert_eq!(
+                    *heard.lock().unwrap(),
+                    [
+                        "foo bar",
+                        "foo",
+                        "foo 7",
+                        "choice 7",
+                        "choice 7 bar",
+                        "choice text"
+                    ],
+                    "each authorized invocation reaches the listener exactly once"
+                );
             });
         });
     }
