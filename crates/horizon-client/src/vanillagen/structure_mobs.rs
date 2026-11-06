@@ -497,10 +497,14 @@ mod tests {
     ) -> Vec<String> {
         use crate::streaming::{ChunkGenerator, Proto};
         let assets = crate::assets::Assets::load(root).unwrap();
-        let biomes = crate::biome::Biomes::load(root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let item_data =
             crate::test_resources::item_data(root, DataLoadOrigin::ServerDataLoad).unwrap();
         let terrain_resources = crate::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,

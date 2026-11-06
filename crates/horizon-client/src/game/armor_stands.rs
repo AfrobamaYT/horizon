@@ -4,6 +4,7 @@
 //! the default pose, the hit wobble and humanoid armor layers.
 use super::entity::Entity;
 use super::{Game, InteractTarget};
+use horizon_assets::resource_source::ResourceSource;
 use horizon_client::{
     Result,
     cit::{Hand, Kind, Rule},
@@ -19,7 +20,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 /// Velocity `AbstractMinecart.push` adds: the cart, and a quarter on the stand.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -93,11 +94,11 @@ pub(super) struct ArmorStandAssets {
     pub trim_overrides: HashMap<String, Vec<TrimOverride>>,
     pub trims: TrimRegistry,
     /// The resources the trim textures are made from.
-    pub root: PathBuf,
+    pub root: ResourceSource,
 }
 impl ArmorStandAssets {
     pub fn load(
-        root: &std::path::Path,
+        root: &ResourceSource,
         document: Option<&horizon_client::mobs::EntityModelDocument>,
     ) -> Self {
         let load = |key: &str| document.and_then(|document| document.model(key));
@@ -123,21 +124,19 @@ impl ArmorStandAssets {
         }
         let mut equipment = HashMap::new();
         let mut trim_overrides = HashMap::new();
-        // EquipmentAssetManager reads every namespace: vanilla's and the content mods'.
-        let namespaces = std::iter::once("minecraft".to_owned())
-            .chain(horizon_client::mod_content::namespaces(root));
-        for namespace in namespaces {
-            let Ok(entries) = std::fs::read_dir(root.join(format!("assets/{namespace}/equipment")))
-            else {
-                continue;
-            };
-            for e in entries.flatten() {
-                let path = e.path();
-                let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+        // EquipmentAssetManager reads resolved resources in every namespace.
+        for namespace in root.namespaces("assets") {
+            let prefix = format!("assets/{namespace}/equipment/");
+            for path in root.list(&prefix) {
+                let Some(name) = path
+                    .strip_prefix(&prefix)
+                    .and_then(|path| path.strip_suffix(".json"))
+                else {
                     continue;
                 };
-                let Ok(v) =
-                    std::fs::read(&path).map(|b| serde_json::from_slice::<serde_json::Value>(&b))
+                let Ok(v) = root
+                    .read(&path)
+                    .map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes))
                 else {
                     continue;
                 };
@@ -184,8 +183,8 @@ impl ArmorStandAssets {
         }
     }
     /// Trim data of reloaded resources (the models stay).
-    pub fn reload_trims(&mut self, root: &std::path::Path) {
-        let fresh = Self::load(root, None);
+    pub fn apply_resources(&mut self, fresh: Self) {
+        self.equipment = fresh.equipment;
         self.trim_overrides = fresh.trim_overrides;
         self.trims = fresh.trims;
         self.root = fresh.root;

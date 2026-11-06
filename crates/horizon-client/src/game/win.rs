@@ -34,7 +34,7 @@ impl Game<'_> {
     pub(super) fn open_win_screen(&mut self, poem: bool, finish: Finish) {
         let screen = WinScreen::new(
             poem,
-            &self.options.resources,
+            &self.pack.source,
             &self.options.player_name(),
             &self.gui.atlas.font,
         );

@@ -60,7 +60,7 @@ fn thousand_live_block_entity_ticks() {
         mod_api::__private::mark_game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = super::mods::content_root(&base, &Default::default()).unwrap();
-        super::native_entity_refs::tests::with_game_at(root, |game| {
+        super::native_entity_refs::tests::with_game_at(root.prepared().to_path_buf(), |game| {
             for x in 0..4 {
                 for z in 0..4 {
                     game.world
@@ -117,7 +117,12 @@ pub(super) fn with_mod_parts(test: impl FnOnce(std::path::PathBuf)) {
         mod_api::__private::install_parts(&mods).unwrap();
         mod_api::__private::mark_game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        test(super::mods::content_root(&base, &Default::default()).unwrap());
+        test(
+            super::mods::content_root(&base, &Default::default())
+                .unwrap()
+                .prepared()
+                .to_owned(),
+        );
     });
 }
 
