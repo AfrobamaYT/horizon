@@ -108,6 +108,24 @@ impl Scope {
     }
 }
 
+/// The lexical root of a supported receiver expression.
+pub(crate) fn root(expr: &Expr) -> Option<&Ident> {
+    match expr {
+        Expr::Path(path) if path.path.leading_colon.is_none() && path.path.segments.len() == 1 => {
+            Some(&path.path.segments[0].ident)
+        }
+        Expr::Field(field) => root(&field.base),
+        _ => None,
+    }
+}
+
+/// A macro or unknown local import may expand into bindings that cannot be hygienically lowered.
+pub(crate) fn opaque_argument(expr: &Expr) -> bool {
+    let mut scan = Bindings::default();
+    scan.visit_expr(expr);
+    scan.opaque
+}
+
 /// Matching calls in source order, excluding every AST context whose expressions are constant.
 pub(crate) fn calls<'a>(body: &'a syn::Block, selector: &str) -> Vec<&'a Expr> {
     struct Calls<'a, 's> {
