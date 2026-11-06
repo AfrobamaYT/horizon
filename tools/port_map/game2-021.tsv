@@ -12,7 +12,7 @@ BoundingBox.encapsulatingBoxes	port	crates/horizon-world/src/worldgen/structure/
 BoundingBox.encapsulating	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::encapsulate	mutates self instead of returning a new box
 BoundingBox.move	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::moved	returns a new box; vanilla mutates in place
 BoundingBox.inflatedBy	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::inflated	takes xz and y amounts; vanilla callers all pass equal x and z
-BoundingBox.getLength	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_clone	size vector computed inline for clone; no execute-if-blocks port
+BoundingBox.getLength	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_clone	size vector computed inline for clone; no execute-if-blocks port
 BoundingBox.getCenter	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::center	
 BoundingBox.forAllCorners	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::corners	corner order differs; the empty-corner count lives in FossilFeature::place
 BoundingBox.toString	skip:debug		debug string

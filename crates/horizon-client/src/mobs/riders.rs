@@ -2,7 +2,7 @@
 //! vehicle (`EntityAttachments`), the rider steering the vehicle toward its
 //! target (`Mob.getControllingPassenger`, whose navigation and move control
 //! the rider's goals use), and the saved jockey fields. The game links the
-//! two (`game/passengers.rs`) and spawns the jockeys.
+//! two (`game/entities/passengers.rs`) and spawns the jockeys.
 use super::{
     Mob, MobWorld, Seen, Species,
     goals::{JUMP, LOOK, MOVE, TARGET},

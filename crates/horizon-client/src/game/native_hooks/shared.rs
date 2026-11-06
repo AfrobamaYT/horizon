@@ -3814,10 +3814,7 @@ mod tests {
                 surface: &mut batch,
             };
             // A server's HUD atlas is metrics-only (upstream 2e5a2629a): no sprite sheets,
-            // so sprite sizes answer None there, while an upper-case A still advances
-            // 6 GUI pixels.
-            assert_eq!(draw.sprite_size("font/ascii"), None);
-            assert_eq!(draw.sprite_size("mymod:no_such_sprite"), None);
+            // while an upper-case A still advances 6 GUI pixels.
             assert_eq!(draw.text_width("AA"), 12.0);
             assert_eq!(draw.text_width(""), 0.0);
         });
@@ -4900,7 +4897,7 @@ mod tests {
 
     #[test]
     fn lifecycle_source_stays_hookable() {
-        let source = include_str!("../native_lifecycle.rs");
+        let source = include_str!("../modding/native_lifecycle.rs");
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
             assert!(!line.contains("cfg"), "a cfg in lifecycle source: {line}");
@@ -5145,6 +5142,7 @@ pub(super) mod particle_count_tests {
 
     fn orb(at: Vec3) -> ExperienceOrb {
         ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,

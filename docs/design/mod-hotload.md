@@ -189,7 +189,7 @@ On the desktop (i7-13700KF, `-j 8`, Linux, `rustc` 1.99, the launcher's `profile
 |---|---|
 | Cold, empty target | 812 s |
 | No change | 55 s |
-| One line changed in gameplay (`game/mods.rs`), as a mixin into gameplay does | 570 s (the revert: 668 s) |
+| One line changed in gameplay (`game/modding/mods/mod.rs`), as a mixin into gameplay does | 570 s (the revert: 668 s) |
 | One line changed in `horizon-world`, as a mixin into a lower crate does | 427 s (the revert: 469 s) |
 | The gameplay change, linked with mold | 612 s |
 
