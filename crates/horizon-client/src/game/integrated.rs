@@ -1377,6 +1377,7 @@ pub(super) mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_session_identifies_only_its_own_integrated_server() {
         use mod_api::ClientHost;
         super::super::native_entity_refs::tests::with_client_game(|game| {
