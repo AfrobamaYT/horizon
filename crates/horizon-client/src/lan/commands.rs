@@ -43,12 +43,8 @@ const INTEGRATED_ONLY: &[&str] = &["publish", "unpublish"];
 /// Commands that check permissions only on dedicated servers
 /// (`checkPermissions` in SeedCommand and VersionCommand).
 const OPEN_WHEN_INTEGRATED: &[&str] = &["seed", "version"];
-/// Game rules of experimental features (minecart improvements), which the
-/// report lists but a vanilla-features world does not register.
-const EXPERIMENTAL_RULES: &[&str] = &["max_minecart_speed", "minecraft:max_minecart_speed"];
-
 pub struct CommandTree {
-    root: Value,
+    pub(super) root: Value,
 }
 
 /// A node of the filtered tree.
@@ -103,7 +99,14 @@ impl CommandTree {
         builtin: &Builtin,
         extra: &Value,
     ) -> Commands {
-        self.packet_with_features(level, dedicated, builtin, extra, &[])
+        self.packet_with_features(
+            level,
+            dedicated,
+            builtin,
+            extra,
+            &[],
+            &crate::gamerules::rule_registry(),
+        )
     }
 
     pub fn packet_with_features(
@@ -113,6 +116,7 @@ impl CommandTree {
         builtin: &Builtin,
         extra: &Value,
         features: &[String],
+        registry: &crate::gamerules::RuleRegistry,
     ) -> Commands {
         let minecart_improvements = features
             .iter()
@@ -138,14 +142,31 @@ impl CommandTree {
         } else {
             Value::Null
         };
-        for root in [&self.root, extra, &horizon] {
+        let mut root = self.root.clone();
+        if let Some(gamerule) = root.get_mut("children").and_then(|c| c.get_mut("gamerule")) {
+            let mut rules = serde_json::Map::new();
+            for rule in registry.available_rules(minecart_improvements) {
+                let value = match rule.default {
+                    crate::gamerules::Value::Bool(_) => {
+                        serde_json::json!({"type": "argument", "parser": "brigadier:bool", "executable": true})
+                    }
+                    crate::gamerules::Value::Int(_) => {
+                        serde_json::json!({"type": "argument", "parser": "brigadier:integer", "properties": {"min": rule.min, "max": rule.max}, "executable": true})
+                    }
+                };
+                for name in [rule.name.to_owned(), format!("minecraft:{}", rule.name)] {
+                    rules.insert(name, serde_json::json!({"type":"literal", "executable": true, "children": {"value": value}}));
+                }
+            }
+            gamerule["children"] = Value::Object(rules);
+        }
+        for root in [&root, extra, &horizon] {
             fill(
                 root,
                 0,
                 &mut Vec::new(),
                 level,
                 dedicated,
-                minecart_improvements,
                 &suggestions,
                 &mut nodes,
                 &mut paths,
@@ -206,7 +227,6 @@ fn fill(
     path: &mut Vec<String>,
     level: u8,
     dedicated: bool,
-    minecart_improvements: bool,
     suggestions: &HashMap<&str, &'static str>,
     nodes: &mut Vec<Node>,
     paths: &mut HashMap<Vec<String>, usize>,
@@ -236,12 +256,7 @@ fn fill(
             } else {
                 required_level(child)
             };
-        if required > level
-            || path.len() == 1
-                && path[0] == "gamerule"
-                && !minecart_improvements
-                && EXPERIMENTAL_RULES.contains(&name.as_str())
-        {
+        if required > level {
             continue;
         }
         if path.is_empty()
@@ -281,7 +296,6 @@ fn fill(
             path,
             level,
             dedicated,
-            minecart_improvements,
             suggestions,
             nodes,
             paths,
