@@ -775,8 +775,8 @@ mod tests {
         );
     }
 
-    /// An unbreakable damaged stack must keep both components through inventory
-    /// sync, including the integrated server's window (#5721).
+    /// Both effective kinetic replacements and removals reach the client through
+    /// the inventory stream, including fields that do not affect the pose.
     #[test]
     fn kinetic_patches_survive_inventory_bytes() {
         use horizon_protocol::{buf::Writer, item::Slot};
@@ -887,6 +887,8 @@ mod tests {
         }
     }
 
+    /// An unbreakable damaged stack must keep both components through inventory
+    /// sync, including the integrated server's window (#5721).
     #[test]
     fn unbreakable_survives_inventory_sync() {
         use horizon_protocol::buf::{Codec, Reader, Writer};
