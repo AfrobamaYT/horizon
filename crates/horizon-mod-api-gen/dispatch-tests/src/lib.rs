@@ -267,7 +267,6 @@ mod tests {
         pub(super) struct WorldPhase;
         pub(super) trait ServerReloadListeners {}
         pub(super) trait ClientReloadListeners {}
-        pub(super) trait PackFinders {}
     }
     use serde_json::{Map, Value};
     use stubs::*;
@@ -346,6 +345,7 @@ mod tests {
             }
         }
         pub(super) mod mod_api {
+            pub trait PackFinders {}
             pub mod camera {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
