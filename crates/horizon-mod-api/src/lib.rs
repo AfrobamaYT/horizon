@@ -3122,6 +3122,31 @@ impl BossBarOverlay {
     }
 }
 
+/// One boss bar the client shows (vanilla's `LerpingBossEvent`), as
+/// `customize_boss_event_progress` reads it. Any bar the server sends: mob,
+/// raid and `/bossbar` ones alike.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientBossBar {
+    /// The bar's UUID, as the server's boss event packets name it.
+    pub uuid: u128,
+    /// The title drawn above the bar.
+    pub name: Text,
+    /// The fill drawn this frame, 0 to 1 (`getProgress`, eased toward the
+    /// server's value).
+    pub progress: f32,
+    /// The bar's color.
+    pub color: BossBarColor,
+    /// The notches drawn over it.
+    pub overlay: BossBarOverlay,
+    /// Whether it darkens the sky (`shouldDarkenScreen`).
+    pub darken_screen: bool,
+    /// Whether it plays the boss music (`shouldPlayBossMusic`).
+    pub play_boss_music: bool,
+    /// Whether it thickens the fog (`shouldCreateWorldFog`).
+    pub create_world_fog: bool,
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
 ///

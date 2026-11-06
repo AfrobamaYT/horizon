@@ -158,6 +158,21 @@ impl BossOverlay {
             })
             .collect()
     }
+    /// The bar at `index` of `bars(now)` as `customize_boss_event_progress`
+    /// hands it to mods.
+    pub fn mod_bar(&self, index: usize, now: u128) -> Option<mod_api::ClientBossBar> {
+        let e = self.events.get(index)?;
+        Some(mod_api::ClientBossBar {
+            uuid: e.id,
+            name: e.name.clone(),
+            progress: e.displayed(now),
+            color: mod_api::BossBarColor::ALL[e.color as usize],
+            overlay: mod_api::BossBarOverlay::ALL[e.overlay as usize],
+            darken_screen: e.darken,
+            play_boss_music: e.music,
+            create_world_fog: e.fog,
+        })
+    }
 }
 
 #[cfg(test)]

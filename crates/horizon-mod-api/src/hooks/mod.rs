@@ -107,6 +107,7 @@ mod crop_grow;
 mod crosshair_target;
 mod custom_click_action;
 mod custom_spawners;
+mod customize_boss_event_progress;
 mod customize_chat_overlay;
 mod display_refs;
 mod dragon_refs;

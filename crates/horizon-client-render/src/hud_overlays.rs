@@ -528,45 +528,70 @@ const BOSS_OVERLAYS: [&str; 5] = [
     "notched_20",
 ];
 
+/// Where one boss bar is drawn: its top-left corner and the spacing to the
+/// next bar's `y`, as `boss_overlay` asks its `place` callback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BossBarPlace {
+    pub x: i32,
+    pub y: i32,
+    pub increment: i32,
+}
+
 /// `BossHealthOverlay.extractRenderState`: the bars in event order, 19 pixels
-/// apart from y = 12 until a third of the screen height.
-pub fn boss_overlay(w: i32, h: i32, bars: &[BossBar], font: &Font) -> Vec<GuiDraw> {
+/// apart from y = 12 until a third of the screen height. `place` is asked for
+/// each bar (its index in `bars`) and may move it or change the spacing to the
+/// next; it returns false to skip drawing it, the spacing still applied.
+pub fn boss_overlay(
+    w: i32,
+    h: i32,
+    bars: &[BossBar],
+    font: &Font,
+    mut place: impl FnMut(usize, &mut BossBarPlace) -> bool,
+) -> Vec<GuiDraw> {
     let mut out = Vec::new();
     let mut y_offset = 12;
-    for bar in bars {
-        let x_left = w / 2 - 91;
-        let part = |out: &mut Vec<GuiDraw>, width: i32, kind: &str| {
-            let sprite = |name: String| GuiDraw::Sprite {
-                sprite: Cow::Owned(format!("boss_bar/{name}_{kind}")),
-                x: x_left,
-                y: y_offset,
-                w: width,
-                h: 5,
-                region: Some([182, 5, 0, 0]),
-                color: crate::hud_layout::WHITE,
-                blend: crate::hud_layout::Blend::Textured,
-            };
-            out.push(sprite(BOSS_COLORS[bar.color].to_owned()));
-            if bar.overlay != 0 {
-                out.push(sprite(BOSS_OVERLAYS[bar.overlay].to_owned()));
-            }
+    for (index, bar) in bars.iter().enumerate() {
+        let mut at = BossBarPlace {
+            x: w / 2 - 91,
+            y: y_offset,
+            increment: 10 + 9,
         };
-        part(&mut out, 182, "background");
-        let progress = crate::hud_layout::lerp_discrete(bar.progress, 0, 182);
-        if progress > 0 {
-            part(&mut out, progress, "progress");
+        if place(index, &mut at) {
+            let (x_left, y) = (at.x, at.y);
+            let part = |out: &mut Vec<GuiDraw>, width: i32, kind: &str| {
+                let sprite = |name: String| GuiDraw::Sprite {
+                    sprite: Cow::Owned(format!("boss_bar/{name}_{kind}")),
+                    x: x_left,
+                    y,
+                    w: width,
+                    h: 5,
+                    region: Some([182, 5, 0, 0]),
+                    color: crate::hud_layout::WHITE,
+                    blend: crate::hud_layout::Blend::Textured,
+                };
+                out.push(sprite(BOSS_COLORS[bar.color].to_owned()));
+                if bar.overlay != 0 {
+                    out.push(sprite(BOSS_OVERLAYS[bar.overlay].to_owned()));
+                }
+            };
+            part(&mut out, 182, "background");
+            let progress = crate::hud_layout::lerp_discrete(bar.progress, 0, 182);
+            if progress > 0 {
+                part(&mut out, progress, "progress");
+            }
+            let name = bar.name.resolve_legacy();
+            let width = width(font, &name);
+            // The title stays centred over the bar wherever it is moved.
+            text(
+                &mut out,
+                name,
+                x_left + 91 - width / 2,
+                y - 9,
+                crate::hud_layout::WHITE,
+                true,
+            );
         }
-        let name = bar.name.resolve_legacy();
-        let width = width(font, &name);
-        text(
-            &mut out,
-            name,
-            w / 2 - width / 2,
-            y_offset - 9,
-            crate::hud_layout::WHITE,
-            true,
-        );
-        y_offset += 10 + 9;
+        y_offset += at.increment;
         if y_offset >= h / 3 {
             break;
         }

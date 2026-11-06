@@ -359,6 +359,7 @@ mod tests {
             pub struct NativeClientInfo;
             #[derive(Clone, Copy)]
             pub struct RaidRef;
+            pub struct ClientBossBar;
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum ToastKind {
                 Advancement,

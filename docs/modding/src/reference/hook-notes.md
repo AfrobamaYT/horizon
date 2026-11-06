@@ -317,6 +317,13 @@ requires a farmer at work and `mob_griefing` enabled.
   may set another. It runs before `native_health_hud`, whose `inputs.kind` carries the answer; only the heart sprites
   change.
 
+- Where each boss bar is drawn through `native_customize_boss_event_progress` (NeoForge's
+  `CustomizeGuiOverlayEvent.BossEventProgress`): once a frame per bar, in the order the server added them, `x` and
+  `y` come in as the bar's top-left corner (91 left of the centre; 12, then 19 lower for each bar) and `increment` as
+  the spacing to the next (19). The bar and its title are drawn where a mod moved them, and the next bar comes in
+  `increment` below where this one came in. A cancelled bar is not drawn and its increment still applies. Bars stop
+  once the next would start a third of the way down the screen. With no listener nothing is built per bar.
+
 - Where the in-game chat is drawn through `native_customize_chat_overlay` (NeoForge's `CustomizeGuiOverlayEvent.Chat`):
   each frame the chat layer draws, `x` and `y` come in as the chat's bottom-left corner (0 and the GUI height minus 40)
   with the GUI size and whether the chat screen is open, and the chat is drawn shifted to where a mod moved them. Not
