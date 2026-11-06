@@ -213,7 +213,7 @@ fn clean_fields(fields: &Fields) -> Fields {
     fields
 }
 
-fn shape_signature(item: &Item) -> Option<Item> {
+pub(crate) fn shape_signature(item: &Item) -> Option<Item> {
     match item {
         Item::Struct(value) => {
             let mut value = value.clone();
@@ -244,6 +244,14 @@ fn shape_signature(item: &Item) -> Option<Item> {
         }
         _ => None,
     }
+}
+
+/// A listed signature's hash: what a mod's declaration pins.
+pub(crate) fn signature_hash(signature: &str) -> String {
+    Sha256::digest(signature.as_bytes())[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn configuration(outer: &[String], attrs: &[syn::Attribute]) -> String {
@@ -471,6 +479,9 @@ impl Shapes {
                 };
             }
             "std" | "core" | "alloc" => return Ok(BTreeMap::from([(path.to_owned(), false)])),
+            _ if crate::crossing::foreign(path).is_some() => {
+                return Ok(BTreeMap::from([(path.to_owned(), false)]));
+            }
             _ => {}
         }
         if self
@@ -602,11 +613,7 @@ impl Pass {
         }
         let cfg = configuration(&self.cfg, attrs);
         let signature = tokens.to_token_stream().to_string();
-        let digest = Sha256::digest(signature.as_bytes());
-        let hash = digest[..8]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let hash = signature_hash(&signature);
         let key = (path.to_owned(), kind, cfg.clone());
         self.uses.insert(key.clone(), (module.to_owned(), uses));
         self.entries.insert(
@@ -1772,6 +1779,21 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
         assert!(!game.shape_only);
         assert_eq!(game.refs["Kind"], "horizon_items::kinds::Kind");
         assert_eq!(game.refs["Cell"], "std::cell::Cell");
+    }
+
+    #[test]
+    fn imports_of_crossing_foreign_types_resolve_and_the_rest_of_their_crate_does_not() {
+        let fixture = shapes_fixture(
+            "use winit::keyboard::KeyCode; use winit::event::ElementState as State; use winit::window::Window;\nstruct Game { key: KeyCode, state: State, window: Window }\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let game = entries
+            .iter()
+            .find(|e| e.path == "horizon_client::game::Game")
+            .unwrap();
+        assert_eq!(game.refs["KeyCode"], "winit::keyboard::KeyCode");
+        assert_eq!(game.refs["State"], "winit::event::ElementState");
+        assert!(!game.refs.contains_key("Window"));
     }
 
     #[test]

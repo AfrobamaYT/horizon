@@ -55,7 +55,7 @@ fn structural_key(shape: &crate::crossing::Shape) -> bool {
     }
 }
 
-use crate::crossing::{Collection, Crossing, Rule, Scalar, Shape, Wrapper, bare};
+use crate::crossing::{Collection, Crossing, Foreign, Rule, Scalar, Shape, Wrapper, bare};
 use crate::internals::Internal;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
@@ -280,6 +280,16 @@ fn buildable(shape: &Shape, rule: &Rule) -> bool {
     }
 }
 
+/// The fields of the listed type at `path` a node steps into: none for flags, which are read
+/// whole (their bits are no field of theirs).
+pub(crate) fn node_fields<'r>(rule: &'r Rule, path: &str) -> Vec<crate::crossing::Field<'r>> {
+    if crate::crossing::foreign(path) == Some(Foreign::Bits) {
+        Vec::new()
+    } else {
+        rule.fields(path)
+    }
+}
+
 fn codec_names(path: &str) -> (syn::Ident, syn::Ident) {
     let id = path.replace("::", "__");
     (format_ident!("enc__{id}"), format_ident!("dec__{id}"))
@@ -462,13 +472,19 @@ impl<'r> Gen<'r> {
             syn::Item::Struct(item) => {
                 let binds: Vec<_> = (0..fields.len()).map(|i| format_ident!("f{i}")).collect();
                 let members: Vec<_> = fields.iter().map(|f| &f.member).collect();
-                let pattern = quote!(#path_ty { #(#members: #binds,)* .. });
+                // Flags have no field to bind: their one field is their bits.
+                let bits = !self.guest && crate::crossing::foreign(path) == Some(Foreign::Bits);
+                let bind = if bits {
+                    quote!(let f0 = &value.bits();)
+                } else {
+                    quote!(let #path_ty { #(#members: #binds,)* .. } = value;)
+                };
                 let encoded: Vec<_> = shapes
                     .iter()
                     .zip(&binds)
                     .map(|(s, b)| self.encode(s, quote!(#b)))
                     .collect();
-                let encode = quote!({ let #pattern = value; V::Rec(::std::vec![#(#encoded),*]) });
+                let encode = quote!({ #bind V::Rec(::std::vec![#(#encoded),*]) });
                 let n = fields.len();
                 let decoded: Vec<_> = shapes
                     .iter()
@@ -481,9 +497,14 @@ impl<'r> Gen<'r> {
                         }
                     })
                     .collect();
+                let built = if bits {
+                    quote!(#path_ty::from_bits_retain(#(#decoded)*))
+                } else {
+                    quote!(#path_ty { #(#members: #decoded),* })
+                };
                 let decode = quote!({
                     let [#(#binds),*] = I::fields::<_, #n>(I::rec(value)?)?;
-                    Ok(#path_ty { #(#members: #decoded),* })
+                    Ok(#built)
                 });
                 let _ = item;
                 (encode, decode)
@@ -580,8 +601,7 @@ impl<'r> Gen<'r> {
         let fields = match shape {
             Shape::Named(path, _) => {
                 let named = self.rule.named(path).expect("listed");
-                self.rule
-                    .fields(path)
+                node_fields(self.rule, path)
                     .iter()
                     .enumerate()
                     .filter_map(|(i, f)| {
@@ -606,8 +626,7 @@ impl<'r> Gen<'r> {
         let raw_gets = match shape {
             Shape::Named(path, _) => {
                 let named = self.rule.named(path).expect("listed");
-                self.rule
-                    .fields(path)
+                node_fields(self.rule, path)
                     .iter()
                     .enumerate()
                     .filter_map(|(i, field)| {
@@ -772,7 +791,7 @@ impl<'r> Gen<'r> {
                 let named = rule.named(path).expect("listed");
                 let path_ty = path_tokens(path);
                 let mut arms = Vec::new();
-                for (i, field) in rule.fields(path).iter().enumerate() {
+                for (i, field) in node_fields(rule, path).iter().enumerate() {
                     if !full
                         && !self
                             .selection
@@ -1551,7 +1570,7 @@ pub(crate) fn select<'a>(
     let fields: HashMap<_, _> = rule
         .paths()
         .flat_map(|owner| {
-            rule.fields(owner)
+            node_fields(rule, owner)
                 .into_iter()
                 .enumerate()
                 .map(move |(index, field)| {
@@ -2459,6 +2478,91 @@ pub(crate) mod tests {
             }
             assert_eq!(value.unsigned, u128::MAX);
             assert_eq!(value.signed, i128::MIN);
+        "#,
+        );
+    }
+
+    #[test]
+    fn foreign_keys_and_flags_round_trip_through_the_generated_table() {
+        let shape = |path: &str, kind: &'static str, signature: &str| {
+            let mut entry = internal(path, kind, signature);
+            entry.shape_only = true;
+            entry
+        };
+        let entries = [
+            internal(
+                "horizon_client::Held",
+                "struct",
+                "struct Held { key : winit :: keyboard :: PhysicalKey , mods : winit :: keyboard :: ModifiersState , }",
+            ),
+            shape(
+                "winit::keyboard::KeyCode",
+                "enum",
+                "# [non_exhaustive] enum KeyCode { KeyA , KeyB , }",
+            ),
+            shape(
+                "winit::keyboard::NativeKeyCode",
+                "enum",
+                "enum NativeKeyCode { Unidentified , Xkb (u32) , }",
+            ),
+            shape(
+                "winit::keyboard::PhysicalKey",
+                "enum",
+                "enum PhysicalKey { Code (KeyCode) , Unidentified (NativeKeyCode) , }",
+            ),
+            shape(
+                "winit::keyboard::ModifiersState",
+                "struct",
+                "struct ModifiersState (u32) ;",
+            ),
+        ];
+        let (code, _) = all_table(&entries);
+        // The flags' field is private, as `bitflags!` makes it: only `bits` reaches it.
+        run_fixture(
+            &code,
+            r#"
+            extern crate self as winit;
+            #[allow(dead_code)]
+            pub mod keyboard {
+                #[non_exhaustive] pub enum KeyCode { KeyA, KeyB }
+                pub enum NativeKeyCode { Unidentified, Xkb(u32) }
+                pub enum PhysicalKey { Code(KeyCode), Unidentified(NativeKeyCode) }
+                struct Bits(u32);
+                pub struct ModifiersState(Bits);
+                impl ModifiersState {
+                    pub fn bits(&self) -> u32 { self.0.0 }
+                    pub fn from_bits_retain(bits: u32) -> Self { Self(Bits(bits)) }
+                }
+            }
+            struct Held { key: winit::keyboard::PhysicalKey, mods: winit::keyboard::ModifiersState }
+            "#,
+            r#"
+            use winit::keyboard::{KeyCode, ModifiersState, NativeKeyCode, PhysicalKey};
+            let mut held = Held {
+                key: PhysicalKey::Code(KeyCode::KeyB),
+                mods: ModifiersState::from_bits_retain(0b100_100),
+            };
+            let walk = __internals::TABLE
+                .types
+                .iter()
+                .find(|t| t.path == "horizon_client::Held")
+                .unwrap()
+                .node;
+            let ptr = &raw mut held as *mut ();
+            let key_b = Value::Var(0, vec![Value::Var(1, vec![])]);
+            let control_shift = Value::Rec(vec![Value::U(0b100_100)]);
+            let xkb = Value::Var(1, vec![Value::Var(1, vec![Value::U(38)])]);
+            unsafe {
+                assert_eq!(walk(ptr, false, Op::Get(0)), Ok(Reply::Value(key_b)));
+                assert_eq!(walk(ptr, false, Op::Get(1)), Ok(Reply::Value(control_shift)));
+                assert_eq!(walk(ptr, true, Op::Set(0, xkb)), Ok(Reply::Done));
+                assert_eq!(
+                    walk(ptr, true, Op::Set(1, Value::Rec(vec![Value::U(0b100)]))),
+                    Ok(Reply::Done)
+                );
+            }
+            assert!(matches!(held.key, PhysicalKey::Unidentified(NativeKeyCode::Xkb(38))));
+            assert_eq!(held.mods.bits(), 0b100);
         "#,
         );
     }
