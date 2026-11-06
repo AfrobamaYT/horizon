@@ -605,7 +605,7 @@ mod tests {
                     }
                     // White field markings (`entityTranslucent`).
                     if id == "minecraft:horse" {
-                        m.extra.profession = crate::mobs::villager::ProfessionState::from_index(2);
+                        m.extra.variant2 = 2;
                     }
                     let mut cpu = Vec::new();
                     render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
