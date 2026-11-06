@@ -622,15 +622,15 @@ impl Attachments {
 
     // All canonical entry mutations publish the same Arc the map keeps. Retain the
     // replaced entry until after publication releases the index lock.
-    fn write_entry(&mut self, key: index::AttachmentKey, entry: Option<Arc<AttachmentEntry>>) {
+    fn write_entry(&mut self, key: &index::AttachmentKey, entry: Option<Arc<AttachmentEntry>>) {
         let previous = match entry {
             Some(entry) => self.entries.insert(key.clone(), entry),
-            None => self.entries.remove(&key),
+            None => self.entries.remove(key),
         };
         if let Some(registration) = &self.registration {
             registration.publisher.publish(&[AttachmentChange {
-                key: &key,
-                entry: self.entries.get(&key),
+                key,
+                entry: self.entries.get(key),
             }]);
         }
         drop(previous);
@@ -743,7 +743,7 @@ impl Attachments {
         let sync = value.policy.sync;
         let key: (JavaString, JavaString) = (namespace.into(), name.into());
         self.write_entry(
-            key.clone(),
+            &key,
             Some(Arc::new(AttachmentEntry {
                 state: Entry::Decoded(value),
             })),
@@ -757,7 +757,7 @@ impl Attachments {
     }
     fn discard(&mut self, namespace: &str, name: &str, sync: bool) {
         let key: (JavaString, JavaString) = (namespace.into(), name.into());
-        self.write_entry(key.clone(), None);
+        self.write_entry(&key, None);
         if sync {
             self.pending.insert(key);
         }
@@ -813,7 +813,7 @@ impl Attachments {
             let raw = [("value".into(), Tag::Compound(value))].into();
             Arc::new(AttachmentEntry::raw(raw))
         });
-        self.write_entry(key, entry);
+        self.write_entry(&key, entry);
     }
 }
 
@@ -1069,6 +1069,63 @@ mod tests {
         map.apply_sync(change("synced", Some(9)));
         assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(9));
         assert!(!registration.unregister());
+    }
+
+    #[test]
+    fn retirement_and_rebind_drop_mod_payloads_only_after_unlock() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        #[derive(Clone)]
+        struct Probe {
+            index: Weak<Mutex<index::AttachmentIndex<u32>>>,
+            unlocked: Arc<AtomicBool>,
+            drops: Arc<AtomicUsize>,
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                if let Some(index) = self.index.upgrade() {
+                    self.unlocked
+                        .fetch_and(index.try_lock().is_ok(), Ordering::Relaxed);
+                }
+                self.drops.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let key: AttachmentType<Probe> = AttachmentType {
+            namespace: "test",
+            name: "drop_probe",
+            default: || panic!("no default"),
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        let mut outcomes = Vec::new();
+        for rebind in [false, true] {
+            let index = Arc::new(Mutex::new(index::AttachmentIndex::default()));
+            let unlocked = Arc::new(AtomicBool::new(true));
+            let drops = Arc::new(AtomicUsize::new(0));
+            let mut map = Attachments::default();
+            key.set(
+                &mut map,
+                Holder::Level,
+                Probe {
+                    index: Arc::downgrade(&index),
+                    unlocked: unlocked.clone(),
+                    drops: drops.clone(),
+                },
+            )
+            .unwrap();
+            let registration = map.bind_index(&index, 1);
+            let mut replacement = map.clone();
+            key.remove(&mut replacement, Holder::Level).unwrap();
+            drop(map);
+            if rebind {
+                replacement.bind_index(&index, 1);
+            } else {
+                assert!(registration.unregister());
+            }
+            assert_eq!(drops.load(Ordering::Relaxed), 2);
+            outcomes.push(unlocked.load(Ordering::Relaxed));
+        }
+        assert_eq!(outcomes, [true, true]);
     }
 
     #[test]
