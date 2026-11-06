@@ -42,13 +42,13 @@ pub fn listened(hook: HookId) -> bool {
     crate::listened(hook)
 }
 
-pub use crate::block_entity_type::validate_block_entity_type_keys;
 pub use crate::generated::calls::*;
 pub use crate::part_table::{
     HookParts, KnownIds, PartsRef, block_entity_types, block_listens, has_part_hook,
     has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
 };
 pub use crate::phase::install_packages;
+pub use crate::registry_keys::resolve_block_entity_types;
 /// The game's side of wasm mods, for `horizon-mod-wasm`.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub mod wasm_host {
@@ -129,10 +129,6 @@ pub mod game {
         }
     }
 
-    /// A block entity type the game names.
-    pub fn block_entity_type_key(id: &str) -> BlockEntityTypeKey {
-        BlockEntityTypeKey(id.into())
-    }
     /// A block entity handle the game names.
     pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
         BlockEntityRef { level, position }
@@ -288,15 +284,6 @@ pub mod game {
         }
     }
 
-    pub trait BlockEntityTypeKeyRegistered: Sized {
-        fn registered(id: &str) -> Option<Self>;
-    }
-    impl BlockEntityTypeKeyRegistered for BlockEntityTypeKey {
-        fn registered(id: &str) -> Option<Self> {
-            BlockEntityTypeKey::registered(id)
-        }
-    }
-
     pub trait RegistrationContextNew {
         fn new() -> Self;
     }
@@ -443,4 +430,7 @@ pub use crate::registry_keys::{
     ResolvedBlock, block as resolved_block, effect as resolved_effect, resolve_blocks,
     resolve_effects,
 };
-pub use crate::registry_keys::{block_id as block_key_id, effect_id as effect_key_id};
+pub use crate::registry_keys::{
+    block_entity_type_key, block_entity_type_name, block_id as block_key_id,
+    effect_id as effect_key_id,
+};

@@ -122,12 +122,6 @@ enum ProviderTarget<'a> {
     Id(&'a str),
 }
 
-#[derive(Debug)]
-pub(crate) struct BlockEntityTypeRequest {
-    pub(crate) mod_id: &'static str,
-    pub(crate) kind: super::BlockEntityTypeKey,
-}
-
 /// A capability provider a mod registered: a [`BlockProviderOf`], [`ItemProviderOf`] or
 /// [`EntityProviderOf`].
 #[derive(Clone)]
@@ -337,9 +331,9 @@ struct Installed {
     keys: Parts,
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
-    requested_types: Vec<BlockEntityTypeRequest>,
     registry_keys: super::registry_keys::Requests,
     effects: OnceLock<super::registry_keys::Effects>,
+    resolved_block_entity_types: OnceLock<super::registry_keys::Names>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
@@ -376,8 +370,9 @@ pub(crate) fn resolved_effects() -> &'static OnceLock<super::registry_keys::Effe
     installed().map_or(&EMPTY, |installed| &installed.effects)
 }
 
-pub(crate) fn requested_block_entity_types() -> &'static [BlockEntityTypeRequest] {
-    installed().map_or(&[], |installed| &installed.requested_types)
+pub(crate) fn resolved_block_entity_types() -> &'static OnceLock<super::registry_keys::Names> {
+    static EMPTY: OnceLock<super::registry_keys::Names> = OnceLock::new();
+    installed().map_or(&EMPTY, |installed| &installed.resolved_block_entity_types)
 }
 
 /// The ticket controllers registered at startup.
@@ -765,11 +760,9 @@ pub fn block_entity_providers<T: ?Sized + 'static>(
     host: &dyn Host,
     at: BlockSide,
 ) -> Option<BlockEntityProviders<T>> {
-    let parts = installed()?
-        .keys
-        .capabilities
-        .get(key.name)?
-        .get(at.kind(host)?.id())?;
+    let parts = installed()?.keys.capabilities.get(key.name)?.get(
+        super::registry_keys::block_entity_type_name(at.kind(host)?)?,
+    )?;
     Some(BlockEntityProviders {
         parts,
         at,
@@ -1121,7 +1114,6 @@ pub struct PartRegistrar {
     parts: Parts,
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
-    requested_types: Vec<BlockEntityTypeRequest>,
     registry_keys: Rc<RefCell<super::registry_keys::Requests>>,
     effects: OnceLock<super::registry_keys::Effects>,
     controllers: Vec<ControllerInfo>,
@@ -1138,7 +1130,6 @@ impl PartRegistrar {
             parts: Parts::default(),
             tags: TagParts::default(),
             block_entity_types: Vec::new(),
-            requested_types: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
@@ -1204,8 +1195,20 @@ impl PartRegistrar {
             ));
             return;
         }
+        let block_entity_id;
         let id = match target {
-            ProviderTarget::BlockEntity(kind) => kind.id(),
+            ProviderTarget::BlockEntity(kind) => {
+                block_entity_id = self
+                    .registry_keys
+                    .borrow()
+                    .block_entity_types
+                    .id(kind.0)
+                    .map(str::to_owned);
+                let Some(id) = block_entity_id.as_deref() else {
+                    return;
+                };
+                id
+            }
             ProviderTarget::Id(id) => {
                 if !namespaced(id) {
                     self.refused.push(format!(
@@ -1344,18 +1347,18 @@ impl Registrar for PartRegistrar {
     }
 
     fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey {
-        if !horizon_mods::content::namespaced_id(id) {
-            self.refused.push(format!(
-                "mod {}: invalid block entity type {id:?}",
-                self.mod_id
-            ));
+        match self
+            .registry_keys
+            .borrow_mut()
+            .block_entity_types
+            .request(self.mod_id, id)
+        {
+            Ok(slot) => super::BlockEntityTypeKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::BlockEntityTypeKey(u32::MAX)
+            }
         }
-        let kind = super::BlockEntityTypeKey(id.into());
-        self.requested_types.push(BlockEntityTypeRequest {
-            mod_id: self.mod_id,
-            kind: kind.clone(),
-        });
-        kind
     }
 
     fn block_key(&mut self, id: &str) -> super::BlockKey {
@@ -1394,10 +1397,7 @@ impl Registrar for PartRegistrar {
         blocks: Vec<String>,
     ) -> super::BlockEntityTypeKey {
         let id = format!("{}:{path}", self.mod_id);
-        if !horizon_mods::content::namespaced_id(&id) {
-            self.refused.push(format!("invalid block entity type {id}"));
-        }
-        let key = super::BlockEntityTypeKey(id.as_str().into());
+        let key = self.block_entity_type_key(&id);
         self.block_entity_types.push(BlockEntityType { id, blocks });
         key
     }
@@ -1440,10 +1440,17 @@ impl Registrar for PartRegistrar {
         kind: &'static str,
         part: Arc<dyn BlockEntityPart>,
     ) -> Result<(), super::BlockEntityPartError> {
-        if key.id().starts_with("minecraft:") {
-            return Err(super::BlockEntityPartError::VanillaType { kind: key.clone() });
+        let id = self
+            .registry_keys
+            .borrow()
+            .block_entity_types
+            .id(key.0)
+            .map(str::to_owned)
+            .unwrap_or_default();
+        if id.starts_with("minecraft:") {
+            return Err(super::BlockEntityPartError::VanillaType { kind: *key });
         }
-        if self.attach_known(|p| &mut p.block_entity_kinds, kind, key.id(), part) {
+        if self.attach_known(|p| &mut p.block_entity_kinds, kind, &id, part) {
             Ok(())
         } else {
             Err(super::BlockEntityPartError::Duplicate {
@@ -1604,7 +1611,7 @@ fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
         keys: registrar.parts,
         tags: registrar.tags,
         block_entity_types: registrar.block_entity_types,
-        requested_types: registrar.requested_types,
+        resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
             .into_inner(),
@@ -1684,7 +1691,13 @@ pub mod tests {
 
     #[cfg(test)]
     fn type_key(id: &str) -> BlockEntityTypeKey {
-        BlockEntityTypeKey(id.into())
+        BlockEntityTypeKey(
+            *super::requested_keys()
+                .block_entity_types
+                .slots
+                .get(id)
+                .expect("fixture requested this type"),
+        )
     }
 
     /// The level the test worlds are.
@@ -1916,7 +1929,7 @@ pub mod tests {
         assert!(
             errors
                 .iter()
-                .all(|error| error.starts_with("invalid block entity type test:"))
+                .all(|error| error.starts_with("mod test: invalid registry key"))
         );
     }
 
@@ -1926,17 +1939,17 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Invalid {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                for id in ["press", "minecraft:", "Upper:chest", "test:has space"] {
+                for id in ["minecraft:", "Upper:chest", "test:has space"] {
                     r.block_entity_type_key(id);
                 }
             }
         }
         let errors = install_parts(&[ModEntry::new("lookup", Box::new(Invalid))]).unwrap_err();
-        assert_eq!(errors.len(), 4);
+        assert_eq!(errors.len(), 3);
         assert!(
             errors
                 .iter()
-                .all(|error| error.starts_with("mod lookup: invalid block entity type"))
+                .all(|error| error.starts_with("mod lookup: invalid registry key"))
         );
     }
 
@@ -5904,7 +5917,7 @@ pub mod tests {
                 part: type_name::<Press>()
             }),
         );
-        assert_eq!(r.parts.block_entity_kinds[kind.id()].len(), 1);
+        assert_eq!(r.parts.block_entity_kinds["test:press"].len(), 1);
     }
 
     #[test]

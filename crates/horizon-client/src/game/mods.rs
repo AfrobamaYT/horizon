@@ -399,7 +399,7 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    mod_api::__private::validate_block_entity_type_keys(&types)?;
+    mod_api::__private::resolve_block_entity_types(&types).map_err(|errors| errors.join("\n"))?;
     block_entity_types::install(types)?;
     Ok(())
 }

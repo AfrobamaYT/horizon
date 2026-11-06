@@ -66,7 +66,7 @@ impl Game<'_> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        BlockEntityTypeKey::registered(save::block_entity_id(block_entity, block))
+        mod_api::__private::block_entity_type_key(save::block_entity_id(block_entity, block))
     }
 
     /// The block entity's position.

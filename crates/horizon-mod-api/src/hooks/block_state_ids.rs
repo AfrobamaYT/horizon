@@ -15,6 +15,12 @@ pub trait Helpers {
     fn effect_key_id();
     #[helper(
         side = "both",
+        receiver = "block_entity_type_key",
+        target = "horizon_client::game::native_block_states::Game<'_>::native_block_entity_type_key_id"
+    )]
+    fn block_entity_type_key_id();
+    #[helper(
+        side = "both",
         target = "horizon_client::game::native_block_states::Game<'_>::native_block_state_id"
     )]
     fn block_state_id();
