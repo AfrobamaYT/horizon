@@ -2556,7 +2556,10 @@ impl Game<'_> {
             }
         }
         // checkWalls over head, neck and body.
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         let mut in_wall = false;
         let Some(d) = self.dragon.as_ref() else {
             return;
@@ -2659,7 +2662,10 @@ impl Game<'_> {
         let fight = self.is_fight_dragon();
         let first_kill = fight && !self.fight.previously_killed;
         let xp = if first_kill { 12000 } else { 500 };
-        let drops = self.ui.rules.bool("mob_drops");
+        let drops = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS);
         if t > 150 && t % 5 == 0 && drops {
             self.spawn_orbs([p.x, p.y, p.z], (xp as f32 * 0.08) as u32);
         }
