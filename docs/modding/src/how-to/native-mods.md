@@ -177,11 +177,11 @@ for it). The generator discovers these files without a shared module list. `nati
 the catalog, not a global API number, source comments or documentation histories.
 
 Hand-written API types have a selected public surface in `crates/horizon-mod-api/src/exports/<area>.rs`:
-module declarations and re-exports stay in their source area's fragment. A nested `mod __private` groups
-engine-only re-exports; its `built`, `game`, `reload` and `wasm_host` sections retain those existing paths.
-The generator discovers all fragments and includes each section at its original scope. A new hand-written
-area adds one fragment, while catalog-generated hook types need no export-list edit. Do not add declarations
-or re-export lists to `lib.rs` or `__private.rs`.
+module declarations and re-exports stay in their source area's fragment. Engine-only re-exports sit in a
+separate section of the same fragment and keep their existing paths. The generator discovers all fragments
+and includes each section at its original scope. A new hand-written area adds one fragment, while
+catalog-generated hook types need no export-list edit. Do not add declarations or re-export lists to
+`lib.rs`.
 
 ## Runtime packages and identity
 
