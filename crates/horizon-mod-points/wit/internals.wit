@@ -19,10 +19,13 @@ interface view {
   }
   variant reached { node(node), value(list<cell>) }
   variant arg { value(list<cell>), node(borrow<node>) }
+  /// Each successful entry gives its cell count in the concatenated cells list.
+  record batch-values { entries: list<result<u32, refusal>>, cells: list<cell> }
   /// At most twelve entries; larger batches trap. Results keep node.get semantics.
-  get-many: func(reads: list<tuple<borrow<node>, u32>>) -> list<result<list<cell>, refusal>>;
+  get-many: func(reads: list<tuple<borrow<node>, u32>>) -> batch-values;
+  /// Each write names its node, field and length in the concatenated cells list.
   /// At most twelve journaled writes; larger batches trap. Refusals are per entry.
-  set-many: func(writes: list<tuple<borrow<node>, u32, list<cell>>>) -> list<result<_, refusal>>;
+  set-many: func(writes: list<tuple<borrow<node>, u32, u32>>, cells: list<cell>) -> list<result<_, refusal>>;
   root: func(n: u32) -> result<node, refusal>;
   /// Final mutable copy arguments are returned in parameter order, separate from node results.
   record call-reply { %result: reached, updates: list<list<cell>> }
