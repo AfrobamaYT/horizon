@@ -18,5 +18,13 @@ pub trait Hooks {
         neoforge = "RenderTooltipEvent.Pre",
         cancellable = true
     )]
-    fn render_tooltip_pre();
+    fn render_tooltip_pre(
+        draw: &mut dyn DrawContext,
+        stack: Option<&ItemStack>,
+        screen_width: i32,
+        screen_height: i32,
+        elements: &[TooltipElement],
+        place: &mut TooltipPlace,
+        cancel: &mut bool,
+    );
 }

@@ -2738,15 +2738,19 @@ impl Game<'_> {
         };
         let before = place;
         let mut cancel = false;
-        self.native_render_tooltip_pre(
-            batch,
+        let mut draw = super::mod_api_host::generated::GameDrawContext {
+            game: self,
+            surface: batch,
+        };
+        self.native_render_tooltip_pre(mod_api::__private::RenderTooltipPreCall {
+            draw: &mut draw,
             stack,
-            screen.0 as i32,
-            screen.1 as i32,
-            &elements,
-            &mut place,
-            &mut cancel,
-        );
+            screen_width: screen.0 as i32,
+            screen_height: screen.1 as i32,
+            elements: &elements,
+            place: &mut place,
+            cancel: &mut cancel,
+        });
         if cancel {
             return None;
         }
