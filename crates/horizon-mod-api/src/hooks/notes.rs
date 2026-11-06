@@ -699,6 +699,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
   blocks). `chunk.forced(host)` and `level.forced_chunks(host)` read the chunks `/forceload` holds (`/forceload query`);
   `chunk.set_forced(host, bool)` is `/forceload add` or `remove` of one chunk and returns whether the set changed. That
   is the world's own state: it is saved with the level and stays until `/forceload remove`.
+  A newly added forced chunk is loaded before the call returns, including in a parked server level. Repeated adds
+  and removals do not load chunks.
 - Ticket controllers (NeoForge's `TicketController`, registered in `RegisterTicketControllersEvent`): a mod registers
   each one once at startup, from `Hooks::register`, with `r.register_ticket_controller("quarry", validates)` and keeps the
   `TicketController` it returns (it is `Copy`; `Hooks` methods take `&self`, so a `OnceLock` holds it). The id is the

@@ -115,8 +115,8 @@ impl Game<'_> {
     /// without a player. This is the world's own `/forceload` state, not a
     /// ticket the mod owns: the chunk stays forced across restarts, and after
     /// the mod is unloaded or removed, until `set_forced(false)` or
-    /// `/forceload remove` clears it. Unlike vanilla, the chunk is not loaded before
-    /// this returns: it loads over the next ticks, as after `/forceload`.
+    /// `/forceload remove` clears it. Adding a newly forced chunk loads it
+    /// before returning, as vanilla does.
     /// False for a stale handle, on a client, and for a level the server
     /// has not opened.
     pub(super) fn native_chunk_set_forced(&mut self, chunk: ChunkRef, forced: bool) -> bool {
@@ -124,17 +124,14 @@ impl Game<'_> {
             return false;
         }
         let [x, z] = chunk.pos();
-        let streaming = if chunk.level().dimension() == self.dim.key() {
-            &mut self.streaming
-        } else if let Some(streaming) = self
-            .levels
-            .parked_streaming_of_mut(chunk.level().dimension_id())
-        {
-            streaming
+        if chunk.level().dimension() == self.dim.key() {
+            self.streaming
+                .set_forced_loaded(&mut self.world, x, z, forced)
         } else {
-            return false;
-        };
-        streaming.set_forced(x, z, forced)
+            self.levels
+                .force_parked_chunk(chunk.level().dimension_id(), x, z, forced)
+                .unwrap_or(false)
+        }
     }
     /// The mods validate the chunk tickets `dim`'s level loaded from its save,
     /// controller by controller (`LoadingValidationCallback.validateTickets`),
@@ -511,6 +508,18 @@ mod tests {
     use horizon_core::position::BlockPos;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
 
+    /// A logical server with its worker queue running rather than the
+    /// title-screen streamer's paused placeholder.
+    fn with_chunk_streaming(test: impl FnOnce(&mut super::Game<'_>)) {
+        with_game(|game| {
+            game.options.headless = true;
+            game.streaming.paused = false;
+            game.streaming.mesh = false;
+            game.streaming.radius = 0;
+            test(game);
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_transform_preview_preserves_state_and_marks_simulation() {
@@ -692,7 +701,7 @@ mod tests {
 
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
-            let nether = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(level.in_world_bounds(game, [0, 64, 0]), Some(true));
             assert_eq!(level.in_world_bounds(game, [0, -65, 0]), Some(false));
             assert_eq!(level.in_world_bounds(game, [0, 320, 0]), Some(false));
@@ -833,13 +842,22 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forced_chunks_set_clear_and_query_like_forceload() {
-        with_game(|game| {
+        with_chunk_streaming(|game| {
             let level = game.native_level(game.dim.id()).unwrap();
             let far = game.native_level_chunk_ref(level, [40, -7]).unwrap();
             let near = game.native_level_chunk_ref(level, [-3, 2]).unwrap();
             assert_eq!(game.native_chunk_forced(far), Some(false));
             assert_eq!(game.native_level_forced_chunks(level), Some(vec![]));
+            // A synchronous load leaves existing columns for the normal owner
+            // update to save and unload, including their entity data.
+            let old = std::sync::Arc::new(horizon_client::chunk::Chunk::empty(-40, 40));
+            game.world.chunks.insert((-40, 40), old.clone());
+            game.world.modified.insert((-40, 40));
+            assert!(!game.native_chunk_ref_loaded(far));
             assert!(game.native_chunk_set_forced(far, true));
+            assert!(game.native_chunk_ref_loaded(far), "loaded before returning");
+            assert!(std::sync::Arc::ptr_eq(&old, &game.world.chunks[&(-40, 40)]));
+            assert!(game.world.modified.contains(&(-40, 40)));
             assert!(!game.native_chunk_set_forced(far, true), "already forced");
             assert!(game.native_chunk_set_forced(near, true));
             assert_eq!(game.native_chunk_forced(far), Some(true));
@@ -853,6 +871,14 @@ mod tests {
             assert_eq!(game.native_level_forced_chunks(level), Some(vec![[-3, 2]]));
             assert!(!game.streaming.forced.contains(&(40, -7)));
             // Outside the world.
+            // Unchanged adds and removals do not load a missing column.
+            let pending = game.native_level_chunk_ref(level, [200, 200]).unwrap();
+            assert!(game.streaming.set_forced(200, 200, true));
+            assert!(!game.native_chunk_ref_loaded(pending));
+            assert!(!game.native_chunk_set_forced(pending, true));
+            assert!(!game.native_chunk_ref_loaded(pending));
+            assert!(game.native_chunk_set_forced(pending, false));
+            assert!(!game.native_chunk_ref_loaded(pending));
             assert!(game.native_level_chunk_ref(level, [1_875_000, 0]).is_none());
             assert!(
                 game.native_level_chunk_ref(level, [0, -1_875_001])
@@ -864,7 +890,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forced_chunk_changes_the_ticket_sources_and_the_saved_set() {
-        with_game(|game| {
+        with_chunk_streaming(|game| {
             let level = game.native_level(game.dim.id()).unwrap();
             let chunk = game.native_level_chunk_ref(level, [5, 6]).unwrap();
             assert!(game.native_chunk_set_forced(chunk, true));
@@ -884,7 +910,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forced_chunks_of_a_parked_level_and_stale_handles() {
-        with_game(|game| {
+        with_chunk_streaming(|game| {
             let stale_epoch =
                 NativeWorldEpoch::new(game.native_lifecycle.epoch().unwrap().get() + 1);
             let level = game.native_level(game.dim.id()).unwrap();
@@ -909,7 +935,13 @@ mod tests {
             game.enter_level(other).unwrap();
             game.enter_level(back).unwrap();
             assert_eq!(game.native_chunk_forced(chunk), Some(false));
+            assert!(!game.native_chunk_ref_loaded(chunk));
             assert!(game.native_chunk_set_forced(chunk, true));
+            assert!(
+                game.native_chunk_ref_loaded(chunk),
+                "parked level loaded before returning"
+            );
+            assert_eq!(game.dim, back, "forcing must not switch the acting level");
             assert_eq!(game.native_level_forced_chunks(parked), Some(vec![[1, 1]]));
             assert_eq!(game.native_level_forced_chunks(level), Some(vec![]));
             assert!(game.levels_to_tick().contains(&other));
@@ -1064,7 +1096,7 @@ mod tests {
     }
     /// A game whose mods are `Machines` and `Other`, with their controllers registered.
     fn with_machines(test: impl FnOnce(&mut super::super::Game<'_>)) {
-        testing::with_mods(mods(), || with_game(test));
+        testing::with_mods(mods(), || with_chunk_streaming(test));
     }
 
     #[test]
@@ -1241,6 +1273,29 @@ mod tests {
         let (ctx, _) = parse.executable().ok()?;
         let (ctx, root) = (ctx.clone(), parse.context.clone());
         game.run_chain(&root, &ctx).ok()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn forceload_add_returns_with_each_new_column_loaded() {
+        with_chunk_streaming(|game| {
+            game.ui.registries.permission = 4;
+            assert!(!game.world.chunks.contains_key(&(8, -4)));
+            assert!(!game.world.chunks.contains_key(&(9, -4)));
+            assert_eq!(query_result(game, "forceload add 128 -64 144 -64"), Some(2));
+            for key in [(8, -4), (9, -4)] {
+                assert!(
+                    game.world.chunks.contains_key(&key),
+                    "loaded {key:?} before command return"
+                );
+                assert!(game.streaming.commanded().contains(&key));
+            }
+            assert_eq!(query_result(game, "forceload add 128 -64 144 -64"), None);
+            assert_eq!(
+                query_result(game, "forceload remove 128 -64 144 -64"),
+                Some(2)
+            );
+        });
     }
 
     #[test]

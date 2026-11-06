@@ -310,6 +310,17 @@ def run_side(label, command, directory, client):
     server = Server(command, directory, label)
     try:
         server.wait_for(r'Done \(')
+        # ServerLevel.setChunkForced loads a newly forced column before returning.
+        # Queue the observation immediately after the command, without waiting for
+        # chunk generation or polling readiness between the two commands.
+        server.console('forceload add 20000 20000')
+        server.console('execute if loaded 20000 100 20000 run say forced chunk ready')
+        server.console('execute unless loaded 20000 100 20000 run say forced chunk missing')
+        server.console('say forced chunk barrier checked')
+        server.wait_for(r'\[Server\] forced chunk barrier checked', timeout=120)
+        assert any('[Server] forced chunk ready' in line for line in server.lines), label
+        assert not any('[Server] forced chunk missing' in line for line in server.lines), label
+        server.console('forceload remove 20000 20000')
         # A librarian beside the spawn for the client to trade with (no AI:
         # it stays put; experience keeps its profession).
         server.console('summon minecraft:villager ~1 ~ ~ {NoAI:1b,Xp:1,VillagerData:'
