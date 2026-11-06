@@ -2,13 +2,14 @@
 use super::*;
 use bytemuck::Zeroable;
 
-/// Renders quads against a supplied RGBA atlas. Returns `None` without a software Vulkan adapter.
+/// Renders quads against a supplied RGBA atlas.
+/// A missing software Vulkan adapter is an error: this ignored test is run on purpose.
 pub fn render(
     vertices: &[Vertex],
     atlas_size: [u32; 2],
     atlas: &[u8],
     view_proj: Mat4,
-) -> Option<Vec<u8>> {
+) -> std::result::Result<Vec<u8>, String> {
     const SIZE: u32 = 64;
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = wgpu::Backends::VULKAN;
@@ -17,14 +18,12 @@ pub fn render(
         force_fallback_adapter: true,
         ..Default::default()
     }))
-    .map_err(|_| eprintln!("entity pixel test: no software Vulkan adapter; skipped"))
-    .ok()?;
+    .map_err(|error| format!("no software Vulkan adapter: {error}"))?;
     if adapter.get_info().device_type != wgpu::DeviceType::Cpu {
-        eprintln!("entity pixel test: no software Vulkan adapter; skipped");
-        return None;
+        return Err("no software Vulkan adapter".into());
     }
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
-        .expect("software Vulkan device request failed");
+        .map_err(|error| format!("software Vulkan device request failed: {error}"))?;
     let texture = |width, height, format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {
             label: None,
@@ -237,6 +236,10 @@ pub fn render(
     queue.submit([encoder.finish()]);
     readback.slice(..).map_async(wgpu::MapMode::Read, |_| {});
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-    let pixels = readback.slice(..).get_mapped_range().unwrap().to_vec();
-    Some(pixels)
+    let pixels = readback
+        .slice(..)
+        .get_mapped_range()
+        .map_err(|error| error.to_string())?
+        .to_vec();
+    Ok(pixels)
 }

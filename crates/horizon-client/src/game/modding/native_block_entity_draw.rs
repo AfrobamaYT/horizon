@@ -1130,7 +1130,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn prepared_model_entity_pixels() {
         use mod_api::{__private::game::Fields, ClientHost};
-        horizon_client::models::register_standalone(vec!["minecraft:block/grass_block".into()]);
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let model = game
                 .render_assets()
@@ -1180,14 +1181,13 @@ mod tests {
                 Quat::IDENTITY,
                 Vec3::new(-0.55, -0.85, 0.5),
             );
-            let Some(rendered) = horizon_client::gfx::entity_pixel_test::render(
+            let rendered = horizon_client::gfx::entity_pixel_test::render(
                 vertices,
                 [atlas.width, atlas.height],
                 &pixels,
                 view,
-            ) else {
-                return;
-            };
+            )
+            .expect("software Vulkan entity pixels");
             let coverage = rendered
                 .as_chunks::<4>()
                 .0
@@ -1207,7 +1207,8 @@ mod tests {
         use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
         use mod_api::{BlockEntityDrawContext, ClientHost};
 
-        horizon_client::models::register_standalone(vec!["minecraft:block/grass_block".into()]);
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let id = Identifier::parse("minecraft:block/grass_block").unwrap();
             let model = game.render_assets().model(&id).unwrap();
