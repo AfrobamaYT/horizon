@@ -1313,7 +1313,10 @@ mod scissor_tests {
     use super::*;
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            std::path::PathBuf::from("/nonexistent/horizon-test-assets"),
+        ))
+        .unwrap()
     }
 
     /// The bounds of every quad's six vertices, in draw order.
