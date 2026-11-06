@@ -731,14 +731,14 @@ mod tests {
             {
                 let _config = owner.config().unwrap();
                 assert_eq!(current_phase(), Config);
-                check_access("setting", false);
+                check_access("setting", LoadAccess::WorldOnly);
             }
             assert_eq!(current_phase(), World);
             for _reload in 0..2 {
                 let _ = std::panic::catch_unwind(|| {
                     let _reload = owner.reloading().unwrap();
                     assert_eq!(current_phase(), Reloading);
-                    check_access("block_state_default", false);
+                    check_access("block_state_default", LoadAccess::WorldOnly);
                     panic!("failed prepare");
                 });
                 assert_eq!(current_phase(), World);
