@@ -2,8 +2,8 @@
 //! it, and keeps nothing of their group alive. CI builds `tests/groups/counter_lib` and
 //! `tests/points/lib_tail` first and points `HORIZON_WASM_GROUPS`, `HORIZON_WASM_POINTS` and
 //! `HORIZON_WASM_STD` at them; the test is ignored elsewhere.
+use horizon_mod_package::manifest::Manifest;
 use horizon_mod_wasm::{Refusal, WasmPackage};
-use horizon_mods::manifest::Manifest;
 use mod_api::__private::wasm_host::live_groups;
 
 #[test]
@@ -11,8 +11,10 @@ use mod_api::__private::wasm_host::live_groups;
 fn a_listener_refused_with_its_library_keeps_nothing_of_their_group() {
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let read = |package: std::path::PathBuf| WasmPackage {
-        manifest: horizon_mods::Package::read(&package).unwrap().manifest,
-        module: horizon_mods::Package::read_wasm(&package).unwrap(),
+        manifest: horizon_mod_package::Package::read(&package)
+            .unwrap()
+            .manifest,
+        module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
     };
     let mut library =
         read(path("HORIZON_WASM_GROUPS").join("counter_lib/target/horizon-mod/counter_lib.hmod"));

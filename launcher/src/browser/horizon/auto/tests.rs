@@ -21,7 +21,7 @@ fn ruby(dir: &Path, version: &str, blocks: &[&str], items: &[&str]) -> PathBuf {
         .collect();
     let files: Vec<(&str, &[u8])> = names.iter().map(|(n, b)| (n.as_str(), *b)).collect();
     let manifest = format!("{MANIFEST}version = \"{version}\"\n");
-    let bytes = horizon_mods::Package::write_files(&manifest, &files).unwrap();
+    let bytes = horizon_mod_package::Package::write_files(&manifest, &files).unwrap();
     let path = dir.join(format!("ruby-{version}.hmod"));
     fs::write(&path, bytes).unwrap();
     path
@@ -36,8 +36,8 @@ fn index_of(versions: &[(&str, &str, &Path)]) -> Index {
         .map(|(version, game, path)| index::Version {
             version: (*version).into(),
             api: "0.2".into(),
-            side: Some(horizon_mods::Side::Both),
-            capabilities: vec![horizon_mods::Capability::Registries],
+            side: Some(horizon_mod_package::Side::Both),
+            capabilities: vec![horizon_mod_package::Capability::Registries],
             game: (*game).into(),
             requires: Vec::new(),
             file: index::File {
@@ -252,12 +252,12 @@ fn wasm_update_waits_for_the_player() {
     let module = b"\0asm\x01\0\0\0";
     let manifest = format!(
         "{MANIFEST}version = \"1.1.0\"\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n",
-        horizon_mods::manifest::sha512_of(module)
+        horizon_mod_package::manifest::sha512_of(module)
     );
     let new = dir.join("ruby-1.1.0.hmod");
     fs::write(
         &new,
-        horizon_mods::Package::write_files(&manifest, &[("mod.wasm", module)]).unwrap(),
+        horizon_mod_package::Package::write_files(&manifest, &[("mod.wasm", module)]).unwrap(),
     )
     .unwrap();
     let first = index_of(&[("1.0.0", GAME, &old)]);

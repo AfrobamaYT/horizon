@@ -4595,7 +4595,7 @@ mod tests {
     #[test]
     fn native_host_returns_typed_recipe_rules() {
         struct Recipes(Arc<[Recipe]>);
-        impl mod_api::prelude::BaseHost for Recipes {
+        impl mod_api::prelude::RecipesHost for Recipes {
             fn recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
                 if kind == "minecraft:crafting_transmute" {
                     self.0.clone()
@@ -4605,7 +4605,7 @@ mod tests {
             }
         }
         impl Host for Recipes {}
-        mod_api::impl_host_areas!(Recipes, except(base));
+        mod_api::impl_host_areas!(Recipes, except(recipes));
         let mut recipe = Recipe::new(
             "test:recipe",
             "minecraft:crafting_transmute",
@@ -4678,13 +4678,13 @@ mod tests {
     #[test]
     fn an_optional_dependency_runs_only_when_built_with_and_installed() {
         struct Installed(&'static str);
-        impl mod_api::prelude::BaseHost for Installed {
+        impl mod_api::prelude::LevelsHost for Installed {
             fn is_loaded(&self, id: &str) -> bool {
                 id == self.0
             }
         }
         impl Host for Installed {}
-        mod_api::impl_host_areas!(Installed, except(base));
+        mod_api::impl_host_areas!(Installed, except(levels));
         // The `testing` feature stands for a dependency's: without it the block isn't compiled,
         // with it the game is asked.
         let ran = std::cell::Cell::new(0);
@@ -4707,15 +4707,15 @@ mod tests {
         lines: Vec<Text>,
     }
 
-    impl mod_api::prelude::LevelReadsBackend for Reader {
+    impl mod_api::prelude::LevelsBackend for Reader {
         fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
             Some(self.block.to_string())
         }
     }
     impl Backend for Reader {}
-    mod_api::impl_backend_areas!(Reader, except(level_reads));
+    mod_api::impl_backend_areas!(Reader, except(levels));
 
-    impl mod_api::prelude::EntityHandlesHost for Reader {
+    impl mod_api::prelude::EntitiesHost for Reader {
         fn level(&self, dimension: &str) -> Option<LevelRef> {
             (dimension == "minecraft:overworld")
                 .then(|| LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD))
@@ -4726,7 +4726,7 @@ mod tests {
             Some(BackendRef::of(self))
         }
     }
-    mod_api::impl_host_areas!(Reader, except(entity_handles));
+    mod_api::impl_host_areas!(Reader, except(entities));
     impl ClientHost for Reader {}
     mod_api::impl_client_host_areas!(Reader);
     impl mod_api::prelude::ServicesServerHost for Reader {
@@ -4752,7 +4752,7 @@ mod tests {
             ))
         }
     }
-    impl mod_api::prelude::BaseBackendMut for Reader {
+    impl mod_api::prelude::PlayersBackendMut for Reader {
         fn player_action_bar(&mut self, player: PlayerRef, line: Text) -> bool {
             assert_eq!(player.uuid(), 7);
             self.lines.push(line);
@@ -4760,7 +4760,7 @@ mod tests {
         }
     }
     impl BackendMut for Reader {}
-    mod_api::impl_backend_mut_areas!(Reader, except(base));
+    mod_api::impl_backend_mut_areas!(Reader, except(players));
 
     #[test]
     fn server_services_forward_commands_messages_and_player_identity() {

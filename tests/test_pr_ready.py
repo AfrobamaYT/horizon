@@ -29,6 +29,22 @@ def args(host="local", quick=False):
 
 
 class PrReadyTests(unittest.TestCase):
+    def test_windows_runner_gives_a_leading_variable_to_the_environment(self):
+        step = pr_ready.Step(
+            "dispatch tests tests",
+            "CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4} cargo test --manifest-path a/Cargo.toml --locked",
+        )
+        with mock.patch.object(pr_ready.subprocess, "Popen") as popen, \
+                mock.patch.object(pr_ready, "finish"), mock.patch.dict(os.environ):
+            os.environ.pop("CARGO_BUILD_JOBS", None)
+            popen.return_value.__enter__.return_value.stdout = []
+            popen.return_value.__enter__.return_value.wait.return_value = 0
+            pr_ready.run_windows([step], False)
+        self.assertEqual(popen.call_args.args[0],
+                         ["cargo", "test", "--manifest-path", "a/Cargo.toml", "--locked"])
+        self.assertEqual(popen.call_args.kwargs["env"]["CARGO_BUILD_JOBS"], "4")
+        self.assertEqual(step.status, "pass")
+
     def test_paths_map_to_the_crates_that_own_them(self):
         self.assertEqual(pr_ready.touched_crates({"crates/horizon-core/src/jmath.rs", "crates/horizon-client/build.rs",
                                                   "xtask/src/main.rs", "tools/parity.py"}, PACKAGES),
@@ -86,7 +102,7 @@ class PrReadyTests(unittest.TestCase):
             return {step.name: step for step in steps}["content root tests"]
         self.assertEqual(content_step("crates/horizon-client/src/game.rs").skip, "content root untouched")
         for path in ["crates/horizon-client/src/mod_content.rs", "crates/horizon-client/src/mod_content_tests.rs",
-                     "crates/horizon-mods/src/content.rs", "crates/horizon-assets/src/lib.rs", "Cargo.lock"]:
+                     "crates/horizon-mod-package/src/content.rs", "crates/horizon-assets/src/lib.rs", "Cargo.lock"]:
             with self.subTest(path=path):
                 step = content_step(path)
                 self.assertIsNone(step.skip)
@@ -134,8 +150,8 @@ class PrReadyTests(unittest.TestCase):
     def test_tests_get_the_features_ci_s_workspace_run_gives_them(self):
         self.assertEqual(pr_ready.mod_features(["horizon-world"]), "")
         self.assertEqual(pr_ready.mod_features(["horizon-client"]), "")
-        self.assertEqual(pr_ready.mod_features(["horizon-mods"]),
-                         " --features horizon-mods/index")
+        self.assertEqual(pr_ready.mod_features(["horizon-mod-package"]),
+                         " --features horizon-mod-package/index")
         self.assertEqual(pr_ready.mod_features(None), MODS)
 
     def test_mod_api_data_inputs_build_and_test_the_consuming_crates(self):
