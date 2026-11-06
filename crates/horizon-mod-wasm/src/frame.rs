@@ -85,6 +85,7 @@ fn not_here(what: &str) -> Refusal {
 
 /// Fuel to walk a stored path, without resolving any game pointers.
 pub(crate) fn walk_cost(path: &Path<Value>) -> usize {
+    let mut cells = 0usize;
     let mut bytes = 0usize;
     let mut pending = Vec::new();
     for step in &path.steps {
@@ -93,13 +94,17 @@ pub(crate) fn walk_cost(path: &Path<Value>) -> usize {
         }
     }
     while let Some(value) = pending.pop() {
+        cells = cells.saturating_add(1);
         match value {
             Value::Str(s) => bytes = bytes.saturating_add(s.len()),
             Value::Seq(v) | Value::Rec(v) | Value::Var(_, v) => pending.extend(v),
             _ => {}
         }
     }
-    path.steps.len().saturating_add(bytes.div_ceil(64))
+    path.steps
+        .len()
+        .saturating_add(cells)
+        .saturating_add(bytes.div_ceil(64))
 }
 
 /// The retained payload of a plain value. Sequence storage counts too, including byte arrays.
@@ -385,6 +390,11 @@ impl<'t> Frame<'t> {
         Ok(())
     }
 
+    /// Pending entries to charge before scanning or applying the journal.
+    pub(crate) fn journal_len(&self) -> usize {
+        self.journal.len()
+    }
+
     /// Whether the call wrote under `node`: its whole-node reads would miss those writes.
     fn written_under(&self, node: &Node) -> bool {
         self.journal
@@ -583,6 +593,32 @@ pub(crate) mod tests {
     }
     struct Player {
         health: i64,
+    }
+
+    #[test]
+    fn reused_aggregate_key_path_charges_every_encoded_cell() {
+        let node = Node::new(
+            Path {
+                root: 0,
+                steps: vec![Step::Key(Value::Seq((0..1024).map(Value::U).collect()))],
+            },
+            false,
+        );
+        // One path step, the sequence cell, and 1,024 scalar cells, on every reuse.
+        for _ in 0..2 {
+            assert_eq!(walk_cost(&node.path), 1026);
+        }
+        let nested = Path {
+            root: 0,
+            steps: vec![
+                Step::Field(0),
+                Step::Key(Value::Rec(vec![
+                    Value::Var(1, vec![Value::Str("x".repeat(65)), Value::None]),
+                    Value::S(7),
+                ])),
+            ],
+        };
+        assert_eq!(walk_cost(&nested), 2 + 5 + 2);
     }
 
     const GAME: u32 = 0;

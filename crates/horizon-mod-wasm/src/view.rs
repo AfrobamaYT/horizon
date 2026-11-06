@@ -261,10 +261,19 @@ fn import<T>(
     output: impl FnOnce(&T) -> usize,
 ) -> wasmtime::Result<Result<T, wire::Refusal>> {
     contain(|| {
+        #[cfg(test)]
+        let fuel_before = wasmtime::AsContextMut::as_context_mut(&mut host)
+            .get_fuel()
+            .ok();
         charge(&mut host, 1 + cells)?;
         let result = f();
         if let Ok(value) = &result {
             charge(&mut host, output(value))?;
+        }
+        #[cfg(test)]
+        if let Some(fuel) = fuel_before {
+            let left = wasmtime::AsContextMut::as_context_mut(&mut host).get_fuel()?;
+            tests::FUEL_DEBITS.with_borrow_mut(|debits| debits.push(fuel - left));
         }
         Ok(result)
     })
@@ -283,6 +292,10 @@ fn wire_cost(cells: &[wire::Cell]) -> usize {
 
 fn node_cost(node: &Resource<wire::Node>) -> usize {
     current(|active| Ok(crate::frame::walk_cost(&active.node(node)?.path))).unwrap_or(0)
+}
+
+fn journal_cost() -> usize {
+    current(|active| Ok(active.frame.journal_len())).unwrap_or(0)
 }
 
 fn reached_cells(value: &wire::Reached) -> usize {
@@ -309,7 +322,7 @@ impl wire::HostNodeWithStore<State> for View {
     ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
         import(
             host,
-            node_cost(&node),
+            node_cost(&node).saturating_add(journal_cost()),
             || View.get(node, n),
             |v| wire_cost(v),
         )
@@ -367,7 +380,12 @@ impl wire::HostNodeWithStore<State> for View {
         host: wasmtime::component::Access<'_, State, Self>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
-        import(host, node_cost(&node), || View.read(node), |v| wire_cost(v))
+        import(
+            host,
+            node_cost(&node).saturating_add(journal_cost()),
+            || View.read(node),
+            |v| wire_cost(v),
+        )
     }
     fn drop(
         mut host: wasmtime::component::Access<'_, State, Self>,
@@ -404,7 +422,9 @@ impl wire::HostWithStore<State> for View {
             );
         import(
             host,
-            1000 + cells,
+            1000usize
+                .saturating_add(cells)
+                .saturating_add(journal_cost()),
             || View.call(declared, receiver, args),
             reached_cells,
         )
@@ -565,7 +585,40 @@ mod tests {
 
     use super::*;
     use crate::frame::Root;
+
+    thread_local! {
+        // Observe actual store debits, excluding fuel spent executing guest instructions.
+        pub(super) static FUEL_DEBITS: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn take_debits() -> Vec<u64> {
+        FUEL_DEBITS.with_borrow_mut(std::mem::take)
+    }
     use crate::frame::tests::{TABLE, frame, world};
+
+    #[test]
+    fn journal_cost_counts_pending_entries_and_resets_after_a_call_flushes_them() {
+        let mut game = world();
+        assert_eq!(journal_cost(), 0);
+        run(
+            frame(&mut game),
+            &[Resolved::Thunk(0), Resolved::Member { owner: 0, field: 1 }],
+            || {
+                let root = View.root(0).unwrap();
+                assert_eq!(journal_cost(), 0);
+                for _ in 0..4096 {
+                    View.set(borrow(&root), 1, vec![wire::Cell::B(true)])
+                        .unwrap();
+                }
+                assert_eq!(journal_cost(), 4096);
+                View.call(0, Some(borrow(&root)), vec![]).unwrap();
+                assert_eq!(journal_cost(), 0);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(journal_cost(), 0);
+    }
 
     #[test]
     fn live_nodes_and_wire_values_are_bounded() {
@@ -706,6 +759,14 @@ mod tests {
     }
 
     fn fixture_call(group: &FixtureGroup, game: &mut fixture::Game, message: &str) -> Option<()> {
+        fixture_result(group, game, message).ok()
+    }
+
+    fn fixture_result(
+        group: &FixtureGroup,
+        game: &mut fixture::Game,
+        message: &str,
+    ) -> Result<(), String> {
         use mod_api::__private::wasm_host::CallHost;
         use mod_points::internals::bindings::exports::horizon::mod_internals::raw_listeners::HostKind;
         let mut record = fixture::Record {
@@ -734,11 +795,14 @@ mod tests {
                 ],
             )
         };
-        group.exports.call(CallHost::None, |store| {
+        let mut error = None;
+        let result = group.exports.call(CallHost::None, |store| {
             run(frame, &group.declared, || {
                 group.fire.call(store, (0, HostKind::None))
             })
-        })
+            .inspect_err(|why| error = Some(format!("{why:#}")))
+        });
+        result.ok_or_else(|| error.unwrap_or_else(|| "call refused".into()))
     }
 
     fn fixture_game() -> fixture::Game {
@@ -746,7 +810,17 @@ mod tests {
             left: 1,
             right: 10,
             hidden: vec![],
+            refused_sets: 0,
+            reads: 0,
         }
+    }
+
+    fn assert_healthy_group_runs() {
+        let healthy = fixture_group_with_fuel(true);
+        let mut other = fixture_game();
+        assert_eq!(fixture_call(&healthy, &mut other, "before"), Some(()));
+        assert!(!healthy.exports.stopped());
+        assert_eq!((other.left, other.right), (8, 13));
     }
 
     fn refuses_group_but_not_another(mode: &str, expected_left: i64) {
@@ -786,21 +860,72 @@ mod tests {
     fn reused_large_string_exhausts_fuel_without_stopping_another_group() {
         let large = fixture_group_with_fuel(true);
         let small = fixture_group_with_fuel(true);
-        let healthy = fixture_group_with_fuel(true);
         let mut large_game = fixture_game();
         let mut small_game = fixture_game();
-        assert!(fixture_call(&large, &mut large_game, &"x".repeat(1_048_576)).is_none());
-        let _ = fixture_call(&small, &mut small_game, "x");
-        let large_calls = large_game.left - 1;
-        let small_calls = small_game.left - 1;
+        take_debits();
+        let error = fixture_result(&large, &mut large_game, &"x".repeat(1_048_576)).unwrap_err();
+        assert!(error.contains("internals fuel exhausted"), "{error}");
+        let large_debits = take_debits();
+        assert_eq!(fixture_result(&small, &mut small_game, "x"), Ok(()));
+        let small_debits = take_debits();
+        let large_debit = *large_debits.iter().max().unwrap();
+        let small_debit = *small_debits.iter().max().unwrap();
         assert!(
-            small_calls >= 1000 * (large_calls + 1),
-            "large={large_calls}, small={small_calls}"
+            large_debit >= 1000 * small_debit,
+            "large={large_debit}, small={small_debit}"
         );
+        // Each successful input charge reaches the wrong-type check, never a retained write.
+        assert!(large_game.refused_sets > 1);
+        assert_eq!(
+            large_debits.iter().filter(|&&n| n == large_debit).count(),
+            large_game.refused_sets
+        );
+        assert_eq!(small_game.refused_sets, 2000);
+        assert_eq!((large_game.left, large_game.right), (1, 10));
         assert!(large.exports.stopped());
-        let mut other = fixture_game();
-        assert_eq!(fixture_call(&healthy, &mut other, "before"), Some(()));
-        assert!(!healthy.exports.stopped());
+        assert_healthy_group_runs();
+    }
+
+    #[test]
+    #[ignore = "needs compiled internals fixture and std member"]
+    fn full_journal_get_charges_scans_and_exhausts_only_its_groups_fuel() {
+        let full = fixture_group_with_fuel(true);
+        let empty = fixture_group_with_fuel(true);
+        let mut full_game = fixture_game();
+        let mut empty_game = fixture_game();
+        take_debits();
+        let error = fixture_result(&full, &mut full_game, "full_journal").unwrap_err();
+        assert!(error.contains("internals fuel exhausted"), "{error}");
+        let full_debits = take_debits();
+        assert_eq!(
+            fixture_result(&empty, &mut empty_game, "empty_journal"),
+            Ok(())
+        );
+        let empty_debits = take_debits();
+        // Identify the measured get debits by their count, not guest instruction fuel.
+        let full_get = full_debits.iter().copied().max().unwrap();
+        let empty_get = *empty_debits.iter().find(|&&n| n == 2).unwrap();
+        assert_eq!(
+            empty_debits.iter().filter(|&&n| n == empty_get).count(),
+            2000
+        );
+        assert!(
+            full_get >= 1000 * empty_get,
+            "full={full_get}, empty={empty_get}"
+        );
+        assert!(full_game.reads > 1);
+        assert_eq!(
+            full_debits.iter().filter(|&&n| n == full_get).count(),
+            full_game.reads
+        );
+        assert_eq!(empty_game.reads, 2000);
+        assert_eq!(
+            (full_game.left, full_game.right),
+            (1, 10),
+            "trapping discards the filled journal"
+        );
+        assert!(full.exports.stopped());
+        assert_healthy_group_runs();
     }
 
     fn borrow(node: &Resource<wire::Node>) -> Resource<wire::Node> {

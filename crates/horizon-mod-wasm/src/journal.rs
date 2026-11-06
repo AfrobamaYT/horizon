@@ -79,6 +79,11 @@ impl<V: PartialEq> Journal<V> {
         self.writes.iter().any(|(path, _, _)| under(path))
     }
 
+    /// The pending writes, including repeated writes to the same field.
+    pub fn len(&self) -> usize {
+        self.writes.len()
+    }
+
     /// Whether the call wrote nothing yet.
     pub fn is_empty(&self) -> bool {
         self.writes.is_empty()

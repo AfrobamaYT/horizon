@@ -30,6 +30,8 @@ fn a_generated_guest_view_reads_writes_calls_and_commits_a_raw_listener() {
         left: 1,
         right: 10,
         hidden: vec![99],
+        refused_sets: 0,
+        reads: 0,
     };
     let mut raw = Record {
         message: "before".into(),
@@ -49,7 +51,9 @@ fn a_generated_guest_view_reads_writes_calls_and_commits_a_raw_listener() {
         Game {
             left: 8,
             right: 13,
-            hidden: vec![99]
+            hidden: vec![99],
+            refused_sets: 0,
+            reads: 1,
         }
     );
     assert_eq!(raw.message, "proof21");

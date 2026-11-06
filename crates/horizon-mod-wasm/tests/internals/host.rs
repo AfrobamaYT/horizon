@@ -7,6 +7,8 @@ pub struct Game {
     pub left: i64,
     pub right: i64,
     pub hidden: Vec<i32>,
+    pub refused_sets: usize,
+    pub reads: usize,
 }
 pub struct Record {
     pub message: String,
@@ -17,10 +19,17 @@ unsafe fn game(ptr: *mut (), writable: bool, op: Op<'_>) -> Result<Reply, Refusa
     // SAFETY: the synthetic point below supplies the live, exclusively borrowed fixture Game.
     let game = unsafe { &mut *ptr.cast::<Game>() };
     match op {
+        Op::Check(0, Value::Str(_)) => {
+            game.refused_sets += 1;
+            Err(I::not_here("left is i64, not String"))
+        }
         Op::Check(0, Value::S(_)) => Ok(Reply::Done),
         Op::Get(0) => Ok(Reply::Value(Value::S(game.left))),
         Op::Check(1, Value::S(_)) => Ok(Reply::Done),
-        Op::Get(1) => Ok(Reply::Value(Value::S(game.right))),
+        Op::Get(1) => {
+            game.reads += 1;
+            Ok(Reply::Value(Value::S(game.right)))
+        }
         Op::Set(0, Value::S(n)) if writable => {
             assert_ne!(n, -777, "fixture final journal apply panic");
             game.left = n;

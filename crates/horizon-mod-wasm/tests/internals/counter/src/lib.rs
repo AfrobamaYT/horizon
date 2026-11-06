@@ -12,9 +12,35 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
     let game = game.expect("a method receiver");
     let message = raw.message().unwrap();
     if message.starts_with('x') {
+        use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view::Cell};
+        // Lower once. The WIT setter borrows these cells, with no per-iteration string clone.
+        let small = message.len() == 1;
+        let cells = [Cell::Str(*message)];
+        let node = game.node();
+        if small {
+            for _ in 0..2000 {
+                assert!(node.set(0, &cells).is_err());
+            }
+            return;
+        }
+        loop {
+            // `left` is i64: refusal precedes retention, so journal budgets cannot stop this.
+            assert!(node.set(0, &cells).is_err());
+        }
+    }
+    if matches!(message.as_str(), "full_journal" | "empty_journal") {
+        use mod_internals::runtime::AsNode;
+        if message.as_str() == "full_journal" {
+            for _ in 0..4096 {
+                game.set_left(42).unwrap();
+            }
+            loop {
+                // Miss all pending writes, rather than finding the most recent left write.
+                let _ = game.node().get(1).unwrap();
+            }
+        }
         for _ in 0..2000 {
-            raw.set_message(message.clone()).unwrap();
-            game.add(1).unwrap();
+            let _ = game.node().get(1).unwrap();
         }
         return;
     }
