@@ -268,7 +268,6 @@ impl BlockEntities {
         }
     }
     fn new_generation(&mut self, pos: Pos) {
-        use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let generation = NEXT
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
