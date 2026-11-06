@@ -194,6 +194,7 @@ pub fn check_access(operation: &str, access: LoadAccess) {
             | "block_key_id"
             | "item_key_id"
             | "effect_key_id"
+            | "dimension_key_id"
             | "block_states_of"
             | "block_item"
             | "block_in_tag"

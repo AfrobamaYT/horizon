@@ -48,7 +48,7 @@ pub(super) fn check<'a>(
     let site = find(sites, injection).ok_or_else(|| Error::NotSite {
         mod_id: manifest.id.clone(),
         line: format!(
-            "{} | {} | {}",
+            "{} | {} | {} |",
             injection.target.as_deref().expect("target"),
             injection.selector.as_deref().expect("selector"),
             injection.ordinal.unwrap_or(0)
