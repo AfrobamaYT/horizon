@@ -25,6 +25,42 @@ use horizon_client::{
 use horizon_world::registry::BlockStateId;
 use mod_api::{Identifier, ModelError, ModelPart, ModelRef};
 
+/// Atlas placements for standalone faces, indexed by their existing model slot.
+/// Geometry remains in the generation's baked catalog and is not duplicated.
+pub(super) struct StandaloneSprites {
+    generation: u64,
+    slots: std::collections::HashMap<u32, Vec<Option<Rect>>>,
+}
+
+impl StandaloneSprites {
+    pub(super) fn new(pack: &super::PackResources, gui: &super::UiResources) -> Self {
+        let catalog = &pack.render.model_catalog;
+        let slots = catalog
+            .standalone_slots()
+            .map(|slot| {
+                let faces = &catalog
+                    .model_by_slot(slot)
+                    .expect("standalone slot exists")
+                    .faces;
+                let sprites = faces
+                    .iter()
+                    .map(|face| {
+                        pack.layer_names
+                            .get(&face.layer)
+                            .and_then(|name| gui.atlas.sprites.get(name))
+                            .copied()
+                    })
+                    .collect();
+                (slot, sprites)
+            })
+            .collect();
+        Self {
+            generation: pack.render.generation,
+            slots,
+        }
+    }
+}
+
 /// `BlockEntityRenderer.getViewDistance`'s default, in blocks.
 const VIEW_DISTANCE: f64 = 64.0;
 
@@ -830,11 +866,31 @@ impl Game<'_> {
         model: ModelRef,
         tint: u32,
     ) -> Result<(), ModelError> {
+        use mod_api::__private::game::Fields;
         let baked = self.pack.render.resolve_model(model)?;
-        let pose = draw.pose();
+        let fields = model.fields();
+        if fields.generation != self.standalone_sprites.generation {
+            return Err(ModelError::StaleModel);
+        }
+        let sprites = self
+            .standalone_sprites
+            .slots
+            .get(&fields.slot)
+            .ok_or(ModelError::UnknownModel)?;
+        let faces = baked
+            .faces
+            .iter()
+            .zip(sprites)
+            .filter_map(|(face, sprite)| sprite.map(|sprite| (&face.quad, sprite)));
         let light = draw.light;
-        let tint = |index: i32| (index >= 0).then_some(tint & 0xFF_FFFF);
-        self.baked_model_vertices([baked], pose, |_| light, true, tint, &mut draw.vertices);
+        super::minecarts::emit_model_faces(
+            faces,
+            draw.pose(),
+            |_| light,
+            true,
+            |index| (index >= 0).then_some(tint & 0xFF_FFFF),
+            &mut draw.vertices,
+        );
         Ok(())
     }
 
@@ -1035,6 +1091,11 @@ mod tests {
                 Err(ModelError::UnknownModel)
             );
             let mut surface = draw();
+            surface.poses.push(Mat4::from_scale_rotation_translation(
+                Vec3::new(2.0, 0.5, 1.5),
+                Quat::from_rotation_y(0.7) * Quat::from_rotation_x(0.3),
+                Vec3::new(8.0, -4.0, 3.0),
+            ));
             surface.light = 0x7030;
             // Compare the consumer with the existing shared emitter, under the same pose,
             // tint, atlas and light: handle resolution must not change any vertex bytes.
@@ -1095,6 +1156,7 @@ mod tests {
                 .unwrap();
             assert_ne!(replacement.generation, game.pack.render.generation);
             game.pack.render = std::sync::Arc::new(replacement);
+            game.standalone_sprites = StandaloneSprites::new(&game.pack, &game.gui);
             assert_eq!(
                 game.native_draw_model(&mut surface, model, 0x123456),
                 Err(ModelError::StaleModel)
