@@ -13,6 +13,8 @@ mod glint_atlas;
 mod glint_tests;
 pub mod gui;
 mod special;
+#[cfg(test)]
+mod tint_tests;
 
 use crate::{
     block_entity_render::{ModelPart, diffuse},

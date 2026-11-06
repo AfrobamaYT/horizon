@@ -293,6 +293,16 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
 }
+/// The native mods' item tint sources (`native_register_item_tint_sources`), kept once at
+/// start, before resources load, so `tints` entries on them read the mod's colour.
+pub(super) fn register_item_tint_sources(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut sources = Vec::new();
+    Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
+    horizon_assets::item_model::register_tint_sources(sources);
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
