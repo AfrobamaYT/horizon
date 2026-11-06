@@ -708,7 +708,11 @@ mod tests {
         m.horizontal_collision = true;
         near(f64::from(jump_power(&m, 1.0)), 0.5);
         m.attrs.jump_strength = 0.84;
-        m.extra.effects.push(("minecraft:jump_boost", 100, 1));
+        m.extra.effects.push(crate::mobs::StoredEffect::new(
+            "minecraft:jump_boost",
+            100,
+            1,
+        ));
         near(f64::from(jump_power(&m, 0.5)), 0.7);
         apply_jump(&mut m, 0.2);
         near(m.velocity.z, 0.1 / 3.25_f64.sqrt());

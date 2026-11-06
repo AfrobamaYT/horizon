@@ -668,16 +668,68 @@ impl syn::parse::Parse for IfInstalled {
     }
 }
 
-/// `#[wasm(via = Form)]` on a `mod_api` type, or on the `pub use` that exports another crate's:
-/// the type crosses to wasm mods as `Form`, through `From<&Type> for Form` and
-/// `TryFrom<Form> for Type`, which live with the type. The bindings generator reads the
-/// attribute; this checks the two conversions exist.
+/// Declares how a plain-data type crosses the generated wasm interface.
+///
+/// `#[wasm(via = Form)]` on a type or its re-export checks `From<&Type> for Form`
+/// and `TryFrom<Form> for Type`. `#[wasm(host_constructor = method)]` on an owned
+/// tuple struct makes incoming host lifts call that checked constructor with the
+/// lifted fields instead of constructing the tuple directly. It returns `Result<Self, E>`
+/// with a displayable refusal. Guest lifts remain structural: the host owns validation.
 #[proc_macro_attribute]
 pub fn wasm(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let item = parse_macro_input!(input as syn::Item);
-    let via = match syn::parse::<WasmVia>(attribute) {
-        Ok(via) => via.form,
-        Err(e) => return e.to_compile_error().into(),
+    let rule = parse_macro_input!(attribute as WasmRule);
+    if let WasmRule::HostConstructor(constructor) = rule {
+        let syn::Item::Struct(record) = &item else {
+            return syn::Error::new_spanned(
+                item,
+                "host_constructor requires an owned tuple struct",
+            )
+            .to_compile_error()
+            .into();
+        };
+        let syn::Fields::Unnamed(fields) = &record.fields else {
+            return syn::Error::new_spanned(
+                item,
+                "host_constructor requires an owned tuple struct",
+            )
+            .to_compile_error()
+            .into();
+        };
+        if !record.generics.params.is_empty() {
+            return syn::Error::new_spanned(
+                item,
+                "host_constructor requires an owned tuple struct",
+            )
+            .to_compile_error()
+            .into();
+        }
+        let ty = &record.ident;
+        let params: Vec<_> = fields
+            .unnamed
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let name = format_ident!("p{i}");
+                let ty = &field.ty;
+                quote!(#name: #ty)
+            })
+            .collect();
+        let args: Vec<_> = (0..params.len()).map(|i| format_ident!("p{i}")).collect();
+        return quote! {
+            #item
+            const _: () = {
+                fn checked_constructor(#(#params),*) -> ::core::result::Result<#ty, ::std::string::String> {
+                    #ty::#constructor(#(#args),*).map_err(|error| error.to_string())
+                }
+                let _ = #ty::#constructor;
+                let _ = checked_constructor;
+            };
+        }
+        .into();
+    }
+    let WasmRule::Via(via) = rule else {
+        unreachable!()
     };
     let ty = match &item {
         syn::Item::Struct(item) => item.ident.clone(),
@@ -710,21 +762,24 @@ pub fn wasm(attribute: TokenStream, input: TokenStream) -> TokenStream {
     .into()
 }
 
-/// `via = Form`.
-struct WasmVia {
-    form: syn::Type,
+/// The single conversion rule on a type declaration.
+enum WasmRule {
+    Via(syn::Type),
+    HostConstructor(syn::Ident),
 }
 
-impl syn::parse::Parse for WasmVia {
+impl syn::parse::Parse for WasmRule {
     fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
         let key: syn::Ident = input.parse()?;
-        if key != "via" {
-            return Err(syn::Error::new(key.span(), "expected `via = Form`"));
-        }
         input.parse::<syn::Token![=]>()?;
-        Ok(Self {
-            form: input.parse()?,
-        })
+        match key.to_string().as_str() {
+            "via" => Ok(Self::Via(input.parse()?)),
+            "host_constructor" => Ok(Self::HostConstructor(input.parse()?)),
+            _ => Err(syn::Error::new(
+                key.span(),
+                "expected via or host_constructor",
+            )),
+        }
     }
 }
 

@@ -590,6 +590,9 @@ fn server_services_preserve_identity_and_message_delivery() {
         );
         let a = players[0];
         let b = players[1];
+        let host: &dyn ServerHost = game;
+        assert_eq!(host.players().player_by_name("GUEST12"), Some(a));
+        assert_eq!(host.players().player_by_name("missing"), None);
         assert!(game.players().acting_player().is_none());
         assert_eq!(a.name(game).as_deref(), Some("guest12"));
         assert_eq!(a.permission_level(game), Some(3));
@@ -703,6 +706,7 @@ fn canonical_permissions_preserve_owner_and_fake_player_reads() {
         let level = game.native_level(game.dim.id()).unwrap();
         let fake = game.native_fake_player(level, 1234, "machine").unwrap();
         assert!(!game.players().server_players().contains(&fake));
+        assert_eq!(game.players().player_by_name("machine"), None);
         assert_eq!(fake.permission_level(game), Some(0));
         assert_eq!(
             fake.address(game),
@@ -798,7 +802,7 @@ fn tick_advancement_notice_precedes_recipe_reward() {
             guest.advancements_loaded = reload;
         }
         host.hub.mods_loaded = reload;
-        host.hub.reload_resources(Arc::new(sync));
+        game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners));
         if reload {
             game.run_native_advancement_grants();
         } else {
