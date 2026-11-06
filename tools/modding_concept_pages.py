@@ -96,9 +96,9 @@ def validate(text, path, src, contents):
         assert not unquote(url.path).startswith("/"), f"{path}: root-relative link {match[2]}"
         target = (src / path).parent / unquote(url.path) if url.path else src / path
         target = target.resolve()
-        assert target.is_file(), f"{path}: missing link target {match[2]}"
+        assert target in contents or target.is_file(), f"{path}: missing link target {match[2]}"
         if url.fragment and target.suffix == ".md":
-            body = contents.get(target, target.read_text())
+            body = contents[target] if target in contents else target.read_text()
             assert unquote(url.fragment) in {a for _, a in headings(body)}, f"{path}: missing anchor {match[2]}"
     for match in INCLUDE.finditer(text):
         name, _, anchor = match[2].partition(":")
@@ -109,7 +109,18 @@ def validate(text, path, src, contents):
 
 
 def expand(book, src):
-    contents = {(src / g).resolve(): aggregate(src, g) for g in GROUPS}
+    contents = {}
+
+    def collect(items):
+        for item in items:
+            if "Chapter" in item:
+                chapter = item["Chapter"]
+                if chapter["path"]:
+                    contents[(src / chapter["path"]).resolve()] = chapter["content"]
+                collect(chapter["sub_items"])
+
+    collect(book["sections"])
+    contents.update({(src / g).resolve(): aggregate(src, g) for g in GROUPS})
     seen = set()
 
     def visit(items):
@@ -155,6 +166,7 @@ class HtmlLinks(HTMLParser):
 
 def check_html(directory, src=SRC):
     pages = [p for g in GROUPS for p in [g, *(p for p, _, _ in fragments(src, g))]]
+    pages.append("reference/hook-notes.md")
     for page in pages:
         path = directory / Path(page).with_suffix(".html")
         html = HtmlLinks(path.read_text())

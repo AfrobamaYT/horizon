@@ -10,6 +10,11 @@ pub trait Hooks {
     /// window's own shortcuts (fullscreen, screenshot, debug keys), and only with no screen open;
     /// not for a controller, whose presses go straight to the mappings. No NeoForge counterpart.
     /// Client-side.
-    #[hook(side = "client", contract = "cancel", out = "canceled")]
+    #[hook(
+        side = "client",
+        contract = "cancel",
+        out = "canceled",
+        neoforge = "InputEvent.InteractionKeyMappingTriggered, InputEvent.Key"
+    )]
     fn key_mapping_pre();
 }

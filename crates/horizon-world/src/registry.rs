@@ -3,13 +3,16 @@
 mod facts;
 mod json;
 pub(crate) mod snapshot;
-use crate::{DATA_VERSION, chunk::BlockState, compression::invalid, nbt::Tag};
 pub use json::BlockStateJsonCodec;
 pub(crate) use json::java_integer;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     hash::{DefaultHasher, Hash, Hasher},
     io,
+};
+use {
+    crate::{DATA_VERSION, chunk::BlockState, compression::invalid},
+    horizon_core::nbt::Tag,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -289,7 +292,7 @@ impl<'r> BlockTableFile<'r> {
     /// Reads `bytes`, checking every `states` list of the root compound and
     /// of the compounds directly under it against `registry`.
     pub fn read(bytes: &[u8], registry: &'r BlockRegistry) -> io::Result<Self> {
-        let mut visit = |states: &mut crate::nbt::ListElements<'_, '_, '_>| {
+        let mut visit = |states: &mut horizon_core::nbt::ListElements<'_, '_, '_>| {
             if states.len() != registry.len() {
                 return Err(states.error("table registry size mismatch"));
             }
@@ -304,9 +307,9 @@ impl<'r> BlockTableFile<'r> {
             }
             Ok(())
         };
-        let (named, _) = crate::nbt::read_named_streaming(
+        let (named, _) = horizon_core::nbt::read_named_streaming(
             bytes,
-            crate::nbt::Limits::tables(),
+            horizon_core::nbt::Limits::tables(),
             "states",
             &mut visit,
         )

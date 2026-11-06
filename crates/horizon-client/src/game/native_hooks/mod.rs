@@ -1,7 +1,6 @@
 //! Native hook implementations, split by catalog area.
 //!
 //! Hook documentation and contract versions live in the catalog, not a shared changelog.
-//! The numbered history is frozen in the modding book's legacy API history reference.
 //!
 //! Native mods are built against an exact game revision, rather than a hook API revision.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
@@ -60,13 +59,6 @@ use horizon_core::{
     ticks::{ScheduleResult, TickPriority},
 };
 use horizon_world::level::{BonemealCheck, PlaceContext};
-use horizon_world::{
-    consumable::UseAnimation,
-    fluid::FluidKind,
-    level::{BlockId, LevelAccess, PlacementContext, Ticks},
-    nbt::{Compound, Tag},
-    registry::{BlockRegistry, BlockStateId},
-};
 use mod_api::__private::game::IngredientTest;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
@@ -102,6 +94,17 @@ use std::{
     time::Duration,
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
+use {
+    horizon_core::{
+        nbt::{Compound, Tag},
+        use_animation::UseAnimation,
+    },
+    horizon_world::{
+        fluid::FluidKind,
+        level::{BlockId, LevelAccess, PlacementContext, Ticks},
+        registry::{BlockRegistry, BlockStateId},
+    },
+};
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
 include!("shared.rs");

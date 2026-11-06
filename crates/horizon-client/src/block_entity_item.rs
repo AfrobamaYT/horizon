@@ -8,7 +8,7 @@
 //! `collectImplicitComponents`) leaves its NBT; the rest goes to
 //! `minecraft:block_entity_data`, tagged with the type's id.
 use crate::block_entity_nbt::{self, canonical};
-use horizon_world::nbt::{Compound, JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 
 pub const BLOCK_ENTITY_DATA: &str = "minecraft:block_entity_data";
 
@@ -482,7 +482,7 @@ mod tests {
     use super::*;
 
     fn snbt(text: &str) -> Tag {
-        horizon_world::nbt::parse_snbt(text).expect("snbt").0
+        horizon_core::nbt::parse_snbt(text).expect("snbt").0
     }
     fn saved(text: &str) -> Tag {
         canonical(&snbt(text)).expect("known type")

@@ -42,9 +42,9 @@ impl PrimedTnt {
     pub(super) fn block_state_nbt(
         &self,
         registry: &horizon_world::registry::BlockRegistry,
-    ) -> horizon_world::nbt::Tag {
+    ) -> horizon_core::nbt::Tag {
         self.block_state.map_or_else(
-            || horizon_world::nbt::Tag::String("minecraft:tnt".into()),
+            || horizon_core::nbt::Tag::String("minecraft:tnt".into()),
             |state| horizon_client::entity_nbt::state_to_nbt(registry, state),
         )
     }
@@ -330,7 +330,7 @@ impl Game<'_> {
         Ok(())
     }
     /// The saved compound of primed TNT `i`: chunk saves, `/data get`, portals.
-    pub(super) fn tnt_nbt(&mut self, i: usize) -> horizon_world::nbt::Tag {
+    pub(super) fn tnt_nbt(&mut self, i: usize) -> horizon_core::nbt::Tag {
         let id = self.tnts[i].id;
         let uuid = self.uuid_for(id);
         let owner = self.tnt_owner_uuid(self.tnts[i].owner, self.tnts[i].guest);
@@ -604,9 +604,9 @@ mod tests {
 
     #[test]
     fn saved_block_state_follows_the_model_instead_of_raw_input() {
-        use horizon_world::{
-            nbt::Tag,
-            registry::{BlockRegistry, BlockStateId},
+        use {
+            horizon_core::nbt::Tag,
+            horizon_world::registry::{BlockRegistry, BlockStateId},
         };
         let unstable = Tag::compound([
             ("id", Tag::String("minecraft:tnt".into())),
@@ -1233,6 +1233,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,

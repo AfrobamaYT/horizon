@@ -2,7 +2,7 @@
 use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 use super::AttachmentEntry;
-use crate::nbt::JavaString;
+use horizon_core::nbt::JavaString;
 
 /// An already-resolved attachment namespace and name.
 pub type AttachmentKey = (JavaString, JavaString);
@@ -279,7 +279,7 @@ mod tests {
     use crate::attachments::{
         AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
     };
-    use crate::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     static VALUE: AttachmentType<i32> = AttachmentType {
         namespace: "test",

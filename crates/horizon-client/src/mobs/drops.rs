@@ -815,7 +815,7 @@ mod death_loot_table_tests {
             "entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]}"#;
         let packs = [("loot_table/pack:boss".to_owned(), vec![table.to_vec()])];
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let loot = LootData::load(&root, &PackOverlay { files: &packs }, &defaults).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::new(&packs), &defaults).unwrap();
         let death = Death {
             loot: &loot,
             damage: None,
@@ -860,7 +860,7 @@ mod death_loot_table_tests {
             return;
         }
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let loot = LootData::load(&root, &PackOverlay { files: &[] }, &defaults).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::new(&[]), &defaults).unwrap();
         let death = Death {
             loot: &loot,
             damage: None,

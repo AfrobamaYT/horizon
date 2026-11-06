@@ -6,8 +6,8 @@
 use super::respawn_anchor::RespawnConfig;
 use super::server_travel::LevelTeleport;
 use super::{Dim, Game};
+use horizon_core::dimension::Dimension as LevelDimension;
 use horizon_core::geometry::Vec3;
-use horizon_world::level::Dimension as LevelDimension;
 
 /// Where a respawn ends, as the server found it: a level, a point and the
 /// player's facing.

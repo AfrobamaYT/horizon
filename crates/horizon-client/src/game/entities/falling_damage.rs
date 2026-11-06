@@ -141,11 +141,11 @@ impl Game<'_> {
                 self.world.block_entities.insert(key, entity);
                 // FallingBlockEntity.tick copies each supplied field over the
                 // new block entity's saved defaults before loadWithComponents.
-                if let Some(horizon_world::nbt::Tag::Compound(carried)) = block
+                if let Some(horizon_core::nbt::Tag::Compound(carried)) = block
                     .saved
                     .as_ref()
                     .and_then(|saved| saved.1.get("TileEntityData"))
-                    && let horizon_world::nbt::Tag::Compound(fields) = &mut tag
+                    && let horizon_core::nbt::Tag::Compound(fields) = &mut tag
                 {
                     fields.extend(carried.clone());
                     self.load_block_entity_nbt(pos, &horizon_client::snbt::to_snbt(&tag));

@@ -13,13 +13,13 @@ use horizon_client::{
     text_display::{display_data, text_display_data},
 };
 use horizon_protocol::entity_data::Value;
-use horizon_world::{
-    nbt::{Compound, Tag},
-    registry::BlockStateId,
-};
 use mod_api::{
     DisplayRef, EntityRef, NativeBillboard, NativeDisplayKind, NativeItemDisplayContext,
     NativeTextAlignment, NativeTransformation, Text,
+};
+use {
+    horizon_core::nbt::{Compound, Tag},
+    horizon_world::registry::BlockStateId,
 };
 
 /// The entity data entry `id` of a display's compound: what it sets, else the default.

@@ -2,7 +2,7 @@
 //! lenient mode, `GsonHelper.toStableString`, and `JsonOps.convertTo` into NBT.
 //! Strings stay UTF-16 like Java's; numbers keep their literal like Gson's
 //! `LazilyParsedNumber`.
-use crate::nbt::{Compound, JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Json {

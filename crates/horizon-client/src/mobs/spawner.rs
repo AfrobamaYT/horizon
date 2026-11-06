@@ -14,8 +14,8 @@ use super::{
 };
 use crate::chunk::block_entity::Next;
 pub use crate::chunk::block_entity::{CustomSpawnRules, SpawnData, Spawner};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_core::{geometry::Aabb, geometry::Vec3, random::RandomSource};
-use horizon_world::nbt::{Compound, JavaString, Tag};
 
 /// `SpawnData`'s codec and rules, over the data in `chunk::block_entity`.
 pub trait SpawnDataExt: Sized {
@@ -732,7 +732,7 @@ mod tests {
     use horizon_core::random::LegacyRandom;
 
     fn tag(snbt: &str) -> Tag {
-        horizon_world::nbt::parse_snbt(snbt).expect("snbt").0
+        horizon_core::nbt::parse_snbt(snbt).expect("snbt").0
     }
 
     #[test]

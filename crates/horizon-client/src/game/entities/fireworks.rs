@@ -92,8 +92,8 @@ impl Rocket {
         &self,
         uuid: [i32; 4],
         player: Option<[i32; 4]>,
-        raw: Option<&horizon_world::nbt::Tag>,
-    ) -> horizon_world::nbt::Tag {
+        raw: Option<&horizon_core::nbt::Tag>,
+    ) -> horizon_core::nbt::Tag {
         horizon_client::entity_nbt::firework_rocket_to_nbt(
             &horizon_client::entity_nbt::RocketSave {
                 rotation: self.rotation,
@@ -794,6 +794,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
