@@ -6,7 +6,7 @@
 //! packs, a mod's saved settings) are copied in once, when it is installed.
 use super::{fetch, index, install_version, local, newest, Index};
 use crate::browser::{java, FileRef};
-use horizon_mods::{index as idx, modpack::Modpack};
+use horizon_mod_package::{index as idx, modpack::Modpack};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -204,7 +204,7 @@ mod tests {
     /// [`registry`] with the pack at `pack_version`.
     fn registry_at(dir: &Path, pack_version: &str, on: bool, extra: &str) -> Index {
         let hmod_src = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../crates/horizon-mods/tests/index/coords_hud-0.1.0.hmod");
+            .join("../crates/horizon-mod-package/tests/index/coords_hud-0.1.0.hmod");
         let hmod = dir.join("coords_hud-0.1.0.hmod");
         fs::copy(hmod_src, &hmod).unwrap();
         let hmod_sha = idx::sha256_file(&hmod).unwrap();

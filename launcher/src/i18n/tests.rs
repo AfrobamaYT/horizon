@@ -56,7 +56,7 @@ fn strings() -> (BTreeSet<String>, BTreeSet<String>) {
         &mut files,
     );
     sources(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/horizon-mods/src"),
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/horizon-mod-package/src"),
         &mut files,
     );
     let (mut asked, mut all) = (BTreeSet::new(), BTreeSet::new());
