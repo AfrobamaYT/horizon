@@ -45,9 +45,21 @@ pub fn listened(hook: HookId) -> bool {
 pub use crate::generated::calls::*;
 pub use crate::part_table::{
     HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, block_entity_types,
-    block_listens, game_rule_registry, has_part_hook, has_scoped_hook, install_parts,
-    mark_game_thread, parts, resolve_parts,
+    block_listens, entity_parts, game_rule_bool_slot, game_rule_registry, has_entity_parts,
+    has_part_hook, has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
 };
+/// A read backend wrapper for a host the game builds narrowed: the mob tick's
+/// goal view hands itself out as its own backend (#1077).
+pub fn backend_ref(inner: &dyn Backend) -> crate::BackendRef<'_> {
+    crate::BackendRef::of(inner)
+}
+/// Call `read` on `host`'s real backend, or `None` where the host has none:
+/// the mob tick's goal view forwards the level's own reads — blocks, loaded
+/// chunks, time, height, weather, block entities — through it (#1077); the
+/// entity data its snapshot does not carry stays refused.
+pub fn backend_read<R>(host: &dyn crate::Host, read: impl FnOnce(&dyn Backend) -> R) -> Option<R> {
+    host.backend().map(|backend| read(backend.open()))
+}
 pub use crate::phase::{
     LoadAccess, ModPhase, PhaseError, PhaseOwner, check_access, current_phase, install_packages,
 };
@@ -74,6 +86,12 @@ pub fn mods() -> &'static [ModEntry] {
     crate::mods()
 }
 
+/// Actual installed code identities, including mods with no hook subscriptions.
+/// The engine uses this dispatch inventory to apply its saved code switches.
+pub fn installed_code_ids() -> impl Iterator<Item = &'static str> {
+    crate::mods().iter().map(|entry| entry.id)
+}
+
 /// The startup package inventory at an owning engine load boundary.
 pub fn loaded_mods() -> LoadedMods {
     LoadedMods::new()
@@ -90,6 +108,10 @@ pub mod reload {
 
 /// The structs the game fills for its hooks, each turned into the API's own with `From`.
 pub mod built {
+    /// Wrap a slot in the model store's published generation.
+    pub fn model_ref(generation: u64, slot: u32) -> crate::ModelRef {
+        crate::ModelRef(generation, slot)
+    }
     pub use crate::built::{
         ChannelRef, NativeActiveEffect, NativeBlockClick, NativeExplosionStart, NativeItemClick,
         NativeItemFished, NativeLifecycleContext, NativeLootDrops, NativePlayerAbilities,
@@ -184,6 +206,20 @@ pub mod game {
         enchantments: ItemEnchantments,
     ) -> (Vec<(Identifier, u32)>, bool) {
         (enchantments.entries, enchantments.changed)
+    }
+
+    pub struct ModelRefFields {
+        pub generation: u64,
+        pub slot: u32,
+    }
+    impl Fields for ModelRef {
+        type Fields<'a> = ModelRefFields;
+        fn fields(&self) -> ModelRefFields {
+            ModelRefFields {
+                generation: self.0,
+                slot: self.1,
+            }
+        }
     }
 
     pub struct BlockEntityRefFields {
@@ -438,7 +474,26 @@ pub use crate::registry_keys::{
     block_entity_type_key, block_entity_type_name, block_id as block_key_id,
     effect_id as effect_key_id, item_id as item_key_id,
 };
-pub use crate::registry_keys::{effect_key, fluid_id, fluid_key, fluid_key_utf16, resolve_fluids};
+pub use crate::registry_keys::{
+    effect_key, fluid_id, fluid_key, fluid_key_utf16, resolve_fluids, world_fluid_key,
+};
+
+/// Construct a fluid state from an engine-owned state and its load-resolved key.
+pub fn engine_fluid_state(
+    fluid: crate::FluidKey,
+    state: horizon_world::fluid::FluidState,
+) -> crate::FluidState {
+    debug_assert_eq!(
+        state.amount() == 0,
+        state.kind() == horizon_world::fluid::FluidKind::Empty
+    );
+    crate::FluidState {
+        fluid,
+        amount: state.amount(),
+        falling: state.falling(),
+        source: state.is_source(),
+    }
+}
 pub use crate::unresolved_fluid::{
     identity_name as fluid_identity_name, intern as intern_unresolved_fluid,
     lookup as lookup_unresolved_fluid, lookup_utf16 as lookup_unresolved_fluid_utf16,

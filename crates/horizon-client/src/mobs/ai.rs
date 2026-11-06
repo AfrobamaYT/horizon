@@ -105,6 +105,12 @@ impl Ai {
         self.last_home_position = self.home_position();
         self.home = None;
     }
+    /// `Mob.isWithinRestriction(pos)`: an unrestricted mob is within
+    /// everywhere.
+    pub fn is_within_home(&self, p: [i32; 3]) -> bool {
+        self.home
+            .is_none_or(|(c, r)| super::goals::within_home(c, r, p))
+    }
 }
 impl Mob {
     /// `LivingEntity.getCurrentSwingDuration`: 6 ticks unless a swing set its own.
@@ -368,6 +374,23 @@ fn constructor_maluses(m: &mut Mob) {
         _ => {}
     }
 }
+/// Brain-backed vanilla `getTarget` overrides. Piglins and hoglins use
+/// Horizon's `ai.target` as the stand-in for their brain memory.
+pub fn brain_target(mob: &Mob) -> Option<Option<Who>> {
+    Some(match mob.species() {
+        Species::Warden => super::warden::brain_target(mob),
+        Species::Breeze | Species::Creaking => super::monster_brain::attack_target(mob),
+        Species::Axolotl => mob
+            .extra
+            .animal_brain
+            .as_ref()
+            .and_then(|b| b.mem.attack_target.value()),
+        Species::Frog => super::frog::attack_target(mob),
+        Species::Piglin | Species::PiglinBrute | Species::Hoglin | Species::Zoglin => mob.ai.target,
+        _ => return None,
+    })
+}
+
 pub fn register(m: &mut Mob) {
     constructor_maluses(m);
     // Raider subclasses call super.registerGoals() first.

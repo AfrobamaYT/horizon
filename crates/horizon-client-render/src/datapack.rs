@@ -1,6 +1,7 @@
 //! Data packs (`<world>/datapacks`: folders and zips with `pack.mcmeta`) and
 //! the parts of them commands use: `.mcfunction` functions (with macros and
 //! line continuation), function tags and predicates.
+use crate::resource_source::ResourceSource;
 use crate::zip::Zip;
 use horizon_world::{
     nbt::Tag,
@@ -15,49 +16,25 @@ use std::{
 pub struct DataPack {
     /// `file/<name>` in `/datapack` and level.dat.
     pub id: String,
-    source: Source,
-}
-enum Source {
-    Dir(PathBuf),
-    Zip(Box<Zip>),
+    source: ResourceSource,
 }
 impl DataPack {
+    /// A named resource layer, retaining its open source for lazy reads.
+    pub fn from_source(id: String, source: ResourceSource) -> Self {
+        Self { id, source }
+    }
+    pub fn source(&self) -> &ResourceSource {
+        &self.source
+    }
     /// Every file path under `prefix` (relative to the pack root).
     pub fn list(&self, prefix: &str) -> Vec<String> {
-        match &self.source {
-            Source::Zip(z) => z
-                .names()
-                .filter(|n| n.starts_with(prefix) && crate::packs::stays_inside(n))
-                .map(str::to_owned)
-                .collect(),
-            Source::Dir(root) => {
-                let mut out = Vec::new();
-                walk(root, &root.join(prefix), &mut out);
-                out.retain(|name| crate::packs::stays_inside(name));
-                out
-            }
-        }
+        self.source.list(prefix)
     }
     /// The files of `<top>/<namespace>/<kind>/` for each kind, in the order
     /// `list("<top>/")` gives them. A folder pack walks only those folders:
     /// the built-in pack holds about 10,000 other data files.
     pub fn list_under(&self, top: &str, kinds: &[&str]) -> Vec<String> {
-        debug_assert!(kinds.is_sorted(), "kinds in walk order");
-        let Source::Dir(root) = &self.source else {
-            return self.list(&format!("{top}/"));
-        };
-        let Ok(entries) = std::fs::read_dir(root.join(top)) else {
-            return Vec::new();
-        };
-        let mut namespaces: Vec<_> = entries.flatten().map(|e| e.path()).collect();
-        namespaces.sort();
-        let mut out = Vec::new();
-        for ns in namespaces {
-            for kind in kinds {
-                walk(root, &ns.join(kind), &mut out);
-            }
-        }
-        out
+        self.source.list_under(top, kinds)
     }
     /// The files of `data/<namespace>/<kind>/` for each kind.
     pub fn list_kinds(&self, kinds: &[&str]) -> Vec<String> {
@@ -67,26 +44,10 @@ impl DataPack {
     /// The files of `data/<namespace>/<folder>/` in every namespace, as
     /// `list` names them; a folder pack walks only those folders.
     pub fn list_folder(&self, folder: &str) -> Vec<String> {
-        let files = self.list_kinds(&[folder]);
-        let Source::Zip(_) = &self.source else {
-            return files;
-        };
-        files
-            .into_iter()
-            .filter(|f| {
-                f.strip_prefix("data/")
-                    .and_then(|r| r.split_once('/'))
-                    .is_some_and(|(_, r)| {
-                        r.strip_prefix(folder).is_some_and(|r| r.starts_with('/'))
-                    })
-            })
-            .collect()
+        self.list_kinds(&[folder])
     }
     pub fn read(&self, path: &str) -> Option<Vec<u8>> {
-        match &self.source {
-            Source::Zip(z) => z.read(path).ok(),
-            Source::Dir(root) => std::fs::read(root.join(path)).ok(),
-        }
+        self.source.read(path).ok()
     }
 
     /// The `description` of `pack.mcmeta`, as text.
@@ -119,37 +80,19 @@ impl DataPack {
             .unwrap_or_default()
     }
 }
-fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.flatten().collect();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for e in entries {
-        let p = e.path();
-        if p.is_dir() {
-            walk(root, &p, out);
-        } else if let Ok(rel) = p.strip_prefix(root) {
-            out.push(rel.to_string_lossy().replace('\\', "/"));
-        }
-    }
-}
 impl DataPack {
     /// A mod's passive data layer, without reading the archive's pack metadata.
     pub fn mod_layer(id: String, source: &crate::packs::Source) -> std::io::Result<Self> {
         Ok(Self {
             id,
-            source: match source {
-                crate::packs::Source::Dir(root) => Source::Dir(root.clone()),
-                crate::packs::Source::Zip(path) => Source::Zip(Box::new(Zip::open(path)?)),
-            },
+            source: source.open()?,
         })
     }
     /// The built-in `vanilla` pack: the game's own data directory.
     pub fn builtin(root: &Path) -> Self {
         DataPack {
             id: "vanilla".into(),
-            source: Source::Dir(root.to_path_buf()),
+            source: ResourceSource::directory(root.to_path_buf()),
         }
     }
 }
@@ -169,7 +112,7 @@ pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
         if path.is_dir() && path.join("pack.mcmeta").exists() {
             packs.push(DataPack {
                 id: format!("file/{name}"),
-                source: Source::Dir(path),
+                source: ResourceSource::directory(path),
             });
         } else if name.ends_with(".zip")
             && let Ok(z) = Zip::open(&path)
@@ -177,7 +120,7 @@ pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
         {
             packs.push(DataPack {
                 id: format!("file/{name}"),
-                source: Source::Zip(Box::new(z)),
+                source: ResourceSource::opened_archive(z),
             });
         }
     }
@@ -199,7 +142,7 @@ pub fn feature_packs(resources: &Path) -> Vec<DataPack> {
         if path.join("pack.mcmeta").exists() {
             packs.push(DataPack {
                 id: e.file_name().to_string_lossy().into_owned(),
-                source: Source::Dir(path),
+                source: ResourceSource::directory(path),
             });
         }
     }
@@ -377,7 +320,15 @@ pub fn install(dir: &Path, world: &Path, selected: &[String]) -> Result<(), Stri
     std::fs::create_dir_all(&target).map_err(|e| err(&target, e))?;
     let mut disabled = Vec::new();
     for pack in crate::packs::folder(dir, horizon_core::version::DATA_PACK_FORMAT) {
-        let (crate::packs::Source::Dir(from) | crate::packs::Source::Zip(from)) = &pack.source;
+        let from = match &pack.source {
+            crate::packs::Source::Dir(from) | crate::packs::Source::Zip(from) => from,
+            crate::packs::Source::Opened(_) => {
+                return Err(format!(
+                    "{}: an open resource layer cannot be installed as a file pack",
+                    pack.id
+                ));
+            }
+        };
         copy(from, &target.join(pack.id.trim_start_matches("file/")))?;
         if !selected.contains(&pack.id) {
             disabled.push(pack.id);
@@ -913,10 +864,10 @@ pub fn worldgen_overrides(
     for pack in packs {
         for file in pack.list_kinds(&overrides::PACK_KINDS) {
             if let Some(id) = overrides::template_id(&file) {
-                match pack.read(&file) {
-                    Some(nbt) => out.set_template(&id, nbt),
-                    None => warnings.push(format!("{}: {file}: unreadable", pack.id)),
-                }
+                out.set_template(
+                    id,
+                    horizon_assets::resource_source::Resource::file(pack.source.clone(), file),
+                );
                 continue;
             }
             let read = || String::from_utf8(pack.read(&file)?).ok();
@@ -939,6 +890,136 @@ pub fn worldgen_overrides(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structure_templates_read_archive_generations_without_extraction() {
+        use horizon_world::{
+            nbt::{Limits, NamedTag},
+            registry::BlockRegistry,
+            worldgen::structure::{StateTransforms, StructureResources},
+        };
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("horizon-template-source-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let scratch = Scratch(root);
+        let archive = scratch.0.join("templates.jar");
+        let write_archive = |width| {
+            let tag = Tag::compound([
+                (
+                    "size",
+                    Tag::List(vec![Tag::Int(width), Tag::Int(3), Tag::Int(4)]),
+                ),
+                (
+                    "palette",
+                    Tag::List(vec![Tag::compound([(
+                        "Name",
+                        Tag::String("minecraft:stone".into()),
+                    )])]),
+                ),
+                (
+                    "blocks",
+                    Tag::List(vec![Tag::compound([
+                        (
+                            "pos",
+                            Tag::List(vec![Tag::Int(1), Tag::Int(0), Tag::Int(1)]),
+                        ),
+                        ("state", Tag::Int(0)),
+                    ])]),
+                ),
+                ("entities", Tag::List(Vec::new())),
+            ]);
+            let bytes = horizon_world::nbt::write_named(
+                &NamedTag {
+                    name: "".into(),
+                    tag,
+                },
+                Limits::templates(),
+            )
+            .unwrap();
+            let mut gzip =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            gzip.write_all(&bytes).unwrap();
+            let temporary = scratch.0.join("replacement.jar");
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&temporary).unwrap());
+            zip.start_file(
+                "data/example/structure/nested/piece.nbt",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            zip.write_all(&gzip.finish().unwrap()).unwrap();
+            zip.finish().unwrap();
+            std::fs::rename(temporary, &archive).unwrap();
+        };
+        write_archive(2);
+        let old =
+            DataPack::from_source("passive".into(), ResourceSource::archive(&archive).unwrap());
+        let (before, warnings) = worldgen_overrides(&[&old], |_| true);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        write_archive(5);
+        let new =
+            DataPack::from_source("passive".into(), ResourceSource::archive(&archive).unwrap());
+        let (after, warnings) = worldgen_overrides(&[&new], |_| true);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_ne!(
+            before, after,
+            "a reopened archive invalidates the generator cache"
+        );
+        let registry = Box::leak(Box::new(
+            BlockRegistry::from_nbt(&Tag::compound([
+                ("DataVersion", Tag::Int(horizon_world::DATA_VERSION)),
+                (
+                    "states",
+                    Tag::List(vec![
+                        Tag::compound([("id", Tag::String("minecraft:air".into()))]),
+                        Tag::compound([("id", Tag::String("minecraft:stone".into()))]),
+                    ]),
+                ),
+                (
+                    "defaults",
+                    Tag::compound([
+                        ("minecraft:air", Tag::Int(0)),
+                        ("minecraft:stone", Tag::Int(1)),
+                    ]),
+                ),
+            ]))
+            .unwrap(),
+        ));
+        let manager = |overrides: &WorldgenOverrides| {
+            let transforms = StateTransforms::from_json(
+                r#"{"rotate":[[0,0,0],[1,1,1]],"mirror":[[0,0],[1,1]],"full_block":[false,true]}"#,
+                2,
+            )
+            .unwrap();
+            StructureResources::new(
+                registry,
+                transforms,
+                &scratch.0.join("unpacked-templates"),
+                BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .with_templates(overrides.templates().clone())
+        };
+        // Neither generation has read its NBT yet; the old one must still
+        // read from the reader retained before the archive was replaced.
+        let first = manager(&before).template("example:nested/piece").unwrap();
+        let second = manager(&after).template("example:nested/piece").unwrap();
+        assert_eq!(first.size, [2, 3, 4]);
+        assert_eq!(second.size, [5, 3, 4]);
+        let blocks = second.palettes()[0].blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].pos, [1, 0, 1]);
+        assert_eq!(blocks[0].state.0, 1);
+        assert!(!scratch.0.join("data").exists());
+        assert!(!scratch.0.join("unpacked-templates").exists());
+    }
 
     #[test]
     fn data_map_files_are_content_files_keyed_by_map_namespace_and_registry() {
@@ -1017,7 +1098,7 @@ mod tests {
             [("minecraft:cave", "a")]
         );
         assert_eq!(o.templates().len(), 1);
-        assert_eq!(&*o.templates()["p:room/a"], b"a");
+        assert_eq!(o.templates()["p:room/a"].read().unwrap(), b"a");
         assert_eq!(
             o.entries("biomes").collect::<Vec<_>>(),
             [("minecraft:plains", "{}")]

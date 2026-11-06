@@ -250,6 +250,7 @@ mod native_components;
 mod native_config_files;
 mod native_configs;
 mod native_criteria;
+mod native_custom_geometry;
 #[cfg(test)]
 mod native_damage_tests;
 mod native_data_maps;
@@ -267,6 +268,7 @@ mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
+mod native_goal_ticks;
 #[cfg(test)]
 mod native_guest_turn_tests;
 #[cfg(test)]
@@ -1841,7 +1843,9 @@ impl LevelAccess for GameLevel<'_> {
         fluid: FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
-        if self.native_authoritative {
+        if self.native_authoritative
+            && let Some(fluid) = native_world_read::api_fluid_state(fluid)
+        {
             self.native_state_for_placement(self.dimension, state, context, fluid, answer);
         }
     }
@@ -2555,20 +2559,19 @@ pub struct UiResources {
     pub panorama: Arc<horizon_client::gfx::panorama::Faces>,
 }
 impl UiResources {
-    /// From a resource root layering packs over `defaults`, the game's own
-    /// resources (`root` itself when no pack is on).
-    pub fn load(root: &std::path::Path, defaults: &std::path::Path) -> Result<Self> {
+    /// The resolved resource generation, including the base layer and pack filters.
+    pub fn load(root: &horizon_assets::resource_source::ResourceSource) -> Result<Self> {
         // The title screen waits for both: the panorama's six faces decode
         // beside the atlas.
         std::thread::scope(|scope| {
             let panorama = named_scope(scope, "panorama", || {
                 startup::time("ui.panorama", || {
-                    horizon_client::gfx::panorama::Faces::load(root, defaults)
+                    horizon_client::gfx::panorama::Faces::load(root, root)
                 })
             });
             let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
             let atlas = startup::time("ui.atlas", || {
-                HudAtlas::build_over_with_image(root, defaults, mod_image)
+                HudAtlas::build_over_with_image(root, root, mod_image)
             });
             let panorama = panorama
                 .join()
@@ -2581,7 +2584,7 @@ impl UiResources {
     }
     /// What a server's game holds, since it draws nothing: the font, which books
     /// and chat measure with, and a one-pixel panorama.
-    pub fn server(root: &std::path::Path) -> Result<Self> {
+    pub fn server(root: &horizon_assets::resource_source::ResourceSource) -> Result<Self> {
         Ok(Self {
             atlas: HudAtlas::fonts(root)?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([0; 4])),
@@ -2594,6 +2597,9 @@ impl UiResources {
 /// cloning shares the loaded data.
 #[derive(Clone)]
 pub struct PackResources {
+    source: horizon_assets::resource_source::ResourceSource,
+    data_source: horizon_assets::resource_source::ResourceSource,
+    data_changes: horizon_assets::resource_source::ResourceSource,
     assets: Arc<Assets>,
     block_registries: Arc<horizon_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -2611,7 +2617,7 @@ impl PackResources {
     /// Everything a pack overlay at `root` provides, over `assets` and `render`
     /// loaded from it.
     fn load(
-        root: &std::path::Path,
+        root: &horizon_assets::resource_source::ResourceRoot,
         assets: Arc<Assets>,
         render: Arc<RenderAssets>,
         facts: &BlockFacts,
@@ -2619,7 +2625,7 @@ impl PackResources {
         light: Arc<LightTables>,
         item_data: &horizon_world::item_defaults::ItemData,
     ) -> Result<Self> {
-        let visibility = models::load_visibility(root, assets.registry)?;
+        let visibility = models::load_visibility(root.prepared(), assets.registry)?;
         let tables = Arc::new(MeshTables::new(&assets, &render, facts, visibility)?);
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
             root,
@@ -2655,7 +2661,7 @@ impl PackResources {
     /// The pack tables over their parts, which `load_resources` builds on
     /// separate workers.
     fn assemble(
-        root: &std::path::Path,
+        root: &horizon_assets::resource_source::ResourceRoot,
         assets: Arc<Assets>,
         render: Arc<RenderAssets>,
         tables: Arc<MeshTables>,
@@ -2683,9 +2689,12 @@ impl PackResources {
             assets,
             render,
             item_renderer: Arc::new(item_renderer),
-            names: Arc::new(Names::load(root)),
-            clouds: Arc::new(load_clouds(root)),
-            forcefield: Arc::new(load_forcefield(root)),
+            source: root.source().clone(),
+            data_source: root.data().clone(),
+            data_changes: root.data_changes().clone(),
+            names: Arc::new(Names::load(root.source())),
+            clouds: Arc::new(load_clouds(root.source())),
+            forcefield: Arc::new(load_forcefield(root.source())),
         }
     }
 }
@@ -2945,6 +2954,8 @@ struct Game<'a> {
     keys: horizon_client::held::HeldKeys,
     // Physical input is separate from remapped and toggled movement keys.
     physical_keys: HashSet<KeyCode>,
+    /// Keys whose first press a mod cancelled (`key_mapping_pre`): their repeats are never held.
+    rejected_keys: HashSet<KeyCode>,
     physical_buttons: HashSet<MouseButton>,
     drag_button: Option<MouseButton>,
     /// Control + left click as a right click (macOS).
@@ -3061,6 +3072,7 @@ struct Game<'a> {
     /// Mod block entities' geometry their mods kept
     /// (game/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
     /// `item_level` for one frame, game time, day time and dimension.
@@ -3787,7 +3799,7 @@ struct Game<'a> {
     adv_ui: advancements_screen::AdvUi,
     /// The Server Links screens' state (game/server_links.rs).
     links_ui: server_links::LinksUi,
-    camera_type: perspective::CameraType,
+    camera_type: horizon_client::camera::CameraType,
     fangs: fangs::FangState,
     /// The local player as a model (third person, the inventory).
     player_model: Option<Mob>,
@@ -3950,12 +3962,17 @@ fn level_can_have_weather(sky_light: bool, has_ceiling: bool, is_end: bool) -> b
 }
 /// `Camera.setRotation` (`rotationYXZ(π - yaw, -pitch, 0)`) for the player's
 /// view, turned round in third-person front view (`Camera.setup`).
-fn camera_rotation(camera_type: perspective::CameraType, yaw: f32, pitch: f32) -> glam::Quat {
-    let (view_yaw, view_pitch) = if camera_type == perspective::CameraType::ThirdPersonFront {
-        (yaw + 180.0, -pitch)
-    } else {
-        (yaw, pitch)
-    };
+fn camera_rotation(
+    camera_type: horizon_client::camera::CameraType,
+    yaw: f32,
+    pitch: f32,
+) -> glam::Quat {
+    let (view_yaw, view_pitch) =
+        if camera_type == horizon_client::camera::CameraType::ThirdPersonFront {
+            (yaw + 180.0, -pitch)
+        } else {
+            (yaw, pitch)
+        };
     glam::Quat::from_euler(
         glam::EulerRot::YXZ,
         std::f32::consts::PI - view_yaw.to_radians(),
@@ -9085,6 +9102,47 @@ impl Game<'_> {
             }
         }
     }
+    /// Asks the mods about each gameplay mapping a physical input (a key's or a mouse button's
+    /// name) is bound to, before the game acts on it: true when one cancels a press. Only while
+    /// playing, and nothing is asked with no mod listening.
+    fn key_mapping_canceled(&mut self, input: Option<&str>, pressed: bool) -> bool {
+        let Some(input) = input else {
+            return false;
+        };
+        if !mod_api::__private::listened(mod_api::HookId::KeyMappingPre)
+            || !gameplay_has_keyboard(self.screen, self.title.is_some(), self.dialog_open())
+        {
+            return false;
+        }
+        let names: Vec<&'static str> = self.settings.keys.translated_mappings(input).collect();
+        let mut canceled = false;
+        for name in names {
+            let mut this = false;
+            self.native_key_mapping_pre(name, pressed, &mut this);
+            canceled |= this;
+        }
+        canceled && pressed
+    }
+    /// `key_mapping_canceled` for a key event, and what a cancel leaves of the key's hold: a first
+    /// press that is cancelled never happened, so `restore_held_keys` must not hold it (nor its
+    /// repeats); a cancelled repeat only drops its own action and keeps the hold an accepted
+    /// press made.
+    fn key_press_canceled(&mut self, key: KeyCode, pressed: bool, repeat: bool) -> bool {
+        if !repeat {
+            self.rejected_keys.remove(&key);
+        }
+        let name = horizon_client::keybinds::key_name(key);
+        if !self.key_mapping_canceled(name, pressed) {
+            return false;
+        }
+        if !repeat {
+            self.rejected_keys.insert(key);
+        }
+        if self.rejected_keys.contains(&key) {
+            self.physical_keys.remove(&key);
+        }
+        true
+    }
     /// Apply a physical key to every mapping bound to it.
     fn mapped_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) -> Result<()> {
         for mapped in self.settings.keys.translate_all(key) {
@@ -9816,7 +9874,7 @@ impl Game<'_> {
             let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
             // The 3D crosshair (F3) takes the 2D one's place.
             // Hud.extractCrosshair: a spectator only sees it over something to open.
-            if self.camera_type.first_person()
+            if self.camera_type.is_first_person()
                 && (!spectator || self.spectator_crosshair())
                 && !self.debug_crosshair()
             {
@@ -12178,7 +12236,9 @@ impl Game<'_> {
     pub(super) fn camera_orientation(&self) -> glam::Quat {
         match self.posed_rotation {
             // The frame's camera, already turned round in front view.
-            Some((yaw, pitch)) => camera_rotation(perspective::CameraType::FirstPerson, yaw, pitch),
+            Some((yaw, pitch)) => {
+                camera_rotation(horizon_client::camera::CameraType::FirstPerson, yaw, pitch)
+            }
             None => camera_rotation(self.camera_type, self.yaw, self.pitch),
         }
     }
@@ -12216,7 +12276,7 @@ impl Game<'_> {
         // One scan for both passes that draw them (block entities below and the
         // overlay near the end of this function).
         let cracks = self.cracks(camera);
-        let fire_yaw = if self.camera_type == perspective::CameraType::ThirdPersonFront {
+        let fire_yaw = if self.camera_type == horizon_client::camera::CameraType::ThirdPersonFront {
             self.yaw + 180.0
         } else {
             self.yaw
@@ -13903,6 +13963,7 @@ impl Game<'_> {
         // Keep the no-pack preload; a world's packs replace it atomically.
         // A later /reload keeps this session's synchronized registries.
         lan::open_world_sync_data(
+            &self.options.resources,
             &self.res.core.item_data,
             &pack_files(&self.world_tables),
             &self.health_resources.damage,
@@ -15782,7 +15843,7 @@ impl Game<'_> {
         if self.spectator()
             || self.ui.hide_gui
             || self.sleeping.is_some()
-            || !self.camera_type.first_person()
+            || !self.camera_type.is_first_person()
             || self
                 .player
                 .as_ref()
@@ -17767,7 +17828,7 @@ impl Game<'_> {
         let mut crosshair = horizon_client::gizmos::Gizmos::default();
         if debug_crosshair_drawn(
             self.debug_crosshair(),
-            self.camera_type.first_person(),
+            self.camera_type.is_first_person(),
             self.ui.hide_gui,
             self.shows_panorama(),
         ) {
@@ -18027,6 +18088,21 @@ impl Game<'_> {
         if !title {
             self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
         }
+        let mut world_geometry = self.world_geometry.take().expect("view storage");
+        let white = self.gui.atlas.sprites["horizon/white"];
+        world_geometry.reset(
+            camera.to_array(),
+            view,
+            [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5],
+        );
+        if !title {
+            let view = mod_api::WorldRenderView::new(
+                camera.to_array(),
+                alpha as f32,
+                self.world.game_time,
+            );
+            self.native_submit_custom_geometry(&view, &mut world_geometry);
+        }
         let colored_lights = if self.title.is_none() {
             visuals.finish(self, camera)
         } else {
@@ -18139,7 +18215,7 @@ impl Game<'_> {
             },
             additive: &additive,
             see_through: &see_through,
-            world_primitives: Default::default(),
+            world_primitives: world_geometry.batch(),
             shadow_only: &shadow_only,
             celestial: if self.settings.horizon.sky || title {
                 &celestial
@@ -18178,7 +18254,7 @@ impl Game<'_> {
             menu_blur: self.menu_blur(),
             post_effects: horizon_client::post_chain::Request {
                 effects: &requested_post_effects,
-                root: &self.options.resources,
+                root: &self.pack.source,
                 menu_blur_radius: self.settings.menu_blur as f32,
                 // GlobalSettingsUniform.update.
                 globals: horizon_client::post_chain::Globals {
@@ -18213,6 +18289,7 @@ impl Game<'_> {
         self.frame_drawn = matches!(result, Ok(true));
         // Restore storage even when rendering fails (for example, a lost surface).
         self.entity_vertices = entities;
+        self.world_geometry = Some(world_geometry);
         *self.entity_spans.get_mut() = entity_spans;
         *self.entity_motion.get_mut() = entity_motion;
         *self.glowing_vertices.get_mut() = glowing;
@@ -20244,6 +20321,11 @@ impl Game<'_> {
                                 self.capture(true);
                                 return Ok(());
                             }
+                            let input = horizon_client::keybinds::mouse_name(button);
+                            if self.key_mapping_canceled(Some(input.as_str()), pressed) {
+                                self.physical_buttons.remove(&button);
+                                return Ok(());
+                            }
                             self.extras_mouse(button, pressed);
                             if pressed
                                 && self.settings.keys.get("key.smoothCamera")
@@ -20251,7 +20333,6 @@ impl Game<'_> {
                             {
                                 self.smooth_camera_action();
                             }
-                            let input = horizon_client::keybinds::mouse_name(button);
                             for mapped in self.settings.keys.translate_mouse_all(button) {
                                 match mapped {
                                     Err(b)
@@ -20657,6 +20738,10 @@ impl Game<'_> {
                     let PhysicalKey::Code(key) = event.physical_key else {
                         return Ok(());
                     };
+                    let pressed = event.state == ElementState::Pressed;
+                    if self.key_press_canceled(key, pressed, event.repeat) {
+                        return Ok(());
+                    }
                     self.native_panel_key_event(
                         key,
                         event.state == ElementState::Pressed,
@@ -21089,8 +21174,10 @@ impl Game<'_> {
     }
 }
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).
-fn load_clouds(root: &std::path::Path) -> (u32, u32, Vec<bool>) {
-    horizon_client::hud::decode(&root.join("assets/minecraft/textures/environment/clouds.png"))
+fn load_clouds(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<bool>) {
+    root.read("assets/minecraft/textures/environment/clouds.png")
+        .map_err(Into::into)
+        .and_then(|bytes| horizon_client::hud::decode_bytes(&bytes))
         .map(|(w, h, px)| {
             (
                 w,
@@ -21101,8 +21188,10 @@ fn load_clouds(root: &std::path::Path) -> (u32, u32, Vec<bool>) {
         .unwrap_or((1, 1, vec![false]))
 }
 /// misc/forcefield.png for the world border wall (square, power of two).
-fn load_forcefield(root: &std::path::Path) -> (u32, u32, Vec<u8>) {
-    horizon_client::hud::decode(&root.join("assets/minecraft/textures/misc/forcefield.png"))
+fn load_forcefield(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<u8>) {
+    root.read("assets/minecraft/textures/misc/forcefield.png")
+        .map_err(Into::into)
+        .and_then(|bytes| horizon_client::hud::decode_bytes(&bytes))
         .ok()
         .filter(|(w, h, _)| w == h && w.is_power_of_two())
         .unwrap_or((1, 1, vec![0; 4]))
@@ -21147,9 +21236,13 @@ impl<'a> Game<'a> {
                 .join(".horizon-title"),
             horizon_client::save::LevelShape::OVERWORLD,
         ));
-        let prepared = prepared
-            .map(Ok)
-            .unwrap_or_else(|| GameCpuResources::load(&root))?;
+        let prepared = prepared.map(Ok).unwrap_or_else(|| {
+            GameCpuResources::load(&horizon_assets::resource_source::ResourceRoot::new(
+                root.clone(),
+                packs::cache_dir(),
+                pack.source.clone(),
+            ))
+        })?;
         let world = World::new(res.facts().air, 0);
         let tutorial = tutorial::Tutorial::new(tutorial::Step::from_option(
             settings.file.int("tutorialStep"),
@@ -21159,10 +21252,11 @@ impl<'a> Game<'a> {
         let now = Instant::now();
         let look = options.look;
         let particles = horizon_client::particles::ParticleEngine::new(
-            &root,
+            &pack.source,
             &gui.atlas.sprites,
             &gui.atlas.translucent,
         );
+        let resource_source = pack.source.clone();
         let game = Game {
             world_biomes: None,
             world_biomes_base: None,
@@ -21239,6 +21333,7 @@ impl<'a> Game<'a> {
             },
             keys: Default::default(),
             physical_keys: HashSet::new(),
+            rejected_keys: HashSet::new(),
             physical_buttons: HashSet::new(),
             drag_button: None,
             right_click_emulation: Default::default(),
@@ -21299,6 +21394,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            world_geometry: Some(Default::default()),
             mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
             world_frames: 0,
@@ -21498,7 +21594,7 @@ impl<'a> Game<'a> {
                         .unwrap_or_default()
                         .join("assets/skins"),
                 );
-                downloads.set_resource_root(root.clone());
+                downloads.set_resource_root(resource_source.clone());
                 downloads
             }),
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
@@ -21759,17 +21855,27 @@ impl EntityModels {
     }
 }
 impl GameCpuResources {
-    fn load(root: &std::path::Path) -> Result<Self> {
+    fn load(resources: &horizon_assets::resource_source::ResourceRoot) -> Result<Self> {
+        let root = resources.prepared();
         let document = horizon_client::mobs::EntityModelDocument::load(root).ok();
         let model = |key| document.as_ref().and_then(|document| document.model(key));
+        let [
+            frame_model,
+            glow_frame_model,
+            map_frame_model,
+            glow_map_frame_model,
+        ] = frames::bake_frames(resources.source());
         Ok(Self {
             painting_variants: paintings::PaintingVariants::load(root),
-            frame_model: frames::bake_frame(root, "item_frame"),
-            glow_frame_model: frames::bake_frame(root, "glow_item_frame"),
-            map_frame_model: frames::bake_frame(root, "item_frame_map"),
-            glow_map_frame_model: frames::bake_frame(root, "glow_item_frame_map"),
-            armor_stand_assets: armor_stands::ArmorStandAssets::load(root, document.as_ref()),
-            waypoint_styles: horizon_client::locator_bar::WaypointStyles::load(root),
+            frame_model,
+            glow_frame_model,
+            map_frame_model,
+            glow_map_frame_model,
+            armor_stand_assets: armor_stands::ArmorStandAssets::load(
+                resources.source(),
+                document.as_ref(),
+            ),
+            waypoint_styles: horizon_client::locator_bar::WaypointStyles::load(resources.source()),
             boat_models: boats::BoatModels::load(document.as_ref()),
             cart_models: minecarts::CartModels::load(document.as_ref()),
             crystal_model: model("minecraft:end_crystal#main"),
@@ -21881,6 +21987,7 @@ impl Game<'_> {
         world_loading::preload_world_data(
             on_world_screens,
             &self.options.resources,
+            &self.pack.data_changes,
             self.pack.assets.registry,
             &self.res.core.item_data,
         );
@@ -21936,12 +22043,18 @@ impl Game<'_> {
                     )
                 })
                 .unwrap_or_default();
+            let data_source = self.pack.data_changes.clone();
             self.creation_job = std::thread::Builder::new()
                 .name("world-creation".into())
                 .spawn(move || {
-                    horizon_client::vanillagen::shared_data_with(&dir, &overrides, registry)
-                        .map(|_| ())
-                        .map_err(|e| e.to_string())
+                    horizon_client::vanillagen::shared_data_from(
+                        &dir,
+                        &overrides,
+                        registry,
+                        &data_source,
+                    )
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
                 })
                 .ok();
             return;
@@ -22091,10 +22204,11 @@ impl Game<'_> {
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
         let sources = lan::load_sources(
+            root,
             &self.res.core.item_data,
             self.options.execution_role.data_load_origin(),
             &overlay,
-        );
+        )?;
         let recipes = Recipes::from_resolved(root, &items, &overlay, &sources)?;
         let stations = horizon_client::stations::StationData::from_sources(
             root,
@@ -22164,7 +22278,17 @@ impl Game<'_> {
                 self.res.item_defaults(),
             ) {
                 Ok(mut loot) => {
-                    let context = lan::server_data_load(&self.res.core.item_data);
+                    let context = match lan::server_data_load(
+                        &self.options.resources,
+                        &self.res.core.item_data,
+                    ) {
+                        Ok(context) => context,
+                        Err(error) => {
+                            log::warn!("Horizon: server loot inventory unavailable: {error}");
+                            self.server_loot.set(None);
+                            return;
+                        }
+                    };
                     loot.apply_native_table_loads(&context);
                     Some(Arc::new(loot))
                 }
@@ -22262,7 +22386,10 @@ impl Game<'_> {
         // One pass over the recipes for this reload: the tables built next and
         // the players' copy below share it.
         lan::forget_server_sources();
-        self.refresh_loop_context();
+        if let Err(error) = self.refresh_loop_context() {
+            log::warn!("Horizon: data-load inventory could not be refreshed: {error}");
+            return;
+        }
         match self.build_world_tables(stack, true) {
             Ok((tables, health)) => {
                 self.world_tables = tables;
@@ -22288,7 +22415,12 @@ impl Game<'_> {
         let kept = self.lan.as_ref().map(|host| host.hub.lan.shared.sync());
         match kept {
             Some(kept) => {
-                match lan::reload_sync_data(&self.res.core.item_data, &self.pack_files(), &kept) {
+                match lan::reload_sync_data(
+                    &self.options.resources,
+                    &self.res.core.item_data,
+                    &self.pack_files(),
+                    &kept,
+                ) {
                     Ok(sync) => {
                         self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
                         self.run_native_advancement_grants();
@@ -22299,9 +22431,11 @@ impl Game<'_> {
                 }
             }
             None => {
-                if let Err(e) =
-                    lan::reload_cached_sync_data(&self.res.core.item_data, &self.pack_files())
-                {
+                if let Err(e) = lan::reload_cached_sync_data(
+                    &self.options.resources,
+                    &self.res.core.item_data,
+                    &self.pack_files(),
+                ) {
                     log::warn!("Horizon: the cached world data is not reloaded: {e}");
                 }
             }
@@ -22509,12 +22643,13 @@ struct GameplayTables {
 /// fails the load; the inner one is the packs' (the registry or the block
 /// models), which `load_resources` rolls back from.
 fn load_core(
-    root: &std::path::Path,
+    resources: &horizon_assets::resource_source::ResourceRoot,
     role: execution_role::ExecutionRole,
     parallel: bool,
     progress: &Progress,
     launch_world: Option<&str>,
 ) -> std::result::Result<std::result::Result<CoreTables, String>, String> {
+    let root = resources.prepared();
     let headless = !role.is_client();
     // The model library reads every file under `assets/` and needs no
     // block registry, so it is parsed beside `Assets::load` rather than
@@ -22526,7 +22661,7 @@ fn load_core(
         let models = (parallel && !headless).then(|| {
             scope.spawn(|| {
                 let _step = startup::step("core.models_parse");
-                horizon_client::model_library::ParsedModels::load(root)
+                horizon_client::model_library::ParsedModels::load(resources.source())
             })
         });
         let assets = startup::time("core.assets", || Assets::load(root));
@@ -22550,11 +22685,11 @@ fn load_core(
                 let parsed_models = parsed_models;
                 let render = startup::time("core.block_models_sprites", || {
                     if headless {
-                        assets.reload_for_server(root)
+                        assets.reload_for_server(resources)
                     } else if let Some(parsed) = parsed_models {
-                        assets.reload_with_models(root, parsed)
+                        assets.reload_with_models(resources, parsed)
                     } else {
-                        assets.reload(root)
+                        assets.reload(resources)
                     }
                 })
                 .map_err(|e| e.to_string())?;
@@ -22566,11 +22701,11 @@ fn load_core(
                 let item_renderer = startup::time("core.item_models", || {
                     if headless {
                         horizon_client::item_render::ItemRenderer::load_for_server(
-                            root, library, item_data,
+                            resources, library, item_data,
                         )
                     } else {
                         horizon_client::item_render::ItemRenderer::load_with_library(
-                            root, library, item_data,
+                            resources, library, item_data,
                         )
                     }
                 })
@@ -22590,7 +22725,7 @@ fn load_core(
             });
             let biomes = Step::spawn(scope, parallel, "biomes", || {
                 let biomes = Arc::new(
-                    startup::time("core.biomes", || Biomes::load(root))
+                    startup::time("core.biomes", || Biomes::load(resources))
                         .map_err(|e| e.to_string())?,
                 );
                 // A launch that names a world: its data preload needs only the
@@ -22600,6 +22735,7 @@ fn load_core(
                     world_loading::preload_launch_world(
                         folder,
                         root,
+                        resources.data_changes(),
                         registry,
                         biomes.clone(),
                         item_data.clone(),
@@ -22608,7 +22744,7 @@ fn load_core(
                 Ok::<_, String>(biomes)
             });
             let environment = Step::spawn(scope, parallel, "environment", || {
-                startup::time("core.environment", || Environment::load(root))
+                startup::time("core.environment", || Environment::load(resources.source()))
                     .map_err(|e| e.to_string())
             });
             let collision = Step::spawn(scope, parallel, "collision", || {
@@ -22692,7 +22828,7 @@ fn gameplay_tables(
 /// the launch opens, whose data is preloaded meanwhile.
 #[allow(clippy::too_many_arguments)]
 fn load_resources(
-    mut root: PathBuf,
+    mut resolved: horizon_assets::resource_source::ResourceRoot,
     launch_world: Option<&str>,
     vanilla_root: &std::path::Path,
     settings: &Settings,
@@ -22702,6 +22838,7 @@ fn load_resources(
     progress: &Progress,
     publish: &mut dyn FnMut(UiResources, &std::path::Path),
 ) -> Result<Loaded> {
+    let mut root = resolved.prepared().to_path_buf();
     let headless = !role.is_client();
     let threads = settings.horizon.worker_threads();
     // One pool of workers for every level's streaming, the client's and the
@@ -22715,12 +22852,12 @@ fn load_resources(
     let mut pack_error = None;
     // A dedicated server builds only the font (UiResources::server), as the
     // integrated server's game does: the full atlas and panorama are 144 MB.
-    let load_ui = |root: &std::path::Path| {
+    let load_ui = |source: &horizon_assets::resource_source::ResourceSource| {
         let _step = startup::step("ui.load");
         if headless {
-            UiResources::server(root)
+            UiResources::server(source)
         } else {
-            UiResources::load(root, vanilla_root)
+            UiResources::load(source)
         }
     };
     // The menu bundle loads on this thread while workers build the world
@@ -22740,23 +22877,25 @@ fn load_resources(
             Some(ui)
         }
     };
-    let (core, loaded_gui) = loop {
+    let mut can_rollback = true;
+    let (core, loaded_gui, resolved) = loop {
         let (ui, core) = std::thread::scope(|scope| {
             let core = Step::spawn(scope, parallel, "core", || {
                 // A failed pack starts core again from the game's own
                 // resources, which the world's preload must read: with packs
                 // it waits for the core that loaded.
                 let early = launch_world.filter(|_| root == vanilla_root);
-                startup::time("core", || load_core(&root, role, parallel, progress, early))
+                startup::time("core", || {
+                    load_core(&resolved, role, parallel, progress, early)
+                })
             });
-            let ui = load_ui(&root).map(|ui| offer(ui, &root));
+            let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
             (ui, core.join())
         });
-        let packs = root != vanilla_root;
         let failure = match (ui, core) {
-            (Ok(gui), Ok(Ok(core))) => break (core, gui),
-            (Err(e), _) if packs => e.to_string(),
-            (_, Ok(Err(e))) if packs => e,
+            (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved),
+            (Err(e), _) if can_rollback => e.to_string(),
+            (_, Ok(Err(e))) if can_rollback => e,
             (_, Ok(Err(e))) => {
                 return Err(format!(
                     "{e}\nPrepare resources with the launcher, or: horizon-prepare --prepare"
@@ -22770,7 +22909,9 @@ fn load_resources(
             "Horizon: resource packs failed to load ({failure}); using the default resources"
         );
         pack_error = Some(failure);
+        can_rollback = false;
         root = vanilla_root.to_path_buf();
+        resolved = horizon_assets::resource_source::ResourceRoot::directory(root.clone());
     };
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
     let CoreTables {
@@ -22797,6 +22938,7 @@ fn load_resources(
         world_loading::preload_launch_world(
             folder,
             &root,
+            resolved.data_changes(),
             assets.registry,
             biomes.clone(),
             item_data.clone(),
@@ -22807,7 +22949,7 @@ fn load_resources(
     })?);
     let pack_step = startup::step("pack.assemble");
     let pack = PackResources::assemble(
-        &root,
+        &resolved,
         assets.clone(),
         render,
         tables,
@@ -22819,9 +22961,9 @@ fn load_resources(
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(4);
     if !menu {
-        horizon_client::ui::load_metadata(&root);
+        horizon_client::ui::load_metadata(resolved.source());
         horizon_client::lang::set(horizon_client::lang::Language::load(
-            &[&root],
+            &[&pack.source],
             &settings.language,
         ));
     }
@@ -22854,7 +22996,7 @@ fn load_resources(
     let visibility = pack.context.tables.visibility.clone();
     let rest_loader = if menu {
         let resources = resources.clone();
-        let root = root.clone();
+        let resource_root = resolved.clone();
         let vanilla_root = vanilla_root.to_owned();
         let rest_progress = progress.clone();
         let progress = progress.clone();
@@ -22863,7 +23005,7 @@ fn load_resources(
             .spawn(move || {
                 let _step = startup::step("rest");
                 let rest = load_world_rest(
-                    &root,
+                    &resource_root,
                     &resources,
                     &assets,
                     &behaviour_json,
@@ -22892,7 +23034,7 @@ fn load_resources(
         })
     } else {
         let rest = load_world_rest(
-            &root,
+            &resolved,
             &resources,
             &assets,
             &behaviour_json,
@@ -22919,7 +23061,7 @@ fn load_resources(
                     prepare_renderer_textures(&pack)
                 })
             });
-            let game_cpu = startup::time("handoff.game_cpu", || GameCpuResources::load(&root));
+            let game_cpu = startup::time("handoff.game_cpu", || GameCpuResources::load(&resolved));
             (game_cpu, textures.join())
         });
         let game_cpu = match game_cpu {
@@ -22949,7 +23091,7 @@ fn load_resources(
         Vec::new()
     } else {
         match client_reload::stage_client_reload(
-            &root,
+            resolved.source(),
             client_reload::register_startup_client_reload_listeners(),
             mod_api::__private::ModPhase::Setup,
         ) {
@@ -23005,7 +23147,7 @@ fn write_prepared_files(root: PathBuf) {
 }
 
 fn load_world_rest(
-    root: &std::path::Path,
+    resource_root: &horizon_assets::resource_source::ResourceRoot,
     resources: &Resources,
     assets: &Assets,
     behaviour_json: &serde_json::Value,
@@ -23017,11 +23159,20 @@ fn load_world_rest(
     // renderer or animate tables (client-side display ticks).
     draws: bool,
 ) -> Result<WorldRest> {
+    let root = resource_root.prepared();
     let facts = resources.facts();
     let biomes = resources.biomes();
     let threads = resources.threads();
     let registry = assets.registry;
-    let overlay = &horizon_world::loot::PackOverlay::NONE;
+    let content = horizon_client::datapack::DataPack::from_source(
+        "horizon-content".into(),
+        resource_root.data_changes().clone(),
+    );
+    let files = horizon_client::datapack::DataStore::load(&[&content])
+        .files
+        .into_iter()
+        .collect::<Vec<_>>();
+    let overlay = &horizon_world::loot::PackOverlay { files: &files };
     progress.set(6);
     // Independent tables load together, within the worker budget the settings
     // allow. Only the recipes and the stations read another table: the items.
@@ -23036,11 +23187,12 @@ fn load_world_rest(
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
         let sources = startup::time("rest.recipe_sources", || {
             lan::load_sources(
+                root,
                 &resources.core.item_data,
                 resources.core.item_data.context().origin(),
                 overlay,
             )
-        });
+        })?;
         let recipes = startup::time("rest.recipes", || {
             Recipes::from_resolved(root, &items, overlay, &sources)
         })?;
@@ -23066,7 +23218,7 @@ fn load_world_rest(
             return Ok(Default::default());
         }
         let mut renderer = BlockEntityRenderer::load_with_visibility(
-            root,
+            resource_root,
             registry,
             visibility,
             resources.item_defaults(),
@@ -23094,9 +23246,9 @@ fn load_world_rest(
         .into_iter()
         .map(|(k, v)| (k, Arc::new(v)))
         .collect();
-        let mut mob_data = horizon_client::mobs::MobData::load(root, facts);
+        let mut mob_data = horizon_client::mobs::MobData::load(resource_root, facts);
         mob_data.cem = std::sync::RwLock::new(Arc::new(if draws {
-            horizon_client::mobs::cem::CemModels::load(root, &mob_types)
+            horizon_client::mobs::cem::CemModels::load(resource_root.source(), &mob_types)
         } else {
             horizon_client::mobs::cem::CemModels::default()
         }));
@@ -23174,8 +23326,12 @@ fn load_world_rest(
         fog,
         music: horizon_client::music::MusicTables::load(root),
         ambient: horizon_client::ambience::AmbientTables::load(root),
-        nether_environment: Environment::load_dimension(root, "the_nether", false)?,
-        end_environment: Environment::load_dimension(root, "the_end", false)?,
+        nether_environment: Environment::load_dimension(
+            resource_root.source(),
+            "the_nether",
+            false,
+        )?,
+        end_environment: Environment::load_dimension(resource_root.source(), "the_end", false)?,
         behaviours: behaviours?,
         mob_types,
         mob_data,
@@ -23488,7 +23644,7 @@ fn start_game<'a>(
     // The initial load's client reload listeners, registered and staged by
     // the loader thread, publish now that the game owns the assets.
     client_reload::apply_client_reload(&game.mod_phase, client_applies);
-    game.refresh_loop_context();
+    game.refresh_loop_context()?;
     // After the mods: their templates are among the ids it lists.
     game.preload_registries();
     game.start_agent_control()?;
@@ -23955,9 +24111,9 @@ impl Loading {
         let renderer_ms = renderer_at.elapsed().as_millis();
         // Audio is created on the main thread, after the core is ready.
         let audio = if !options.execution_role.is_client() {
-            Audio::silent(&options.resources)
+            Audio::silent(&loaded.pack.source)
         } else {
-            Audio::with_device(&options.resources, &self.settings.sound_device)
+            Audio::with_device(&loaded.pack.source, &self.settings.sound_device)
         };
         let pack_error = loaded.pack_error.or_else(|| self.pack_error.take());
         // The game borrows its shared resources for the process's lifetime,
@@ -24270,6 +24426,9 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     let mut early_settings = Settings::load(&Game::options_path());
     options
         .mods
+        .capture_code_switches(&early_settings.mods.disabled);
+    options
+        .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);
@@ -24289,6 +24448,8 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role);
+    mods::register_debug_entries(options.execution_role);
+    mods::register_range_select_item_model_properties(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not
@@ -24316,7 +24477,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         return run_loading(options, early_settings, vanilla_root, None, started);
     }
     let mut pack_error = None;
-    options.resources = packs::startup_root(
+    let selected_root = packs::startup_root(
         &vanilla_root,
         &early_settings.resource_packs,
         &[],
@@ -24328,7 +24489,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         mods::content_root(&vanilla_root, &options.mods)
     })?;
     let mut loaded = load_resources(
-        options.resources.clone(),
+        selected_root,
         launch_world(&options),
         &vanilla_root,
         &early_settings,
@@ -24341,9 +24502,9 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     let gui = loaded.gui.ok_or("missing menu bundle")?;
     options.resources = loaded.root.clone();
     let audio = if !options.execution_role.is_client() || options.headless {
-        Audio::silent(&options.resources)
+        Audio::silent(&loaded.pack.source)
     } else {
-        Audio::with_device(&options.resources, &early_settings.sound_device)
+        Audio::with_device(&loaded.pack.source, &early_settings.sound_device)
     };
     let resources = loaded.resources;
     let game = start_game(
@@ -24571,7 +24732,10 @@ mod startup_cpu_tests {
         .unwrap();
         let worker_root = root.clone();
         let prepared = std::thread::spawn(move || {
-            GameCpuResources::load(&worker_root).map_err(|error| error.to_string())
+            GameCpuResources::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                worker_root,
+            ))
+            .map_err(|error| error.to_string())
         })
         .join()
         .unwrap()
@@ -24592,7 +24756,12 @@ mod startup_cpu_tests {
             "minecraft:stone"
         );
         // No documents from the old generation remain available to reload.
-        assert!(GameCpuResources::load(&root).is_err());
+        assert!(
+            GameCpuResources::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone()
+            ))
+            .is_err()
+        );
     }
 }
 
@@ -24750,6 +24919,8 @@ mod tests {
             let stack = super::functions::pack_stack(
                 &game.world_root,
                 &game.options.resources,
+                &game.pack.data_source,
+                &game.pack.data_changes,
                 game.cmds.vanilla_disabled,
                 &game.level.enabled_features,
             );

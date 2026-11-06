@@ -30,3 +30,6 @@ pub mod random_textures;
 pub use matchers::{BlockMatch, IdList, Name, RangeList};
 pub use paths::{properties_files, properties_files_in, resolve, valid};
 pub use properties::Properties;
+
+#[cfg(test)]
+mod resource_tests;
