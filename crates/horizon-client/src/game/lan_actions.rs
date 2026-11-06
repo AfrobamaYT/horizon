@@ -7190,6 +7190,33 @@ mod tests {
                             .count,
                         60
                     );
+                    // When the whole refused stack fits, safeTake moves all eight.
+                    game.lan.as_mut().unwrap().hub.guests[0].carried =
+                        Some(ItemStack::new("minecraft:bundle", 1));
+                    game.lan_guest_packet(
+                        12,
+                        Serverbound::ContainerClick(ContainerClick {
+                            container: window,
+                            state: 0,
+                            slot: 0,
+                            button: 0,
+                            input: 0,
+                            changed: Vec::new(),
+                            carried: None,
+                        }),
+                    );
+                    assert!(game.world.block_entities.get(&pos).unwrap().slots()[0].is_none());
+                    assert_eq!(
+                        game.lan.as_ref().unwrap().hub.guests[0]
+                            .carried
+                            .as_ref()
+                            .unwrap()
+                            .data()
+                            .unwrap()
+                            .bundle_contents[0]
+                            .count,
+                        8
+                    );
                     // A capped occupied swap preserves both stacks and their total count.
                     game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
                         Some(ItemStack::new("minecraft:dirt", 2));
