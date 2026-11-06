@@ -161,6 +161,13 @@ A write is checked against its field's codec before entering the journal. Exceed
 `NotHere("internals budget")`. With fuel enabled, every import costs 1 plus its input and output
 cells; a native thunk call also costs a fixed 1,000 fuel units.
 
+Incoming values are limited to 65,536 cells and 1 MiB of decoded string bytes each.
+String lengths are checked and fuel is charged before their payloads are copied into
+host memory, including strings nested in call arguments and batch writes. A function
+call checks the declared thunk's argument count before lifting those arguments; each
+accepted argument keeps its own value budget. Batches retain the twelve-entry limit
+and per-entry refusals.
+
 **Native work inside a thunk is not interruptible.** Fuel and deadlines limit the wasm listener,
 not the duration of a native function it calls. Daily prebuilts contain thunks only for paths in
 committed, reviewed `wasm-internals/<mod>.txt` files. Reviewers must put unbounded functions
