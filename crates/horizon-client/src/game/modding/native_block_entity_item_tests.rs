@@ -163,23 +163,31 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
                 assert_eq!(set(host, tx, 1, None), Ok(true));
             });
             assert_eq!(get(game, 1), Ok(None));
+            let level = entity.level(game).unwrap();
             game.world.block_entities.remove(&pos);
-            assert_eq!(get(game, 0), Err(Error::Unavailable));
+            assert_eq!(get(game, 0), Err(Error::Stale));
             commit(game, |host, tx| {
-                assert_eq!(set(host, tx, 0, None), Err(Error::Unavailable));
+                assert_eq!(set(host, tx, 0, None), Err(Error::Stale));
             });
             game.world
                 .block_entities
                 .insert(pos, BlockEntity::Chest(vec![None; 27]));
             commit(game, |host, tx| {
-                assert_eq!(get(host, 0), Err(Error::Unavailable));
-                assert_eq!(set(host, tx, 0, None), Err(Error::Unavailable));
+                assert_eq!(get(host, 0), Err(Error::Stale));
+                assert_eq!(set(host, tx, 0, None), Err(Error::Stale));
             });
             game.world.set(1, 64, 1, granite).unwrap();
             let replacement = ModBlockEntity::new("live_bench:ticker".into(), Default::default());
             game.world
                 .block_entities
                 .insert(pos, BlockEntity::Mod(Box::new(replacement)));
+            assert_eq!(get(game, 0), Err(Error::Stale));
+            let replacement = game.native_block_entity_ref(level, [1, 64, 1]).unwrap();
+            assert_ne!(entity, replacement);
+            let get = |host: &dyn Host, slot| replacement.item_slot(host, slot);
+            let set = |host: &mut dyn ServerHost, tx: &Transaction, slot, stack| {
+                replacement.set_item_slot(host, tx, slot, stack)
+            };
             commit(game, |host, tx| {
                 assert_eq!(
                     set(host, tx, 1, None),
@@ -190,7 +198,7 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
             assert_eq!(get(game, 0), Ok(Some(dirt)));
             game.native_lifecycle
                 .begin_open(mod_api::NativeAuthority::IntegratedServer);
-            assert_eq!(get(game, 0), Err(Error::Unavailable));
+            assert_eq!(get(game, 0), Err(Error::Stale));
             assert!(game.transactions.is_empty());
         });
     });

@@ -61,6 +61,7 @@ impl Game<'_> {
         pos: (i32, i32, i32),
         opener_started: bool,
     ) -> MenuOpen {
+        let generation = self.world.block_entities.generation(&pos);
         let name = &self
             .res
             .facts()
@@ -244,6 +245,9 @@ impl Game<'_> {
             }
             _ => None,
         };
+        if self.world.block_entities.generation(&pos) != generation {
+            return MenuOpen::Refused;
+        }
         let Some(host) = self.lan.as_mut() else {
             return MenuOpen::Refused;
         };
