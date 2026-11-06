@@ -42,6 +42,7 @@ impl Game<'_> {
         let p = self.resolve_coords(&c);
         Ok([p[0].floor() as i32, p[2].floor() as i32])
     }
+    /// `ForceLoadCommand.changeForceLoad`: update and load each newly forced column in order.
     pub(super) fn cmd_forceload(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let dim = Text::literal(self.dim.id());
         match id {

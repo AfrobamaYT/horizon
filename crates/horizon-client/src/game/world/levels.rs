@@ -174,7 +174,7 @@ impl Levels {
             .map(|(_, level)| &mut level.streaming)
     }
 
-    /// Force a column in an already open level without changing the acting
+    /// `ServerLevel.setChunkForced`: force a column in an already open level without changing the acting
     /// player's level; the same queue and load barrier serve the active level.
     pub(super) fn force_parked_chunk(
         &mut self,
