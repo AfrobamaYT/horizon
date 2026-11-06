@@ -2039,9 +2039,11 @@ dependencies = [
 name = "horizon-mod-wasm"
 version = "0.1.0"
 dependencies = [
+ "heck",
  "horizon-client-core",
  "horizon-core",
  "horizon-mod-api",
+ "horizon-mod-api-gen",
  "horizon-mod-points",
  "horizon-mods",
  "horizon-world",

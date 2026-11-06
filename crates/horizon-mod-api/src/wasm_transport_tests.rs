@@ -150,6 +150,10 @@ fn resource_list_transport_reuses_host_buffers() {
         );
     }
     assert_eq!(
+        counts[1], 0,
+        "empty synchronous host calls allocate nothing"
+    );
+    assert_eq!(
         counts[0] - counts[1],
         2 * 100_000,
         "owned list transport allocations"
