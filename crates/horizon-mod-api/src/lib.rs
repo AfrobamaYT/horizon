@@ -22,6 +22,18 @@ pub use registry_keys::UnknownFluid;
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
 
+/// Why a game rule category declaration was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GameRuleError {
+    /// The identifier is invalid.
+    InvalidId,
+    /// The namespace does not belong to the declaring mod.
+    ForeignNamespace,
+    /// The category is already declared.
+    Duplicate,
+}
+
 /// A load-owned fluid identity requested through [`Registrar::fluid_key`] or resolved through
 /// [`DataLoadContext::fluid_key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -318,8 +330,31 @@ pub use horizon_items::item_data::StackData;
 pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
-#[horizon_mod_api_macros::wasm(via = (horizon_world::fluid::FluidKind, u8, bool))]
-pub use horizon_world::fluid::FluidState;
+/// A fluid state copied from the engine. For engine-built values, amount is zero exactly for
+/// the empty fluid. A mod may change a placement event's copy; that mod-provided data is
+/// forwarded to later Parts and is never consumed by the engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FluidState {
+    /// Registered fluid identity.
+    pub fluid: FluidKey,
+    /// Fluid amount; zero only for empty, otherwise 1 through 8.
+    pub amount: u8,
+    /// Whether the fluid is falling.
+    pub falling: bool,
+    /// Whether the engine identifies this as a source.
+    pub source: bool,
+}
+impl FluidState {
+    /// Whether this is the empty fluid.
+    pub fn is_empty(self) -> bool {
+        self.amount == 0
+    }
+    /// Whether the engine identifies this state as a source.
+    pub fn is_source(self) -> bool {
+        self.source
+    }
+}
 #[horizon_mod_api_macros::wasm(via = Tag)]
 pub use horizon_world::nbt::Compound;
 #[horizon_mod_api_macros::wasm(via = Vec<u8>)]
