@@ -558,25 +558,27 @@ impl Game<'_> {
         }
         let mut state = ScopedPlayerState::new(self.motion, setup)?;
         let host = self.lan.as_mut().expect("validated fake's host");
-        state.swap(&mut host.hub.guests[gi]);
+        host.hub.guests.update(gi, |guest| state.swap(guest));
         let play = host.play.insert(conn, Default::default());
         let outcome = self.perform_fake_action(gi, conn, action);
         let host = self.lan.as_mut().expect("guest turns retain the host");
-        let guest = &mut host.hub.guests[gi];
-        let held = guest
-            .inventory
-            .get_mut(guest.selected)
-            .and_then(Option::take)
-            .filter(|s| s.count > 0);
-        let other = guest
-            .inventory
-            .iter_mut()
-            .chain([&mut guest.offhand, &mut guest.carried])
-            .chain(guest.armor.iter_mut())
-            .filter_map(Option::take)
-            .filter(|s| s.count > 0)
-            .collect();
-        state.swap(guest);
+        let (held, other) = host.hub.guests.update(gi, |guest| {
+            let held = guest
+                .inventory
+                .get_mut(guest.selected)
+                .and_then(Option::take)
+                .filter(|s| s.count > 0);
+            let other = guest
+                .inventory
+                .iter_mut()
+                .chain([&mut guest.offhand, &mut guest.carried])
+                .chain(guest.armor.iter_mut())
+                .filter_map(Option::take)
+                .filter(|s| s.count > 0)
+                .collect();
+            state.swap(guest);
+            (held, other)
+        });
         host.play.remove(&conn);
         if let Some(play) = play {
             host.play.insert(conn, play);
@@ -1513,9 +1515,7 @@ impl Game<'_> {
         }
         let mut commands = Vec::new();
         self.native_register_commands(&mut commands);
-        let vanilla = horizon_client::command::vanilla::game_dispatcher_with_features(
-            &self.level.enabled_features,
-        );
+        let vanilla = self.ui.dispatcher.0.clone();
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -1579,8 +1579,10 @@ impl Game<'_> {
                     g.native_player_commands_sent(uuid, &name, &mut kept);
                 });
             }
-            if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
-                g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
+            if let Some(host) = self.lan.as_mut() {
+                let _ = host.hub.update_guest(conn, |g| {
+                    g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
+                });
             }
         }
     }
@@ -2710,12 +2712,12 @@ mod fake_action_tests {
                 .conn
         };
         let (fake, real) = (conn(2), conn(1));
-        for g in host.hub.guests.iter_mut() {
+        host.hub.guests.update_all(|g| {
             g.position = [0.5, 64.0, 0.5];
             g.game_mode = mode;
             g.abilities.update_for_mode(mode);
             g.inventory[g.selected] = item.map(|i| ItemStack::new(i, 1));
-        }
+        });
         (player, fake, real)
     }
 
@@ -2844,9 +2846,8 @@ mod fake_action_tests {
                         .as_mut()
                         .unwrap()
                         .hub
-                        .guest_mut(fake_conn)
-                        .unwrap()
-                        .sneaking = sneaking;
+                        .update_guest(fake_conn, |guest| guest.sneaking = sneaking)
+                        .unwrap();
                     assert_eq!(
                         game.native_player_perform_action(player, interact),
                         Ok(ActionOutcome::Consumed)
@@ -2898,9 +2899,8 @@ mod fake_action_tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(real_conn)
-                .unwrap()
-                .position = [0.5, 64.0, 0.5];
+                .update_guest(real_conn, |guest| guest.position = [0.5, 64.0, 0.5])
+                .unwrap();
             assert_eq!(
                 game.guest_interact(real_conn, gi, 6110, Hand::Main, [2.5, 64.5, 0.5]),
                 Ok(true),
@@ -3097,9 +3097,9 @@ mod fake_action_tests {
         // empties when used, by its ray from the eyes (looking straight down here).
         with_game(|game| {
             let (player, ..) = fake(game, Some("minecraft:water_bucket"), 0);
-            for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+            game.lan.as_mut().unwrap().hub.guests.update_all(|g| {
                 g.pitch = 90.0;
-            }
+            });
             assert_eq!(
                 game.native_player_perform_action(player, on_top([1, 63, 0])),
                 Ok(ActionOutcome::Passed)
@@ -3159,15 +3159,21 @@ mod fake_action_tests {
         use mod_api::PlayerActionSetup;
         super::super::native_entity_refs::tests::with_game(|game| {
             let (player, conn, _) = fake(game, Some("minecraft:diamond"), 1);
-            let guest = game.lan.as_mut().unwrap().hub.guest_mut(conn).unwrap();
-            guest.yaw = 31.0;
-            guest.pitch = 12.0;
-            guest.selected = 3;
-            guest.inventory[3] = Some(ItemStack::new("minecraft:emerald", 4));
-            guest.offhand = Some(ItemStack::new("minecraft:apple", 2));
-            guest.sneaking = true;
-            guest.previous_game_mode = Some(3);
-            guest.motion.as_mut().unwrap().shift_key_down = true;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(conn, |guest| {
+                    guest.yaw = 31.0;
+                    guest.pitch = 12.0;
+                    guest.selected = 3;
+                    guest.inventory[3] = Some(ItemStack::new("minecraft:emerald", 4));
+                    guest.offhand = Some(ItemStack::new("minecraft:apple", 2));
+                    guest.sneaking = true;
+                    guest.previous_game_mode = Some(3);
+                    guest.motion.as_mut().unwrap().shift_key_down = true;
+                })
+                .unwrap();
             game.lan
                 .as_mut()
                 .unwrap()
@@ -3464,9 +3470,9 @@ mod fake_action_tests {
         use super::super::native_entity_refs::tests::with_game;
         with_game(|game| {
             let (player, fake_conn, _) = fake(game, None, 0);
-            for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+            game.lan.as_mut().unwrap().hub.guests.update_all(|g| {
                 g.yaw = -90.0;
-            }
+            });
             // A fist does 1 (the attack damage attribute's base), scaled by the attack strength
             // of a player that hasn't waited (`getAttackStrengthScale(0.5)`: 0.5 of a 5-tick
             // delay, 0.1, so 0.2 + 0.1² × 0.8 = 0.208), then by a zombie's 2 armour
@@ -3544,15 +3550,9 @@ mod fake_action_tests {
                 Some("minecraft:bedrock")
             );
             place(game, [3, 64, 3], "minecraft:stone");
-            game.lan
-                .as_mut()
-                .unwrap()
-                .hub
-                .guests
-                .iter_mut()
-                .for_each(|g| {
-                    g.position = [-6.5, 64.0, -6.5];
-                });
+            game.lan.as_mut().unwrap().hub.guests.update_all(|g| {
+                g.position = [-6.5, 64.0, -6.5];
+            });
             assert_eq!(
                 game.native_player_perform_action(
                     player,
@@ -3750,10 +3750,10 @@ mod fake_action_tests {
                                 .unwrap(),
                         );
                     }
-                    for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+                    game.lan.as_mut().unwrap().hub.guests.update_all(|g| {
                         g.position = [0.5, 64.0, 0.5];
                         g.yaw = -90.0;
-                    }
+                    });
                     let target = zombie(game, 5000, [2.0, 64.0, 0.5]);
                     let stone = game
                         .pack

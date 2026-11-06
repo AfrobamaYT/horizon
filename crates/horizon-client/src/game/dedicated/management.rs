@@ -36,7 +36,7 @@ fn typed_rule(rule: &gamerules::Rule, value: GameRuleValue) -> Value {
         GameRuleValue::Bool(b) => ("boolean", json!(b)),
         GameRuleValue::Int(i) => ("integer", json!(i)),
     };
-    json!({ "key": format!("minecraft:{}", rule.name), "type": kind, "value": value })
+    json!({ "key": rule.name.clone(), "type": kind, "value": value })
 }
 
 /// `NameAndId`'s record `toString`, as vanilla's log lines show it.
@@ -64,7 +64,7 @@ impl Game<'_> {
                 let rules = &self.ui.rules;
                 let all: Vec<Value> = rules
                     .available_rules()
-                    .map(|r| typed_rule(r, rules.get(r.name).unwrap_or(r.default)))
+                    .map(|r| typed_rule(r, rules.get(&r.name).unwrap_or(r.default)))
                     .collect();
                 return json!({ "value": all });
             }
@@ -107,7 +107,7 @@ impl Game<'_> {
                     Ok(value) => value,
                     Err(invalid) => return json!({ "invalid": invalid }),
                 };
-                let current = self.ui.rules.get(rule.name).unwrap_or(rule.default);
+                let current = self.ui.rules.get(&rule.name).unwrap_or(rule.default);
                 rpc(format!(
                     "Game rule '{}' updated from '{current}' to '{value}'",
                     rule.name

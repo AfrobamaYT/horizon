@@ -1,6 +1,6 @@
 //! Borrow the storage a player's active guest turn actually owns.
 
-use super::super::guest::Guest;
+use super::super::guest_list::GuestList;
 use crate::{advancements::Progress, recipe_book::Settings};
 use std::collections::BTreeSet;
 
@@ -32,7 +32,7 @@ impl<'a> AdvancementOwners<'a> {
     /// Use the live storage for the acting player; other players use their hub record.
     pub fn state<'b>(
         &'b mut self,
-        guests: &'b mut [Guest],
+        guests: &'b mut GuestList,
         index: usize,
     ) -> Option<AdvancementState<'b>> {
         let conn = guests.get(index)?.conn;
@@ -45,12 +45,6 @@ impl<'a> AdvancementOwners<'a> {
                 book: live.book,
             });
         }
-        let guest = guests.get_mut(index)?;
-        Some(AdvancementState {
-            progress: &mut guest.advancements,
-            changed: &mut guest.advancements_changed,
-            unlocked: &mut guest.recipes_unlocked,
-            book: &mut guest.recipe_book,
-        })
+        guests.advancement_state(index)
     }
 }

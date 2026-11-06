@@ -491,7 +491,7 @@ fn villager_data(m: &mut Mob, data: &[i32], builtin: &Builtin) {
         .and_then(|name| name.strip_prefix("minecraft:"))
         .and_then(horizon_client::mobs::villager::profession_index)
     {
-        m.extra.variant2 = p;
+        m.extra.profession = horizon_client::mobs::villager::ProfessionState::from_index(p);
     }
     m.extra.villager_level = level.max(1);
 }
@@ -1274,7 +1274,9 @@ mod tests {
         let name = |m: &Mob| {
             (
                 VILLAGER_TYPES[m.extra.variant as usize],
-                horizon_client::mobs::villager::PROFESSIONS[m.extra.variant2 as usize].id,
+                horizon_client::mobs::villager::profession_table().entries()
+                    [m.extra.profession.index().unwrap_or(0) as usize]
+                    .id,
                 m.extra.villager_level,
             )
         };

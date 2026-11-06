@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "N'haller ket lenn marilh ar sevel : {error}",
   "Could not read the saved sign-in.": "N'haller ket lenn an enrolladenn enrollet.",
   "Could not read the saved sign-in. Sign in again.": "N'haller ket lenn an enrolladenn enrollet. En em lugañ en-dro.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "N'haller ket lenn {name}: {error}",
   "Could not run {program}: {error}": "N'haller ket mont en-dro {program} : {error}",
   "Could not save the renewed sign-in.": "N'eus ket bet tu da enrollañ an enskrivadur nevesaet.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Ar pellgargadennoù, an enskrivadurioù hag an hizivadurioù a dremen dre ar proksi mañ (http://host:port, socks5://host:port). Goullo a dalv hini ebet : arveret e vez HTTPS_PROXY e-lec'h pa oa bet kroget al lañser gant unan.",
   "{name} was left out: made for another Horizon version": "{name} a zo bet lezet a-gostez: graet evit ur stumm all eus Horizon",
   "{name} was left out: clashes with {other}": "{name} a zo bet lezet a-gostez: en em stok a ra gant {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} a zo bet lezet a-gostez: ezhomm en deus eus {other}, a zo bet lezet a-gostez"
+  "{name} was left out: it needs {other}, which was left out": "{name} a zo bet lezet a-gostez: ezhomm en deus eus {other}, a zo bet lezet a-gostez",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

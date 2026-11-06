@@ -1064,6 +1064,7 @@ impl Game<'_> {
                 if page == Page::ShaderPacks {
                     self.settings.shader_packs =
                         horizon_client::shader_pack_list::scan(&Self::shader_packs_dir());
+                    self.open_shader_options();
                 }
                 ok()
             }
@@ -1349,7 +1350,7 @@ impl Game<'_> {
             players.push(drain("host", &mut p.hurt_log, &mut p.attack_log));
         }
         if let Some(host) = self.lan.as_mut() {
-            for g in &mut host.hub.guests {
+            host.hub.guests.update_all(|g| {
                 let name = g.name.clone();
                 if let Some(m) = g.motion.as_mut() {
                     players.push(drain(&name, &mut m.hurt_log, &mut m.attack_log));
@@ -1357,7 +1358,7 @@ impl Game<'_> {
                     // Dead, not yet respawned: what its last body logged.
                     players.push(drain(&name, &mut hurts, &mut attacks));
                 }
-            }
+            });
         }
         json!({ "ok": true, "players": players })
     }

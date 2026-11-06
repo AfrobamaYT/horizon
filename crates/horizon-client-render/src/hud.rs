@@ -76,6 +76,7 @@ pub struct HudAtlas {
     pub sprites: HashMap<String, Rect>,
     /// Resolved player-profile names and UUIDs for inline head components.
     pub object_skins: HashMap<String, String>,
+    pub object_skins_revision: u64,
     /// Sprites with a 0 < alpha < 255 texel (`SpriteContents.transparency().hasTranslucent`),
     /// which puts their particles on vanilla's translucent layer.
     pub translucent: HashSet<String>,
@@ -786,21 +787,29 @@ impl HudAtlas {
             .or_else(|| self.sprites.get(MISSING_SPRITE))
             .copied()
     }
+    pub fn clear_object_skins(&mut self) {
+        self.object_skins.clear();
+        self.object_skins_revision = Self::next_revision();
+    }
     /// Keep a ready profile skin when another source only has its default.
     pub fn set_object_skin(&mut self, key: String, skin: String) {
         use std::collections::hash_map::Entry;
         if self.object_skins.len() >= 1024 && !self.object_skins.contains_key(&key) {
-            self.object_skins.clear();
+            self.clear_object_skins();
         }
         match self.object_skins.entry(key) {
             Entry::Occupied(entry)
                 if skin.starts_with("entity/player/") && self.sprites.contains_key(entry.get()) => {
             }
             Entry::Occupied(mut entry) => {
-                entry.insert(skin);
+                if entry.get() != &skin {
+                    entry.insert(skin);
+                    self.object_skins_revision = Self::next_revision();
+                }
             }
             Entry::Vacant(entry) => {
                 entry.insert(skin);
+                self.object_skins_revision = Self::next_revision();
             }
         }
     }
@@ -920,6 +929,7 @@ impl HudAtlas {
             height: 1,
             sprites: HashMap::new(),
             object_skins: HashMap::new(),
+            object_skins_revision: Self::next_revision(),
             translucent: HashSet::new(),
             flags: HashMap::new(),
             sprite_animations: Vec::new(),
@@ -985,6 +995,7 @@ impl HudAtlas {
             translucent: HashSet::new(),
             flags: HashMap::new(),
             object_skins: HashMap::new(),
+            object_skins_revision: Self::next_revision(),
             sprite_animations: Vec::new(),
             glint: (vec![0; 4], 1, 1),
             glint_armor: (vec![0; 4], 1, 1),
@@ -1091,22 +1102,21 @@ impl HudAtlas {
         for folder in folders {
             walk(&textures.join(folder), &mut files);
         }
-        // Content mods' entity textures: their equipment assets name them as
-        // `<ns>:<path>`, and native mods draw their block entities with them
-        // (`native_draw_quad`: `<ns>:entity/...`); and their mob effects'
-        // icons, `<ns>:mob_effect/<path>`.
-        let namespaces = horizon_items::content_namespaces::namespaces(root);
-        for folder in ["entity", "mob_effect"] {
-            if folders.contains(&folder) {
-                for namespace in &namespaces {
-                    walk(
-                        &root.join(format!("assets/{namespace}/textures/{folder}")),
-                        &mut files,
-                    );
+        // Entity and effect resources can come from any namespace in the effective
+        // pack, including a native mod with no content-mod namespace marker.
+        let assets = root.join("assets");
+        if let Ok(namespaces) = fs::read_dir(&assets) {
+            for namespace in namespaces.flatten() {
+                if namespace.file_name() == "minecraft" {
+                    continue;
+                }
+                for folder in ["entity", "mob_effect"] {
+                    if folders.contains(&folder) {
+                        walk(&namespace.path().join("textures").join(folder), &mut files);
+                    }
                 }
             }
         }
-        let assets = root.join("assets");
         // A native mod's particle type names its textures `<ns>:particle/<path>`
         // and needn't ship content, so every namespace's folder is packed.
         if folders.contains(&"particle")
@@ -1436,6 +1446,7 @@ impl HudAtlas {
             height,
             sprites,
             object_skins: HashMap::new(),
+            object_skins_revision: Self::next_revision(),
             translucent,
             flags,
             sprite_animations,
@@ -2904,6 +2915,28 @@ mod tests {
         assert_eq!([batch.width, batch.height], expected.size.map(|v| v as f32));
     }
 
+    #[test]
+    fn object_skin_revision_tracks_changes_and_capacity_clear() {
+        let mut atlas = HudAtlas::boot();
+        atlas.set_object_skin("name:player".into(), "skins/server".into());
+        let revision = atlas.object_skins_revision;
+        atlas.set_object_skin("name:player".into(), "skins/server".into());
+        assert_eq!(atlas.object_skins_revision, revision);
+        atlas.set_object_skin("name:player".into(), "skins/inline".into());
+        assert_ne!(atlas.object_skins_revision, revision);
+        for i in 1..1024 {
+            atlas.set_object_skin(format!("name:{i}"), "skins/server".into());
+        }
+        let revision = atlas.object_skins_revision;
+        atlas.set_object_skin("name:overflow".into(), "skins/server".into());
+        assert_ne!(atlas.object_skins_revision, revision);
+        assert_eq!(atlas.object_skins.len(), 1);
+        let revision = atlas.object_skins_revision;
+        atlas.clear_object_skins();
+        assert_ne!(atlas.object_skins_revision, revision);
+        assert!(atlas.object_skins.is_empty());
+    }
+
     /// The mod image slot is paid only by a game with a native mod loaded.
     #[test]
     fn the_mod_image_slot_exists_only_when_a_mod_is_loaded() {
@@ -3561,6 +3594,22 @@ mod tests {
         let static_badge = atlas.sprites["gui/sprites/icon/static_badge"];
         assert_eq!(static_badge.texels((atlas.width, atlas.height)), (16, 32));
     }
+    #[test]
+    fn arbitrary_namespace_entity_textures_are_packed_without_content_marker() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-atlas-entity-namespace-{}",
+            std::process::id()
+        ));
+        let file =
+            root.join("assets/example/textures/entity/villager/profession/nested/engineer.png");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        write_strip(&file, 16, 16, &[[12, 34, 56, 255]], None);
+        let atlas = HudAtlas::build(&root).unwrap();
+        let rect = atlas.sprites["example:entity/villager/profession/nested/engineer"];
+        assert_eq!(texel_at(&atlas, rect, 0, 0), [12, 34, 56, 255]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// A resource root with one plain item texture and these CIT files (relative path, contents).
     fn cit_root(name: &str, files: &[(&str, &str)]) -> PathBuf {
         let root =

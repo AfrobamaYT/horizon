@@ -203,7 +203,7 @@ impl Game<'_> {
                         let rule = self.ui.rules.rule(name)?;
                         Some((
                             rule.name.to_owned(),
-                            self.ui.rules.get(rule.name).unwrap_or(rule.default),
+                            self.ui.rules.get(&rule.name).unwrap_or(rule.default),
                         ))
                     })
                     .collect();
@@ -264,9 +264,9 @@ impl Game<'_> {
     fn set_environment_rules(&mut self, rules: &[(String, Value)]) {
         for (name, value) in rules {
             if let Some(rule) = self.ui.rules.rule(name).cloned()
-                && self.ui.rules.set(rule.name, *value)
+                && self.ui.rules.set(&rule.name, *value)
             {
-                self.game_rule_changed(rule.name, *value, None);
+                self.game_rule_changed(&rule.name, *value, None);
             }
         }
         self.sync_rules();

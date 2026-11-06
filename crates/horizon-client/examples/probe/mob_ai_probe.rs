@@ -220,6 +220,7 @@ fn goal_name(m: &Mob, name: &str) -> String {
         "RandomSwimming" => "RandomSwimmingGoal",
         "LookAtPlayer" => "LookAtPlayerGoal",
         "RandomLookAround" => "RandomLookAroundGoal",
+        "SpearUse" => "SpearUseGoal",
         "HurtByTarget" => "HurtByTargetGoal",
         "NearestTarget" => "NearestAttackableTargetGoal",
         "Panic" => "PanicGoal",
@@ -428,7 +429,7 @@ fn villager_events(
                 child.persistent = true;
                 // The flat world is all plains (type 0).
                 child.extra.variant = variant.unwrap_or(0);
-                child.extra.variant2 = villager::NONE;
+                child.extra.profession = Default::default();
                 child.extra.age = -24000;
                 child.extra.bed = Some(bed);
                 let seed = spawn_seed(index);
@@ -837,7 +838,7 @@ fn villager(m: &Mob) -> String {
     };
     let mut s = format!(
         "prof {} lvl {} xp {} food {} age {} inv {} gossip {} rep {} sleep {}",
-        villager::profession(m.extra.variant2).id,
+        villager::profession(m.extra.profession.index().unwrap_or(0)).id,
         m.extra.villager_level.max(1),
         villager::xp(m),
         e.map_or(0, |e| e.food_level),
@@ -1458,7 +1459,13 @@ pub fn main() -> horizon_client::Result<()> {
                     else {
                         continue;
                     };
-                    let tag = horizon_client::entity_nbt::mob_to_nbt(&mobs[i], [0; 4], None, None);
+                    let tag = horizon_client::entity_nbt::mob_to_nbt(
+                        &mobs[i],
+                        [0; 4],
+                        None,
+                        None,
+                        |_| None,
+                    );
                     let flower = horizon_client::mobs::bee::get(&mobs[i]).and_then(|b| b.flower);
                     let mut honey = Vec::new();
                     let stored = {
