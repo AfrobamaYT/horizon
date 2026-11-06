@@ -44,7 +44,7 @@ struct VanillaRule {
 impl From<&VanillaRule> for Rule {
     fn from(rule: &VanillaRule) -> Self {
         Self {
-            name: rule.name.into(),
+            name: format!("minecraft:{}", rule.name),
             category: rule.category.into(),
             default: rule.default,
             min: rule.min,
@@ -188,8 +188,10 @@ impl RuleRegistry {
             .map(|(_, rule)| rule)
     }
     pub fn rule(&self, name: &str) -> Option<&Rule> {
-        let name = name.strip_prefix("minecraft:").unwrap_or(name);
-        self.available_rules(true).find(|r| r.name == name)
+        self.available_rules(true).find(|r| {
+            r.name == name
+                || (!name.contains(':') && r.name.strip_prefix("minecraft:") == Some(name))
+        })
     }
 }
 /// The vanilla-backed registry, shared by all existing consumers.
@@ -396,18 +398,21 @@ impl GameRules {
     }
     /// Look up a definition in this rule set's registry.
     pub fn rule(&self, name: &str) -> Option<&Rule> {
-        self.available_rules()
-            .find(|rule| rule.name == name.strip_prefix("minecraft:").unwrap_or(name))
+        self.available_rules().find(|rule| {
+            rule.name == name
+                || (!name.contains(':') && rule.name.strip_prefix("minecraft:") == Some(name))
+        })
     }
     pub fn get(&self, name: &str) -> Option<Value> {
-        let name = name.strip_prefix("minecraft:").unwrap_or(name);
         let index = self
             .registry
             .rules
             .iter()
             .enumerate()
             .find_map(|(index, rule)| {
-                (rule.name == name && (index != RULES.len() || self.minecart_improvements))
+                ((rule.name == name
+                    || (!name.contains(':') && rule.name.strip_prefix("minecraft:") == Some(name)))
+                    && (index != RULES.len() || self.minecart_improvements))
                     .then_some(index)
             })?;
         Some(self.values[index])
@@ -434,9 +439,10 @@ impl GameRules {
     }
     /// Set a rule; false if the name or value type is wrong.
     pub fn set(&mut self, name: &str, value: Value) -> bool {
-        let name = name.strip_prefix("minecraft:").unwrap_or(name);
         let Some((index, r)) = self.registry.rules.iter().enumerate().find(|(index, r)| {
-            (*index != RULES.len() || self.minecart_improvements) && r.name == name
+            (*index != RULES.len() || self.minecart_improvements)
+                && (r.name == name
+                    || (!name.contains(':') && r.name.strip_prefix("minecraft:") == Some(name)))
         }) else {
             return false;
         };
@@ -482,12 +488,7 @@ impl GameRules {
                         Value::Bool(b) => Tag::Byte(i8::from(b)),
                         Value::Int(i) => Tag::Int(i),
                     };
-                    (
-                        horizon_world::nbt::JavaString::from(
-                            format!("minecraft:{}", r.name).as_str(),
-                        ),
-                        tag,
-                    )
+                    (horizon_world::nbt::JavaString::from(r.name.as_str()), tag)
                 }),
         );
         NamedTag {
@@ -517,10 +518,12 @@ impl GameRules {
         rules.unknown = data.clone();
         let registry = rules.registry.clone();
         for r in registry.available_rules(rules.minecart_improvements) {
-            let key = format!("minecraft:{}", r.name);
-            let value = data
-                .get(&key.as_str().into())
-                .or_else(|| data.get(&r.name.as_str().into()));
+            let key = &r.name;
+            let value = data.get(&key.as_str().into()).or_else(|| {
+                r.name
+                    .strip_prefix("minecraft:")
+                    .and_then(|bare| data.get(&bare.into()))
+            });
             match (r.default, value) {
                 (Value::Bool(_), Some(Tag::Byte(v))) => {
                     rules.set(&r.name, Value::Bool(*v != 0));
@@ -531,7 +534,9 @@ impl GameRules {
                 _ => {}
             }
             rules.unknown.remove(&key.as_str().into());
-            rules.unknown.remove(&r.name.as_str().into());
+            if let Some(bare) = r.name.strip_prefix("minecraft:") {
+                rules.unknown.remove(&bare.into());
+            }
         }
         rules
     }
@@ -627,7 +632,7 @@ mod tests {
     fn disabled_feature_does_not_shift_later_dense_positions() {
         let mut registry = RuleRegistry::vanilla();
         registry.rules.push(Rule {
-            name: "later".into(),
+            name: "example:later".into(),
             category: "misc".into(),
             default: Value::Int(4),
             min: 0,
@@ -635,12 +640,12 @@ mod tests {
         });
         let registry = Arc::new(registry);
         let mut rules = GameRules::with_registry(registry, &[]);
-        assert_eq!(rules.get("later"), Some(Value::Int(4)));
-        assert!(rules.set("later", Value::Int(7)));
-        assert_eq!(rules.get("later"), Some(Value::Int(7)));
+        assert_eq!(rules.get("example:later"), Some(Value::Int(4)));
+        assert!(rules.set("example:later", Value::Int(7)));
+        assert_eq!(rules.get("example:later"), Some(Value::Int(7)));
         assert_eq!(rules.get("max_minecart_speed"), None);
         let enabled = rules.copy_with_features(&[MINECART_IMPROVEMENTS.to_owned()]);
-        assert_eq!(enabled.get("later"), Some(Value::Int(7)));
+        assert_eq!(enabled.get("example:later"), Some(Value::Int(7)));
         assert_eq!(enabled.int_at(vanilla::MAX_MINECART_SPEED), 8);
     }
 

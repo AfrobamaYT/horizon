@@ -2950,7 +2950,7 @@ impl Game<'_> {
                             .rules
                             .available_rules()
                             .map(|r| play::GameRuleEntry {
-                                name: format!("minecraft:{}", r.name),
+                                name: r.name.clone(),
                                 value: self.ui.rules.get(&r.name).unwrap_or(r.default).to_string(),
                             })
                             .collect(),

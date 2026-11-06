@@ -1053,7 +1053,7 @@ impl Game<'_> {
         if let Some(announce) = props.announce_player_achievements {
             let value = horizon_client::gamerules::Value::Bool(announce);
             if self.ui.rules.set("show_advancement_messages", value) {
-                self.game_rule_changed("show_advancement_messages", value, None);
+                self.game_rule_changed("minecraft:show_advancement_messages", value, None);
             }
         }
         self.settings.render_distance = props.view_distance.clamp(2, 32);

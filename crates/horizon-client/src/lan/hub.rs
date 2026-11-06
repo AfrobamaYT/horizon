@@ -5348,7 +5348,12 @@ mod tests {
         let mut expected: Vec<_> = hub
             .rule_registry
             .available_rules(false)
-            .flat_map(|r| [r.name.to_owned(), format!("minecraft:{}", r.name)])
+            .flat_map(|r| {
+                [
+                    r.name.clone(),
+                    r.name.strip_prefix("minecraft:").unwrap().to_owned(),
+                ]
+            })
             .collect();
         expected.sort();
         assert_eq!(names, expected);
@@ -5417,7 +5422,12 @@ mod tests {
         let mut expected: Vec<_> = hub
             .rule_registry
             .available_rules(true)
-            .flat_map(|r| [r.name.to_owned(), format!("minecraft:{}", r.name)])
+            .flat_map(|r| {
+                [
+                    r.name.clone(),
+                    r.name.strip_prefix("minecraft:").unwrap().to_owned(),
+                ]
+            })
             .collect();
         expected.sort();
         assert_eq!(names, expected);

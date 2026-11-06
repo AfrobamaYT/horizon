@@ -3916,6 +3916,11 @@ impl Level {
             .or_else(|| {
                 self.rule_registry
                     .rule(name)
+                    .and_then(|rule| self.game_rules.get(&rule.name).copied())
+            })
+            .or_else(|| {
+                self.rule_registry
+                    .rule(name)
                     .map(|rule| match rule.default {
                         crate::gamerules::Value::Bool(value) => i32::from(value),
                         crate::gamerules::Value::Int(value) => value,
@@ -4023,7 +4028,11 @@ impl Level {
         if let Some(Tag::Compound(map)) = &saved_rules {
             for (k, v) in map {
                 let name = k.to_string_lossy();
-                let name = name.strip_prefix("minecraft:").unwrap_or(&name).to_owned();
+                let name = if name.contains(':') {
+                    name
+                } else {
+                    format!("minecraft:{name}")
+                };
                 if let Some(v) = number(Some(v)) {
                     rules.insert(name, v as i32);
                 }
@@ -4766,7 +4775,7 @@ impl Level {
                         Tag::Int(self.game_rules.get(&rule.name).copied().unwrap_or(default))
                     }
                 };
-                put(&mut rules, &format!("minecraft:{}", rule.name), tag);
+                put(&mut rules, &rule.name.clone(), tag);
             }
             if self
                 .enabled_features
@@ -4783,11 +4792,7 @@ impl Level {
                     .copied()
                     .filter(|v| (rule.min..=rule.max).contains(v))
                     .unwrap_or(default);
-                put(
-                    &mut rules,
-                    &format!("minecraft:{}", rule.name),
-                    Tag::Int(value),
-                );
+                put(&mut rules, &rule.name.clone(), Tag::Int(value));
             }
             write_saved_data(dir, "game_rules", rules)?;
         }
@@ -7357,7 +7362,9 @@ mod tests {
         };
         level.weather.raining = true;
         level.weather.rain_time = 500;
-        level.game_rules.insert("keep_inventory".into(), 1);
+        level
+            .game_rules
+            .insert("minecraft:keep_inventory".into(), 1);
         level.write(&dir).unwrap();
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.name, "Test");
@@ -7650,7 +7657,7 @@ mod tests {
             super::Tag::compound([("absent:rule", super::Tag::Long(42))]),
         )
         .unwrap();
-        level.game_rules.insert("advance_time".into(), 0);
+        level.game_rules.insert("minecraft:advance_time".into(), 0);
         level.write(&dir).unwrap();
         assert_eq!(
             super::read_saved_data(&dir, "game_rules")
