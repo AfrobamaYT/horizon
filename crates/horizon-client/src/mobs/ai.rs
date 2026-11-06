@@ -4070,7 +4070,12 @@ mod same_vehicle_push_tests {
         };
         let mut events = Vec::new();
         let ran = with_test_world(&[villager.seen(None)], |w, _| {
-            push_entities(&mut cow, w, &mut events);
+            push_entities(
+                &mut cow,
+                w,
+                &mut crate::health::TestLevel::new(0).level(),
+                &mut events,
+            );
         });
         // Without the vanilla data under .local/horizon-client the world
         // cannot be built: the test has nothing to check.
@@ -4079,7 +4084,12 @@ mod same_vehicle_push_tests {
         assert_eq!(cow.velocity, Vec3::ZERO);
 
         let ran = with_test_world(&[cow.seen(None)], |w, _| {
-            push_entities(&mut villager, w, &mut events);
+            push_entities(
+                &mut villager,
+                w,
+                &mut crate::health::TestLevel::new(0).level(),
+                &mut events,
+            );
         });
         // Without the vanilla data under .local/horizon-client the world
         // cannot be built: the test has nothing to check.
@@ -4118,7 +4128,12 @@ mod same_vehicle_push_tests {
         };
         let mut events = Vec::new();
         let ran = with_test_world(&[fox.seen(None)], |w, _| {
-            push_entities(&mut cow, w, &mut events);
+            push_entities(
+                &mut cow,
+                w,
+                &mut crate::health::TestLevel::new(0).level(),
+                &mut events,
+            );
         });
         // Without the vanilla data under .local/horizon-client the world
         // cannot be built: the test has nothing to check.
@@ -4128,7 +4143,12 @@ mod same_vehicle_push_tests {
 
         fox.extra.ints[0] &= !super::super::fox::SLEEPING;
         let ran = with_test_world(&[fox.seen(None)], |w, _| {
-            push_entities(&mut cow, w, &mut events);
+            push_entities(
+                &mut cow,
+                w,
+                &mut crate::health::TestLevel::new(0).level(),
+                &mut events,
+            );
         });
         // Without the vanilla data under .local/horizon-client the world
         // cannot be built: the test has nothing to check.
@@ -4496,7 +4516,12 @@ mod forgiveness_tests {
             golem.extra.anger = 300;
             golem.ai.last_hurt_by = Some(Who::Player);
             let mut events = Vec::new();
-            tick(&mut golem, &world, &mut LegacyRandom::new(0), &mut events);
+            tick(
+                &mut golem,
+                &world,
+                &mut crate::health::TestLevel::new(0).level(),
+                &mut events,
+            );
             assert_eq!(golem.ai.target, None);
             assert_eq!(golem.extra.anger, 0);
             assert_eq!(golem.ai.last_hurt_by, None);
@@ -5692,12 +5717,13 @@ mod happy_ghast_ambient_tests {
                     mob.persistent = true;
                     mob.extra.age = if baby { -24000 } else { 0 };
                     let sound = super::super::happy_ghast::sounds(&mob)[0];
-                    let mut random = LegacyRandom::new(0);
+                    let mut test_level = crate::health::TestLevel::new(0);
+                    let level = &mut test_level.level();
                     let mut heard = false;
                     // Natural scheduling: no ambient counter is forced or reset here.
                     for _ in 0..1200 {
                         let mut events = Vec::new();
-                        assert!(tick(&mut mob, w, &mut random, &mut events));
+                        assert!(tick(&mut mob, w, level, &mut events));
                         for event in events {
                             if let MobEvent::Sound(name, at, _, _) = event
                                 && name == sound
@@ -5720,10 +5746,11 @@ mod happy_ghast_ambient_tests {
                 mob.persistent = true;
                 mob.silent = true;
                 let sound = super::super::happy_ghast::sounds(&mob)[0];
-                let mut random = LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 for _ in 0..1200 {
                     let mut events = Vec::new();
-                    assert!(tick(&mut mob, w, &mut random, &mut events));
+                    assert!(tick(&mut mob, w, level, &mut events));
                     assert!(
                         !events
                             .iter()

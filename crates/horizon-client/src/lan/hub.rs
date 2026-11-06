@@ -6602,27 +6602,29 @@ mod tests {
     #[test]
     fn a_release_shoots_before_the_move_behind_it() {
         let (mut hub, _rx) = hub_with_a_guest();
-        hub.guests[0].load_timeout = 0;
         let before = (hub.guests[0].position, hub.guests[0].known_movement);
-        let inbox = &mut hub.guests[0].inbox;
-        inbox.push_back((
-            S::PlayerAction(play::PlayerAction {
-                action: 6,
-                pos: [0; 3],
-                direction: 0,
-                sequence: 0,
-            }),
-            0,
-        ));
-        inbox.push_back((
-            S::MovePlayerPos(play::MovePlayerPos {
-                x: before.0[0] + 0.3,
-                y: before.0[1],
-                z: before.0[2],
-                flags: 1,
-            }),
-            0,
-        ));
+        hub.guests.update(0, |guest| {
+            guest.load_timeout = 0;
+            let inbox = &mut guest.inbox;
+            inbox.push_back((
+                S::PlayerAction(play::PlayerAction {
+                    action: 6,
+                    pos: [0; 3],
+                    direction: 0,
+                    sequence: 0,
+                }),
+                0,
+            ));
+            inbox.push_back((
+                S::MovePlayerPos(play::MovePlayerPos {
+                    x: before.0[0] + 0.3,
+                    y: before.0[1],
+                    z: before.0[2],
+                    flags: 1,
+                }),
+                0,
+            ));
+        });
         let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
         let mut next_entity = 2;
         let border = crate::worldborder::WorldBorder::default();

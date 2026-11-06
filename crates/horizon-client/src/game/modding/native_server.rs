@@ -1504,7 +1504,7 @@ pub(super) struct NativeCommands {
 /// Where the game calls the server hook points.
 impl Game<'_> {
     /// Asks the mods for their commands once per hub, and puts them in every
-    /// player's command tree.
+    /// player's command tree; again when a mod asked (`native_refresh_commands`).
     pub(super) fn register_native_commands(&mut self) {
         let refresh = std::mem::take(&mut self.native_commands_refresh);
         if self

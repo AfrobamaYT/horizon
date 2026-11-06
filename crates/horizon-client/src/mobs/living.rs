@@ -2918,7 +2918,11 @@ mod tests {
                     let mut mob = Mob::new(1, kind, Vec3::new(x, 1.0, 0.5), 0.0);
                     mob.fall_distance = 5.0;
                     let mut events = Vec::new();
-                    mob.fall_on_block(w, &mut events);
+                    mob.fall_on_block(
+                        w,
+                        &mut crate::health::TestLevel::new(0).level(),
+                        &mut events,
+                    );
                     assert!(
                         matches!(events.as_slice(), [MobEvent::Sound("entity.hostile.small_fall", _, 1.0, 1.0), MobEvent::SoundId(id, _, 0.5, 0.75), ..] if id == block_sound),
                         "{events:?}"

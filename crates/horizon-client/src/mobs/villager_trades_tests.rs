@@ -41,11 +41,12 @@ fn displayed_trade_items_have_no_drop_chance_and_clear_restores_it() {
             ..Trader::default()
         }));
         mem(&mut m).interaction_target.set(Who::Player);
-        let mut lr = LegacyRandom::new(1);
+        let mut test_level = crate::health::TestLevel::new(1);
+        let level = &mut test_level.level();
         let mut events = Vec::new();
         let mut cx = Bx {
             w: &w,
-            lr: &mut lr,
+            level,
             events: &mut events,
             now: 0,
             refresh: false,
