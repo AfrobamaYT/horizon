@@ -142,7 +142,10 @@ The supervisor/engine split stays even after the engine becomes headless, for th
 With `--control-socket <dir>/.horizon/engine.json` (the existing control protocol: TCP on 127.0.0.1 plus a token, on
 every OS), the dedicated loop answers `server-status` with TPS, MSPT (average, P50/P95/P99 from the tick
 clock `/tick query` uses), players (name, UUID, address, ping, position), loaded chunks and uptime. It answers
-`console <line>` with the command's output.
+`console <line>` with the command's output. `server-mods` reads the canonical `LoadedMods` package
+inventory on this same server thread and answers `{"mods":[{"id":"example","version":"1"}]}`.
+It includes native, wasm and content packages installed in that inventory, in inventory order; an empty
+inventory is `{"mods":[]}`. The supervisor's `GET /api/v1/mods` uses this query, never a build-record fallback.
 
 **A proxy moving a player between two servers** uses more requests on this endpoint (`lan/arrivals.rs`,
 `game/dedicated/transfer.rs`). They are a built-in module, **off by default**, that the owner turns on in

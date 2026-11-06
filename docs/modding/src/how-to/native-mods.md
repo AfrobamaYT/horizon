@@ -813,9 +813,13 @@ Point a server at it:
     horizon-server --dir SERVER restart
 
 Updates do not rebuild a pinned `engine.path`: build a new export folder, set `engine.path` to it, restart, and keep
-the old folder for manual rollback. The supervisor does not auto-update or rebuild a pinned engine path, and there
-is no supervisor-to-engine inventory query or managed native rebuild/update workflow yet (remaining work in
-horizon-rust/horizon#6304). Configuration mod matching is implemented as described above.
+the old folder for manual rollback. The supervisor does not auto-update or rebuild a pinned engine path
+(remaining work in horizon-rust/horizon#6304). To inspect the running server, its authenticated
+[`GET /api/v1/mods`](../../../api/server.md) queries the engine's canonical `LoadedMods` inventory:
+`mods` lists loaded native, wasm and content package ids and versions in inventory order.
+`provenance` separately reports the configured program's build record, which may differ and is never
+used as an inventory fallback. A stopped or unreachable engine returns HTTP 409, not an empty list.
+Configuration mod matching is implemented as described above.
 Native mods run unsandboxed: only build code you have read and trust.
 `--trust-native-code` records the operator's decision; an agent must not supply that consent.
 
