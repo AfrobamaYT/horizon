@@ -1147,7 +1147,7 @@ mod tests {
                 Box::new(MissingItem),
             )])
             .unwrap();
-            let error = game.reload_datapacks(true, &[]).unwrap_err();
+            let error = game.reload_datapacks(true, &[]).err().unwrap();
             assert!(error.to_string().contains("reload_test:missing"));
             assert_eq!(game.options.resources, old_root);
             assert!(game.pack.data_source.same_generation(&old_data));
