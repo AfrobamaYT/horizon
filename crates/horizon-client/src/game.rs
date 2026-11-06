@@ -51,92 +51,7 @@ fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOv
     }
 }
 
-mod advancements;
-mod advancements_screen;
-mod agent;
-mod agent_settings;
-mod allays;
-mod armor_stands;
-mod atlas_slots;
-mod attachment_index;
-mod attachment_sync;
-mod banners;
-mod beacon;
-mod beds;
-mod beehives;
-mod block_editor;
-mod block_edits;
-mod block_entity_anims;
-mod block_entity_ticks;
-mod block_items;
-mod blockctl;
-mod boarding;
-mod boat_authority_fixture;
-mod boat_leads;
-mod boat_passengers;
-mod boat_rider_fixture;
-mod boats;
-mod books;
-mod bossbars;
-mod breezes;
-mod brush;
-mod building_players;
-mod bundles;
-mod campfire;
-mod campfire_douse;
-mod cartography;
-mod cat_spawner;
-mod chat;
-mod chat_filter;
-mod chiseled_bookshelf;
-mod client_ambient;
-mod client_reload;
-mod clipboard;
-mod code_of_conduct;
-mod combat;
-mod command_blocks;
-mod command_harness;
-mod command_minecarts;
-mod commands;
-mod composter;
-mod consume;
-mod control;
-mod copper_golems;
-mod creaking;
-#[cfg(test)]
-mod create_fluid_source_tests;
-mod creative_hotbar;
-mod creatures;
-#[cfg(test)]
-mod crop_grow_tests;
-mod crossbow;
-pub(crate) mod cushions;
-mod custom_spawners;
-mod debug_keys;
-mod debug_lines;
-mod debug_options;
-mod debug_renderers;
-mod debug_stick;
-mod decorated_pot;
-mod dedicated;
-mod deflect;
-mod dialogs;
-mod dispense_fixture;
-mod dispenser;
-mod dragon;
-mod durability;
-mod dynamic_lights;
-mod enchant_effects;
-mod end;
-mod enderman;
-#[cfg(test)]
-mod enderman_placement_tests;
-mod entity;
-mod entity_culling;
-mod entity_sounds;
-mod event_loop;
-mod events;
-mod execution_role;
+include!(concat!(env!("OUT_DIR"), "/game_modules.rs"));
 /// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
 pub mod points {
@@ -148,320 +63,7 @@ pub mod points {
         super::execution_role::host_side(game)
     }
 }
-mod explosion;
-mod extras;
-mod falling_damage;
-mod fangs;
-mod finalize_spawn;
-mod fireworks;
-mod fishing;
-mod fov;
-mod foxes;
-mod frames;
-mod friends;
-mod functions;
-mod game_mode;
-mod game_tests;
-mod gamemode_switcher;
-mod ghasts;
-mod glowing;
-mod golems;
-mod growth;
-mod hand;
-mod headless;
-mod hud_editor;
-mod ime;
-mod initial_spawn;
-mod input_trace;
-mod integrated;
-mod interaction_shapes;
-mod interactions;
-mod item_areas;
-mod item_draw;
-mod item_particles;
-#[cfg(test)]
-mod item_slot_command_tests;
-mod item_use;
-mod jigsaw_blocks;
-mod jigsaw_edit;
-mod jukebox;
-mod key_focus;
-mod lan;
-mod lan_actions;
-mod lan_attributes;
-mod lan_camera;
-mod lan_chat;
-mod lan_crafting;
-mod lan_entities;
-mod lan_far;
-mod lan_idle;
-mod lan_mobs;
-mod lan_mount_menu;
-mod lan_particles;
-mod lan_pvp;
-mod lan_quiet;
-mod lan_screen;
-mod lan_stations;
-mod lan_trading;
-mod lan_vehicles;
-mod lan_waypoints;
-mod launch_api;
-mod leads;
-mod legacy_rules;
-mod level_particles;
-mod level_sounds;
-mod levels;
-mod lightning;
-mod living_attributes;
-mod llamas;
-mod locator_bar;
-mod loom;
-mod mace;
-mod machines;
-mod maps;
-mod memory;
-mod minecarts;
-mod mob_blocks;
-mod mob_gear;
-mod mob_index;
-mod mob_looting;
-mod mob_sounds;
-mod mod_api_host;
-mod mod_browser;
-pub(crate) mod mods;
-mod mount_menu;
-mod mounts;
-mod moving_pistons;
-mod music;
-mod names;
-mod narrator;
-mod native_biome_colors;
-pub mod native_block_entity_draw;
-#[cfg(test)]
-mod native_block_entity_item_tests;
-mod native_block_entity_refs;
-mod native_block_sprites;
-mod native_block_states;
-mod native_boss_bar_refs;
-mod native_chunk_save;
-mod native_claimed_items;
-pub mod native_client_services;
-mod native_client_session;
-mod native_components;
-mod native_config_files;
-mod native_configs;
-mod native_criteria;
-mod native_custom_geometry;
-#[cfg(test)]
-mod native_damage_tests;
-mod native_data_maps;
-mod native_display_refs;
-mod native_dragon_refs;
-mod native_entities;
-mod native_entity_data;
-mod native_entity_invulnerable;
-mod native_entity_motion;
-mod native_entity_moves;
-mod native_entity_physics;
-mod native_entity_refs;
-mod native_entity_remove;
-mod native_entity_riding;
-mod native_entity_sounds;
-mod native_entity_state;
-mod native_explosions;
-mod native_falling;
-mod native_goal_ticks;
-#[cfg(test)]
-mod native_guest_turn_tests;
-#[cfg(test)]
-mod native_held_out_tests;
 mod native_hooks;
-mod native_inventories;
-mod native_item_container;
-mod native_item_entity_refs;
-mod native_item_places;
-#[cfg(test)]
-mod native_knockback_tests;
-mod native_level_effects;
-mod native_level_events;
-mod native_level_items;
-mod native_level_refs;
-mod native_level_signals;
-mod native_level_world;
-mod native_lifecycle;
-#[cfg(test)]
-mod native_live_holder_tests;
-mod native_living_effects;
-mod native_living_flags;
-mod native_living_position;
-mod native_living_refs;
-mod native_living_writes;
-mod native_menu_refs;
-mod native_menus;
-mod native_merchant_refs;
-mod native_minecart_refs;
-mod native_mob_draw;
-mod native_mob_goals;
-mod native_mob_navigation;
-mod native_mob_refs;
-mod native_mobs;
-mod native_motion;
-mod native_mounts;
-mod native_net;
-mod native_panel;
-mod native_panel_recipes;
-mod native_player_cooldowns;
-mod native_player_death;
-mod native_player_food;
-mod native_player_modes;
-mod native_player_stats;
-mod native_projectile_refs;
-mod native_projectiles;
-mod native_quick_move;
-mod native_raid_refs;
-mod native_recipes;
-mod native_render_visibility;
-mod native_scene;
-mod native_server;
-mod native_shaders;
-#[cfg(test)]
-mod native_shield_totem_tests;
-mod native_sound_refs;
-mod native_structures;
-mod native_ticks;
-mod native_visuals;
-mod native_world_columns;
-mod native_world_edit;
-mod native_world_read;
-mod natural_spawning;
-mod nautili;
-#[cfg(test)]
-mod neighbor_notify_tests;
-mod net_harness;
-mod nether_portal;
-mod no_resources;
-mod occlusion_culling;
-mod ominous_item_spawner;
-mod options;
-mod ordered_tick;
-mod packs;
-mod pad;
-mod pad_actions;
-mod pad_menu;
-mod paintings;
-mod pandas;
-mod particle_culling;
-mod passengers;
-mod persist;
-mod perspective;
-mod pick_entity;
-mod pickups;
-mod piglins;
-mod piston_push;
-mod player_equip;
-mod postprocess;
-mod potent_sulfur;
-mod potions;
-mod powder_snow;
-mod prediction;
-mod pumpkin;
-mod pvp;
-mod quick_actions;
-mod raids;
-mod random_textures;
-mod recipe_book;
-mod remote;
-mod remote_camera;
-mod remote_chat;
-mod remote_chunks;
-mod remote_mob_data;
-mod remote_mob_particles;
-mod remote_mob_use;
-mod remote_objects;
-mod remote_projectiles;
-mod remote_stations;
-mod remote_vehicles;
-mod render_control;
-mod render_tick;
-mod repro;
-mod respawn_anchor;
-mod respawn_position;
-mod saves_control;
-mod saving;
-mod scoreboard;
-mod screen_info;
-mod screens;
-mod sculk;
-mod sculk_fixture;
-mod server_lifecycle;
-mod server_links;
-mod server_packs;
-mod server_reload;
-mod server_travel;
-mod shader_packs;
-mod sheep_dye;
-mod shelf;
-mod shield;
-mod shoulders;
-mod sign_edit;
-mod skin_models;
-mod sniffers;
-mod social;
-mod spawner;
-mod spear;
-mod spectator;
-mod spill;
-mod splash_water;
-mod split;
-#[cfg(test)]
-mod stand_equipment_change_tests;
-mod startup_menu;
-mod station_control;
-mod stations;
-mod stats;
-mod stats_screen;
-mod storage;
-mod structure_blocks;
-mod structure_edit;
-mod structures;
-mod studio;
-mod subtitle_hud;
-mod sulfur_cubes;
-#[cfg(test)]
-mod sync_background_tests;
-mod tempban;
-mod test_block_edit;
-mod test_blocks;
-mod test_entities;
-mod test_environments;
-mod test_instance_edit;
-mod test_instances;
-mod text_displays;
-mod tick_profile;
-mod tick_script;
-mod titles;
-mod tnt;
-mod totem;
-mod trading;
-mod transactions;
-mod transient_blocks;
-mod trial_spawner;
-mod trial_visuals;
-mod trident;
-mod tutorial;
-mod tweaks;
-mod ui_control;
-mod vault;
-mod vehicle_teleport;
-mod villagers;
-mod wandering_trader;
-mod win;
-mod wind;
-mod wither;
-mod world_loading;
-mod xp_orb_targeting;
-mod zombie_reinforcements;
-mod zombie_villagers;
 use event_loop::EventLoopCtl;
 // `Action` here is the title screen's buttons (`title::Action`).
 use horizon_client::actions::Action as Mapping;
@@ -611,7 +213,7 @@ struct Options {
     /// window stays hidden and never grabs the system pointer.
     offscreen: bool,
     /// `--headless` (#4951): no display, no window and no renderer. The game runs its own
-    /// loop (`game/headless.rs`) instead of winit's, so it starts where no display server
+    /// loop (`game/runtime/headless.rs`) instead of winit's, so it starts where no display server
     /// is (an SSH session, a server). It counts as `offscreen` for everything else (an
     /// automated run that never shows a window or grabs the pointer).
     headless: bool,
@@ -955,31 +557,31 @@ enum Screen {
     Stats,
     /// The Advancements screen.
     Advancements,
-    /// WorldOptionsScreen (game/lan_screen.rs).
+    /// WorldOptionsScreen (game/network/lan_screen.rs).
     WorldOptions,
     /// Play with Friends, from the pause menu's Friends button
-    /// (`friends_screen`, game/friends.rs).
+    /// (`friends_screen`, game/network/friends.rs).
     Friends,
-    /// `SocialInteractionsScreen` (`social_screen`, game/social.rs).
+    /// `SocialInteractionsScreen` (`social_screen`, game/network/social.rs).
     Social,
-    /// CommandBlockEditScreen (game/command_blocks.rs).
+    /// CommandBlockEditScreen (game/administration/command_blocks.rs).
     CommandBlock,
-    /// A game master block's edit screen (game/block_editor.rs).
+    /// A game master block's edit screen (game/interface/block_editor.rs).
     BlockEditor,
-    /// ServerLinksDialogScreen: a server's links (game/server_links.rs).
+    /// ServerLinksDialogScreen: a server's links (game/network/server_links.rs).
     ServerLinks,
-    /// ConfirmLinkScreen for a server link (game/server_links.rs).
+    /// ConfirmLinkScreen for a server link (game/network/server_links.rs).
     ConfirmLink,
     /// DialogScreen.WarningScreen: the note about custom screens.
     DialogWarning,
-    /// WinScreen: the end poem and the credits (game/win.rs).
+    /// WinScreen: the end poem and the credits (game/interface/win.rs).
     Win,
-    /// DebugOptionsScreen, F3+F6 (game/debug_options.rs).
+    /// DebugOptionsScreen, F3+F6 (game/interface/debug_options.rs).
     DebugOptions,
     /// A screen of a native mod's own (`native_mod_screen_open`): it draws and
     /// takes its input through the screen hooks.
     Mod,
-    /// PvP & HUD's widget editor (game/hud_editor.rs).
+    /// PvP & HUD's widget editor (game/interface/hud_editor.rs).
     HudEditor,
 }
 impl Screen {
@@ -2868,14 +2470,14 @@ struct Game<'a> {
     /// A pack reload staged on a worker (`LoadingOverlay`): the frame draws
     /// its progress until `drive_pack_reload` applies it.
     pack_reload: Option<packs::PackReload>,
-    /// A server's resource packs (game/server_packs.rs).
+    /// A server's resource packs (game/world/server_packs.rs).
     server_packs: server_packs::ServerPackState,
     /// The link a chat click asks to open (`ConfirmLinkScreen`).
     link_prompt: Option<String>,
     /// A command the player didn't type, waiting for their answer
-    /// (game/remote_chat.rs).
+    /// (game/network/remote_chat.rs).
     command_prompt: Option<remote_chat::CommandPrompt>,
-    /// A server's Code of Conduct to accept (game/code_of_conduct.rs).
+    /// A server's Code of Conduct to accept (game/interface/code_of_conduct.rs).
     code_of_conduct: Option<code_of_conduct::Prompt>,
     dialogs: dialogs::DialogState,
     /// Single player's server while it loads its world (`Minecraft.doWorldLoad`).
@@ -2890,7 +2492,7 @@ struct Game<'a> {
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
     gui: UiResources,
-    standalone_sprites: native_block_entity_draw::StandaloneSprites,
+    standalone_geometry: native_block_entity_draw::StandaloneGeometry,
     /// `FogRenderer`'s evolving state.
     fog: horizon_client::fog::FogState,
     screen_fx: horizon_client::screen_effects::ScreenEffects,
@@ -2956,7 +2558,7 @@ struct Game<'a> {
     container: Option<(i32, i32, i32)>,
     /// Open workstation menu (enchanting table, anvil, ...).
     station: Option<stations::Station>,
-    /// Status effects and thrown potions (game/potions.rs).
+    /// Status effects and thrown potions (game/items/potions.rs).
     potions: potions::PotionState,
     scratch_slot: Option<ItemStack>,
     mining: Option<Mining>,
@@ -3053,7 +2655,7 @@ struct Game<'a> {
     /// The first-person player's model, which only a native pack's shadow pass draws.
     shadow_only_vertices: std::cell::RefCell<Vec<Vertex>>,
     /// Runs of `entity_vertices` by entity, for a shader pack's per-entity draws; recorded only
-    /// while `pack_ids` is set (game/shader_packs.rs).
+    /// while `pack_ids` is set (game/interface/shader_packs.rs).
     entity_spans: std::cell::RefCell<Vec<horizon_client::gfx::pack_draw::EntitySpan>>,
     /// Which entity this frame's entity vertices belong to (`Frame::entity_motion`).
     entity_motion: std::cell::RefCell<Vec<(u32, u64)>>,
@@ -3061,7 +2663,7 @@ struct Game<'a> {
     /// and this frame's draws.
     skin_models: std::cell::RefCell<horizon_client::mobs::skin::SkinModels>,
     skin_frame: std::cell::RefCell<horizon_client::gfx::entity_skin::SkinFrame>,
-    /// The glowing entities' silhouettes this frame (game/glowing.rs).
+    /// The glowing entities' silhouettes this frame (game/entities/glowing.rs).
     glowing_vertices: std::cell::RefCell<Vec<Vertex>>,
     /// Client mods' sounds (`native_play_local_sound`), with the ticks each waits, until the
     /// next audio update plays them (`tick_sound_engine`).
@@ -3084,10 +2686,10 @@ struct Game<'a> {
     pad: pad::Pads,
     frames: u64,
     /// The glint clock and options, read once at the start of each frame
-    /// (game/item_draw.rs).
+    /// (game/interface/item_draw.rs).
     glint_frame: horizon_client::item_render::GlintFrame,
     /// Mod block entities' geometry their mods kept
-    /// (game/native_block_entity_draw.rs).
+    /// (game/modding/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
     world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
@@ -3186,7 +2788,7 @@ struct Game<'a> {
     /// player's own (taken by `update_world`).
     spawn_wait: Vec<(i32, i32)>,
     mobs: horizon_client::join_seq::JoinList<Mob>,
-    /// `mobs` by network id, for the packets that name one (`game/mob_index.rs`).
+    /// `mobs` by network id, for the packets that name one (`game/mobs/mob_index.rs`).
     mob_index: mob_index::MobIndex,
     creatures: creatures::Creatures,
     sculk: sculk::SculkState,
@@ -3209,17 +2811,17 @@ struct Game<'a> {
     /// Mobs whose death (`LivingEntity.die`) has been handled.
     /// Looked up per mob each tick: a fast hasher (never iterated).
     died: horizon_client::fast_hash::FxHashSet<u32>,
-    /// Client-ticked block-entity animation state (`game/block_entity_anims.rs`).
+    /// Client-ticked block-entity animation state (`game/blocks/block_entity_anims.rs`).
     be_anims: horizon_client::block_entity_anim::BlockEntityAnims,
     /// Item being used (eaten): hotbar slot and ticks used.
     using: Option<(usize, u32)>,
     /// `getUseDuration` when that use started, as a mod left it
-    /// (`game/item_use.rs`): consumables and mod items count to it.
+    /// (`game/items/item_use.rs`): consumables and mod items count to it.
     use_duration: i32,
-    /// A mod's `Start` or `Tick` set that use's ticks left (`game/item_use.rs`).
+    /// A mod's `Start` or `Tick` set that use's ticks left (`game/items/item_use.rs`).
     use_ticks_set: bool,
     /// The crossbow charge's start and middle loading sounds played so far
-    /// (`game/crossbow.rs`): each charge plays each of them once, however
+    /// (`game/items/crossbow.rs`): each charge plays each of them once, however
     /// far a mod's tick moved the charge at a time.
     crossbow_sounds: [bool; 2],
     /// Camera.oldFovModifier / fovModifier.
@@ -3314,7 +2916,7 @@ struct Game<'a> {
     sleeping: Option<[i32; 3]>,
     sleep_timer: u32,
     /// The beds players sleep in that this game marked `occupied`, by level
-    /// (game/beds.rs).
+    /// (game/blocks/beds.rs).
     player_beds: Vec<(Dim, [i32; 3])>,
     /// `SleepStatus`'s active and sleeping players at the last announcement.
     sleep_seen: (i64, i64),
@@ -3339,19 +2941,19 @@ struct Game<'a> {
     /// Teleports a command made inside a level, for `native_player_teleported`
     /// once the player's move has reached their client (`leave_guest`).
     teleport_notes: Vec<server_travel::TeleportNote>,
-    /// A server's levels other than the one in place (game/levels.rs).
+    /// A server's levels other than the one in place (game/world/levels.rs).
     levels: levels::Levels,
     /// Which pass of a server tick runs (`tick_server`): the first one reads
     /// the network, the last one ends the players' tick.
     level_pass: levels::Pass,
-    /// Nether portals: the player's, items' and mobs' (game/nether_portal.rs).
+    /// Nether portals: the player's, items' and mobs' (game/blocks/nether_portal.rs).
     portals: nether_portal::Portals,
     /// The respawn point when it is not the world spawn or a bed: a respawn
-    /// anchor (`game/respawn_anchor.rs`).
+    /// anchor (`game/blocks/respawn_anchor.rs`).
     respawn_config: Option<respawn_anchor::RespawnConfig>,
     /// The next enter_dimension call comes from an End portal.
     end_portal_travel: bool,
-    /// The open WinScreen (game/win.rs).
+    /// The open WinScreen (game/interface/win.rs).
     win: Option<win::Win>,
     end: end::EndState,
     block_ticks: Ticks,
@@ -3371,7 +2973,7 @@ struct Game<'a> {
     map_frame_model: frames::FrameModel,
     glow_map_frame_model: frames::FrameModel,
     armor_stands: horizon_client::join_seq::JoinList<horizon_client::entities::ArmorStand>,
-    /// `Cushion` decoration entities (game/cushions.rs).
+    /// `Cushion` decoration entities (game/entities/cushions.rs).
     cushions: horizon_client::join_seq::JoinList<horizon_client::entities::Cushion>,
     /// Entities of types Horizon does not simulate.
     others: Vec<commands::OtherEntity>,
@@ -3410,7 +3012,7 @@ struct Game<'a> {
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
     maps: maps::Maps,
-    /// The ender dragon fight (game/dragon.rs).
+    /// The ender dragon fight (game/mobs/dragon.rs).
     fight: dragon::Fight,
     dragon: Option<dragon::Dragon>,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
@@ -3445,10 +3047,10 @@ struct Game<'a> {
     /// The boat the player rides.
     riding: Option<u32>,
     /// Vehicles that gained a rider this tick whose `START_RIDING_TRIGGER` was
-    /// not fired yet (`game/boarding.rs`), for a guest's turn.
+    /// not fired yet (`game/entities/boarding.rs`), for a guest's turn.
     started_riding: Vec<u32>,
     /// `Entity.boardingCooldown` of the acting player, and its vehicle at the
-    /// last tick (`game/boarding.rs`).
+    /// last tick (`game/entities/boarding.rs`).
     boarding_cooldown: i32,
     riding_at_tick: Option<u32>,
     /// A rotation-only write (`/rotate`, `Entity.forceSetRotation`) to the player of this
@@ -3469,9 +3071,9 @@ struct Game<'a> {
     /// Item entities spawned and block entities removed while the block
     /// behaviour ran (spilled contents, popped resources).
     spill: spill::Spill,
-    /// The recipe book of the open screen (game/recipe_book.rs).
+    /// The recipe book of the open screen (game/items/recipe_book.rs).
     recipe_ui: recipe_book::RecipeUi,
-    /// The horse inventory (game/mount_menu.rs).
+    /// The horse inventory (game/interface/mount_menu.rs).
     mount_menu: mount_menu::MountMenu,
     /// The player's fishing hook.
     hook: Option<fishing::Hook>,
@@ -3482,7 +3084,7 @@ struct Game<'a> {
     /// Ominous trial spawners' item spawners.
     ominous_spawners: Vec<ominous_item_spawner::OminousItemSpawner>,
     creaking: creaking::CreakingState,
-    /// Monster spawners' display mobs (`game/spawner.rs`).
+    /// Monster spawners' display mobs (`game/mobs/spawner.rs`).
     spawners: spawner::SpawnerState,
     /// Reused candidate buffers for natural spawning.
     spawn_scratch: natural_spawning::SpawnScratch,
@@ -3518,30 +3120,30 @@ struct Game<'a> {
     pending_bench: Option<(Instant, std::sync::mpsc::Sender<String>)>,
     /// Recent frame times for the performance overlay.
     frame_graph: horizon_client::perf_overlay::FrameGraph,
-    /// Horizon's extras (minimap, auto-reconnect; mods' counters): `game/extras.rs`.
+    /// Horizon's extras (minimap, auto-reconnect; mods' counters): `game/interface/extras.rs`.
     extras: extras::ExtrasState,
-    /// The PvP & HUD options' state (`game/pvp.rs`).
+    /// The PvP & HUD options' state (`game/entities/pvp.rs`).
     pvp: pvp::PvpState,
-    /// Horizon mods (`game/mods.rs`), none running unless turned on.
+    /// Horizon mods (`game/modding/mods/mod.rs`), none running unless turned on.
     mods: mods::ModsState,
     /// The in-game browser's worker, separate from the cloneable reload inputs.
     mod_jobs: mod_browser::Jobs,
-    /// Every item and recipe, for mods (`game/native_recipes.rs`), made once.
+    /// Every item and recipe, for mods (`game/modding/native_recipes.rs`), made once.
     recipe_tables: native_recipes::RecipeTables,
-    /// The item panel beside container screens (`game/native_panel.rs`).
+    /// The item panel beside container screens (`game/modding/native_panel.rs`).
     panel: native_panel::Panel,
-    /// Horizon's own shader pack, while one is picked (`game/native_shaders.rs`).
+    /// Horizon's own shader pack, while one is picked (`game/modding/native_shaders.rs`).
     native_shaders: native_shaders::NativeShaders,
-    /// The items native client mods claim and the events they haven't polled (game/native_claimed_items.rs).
+    /// The items native client mods claim and the events they haven't polled (game/modding/native_claimed_items.rs).
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
     /// Entities whose copies are held out of storage; their handles refuse until stored back.
     held_out: Vec<u32>,
-    /// Native mods' config files this game loaded (game/native_configs.rs).
+    /// Native mods' config files this game loaded (game/modding/native_configs.rs).
     native_configs: native_configs::NativeConfigs,
     mod_phase: mod_api::__private::PhaseOwner,
-    /// Native mods' messages waiting (`game/native_net.rs`).
+    /// Native mods' messages waiting (`game/modding/native_net.rs`).
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
     native_mod_screen: Option<String>,
@@ -3562,17 +3164,17 @@ struct Game<'a> {
     pack_shadow_casters: (bool, bool),
     /// A scripted flight from the control socket (`fly`).
     flight: Option<control::Flight>,
-    /// The running agent action from the control socket (game/agent.rs).
+    /// The running agent action from the control socket (game/runtime/agent/mod.rs).
     agent: agent::Agent,
-    /// Widget commands waiting for the frame after a click (game/ui_control.rs).
+    /// Widget commands waiting for the frame after a click (game/runtime/ui_control.rs).
     ui_wait: ui_control::UiWait,
-    /// What happened, for `events` and `wait-for` (game/events.rs).
+    /// What happened, for `events` and `wait-for` (game/runtime/events.rs).
     events: events::Events,
-    /// Who caused each input event: a person, an agent or the game (game/input_trace.rs).
+    /// Who caused each input event: a person, an agent or the game (game/runtime/input_trace.rs).
     input_trace: input_trace::InputTrace,
-    /// A repro recording, export or replay (game/repro.rs).
+    /// A repro recording, export or replay (game/runtime/repro.rs).
     repro: repro::Repro,
-    /// `HORIZON_TICK_SCRIPT`'s scenario (game/tick_script.rs).
+    /// `HORIZON_TICK_SCRIPT`'s scenario (game/world/tick_script.rs).
     tick_script: tick_script::TickScript,
     /// The overworld's last `sky_darken` and its inputs (time, rain, thunder).
     sky_darken_memo: std::cell::Cell<Option<((i64, u32, u32), i32)>>,
@@ -3589,19 +3191,19 @@ struct Game<'a> {
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
-    /// Connected to a server: the world comes from the network (game/remote.rs).
+    /// Connected to a server: the world comes from the network (game/network/remote/mod.rs).
     remote: Option<remote::Remote>,
-    /// This world is open to the network (game/lan.rs).
+    /// This world is open to the network (game/network/lan/mod.rs).
     lan: Option<lan::LanHost>,
     /// Single player's server thread, which `remote` is connected to.
     integrated: Option<integrated::Integrated>,
     /// The shapes of the open world's levels, from its dimension types.
     level_shapes: horizon_client::chunk::LevelShapes,
-    /// This game is that server thread's (game/integrated.rs).
+    /// This game is that server thread's (game/world/integrated.rs).
     serving: Option<integrated::Serving>,
-    /// The open world is shared behind an invite code (game/friends.rs).
+    /// The open world is shared behind an invite code (game/network/friends.rs).
     friends: Option<friends::Sharing>,
-    /// The Social Interactions screen and the players whose chat is hidden (game/social.rs).
+    /// The Social Interactions screen and the players whose chat is hidden (game/network/social.rs).
     social: social::Social,
     world_options: Option<lan_screen::WorldOptions>,
     /// Chat Settings opened from RestrictionsScreen: Done returns to World Options.
@@ -3611,7 +3213,7 @@ struct Game<'a> {
     command_block_screen: Option<command_blocks::CommandBlockScreen>,
     block_editor: Option<block_editor::BlockEditScreen>,
     /// `StructureTemplateManager.structureRepository`: the templates in memory
-    /// by id, a miss included (game/structure_blocks.rs).
+    /// by id, a miss included (game/administration/structure_blocks.rs).
     structure_templates: HashMap<String, Option<structure_blocks::TemplateEntry>>,
     /// The game tests read so far, by id (the test instance registry).
     test_defs: std::cell::RefCell<HashMap<String, Option<test_instances::TestDef>>>,
@@ -3619,7 +3221,7 @@ struct Game<'a> {
     test_highlights: HashMap<(i32, i32, i32), (String, std::time::Instant)>,
     /// `GameTestTicker.SINGLETON`: the game tests running on this server.
     game_tests: game_tests::GameTests,
-    /// KeyboardHandler's debug key state (game/debug_keys.rs), the physical
+    /// KeyboardHandler's debug key state (game/interface/debug_keys.rs), the physical
     /// keys held, and the debug renderers F3+B and F3+G switch on.
     debug_keys: horizon_client::debug_keys::DebugKeys,
     /// The F3 overlay's charts (F3+2, F3+3).
@@ -3627,9 +3229,9 @@ struct Game<'a> {
     /// `Minecraft.debugEntries`: what the overlay and the debug renderers
     /// show (`debug-profile.json`, F3+F6).
     debug_entries: horizon_client::debug_entries::DebugEntries,
-    /// `DebugOptionsScreen` while it is open (game/debug_options.rs).
+    /// `DebugOptionsScreen` while it is open (game/interface/debug_options.rs).
     debug_options: Option<debug_options::DebugOptionsUi>,
-    /// `DebugEntryMemory`'s readings (game/debug_lines.rs).
+    /// `DebugEntryMemory`'s readings (game/interface/debug_lines.rs).
     memory_meter: std::cell::RefCell<horizon_client::debug_overlay::MemoryMeter>,
     /// `Minecraft.gpuUtilization`: the last timed frame's GPU time over its
     /// CPU time, in percent.
@@ -3668,9 +3270,9 @@ struct Game<'a> {
     /// The world list's icon in progress (`GameRenderer.tryTakeScreenshotIfNeeded`):
     /// `None` without a local world, or once the save has its icon.png.
     world_icon: Option<WorldIcon>,
-    /// The block a guest is acting on (game/lan_actions.rs).
+    /// The block a guest is acting on (game/network/lan_actions/interaction.rs).
     forced_hit: Option<Hit>,
-    /// `Minecraft.hitResult` while the clicks of a tick act (game/remote.rs
+    /// `Minecraft.hitResult` while the clicks of a tick act (game/network/remote/mod.rs
     /// `remote_handle_input`): picked once, so a creative break does not
     /// move the use that follows it past the broken block.
     tick_hit: Option<Option<Hit>>,
@@ -3686,7 +3288,7 @@ struct Game<'a> {
     /// +2): the pick helpers' `&self` reach.
     entity_reach: f64,
     block_reach: f64,
-    /// The part of a right click a guest's packet asks for (game/lan_actions.rs).
+    /// The part of a right click a guest's packet asks for (game/network/lan_actions/interaction.rs).
     guest_use: Option<GuestUse>,
     /// The last `use_hand` that ended the click did so with `FAIL`, which
     /// does not consume the action (handleUseItemOn's ANY_BLOCK_USE).
@@ -3768,7 +3370,7 @@ struct Game<'a> {
     /// pitch): `level.playSound(player, ...)` leaves the guest out, whose
     /// own client plays it.
     guest_player_sounds: Vec<(String, [f64; 3], f32, f32)>,
-    /// Sounds bound to an entity this tick, for the players (`game/level_sounds.rs`).
+    /// Sounds bound to an entity this tick, for the players (`game/interface/level_sounds.rs`).
     bound_sounds: Vec<level_sounds::BoundSound>,
     /// `broadcastToAdmins` lines a guest's command queued, sent once it
     /// returns: the line, whether operators get it and whether the console
@@ -3816,7 +3418,7 @@ struct Game<'a> {
     restore_player_state: bool,
     stats_ui: stats_screen::StatsUi,
     adv_ui: advancements_screen::AdvUi,
-    /// The Server Links screens' state (game/server_links.rs).
+    /// The Server Links screens' state (game/network/server_links.rs).
     links_ui: server_links::LinksUi,
     camera_type: horizon_client::camera::CameraType,
     fangs: fangs::FangState,
@@ -6724,7 +6326,7 @@ impl Game<'_> {
             // A mod block's container (`native_block_entity_container`).
             self.container = Some(key);
         } else if self.open_station(pos, &name) {
-            // Workstation menus: game/stations.rs.
+            // Workstation menus: game/blocks/stations.rs.
         } else {
             self.message = Some((
                 format!(
@@ -18155,7 +17757,7 @@ impl Game<'_> {
             Vec::new()
         };
         // Map textures and font glyphs changed while building this frame's
-        // geometry (game/maps.rs, world text) upload with this batch; draining
+        // geometry (game/blocks/maps/mod.rs, world text) upload with this batch; draining
         // map_patches any earlier leaves them a frame behind.
         hud.patches.append(&mut self.map_patches);
         let entity_spans = std::mem::take(self.entity_spans.get_mut());
@@ -21273,7 +20875,7 @@ impl<'a> Game<'a> {
         let mod_phase = mod_api::__private::PhaseOwner::new(phase);
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
-        let standalone_sprites = native_block_entity_draw::StandaloneSprites::new(&pack, &gui);
+        let standalone_geometry = native_block_entity_draw::StandaloneGeometry::new(&pack, &gui);
         let loop_side = options.execution_role.loop_side();
         let root = options.resources.clone();
         let mod_sources = options.mods.clone();
@@ -21336,7 +20938,7 @@ impl<'a> Game<'a> {
             damage_tag_generation: 1,
             pack,
             gui,
-            standalone_sprites,
+            standalone_geometry,
             fog: Default::default(),
             screen_fx: Default::default(),
             item_activation: Default::default(),
@@ -24882,9 +24484,6 @@ mod runtime_reset_tests {
         assert!(stats.values.is_empty());
     }
 }
-
-#[cfg(test)]
-mod entity_model_loading_tests;
 
 /// `LocalPlayer.moveTowardsClosestSpace` at the body's four corners (aiStep, unless a spectator or a
 /// passenger): a corner inside a suffocating block sets a 0.1 speed towards the nearest side that is

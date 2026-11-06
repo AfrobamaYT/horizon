@@ -839,7 +839,7 @@ impl HudAtlas {
         );
         Ok(atlas)
     }
-    /// Empty slots written at run time: map textures (game/maps.rs), the
+    /// Empty slots written at run time: map textures (game/blocks/maps/mod.rs), the
     /// minimap, a native mod's own image, downloaded skins, world and pack
     /// icons and the on-screen keyboard's text.
     fn slots(images: &mut Vec<PackedImage>, trim: (u32, u32), mod_image: bool) {
@@ -847,7 +847,7 @@ impl HudAtlas {
             let name = map_slot_sprite(i).unwrap_or_default();
             images.push((name.into(), 128, 128, vec![0; 128 * 128 * 4]));
         }
-        // The minimap extra's image (game/extras.rs).
+        // The minimap extra's image (game/interface/extras.rs).
         images.push((
             MINIMAP_SPRITE.into(),
             crate::minimap::SIZE as u32,
@@ -863,7 +863,7 @@ impl HudAtlas {
                 vec![0; (MOD_IMAGE_SIZE * MOD_IMAGE_SIZE * 4) as usize],
             ));
         }
-        // Downloaded skins (game/scoreboard.rs).
+        // Downloaded skins (game/interface/scoreboard/mod.rs).
         for i in 0..SKIN_SLOTS {
             images.push((format!("horizon/skin{i}"), 64, 64, vec![0; 64 * 64 * 4]));
         }

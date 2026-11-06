@@ -9,6 +9,8 @@
 
 # Concepts
 
+<!-- Per-concept child chapters are discovered at build time; keep these aggregate links for published anchors. -->
+
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
@@ -31,8 +33,8 @@
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
-- [Legacy native hook API history (frozen)](reference/native-api-history.md)
-- [Hook notes](reference/hook-notes.md)
+<!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
+- [Hook notes]()
 
 # For agents
 

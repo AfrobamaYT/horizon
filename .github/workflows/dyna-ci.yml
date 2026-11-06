@@ -12,6 +12,11 @@ on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      prepare-output-check:
+        description: Check the prepared output digest
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -190,7 +195,8 @@ jobs:
         run: |
           cargo +stable fmt --all -- --check
           find crates/horizon-mod-api/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
-          rustup run stable rustfmt --edition 2024 --check crates/horizon-client/src/game/native_hooks/*.rs
+          find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
+          rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
           cargo +stable clippy $JOBS --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
         if: steps.rust.outputs.required != 'false'
@@ -476,7 +482,9 @@ jobs:
       # Last, and whatever happened above: a tooling failure must never skip the Rust tests.
       - name: Test offline research tooling
         if: ${{ !cancelled() }}
-        run: python3 -m unittest discover -s tests -v
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 -m unittest discover -s tools/ci -p test_prepared_cache.py -v
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
@@ -508,29 +516,25 @@ jobs:
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
           rustup toolchain install stable --profile minimal
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
       # Not every dyna-large runner has the data yet. Dispatches skip the tests there; main pushes fail.
-      - name: Link prepared vanilla data
+      - name: Prepare checkout-keyed vanilla data
         id: data
         env:
           EVENT: ${{ github.event_name }}
         run: |
           for dir in minecraft datagen horizon-client tools; do
             if [ ! -d "/cache/horizon-local/$dir" ]; then
-              echo "no prepared data on this runner ($RUNNER_NAME): /cache/horizon-local/$dir is missing"
+              echo "prepared data unavailable on this runner"
               if [ "$EVENT" = push ]; then exit 1; fi
               echo "present=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
-          mkdir -p .local
-          for dir in minecraft datagen horizon-client tools; do
-            ln -sfn "/cache/horizon-local/$dir" ".local/$dir"
-          done
-      - uses: actions/setup-java@v4
-        if: steps.data.outputs.present != 'false' && matrix.shard == 'horizon-client'
-        with:
-          distribution: temurin
-          java-version: '25'
+          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
       - name: Generate the fishing test's vanilla reference inputs
         if: steps.data.outputs.present != 'false' && matrix.shard == 'horizon-client'
         run: |
@@ -614,6 +618,42 @@ jobs:
           cargo +stable clippy $JOBS --all-targets --locked -- -D warnings
           cargo +stable test $JOBS --locked --lib --bins
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
+  prepared-output-check:
+    if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'
+    needs: changes
+    runs-on: dyna-large
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Dyna runner dependencies
+        run: bash tools/ci/dyna_ci_deps.sh
+      - name: Install Rust toolchain
+        run: |
+          if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+          fi
+          rustup toolchain install stable --profile minimal
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Check prepared output digest
+        run: |
+          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+          set +e
+          python3 tools/prepare_output.py check > "$RUNNER_TEMP/output-check.log" 2>&1
+          result=$?
+          set -e
+          actual=$(python3 tools/prepare_output.py digest 2>/dev/null) || { echo "::error::prepared output digest unavailable"; exit 1; }
+          expected=$(awk '!/^#/ && NF == 2 { value=$2 } END { print value }' crates/horizon-prepare/output-versions.txt)
+          { echo "prepared output check: $([ "$result" -eq 0 ] && echo pass || echo fail)"; echo "actual: $actual"; echo "expected: $expected"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
   vanilla-parity:
     if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch'
     runs-on: dyna-large
@@ -636,20 +676,17 @@ jobs:
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
           rustup toolchain install stable --profile minimal
-      - name: Set up disk-backed parity scratch and link prepared vanilla data
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Set up disk-backed parity scratch and prepared vanilla data
         run: |
           rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
           mkdir -p "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
           ln -s "$DYNA_CI_BUILD/parity-out" .local
           echo "TMPDIR=$DYNA_CI_BUILD/parity-tmp" >> "$GITHUB_ENV"
-          for dir in minecraft datagen horizon-client tools; do
-            test -d "/cache/horizon-local/$dir"
-            ln -s "/cache/horizon-local/$dir" ".local/$dir"
-          done
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
+          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
       # Harness subprocess timeouts can be shorter than a cold release build. Match their build commands and target dir.
       - name: Build parity probes
         env:

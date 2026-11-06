@@ -3876,7 +3876,7 @@ impl Game<'_> {
     }
     /// `PlayerRespawnPositionEvent`: where `player` respawns, once the server found it. The
     /// `original_*` arguments are that point; the mods may change `level`, `position`, `yaw`,
-    /// `pitch` and `copy_original_spawn_position` (`game/respawn_position.rs` applies them).
+    /// `pitch` and `copy_original_spawn_position` (`game/world/respawn_position.rs` applies them).
     pub(in crate::game) fn native_player_respawn_position(
         &mut self,
         call: mod_api::__private::PlayerRespawnPositionCall<'_>,
