@@ -65,6 +65,32 @@ impl StandaloneGeometry {
             slots,
         }
     }
+
+    /// Vertices and per-slot index ranges for the generation's GPU buffer.
+    pub(super) fn prepared_upload(
+        &self,
+    ) -> (
+        Vec<horizon_client::gfx::PreparedModelVertex>,
+        Vec<Option<(u32, u32)>>,
+    ) {
+        let mut vertices = Vec::new();
+        let mut ranges = Vec::new();
+        for slot in &self.slots {
+            let Some(faces) = slot else {
+                ranges.push(None);
+                continue;
+            };
+            let index_start = vertices.len() as u32 / 4 * 6;
+            for face in faces {
+                for corner in 0..4 {
+                    vertices.push(face.gpu_vertex(corner));
+                }
+            }
+            let index_count = vertices.len() as u32 / 4 * 6 - index_start;
+            ranges.push((index_count > 0).then_some((index_start, index_count)));
+        }
+        (vertices, ranges)
+    }
 }
 
 /// `BlockEntityRenderer.getViewDistance`'s default, in blocks.

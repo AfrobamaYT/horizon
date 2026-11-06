@@ -117,6 +117,8 @@ struct EntityPipelineOptions<'a> {
     bias: wgpu::DepthBiasState,
     blend: wgpu::BlendState,
     clouds: bool,
+    /// `vs_entity` for the entity vertex layout. Clouds still enter at `vs_cloud`.
+    vertex: &'a str,
     fragment: &'a str,
     write_mask: wgpu::ColorWrites,
 }
@@ -139,6 +141,7 @@ fn entity_pipeline_factory<'a>(
             bias,
             blend,
             clouds,
+            vertex,
             fragment,
             write_mask,
         } = options;
@@ -147,7 +150,7 @@ fn entity_pipeline_factory<'a>(
             layout: Some(if clouds { cloud_layout } else { entity_layout }),
             vertex: wgpu::VertexState {
                 module: entity_shader,
-                entry_point: Some(if clouds { "vs_cloud" } else { "vs_entity" }),
+                entry_point: Some(if clouds { "vs_cloud" } else { vertex }),
                 compilation_options: Default::default(),
                 buffers: entity_vertex,
             },
@@ -192,6 +195,12 @@ mod entity_outline;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod entity_pixel_test;
+mod prepared_model;
+#[cfg(feature = "test-support")]
+pub use prepared_model::fail_next_prepared_upload;
+pub use prepared_model::{
+    PreparedModelInstance, PreparedModelVertex, PreparedModels, camera_matrix,
+};
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
@@ -1351,6 +1360,9 @@ pub struct Renderer {
     entity_group: wgpu::BindGroup,
     /// The layout of `entity_group`, for the native shadow pass.
     entity_bindings: wgpu::BindGroupLayout,
+    /// Generation-owned prepared model geometry. Production draws stay on the CPU
+    /// path until the world hook consumes this buffer.
+    prepared_models: Option<PreparedModels>,
     /// The entity resources with the hand's projection (`hand_globals`).
     hand_group: wgpu::BindGroup,
     hand_globals: wgpu::Buffer,
@@ -2564,6 +2576,31 @@ impl Renderer {
     }
 }
 impl Renderer {
+    /// Uploads one generation of prepared geometry. A failed upload leaves the previous
+    /// generation in place.
+    pub fn install_prepared_models(
+        &mut self,
+        generation: u64,
+        vertices: &[PreparedModelVertex],
+        ranges: Vec<Option<(u32, u32)>>,
+    ) -> Result<()> {
+        if vertices.is_empty() {
+            self.prepared_models = None;
+            return Ok(());
+        }
+        let next = PreparedModels::create(
+            &self.device,
+            &self.reuse,
+            &self.entity_bindings,
+            self.config.format,
+            generation,
+            vertices,
+            ranges,
+        )?;
+        self.prepared_models = Some(next);
+        Ok(())
+    }
+
     pub async fn new(
         window: Arc<Window>,
         offscreen: bool,
@@ -3673,6 +3710,7 @@ impl Renderer {
                 bias,
                 blend,
                 clouds,
+                vertex: "vs_entity",
                 fragment: "fs_entity",
                 write_mask: wgpu::ColorWrites::ALL,
             })
@@ -3686,6 +3724,7 @@ impl Renderer {
             bias: Default::default(),
             blend: alpha_blend,
             clouds: false,
+            vertex: "vs_entity",
             fragment: "fs_water_mask",
             write_mask: wgpu::ColorWrites::empty(),
         });
@@ -3724,6 +3763,7 @@ impl Renderer {
             },
             blend: alpha_blend,
             clouds: false,
+            vertex: "vs_entity",
             fragment: "fs_entity_shadow",
             write_mask: wgpu::ColorWrites::ALL,
         });
@@ -3759,6 +3799,7 @@ impl Renderer {
             bias: Default::default(),
             blend: wgpu::BlendState::REPLACE,
             clouds: true,
+            vertex: "vs_entity",
             fragment: "fs_hdr_cloud_mark",
             write_mask: wgpu::ColorWrites::ALPHA,
         });
@@ -3870,6 +3911,7 @@ impl Renderer {
                 alpha: one_one,
             },
             clouds: false,
+            vertex: "vs_entity",
             fragment: "fs_energy_swirl",
             write_mask: wgpu::ColorWrites::ALL,
         });
@@ -3882,6 +3924,7 @@ impl Renderer {
             bias: Default::default(),
             blend: wgpu::BlendState::REPLACE,
             clouds: false,
+            vertex: "vs_entity",
             fragment: "fs_hdr_mark",
             write_mask: wgpu::ColorWrites::ALPHA,
         });
@@ -3893,6 +3936,7 @@ impl Renderer {
             bias: Default::default(),
             blend: wgpu::BlendState::REPLACE,
             clouds: false,
+            vertex: "vs_entity",
             fragment: "fs_hdr_hand_unmark",
             write_mask: wgpu::ColorWrites::ALPHA,
         });
@@ -4652,6 +4696,7 @@ impl Renderer {
             screen_capacity,
             entity_group,
             entity_bindings,
+            prepared_models: None,
             static_entity_group,
             static_entity_transform,
             static_entity_camera: None,

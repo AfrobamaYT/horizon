@@ -167,6 +167,7 @@ pub fn render(
             },
             blend: wgpu::BlendState::ALPHA_BLENDING,
             clouds: false,
+            vertex: "vs_entity",
             fragment: "fs_entity",
             write_mask: wgpu::ColorWrites::ALL,
         },
