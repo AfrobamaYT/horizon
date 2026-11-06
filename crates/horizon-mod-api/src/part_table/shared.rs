@@ -233,6 +233,7 @@ pub fn parts(hook: HookId, name: &'static str) -> PartsRef {
 
 /// The engine asked for tag Parts on a thread without that world's table.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct MissingResolvedParts {
     /// The dispatch that required the table.
     pub hook: &'static str,
