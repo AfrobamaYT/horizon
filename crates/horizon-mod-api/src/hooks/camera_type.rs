@@ -9,7 +9,12 @@ pub trait Hooks {
     /// answer as it follows vanilla's. `camera_type` and `set_camera_type` read and set the type
     /// at any other moment. Client-side. Beyond NeoForge: there is no counterpart. Diverges from
     /// upstream: new hook.
-    #[hook(side = "client", contract = "listen", cancellable = false)]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        cancellable = false,
+        neoforge = "none (NeoForge has no camera type event)"
+    )]
     fn camera_type_cycle();
 }
 
