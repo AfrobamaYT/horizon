@@ -1284,12 +1284,12 @@ impl SubtitleOverlay {
 mod boss_overlay_tests {
     use super::*;
     use crate::hud::Rect;
-    use std::{collections::HashMap, path::Path};
+    use std::collections::HashMap;
 
     fn font() -> Font {
         // The missing-glyph metrics let these tests run without game assets.
         Font::load(
-            Path::new("/nonexistent-horizon-boss-overlay-test-resources"),
+            &horizon_assets::resource_source::ResourceSource::default(),
             &HashMap::new(),
             &[],
             (1, 1),
