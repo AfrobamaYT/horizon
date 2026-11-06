@@ -119,7 +119,6 @@ mod decorated_pot;
 mod dedicated;
 mod deflect;
 mod dialogs;
-mod discord;
 mod dispense_fixture;
 mod dispenser;
 mod dragon;
@@ -193,6 +192,7 @@ mod lan_chat;
 mod lan_crafting;
 mod lan_entities;
 mod lan_far;
+mod lan_idle;
 mod lan_mobs;
 mod lan_mount_menu;
 mod lan_particles;
@@ -242,6 +242,7 @@ mod native_boss_bar_refs;
 mod native_chunk_save;
 mod native_claimed_items;
 pub mod native_client_services;
+mod native_client_session;
 mod native_components;
 mod native_config_files;
 mod native_configs;
@@ -278,6 +279,7 @@ mod native_level_effects;
 mod native_level_events;
 mod native_level_items;
 mod native_level_refs;
+mod native_level_signals;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_effects;
@@ -1027,6 +1029,11 @@ struct Mining {
     progress: f32,
     ticks: u32,
 }
+impl Mining {
+    fn stage(&self) -> Option<u8> {
+        (self.progress > 0.0).then(|| ((self.progress * 10.0) as u8).min(9))
+    }
+}
 #[derive(Clone, Copy)]
 struct Hit {
     pos: [i32; 3],
@@ -1727,12 +1734,11 @@ impl LevelAccess for GameLevel<'_> {
         direct: bool,
         vanilla: i32,
     ) -> i32 {
-        let mut signal = vanilla;
-        if self.native_authoritative {
-            let face = direction.opposite();
-            self.native_block_signal(self.dimension, pos, state, face, direct, &mut signal);
-        }
-        signal.clamp(0, 15)
+        native_level_signals::adjust_signal(direction, vanilla, |face, signal| {
+            if self.native_authoritative {
+                self.native_block_signal(self.dimension, pos, state, face, direct, signal);
+            }
+        })
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         let mut output = vanilla;
@@ -1962,17 +1968,7 @@ impl LevelAccess for GameLevel<'_> {
         _state: BlockStateId,
         _direction: Direction,
     ) -> i32 {
-        // TestBlock.ownSignal.
-        if let Some(BlockEntity::TestBlock(b)) =
-            self.world.block_entities.get(&(pos.x, pos.y, pos.z))
-        {
-            return b.own_signal();
-        }
-        // TrappedChestBlock.getSignal: the players with it open, at most 15.
-        if let Some(count) = self.lid_openers.get(&(pos.x, pos.y, pos.z)) {
-            return (*count).clamp(0, 15);
-        }
-        jukebox::jukebox_signals(self.world, self.items, pos).map_or(0, |(signal, _)| signal)
+        native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)
     }
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
         let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
@@ -12827,9 +12823,9 @@ impl Game<'_> {
             None => stages.push((pos, stage)),
         };
         if let Some(m) = &self.mining
-            && m.progress > 0.0
+            && let Some(stage) = m.stage()
         {
-            add(m.pos, ((m.progress * 10.0) as u32).min(9));
+            add(m.pos, u32::from(stage));
         }
         let now = self.world.game_time;
         for (pos, stage, at) in self.destroying.values() {
@@ -19124,6 +19120,7 @@ impl Game<'_> {
     /// screen's own raw keys, text and mods' key hooks stay raw on purpose.
     fn handle_window_event_inner(&mut self, event_loop: &dyn EventLoopCtl, mut event: WindowEvent) {
         if let WindowEvent::Focused(false) = &event {
+            self.modifiers = winit::keyboard::ModifiersState::empty();
             self.physical_keys.clear();
             self.physical_buttons.clear();
             self.drag_button = None;
@@ -20360,7 +20357,6 @@ impl Game<'_> {
                     let updated = Instant::now();
                     self.track_toggle_screens();
                     self.heal_hold_latches();
-                    self.update_discord_presence();
                     let steps = self.clock.advance(elapsed);
                     for _ in 0..steps {
                         let started = Instant::now();
@@ -23231,7 +23227,6 @@ fn run_event_loop(mut game: Game<'_>) -> Result<()> {
     game = split.host;
     narrator::stop();
     leave_fullscreen_after(&result, &mut game.settings);
-    horizon_client::discord_presence::stop();
     let result = result
         .map_err(Into::into)
         .and_then(|()| write_report(&game))
@@ -23744,7 +23739,6 @@ fn run_loading(
         App::Loading(loading) => leave_fullscreen_after(&result, &mut loading.settings),
     }
     result?;
-    horizon_client::discord_presence::stop();
     match app {
         App::Ready(mut split) => {
             write_report(&split.host)?;
@@ -23850,14 +23844,6 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     // Minecraft's constructor opens the narrator; a server has none.
     if options.execution_role.is_client() {
         narrator::start(&early_settings);
-    }
-    // "Playing Horizon" on Discord: never for a server; an automated run only talks to a test's fake Discord.
-    if options.dedicated.is_none() {
-        let automated = options.benchmark.is_some()
-            || options.offscreen
-            || options.frames.is_some()
-            || options.world_frames.is_some();
-        horizon_client::discord_presence::start(early_settings.extras.discord_presence, automated);
     }
     // Snapshots of derived tables live in the game folder, never beside the
     // shared resources.
@@ -24305,6 +24291,29 @@ mod tests {
 
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_modifier_snapshot_tracks_focus_loss() {
+        use mod_api::ClientHost;
+        use winit::{event_loop::ControlFlow, keyboard::ModifiersState};
+        struct TestLoop;
+        impl EventLoopCtl for TestLoop {
+            fn exit(&self) {}
+            fn set_control_flow(&self, _: ControlFlow) {}
+        }
+        super::native_entity_refs::tests::with_client_game(|game| {
+            game.modifiers = ModifiersState::SHIFT | ModifiersState::ALT;
+            let snapshot = (game as &dyn ClientHost).modifiers();
+            assert!(snapshot.shift());
+            assert!(snapshot.alt());
+            assert!(!snapshot.control());
+            assert!(!snapshot.super_key());
+            game.handle_window_event_inner(&TestLoop, WindowEvent::Focused(false));
+            assert_eq!((game as &dyn ClientHost).modifiers().bits, 0);
+            assert_eq!(snapshot.bits, 5);
+        });
+    }
 
     /// `ClipContext.Block.OUTLINE` for the SOURCE_ONLY ray (#8180): a ray
     /// through the empty part of a torch's cell is not stopped by it.

@@ -1476,6 +1476,7 @@ mod hub_tests {
         g.food = 12;
         g.xp_level = 7;
         g.game_mode = 1;
+        g.abilities.update_for_mode(g.game_mode);
         g.selected = 3;
         g.inventory[0] = Some(ItemStack {
             item: std::sync::Arc::from("minecraft:stone"),
