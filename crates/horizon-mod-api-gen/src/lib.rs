@@ -1083,7 +1083,7 @@ mod tests {
         assert_eq!(frame.version, 1);
         assert_eq!(
             frame.target,
-            "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre"
+            "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre"
         );
         assert!(!frame.scoped);
         let scoped = points

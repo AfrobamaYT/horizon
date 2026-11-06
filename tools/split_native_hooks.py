@@ -55,6 +55,8 @@ def split(source, manifest):
             area = areas.get("native_" + test[1]) if test else None
             if test and not area and len(refs) == 1:
                 area = refs.pop()
+            if test and "pub(super) mod " in text:
+                area = None  # Shared fixture called by other game test modules.
             if area:
                 # Tests' parent becomes the area; game references keep their target.
                 text = text.replace("super::super::", "crate::game::")
@@ -135,9 +137,11 @@ def payload(files):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify", metavar="B1_REVISION")
+    parser.add_argument("--base", metavar="B1_REVISION", help="reproduce the split from git")
     args = parser.parse_args()
     path = DIRECTORY / "mod.rs"
-    source = run("git", "show", f"{args.verify}:{path}") if args.verify else (ROOT / path).read_text()
+    base = args.verify or args.base
+    source = run("git", "show", f"{base}:{path}") if base else (ROOT / path).read_text()
     manifest = layout(source)
     expected = split(source, manifest)
     if args.verify:
