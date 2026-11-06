@@ -1351,7 +1351,9 @@ impl Game<'_> {
         };
         let outer = self.command_source.replace(server);
         let filter = std::mem::replace(&mut self.native_command_filter, true);
+        let outer_exec = std::mem::take(&mut self.exec);
         let ok = self.as_console(|g| g.run_command(line));
+        self.exec = outer_exec;
         self.native_command_filter = filter;
         self.command_source = outer;
         ok
@@ -1993,6 +1995,9 @@ mod tests {
             );
             assert!(game.chat_capture.take().unwrap().is_empty());
             assert!(game.command_source.is_none());
+            game.exec.functions.push("test:outer".into());
+            assert!(game.native_run_command("list"));
+            assert_eq!(game.exec.functions, ["test:outer"]);
         });
     }
 

@@ -82,4 +82,18 @@ impl LevelReadsBackend for Game<'_> {
         );
         self.native_level_fluid_flow(level, pos)
     }
+    fn level_in_world_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
+        mod_api::__private::check_access(
+            "level_in_world_bounds",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_in_world_bounds(level, pos)
+    }
+    fn level_in_spawnable_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
+        mod_api::__private::check_access(
+            "level_in_spawnable_bounds",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_in_spawnable_bounds(level, pos)
+    }
 }

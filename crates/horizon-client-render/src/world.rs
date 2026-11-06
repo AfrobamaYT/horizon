@@ -193,6 +193,24 @@ impl Weather {
     }
 }
 impl World {
+    /// Install loaded instances, retiring an existing column's block entities even
+    /// when the new payload omits their positions. Initial loads need no world scan.
+    pub fn load_chunk_block_entities(
+        &mut self,
+        chunk: (i32, i32),
+        entities: Vec<(
+            crate::block_entities::Pos,
+            crate::chunk::block_entity::BlockEntity,
+        )>,
+    ) {
+        if self.chunks.contains_key(&chunk) {
+            let incoming: FxHashSet<_> = entities.iter().map(|(pos, _)| *pos).collect();
+            self.block_entities
+                .unload(|p| (p.0 >> 4, p.2 >> 4) == chunk && !incoming.contains(p));
+        }
+        self.block_entities.load_chunk(entities);
+    }
+
     pub fn new(air: BlockStateId, seed: i64) -> Self {
         Self {
             shape: LevelShape::OVERWORLD,

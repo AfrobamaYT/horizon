@@ -17,7 +17,7 @@ class HookNotes(unittest.TestCase):
                 parent_names=["Reference"], sub_items=[])}])}]}
 
     def test_virtual_chapter_keeps_its_url_navigation_and_generated_content(self):
-        book = notes.expand(self.book(), "# Hook notes\n\n## Example\n\nFresh notes.")
+        book = notes.expand(self.book(), "# Hook notes\n\n## Example\n\nFresh notes.", "Hook notes", notes.PAGE)
         chapter = book["sections"][0]["Chapter"]["sub_items"][0]["Chapter"]
         self.assertEqual(chapter["path"], "reference/hook-notes.md")
         self.assertIsNone(chapter["source_path"])
@@ -30,7 +30,7 @@ class HookNotes(unittest.TestCase):
             if book["sections"]:
                 book["sections"].extend(self.book()["sections"])
             with self.assertRaisesRegex(AssertionError, "one draft"):
-                notes.expand(book, "generated")
+                notes.expand(book, "generated", "Hook notes", notes.PAGE)
 
     def test_catalog_failure_is_not_silently_replaced_with_an_empty_page(self):
         with patch.object(notes.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "cargo")):
