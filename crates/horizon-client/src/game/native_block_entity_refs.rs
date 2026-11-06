@@ -2,10 +2,15 @@
 //! and `BlockEntity.setChanged` make. A write inside `host.transaction` is journaled
 //! (`transactions.rs`) and tells the world at the root commit.
 use super::{Game, transactions::After};
-use horizon_client::{block_entity_nbt, containers::BlockEntity, save, world::World};
+use horizon_client::{
+    block_entity_nbt,
+    containers::{BlockEntity, ModBlockEntity},
+    save,
+    world::World,
+};
 use horizon_world::nbt::{Compound, Tag};
 use mod_api::__private::game::*;
-use mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef};
+use mod_api::{BlockEntityDataError, BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef};
 
 impl Game<'_> {
     fn native_block_entity_target(&self, entity: BlockEntityRef) -> Option<(&World, &BlockEntity)> {
@@ -185,24 +190,61 @@ impl Game<'_> {
         slot: u32,
         value: i32,
     ) -> bool {
-        let Some(key) = self.native_block_entity_write_key(entity) else {
-            return false;
-        };
+        self.write_block_entity_data_slots(entity, |block_entity| {
+            let index = slot as usize;
+            if block_entity
+                .data
+                .get(index)
+                .is_none_or(|current| *current == value)
+            {
+                return false;
+            }
+            block_entity.data[index] = value;
+            true
+        })
+        .unwrap_or(false)
+    }
+
+    /// Sizes a mod block entity's menu data explicitly, using the same write
+    /// target, journal and Changed notice as scalar data-slot writes.
+    pub(super) fn native_block_entity_set_data_slots(
+        &mut self,
+        entity: BlockEntityRef,
+        values: Vec<i32>,
+    ) -> Result<bool, BlockEntityDataError> {
+        let limit = usize::from(horizon_mods::content::MAX_MENU_SLOTS);
+        if values.len() > limit {
+            return Err(BlockEntityDataError::TooManySlots {
+                count: values.len() as u64,
+                limit: limit as u64,
+            });
+        }
+        self.write_block_entity_data_slots(entity, |block_entity| {
+            if block_entity.data == values {
+                return false;
+            }
+            block_entity.data = values;
+            true
+        })
+    }
+
+    fn write_block_entity_data_slots(
+        &mut self,
+        entity: BlockEntityRef,
+        edit: impl FnOnce(&mut ModBlockEntity) -> bool,
+    ) -> Result<bool, BlockEntityDataError> {
+        let key = self
+            .native_block_entity_write_key(entity)
+            .ok_or(BlockEntityDataError::Unavailable)?;
         self.journal_block_entity(key);
         let Some(BlockEntity::Mod(block_entity)) = self.world.block_entities.get_mut(&key) else {
-            return false;
+            return Err(BlockEntityDataError::Unavailable);
         };
-        let index = slot as usize;
-        if block_entity
-            .data
-            .get(index)
-            .is_none_or(|current| *current == value)
-        {
-            return false;
+        if !edit(block_entity) {
+            return Ok(false);
         }
-        block_entity.data[index] = value;
         self.after_commit(After::Changed(key));
-        true
+        Ok(true)
     }
 
     /// Merges `data` into the block entity's saved data and loads it, as `/data merge block`

@@ -141,7 +141,7 @@ impl Game<'_> {
         Some(
             rules
                 .available_rules()
-                .filter_map(|r| Some((["minecraft:", r.name].concat(), rules.get(r.name)?)))
+                .filter_map(|r| Some((r.name.clone(), rules.get(&r.name)?)))
                 .collect(),
         )
     }
@@ -387,8 +387,11 @@ mod tests {
                         .rules
                         .set("random_tick_speed", GameRuleValue::Int(7))
                 );
-                let keep_inventory = gamerules::rule("keep_inventory").unwrap();
-                game.set_game_rule(keep_inventory, GameRuleValue::Bool(true), None);
+                let keep_inventory = gamerules::rule_registry()
+                    .rule("keep_inventory")
+                    .unwrap()
+                    .clone();
+                game.set_game_rule(&keep_inventory, GameRuleValue::Bool(true), None);
             });
         });
         assert_eq!(

@@ -113,8 +113,8 @@ pub fn finalize(m: &mut Mob) {
 /// `Llama.getBreedOffspring` with `AbstractHorse.setOffspringAttributes`,
 /// drawn from the parent's random with the partner's stock.
 pub fn breed_offspring(m: &mut Mob, partner: &Seen) -> equine::Offspring {
-    // Seen.profession is the partner's strength.
-    let top = strength(m).max(i32::from(partner.profession));
+    // Seen.secondary_variant is the partner's strength.
+    let top = strength(m).max(i32::from(partner.secondary_variant));
     let attributes = equine::OffspringAttributes::draw(m, partner);
     let r = &mut m.random;
     let mut s = r.next_int_bound(top).unwrap_or(0) + 1;

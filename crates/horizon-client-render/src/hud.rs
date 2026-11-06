@@ -1091,22 +1091,21 @@ impl HudAtlas {
         for folder in folders {
             walk(&textures.join(folder), &mut files);
         }
-        // Content mods' entity textures: their equipment assets name them as
-        // `<ns>:<path>`, and native mods draw their block entities with them
-        // (`native_draw_quad`: `<ns>:entity/...`); and their mob effects'
-        // icons, `<ns>:mob_effect/<path>`.
-        let namespaces = horizon_items::content_namespaces::namespaces(root);
-        for folder in ["entity", "mob_effect"] {
-            if folders.contains(&folder) {
-                for namespace in &namespaces {
-                    walk(
-                        &root.join(format!("assets/{namespace}/textures/{folder}")),
-                        &mut files,
-                    );
+        // Entity and effect resources can come from any namespace in the effective
+        // pack, including a native mod with no content-mod namespace marker.
+        let assets = root.join("assets");
+        if let Ok(namespaces) = fs::read_dir(&assets) {
+            for namespace in namespaces.flatten() {
+                if namespace.file_name() == "minecraft" {
+                    continue;
+                }
+                for folder in ["entity", "mob_effect"] {
+                    if folders.contains(&folder) {
+                        walk(&namespace.path().join("textures").join(folder), &mut files);
+                    }
                 }
             }
         }
-        let assets = root.join("assets");
         // A native mod's particle type names its textures `<ns>:particle/<path>`
         // and needn't ship content, so every namespace's folder is packed.
         if folders.contains(&"particle")
@@ -3561,6 +3560,22 @@ mod tests {
         let static_badge = atlas.sprites["gui/sprites/icon/static_badge"];
         assert_eq!(static_badge.texels((atlas.width, atlas.height)), (16, 32));
     }
+    #[test]
+    fn arbitrary_namespace_entity_textures_are_packed_without_content_marker() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-atlas-entity-namespace-{}",
+            std::process::id()
+        ));
+        let file =
+            root.join("assets/example/textures/entity/villager/profession/nested/engineer.png");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        write_strip(&file, 16, 16, &[[12, 34, 56, 255]], None);
+        let atlas = HudAtlas::build(&root).unwrap();
+        let rect = atlas.sprites["example:entity/villager/profession/nested/engineer"];
+        assert_eq!(texel_at(&atlas, rect, 0, 0), [12, 34, 56, 255]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// A resource root with one plain item texture and these CIT files (relative path, contents).
     fn cit_root(name: &str, files: &[(&str, &str)]) -> PathBuf {
         let root =

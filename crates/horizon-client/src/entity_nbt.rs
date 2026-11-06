@@ -8,6 +8,7 @@ use crate::{
     arrows::Pickup,
     entities::{ArmorStand, Cushion, ExperienceOrb, ItemEntity, ItemFrame, Painting},
     mobs::{Mob, MobType, Who},
+    nbt_path::int_value,
     projectiles::{Projectile, ProjectileKind},
     save::{
         doubles, float, floats, item_from_nbt, item_to_nbt, number, put, read_doubles, text,
@@ -1624,12 +1625,12 @@ pub fn mob_from_nbt(
         m.extra.drop_chances = Some(Box::new(chances));
     }
     if saves_age(m.species()) {
-        m.extra.age = number(tag.get("Age")).unwrap_or(0) as i32;
-        m.extra.forced_age = number(tag.get("ForcedAge")).unwrap_or(0) as i32;
+        m.extra.age = tag.get("Age").and_then(int_value).unwrap_or(0);
+        m.extra.forced_age = tag.get("ForcedAge").and_then(int_value).unwrap_or(0);
         m.extra.age_locked = flag(tag, "AgeLocked");
     }
     if is_animal(&m.kind.id) {
-        m.extra.in_love = number(tag.get("InLove")).unwrap_or(0) as i32;
+        m.extra.in_love = tag.get("InLove").and_then(int_value).unwrap_or(0);
         // Animal.readAdditionalSaveData: the player who fed it into love.
         m.extra.love_cause = crate::save::uuid_from_tag(tag.get("LoveCause"));
     }
@@ -3136,13 +3137,14 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
     }
     tag
 }
+/// `ItemFrame.readAdditionalSaveData`: an absent Facing defaults to Direction.DOWN.
 pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
     let pos = attached_block_pos(tag)?;
     Some(ItemFrame {
         join: Default::default(),
         id,
         pos,
-        facing: number(tag.get("Facing")).unwrap_or(2).clamp(0, 5) as u8,
+        facing: number(tag.get("Facing")).unwrap_or(0).clamp(0, 5) as u8,
         glow: kind(tag).as_deref() == Some("minecraft:glow_item_frame"),
         item: tag.get("Item").and_then(item_from_nbt),
         rotation: (number(tag.get("ItemRotation")).unwrap_or(0) & 7) as u8,
@@ -3350,13 +3352,7 @@ fn villager_data(m: &Mob) -> Tag {
                 VILLAGER_TYPES[m.extra.variant as usize % VILLAGER_TYPES.len()]
             )),
         ),
-        (
-            "profession",
-            string(&format!(
-                "minecraft:{}",
-                crate::mobs::villager::profession(m.extra.variant2).id
-            )),
-        ),
+        ("profession", string(&m.extra.profession.id())),
         ("level", Tag::Int(m.extra.villager_level.max(1))),
     ])
 }
@@ -3479,9 +3475,10 @@ fn read_villager(m: &mut Mob, tag: &Tag) {
         if let Some(t) = name("type").and_then(|t| VILLAGER_TYPES.iter().position(|v| *v == t)) {
             m.extra.variant = t as u8;
         }
-        m.extra.variant2 = name("profession")
-            .and_then(|p| crate::mobs::villager::profession_index(&p))
-            .unwrap_or(0);
+        m.extra.profession = text(data.get("profession"))
+            .as_deref()
+            .map(crate::mobs::villager::ProfessionState::from_id)
+            .unwrap_or_default();
         m.extra.villager_level = number(data.get("level"))
             .unwrap_or(1)
             .clamp(1, i64::from(i32::MAX)) as i32;
@@ -3861,6 +3858,31 @@ mod tests {
         ]);
         let mob = mob_from_nbt(&tag, &types, 7, None).unwrap();
         assert_eq!(villager_data(&mob), data);
+    }
+
+    #[test]
+    fn unresolved_villager_profession_round_trips_through_entity_nbt() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:villager".into();
+        def.species = crate::mobs::Species::Villager;
+        let types = [("minecraft:villager".into(), kind)].into();
+        let data = Tag::compound([
+            ("profession", string("example:nested/engineer")),
+            ("type", string("minecraft:plains")),
+            ("level", Tag::Int(1)),
+        ]);
+        let tag = Tag::compound([
+            ("id", string("minecraft:villager")),
+            ("Pos", doubles(&[0.0, 100.0, 0.0])),
+            ("VillagerData", data.clone()),
+        ]);
+        let mob = mob_from_nbt(&tag, &types, 7, None).unwrap();
+        assert_eq!(villager_data(&mob), data);
+        assert_eq!(mob.extra.profession.index(), None);
+        let saved = mob_to_nbt(&mob, [0; 4], None, None);
+        let reloaded = mob_from_nbt(&saved, &types, 8, None).unwrap();
+        assert_eq!(villager_data(&reloaded), data);
     }
 
     #[test]
@@ -4278,6 +4300,81 @@ mod tests {
         let cleared = item_entity_to_nbt(&cleared, [1, 2, 3, 4], Some(&tag));
         assert!(cleared.get("Thrower").is_none());
     }
+    #[test]
+    fn animal_integer_loads_save_modeled_values_without_raw_source() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:pig".into();
+        def.species = crate::mobs::Species::Pig;
+        let types = [("minecraft:pig".into(), kind)].into();
+        for (input, expected) in [
+            (None, 0),
+            (Some(Tag::Int(0)), 0),
+            (Some(Tag::Byte(-7)), -7),
+            (Some(Tag::Short(13)), 13),
+            (Some(Tag::Int(i32::MIN)), i32::MIN),
+            (Some(Tag::Int(i32::MAX)), i32::MAX),
+            (Some(Tag::Long(2147483648)), i32::MIN),
+            (Some(Tag::Long(-2147483649)), i32::MAX),
+            (Some(Tag::Long(4294967296)), 0),
+            (Some(Tag::Long(i64::MAX)), -1),
+            (Some(Tag::Long(i64::MIN)), 0),
+            (Some(Tag::Float(2.5f32.to_bits())), 2),
+            (Some(Tag::Float((-2.5f32).to_bits())), -3),
+            (Some(Tag::Double(2.5f64.to_bits())), 2),
+            (Some(Tag::Double((-2.5f64).to_bits())), -3),
+            (Some(Tag::Float(2147483520f32.to_bits())), 2147483520),
+            (Some(Tag::Float(2147483648f32.to_bits())), i32::MAX),
+            (Some(Tag::Float((-2147483648f32).to_bits())), i32::MIN),
+            (Some(Tag::Float((-2147483904f32).to_bits())), i32::MIN),
+            (Some(Tag::Double(2147483647.75f64.to_bits())), i32::MAX),
+            (Some(Tag::Double(2147483648f64.to_bits())), i32::MAX),
+            (Some(Tag::Double((-2147483647.5f64).to_bits())), i32::MIN),
+            (Some(Tag::Double((-2147483648.5f64).to_bits())), i32::MIN),
+            (Some(Tag::Double(1e20f64.to_bits())), i32::MAX),
+            (Some(Tag::Double((-1e20f64).to_bits())), i32::MIN),
+            (Some(Tag::Float(1e20f32.to_bits())), i32::MAX),
+            (Some(Tag::Float((-1e20f32).to_bits())), i32::MIN),
+        ] {
+            let mut raw = Tag::compound([
+                ("id", string("minecraft:pig")),
+                ("Pos", doubles(&[4.5, 200.0, 4.5])),
+                ("NoAI", Tag::Byte(1)),
+                ("NoGravity", Tag::Byte(1)),
+                ("AgeLocked", Tag::Byte(1)),
+                ("Unrelated", string("keep")),
+            ]);
+            if let Some(value) = input.as_ref() {
+                for key in ["Age", "ForcedAge", "InLove"] {
+                    put(&mut raw, key, value.clone());
+                }
+            }
+            let mob = mob_from_nbt(&raw, &types, 1, None).unwrap();
+            assert_eq!(
+                (mob.extra.age, mob.extra.forced_age, mob.extra.in_love),
+                (expected, expected, expected),
+                "{input:?}"
+            );
+            assert!(mob.no_ai && mob.no_gravity && mob.extra.age_locked);
+            for source in [None, Some(&raw)] {
+                let saved = mob_to_nbt(&mob, [0, 0, 0, 55], source, None);
+                for key in ["Age", "ForcedAge", "InLove"] {
+                    assert_eq!(
+                        saved.get(key),
+                        Some(&Tag::Int(expected)),
+                        "{key}: {input:?}"
+                    );
+                }
+                assert_eq!(saved.get("NoAI"), Some(&Tag::Byte(1)));
+                assert_eq!(saved.get("AgeLocked"), Some(&Tag::Byte(1)));
+                assert_eq!(
+                    saved.get("Unrelated"),
+                    source.and_then(|tag| tag.get("Unrelated"))
+                );
+            }
+        }
+    }
+
     #[test]
     fn animal_nbt_preserves_signed_integer_in_love_and_defaults_after_removal() {
         let mut kind = crate::mobs::sensor_scan_tests::kind();
@@ -6317,6 +6414,54 @@ mod fireball_nbt_tests {
             ("Facing", Tag::Byte(1)),
         ]);
         assert_eq!(item_frame_from_nbt(&frame, 1).unwrap().pos, [-1, 80, 6]);
+    }
+
+    #[test]
+    fn frame_missing_facing_loads_down_and_valid_directions_round_trip() {
+        // ItemFrame.readAdditionalSaveData: LEGACY_ID_CODEC, orElse(DOWN).
+        for kind in ["minecraft:item_frame", "minecraft:glow_item_frame"] {
+            // Explicit controls run before the missing-field assertion.
+            for facing in [Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None] {
+                let mut tag = Tag::compound([
+                    ("id", string(kind)),
+                    ("block_pos", Tag::IntArray(vec![4, 102, 6])),
+                    ("Fixed", Tag::Byte(1)),
+                    ("ItemRotation", Tag::Byte(5)),
+                    ("ItemDropChance", Tag::Float(0.25_f32.to_bits())),
+                    (
+                        "Item",
+                        item_to_nbt(&crate::items::ItemStack::new("minecraft:diamond", 1)),
+                    ),
+                ]);
+                if let Some(direction) = facing {
+                    put(&mut tag, "Facing", Tag::Byte(direction));
+                }
+                let frame = item_frame_from_nbt(&tag, 17).unwrap();
+                assert_eq!(frame.kind(), kind);
+                assert_eq!(frame.id, 17);
+                assert!(frame.fixed);
+                assert_eq!(
+                    frame.item.as_ref().unwrap().item.as_ref(),
+                    "minecraft:diamond"
+                );
+                for raw in [None, Some(&tag)] {
+                    let saved = item_frame_to_nbt(&frame, [1, 2, 3, 4], raw);
+                    assert_eq!(
+                        saved.get("Facing"),
+                        Some(&Tag::Byte(facing.unwrap_or(0))),
+                        "{kind}"
+                    );
+                    assert_eq!(saved.get("Item"), tag.get("Item"));
+                    assert_eq!(saved.get("ItemRotation"), Some(&Tag::Byte(5)));
+                    assert_eq!(saved.get("ItemDropChance"), tag.get("ItemDropChance"));
+                    assert_eq!(saved.get("Fixed"), Some(&Tag::Byte(1)));
+                    assert_eq!(saved.get("block_pos"), tag.get("block_pos"));
+                    if facing.is_none() {
+                        assert_eq!(saved.get("Pos"), Some(&doubles(&[4.5, 102.96875, 6.5])));
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -3853,6 +3853,8 @@ pub struct Level {
     pub enabled_features: std::sync::Arc<[String]>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,
+    /// Definitions used by this world session.
+    pub rule_registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
     pub player_uuid: Option<[i32; 4]>,
     pub selected_slot: i32,
     pub motion: [f64; 3],
@@ -3912,7 +3914,12 @@ impl Level {
             .get(name)
             .copied()
             .or_else(|| {
-                crate::gamerules::rule_registry()
+                self.rule_registry
+                    .rule(name)
+                    .and_then(|rule| self.game_rules.get(&rule.name).copied())
+            })
+            .or_else(|| {
+                self.rule_registry
                     .rule(name)
                     .map(|rule| match rule.default {
                         crate::gamerules::Value::Bool(value) => i32::from(value),
@@ -3930,17 +3937,29 @@ impl Level {
         }
     }
     pub fn read(dir: &Path) -> Option<Self> {
-        Self::read_root(dir, read_level_dat(dir)?)
+        Self::read_root(dir, read_level_dat(dir)?, Default::default())
+    }
+    /// Load a world using its session rule definitions.
+    pub fn read_with_registry(
+        dir: &Path,
+        registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
+    ) -> Option<Self> {
+        Self::read_root(dir, read_level_dat(dir)?, registry)
     }
     /// `read` from level.dat alone, without the level.dat_old fallback: what
     /// `LevelStorageSource.readLevelSummary` reads for the world list.
     pub fn read_summary(dir: &Path) -> Option<Self> {
-        Self::read_root(dir, read_dat(&dir.join("level.dat"))?)
+        Self::read_root(dir, read_dat(&dir.join("level.dat"))?, Default::default())
     }
-    fn read_root(dir: &Path, root: Tag) -> Option<Self> {
+    fn read_root(
+        dir: &Path,
+        root: Tag,
+        registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
+    ) -> Option<Self> {
         let data = root.get("Data")?;
         let n = |t: Option<&Tag>| number(t).unwrap_or(0);
         let mut level = Self {
+            rule_registry: registry,
             name: text(data.get("LevelName")).unwrap_or_else(|| "World".into()),
             creative: n(data.get("GameType")) == 1,
             game_mode: n(data.get("GameType")) as i32,
@@ -3992,7 +4011,7 @@ impl Level {
             };
             level.data_packs = Some((ids("Enabled"), ids("Disabled")));
         }
-        let registry = crate::gamerules::rule_registry();
+        let registry = level.rule_registry.clone();
         let mut rules: BTreeMap<String, i32> = registry
             .available_rules(false)
             .map(|rule| {
@@ -4009,7 +4028,11 @@ impl Level {
         if let Some(Tag::Compound(map)) = &saved_rules {
             for (k, v) in map {
                 let name = k.to_string_lossy();
-                let name = name.strip_prefix("minecraft:").unwrap_or(&name).to_owned();
+                let name = if name.contains(':') {
+                    name
+                } else {
+                    format!("minecraft:{name}")
+                };
                 if let Some(v) = number(Some(v)) {
                     rules.insert(name, v as i32);
                 }
@@ -4017,7 +4040,7 @@ impl Level {
         }
         // GameRules(enabledFeatures, map) removes disabled experimental rules
         // and supplies their defaults when enabled but absent from saved data.
-        let registry = crate::gamerules::rule_registry();
+        let registry = level.rule_registry.clone();
         let minecart_rule = registry.rule("max_minecart_speed").expect("vanilla rule");
         if level
             .enabled_features
@@ -4034,7 +4057,7 @@ impl Level {
                 *value = default;
             }
         } else {
-            rules.remove(minecart_rule.name);
+            rules.remove(&minecart_rule.name);
         }
         level.game_rules = rules;
         // Seed: world_gen_settings.dat (26.3) or Data.WorldGenSettings.
@@ -4738,21 +4761,21 @@ impl Level {
                 ),
                 _ => Tag::Compound(Compound::new()),
             };
-            let registry = crate::gamerules::rule_registry();
+            let registry = &self.rule_registry;
             for rule in registry.available_rules(false) {
                 let tag = match rule.default {
                     crate::gamerules::Value::Bool(default) => Tag::Byte(i8::from(
                         self.game_rules
-                            .get(rule.name)
+                            .get(&rule.name)
                             .copied()
                             .unwrap_or(i32::from(default))
                             != 0,
                     )),
                     crate::gamerules::Value::Int(default) => {
-                        Tag::Int(self.game_rules.get(rule.name).copied().unwrap_or(default))
+                        Tag::Int(self.game_rules.get(&rule.name).copied().unwrap_or(default))
                     }
                 };
-                put(&mut rules, &format!("minecraft:{}", rule.name), tag);
+                put(&mut rules, &rule.name.clone(), tag);
             }
             if self
                 .enabled_features
@@ -4765,15 +4788,11 @@ impl Level {
                 };
                 let value = self
                     .game_rules
-                    .get(rule.name)
+                    .get(&rule.name)
                     .copied()
                     .filter(|v| (rule.min..=rule.max).contains(v))
                     .unwrap_or(default);
-                put(
-                    &mut rules,
-                    &format!("minecraft:{}", rule.name),
-                    Tag::Int(value),
-                );
+                put(&mut rules, &rule.name.clone(), Tag::Int(value));
             }
             write_saved_data(dir, "game_rules", rules)?;
         }
@@ -7343,7 +7362,9 @@ mod tests {
         };
         level.weather.raining = true;
         level.weather.rain_time = 500;
-        level.game_rules.insert("keep_inventory".into(), 1);
+        level
+            .game_rules
+            .insert("minecraft:keep_inventory".into(), 1);
         level.write(&dir).unwrap();
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.name, "Test");
@@ -7602,6 +7623,95 @@ mod tests {
     }
 
     #[test]
+    fn level_read_retains_the_session_registry() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-level-registry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let first = std::sync::Arc::new(crate::gamerules::RuleRegistry::vanilla());
+        let second = std::sync::Arc::new(crate::gamerules::RuleRegistry::vanilla());
+        let mut level = super::Level {
+            rule_registry: first.clone(),
+            ..Default::default()
+        };
+        level.write(&dir).unwrap();
+        let loaded = super::Level::read_with_registry(&dir, first.clone()).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&loaded.rule_registry, &first));
+        let next = super::Level::read_with_registry(&dir, second.clone()).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(
+            &loaded.rule_registry,
+            &next.rule_registry
+        ));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn level_saved_rules_have_vanilla_keys_types_and_defaults() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-rule-defaults-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut level = super::Level::default();
+        level.write(&dir).unwrap();
+        let super::Tag::Compound(rules) = super::read_saved_data(&dir, "game_rules").unwrap()
+        else {
+            panic!("rule compound")
+        };
+        assert_eq!(rules.len(), 58);
+        assert!(
+            rules
+                .keys()
+                .all(|key| key.to_string().unwrap().starts_with("minecraft:"))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:random_tick_speed".into()),
+            Some(&super::Tag::Int(3))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:keep_inventory".into()),
+            Some(&super::Tag::Byte(0))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:max_snow_accumulation_height".into()),
+            Some(&super::Tag::Int(1))
+        );
+        assert!(!rules.contains_key(&"minecraft:max_minecart_speed".into()));
+        level.enabled_features = [crate::gamerules::MINECART_IMPROVEMENTS.to_owned()].into();
+        level.game_rules =
+            crate::gamerules::GameRules::with_features(&level.enabled_features).by_name();
+        level.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("minecraft:max_minecart_speed"),
+            Some(&super::Tag::Int(8))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_bare_saved_rules_load_under_canonical_keys() {
+        let dir = std::env::temp_dir().join(format!("horizon-rule-legacy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        super::Level::default().write(&dir).unwrap();
+        super::write_saved_data(
+            &dir,
+            "game_rules",
+            super::Tag::compound([
+                ("keep_inventory", super::Tag::Byte(1)),
+                ("random_tick_speed", super::Tag::Int(7)),
+            ]),
+        )
+        .unwrap();
+        let level = super::Level::read(&dir).unwrap();
+        assert_eq!(level.game_rules.get("minecraft:keep_inventory"), Some(&1));
+        assert_eq!(
+            level.game_rules.get("minecraft:random_tick_speed"),
+            Some(&7)
+        );
+        assert!(!level.game_rules.contains_key("keep_inventory"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn level_save_preserves_absent_mod_rules() {
         let dir =
             std::env::temp_dir().join(format!("horizon-gamerules-unknown-{}", std::process::id()));
@@ -7614,7 +7724,7 @@ mod tests {
             super::Tag::compound([("absent:rule", super::Tag::Long(42))]),
         )
         .unwrap();
-        level.game_rules.insert("advance_time".into(), 0);
+        level.game_rules.insert("minecraft:advance_time".into(), 0);
         level.write(&dir).unwrap();
         assert_eq!(
             super::read_saved_data(&dir, "game_rules")
