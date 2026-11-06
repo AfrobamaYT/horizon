@@ -2788,6 +2788,7 @@ impl Game<'_> {
             // Its value (ExperienceOrb.DATA_VALUE) follows in SetEntityData.
             self.orbs.retain(|o| o.id != id as u32);
             self.orbs.push(ExperienceOrb {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 no_gravity: false,
@@ -5875,6 +5876,7 @@ impl Game<'_> {
             * std::f32::consts::PI
             * 2.0;
         self.dropped.push(ItemEntity {
+            attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),

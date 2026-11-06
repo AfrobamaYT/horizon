@@ -2542,6 +2542,7 @@ impl Game<'_> {
                     let at = self.unstuck_orb(pos);
                     self.next_entity += 1;
                     self.orbs.push(horizon_client::entities::ExperienceOrb {
+                        attachment_lifetime: Default::default(),
                         rotation: [0.0, 0.0],
                         join: Default::default(),
                         no_gravity: false,

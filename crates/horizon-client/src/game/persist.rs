@@ -802,6 +802,7 @@ impl Game<'_> {
             let id = self.next_entity;
             self.remember(id, uuid, tag);
             self.paintings.push(horizon_client::entities::Painting {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id,
                 pos,

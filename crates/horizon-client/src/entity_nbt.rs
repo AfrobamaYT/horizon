@@ -2289,6 +2289,7 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
     let stack = item_from_nbt(tag.get("Item")?)?;
     let position = position(tag)?;
     Some(ItemEntity {
+        attachment_lifetime: Default::default(),
         fall_distance: float(tag.get("fall_distance")).unwrap_or(0.0),
         rotation: rotation(tag),
         join: Default::default(),
@@ -2396,6 +2397,7 @@ pub fn orbs_from_nbt(tag: &Tag) -> Vec<ExperienceOrb> {
     };
     let count = number(tag.get("Count")).unwrap_or(1).max(1) as u32;
     let orb = ExperienceOrb {
+        attachment_lifetime: Default::default(),
         rotation: rotation(tag),
         join: Default::default(),
         no_gravity: flag(tag, "NoGravity"),
@@ -3118,6 +3120,7 @@ pub fn cushion_from_nbt(tag: &Tag, id: u32) -> Option<Cushion> {
     let color =
         crate::entities::dye_index(&text(tag.get("color")).unwrap_or_else(|| "white".into()));
     Some(Cushion {
+        attachment_lifetime: Default::default(),
         join: Default::default(),
         id,
         position,
@@ -3136,6 +3139,7 @@ mod cushion_tests {
     #[test]
     fn cushion_save_preserves_color_anchor_rotation_and_unknown_data() {
         let cushion = Cushion {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: 7,
             position: Vec3::new(-1.5, 64.5, 3.5),
@@ -3203,6 +3207,7 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
 pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
     let pos = attached_block_pos(tag)?;
     Some(ItemFrame {
+        attachment_lifetime: Default::default(),
         join: Default::default(),
         id,
         pos,
@@ -4415,6 +4420,7 @@ mod tests {
     #[test]
     fn item_entities_round_trip() {
         let e = ItemEntity {
+            attachment_lifetime: Default::default(),
             fall_distance: 2.5,
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -4637,6 +4643,7 @@ mod tests {
         // Entity.remainingFireTicks starts at 0; LivingEntity.removeFrost makes
         // the movement_speed instance AttributeMap.pack then saves.
         let orb = ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -4700,6 +4707,7 @@ mod tests {
     #[test]
     fn orbs_keep_their_count() {
         let o = ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,

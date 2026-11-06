@@ -335,6 +335,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let item = ItemEntity {
+            attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -440,6 +441,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let orb = ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,

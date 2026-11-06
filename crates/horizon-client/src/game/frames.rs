@@ -198,6 +198,7 @@ impl Game<'_> {
             return true;
         }
         let frame = ItemFrame {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: self.next_entity + 1,
             pos,
