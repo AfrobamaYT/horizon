@@ -13,9 +13,10 @@ use crate::sound_events::{Sound, SoundRegistry};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use horizon_assets::resource_source::{Resource, ResourceSource};
 use horizon_core::random::{LegacyRandom, RandomSource};
+#[cfg(any(feature = "audio", test))]
+use std::path::Path;
 use std::{
     collections::HashMap,
-    path::Path,
     sync::{Arc, Mutex},
 };
 
