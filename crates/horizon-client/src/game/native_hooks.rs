@@ -15121,10 +15121,10 @@ mod camera_type_tests {
     struct NoFront(Arc<Mutex<Vec<(CameraType, CameraType)>>>);
     #[mod_api::__subscriptions]
     impl Hooks for NoFront {
-        fn camera_type_cycle(&self, _: &mut dyn ClientHost, event: &mut CameraTypeCycleEvent) {
-            self.0.lock().unwrap().push((event.previous, event.next));
-            if event.next == CameraType::ThirdPersonFront {
-                event.next = CameraType::FirstPerson;
+        fn camera_type_cycle(&self, _: &mut dyn ClientHost, event: &mut CameraTypeCycleEvent<'_>) {
+            self.0.lock().unwrap().push((event.previous, *event.next));
+            if *event.next == CameraType::ThirdPersonFront {
+                *event.next = CameraType::FirstPerson;
             }
         }
     }
