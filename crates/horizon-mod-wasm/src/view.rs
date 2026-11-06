@@ -874,13 +874,18 @@ mod tests {
             large_debit >= 1000 * small_debit,
             "large={large_debit}, small={small_debit}"
         );
-        // Each successful input charge reaches the wrong-type check, never a retained write.
+        // Each charged setter reaches the wrong-type check, never a retained write.
+        // The initial message get has the same debit as one refused setter.
         assert!(large_game.refused_sets > 1);
         assert_eq!(
             large_debits.iter().filter(|&&n| n == large_debit).count(),
-            large_game.refused_sets
+            large_game.refused_sets + 1
         );
         assert_eq!(small_game.refused_sets, 2000);
+        assert_eq!(
+            small_debits.iter().filter(|&&n| n == small_debit).count(),
+            small_game.refused_sets + 1
+        );
         assert_eq!((large_game.left, large_game.right), (1, 10));
         assert!(large.exports.stopped());
         assert_healthy_group_runs(&healthy);
