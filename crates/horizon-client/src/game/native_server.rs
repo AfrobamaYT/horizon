@@ -2339,7 +2339,7 @@ mod tests {
                     game.yaw = 45.0;
                     game.pitch = 30.0;
                     for (line, key) in [
-                        ("typed give guest13 nope", "command.unknown.argument"),
+                        ("typed give guest13 nope", "parsing.int.expected"),
                         ("typed give missing 1", "argument.entity.notfound.player"),
                     ] {
                         game.chat_capture = Some(Vec::new());
