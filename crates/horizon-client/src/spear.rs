@@ -8,7 +8,8 @@ use horizon_core::{
     geometry::{Aabb, Vec3 as Vec3d, trig::Mth},
     jmath::pow,
 };
-use serde::Deserialize;
+use horizon_items::kinetic_weapon::UseDuration;
+pub use horizon_items::kinetic_weapon::UseTiming;
 use std::f32::consts::PI;
 
 /// `KineticWeapon.Condition`.
@@ -48,30 +49,6 @@ pub struct Kinetic {
     /// jab.
     pub attack_ticks: i32,
     pub attack_sound: &'static str,
-}
-
-/// The timing fields of `kinetic_weapon` read by `SpearAnimations.UseParams`.
-/// Sound and combat fields are not part of the first-person pose.
-#[derive(Clone, Copy, Debug, Deserialize)]
-pub struct UseTiming {
-    #[serde(default)]
-    delay_ticks: i32,
-    dismount_conditions: Option<UseDuration>,
-    knockback_conditions: Option<UseDuration>,
-    damage_conditions: Option<UseDuration>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize)]
-struct UseDuration {
-    max_duration_ticks: i32,
-}
-
-impl UseTiming {
-    /// Read the pose from already resolved stack components, including the codec's
-    /// zero delay and absent-condition defaults. No component means no spear pose.
-    pub fn from_components(components: &horizon_assets::item_model::Components) -> Option<Self> {
-        Self::deserialize(components.get("minecraft:kinetic_weapon")?).ok()
-    }
 }
 
 impl From<&Kinetic> for UseTiming {
@@ -188,7 +165,13 @@ pub const HIT_FEEDBACK_TICKS: i64 = 10;
 
 /// `Mth.clamp` on floats (a NaN stays one).
 fn clamp(v: f32, lo: f32, hi: f32) -> f32 {
-    if v < lo { lo } else { v.min(hi) }
+    if v < lo {
+        lo
+    } else if v > hi {
+        hi
+    } else {
+        v
+    }
 }
 /// `SpearAnimations.progress`.
 fn progress(time: f32, start: f32, end: f32) -> f32 {
@@ -525,7 +508,7 @@ mod tests {
 
     #[test]
     fn effective_kinetic_components_drive_the_first_person_pose() {
-        use crate::{first_person::ItemPose, item_render::stack_view, items::ItemStack};
+        use crate::{first_person::ItemPose, items::ItemStack};
         use horizon_assets::item_model::ItemModels;
         use horizon_world::nbt::Tag;
         use serde_json::json;
@@ -551,8 +534,14 @@ mod tests {
             ])),
             ..Default::default()
         };
-        let read =
-            |stack: &ItemStack| UseTiming::from_components(&models.components(&stack_view(stack)));
+        let read = |stack: &ItemStack| {
+            let prototype = models
+                .prototypes
+                .get(&*stack.item)
+                .and_then(|c| c.get("minecraft:kinetic_weapon"))
+                .and_then(UseTiming::from_json);
+            UseTiming::of_stack(stack, prototype)
+        };
         let mut spear = ItemStack::new("minecraft:iron_spear", 1);
         let timing = read(&spear).unwrap();
         // Half raised, before any condition expires. These are the resulting
@@ -601,12 +590,26 @@ mod tests {
             "minecraft:kinetic_weapon",
             Some(Tag::compound([("delay_ticks", Tag::Int(40))])),
         );
+        // Saved/command decode and later mutations keep the raw full component
+        // and its typed timing together through the same owning boundary.
+        let saved = crate::item_data::components_tag(0, spear.data()).unwrap();
+        let (_, extra) = crate::item_data::decode_components(Some(&saved));
+        spear.extra = extra;
+        assert_eq!(
+            spear.data().unwrap().other("minecraft:kinetic_weapon"),
+            saved.get("minecraft:kinetic_weapon")
+        );
         let patched = read(&spear).unwrap();
         assert_eq!(UseParams::of(&patched, 10.0).raise, 0.25);
         // A replacement component does not inherit the prototype's conditions.
         assert!(patched.dismount_conditions.is_none());
         assert!(patched.knockback_conditions.is_none());
         assert!(patched.damage_conditions.is_none());
+        spear.data_mut().set_other(
+            "minecraft:kinetic_weapon",
+            Some(Tag::String("invalid".into())),
+        );
+        assert!(read(&spear).is_none()); // An invalid replacement is not a prototype fallback.
         assert!(
             !first_person_use(&patched, 100.0, 10.0, true)
                 .abs_diff_eq(first_person_use(&timing, 100.0, 10.0, true), 1e-3)
@@ -629,6 +632,46 @@ mod tests {
         assert!(defaulted.dismount_conditions.is_none());
         assert!(defaulted.knockback_conditions.is_none());
         assert!(defaulted.damage_conditions.is_none());
+        // Java Mth.clamp preserves NaN when zero delay meets zero held time.
+        assert!(UseParams::of(&defaulted, 0.0).raise.is_nan());
+        assert!(!first_person_use(&defaulted, 100.0, 0.0, true).is_finite());
+        assert!(first_person_use(&defaulted, 100.0, 1.0, true).is_finite());
+    }
+
+    #[test]
+    fn kinetic_numeric_codecs_normalize_before_rendering() {
+        use serde_json::json;
+        for (value, ticks) in [
+            (json!(40.0), 40),
+            (json!(40.75), 40),
+            (json!(-0.5), 0),
+            (json!(4_294_967_336_i64), 40),
+        ] {
+            let timing = UseTiming::from_json(&json!({
+                "delay_ticks": value,
+                "damage_conditions": {"max_duration_ticks": value}
+            }))
+            .unwrap();
+            assert_eq!(timing.delay_ticks, ticks);
+            assert_eq!(timing.damage_conditions.unwrap().max_duration_ticks, ticks);
+        }
+        for value in [json!(-1), json!("40"), json!(true)] {
+            assert!(UseTiming::from_json(&json!({"delay_ticks": value})).is_none());
+        }
+        let mut stack = crate::items::ItemStack::new("minecraft:stick", 1);
+        for (number, ticks) in [
+            (horizon_world::nbt::Tag::Double(40.75f64.to_bits()), 40),
+            (horizon_world::nbt::Tag::Float(f32::NAN.to_bits()), 0),
+        ] {
+            stack.data_mut().set_other(
+                "minecraft:kinetic_weapon",
+                Some(horizon_world::nbt::Tag::compound([("delay_ticks", number)])),
+            );
+            assert_eq!(
+                UseTiming::of_stack(&stack, None).unwrap().delay_ticks,
+                ticks
+            );
+        }
     }
 
     #[test]
@@ -640,7 +683,7 @@ mod tests {
                 "dismount_conditions": {"max_duration_ticks": 2_147_483_647}
             }),
         )]);
-        let timing = UseTiming::from_components(&components).unwrap();
+        let timing = UseTiming::from_json(&components["minecraft:kinetic_weapon"]).unwrap();
         // finishSwayingTick wraps to -2, startSwayingTick to -22.
         assert_eq!(UseParams::of(&timing, 10.0).sway, 1.0);
     }

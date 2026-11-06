@@ -66,6 +66,8 @@ pub struct StackData {
     /// The original `minecraft:custom_name` component; plain text is derived
     /// when gameplay needs it, so styled names have one source of truth.
     pub custom_name: Option<Tag>,
+    /// Full kinetic component with its typed rendering timing, decoded together.
+    pub kinetic_weapon: Option<crate::kinetic_weapon::KineticComponent>,
     /// `minecraft:potion_contents.potion`.
     pub potion: Option<Arc<str>>,
     /// The rest of `minecraft:potion_contents` (`custom_color`, `custom_effects`,
@@ -162,6 +164,7 @@ const MODELLED: &[&str] = &[
     "minecraft:enchantments",
     "minecraft:firework_explosion",
     "minecraft:fireworks",
+    "minecraft:kinetic_weapon",
     "minecraft:map_id",
     "minecraft:map_post_processing",
     "minecraft:ominous_bottle_amplifier",
@@ -183,6 +186,9 @@ impl StackData {
     pub fn other(&self, id: &str) -> Option<&Tag> {
         if id == "minecraft:custom_name" {
             return self.custom_name.as_ref();
+        }
+        if id == "minecraft:kinetic_weapon" {
+            return self.kinetic_weapon.as_ref().map(|k| k.raw());
         }
         self.other.iter().find(|(k, _)| k == id).map(|(_, v)| v)
     }
@@ -211,6 +217,10 @@ impl StackData {
     /// Set (or with None remove) a preserved component.
     pub fn set_other(&mut self, id: &str, value: Option<Tag>) {
         self.other.retain(|(k, _)| k != id);
+        if id == "minecraft:kinetic_weapon" {
+            self.kinetic_weapon = value.map(crate::kinetic_weapon::KineticComponent::new);
+            return;
+        }
         if id == "minecraft:custom_name" {
             self.custom_name = value
                 .filter(|tag| read_text(tag).is_some())
@@ -894,6 +904,9 @@ pub fn components_tag(damage: u32, data: Option<&StackData>) -> Option<Tag> {
         if let Some(name) = &d.custom_name {
             entries.push(("minecraft:custom_name", name.clone()));
         }
+        if let Some(kinetic) = &d.kinetic_weapon {
+            entries.push(("minecraft:kinetic_weapon", kinetic.raw().clone()));
+        }
         if d.potion.is_some() || !d.potion_extra.is_empty() {
             let potion = d
                 .potion
@@ -1120,6 +1133,10 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .map(collapsed_text),
         potion,
         potion_extra,
+        kinetic_weapon: c
+            .get("minecraft:kinetic_weapon")
+            .cloned()
+            .map(crate::kinetic_weapon::KineticComponent::new),
         map_id: c.get("minecraft:map_id").and_then(int).map(|v| v as i32),
         banner_patterns: crate::banner_layer::layers_from_nbt(c.get("minecraft:banner_patterns")),
         base_color: c

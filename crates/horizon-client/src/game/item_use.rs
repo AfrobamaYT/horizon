@@ -33,24 +33,12 @@ impl Game<'_> {
         self.item_use_state(stack).animation()
     }
 
-    /// Resolve the animation and its spear timing together so rendering reads the
-    /// effective stack components only once, before firing the scoped override.
+    /// Select the animation and its already decoded spear timing together,
+    /// before firing the scoped override. No stack view is built per frame.
     pub(super) fn item_use_state(&self, stack: &ItemStack) -> ItemUseState {
-        let kinetic = std::cell::LazyCell::new(|| {
-            let models = &self.pack.item_renderer.models;
-            // With no stack data there can be no kinetic patch: borrow the
-            // prototype directly, without allocating a StackView on this path.
-            if stack.data().is_none() {
-                return models
-                    .prototypes
-                    .get(&*stack.item)
-                    .and_then(horizon_client::spear::UseTiming::from_components);
-            }
-            let view = horizon_client::item_render::stack_view(stack);
-            let components = models.components(&view);
-            horizon_client::spear::UseTiming::from_components(&components)
-        });
         let info = self.items().get(&stack.item);
+        let kinetic =
+            horizon_client::spear::UseTiming::of_stack(stack, info.and_then(|i| i.kinetic_timing));
         let fixed = match &*stack.item {
             "minecraft:bow" => Some(UseAnimation::Bow),
             "minecraft:crossbow" => Some(UseAnimation::Crossbow),
