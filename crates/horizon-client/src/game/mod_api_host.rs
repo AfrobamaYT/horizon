@@ -36,15 +36,9 @@ fn world_attachments(
     let Holder::Chunk([x, z]) = holder else {
         return Err(AttachmentError::MissingHolder);
     };
-    let chunk = world
-        .chunks
-        .get_mut(&(x, z))
-        .ok_or(AttachmentError::MissingHolder)?;
-    let chunk = std::sync::Arc::make_mut(chunk);
-    let extras = std::sync::Arc::make_mut(chunk.saved.get_or_insert_with(Default::default));
-    attachment_compound(extras.root.get(&ATTACHMENTS_KEY.into()))?;
+    let map = world.chunks.attachments_mut(&(x, z))?;
     world.modified.insert((x, z));
-    Ok(&mut extras.attachments)
+    Ok(map)
 }
 
 impl Game<'_> {

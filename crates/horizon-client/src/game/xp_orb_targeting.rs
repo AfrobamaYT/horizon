@@ -78,6 +78,7 @@ mod tests {
     fn orb(id: u32, at: [f64; 3]) -> ExperienceOrb {
         let at = Vec3::new(at[0], at[1], at[2]);
         ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,

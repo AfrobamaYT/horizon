@@ -273,6 +273,7 @@ impl Game<'_> {
             position.z.floor() as i32,
         ];
         self.cushions.push(Cushion {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id,
             position,
@@ -620,6 +621,7 @@ mod tests {
     #[test]
     fn a_named_cushion_drops_with_its_name() {
         let c = Cushion {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: 1,
             position: Vec3::ZERO,

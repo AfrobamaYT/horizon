@@ -1615,7 +1615,8 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
     if is_monster(m.species())
         && (super::raider::is_raider(m.species()) || super::hostile::mob_brightness(m, w) > 0.5)
     {
-        m.ai.no_action_time += 2;
+        // A Java `int`: past `i32::MAX` it wraps, as there.
+        m.ai.no_action_time = m.ai.no_action_time.wrapping_add(2);
     }
     if super::creaking::is_creaking(m) {
         super::creaking::update(m, w, events);
@@ -1859,7 +1860,8 @@ fn server_ai_step(
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) {
-    m.ai.no_action_time += 1;
+    // A Java `int`: past `i32::MAX` it wraps, as there.
+    m.ai.no_action_time = m.ai.no_action_time.wrapping_add(1);
     // A happy ghast set up for its age (ageBoundaryReached runs at once).
     if m.species() == Species::HappyGhast {
         super::happy_ghast::ensure_setup(m);

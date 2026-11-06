@@ -102,6 +102,7 @@ impl Game<'_> {
             self.armor_stands.push(ArmorStand::new(id, at, yaw));
         } else if kind == "minecraft:item_frame" || kind == "minecraft:glow_item_frame" {
             self.item_frames.push(ItemFrame {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id,
                 pos: block,
@@ -118,6 +119,7 @@ impl Game<'_> {
         } else if kind == "minecraft:cushion" {
             // BlockAttachedEntity.pos: `BlockPos.containing` of the spawn.
             self.cushions.push(Cushion {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id,
                 position: at,
@@ -145,6 +147,7 @@ impl Game<'_> {
                 _ => 0,
             };
             self.paintings.push(Painting {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id,
                 pos: block,
