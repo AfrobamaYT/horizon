@@ -1395,6 +1395,18 @@ impl EntityRef {
     }
 }
 
+/// The resolved holder of a mob's leash, or its absence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MobLeashHolder {
+    /// The mob is not leashed.
+    Unleashed,
+    /// A player, mob or boat holds the leash.
+    Entity(EntityRef),
+    /// A fence knot holds the leash at this block.
+    Knot([i32; 3]),
+}
+
 /// A living entity of the open world: a mob, a player, an armor stand or the
 /// dragon (vanilla's `LivingEntity`). `host.living(entity)` makes one from an
 /// [`EntityRef`] of such an entity, and [`LivingRef::entity`] goes back, so the
