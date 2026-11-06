@@ -895,7 +895,10 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
                 let resources = game.res.clone();
                 let options = game.options.clone();
                 let root = options.resources.clone();
-                let gui = UiResources::server(&root).unwrap();
+                let gui = UiResources::server(
+                    &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+                )
+                .unwrap();
                 let _setup = PhaseOwner::scope(ModPhase::Setup);
                 let mut started = start_game(
                     &resources,
@@ -903,7 +906,9 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
                     gui,
                     options,
                     pack_error.map(str::to_owned),
-                    Audio::silent(&root),
+                    Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                        root.clone(),
+                    )),
                     root,
                     Instant::now(),
                     None,
