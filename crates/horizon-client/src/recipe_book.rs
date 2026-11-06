@@ -1091,10 +1091,7 @@ mod tests {
         let root = content_recipe_root("overlay", CONTENT_RECIPE);
         let replacement = br#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:flint"],"result":{"id":"minecraft:torch"}}"#;
         let files = [("recipe/example:test".to_owned(), vec![replacement.to_vec()])];
-        let overlay = PackOverlay {
-            conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-            files: &files,
-        };
+        let overlay = PackOverlay::new(&files);
         let items = crate::items::Items::for_tests(HashMap::new());
         let recipes = Recipes::load(
             &root,
@@ -1440,13 +1437,7 @@ mod tests {
             "recipe/parity:a_pick".to_owned(),
             vec![recipe.as_bytes().to_vec()],
         )];
-        let index = RecipeIndex::load(
-            &root,
-            &PackOverlay {
-                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-                files: &packs,
-            },
-        );
+        let index = RecipeIndex::load(&root, &PackOverlay::new(&packs));
         std::fs::remove_dir_all(&root).unwrap();
         let ids = [
             "parity:a_pick",

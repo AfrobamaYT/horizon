@@ -445,14 +445,7 @@ mod tests {
         let root = content_brewing_root("overlay", "");
         let files = [("recipe/example:brewing/test".to_owned(), vec![br#"{"type":"minecraft:brewing","input":{"item":"minecraft:potion"},"reagent":{"item":"minecraft:nether_wart"},"output":{"id":"minecraft:emerald"}}"#.to_vec()])];
         let items = Items::for_tests(Default::default());
-        let recipes = Brewing::load(
-            &root,
-            &items,
-            &PackOverlay {
-                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-                files: &files,
-            },
-        );
+        let recipes = Brewing::load(&root, &items, &PackOverlay::new(&files));
         assert_eq!(recipes.recipes.len(), 1);
         assert_eq!(&*recipes.recipes[0].output.item, "minecraft:emerald");
         std::fs::remove_dir_all(root).unwrap();

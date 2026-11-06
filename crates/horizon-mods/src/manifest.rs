@@ -306,16 +306,31 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
     Ok(())
 }
 
-impl Native {
-    /// The injections of a wasm mod's `[native]`, which holds nothing else.
-    fn points(native: toml::Value) -> Result<Vec<Injection>, toml::de::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Points {
-            #[serde(default)]
-            injection: Vec<Injection>,
+/// A wasm mod's internals and point listeners, without native build pins or source modules.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WasmNative {
+    #[serde(default)]
+    injection: Vec<Injection>,
+    #[serde(default)]
+    internals: Vec<Internal>,
+}
+
+impl Internal {
+    fn check_all(internals: &[Self]) -> Result<(), String> {
+        let mut paths = std::collections::HashSet::new();
+        for internal in internals {
+            if internal.path.is_empty()
+                || internal.hash.is_empty()
+                || internal.kind.as_ref().is_some_and(|kind| kind.is_empty())
+                || !paths.insert((&internal.path, &internal.kind))
+            {
+                return Err(format!(
+                    "{MANIFEST}: empty internal path, kind or hash, or duplicate internal path and kind"
+                ));
+            }
         }
-        Ok(native.try_into::<Points>()?.injection)
+        Ok(())
     }
 }
 
@@ -323,34 +338,44 @@ impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut table: toml::Table =
             toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
-        // A wasm mod's `[native]` holds only its injections: it pins no build, as it builds none.
-        let points = match (table.get("wasm"), table.get("native")) {
-            (Some(_), Some(toml::Value::Table(native)))
-                if native.keys().all(|key| key == "injection") =>
-            {
-                let native = table.remove("native").expect("just found");
-                Native::points(native).map_err(|e| format!("{MANIFEST}: {e}"))?
-            }
-            _ => Vec::new(),
+        // Wasm keeps the native declaration syntax, not its pins or source modules.
+        let declarations = if table.contains_key("wasm") {
+            table
+                .remove("native")
+                .map(|native| native.try_into::<WasmNative>())
+                .transpose()
+                .map_err(|e| format!("{MANIFEST}: {e}"))?
+                .unwrap_or_default()
+        } else {
+            WasmNative::default()
         };
         let mut m: Manifest = toml::Value::Table(table)
             .try_into()
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(wasm) = &mut m.wasm {
             let mut ids = std::collections::HashSet::new();
-            for injection in &points {
+            Internal::check_all(&declarations.internals)?;
+            for injection in &declarations.injection {
                 if injection.id.is_empty() || !ids.insert(&injection.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate injection id"));
                 }
-                if injection.trait_method.is_none() || injection.target.is_none() {
+                if (injection.trait_method.is_none() && injection.raw.is_none())
+                    || injection.target.is_none()
+                {
                     return Err(format!(
-                        "{MANIFEST}: injection {}: a wasm mod listens at points (a trait_method at a point's target); a mod that changes game code is a native mod",
+                        "{MANIFEST}: injection {}: a wasm mod listens at points (a trait_method or raw at a point's target); a mod that changes game code is a native mod",
                         injection.id
                     ));
                 }
                 check_injection(injection)?;
+                if injection.raw.is_some() && declarations.internals.is_empty() {
+                    return Err(format!(
+                        "{MANIFEST}: a wasm raw listener needs declared internals"
+                    ));
+                }
             }
-            wasm.points = points;
+            wasm.points = declarations.injection;
+            wasm.internals = declarations.internals;
         }
         if !valid_mod_id(&m.id) {
             return Err(format!(
@@ -373,18 +398,7 @@ impl Manifest {
             ));
         }
         if let Some(native) = &m.native {
-            let mut paths = std::collections::HashSet::new();
-            for internal in &native.internals {
-                if internal.path.is_empty()
-                    || internal.hash.is_empty()
-                    || internal.kind.as_ref().is_some_and(|kind| kind.is_empty())
-                    || !paths.insert((&internal.path, &internal.kind))
-                {
-                    return Err(format!(
-                        "{MANIFEST}: empty internal path, kind or hash, or duplicate internal path and kind"
-                    ));
-                }
-            }
+            Internal::check_all(&native.internals)?;
             let mut ids = std::collections::HashSet::new();
             for injection in &native.injection {
                 if injection.id.is_empty() || !ids.insert(&injection.id) {
@@ -1399,7 +1413,11 @@ capabilities = ["registries"]
             "{text}\n[native]\ngame = \"g\"\nhorizon = \"{0}\"\nmixins = \"{0}\"\n",
             "a".repeat(40)
         );
-        assert!(Manifest::parse(&both).unwrap_err().contains("not both"));
+        assert!(
+            Manifest::parse(&both)
+                .unwrap_err()
+                .contains("unknown field")
+        );
     }
 
     #[test]
@@ -1430,7 +1448,46 @@ capabilities = ["registries"]
             "{wasm}\n[native]\ngame = \"g\"\nhorizon = \"{0}\"\nmixins = \"{0}\"\n\n[[native.injection]]\n{tick}",
             "a".repeat(40)
         );
-        assert!(Manifest::parse(&pinned).unwrap_err().contains("not both"));
+        assert!(
+            Manifest::parse(&pinned)
+                .unwrap_err()
+                .contains("unknown field")
+        );
+    }
+
+    #[test]
+    fn a_wasm_raw_listener_uses_the_native_internal_declaration_without_native_code() {
+        let wasm = format!(
+            "{}\n[wasm]\nsha512 = '{}'\ntoolchain = '1.99.1'\n",
+            EXAMPLE.trim_end(),
+            "0".repeat(128)
+        );
+        let native = "[native]\ninternals=[{path='Game::world',kind='field',hash='world-hash'}]\n";
+        let injection = "[[native.injection]]\nid='fell'\ntarget='Game::break_block'\nkind='HEAD'\nraw='fell'\n";
+        let parsed = Manifest::parse(&format!("{wasm}{native}{injection}")).unwrap();
+        assert!(parsed.native.is_none());
+        let declarations = parsed.wasm.unwrap();
+        assert_eq!(declarations.internals()[0].hash, "world-hash");
+        assert_eq!(declarations.points()[0].raw.as_deref(), Some("fell"));
+        for wrong in [
+            "internals=[{path='',hash='h'}]",
+            "internals=[{path='Game',hash=''}]",
+            "internals=[{path='Game',hash='h'}, {path='Game',hash='h'}]",
+            "module=[]",
+            "game='g'",
+            "horizon='pin'",
+            "mixins='pin'",
+        ] {
+            assert!(
+                Manifest::parse(&format!("{wasm}[native]\n{wrong}\n{injection}")).is_err(),
+                "{wrong}"
+            );
+        }
+        assert!(
+            Manifest::parse(&format!("{wasm}{injection}"))
+                .unwrap_err()
+                .contains("needs declared internals")
+        );
     }
 
     #[test]

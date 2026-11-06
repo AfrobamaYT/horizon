@@ -165,10 +165,10 @@ fn progress_events_capture_each_players_full_mutation_state() {
                 false,
                 None,
             );
-            for guest in &mut game.lan.as_mut().unwrap().hub.guests {
+            game.lan.as_mut().unwrap().hub.guests.update_all(|guest| {
                 guest.advancements_loaded = true;
                 guest.advancements.grant(ID, "gamma", DATE);
-            }
+            });
             game.lan.as_mut().unwrap().hub.mods_loaded = true;
             let reload = |game: &mut Game<'_>| {
                 assert!(game.run_guest_command(GuestCommand {
@@ -313,10 +313,8 @@ fn progress_events_capture_each_players_full_mutation_state() {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(13)
-                .unwrap()
-                .advancements
-                .grant(ID, "gamma", DATE);
+                .update_guest(13, |guest| guest.advancements.grant(ID, "gamma", DATE))
+                .unwrap();
             game.as_guest(12, |game| {
                 game.adv.progress.grant(ID, "alpha", DATE);
                 let index = game.adv.tree.by_id[ID];
@@ -379,14 +377,12 @@ fn progress_events_capture_each_players_full_mutation_state() {
             );
             let reload = case == "reload";
             let host = game.lan.as_mut().unwrap();
-            for guest in &mut host.hub.guests {
+            host.hub.guests.update_all(|guest| {
                 guest.advancements_loaded = reload;
-            }
+            });
             host.hub
-                .guest_mut(13)
-                .unwrap()
-                .advancements
-                .grant(ID, "gamma", DATE);
+                .update_guest(13, |guest| guest.advancements.grant(ID, "gamma", DATE))
+                .unwrap();
             host.hub.mods_loaded = reload;
             game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners));
             if reload {

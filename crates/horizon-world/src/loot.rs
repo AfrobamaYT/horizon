@@ -43,7 +43,15 @@ impl Default for PackOverlay<'_> {
         PackOverlay::NONE
     }
 }
-impl PackOverlay<'_> {
+impl<'a> PackOverlay<'a> {
+    /// A pack view with the built-in package only. Engine-owned server loads
+    /// supply their captured `conditions` explicitly instead.
+    pub const fn new(files: &'a [(String, Vec<Vec<u8>>)]) -> Self {
+        Self {
+            files,
+            conditions: PackOverlay::NONE.conditions,
+        }
+    }
     /// The overlay's files under `<kind>/`, with the prefix stripped.
     pub fn kind(&self, kind: &str) -> impl Iterator<Item = (&str, &Vec<Vec<u8>>)> {
         let prefix = format!("{kind}/");
@@ -2014,14 +2022,7 @@ mod namespace_tests {
             "loot_table/minecraft:chests/b".to_owned(),
             vec![br#"{"pools": []}"#.to_vec()],
         )];
-        let packs = shared_tables(
-            &root,
-            &PackOverlay {
-                conditions: &crate::conditions::LoadConditions::vanilla(),
-                files: &files,
-            },
-        )
-        .unwrap();
+        let packs = shared_tables(&root, &PackOverlay::new(&files)).unwrap();
         assert!(!Arc::ptr_eq(&first, &packs));
         assert!(packs.contains_key("minecraft:chests/b"));
         // A table changed at the same path while `first` is still held: the
@@ -2451,15 +2452,7 @@ mod location_check_biome_tests {
         .unwrap();
         fs::write(root.join("items.json"), "{}").unwrap();
         let defaults = crate::item_defaults::read(&root).unwrap();
-        let data = LootData::load(
-            &root,
-            &PackOverlay {
-                conditions: &crate::conditions::LoadConditions::vanilla(),
-                files: packs,
-            },
-            &defaults,
-        )
-        .unwrap();
+        let data = LootData::load(&root, &PackOverlay::new(packs), &defaults).unwrap();
         let _ = fs::remove_dir_all(&root);
         data
     }

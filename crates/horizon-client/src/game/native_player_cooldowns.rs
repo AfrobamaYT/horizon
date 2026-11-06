@@ -261,13 +261,13 @@ mod tests {
                 saved: None,
             });
             game.level.player_extra = tracker(2);
-            for guest in &mut game.lan.as_mut().unwrap().hub.guests {
+            game.lan.as_mut().unwrap().hub.guests.update_all(|guest| {
                 guest.saved = if guest.uuid == 12 {
                     tracker(2)
                 } else {
                     tracker(4)
                 };
-            }
+            });
             let (a, b) = (
                 game.native_player_ref(12).unwrap(),
                 game.native_player_ref(13).unwrap(),

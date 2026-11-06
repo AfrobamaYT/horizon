@@ -237,7 +237,7 @@ fn variant(m: &Mob, regs: &SpawnRegistries, v: &mut Vec<String>) {
         S::Villager => v.push(format!(
             "minecraft:{}/minecraft:{}/{}",
             VILLAGER_TYPES[m.extra.variant as usize % 7],
-            horizon_client::mobs::villager::profession(m.extra.variant2).id,
+            horizon_client::mobs::villager::profession(m.extra.profession.index().unwrap_or(0)).id,
             m.extra.villager_level.max(1)
         )),
         S::ZombieVillager => v.push(format!(

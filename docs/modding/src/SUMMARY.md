@@ -17,6 +17,7 @@
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+- [Declaring a machine's menu data](how-to/block-entities.md)
 - [Controlling spawns](how-to/spawning.md)
 - [Slowing or boosting entities on a block](how-to/movement-factors.md)
 - [Building to `mod.wasm`](how-to/wasm-mods.md)

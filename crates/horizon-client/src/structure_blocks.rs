@@ -514,10 +514,7 @@ mod tests {
             "loot_table/chests/x".to_owned(),
             vec![br#"{"pools": []}"#.to_vec()],
         )];
-        let packs = PackOverlay {
-            conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-            files: &files,
-        };
+        let packs = PackOverlay::new(&files);
         let other = reuse_or_load(&mut slot, &root, &packs, &defaults).unwrap();
         assert!(!Arc::ptr_eq(&first, &other));
         let next_defaults = horizon_world::item_defaults::read(&root).unwrap();

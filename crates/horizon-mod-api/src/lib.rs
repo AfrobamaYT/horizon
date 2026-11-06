@@ -6,6 +6,14 @@
 #![deny(missing_docs)]
 extern crate self as mod_api;
 mod registry_keys;
+mod unresolved_fluid;
+pub use unresolved_fluid::FluidIdentity;
+
+/// A saved fluid name retained for the lifetime of the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only trusted engine boundaries create handles
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct UnresolvedFluid(u64);
 pub use registry_keys::UnknownFluid;
 
 /// A block requested once through [`Registrar::block_key`]. Its load-owned slot survives reload.
@@ -14,11 +22,17 @@ pub use registry_keys::UnknownFluid;
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
 
-/// A fluid requested once through [`Registrar::fluid_key`]. Its slot is load-owned.
+/// A load-owned fluid identity requested through [`Registrar::fluid_key`] or resolved through
+/// [`DataLoadContext::fluid_key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct FluidKey(u32);
+/// An item requested at registration; its load-owned slot identifies the canonical name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only registration creates a key
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct ItemKey(u32);
 
 /// An effect requested once through [`Registrar::effect_key`]. The registry is fixed until restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2157,7 +2171,9 @@ impl ProjectileRef {
 }
 
 /// A villager or wandering trader (vanilla's `AbstractVillager`, a `Merchant`),
-/// narrowed from an entity with `host.merchant(entity)`.
+/// narrowed from an entity with `host.merchant(entity)`. If a villager's saved
+/// profession is unresolved, offers read empty and merchant mutations are
+/// refused until its profession is available again; saved offers are retained.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MerchantRef(EntityRef);
@@ -4606,7 +4622,8 @@ mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
 pub use fluid_capability::{
-    FLUIDS, FluidIngredient, FluidResource, FluidStack, ITEM_FLUIDS, SizedFluidIngredient,
+    FLUIDS, FluidIngredient, FluidIngredientError, FluidResource, FluidStack, ITEM_FLUIDS,
+    SizedFluidIngredient,
 };
 mod item_place;
 mod menu_slot;
@@ -4621,6 +4638,10 @@ pub use resource::{
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod custom_spawners;
 pub use custom_spawners::{CustomSpawners, SpawnerEntry, SpawnerError, SpawnerKey, SpawnerKind};
+mod block_entity_data;
+pub use block_entity_data::BlockEntityDataError;
+mod block_entity_items;
+pub use block_entity_items::BlockEntityItemError;
 mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder};
 mod ticket_controller;
@@ -5005,7 +5026,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-                r.item_part("minecraft:stick", self.0.clone());
+                let item = r.item_key("minecraft:stick");
+                r.item_part(item, self.0.clone());
             }
         }
         let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
@@ -5381,7 +5403,8 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-            r.item_part("minecraft:stick", HeardStick);
+            let item = r.item_key("minecraft:stick");
+            r.item_part(item, HeardStick);
         }
 
         fn right_click_block(&self, _: crate::HostSide, event: &mut RightClickBlockEvent) -> Flow {

@@ -152,25 +152,27 @@ impl Game<'_> {
     fn take_arrival_records(&mut self, uuid: u128, done: &horizon_client::lan::import::Imported) {
         let tree = self.advancement_tree();
         let host = self.lan.as_mut().expect("server host is present");
-        let Some(g) = host.hub.guests.iter_mut().find(|g| g.uuid == uuid) else {
+        let Some(index) = host.hub.guests.iter().position(|g| g.uuid == uuid) else {
             return;
         };
-        if let Some(saved) = &done.advancements {
-            let mut progress = horizon_client::advancements::Progress::from_json(saved);
-            progress
-                .criteria
-                .retain(|id, _| tree.by_id.contains_key(id));
-            g.advancements = progress;
-            g.advancements_loaded = true;
-        }
-        if done.attachments {
-            self.guest_attachments.insert(g.conn, g.attachments.clone());
-        }
-        if let Some(stats) = &done.stats {
-            let play = host.play.entry(g.conn).or_default();
-            play.stats = crate::game::stats::Stats::from_json(stats);
-            play.stats.mark_all_dirty();
-        }
+        host.hub.guests.update(index, |g| {
+            if let Some(saved) = &done.advancements {
+                let mut progress = horizon_client::advancements::Progress::from_json(saved);
+                progress
+                    .criteria
+                    .retain(|id, _| tree.by_id.contains_key(id));
+                g.advancements = progress;
+                g.advancements_loaded = true;
+            }
+            if done.attachments {
+                self.guest_attachments.insert(g.conn, g.attachments.clone());
+            }
+            if let Some(stats) = &done.stats {
+                let play = host.play.entry(g.conn).or_default();
+                play.stats = crate::game::stats::Stats::from_json(stats);
+                play.stats.mark_all_dirty();
+            }
+        });
     }
 
     /// `player-confirm <uuid> <hand-over>`: places a held player whose record of that hand-over was
@@ -296,7 +298,9 @@ impl Game<'_> {
         }
         host.hub.send_inventory(i);
         // What a mod attached to the player since it joined, as a save writes it.
-        Self::guest_attachments_into(&self.guest_attachments, &mut host.hub.guests[i]);
+        host.hub.guests.update(i, |g| {
+            Self::guest_attachments_into(&self.guest_attachments, g)
+        });
         let advancements = if self.adv.tree.list.is_empty() {
             Value::Null
         } else {

@@ -2885,10 +2885,7 @@ mod tests {
         let recipes = Recipes::load(
             &root,
             &items,
-            &PackOverlay {
-                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-                files: &packs,
-            },
+            &PackOverlay::new(&packs),
             &crate::test_resources::server_load(),
         )
         .unwrap();
@@ -3088,10 +3085,7 @@ mod tests {
         let recipes = Recipes::load(
             &root,
             &items,
-            &PackOverlay {
-                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-                files: &packs,
-            },
+            &PackOverlay::new(&packs),
             &crate::test_resources::server_load(),
         )
         .unwrap();
@@ -3131,10 +3125,7 @@ mod tests {
         let recipes = Recipes::load(
             &root,
             &items,
-            &PackOverlay {
-                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-                files: &packs,
-            },
+            &PackOverlay::new(&packs),
             &crate::test_resources::server_load(),
         )
         .unwrap();

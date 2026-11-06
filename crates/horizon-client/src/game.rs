@@ -238,6 +238,8 @@ mod names;
 mod narrator;
 mod native_biome_colors;
 pub mod native_block_entity_draw;
+#[cfg(test)]
+mod native_block_entity_item_tests;
 mod native_block_entity_refs;
 mod native_block_sprites;
 mod native_block_states;
@@ -3394,6 +3396,7 @@ struct Game<'a> {
     dragon_model: Option<horizon_client::mobs::Part>,
     /// Map textures waiting for the next HUD batch to upload them.
     map_patches: Vec<horizon_client::font::Patch>,
+    name_tag_layouts: names::NameTagLayouts,
     text_displays: std::collections::HashMap<i32, text_displays::RemoteTextDisplay>,
     interactions: std::collections::HashMap<i32, interactions::RemoteInteraction>,
     /// The fence knots a server tracks to this client, by entity id, at their
@@ -3558,6 +3561,8 @@ struct Game<'a> {
     /// worked out for (`vehicle_mob_reach`).
     vehicle_mob_reach: std::cell::Cell<Option<(usize, horizon_client::mobs::BoxReach)>>,
     persist: persist::EntityMemory,
+    /// Missing profession IDs already reported for this world session.
+    missing_professions: HashSet<String>,
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
     /// Connected to a server: the world comes from the network (game/remote.rs).
     remote: Option<remote::Remote>,
@@ -3613,6 +3618,10 @@ struct Game<'a> {
     pause_menu: bool,
     pause_focus: Option<u8>,
     death_focus: Option<u8>,
+    /// The screen ([`Game::key_screen`]) the menu focus belongs to. Another
+    /// screen in front drops it, as `Gui.setScreen` drops the focus of the
+    /// screen it leaves (`Screen.clearFocus`).
+    focus_screen: u64,
     /// MultiPlayerGameMode.previousLocalPlayerMode (F3+N goes back to it).
     previous_mode: Option<horizon_client::command::args::GameMode>,
     gamemode_switcher: Option<horizon_client::game_mode_switcher::GameModeSwitcher>,
@@ -14224,6 +14233,7 @@ impl Game<'_> {
         self.clear_client_particles();
         self.riding = None;
         self.persist = Default::default();
+        self.missing_professions.clear();
         self.entity_attachments.clear();
         self.clear_remote_objects();
         self.clear_remote_projectiles();
@@ -14573,36 +14583,76 @@ impl Game<'_> {
         };
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
         let slot = self.held_slot();
-        let mut hand = powder_snow::HeldSlot {
-            game: self,
-            slot,
-            dropper: None,
-        };
-        let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
-        if result.outcome == Outcome::Pass {
-            return Ok(false);
+        let player = self.native_acting_id();
+        if self.transactions.is_empty() {
+            use transactions::DeferredEffect;
+            let mut hand = powder_snow::HeldSlot {
+                game: self,
+                slot,
+                dropper: None,
+            };
+            let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
+            if result.outcome == Outcome::Pass {
+                return Ok(false);
+            }
+            if let Some(stat) = result.stat {
+                self.defer_effect(DeferredEffect::CustomStat {
+                    player,
+                    key: stat,
+                    amount: 1,
+                });
+            }
+            if let Some(block) = result.block
+                && let Ok(new) = registry.resolve(&block)
+            {
+                self.level_set(pos, new)?;
+            }
+            if let Some(sound) = result.sound {
+                self.defer_effect(DeferredEffect::Sound {
+                    sound,
+                    at: pos.map(|v| f64::from(v) + 0.5),
+                    volume: 1.0,
+                    pitch: 1.0,
+                });
+            }
+            return Ok(true);
         }
-        if let Some(stat) = result.stat {
-            self.award_custom_stat(stat, 1);
-        }
-        if let Some(block) = result.block
-            && let Ok(new) = registry.resolve(&block)
-        {
-            self.level_set(pos, new)?;
-        }
-        if let Some(sound) = result.sound {
-            self.audio.play(
-                sound,
-                Some([
-                    f64::from(pos[0]) + 0.5,
-                    f64::from(pos[1]) + 0.5,
-                    f64::from(pos[2]) + 0.5,
-                ]),
-                1.0,
-                1.0,
-            );
-        }
-        Ok(true)
+        let outcome = mod_api::run_transaction(self, |game, _| {
+            use transactions::DeferredEffect;
+            game.journal_player(player);
+            let mut hand = powder_snow::HeldSlot {
+                game,
+                slot,
+                dropper: Some(player),
+            };
+            let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
+            if result.outcome == Outcome::Pass {
+                return Err(());
+            }
+            if let Some(stat) = result.stat {
+                game.defer_effect(DeferredEffect::CustomStat {
+                    player,
+                    key: stat,
+                    amount: 1,
+                });
+            }
+            if let Some(block) = result.block {
+                let new = registry.resolve(&block).map_err(|_| ())?;
+                if !game.journal_set_block(pos, new) {
+                    return Err(());
+                }
+            }
+            if let Some(sound) = result.sound {
+                game.defer_effect(DeferredEffect::Sound {
+                    sound,
+                    at: pos.map(|v| f64::from(v) + 0.5),
+                    volume: 1.0,
+                    pitch: 1.0,
+                });
+            }
+            Ok(())
+        });
+        Ok(outcome.is_ok())
     }
     /// What `BlockTransformer.transformBlock` would do with a held axe, hoe
     /// or shovel on the block at `pos`, without doing it: the new state, its
@@ -16466,11 +16516,17 @@ impl Game<'_> {
             && let Some(host) = self.lan.as_mut()
         {
             // The live turn may have changed its bed since entry.
-            host.hub.guests[i].bed = Some(head);
+            {
+                let value = Some(head);
+                host.hub.guests.update(i, |guest| guest.bed = value);
+            }
             host.hub.wake(i);
             // This live body applies the stand-up pose below, not the later
             // wake_woken_guests pass over stored guest bodies.
-            host.hub.guests[i].woke_from = None;
+            {
+                let value = None;
+                host.hub.guests.update(i, |guest| guest.woke_from = value);
+            }
         }
         let stand = self.bed_wake_pose(head, self.yaw);
         if let Some(p) = self.player.as_mut() {
@@ -16596,7 +16652,7 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lines = vec![(horizon_client::text::Text::literal(text), u32::MAX)];
         let screen = (batch.width, batch.height);
-        let Some(at) = self.tooltip_pre(None, &lines, &[], (x, y), screen) else {
+        let Some(at) = self.tooltip_pre(batch, None, &lines, &[], (x, y), screen) else {
             return;
         };
         let (x, y, w, h) = Self::tooltip_geometry(atlas, &lines, at, screen, [0.0; 2]);
@@ -17262,10 +17318,12 @@ impl Game<'_> {
         {
             // The vehicle tree goes into a player's file when they leave
             // (`take_parent_vehicle`); here it stays in the chunk saves.
-            for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
-                Self::guest_attachments_into(&self.guest_attachments, g);
-                self.player_autosaves.enqueue(g, &self.world_root);
-            }
+            host.hub.guests.update_all(|g| {
+                if g.placed {
+                    Self::guest_attachments_into(&self.guest_attachments, g);
+                    self.player_autosaves.enqueue(g, &self.world_root);
+                }
+            });
         }
         self.save_world_state();
         self.message = Some(("Saved the game".into(), Instant::now()));
@@ -17390,6 +17448,9 @@ impl Game<'_> {
             self.apply_ui_settings();
         }
         self.observe_screen();
+        // `Gui.setScreen` clears the focus of the screen it leaves: a menu
+        // that comes back starts with no widget highlighted.
+        self.drop_left_screen_focus();
         // Minecraft.doWorldLoad: the LevelLoadingScreen while single player's
         // server starts, with the server's chunk map and progress.
         if let Some(starting) = &self.integrated_starting {
@@ -21366,6 +21427,7 @@ impl<'a> Game<'a> {
             breath_clouds: Vec::new(),
             dragon_model: prepared.dragon_model,
             map_patches: Vec::new(),
+            name_tag_layouts: Default::default(),
             text_displays: Default::default(),
             interactions: Default::default(),
             remote_knots: Default::default(),
@@ -21461,6 +21523,7 @@ impl<'a> Game<'a> {
             water_plane_scan: Default::default(),
             vehicle_mob_reach: Default::default(),
             persist: Default::default(),
+            missing_professions: Default::default(),
             entity_attachments: Default::default(),
             remote: None,
             lan: None,
@@ -21491,6 +21554,7 @@ impl<'a> Game<'a> {
             pause_menu: true,
             pause_focus: None,
             death_focus: None,
+            focus_screen: 0,
             previous_mode: None,
             gamemode_switcher: None,
             clipboard: Default::default(),
@@ -22139,7 +22203,20 @@ impl Game<'_> {
                 state_block: &|state| &registry.state(BlockStateId(state as u32)).unwrap().name,
             },
         )
-        .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")))?;
+        .map_err(|refused| match refused {
+            mod_api::__private::ResolvePartsError::ItemKeys(errors) => format!(
+                "Mod item keys refused:\n{}",
+                errors
+                    .into_iter()
+                    .map(|e| format!("mod {} requested unknown item {}", e.mod_id, e.id))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+            mod_api::__private::ResolvePartsError::Parts(errors) => {
+                format!("Mod parts refused:\n{}", errors.join("\n"))
+            }
+            _ => "Mod parts refused".to_owned(),
+        })?;
         self.resolve_pathfindable();
         Ok(())
     }

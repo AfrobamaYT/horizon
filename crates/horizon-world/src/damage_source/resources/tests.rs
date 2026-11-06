@@ -59,15 +59,7 @@ fn root_namespaces_and_ordered_world_overrides_preserve_vanilla_indices() {
     let mut heat = file("damage_type/demo:hot/air", definition("low"));
     heat.1.push(definition("high").to_string().into_bytes());
     let files = vec![heat, file("damage_type/aaa:new", definition("new"))];
-    let packed = base
-        .with_packs(
-            &f.0,
-            &PackOverlay {
-                conditions: &crate::conditions::LoadConditions::vanilla(),
-                files: &files,
-            },
-        )
-        .unwrap();
+    let packed = base.with_packs(&f.0, &PackOverlay::new(&files)).unwrap();
     assert_eq!(packed.id("minecraft:fall"), Some(fall));
     assert_eq!(
         packed
@@ -99,14 +91,7 @@ fn reload_rebinds_tags_but_ignores_changed_removed_and_added_definitions() {
             json!({"values":["demo:heat"]}),
         ),
     ];
-    let open = Catalog::load(
-        &f.0,
-        &PackOverlay {
-            conditions: &crate::conditions::LoadConditions::vanilla(),
-            files: &files,
-        },
-    )
-    .unwrap();
+    let open = Catalog::load(&f.0, &PackOverlay::new(&files)).unwrap();
     let heat = open.id("demo:heat").unwrap();
     assert!(open.in_tag(heat, "minecraft:is_fire"));
     let changed = vec![
@@ -117,15 +102,7 @@ fn reload_rebinds_tags_but_ignores_changed_removed_and_added_definitions() {
             json!({"values":[{"id":"demo:new","required":false}, "demo:heat"]}),
         ),
     ];
-    let reloaded = open
-        .reload_tags(
-            &f.0,
-            &PackOverlay {
-                conditions: &crate::conditions::LoadConditions::vanilla(),
-                files: &changed,
-            },
-        )
-        .unwrap();
+    let reloaded = open.reload_tags(&f.0, &PackOverlay::new(&changed)).unwrap();
     assert_eq!(reloaded.id("demo:heat"), Some(heat));
     assert_eq!(reloaded.definition(heat).unwrap().message_id, "original");
     assert!(reloaded.id("demo:new").is_none());
@@ -161,14 +138,7 @@ fn replace_nested_optional_and_missing_required_tags_share_one_resolution() {
             json!({"values":["#demo:broken"]}),
         ),
     ];
-    let catalog = Catalog::load(
-        &f.0,
-        &PackOverlay {
-            conditions: &crate::conditions::LoadConditions::vanilla(),
-            files: &files,
-        },
-    )
-    .unwrap();
+    let catalog = Catalog::load(&f.0, &PackOverlay::new(&files)).unwrap();
     assert_eq!(
         catalog
             .tag_members("minecraft:bypasses_armor")
@@ -197,22 +167,8 @@ fn independent_worlds_never_share_reload_state() {
         ),
     ];
     let b = vec![file("damage_type/demo:heat", definition("b"))];
-    let a = Catalog::load(
-        &f.0,
-        &PackOverlay {
-            conditions: &crate::conditions::LoadConditions::vanilla(),
-            files: &a,
-        },
-    )
-    .unwrap();
-    let b = Catalog::load(
-        &f.0,
-        &PackOverlay {
-            conditions: &crate::conditions::LoadConditions::vanilla(),
-            files: &b,
-        },
-    )
-    .unwrap();
+    let a = Catalog::load(&f.0, &PackOverlay::new(&a)).unwrap();
+    let b = Catalog::load(&f.0, &PackOverlay::new(&b)).unwrap();
     assert!(a.in_tag(a.id("demo:heat").unwrap(), "minecraft:is_fire"));
     assert!(!b.in_tag(b.id("demo:heat").unwrap(), "minecraft:is_fire"));
     let _ = a.reload_tags(&f.0, &PackOverlay::NONE).unwrap();
@@ -232,16 +188,7 @@ fn invalid_top_definition_refuses_the_snapshot_without_mutating_base() {
             .to_string()
             .into_bytes(),
     );
-    assert!(
-        base.with_packs(
-            &f.0,
-            &PackOverlay {
-                conditions: &crate::conditions::LoadConditions::vanilla(),
-                files: &[file]
-            }
-        )
-        .is_err()
-    );
+    assert!(base.with_packs(&f.0, &PackOverlay::new(&[file])).is_err());
     assert!(base.id("demo:heat").is_none());
 }
 

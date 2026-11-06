@@ -857,10 +857,7 @@ fn content_root_loads_with_every_table() {
     .unwrap();
 
     let files = content_files(&resources);
-    let overlay = PackOverlay {
-        conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-        files: &files,
-    };
+    let overlay = PackOverlay::new(&files);
     let vanilla = Assets::load(&base).unwrap();
     let assets = Assets::load(&root).unwrap();
     let (old, new) = (vanilla.registry, assets.registry);
@@ -3383,10 +3380,7 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
     )
     .unwrap();
     let files = content_files(&resources);
-    let overlay = PackOverlay {
-        conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-        files: &files,
-    };
+    let overlay = PackOverlay::new(&files);
     let assets = Assets::load(&root).unwrap();
     let new = assets.registry;
     let facts = BlockFacts::load(&root, new).unwrap();
@@ -6114,10 +6108,7 @@ fn a_data_mod_loads_unloads_and_loads_again() {
         )
         .unwrap();
         let files = content_files(&resources);
-        let overlay = PackOverlay {
-            conditions: &horizon_world::conditions::LoadConditions::vanilla(),
-            files: &files,
-        };
+        let overlay = PackOverlay::new(&files);
         let assets = Assets::load(root).unwrap();
         let facts = BlockFacts::load(root, assets.registry).unwrap();
         let defaults = horizon_world::item_defaults::read(root).unwrap();

@@ -26,6 +26,10 @@ mod registry;
 #[doc(hidden)]
 pub mod wire;
 
+// hidden: the staged game's internals table, for the wasm runtime's internals view
+#[doc(hidden)]
+pub mod internals;
+
 pub use registry::{RegisterError, register, stop};
 
 // hidden: the game's side of the points, not part of the API a mod is written against

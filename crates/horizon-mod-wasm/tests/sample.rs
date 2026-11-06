@@ -120,6 +120,24 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     // Its `register` runs in the mod and attaches a part to sticks, which listens to use_item.
     mod_api::__private::install_parts(&loaded.mods).unwrap();
     mod_api::__private::resolve_effects().unwrap();
+    mod_api::__private::resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
+    let load = horizon_world::native_load_context::LoadContext::new(
+        mod_api::DataLoadOrigin::ServerDataLoad,
+        std::sync::Arc::new(horizon_world::native_load_context::LoadInputs::new(
+            Default::default(),
+            Default::default(),
+        )),
+        [],
+    );
+    let mut table = mod_api::serde_json::json!({});
+    entry.fields().hooks.loot_table_load(
+        &mod_api::OwningLoad::new(&load),
+        &mut mod_api::LootTableLoadEvent {
+            id: "test:loot",
+            table: &mut table,
+        },
+    );
+    assert_eq!(table, mod_api::serde_json::json!({"fluid_guest_ok": true}));
     mod_api::__private::resolve_blocks(|id| {
         assert_eq!(id, "minecraft:stone");
         Some(mod_api::__private::ResolvedBlock {

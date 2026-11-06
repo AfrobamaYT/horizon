@@ -44,8 +44,9 @@ pub fn listened(hook: HookId) -> bool {
 
 pub use crate::generated::calls::*;
 pub use crate::part_table::{
-    HookParts, KnownIds, PartsRef, block_entity_types, block_listens, has_part_hook,
-    has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
+    HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, block_entity_types,
+    block_listens, has_part_hook, has_scoped_hook, install_parts, mark_game_thread, parts,
+    resolve_parts,
 };
 pub use crate::phase::{
     LoadAccess, ModPhase, PhaseError, PhaseOwner, check_access, current_phase, install_packages,
@@ -441,6 +442,11 @@ pub use crate::registry_keys::{
 };
 pub use crate::registry_keys::{
     block_entity_type_key, block_entity_type_name, block_id as block_key_id,
-    effect_id as effect_key_id,
+    effect_id as effect_key_id, item_id as item_key_id,
 };
-pub use crate::registry_keys::{effect_key, fluid_id, fluid_key, resolve_fluids};
+pub use crate::registry_keys::{effect_key, fluid_id, fluid_key, fluid_key_utf16, resolve_fluids};
+pub use crate::unresolved_fluid::{
+    identity_name as fluid_identity_name, intern as intern_unresolved_fluid,
+    lookup as lookup_unresolved_fluid, lookup_utf16 as lookup_unresolved_fluid_utf16,
+    matches_utf16 as fluid_identity_matches_utf16, name as unresolved_fluid_name,
+};
