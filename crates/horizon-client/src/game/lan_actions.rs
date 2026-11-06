@@ -7071,6 +7071,65 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
+    fn crafting_guest_self_swap_keeps_eight_items() {
+        use horizon_client::{chunk::Chunk, items::ItemStack};
+        use horizon_protocol::packets::play::{ContainerClick, Serverbound};
+        use std::sync::Arc;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let table = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:crafting_table")
+                .unwrap();
+            game.world.set(1, 64, 1, table).unwrap();
+            game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 8));
+            });
+            game.lan_open_crafting(12, [1, 64, 1]);
+            let window = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .play
+                .get(&12)
+                .unwrap()
+                .crafting
+                .table
+                .as_ref()
+                .unwrap()
+                .0;
+            game.lan_guest_packet(
+                12,
+                Serverbound::ContainerClick(ContainerClick {
+                    container: window,
+                    state: 0,
+                    slot: 37,
+                    button: 0,
+                    input: 2,
+                    changed: Vec::new(),
+                    carried: None,
+                }),
+            );
+            let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert_eq!(guest.inventory[0].as_ref().unwrap().count, 8);
+            assert_eq!(
+                guest
+                    .inventory
+                    .iter()
+                    .flatten()
+                    .map(|s| s.count)
+                    .sum::<u32>(),
+                8
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
     fn block_menu_handle_and_use_each_count_the_guest_once() {
         use horizon_client::chunk::Chunk;
         use mod_api::NativeBlockUpdateFlags;
