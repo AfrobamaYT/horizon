@@ -1596,13 +1596,10 @@ impl Game<'_> {
         line: &str,
         permission: u8,
     ) -> Option<mod_api::CommandInvocation> {
-        let Some(commands) = self
+        let commands = self
             .lan
             .as_ref()
-            .and_then(|host| host.native_commands.as_ref())
-        else {
-            return None;
-        };
+            .and_then(|host| host.native_commands.as_ref())?;
         let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
         let parse = commands.dispatcher.parse(line, &self.ui.registries);
         self.ui.registries.permission = previous;
