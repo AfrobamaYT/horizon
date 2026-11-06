@@ -123,13 +123,38 @@ impl Game<'_> {
             "minecraft:spyglass" => 1200,
             "minecraft:brush" => 200,
             _ if info.is_some_and(|i| i.bundle) => 200,
-            _ if let Some(i) = self.res.items().instrument(stack) => i.use_ticks(),
-            _ => match info {
-                Some(i) if let Some(c) = &i.consumable => c.ticks(),
-                Some(i) if i.blocks_attacks.is_some() => 72_000,
-                _ if Kinetic::of(&stack.item).is_some() => 72_000,
-                _ => 0,
-            },
+            "minecraft:ender_eye" => 0,
+            "minecraft:goat_horn" => self.native_item_instrument_duration(stack),
+            _ => {
+                let consumable = if stack.carries_component(info, "minecraft:consumable") {
+                    Some(
+                        stack
+                            .data()
+                            .and_then(|data| data.other("minecraft:consumable"))
+                            .map(|value| {
+                                value
+                                    .get("consume_seconds")
+                                    .and_then(horizon_items::properties::component_float)
+                                    .unwrap_or(1.6)
+                            })
+                            .unwrap_or_else(|| {
+                                info.and_then(|item| item.consumable.as_ref())
+                                    .map_or(1.6, |value| value.seconds)
+                            }),
+                    )
+                } else {
+                    None
+                };
+                if let Some(seconds) = consumable {
+                    horizon_world::consumable::consume_ticks(seconds)
+                } else if stack.carries_component(info, "minecraft:blocks_attacks")
+                    || stack.carries_component(info, "minecraft:kinetic_weapon")
+                {
+                    72_000
+                } else {
+                    0
+                }
+            }
         };
         self.native_use_duration(stack, &mut duration);
         duration

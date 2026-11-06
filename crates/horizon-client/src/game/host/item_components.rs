@@ -46,4 +46,18 @@ impl ItemComponentsBackend for Game<'_> {
         );
         self.native_item_equippable_slot(stack)
     }
+    fn item_resource_use_duration(&self, stack: &ItemStack) -> Option<i32> {
+        mod_api::__private::check_access(
+            "item_resource_use_duration",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_item_resource_use_duration(stack)
+    }
+    fn item_resource_bar(&self, stack: &ItemStack) -> Option<ItemBar> {
+        mod_api::__private::check_access(
+            "item_resource_bar",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_item_resource_bar(stack)
+    }
 }

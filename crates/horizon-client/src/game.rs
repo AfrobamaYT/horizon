@@ -9367,7 +9367,7 @@ impl Game<'_> {
         let info = self.items().get(&stack.item);
         // ItemStack.isBarVisible: isDamaged, which an unbreakable stack never is.
         let max_damage = if horizon_client::stations::is_damageable(self.items(), stack) {
-            info.map_or(0, |info| info.max_damage as i32)
+            stack.max_damage(info)
         } else {
             0
         };
@@ -9375,9 +9375,12 @@ impl Game<'_> {
             horizon_client::cooldowns::group(stack, info.and_then(|i| i.use_cooldown.as_ref()));
         let partial = self.clock.fraction() as f32;
         // BundleItem overrides the bar with its fullness.
-        let mut bar = horizon_client::bundle::Contents::of(self.items(), stack)
-            .map(|c| c.bar())
-            .unwrap_or_else(|| hud_overlays::damage_bar(stack.damage as i32, max_damage));
+        let mut bar = if info.is_some_and(|item| item.bundle) {
+            horizon_client::bundle::Contents::of(self.items(), stack)
+                .and_then(|contents| contents.bar())
+        } else {
+            hud_overlays::damage_bar(stack.damage as i32, max_damage)
+        };
         // Client-only: a mod may replace or hide the bar vanilla just chose.
         self.native_item_bar(stack, &mut bar);
         let decorations = hud_overlays::ItemDecorations {

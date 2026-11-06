@@ -49,6 +49,96 @@ impl Game<'_> {
     pub(in crate::game) fn native_item_equippable_slot(&self, stack: &ItemStack) -> Option<String> {
         horizon_client::item_sync::equippable_slot(stack, self.items())
     }
+    /// `InstrumentItem.getUseDuration`: effective named or inline instrument; no instrument means zero.
+    pub(in crate::game) fn native_item_instrument_duration(&self, stack: &ItemStack) -> i32 {
+        if !stack.carries_component(self.items().get(&stack.item), "minecraft:instrument") {
+            return 0;
+        }
+        if let Some(value) = stack
+            .data()
+            .and_then(|data| data.other("minecraft:instrument"))
+        {
+            return match value {
+                Tag::String(id) => self
+                    .items()
+                    .instruments
+                    .get(&id.to_string_lossy())
+                    .map_or(0, |value| value.use_ticks()),
+                _ => value
+                    .get("use_duration")
+                    .and_then(horizon_items::properties::component_float)
+                    .map_or(0, horizon_items::items::instrument_use_ticks),
+            };
+        }
+        let Some(value) = self
+            .pack
+            .item_renderer
+            .models
+            .prototypes
+            .get(&*stack.item)
+            .and_then(|item| item.get("minecraft:instrument"))
+        else {
+            return 0;
+        };
+        match value.as_str() {
+            Some(id) => self
+                .items()
+                .instruments
+                .get(id)
+                .map_or(0, |value| value.use_ticks()),
+            None => value
+                .get("use_duration")
+                .and_then(serde_json::Value::as_f64)
+                .map_or(0, |seconds| {
+                    horizon_items::items::instrument_use_ticks(seconds as f32)
+                }),
+        }
+    }
+    /// `ItemStack.getUseDuration`, behind ItemResource's read; gameplay owns the Part call.
+    pub(in crate::game) fn native_item_resource_use_duration(
+        &self,
+        stack: &ItemStack,
+    ) -> Option<i32> {
+        self.items().get(&stack.item)?;
+        Some(self.use_duration(stack))
+    }
+    /// `ItemStack.isBarVisible`, `getBarWidth`, `getBarColor`, before client-only hooks.
+    pub(in crate::game) fn native_item_resource_bar(
+        &self,
+        stack: &ItemStack,
+    ) -> Option<mod_api::ItemBar> {
+        let resource = mod_api::ItemResource::of(stack);
+        let component = |id| {
+            resource.value(
+                self,
+                &mod_api::ComponentId::new(id).expect("built-in component"),
+            )
+        };
+        if self.items().get(&stack.item)?.bundle {
+            let contents = component("minecraft:bundle_contents")?;
+            let patch = Tag::compound([("minecraft:bundle_contents", contents)]);
+            let (damage, extra) = horizon_items::item_data::decode_components(Some(&patch));
+            let effective = ItemStack {
+                item: stack.item.clone(),
+                count: 1,
+                damage,
+                extra,
+            };
+            let (width, color) =
+                horizon_items::bundle::Contents::of(self.items(), &effective)?.bar()?;
+            return Some(mod_api::ItemBar { width, color });
+        }
+        if !resource.damageable(self) {
+            return None;
+        }
+        let max_damage = component("minecraft:max_damage")
+            .as_ref()
+            .and_then(horizon_items::properties::component_int)?;
+        let damage = component("minecraft:damage")
+            .as_ref()
+            .and_then(horizon_items::properties::component_int)?;
+        horizon_items::properties::damage_bar(damage, max_damage)
+    }
     /// Whether enchantments `a` and `b` may share an item (`Enchantment.areCompatible`), by the
     /// world's enchantment definitions. API @API:item_components@.
     pub(in crate::game) fn native_enchantments_compatible(&self, a: &str, b: &str) -> bool {

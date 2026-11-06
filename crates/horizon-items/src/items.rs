@@ -429,8 +429,12 @@ pub struct Instrument {
 impl Instrument {
     /// `InstrumentItem.getUseDuration`: `Mth.floor(useDuration * 20)`.
     pub fn use_ticks(&self) -> i32 {
-        (self.use_duration * 20.0).floor() as i32
+        instrument_use_ticks(self.use_duration)
     }
+}
+/// `InstrumentItem.getUseDuration`: floor after the float multiplication.
+pub fn instrument_use_ticks(seconds: f32) -> i32 {
+    (seconds * 20.0).floor() as i32
 }
 /// The id of a goat horn's instrument (`InstrumentItem.getInstrument`): the
 /// stack's own `instrument` component, else the item's `ponder_goat_horn`.

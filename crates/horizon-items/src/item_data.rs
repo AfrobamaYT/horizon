@@ -402,6 +402,16 @@ impl ItemStack {
         }
         info.is_some_and(|info| info.components.iter().any(|c| c == id))
     }
+    /// `ItemStack.getMaxDamage`: the stack override, removal, or item default.
+    pub fn max_damage(&self, info: Option<&ItemInfo>) -> i32 {
+        if !self.carries_component(info, "minecraft:max_damage") {
+            return 0;
+        }
+        self.data()
+            .and_then(|data| data.other("minecraft:max_damage"))
+            .map(|value| crate::properties::component_int(value).unwrap_or(0))
+            .unwrap_or_else(|| info.map_or(0, |item| item.max_damage as i32))
+    }
     /// The patch the server sent for this stack, while the stack is still what
     /// it decoded to (its count aside); None once anything else changed.
     pub fn wire_patch(&self) -> Option<Arc<[u8]>> {
@@ -489,14 +499,16 @@ impl ItemStack {
     /// non-empty `minecraft:enchantments` component (`Item.isFoil` is
     /// `ItemStack.isEnchanted`; stored book enchantments do not count).
     pub fn has_foil(&self, item_glint: bool) -> bool {
-        if let Some(flag) = self
+        let own = self
             .data()
-            .and_then(|d| d.other("minecraft:enchantment_glint_override"))
-            .and_then(component_bool)
-        {
-            return flag;
-        }
-        item_glint || !self.enchantments().is_empty()
+            .and_then(|data| data.other("minecraft:enchantment_glint_override"))
+            .and_then(component_bool);
+        let removed = self.data().is_some_and(|data| {
+            data.other("!minecraft:enchantment_glint_override")
+                .is_some()
+        });
+        let override_glint = own.or_else(|| (item_glint && !removed).then_some(true));
+        crate::properties::foil(override_glint, !self.enchantments().is_empty())
     }
     pub fn repair_cost(&self) -> u32 {
         self.data().map_or(0, |d| d.repair_cost)
