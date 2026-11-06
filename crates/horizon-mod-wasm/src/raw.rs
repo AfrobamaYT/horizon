@@ -197,6 +197,7 @@ fn roots(place: &Place, receiver: *mut (), record: *mut ()) -> Vec<Root> {
             ptr: receiver,
             ty,
             writable: place.receiver_writable,
+            receiver: true,
             born: None,
         });
     }
@@ -204,6 +205,7 @@ fn roots(place: &Place, receiver: *mut (), record: *mut ()) -> Vec<Root> {
         ptr: record,
         ty: place.record,
         writable: true,
+        receiver: false,
         born: None,
     });
     roots
@@ -419,8 +421,10 @@ mod tests {
         assert_eq!(roots.len(), 2);
         assert_eq!(roots[0].ty, 3);
         assert!(!roots[0].writable);
+        assert!(roots[0].receiver);
         assert_eq!(roots[1].ty, 4);
         assert!(roots[1].writable);
+        assert!(!roots[1].receiver);
         let place = Place {
             receiver: None,
             ..place
@@ -428,5 +432,6 @@ mod tests {
         let roots = super::roots(&place, std::ptr::null_mut(), (&raw mut record).cast());
         assert_eq!(roots.len(), 1);
         assert_eq!(roots[0].ty, 4);
+        assert!(!roots[0].receiver);
     }
 }

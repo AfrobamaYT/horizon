@@ -10,7 +10,7 @@
 //! - A reference a game function returns is a root that lasts until the next call.
 use crate::journal::{Journal, Path, Step};
 use mod_points::internals::{Arg, Op, Refusal, Reply, Table, Value};
-use std::cell::Cell;
+use std::{cell::Cell, collections::BTreeSet};
 
 /// Where a root is.
 #[derive(Clone, Copy, Debug)]
@@ -19,6 +19,8 @@ pub struct Root {
     /// Its type, an index into the table's types.
     pub ty: u32,
     pub writable: bool,
+    /// A slot's receiver, whose fields require this mod's explicit declarations.
+    pub receiver: bool,
     /// The game function call that returned it: valid only until the next one. `None` for the
     /// call's own roots, valid for the whole call.
     pub born: Option<u64>,
@@ -28,14 +30,17 @@ pub struct Root {
 #[derive(Debug)]
 pub struct Node {
     pub path: Path<Value>,
+    /// Receiver nodes expose only the fields declared by the current mod.
+    pub(crate) restricted: bool,
     /// Where it last resolved, and in which generation.
     at: Cell<Option<(u64, Resolved)>>,
 }
 
 impl Node {
-    fn new(path: Path<Value>) -> Self {
+    fn new(path: Path<Value>, restricted: bool) -> Self {
         Self {
             path,
+            restricted,
             at: Cell::new(None),
         }
     }
@@ -61,6 +66,7 @@ pub struct Frame<'t> {
     table: &'t Table,
     roots: Vec<Root>,
     journal: Journal<Value>,
+    allowed_members: BTreeSet<(u32, u32)>,
     /// Bumped by every game function call: every cached pointer is stale after it.
     generation: u64,
 }
@@ -85,17 +91,26 @@ impl<'t> Frame<'t> {
             table,
             roots,
             journal: Journal::default(),
+            allowed_members: BTreeSet::new(),
             generation: 0,
         }
     }
 
+    /// Installs the current mod's field permissions once at the call boundary.
+    pub(crate) fn allow_members(&mut self, members: impl IntoIterator<Item = (u32, u32)>) {
+        self.allowed_members = members.into_iter().collect();
+    }
+
     /// The call's root `n`.
     pub fn root(&self, n: u32) -> Result<Node, Refusal> {
-        self.live_root(n)?;
-        Ok(Node::new(Path {
-            root: n,
-            steps: Vec::new(),
-        }))
+        let root = self.live_root(n)?;
+        Ok(Node::new(
+            Path {
+                root: n,
+                steps: Vec::new(),
+            },
+            root.receiver,
+        ))
     }
 
     fn live_root(&self, n: u32) -> Result<Root, Refusal> {
@@ -158,8 +173,19 @@ impl<'t> Frame<'t> {
         Ok(at)
     }
 
-    fn step(&self, node: &Node, step: Step<Value>) -> Result<Reached, Refusal> {
+    fn field_access(&self, node: &Node, field: u32) -> Result<Resolved, Refusal> {
         let at = self.resolve(node)?;
+        if node.restricted && !self.allowed_members.contains(&(at.ty, field)) {
+            return Err(not_here("undeclared field"));
+        }
+        Ok(at)
+    }
+
+    fn step(&self, node: &Node, step: Step<Value>) -> Result<Reached, Refusal> {
+        let at = match &step {
+            Step::Field(field) => self.field_access(node, *field)?,
+            _ => self.resolve(node)?,
+        };
         let reply = match &step {
             Step::Field(field) => self.op(at, Op::Field(*field))?,
             Step::Index(i) => self.op(at, Op::Index(*i))?,
@@ -169,7 +195,7 @@ impl<'t> Frame<'t> {
         path.steps.push(step);
         Ok(match reply {
             Reply::Node(ptr, ty, writable) => {
-                let next = Node::new(path);
+                let next = Node::new(path, false);
                 next.at
                     .set(Some((self.generation, Resolved { ptr, ty, writable })));
                 Reached::Node(next)
@@ -199,10 +225,11 @@ impl<'t> Frame<'t> {
 
     /// A copy-typed field of `node`, as this call last wrote it, else as the game has it.
     pub fn get(&self, node: &Node, field: u32) -> Result<Value, Refusal> {
+        let at = self.field_access(node, field)?;
         if let Some(value) = self.journal.get(&node.path, field) {
             return Ok(value.clone());
         }
-        match self.op(self.resolve(node)?, Op::Get(field))? {
+        match self.op(at, Op::Get(field))? {
             Reply::Value(value) => Ok(value),
             _ => Err(not_here("a field that isn't a copy")),
         }
@@ -211,7 +238,7 @@ impl<'t> Frame<'t> {
     /// Writes a copy-typed field of `node` when the listener returns, or before its next game
     /// function call.
     pub fn set(&mut self, node: &Node, field: u32, value: Value) -> Result<(), Refusal> {
-        if !self.resolve(node)?.writable {
+        if !self.field_access(node, field)?.writable {
             return Err(not_here("a read-only node"));
         }
         self.journal.set(node.path.clone(), field, value);
@@ -226,6 +253,9 @@ impl<'t> Frame<'t> {
 
     /// The whole of `node`, when its type is a copy.
     pub fn read(&self, node: &Node) -> Result<Value, Refusal> {
+        if node.restricted {
+            return Err(not_here("undeclared field"));
+        }
         if self.written_under(node) {
             return Err(not_here("a node this call wrote under: read its fields"));
         }
@@ -347,12 +377,16 @@ impl<'t> Frame<'t> {
                     ptr,
                     ty,
                     writable,
+                    receiver: false,
                     born: Some(self.generation),
                 });
-                Reached::Node(Node::new(Path {
-                    root: (self.roots.len() - 1) as u32,
-                    steps: Vec::new(),
-                }))
+                Reached::Node(Node::new(
+                    Path {
+                        root: (self.roots.len() - 1) as u32,
+                        steps: Vec::new(),
+                    },
+                    false,
+                ))
             }
             Reply::Value(value) => Reached::Value(value),
             Reply::Done => Reached::Value(Value::None),
@@ -447,6 +481,12 @@ pub(crate) mod tests {
         Ok(Reply::Done)
     }
 
+    unsafe fn heal_player(this: Option<*mut ()>, _: Vec<Arg>) -> Result<Reply, Refusal> {
+        let player = unsafe { &mut *this.unwrap().cast::<Player>() };
+        player.health = 20;
+        Ok(Reply::Done)
+    }
+
     static TYPES: [Type; 3] = [
         Type {
             path: "Game",
@@ -464,7 +504,7 @@ pub(crate) mod tests {
             node: player,
         },
     ];
-    static THUNKS: [Thunk; 3] = [
+    static THUNKS: [Thunk; 4] = [
         Thunk {
             path: "Game::kick",
             hash: "kick-hash",
@@ -488,6 +528,14 @@ pub(crate) mod tests {
             args: &[Some(PLAYER), Some(PLAYER)],
             writes: 0b110,
             call: heal,
+        },
+        Thunk {
+            path: "Player::heal",
+            hash: "heal-player-hash",
+            receiver: Some(PLAYER),
+            args: &[],
+            writes: 1,
+            call: heal_player,
         },
     ];
     pub(crate) static TABLE: Table = Table {
@@ -524,10 +572,13 @@ pub(crate) mod tests {
             ptr: game as *mut Game as *mut (),
             ty: GAME,
             writable: true,
+            receiver: true,
             born: None,
         };
         // SAFETY: `game` outlives the frame in every test, and only the frame touches it.
-        unsafe { Frame::new(&TABLE, vec![root]) }
+        let mut frame = unsafe { Frame::new(&TABLE, vec![root]) };
+        frame.allow_members([(GAME, 0), (GAME, 1)]);
+        frame
     }
 
     fn node(reached: Reached) -> Node {
@@ -647,10 +698,12 @@ pub(crate) mod tests {
             ptr: &mut game as *mut Game as *mut (),
             ty: GAME,
             writable: false,
+            receiver: true,
             born: None,
         };
         // SAFETY: as in `frame`.
         let mut frame = unsafe { Frame::new(&TABLE, vec![root]) };
+        frame.allow_members([(GAME, 0), (GAME, 1)]);
         let root = frame.root(0).unwrap();
         assert!(frame.set(&root, 1, Value::B(true)).is_err());
         let players = frame.field(&root, 0).unwrap();

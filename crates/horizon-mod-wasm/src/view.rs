@@ -167,10 +167,14 @@ impl Drop for Scope {
 /// Runs a raw listener with a call-scoped view; commits only when the listener returns normally.
 /// A trap drops its pending writes, and the scope guard restores the previous thread frame.
 pub fn run<T>(
-    frame: Frame<'_>,
+    mut frame: Frame<'_>,
     declared: &[Resolved],
     f: impl FnOnce() -> wasmtime::Result<T>,
 ) -> wasmtime::Result<T> {
+    frame.allow_members(declared.iter().filter_map(|entry| match entry {
+        Resolved::Member { owner, field } => Some((*owner, *field)),
+        _ => None,
+    }));
     let mut active = Active {
         frame,
         nodes: BTreeMap::new(),
@@ -296,6 +300,12 @@ impl wire::Host for View {
             let Some(Resolved::Thunk(function)) = a.declared.get(declared as usize) else {
                 return Err(wire::Refusal::NotHere("not a declared function".into()));
             };
+            if let Some(receiver) = &receiver {
+                a.nodes
+                    .get_mut(&receiver.rep())
+                    .ok_or_else(|| gone("the node's call is over"))?
+                    .restricted = true;
+            }
             let nodes = &a.nodes;
             let node = |r: &Resource<wire::Node>| {
                 nodes
@@ -334,40 +344,48 @@ mod tests {
     #[test]
     fn a_binding_reads_writes_and_calls_the_table() {
         let mut game = world();
-        run(frame(&mut game), &[Resolved::Thunk(0)], || {
-            let mut host = View;
-            let root = host.root(0).unwrap();
-            assert_eq!(
-                unflatten(host.get(borrow(&root), 1).unwrap()).unwrap(),
-                internals::Value::B(false)
-            );
-            host.set(borrow(&root), 1, vec![wire::Cell::B(true)])
-                .unwrap();
-            assert_eq!(
-                unflatten(host.get(borrow(&root), 1).unwrap()).unwrap(),
-                internals::Value::B(true)
-            );
-            let players = host.field(borrow(&root), 0).unwrap();
-            assert_eq!(host.len(borrow(&players)).unwrap(), 3);
-            let wire::Reached::Node(first) = host.index(borrow(&players), 0).unwrap() else {
-                panic!("a node")
-            };
-            assert_eq!(
-                unflatten(host.read(borrow(&first)).unwrap()).unwrap(),
-                internals::Value::Rec(vec![internals::Value::S(10)])
-            );
-            let wire::Reached::Value(left) = host.call(0, Some(borrow(&root)), vec![]).unwrap()
-            else {
-                panic!("a value")
-            };
-            assert_eq!(unflatten(left).unwrap(), internals::Value::U(2));
-            assert_eq!(host.len(borrow(&players)).unwrap(), 2);
-            assert!(matches!(
-                host.call(1, Some(borrow(&root)), vec![]),
-                Err(wire::Refusal::NotHere(_))
-            ));
-            Ok(())
-        })
+        run(
+            frame(&mut game),
+            &[
+                Resolved::Thunk(0),
+                Resolved::Member { owner: 0, field: 0 },
+                Resolved::Member { owner: 0, field: 1 },
+            ],
+            || {
+                let mut host = View;
+                let root = host.root(0).unwrap();
+                assert_eq!(
+                    unflatten(host.get(borrow(&root), 1).unwrap()).unwrap(),
+                    internals::Value::B(false)
+                );
+                host.set(borrow(&root), 1, vec![wire::Cell::B(true)])
+                    .unwrap();
+                assert_eq!(
+                    unflatten(host.get(borrow(&root), 1).unwrap()).unwrap(),
+                    internals::Value::B(true)
+                );
+                let players = host.field(borrow(&root), 0).unwrap();
+                assert_eq!(host.len(borrow(&players)).unwrap(), 3);
+                let wire::Reached::Node(first) = host.index(borrow(&players), 0).unwrap() else {
+                    panic!("a node")
+                };
+                assert_eq!(
+                    unflatten(host.read(borrow(&first)).unwrap()).unwrap(),
+                    internals::Value::Rec(vec![internals::Value::S(10)])
+                );
+                let wire::Reached::Value(left) = host.call(0, Some(borrow(&root)), vec![]).unwrap()
+                else {
+                    panic!("a value")
+                };
+                assert_eq!(unflatten(left).unwrap(), internals::Value::U(2));
+                assert_eq!(host.len(borrow(&players)).unwrap(), 2);
+                assert!(matches!(
+                    host.call(1, Some(borrow(&root)), vec![]),
+                    Err(wire::Refusal::NotHere(_))
+                ));
+                Ok(())
+            },
+        )
         .unwrap();
         // Successful return applied the flag write before the thunk.
         let next = frame(&mut game);
@@ -375,6 +393,158 @@ mod tests {
             next.get(&next.root(0).unwrap(), 1).unwrap(),
             internals::Value::B(true)
         );
+    }
+
+    fn assert_undeclared_field<T: std::fmt::Debug>(result: Result<T, wire::Refusal>) {
+        match result {
+            Err(wire::Refusal::NotHere(why)) => assert_eq!(why, "undeclared field"),
+            other => panic!("expected an undeclared field refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn receiver_fields_are_permissions_not_the_union_of_the_tables_members() {
+        let mut game = world();
+        let own = resolve(
+            &TABLE,
+            "own",
+            &[("Game", "game-hash"), ("Game::kick", "field-kick-hash")],
+        )
+        .unwrap();
+        let other = resolve(
+            &TABLE,
+            "other",
+            &[("Game", "game-hash"), ("Game::flag", "flag-hash")],
+        )
+        .unwrap();
+        run(frame(&mut game), &[], || {
+            let root = View.root(0).unwrap();
+            assert_undeclared_field(View.field(borrow(&root), 0));
+            assert_undeclared_field(View.get(borrow(&root), 1));
+            assert_undeclared_field(View.set(borrow(&root), 1, vec![wire::Cell::B(true)]));
+            Ok(())
+        })
+        .unwrap();
+        run(frame(&mut game), &own, || {
+            let root = View.root(0).unwrap();
+            let players = View.field(borrow(&root), 0).unwrap();
+            let wire::Reached::Node(first) = View.index(borrow(&players), 0).unwrap() else {
+                panic!("a player")
+            };
+            assert_eq!(
+                unflatten(View.get(borrow(&first), 0).unwrap()).unwrap(),
+                internals::Value::S(10)
+            );
+            View.set(borrow(&first), 0, vec![wire::Cell::S(17)])
+                .unwrap();
+            assert_eq!(
+                unflatten(View.get(borrow(&first), 0).unwrap()).unwrap(),
+                internals::Value::S(17)
+            );
+            assert_undeclared_field(View.get(borrow(&root), 1));
+            assert_undeclared_field(View.set(borrow(&root), 1, vec![wire::Cell::B(true)]));
+            Ok(())
+        })
+        .unwrap();
+        run(frame(&mut game), &other, || {
+            let root = View.root(0).unwrap();
+            assert_eq!(
+                unflatten(View.get(borrow(&root), 1).unwrap()).unwrap(),
+                internals::Value::B(false)
+            );
+            View.set(borrow(&root), 1, vec![wire::Cell::B(true)])
+                .unwrap();
+            assert_undeclared_field(View.field(borrow(&root), 0));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn raw_record_fields_are_open_even_when_the_record_is_root_zero() {
+        for receiver in [false, true] {
+            let mut game = world();
+            let root = crate::frame::Root {
+                ptr: (&raw mut game).cast(),
+                ty: 0,
+                writable: true,
+                receiver,
+                born: None,
+            };
+            // SAFETY: this synthetic record has the fixture Game's layout and exclusive borrow.
+            let frame = unsafe { Frame::new(&TABLE, vec![root]) };
+            run(frame, &[], || {
+                let root = View.root(0).unwrap();
+                if receiver {
+                    assert_undeclared_field(View.field(borrow(&root), 0));
+                } else {
+                    let players = View.field(borrow(&root), 0).unwrap();
+                    assert_eq!(View.len(borrow(&players)).unwrap(), 3);
+                    assert_eq!(
+                        unflatten(View.get(borrow(&root), 1).unwrap()).unwrap(),
+                        internals::Value::B(false)
+                    );
+                    View.set(borrow(&root), 1, vec![wire::Cell::B(true)])
+                        .unwrap();
+                    assert_eq!(
+                        unflatten(View.get(borrow(&root), 1).unwrap()).unwrap(),
+                        internals::Value::B(true)
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_subtree_node_used_as_a_call_receiver_becomes_restricted() {
+        let mut game = world();
+        run(
+            frame(&mut game),
+            &[Resolved::Member { owner: 0, field: 0 }, Resolved::Thunk(3)],
+            || {
+                let root = View.root(0).unwrap();
+                let players = View.field(borrow(&root), 0).unwrap();
+                let wire::Reached::Node(first) = View.index(borrow(&players), 0).unwrap() else {
+                    panic!("a player")
+                };
+                assert_eq!(
+                    unflatten(View.read(borrow(&first)).unwrap()).unwrap(),
+                    internals::Value::Rec(vec![internals::Value::S(10)])
+                );
+                View.call(1, Some(borrow(&first)), vec![]).unwrap();
+                assert_undeclared_field(View.get(borrow(&first), 0));
+                assert_undeclared_field(View.set(borrow(&first), 0, vec![wire::Cell::S(0)]));
+                assert_undeclared_field(View.read(borrow(&first)));
+                Ok(())
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_returned_reference_has_an_unrestricted_subtree() {
+        let mut game = world();
+        run(frame(&mut game), &[Resolved::Thunk(1)], || {
+            let root = View.root(0).unwrap();
+            let wire::Reached::Node(first) = View.call(0, Some(borrow(&root)), vec![]).unwrap()
+            else {
+                panic!("a player")
+            };
+            assert_eq!(
+                unflatten(View.get(borrow(&first), 0).unwrap()).unwrap(),
+                internals::Value::S(10)
+            );
+            View.set(borrow(&first), 0, vec![wire::Cell::S(17)])
+                .unwrap();
+            assert_eq!(
+                unflatten(View.get(borrow(&first), 0).unwrap()).unwrap(),
+                internals::Value::S(17)
+            );
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]
@@ -408,12 +578,16 @@ mod tests {
     #[test]
     fn a_trap_discards_writes_and_clears_the_scope() {
         let mut game = world();
-        let result: wasmtime::Result<()> = run(frame(&mut game), &[], || {
-            let root = View.root(0).unwrap();
-            View.set(borrow(&root), 1, vec![wire::Cell::B(true)])
-                .unwrap();
-            Err(wasmtime::Error::msg("guest trapped"))
-        });
+        let result: wasmtime::Result<()> = run(
+            frame(&mut game),
+            &[Resolved::Member { owner: 0, field: 1 }],
+            || {
+                let root = View.root(0).unwrap();
+                View.set(borrow(&root), 1, vec![wire::Cell::B(true)])
+                    .unwrap();
+                Err(wasmtime::Error::msg("guest trapped"))
+            },
+        );
         assert!(result.is_err());
         assert!(matches!(View.root(0), Err(wire::Refusal::Gone(_))));
         let next = frame(&mut game);

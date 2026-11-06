@@ -86,6 +86,12 @@ plus the named types it walks; the game resolves all of them before registering 
 Missing internals name the prebuilt game's opt-in file to update; changed hashes and a game built
 without an internals table refuse the mod. A raw listener receives no Host: its access is through
 the call-scoped internals view ([Injections](../injections.md#raw-listeners-and-declared-internals)).
+Declarations are permissions as well as compatibility checks. A receiver node exposes only
+that mod's explicitly declared fields, not every field present in the game's shared table.
+Whole-node reads cannot bypass that restriction. Once a declared field is reached, its entire
+subtree is walkable; raw argument-record fields and references returned by declared functions
+are also unrestricted. Using a node as a function's receiver restricts its subsequent field
+access to that mod's declarations. Function calls still require a declared function.
 
 `cargo horizon-mod internals add <path>… [--kind <kind>]` also works beside `[wasm]`.
 Without a native pin it uses the newest daily prebuilt's `internals.json`. For a staged-game
