@@ -140,30 +140,53 @@ impl Area {
     }
 }
 
-/// The traits of one area file by tier. A trait is a tier's when it is named `<Camel><Tier>`; any
-/// other trait whose name ends like a host trait is refused, since it would reach neither a union
-/// nor the WIT. Other traits (the draw contexts and services of `draw.rs` and `services.rs`) are not
-/// host traits and stay with their own generators.
+/// The traits of one area file by tier. Only `<Camel><Tier>` and the explicitly listed draw
+/// contexts and services are accepted: an unknown trait would reach neither a union nor the WIT.
+/// Imports and file/item attributes are allowed, but modules, macros and other items are refused
+/// rather than hiding declarations from this scan.
 fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>, String> {
     let mut tiers = BTreeMap::new();
     for item in file.items {
-        let Item::Trait(item) = item else {
-            continue;
+        let item = match item {
+            Item::Use(_) => continue,
+            Item::Trait(item) => item,
+            other => {
+                let kind = match &other {
+                    Item::Mod(_) => "module",
+                    Item::Macro(_) => "macro",
+                    _ => "item",
+                };
+                return Err(format!(
+                    "unsupported {kind} in host area `{camel}`: only imports and declared traits are allowed, found `{}`",
+                    other.to_token_stream()
+                ));
+            }
         };
         let name = item.ident.to_string();
         let Some(tier) = Tier::ALL
             .into_iter()
             .find(|tier| name == format!("{camel}{}", tier.suffix()))
         else {
-            if Tier::ALL
-                .into_iter()
-                .any(|tier| name.ends_with(tier.suffix()))
-            {
-                return Err(format!(
-                    "trait `{name}` looks like a host trait but is not named `{camel}<Host|ServerHost|ClientHost|Backend|ClientBackend|BackendMut|ClientBackendMut>`"
-                ));
+            if matches!(
+                (camel, name.as_str()),
+                (
+                    "Draw",
+                    "DrawContext" | "BlockEntityDrawContext" | "WorldDrawContext"
+                ) | (
+                    "Services",
+                    "ClientSession"
+                        | "Commands"
+                        | "Levels"
+                        | "Messages"
+                        | "Players"
+                        | "RenderAssets"
+                )
+            ) {
+                continue;
             }
-            continue;
+            return Err(format!(
+                "unrecognised trait `{name}`: expected `{camel}<Host|ServerHost|ClientHost|Backend|ClientBackend|BackendMut|ClientBackendMut>` or an explicitly listed draw context or service"
+            ));
         };
         let entries = item
             .items
@@ -784,7 +807,7 @@ mod tests {
     #[test]
     fn an_area_file_reads_its_tier_traits() {
         let file = syn::parse_str(
-            "pub trait ItemsHost { fn a(&self); } pub trait ItemsBackendMut { fn b(&mut self); } pub trait Unrelated {}",
+            "pub trait ItemsHost { fn a(&self); } pub trait ItemsBackendMut { fn b(&mut self); }",
         )
         .unwrap();
         let tiers = area_tiers("Items", file).unwrap();
@@ -796,14 +819,64 @@ mod tests {
     }
 
     #[test]
-    fn a_host_like_trait_that_is_not_named_for_its_area_is_refused() {
-        for wrong in ["ItemHost", "ItemsReadBackend", "OtherServerHost"] {
-            let file = syn::parse_str(&format!(
-                "pub trait {wrong} {{ fn a(&self) -> &std::path::Path; }}"
-            ))
-            .unwrap();
+    fn an_unrecognised_area_trait_is_refused() {
+        for wrong in [
+            "ItemHost",
+            "ItemsReadBackend",
+            "OtherServerHost",
+            "ReviewProbeHosts",
+            "Unrelated",
+        ] {
+            for recognised in ["", "pub trait ItemsHost { fn known(&self); }"] {
+                let file = syn::parse_str(&format!(
+                    "{recognised} pub trait {wrong} {{ fn a(&self) -> &std::path::Path; }}"
+                ))
+                .unwrap();
+                let error = area_tiers("Items", file).err().unwrap();
+                assert!(error.contains(wrong), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn declarations_cannot_hide_in_modules_or_macros() {
+        for (kind, source) in [
+            (
+                "module",
+                "pub mod inner { pub trait ItemsHost { fn unsupported(&self) -> &std::path::Path; } }",
+            ),
+            (
+                "macro",
+                "macro_rules! hidden { () => { pub trait ItemsHost { fn unsupported(&self) -> &std::path::Path; } }; } hidden!();",
+            ),
+            (
+                "macro",
+                "hidden! { pub trait ItemsHost { fn unsupported(&self) -> &std::path::Path; } }",
+            ),
+        ] {
+            let file = syn::parse_file(source).unwrap();
             let error = area_tiers("Items", file).err().unwrap();
-            assert!(error.contains(wrong), "{error}");
+            assert!(error.contains(&format!("unsupported {kind}")), "{error}");
+            assert!(error.contains("Items"), "{error}");
+        }
+    }
+
+    #[test]
+    fn imports_and_attributes_are_allowed() {
+        let file = syn::parse_file(
+            "#![allow(unused_variables)] use crate::*; /// An area's methods.\n #[doc(hidden)] pub trait ItemsBackend {}",
+        )
+        .unwrap();
+        let tiers = area_tiers("Items", file).unwrap();
+        assert!(tiers.contains_key(&Tier::Backend));
+    }
+
+    #[test]
+    fn non_host_traits_are_allowed_only_in_their_own_file() {
+        for (area, name) in [("Draw", "DrawContext"), ("Services", "Commands")] {
+            let file = syn::parse_file(&format!("pub trait {name} {{}}")).unwrap();
+            assert!(area_tiers(area, file.clone()).unwrap().is_empty());
+            assert!(area_tiers("Items", file).is_err());
         }
     }
 
@@ -811,7 +884,7 @@ mod tests {
     fn every_area_file_of_the_checkout_loads() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let areas = load(&root).unwrap();
-        assert!(areas.iter().any(|area| area.stem == "base"));
+        assert!(areas.iter().any(|area| area.stem == "config"));
         assert!(
             areas
                 .iter()
