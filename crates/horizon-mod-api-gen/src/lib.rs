@@ -1621,6 +1621,7 @@ mod tests {
         let mut inputs: Vec<String> = [
             "crates/horizon-mod-api/src/hooks",
             "crates/horizon-mod-api/src/exports",
+            "crates/horizon-client/src/game.rs",
             "crates/horizon-client/src/game",
             "crates/horizon-mod-api/src/lib.rs",
         ]

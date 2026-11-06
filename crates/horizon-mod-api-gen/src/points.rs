@@ -1291,10 +1291,8 @@ mod tests {
                 && game.contains("pub type __SlotReturnListener"),
             "{game}"
         );
-        let remote = std::fs::read_to_string(
-            root.join("crates/horizon-client/src/game/network/remote/mod.rs"),
-        )
-        .unwrap();
+        let remote =
+            std::fs::read_to_string(root.join("crates/horizon-client/src/game/remote.rs")).unwrap();
         assert!(
             remote.contains("point(name = \"game_remote_decode\", free)] fn decode")
                 && remote.contains("pub type __GameRemoteOtherSendListener"),
