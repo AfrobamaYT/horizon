@@ -2,7 +2,6 @@
 use super::{EntityPipelineOptions, entity_pipeline_factory, entity_shader};
 use crate::Result;
 use glam::{DVec3, Mat3, Mat4, Vec3};
-use wgpu::util::DeviceExt;
 
 /// Local corner of a prepared face. Atlas UVs are already resolved.
 #[repr(C)]
@@ -123,9 +122,7 @@ impl PreparedModels {
                 ]
             })
             .collect();
-        // Vertex and index buffers, not storage bindings, so only `max_buffer_size` applies.
-        // Checked before `create_buffer`: an oversized buffer is a fatal wgpu validation
-        // error when no scope is active.
+        // Vertex and index buffers, so only `max_buffer_size` applies.
         let limit = device.limits().max_buffer_size;
         let vertex_bytes = std::mem::size_of_val(vertices) as u64;
         let index_bytes = std::mem::size_of_val(indices.as_slice()) as u64;
@@ -136,13 +133,18 @@ impl PreparedModels {
             .into());
         }
         let checks = super::GpuChecks::push(device);
-        let buffer = |contents: &[u8], usage| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Prepared model geometry"),
-                contents,
-                usage,
-            })
-        };
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Prepared model geometry"),
+            size: vertex_bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: true,
+        });
+        let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Prepared model geometry"),
+            size: index_bytes,
+            usage: wgpu::BufferUsages::INDEX,
+            mapped_at_creation: true,
+        });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Prepared model instance"),
             source: wgpu::ShaderSource::Wgsl(shader().into()),
@@ -165,7 +167,7 @@ impl PreparedModels {
             }),
         ];
         let kept = reuse.on(device);
-        let pipeline = |label, blend, depth_write, bias, fragment, write_mask| {
+        let make = |label, blend, depth_write, bias, fragment, write_mask| {
             entity_pipeline_factory(&kept, &layout, &layout, &shader, &buffers, format)(
                 EntityPipelineOptions {
                     label,
@@ -181,43 +183,46 @@ impl PreparedModels {
                 },
             )
         };
-        let built = Self {
+        let pipeline = make(
+            "Prepared model instance",
+            wgpu::BlendState::ALPHA_BLENDING,
+            true,
+            wgpu::DepthBiasState {
+                constant: 128,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
+            "fs_entity",
+            wgpu::ColorWrites::ALL,
+        );
+        let hdr_pipeline = make(
+            "Prepared model HDR mark",
+            wgpu::BlendState::REPLACE,
+            false,
+            wgpu::DepthBiasState {
+                constant: 128,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
+            "fs_hdr_mark",
+            wgpu::ColorWrites::ALPHA,
+        );
+        // Pop before mapping: a failed allocation must not be mapped.
+        let scope_error = checks.pop().map(|error| error.to_string());
+        copy_after_scope(scope_error.clone(), || {
+            map_bytes(&vertex_buffer, bytemuck::cast_slice(vertices))
+        })?;
+        copy_after_scope(scope_error, || {
+            map_bytes(&index_buffer, bytemuck::cast_slice(&indices))
+        })?;
+        Ok(Self {
             generation,
-            vertices: buffer(bytemuck::cast_slice(vertices), wgpu::BufferUsages::VERTEX),
-            indices: buffer(bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX),
+            vertices: vertex_buffer,
+            indices: index_buffer,
             ranges,
-            pipeline: pipeline(
-                "Prepared model instance",
-                wgpu::BlendState::ALPHA_BLENDING,
-                true,
-                wgpu::DepthBiasState {
-                    constant: 128,
-                    slope_scale: 0.0,
-                    clamp: 0.0,
-                },
-                "fs_entity",
-                wgpu::ColorWrites::ALL,
-            ),
-            hdr_pipeline: pipeline(
-                "Prepared model HDR mark",
-                wgpu::BlendState::REPLACE,
-                false,
-                wgpu::DepthBiasState {
-                    constant: 128,
-                    slope_scale: 0.0,
-                    clamp: 0.0,
-                },
-                "fs_hdr_mark",
-                wgpu::ColorWrites::ALPHA,
-            ),
-        };
-        // Shader, pipeline layout and both pipelines are created above. No bind group or
-        // texture is. A validation or out-of-memory error returns here, before the caller
-        // replaces `prepared_models`.
-        if let Some(error) = checks.pop() {
-            return Err(error.to_string().into());
-        }
-        Ok(built)
+            pipeline,
+            hdr_pipeline,
+        })
     }
 
     pub fn draw<'a>(
@@ -237,6 +242,24 @@ impl PreparedModels {
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(range.0..range.0 + range.1, 0, 0..1);
     }
+}
+
+/// Copies into a buffer created with `mapped_at_creation`. The scope error is checked first, so a failed allocation is never mapped.
+fn copy_after_scope(scope_error: Option<String>, copy: impl FnOnce() -> Result<()>) -> Result<()> {
+    if let Some(error) = scope_error {
+        return Err(error.into());
+    }
+    copy()
+}
+
+fn map_bytes(buffer: &wgpu::Buffer, contents: &[u8]) -> Result<()> {
+    let mut view = buffer
+        .get_mapped_range_mut(..)
+        .map_err(|error| error.to_string())?;
+    view.copy_from_slice(contents);
+    drop(view);
+    buffer.unmap();
+    Ok(())
 }
 
 fn take_forced_failure() -> bool {
@@ -285,8 +308,10 @@ mod tests {
             wgpu::DeviceType::Cpu,
             "no software Vulkan adapter"
         );
-        let mut limits = wgpu::Limits::default();
-        limits.max_buffer_size = 16_384;
+        let limits = wgpu::Limits {
+            max_buffer_size: 16_384,
+            ..wgpu::Limits::default()
+        };
         let (device, _) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_limits: limits,
             ..Default::default()
@@ -313,5 +338,29 @@ mod tests {
             message.contains("16_640") || message.contains("16640"),
             "{message}"
         );
+    }
+
+    /// llvmpipe does not reliably fail a buffer allocation that is under `max_buffer_size`, so this checks the helper's order instead of injecting an out-of-memory error.
+    #[test]
+    fn mapped_copy_runs_only_after_a_clean_scope() {
+        let mut mapped = false;
+        let error = copy_after_scope(Some("allocation failed".into()), || {
+            mapped = true;
+            Ok(())
+        });
+        assert!(
+            error.is_err(),
+            "a failed allocation must not be treated as uploaded"
+        );
+        assert!(
+            !mapped,
+            "mapped memory was touched before the scope was clean"
+        );
+        copy_after_scope(None, || {
+            mapped = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(mapped);
     }
 }
