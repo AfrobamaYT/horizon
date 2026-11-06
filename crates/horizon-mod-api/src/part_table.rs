@@ -7,8 +7,8 @@
 use super::ticket_controller::{self, ControllerInfo};
 use super::{
     BlockEntityPart, BlockPart, BlockSide, BlockStateId, Capability, CapabilityKey,
-    EntityCapabilityKey, EntityRef, HOOK_COUNT, HookId, Host, ItemCapabilityKey, ItemPart,
-    ItemPlace, MenuPart, ModEntry, PlaceProvider, ServerHost, TicketController,
+    EntityCapabilityKey, EntityPart, EntityRef, HOOK_COUNT, HookId, Host, ItemCapabilityKey,
+    ItemPart, ItemPlace, MenuPart, ModEntry, PlaceProvider, ServerHost, TicketController,
 };
 use horizon_mods::content::BlockEntityType;
 use std::{
@@ -49,6 +49,21 @@ impl<P: ?Sized> Attached<P> {
             part,
         }
     }
+    // hidden: the game's goal registration reads these (#1077)
+    #[doc(hidden)]
+    pub fn mod_id(&self) -> &'static str {
+        self.mod_id
+    }
+    // hidden: the game's goal registration reads these (#1077)
+    #[doc(hidden)]
+    pub fn type_name(&self) -> &'static str {
+        self.type_name
+    }
+    // hidden: the game's goal registration reads these (#1077)
+    #[doc(hidden)]
+    pub fn part(&self) -> &Arc<P> {
+        &self.part
+    }
 }
 
 impl<P: ?Sized> Clone for Attached<P> {
@@ -88,6 +103,10 @@ pub struct Parts {
     block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
     menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
+    /// Entity parts by entity type id (`minecraft:zombie`), for the goal
+    /// registration at every `Mob` construction (#1077). They carry no scoped
+    /// hook, so they never enter `hooks`.
+    entities: HashMap<Box<str>, Vec<Attached<dyn EntityPart>>>,
     /// Capability providers by capability name, then by block entity type, in registration
     /// order.
     capabilities: Capabilities<BlockProviderOf>,
@@ -443,6 +462,35 @@ pub fn has_scoped_hook(hook: HookId) -> bool {
     !super::mods().is_empty() && has_part_hook(hook)
 }
 
+/// Whether any mod attached an entity part, so `Mob` construction asks for
+/// goals and the mob tick builds a goal read view.
+pub fn has_entity_parts() -> bool {
+    !super::mods().is_empty()
+        && installed().is_some_and(|installed| !installed.keys.entities.is_empty())
+}
+
+/// The entity parts attached to entity type `id` (`minecraft:zombie`), in
+/// dispatch order, for the goal registration at every `Mob` construction
+/// (#1077).
+pub fn entity_parts() -> PartsRef {
+    let Some(installed) = installed() else {
+        return PartsRef::Shared(&NO_PARTS);
+    };
+    if let Some(parts) = GAME_PARTS.with_borrow(Option::clone) {
+        return PartsRef::Game(parts);
+    }
+    if !GAME_THREAD.get() {
+        let thread = std::thread::current();
+        let thread = thread.name().unwrap_or("unnamed");
+        if !OFF_THREAD_WARNED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "Native entity parts asked off a game thread ({thread}): a mob built there keeps no mod goals"
+            );
+        }
+    }
+    PartsRef::Shared(&installed.keys)
+}
+
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
 #[non_exhaustive]
 pub enum PartsRef {
@@ -686,6 +734,12 @@ impl HookParts {
 impl Parts {
     pub(crate) fn for_hook(&self, hook: HookId) -> Option<&HookParts> {
         self.hooks.get(hook as usize).and_then(Option::as_ref)
+    }
+    /// The entity parts attached to entity type `id` (`minecraft:zombie`), in
+    /// dispatch order, for the goal registration at every `Mob` construction
+    /// (#1077).
+    pub fn entity_parts(&self, id: &str) -> &[Attached<dyn EntityPart>] {
+        self.entities.get(id).map_or(&[], Vec::as_slice)
     }
     fn index_hooks(&mut self) {
         self.hooks = vec![None; HOOK_COUNT];
@@ -970,6 +1024,16 @@ pub trait Registrar {
         kind: &'static str,
         part: Arc<dyn ItemPart>,
     );
+    /// Attach `part`, of kind `kind`, to the entity type `entity`
+    /// (`minecraft:zombie`, `mymod:golem`): its `register_goals` runs at every
+    /// `Mob` construction of that type (#1077).
+    ///
+    /// Not on wasm: the goal surface a part's `register_goals` hands the game
+    /// does not cross yet (#1077); entity parts are a native mod's for now.
+    /// The gate keeps a wasm mod's call a compile error, not a runtime one;
+    /// the generator still keeps the method off the wasm world by this doc.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>);
     /// Attach `part`, of kind `kind`, to the mod menu type `menu`.
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>);
     /// Attach `part`, of kind `kind`, to every block in tag `tag`.
@@ -1057,6 +1121,14 @@ impl dyn Registrar + '_ {
     /// Attach `part` to item `item` (`mymod:wrench`).
     pub fn item_part<P: ItemPart>(&mut self, item: super::ItemKey, part: P) {
         self.attach_item_part(item, type_name::<P>(), Arc::new(part));
+    }
+    /// Attach `part` to the entity type `entity` (`minecraft:zombie`): its
+    /// [`EntityPart::register_goals`] runs at every `Mob` construction of that
+    /// type, spawning or loading, and its goals join the mob's selectors
+    /// beside vanilla's (#1077).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn entity_part<P: EntityPart>(&mut self, entity: &str, part: P) {
+        self.attach_entity_part(entity, type_name::<P>(), Arc::new(part));
     }
     /// Attach `part` to the mod menu type `menu`.
     pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {
@@ -1616,6 +1688,11 @@ impl Registrar for PartRegistrar {
         self.attach(|p| &mut p.items, kind, &id, part);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>) {
+        self.attach(|p| &mut p.entities, kind, entity, part);
+    }
+
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>) {
         self.attach(|p| &mut p.menus, kind, menu, part);
     }
@@ -1929,6 +2006,43 @@ pub mod tests {
         }
         #[cfg_attr(test, cfg(any()))]
         fn should_check_weak_power(&self, _: &dyn LevelHost, _: &mut ShouldCheckWeakPowerEvent) {}
+    }
+
+    #[test]
+    fn entity_parts_refuse_unnamespaced_ids_and_doubles() {
+        struct Once;
+        #[mod_api::horizon_part]
+        impl super::EntityPart for Once {
+            fn register_goals(&self, goals: &mut crate::GoalRegistrar<'_>) {
+                let _ = goals;
+            }
+        }
+        struct Twice;
+        #[mod_api::horizon_part]
+        impl super::EntityPart for Twice {
+            fn register_goals(&self, goals: &mut crate::GoalRegistrar<'_>) {
+                let _ = goals;
+            }
+        }
+        struct Invalid;
+        #[mod_api::__subscriptions]
+        impl super::super::Hooks for Invalid {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                r.entity_part("zombie", Twice);
+                r.entity_part("minecraft:zombie", Once);
+                r.entity_part("minecraft:zombie", Once);
+            }
+        }
+        let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(
+            errors[0].contains("to \"zombie\", which is not a namespaced id"),
+            "{errors:?}"
+        );
+        assert!(
+            errors[1].contains("attached to minecraft:zombie twice"),
+            "{errors:?}"
+        );
     }
 
     #[test]
