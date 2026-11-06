@@ -4577,6 +4577,8 @@ pub use resource::{
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod custom_spawners;
 pub use custom_spawners::{CustomSpawners, SpawnerEntry, SpawnerError, SpawnerKey, SpawnerKind};
+mod block_entity_data;
+pub use block_entity_data::BlockEntityDataError;
 mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
