@@ -481,6 +481,54 @@ mod tests {
     }
 
     #[test]
+    fn native_argument_alternatives_survive_packet_reconstruction() {
+        let mut builtin = Builtin::default();
+        builtin.registries.insert(
+            "minecraft:command_argument_type".into(),
+            horizon_protocol::registry::Ids::from_names(
+                horizon_protocol::packets::play::ARGUMENT_TYPES
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect(),
+            ),
+        );
+        let mods = serde_json::json!({"type": "root", "children": {
+            "foo": {"type": "literal", "children": {
+                "a": {"type": "argument", "parser": "brigadier:integer", "executable": true, "execution_level": 4,
+                    "children": {"bar": {"type": "literal", "executable": true, "execution_level": 0}}},
+                "b": {"type": "argument", "parser": "brigadier:string", "properties": {"type": "word"}, "executable": true, "execution_level": 0}
+            }},
+            "denied": {"type": "literal", "children": {
+                "a": {"type": "argument", "parser": "brigadier:integer", "executable": true, "execution_level": 4,
+                    "children": {"bar": {"type": "literal", "executable": true, "execution_level": 0}}}
+            }}
+        }});
+        let tree = CommandTree { root: Value::Null };
+        for level in 0..=4 {
+            let packet = tree.packet_with(level, true, &builtin, &mods);
+            let dispatcher =
+                crate::command::network::from_packet(&packet, &crate::command::Dispatcher::new());
+            let registries = crate::command::Registries::default();
+            let parsed = dispatcher.parse("foo 7", &registries);
+            let (context, _) = parsed.executable().unwrap();
+            assert_eq!(context.get("b").is_some(), level < 4);
+            assert!(
+                dispatcher
+                    .parse("foo 7 bar", &registries)
+                    .executable()
+                    .is_ok()
+            );
+            assert_eq!(
+                dispatcher
+                    .parse("denied 7", &registries)
+                    .executable()
+                    .is_ok(),
+                level == 4
+            );
+        }
+    }
+
+    #[test]
     fn server_mods_commands_follow_vanillas() {
         let report: Value = serde_json::from_str(
             r#"{"type":"root","children":{"me":{"type":"literal","children":{"action":{"type":"argument","parser":"minecraft:message","executable":true}}}}}"#,
