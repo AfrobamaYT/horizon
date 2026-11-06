@@ -1191,13 +1191,22 @@ mod tests {
 
             // A failed resource build never publishes a replacement, so the handle remains valid.
             let missing = game.options.resources.join("absent-model-test-root");
+            let listeners = game.register_client_reload_listeners();
             assert!(
-                game.pack
-                    .assets
-                    .reload(&horizon_assets::resource_source::ResourceRoot::directory(
-                        missing
-                    ))
-                    .is_err()
+                super::super::packs::stage_pack(
+                    &missing,
+                    &[],
+                    &[],
+                    &game.mods,
+                    listeners,
+                    &game.pack.assets,
+                    &game.res,
+                    &game.pack.context,
+                    false,
+                    false,
+                    &super::super::Progress::new(),
+                )
+                .is_err()
             );
             assert_eq!(
                 game.native_draw_model(&mut surface, model, 0x123456),
