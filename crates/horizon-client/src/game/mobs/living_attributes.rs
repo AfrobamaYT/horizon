@@ -7,10 +7,30 @@ use horizon_client::mobs::{
     Mob,
     finalize::{self, Attr, Op},
 };
+use horizon_items::items::Items;
 use horizon_world::attributes::{
-    AttributeError, Instance, Modifier, Observer, Operation, entity::AttributeId,
+    AttributeError, Instance, Modifier, Observer, Operation,
+    entity::{AttributeId, Catalog},
 };
 use std::convert::Infallible;
+use std::sync::Arc;
+
+/// One mob's `collectEquipmentChanges`: each slot whose stack is not the one
+/// the map holds swaps the old stack's attribute modifiers for the new one's,
+/// full stacks with their components compared, as the tick's pass and a write
+/// both run it. The map is taken out so the seed can read the mob.
+fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
+    let mut live = std::mem::take(&mut m.extra.live);
+    let changed =
+        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, || {
+            horizon_client::entity_nbt::attribute_entries(m)
+                .into_iter()
+                .map(|(_, e)| e)
+                .collect()
+        });
+    warn_failed(m.id, &m.kind.id, changed);
+    m.extra.live = live;
+}
 
 impl Game<'_> {
     /// `LivingEntity.tick`'s `collectEquipmentChanges` for what the server
@@ -28,22 +48,7 @@ impl Game<'_> {
             if m.extra.equipment.is_empty() && !m.extra.live.has_worn() {
                 continue;
             }
-            // The map is taken out so the seed can read the mob.
-            let mut live = std::mem::take(&mut m.extra.live);
-            let changed = live.collect_equipment_changes(
-                &catalog,
-                &m.kind.id,
-                &m.extra.equipment,
-                items,
-                || {
-                    horizon_client::entity_nbt::attribute_entries(m)
-                        .into_iter()
-                        .map(|(_, e)| e)
-                        .collect()
-                },
-            );
-            warn_failed(m.id, &m.kind.id, changed);
-            m.extra.live = live;
+            collect_equipment(&catalog, items, m);
         }
         for a in self.armor_stands.iter_mut() {
             if a.equipment.is_empty() && !a.live.has_worn() {
@@ -70,6 +75,22 @@ impl Game<'_> {
             );
             warn_failed(d.id, "minecraft:ender_dragon", changed);
         }
+    }
+
+    /// `collectEquipmentChanges` of the mob `id` right away: equipment a mod
+    /// wrote through a handle takes its attribute modifiers on the live map
+    /// at once — its armor and the reads of #940 — not at the tick's pass.
+    /// The tick's own pass remains the safety net for the other writers.
+    pub(super) fn collect_mob_equipment_attributes(&mut self, id: u32) {
+        if self.remote.is_some() || self.options.execution_role.is_client() {
+            return;
+        }
+        let catalog = self.motion.attributes.clone();
+        let items = world_items!(self);
+        let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+            return;
+        };
+        collect_equipment(&catalog, items, m);
     }
 }
 
@@ -245,6 +266,23 @@ impl Game<'_> {
         name: &str,
         write: AttributeWrite,
     ) -> Option<bool> {
+        let done = self.apply_attribute_write(t, name, write)?;
+        // A finalize write drops the mob's live map (its seed changed), which
+        // takes the equipment's modifiers with it: collect them again at
+        // once, so the next read — a hit's armor, the attribute sync — sees
+        // them (#941).
+        if let Target::Mob(id) = t {
+            self.collect_mob_equipment_attributes(id);
+        }
+        Some(done)
+    }
+
+    fn apply_attribute_write(
+        &mut self,
+        t: Target,
+        name: &str,
+        write: AttributeWrite,
+    ) -> Option<bool> {
         let catalog = self.motion.attributes.clone();
         let id = catalog.id(name)?;
         let default = match write {
@@ -390,6 +428,205 @@ mod tests {
             living.attribute_value(game, name),
             living.attribute_base(game, name),
         )
+    }
+
+    /// A held stack with its own `attribute_modifiers` hits by them, not by
+    /// its item type's defaults (#941).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_changed_held_stack_hits_by_its_own_modifiers() {
+        use horizon_client::mobs::gear;
+        use horizon_world::nbt::Tag;
+        use mod_api::EquipmentSlot;
+        with_game(|game| {
+            spawn(game);
+            let zombie = living(game, 12);
+            let attack = |game: &Game<'_>| {
+                gear::attack_damage(
+                    game.mobs.iter().find(|m| m.id == 12).unwrap(),
+                    Some(game.res.items()),
+                )
+            };
+            assert_eq!(attack(game), 3.0, "a zombie's own attack damage");
+            let mut own = ItemStack::new("minecraft:diamond_sword", 1);
+            own.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String("minecraft:attack_damage".into())),
+                    ("id", Tag::String("test:dull".into())),
+                    ("amount", Tag::Double(1.0f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("mainhand".into())),
+                ])])),
+            );
+            assert!(
+                game.native_living_set_equipment(zombie, EquipmentSlot::MainHand, Some(own)),
+                "the write takes"
+            );
+            assert_eq!(attack(game), 4.0, "the stack's own +1, not the sword's +6");
+            assert!(game.native_living_set_equipment(
+                zombie,
+                EquipmentSlot::MainHand,
+                stack("minecraft:diamond_sword")
+            ));
+            assert_eq!(attack(game), 9.0, "the plain sword's own +6");
+            assert!(game.native_living_set_equipment(zombie, EquipmentSlot::MainHand, None));
+            assert_eq!(attack(game), 3.0);
+        });
+    }
+
+    /// The mob's attribute packet is its live map's instances (#941): base
+    /// and each modifier once — the equipment's own rows and `/attribute`'s
+    /// writes among them — with no modifier applied twice, and no instance
+    /// for an attribute nothing created.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_mob_attribute_packet_is_the_live_maps_instances() {
+        use horizon_world::nbt::Tag;
+        use mod_api::EquipmentSlot;
+        with_game(|game| {
+            spawn(game);
+            let zombie = living(game, 12);
+            let mut own = ItemStack::new("minecraft:diamond_chestplate", 1);
+            own.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String("minecraft:armor".into())),
+                    ("id", Tag::String("test:thin".into())),
+                    ("amount", Tag::Double(4.0f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("chest".into())),
+                ])])),
+            );
+            assert!(game.native_living_set_equipment(zombie, EquipmentSlot::Chest, Some(own)));
+            // A finalize write, whose rebuild keeps the equipment's rows.
+            assert!(zombie.set_attribute_base(game, "minecraft:max_health", 25.0));
+            let mut synced = Vec::new();
+            let mob = game.mobs[0].clone();
+            game.mob_attributes(
+                &mob,
+                &mut crate::game::lan_attributes::SpeedByType::default(),
+                &mut synced,
+            );
+            // Each attribute once.
+            let mut ids: Vec<_> = synced.iter().map(|s| s.attribute).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), synced.len(), "{synced:?}");
+            let of = |name: &str| {
+                let id = game.motion.attributes.id(name).unwrap().registry_id();
+                synced.iter().find(move |s| s.attribute == id)
+            };
+            // Armor: the zombie's base and only the stack's own row.
+            let armor = of("minecraft:armor").unwrap();
+            assert_eq!(armor.base, 2.0);
+            assert_eq!(
+                armor.modifiers,
+                [horizon_protocol::packets::play::AttributeModifier {
+                    id: "test:thin".into(),
+                    amount: 4.0,
+                    operation: 0,
+                }]
+            );
+            // The written max health base, as the map holds it.
+            let health = of("minecraft:max_health").unwrap();
+            assert_eq!(health.base, 25.0);
+            assert!(health.modifiers.is_empty());
+            // Movement speed: the instance every mob's first step creates.
+            let speed = of("minecraft:movement_speed").unwrap();
+            assert!(speed.base > 0.0, "{speed:?}");
+            assert!(speed.modifiers.is_empty());
+            // Nothing else: an attribute nothing created sends no instance.
+            assert_eq!(synced.len(), 3, "{synced:?}");
+        });
+    }
+
+    /// The armor a hit reads follows the live map at once (#941): a stack a
+    /// mod or `/item` changed protects by its own `attribute_modifiers`, a
+    /// `/attribute` write takes effect without a tick, a horse's body piece
+    /// armors it by its stack's rows, and the save keeps a written base and
+    /// modifier.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_hits_armor_follows_the_live_map_at_once() {
+        use AttributeOperation::*;
+        use ModifierLifetime::*;
+        use horizon_client::mobs::{Damage, DamageKind, armor};
+        use horizon_world::nbt::Tag;
+        use mod_api::EquipmentSlot;
+        with_game(|game| {
+            spawn(game);
+            let values =
+                |game: &Game<'_>| armor::values(game.mobs.iter().find(|m| m.id == 12).unwrap());
+            let zombie = living(game, 12);
+            // The zombie's own armor is 2, the diamond chestplate's 8 and 2
+            // toughness: the write through the handle collects at once.
+            assert!(game.native_living_set_equipment(
+                zombie,
+                EquipmentSlot::Chest,
+                stack("minecraft:diamond_chestplate")
+            ));
+            assert_eq!(values(game), (10.0, 2.0));
+            // A chestplate with its own `attribute_modifiers` protects by
+            // them, not by the diamond one's.
+            let mut own = ItemStack::new("minecraft:diamond_chestplate", 1);
+            own.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String("minecraft:armor".into())),
+                    ("id", Tag::String("test:thin".into())),
+                    ("amount", Tag::Double(4.0f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("chest".into())),
+                ])])),
+            );
+            assert!(game.native_living_set_equipment(zombie, EquipmentSlot::Chest, Some(own)));
+            assert_eq!(values(game), (6.0, 0.0));
+            // A `/attribute` base write lands at once, on top of the stack's.
+            assert!(zombie.set_attribute_base(game, "minecraft:armor", 5.0));
+            assert_eq!(values(game), (9.0, 0.0));
+            // Unequipped, the base and a permanent modifier are all that is
+            // left, and the damage boundary reads the same value.
+            assert!(zombie.add_attribute_modifier(
+                game,
+                "minecraft:armor",
+                modifier("test:plated", 3.0, AddValue),
+                Permanent
+            ));
+            assert!(game.native_living_set_equipment(zombie, EquipmentSlot::Chest, None));
+            assert_eq!(values(game), (8.0, 0.0));
+            let level = crate::game::entity::damage_level_of!(game);
+            let m = game.mobs.iter_mut().find(|m| m.id == 12).unwrap();
+            m.health = 20.0;
+            assert!(m.damage(level, 4.0, Damage::of(DamageKind::Cactus)));
+            // CombatRules.getDamageAfterAbsorb: (8 - 4/2) of 25 absorbs.
+            let expected = 4.0 * (1.0 - 6.0 / 25.0);
+            assert!((f64::from(m.health) - (20.0 - expected)).abs() < 1e-3);
+            // The written base and modifier survive the map's own save and
+            // load; the first read builds the loaded map again, as a world
+            // load's first tick or read does.
+            let mut list = Vec::new();
+            game.mobs[0].extra.live.save_into(&mut list);
+            let mut fresh = horizon_client::living_attributes::LivingAttributes::default();
+            fresh.load(Some(&Tag::List(list)), |_| true);
+            game.mobs[0].extra.live = fresh;
+            read(game, 12, "minecraft:armor");
+            assert_eq!(values(game), (8.0, 0.0));
+            // A horse's body piece armors it by its stack's rows.
+            let horse_kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
+            game.mobs.push(Mob::new(15, horse_kind, Vec3::ZERO, 0.0));
+            let horse = living(game, 15);
+            assert!(game.native_living_set_equipment(
+                horse,
+                EquipmentSlot::Body,
+                stack("minecraft:diamond_horse_armor")
+            ));
+            let armored = armor::values(game.mobs.iter().find(|m| m.id == 15).unwrap());
+            assert!(
+                armored.0 >= 1.0,
+                "the body piece armors the horse: {armored:?}"
+            );
+        });
     }
 
     #[test]

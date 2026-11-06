@@ -3,12 +3,11 @@
 //! vanilla's `AttributeMap` would have created by then, since only those are
 //! sent, never the type's other defaults.
 use super::Game;
-use super::commands::Target;
 use horizon_client::items::ItemStack;
 use horizon_client::{
     effects,
     items::Items,
-    lan::attributes::{add_modifier, generic_syncable, instance, operation_named},
+    lan::attributes::{add_modifier, instance, operation_named, syncable},
     mobs::{
         GearKnockback, Mob, Species,
         finalize::{self, Attr, Op},
@@ -34,16 +33,6 @@ fn slot_in_group(group: &str, slot: &str) -> bool {
         || group == "any"
         || (group == "hand" && matches!(slot, "mainhand" | "offhand"))
         || (group == "armor" && matches!(slot, "feet" | "legs" | "chest" | "head" | "body"))
-}
-
-fn generic_attributes_into(
-    map: &horizon_world::attributes::entity::EntityAttributes,
-    out: &mut Vec<AttributeSnapshot>,
-) {
-    for s in generic_syncable(map) {
-        let (attribute, base) = (s.attribute, s.base);
-        *instance(out, attribute, base) = s;
-    }
 }
 
 /// The hand and armor slots, mainhand to head, with their names.
@@ -142,55 +131,12 @@ impl Game<'_> {
             .unwrap_or(0.0)
     }
 
-    /// `LivingEntity.collectEquipmentChanges`: each worn or held item's
-    /// attribute modifiers, slot by slot in `EquipmentSlot` order, create
-    /// their instances (an instance without a modifier keeps its base).
-    fn equipment_attributes<'a>(
-        &self,
-        entity: &str,
-        base: impl Fn(&str) -> Option<f64>,
-        slots: impl IntoIterator<Item = (&'static str, Option<&'a ItemStack>)>,
-        out: &mut Vec<AttributeSnapshot>,
-    ) {
-        for (slot, stack) in slots {
-            let Some(stack) = stack else {
-                continue;
-            };
-            for horizon_items::item_data::ModifierRow {
-                attribute,
-                id,
-                amount,
-                operation: op,
-                slot: group,
-            } in
-                horizon_client::item_attributes::attribute_modifiers(stack, self.items()).iter()
-            {
-                if !slot_in_group(group, slot) {
-                    continue;
-                }
-                let Some(a) = self.synced_attribute(entity, attribute) else {
-                    continue;
-                };
-                let start =
-                    base(attribute).unwrap_or_else(|| self.attribute_default(entity, attribute));
-                add_modifier(
-                    out,
-                    a,
-                    start,
-                    AttributeModifier {
-                        id: id.clone(),
-                        amount: *amount,
-                        operation: operation_named(op),
-                    },
-                );
-            }
-        }
-    }
-
-    /// A mob's synced instances: movement speed (its first `aiStep` reads it,
-    /// `LivingEntity.removeFrost`), what finalizeSpawn set, the baby speed
-    /// modifier, its effects' modifiers, its equipment's, and what
-    /// `/attribute` changed.
+    /// A mob's synced instances: the live attribute map's (#941) — what
+    /// finalizeSpawn set, `/attribute` changed, the save loaded and every
+    /// worn or held stack granted, its base and each modifier exactly once,
+    /// as the map holds them — plus movement speed (its first `aiStep` reads
+    /// it, `LivingEntity.removeFrost`, and no stack granted one), the baby
+    /// speed modifier and its effects' modifiers, which no map holds.
     pub(super) fn mob_attributes(
         &self,
         m: &Mob,
@@ -216,29 +162,29 @@ impl Game<'_> {
         if let Some((a, base)) = speed {
             instance(out, a, base);
         }
-        if let Some(s) = m.extra.attributes.as_deref() {
-            for (attr, v) in &s.bases {
-                if let Some(a) = self.synced_attribute(kind, attr.id()) {
-                    instance(out, a, *v).base = *v;
-                }
-            }
-            for x in s.modifiers.iter().chain(&s.transient) {
-                if let Some(a) = self.synced_attribute(kind, x.attr.id()) {
-                    add_modifier(
-                        out,
-                        a,
-                        finalize::base_value(m, x.attr),
-                        AttributeModifier {
-                            id: x.id.to_string(),
-                            amount: x.amount,
-                            operation: match x.op {
-                                Op::AddValue => 0,
-                                Op::AddMultipliedBase => 1,
-                                Op::AddMultipliedTotal => 2,
-                            },
-                        },
-                    );
-                }
+        // The live map's syncable instances: `/attribute`'s writes, the
+        // save's, a mod's modifiers and every worn or held stack's own
+        // `attribute_modifiers`, components included. An immutable read
+        // builds the map if this is its first use; the tick's equipment pass
+        // keeps its stacks current. What the map holds is sent once, with the
+        // base its instance has — never derived again beside it.
+        let catalog = self.motion.attributes.clone();
+        let _ = m.extra.live.read(
+            &catalog,
+            kind,
+            Attr::MovementSpeed.id(),
+            horizon_world::attribute_map::ValueKind::Computed,
+            || {
+                horizon_client::entity_nbt::attribute_entries(m)
+                    .into_iter()
+                    .map(|(_, e)| e)
+                    .collect()
+            },
+        );
+        if let Some(live) = m.extra.live.built() {
+            for s in syncable(live) {
+                let (attribute, base) = (s.attribute, s.base);
+                *instance(out, attribute, base) = s;
             }
         }
         // AbstractHorse.randomizeAttributes rolls a horse's jump strength as
@@ -316,34 +262,15 @@ impl Game<'_> {
                 },
             );
         }
-        use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
-        let e = &m.extra;
-        let item = |slot| e.slot_stack(slot);
-        self.equipment_attributes(
-            kind,
-            base,
-            [
-                ("mainhand", item(MAINHAND)),
-                ("offhand", item(OFFHAND)),
-                ("feet", item(FEET)),
-                ("legs", item(LEGS)),
-                ("chest", item(CHEST)),
-                ("head", item(HEAD)),
-            ],
-            out,
-        );
-        self.generic_attributes_of(Target::Mob(m.id), out);
-        if let Some(map) = m.extra.armor_attributes.as_deref() {
-            generic_attributes_into(map, out);
-        }
     }
 
     /// An armor stand's synced instances: movement speed (its first
-    /// `aiStep`), its equipment's modifiers and what `/attribute` changed.
+    /// `aiStep`), and the live map's — its equipment's per-stack modifiers
+    /// and what `/attribute` changed — built by the read if this is its
+    /// first use.
     pub(super) fn stand_attributes(
         &self,
-        id: u32,
-        equipment: &horizon_items::equipment::Equipment,
+        live: &horizon_client::living_attributes::LivingAttributes,
     ) -> Vec<AttributeSnapshot> {
         const KIND: &str = "minecraft:armor_stand";
         let mut out = Vec::new();
@@ -354,11 +281,20 @@ impl Game<'_> {
                 self.attribute_default(KIND, "minecraft:movement_speed"),
             );
         }
-        let slots = horizon_client::entities::ArmorStand::SLOTS
-            .into_iter()
-            .zip(equipment.iter().map(Option::as_ref));
-        self.equipment_attributes(KIND, |_| None, slots, &mut out);
-        self.generic_attributes_of(Target::Stand(id), &mut out);
+        let catalog = self.motion.attributes.clone();
+        let _ = live.read(
+            &catalog,
+            KIND,
+            "minecraft:movement_speed",
+            horizon_world::attribute_map::ValueKind::Computed,
+            Vec::new,
+        );
+        if let Some(map) = live.built() {
+            for s in syncable(map) {
+                let (attribute, base) = (s.attribute, s.base);
+                *instance(&mut out, attribute, base) = s;
+            }
+        }
         out
     }
 
@@ -402,14 +338,6 @@ impl Game<'_> {
             if has != creative {
                 let _ = p.set_modifier(attribute, id, amount, "add_value", creative);
             }
-        }
-    }
-
-    /// The instances `/attribute` created in an entity's generic map
-    /// replace the ones derived from its state.
-    fn generic_attributes_of(&self, t: Target, out: &mut Vec<AttributeSnapshot>) {
-        if let Some(map) = self.cmds.attributes.get(&t) {
-            generic_attributes_into(map, out);
         }
     }
 }

@@ -214,6 +214,7 @@ impl<'t> Frame<'t> {
         let ty = &self.table.types[ty as usize];
         match op {
             Op::Field(n) => ty.raw_fields.contains(n),
+            Op::Get(n) => ty.raw_gets.contains(n),
             Op::Index(_) => ty.raw_index,
             _ => false,
         }
@@ -710,6 +711,7 @@ pub(crate) mod tests {
             hash: "game-hash",
             node: game,
             raw_fields: &[0],
+            raw_gets: &[],
             raw_index: false,
         },
         Type {
@@ -717,6 +719,7 @@ pub(crate) mod tests {
             hash: "",
             node: players,
             raw_fields: &[0, 1],
+            raw_gets: &[],
             raw_index: true,
         },
         Type {
@@ -724,6 +727,7 @@ pub(crate) mod tests {
             hash: "player-hash",
             node: player,
             raw_fields: &[],
+            raw_gets: &[],
             raw_index: false,
         },
     ];
@@ -820,6 +824,77 @@ pub(crate) mod tests {
         match reached {
             Reached::Node(node) => node,
             Reached::Value(value) => panic!("a copy: {value:?}"),
+        }
+    }
+
+    #[test]
+    fn raw_scalar_reads_keep_a_three_step_path_cached() {
+        #[repr(C)]
+        struct Link {
+            next: *mut (),
+            value: i64,
+        }
+        unsafe fn link(p: *mut (), w: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            match op {
+                Op::Field(0) => Ok(Reply::Node(
+                    unsafe { std::ptr::read_unaligned(&raw const (*(p as *const Link)).next) },
+                    0,
+                    w,
+                )),
+                Op::Get(1) => Ok(Reply::Value(Value::S(unsafe {
+                    std::ptr::read_unaligned(&raw const (*(p as *const Link)).value)
+                }))),
+                _ => Err(not_here("link")),
+            }
+        }
+        let table = Table {
+            types: Box::leak(Box::new([Type {
+                path: "Link",
+                hash: "",
+                node: link,
+                raw_fields: &[0],
+                raw_gets: &[1],
+                raw_index: false,
+            }])),
+            ..TABLE
+        };
+        let mut last = Link {
+            next: std::ptr::null_mut(),
+            value: 42,
+        };
+        let mut third = Link {
+            next: (&raw mut last).cast(),
+            value: 0,
+        };
+        let mut second = Link {
+            next: (&raw mut third).cast(),
+            value: 0,
+        };
+        let mut first = Link {
+            next: (&raw mut second).cast(),
+            value: 0,
+        };
+        let frame = unsafe {
+            Frame::new(
+                &table,
+                vec![Root {
+                    ptr: (&raw mut first).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        let root = frame.root(0).unwrap();
+        let one = frame.field(&root, 0).unwrap();
+        let two = frame.field(&one, 0).unwrap();
+        let three = frame.field(&two, 0).unwrap();
+        let generation = frame.cache_generation.get();
+        for _ in 0..10 {
+            assert_eq!(frame.get(&three, 1), Ok(Value::S(42)));
+            assert_eq!(frame.cache_generation.get(), generation);
+            assert_eq!(three.at.get().unwrap().0, generation);
         }
     }
 
@@ -1020,6 +1095,7 @@ pub(crate) mod tests {
                 hash: "fields-hash",
                 node: fields,
                 raw_fields: &[0, 1],
+                raw_gets: &[],
                 raw_index: false,
             },
             Type {
@@ -1027,6 +1103,7 @@ pub(crate) mod tests {
                 hash: "",
                 node: players,
                 raw_fields: &[0, 1],
+                raw_gets: &[],
                 raw_index: true,
             },
             Type {
@@ -1034,6 +1111,7 @@ pub(crate) mod tests {
                 hash: "player-hash",
                 node: player,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
         ];
@@ -1070,6 +1148,7 @@ pub(crate) mod tests {
             types: Box::leak(Box::new([
                 Type {
                     raw_fields: &[0],
+                    raw_gets: &[],
                     ..FIELD_TYPES[0]
                 },
                 Type { ..FIELD_TYPES[1] },
@@ -1121,6 +1200,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: map,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1128,6 +1208,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: players,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: true,
                 },
                 Type {
@@ -1135,6 +1216,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: player,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
             ])),
@@ -1184,6 +1266,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: checked,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1191,6 +1274,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: players,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1198,6 +1282,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: player,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
             ])),
@@ -1291,6 +1376,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: world,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1298,6 +1384,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: option,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1305,6 +1392,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: player,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1312,6 +1400,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: map,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
             ])),
@@ -1394,6 +1483,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: map,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1401,6 +1491,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: players,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1408,6 +1499,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: player,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
             ])),
@@ -1454,6 +1546,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: choice,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
                 Type {
@@ -1461,6 +1554,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: players,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: true,
                 },
                 Type {
@@ -1468,6 +1562,7 @@ pub(crate) mod tests {
                     hash: "",
                     node: player,
                     raw_fields: &[],
+                    raw_gets: &[],
                     raw_index: false,
                 },
             ])),
@@ -1571,6 +1666,7 @@ pub(crate) mod tests {
                 hash: "",
                 node: text,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             }],
             ..Table::EMPTY
