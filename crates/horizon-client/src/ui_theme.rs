@@ -648,7 +648,10 @@ mod tests {
 
     #[test]
     fn atlas_reload_regenerates_text_and_corners_at_the_same_address() {
-        let atlas = HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
         reset_atlas();
         let draw = |cache: &mut Cache| {
             let glyph = cache.fonts.face(Face::Regular).glyph_id('A');

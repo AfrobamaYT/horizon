@@ -245,7 +245,8 @@ fn contain<T>(f: impl FnOnce() -> wasmtime::Result<T>) -> wasmtime::Result<T> {
 
 fn charge(mut host: impl wasmtime::AsContextMut, cost: usize) -> wasmtime::Result<()> {
     let mut store = host.as_context_mut();
-    if let Ok(fuel) = store.get_fuel() {
+    if store.engine().get_consume_fuel() {
+        let fuel = store.get_fuel()?;
         let left = fuel
             .checked_sub(cost as u64)
             .ok_or_else(|| wasmtime::Error::msg("internals fuel exhausted"))?;
@@ -255,11 +256,20 @@ fn charge(mut host: impl wasmtime::AsContextMut, cost: usize) -> wasmtime::Resul
 }
 
 fn import<T>(
-    mut host: wasmtime::component::Access<'_, State, View>,
+    host: wasmtime::component::Access<'_, State, View>,
     cells: usize,
     f: impl FnOnce() -> Result<T, wire::Refusal>,
     output: impl FnOnce(&T) -> usize,
 ) -> wasmtime::Result<Result<T, wire::Refusal>> {
+    metered(host, cells, f, |result| result.as_ref().map_or(0, output))
+}
+
+fn metered<T>(
+    mut host: wasmtime::component::Access<'_, State, View>,
+    cells: usize,
+    f: impl FnOnce() -> T,
+    output: impl FnOnce(&T) -> usize,
+) -> wasmtime::Result<T> {
     contain(|| {
         #[cfg(test)]
         let fuel_before = wasmtime::AsContextMut::as_context_mut(&mut host)
@@ -267,9 +277,7 @@ fn import<T>(
             .ok();
         charge(&mut host, 1 + cells)?;
         let result = f();
-        if let Ok(value) = &result {
-            charge(&mut host, output(value))?;
-        }
+        charge(&mut host, output(&result))?;
         #[cfg(test)]
         if let Some(fuel) = fuel_before {
             let left = wasmtime::AsContextMut::as_context_mut(&mut host).get_fuel()?;
@@ -398,6 +406,39 @@ impl wire::HostNodeWithStore<State> for View {
     }
 }
 impl wire::HostWithStore<State> for View {
+    fn get_many(
+        host: wasmtime::component::Access<'_, State, Self>,
+        reads: Vec<(Resource<wire::Node>, u32)>,
+    ) -> wasmtime::Result<Vec<Result<Vec<wire::Cell>, wire::Refusal>>> {
+        let reads = bounded_batch(reads)?;
+        let cells = reads
+            .iter()
+            .map(|(n, _)| node_cost(n).saturating_add(journal_cost()))
+            .fold(reads.len().saturating_sub(1), usize::saturating_add);
+        metered(
+            host,
+            cells,
+            || View.get_many(reads),
+            |results| {
+                results
+                    .iter()
+                    .filter_map(|r| r.as_ref().ok())
+                    .map(|v| wire_cost(v))
+                    .fold(0, usize::saturating_add)
+            },
+        )
+    }
+    fn set_many(
+        host: wasmtime::component::Access<'_, State, Self>,
+        writes: Vec<(Resource<wire::Node>, u32, Vec<wire::Cell>)>,
+    ) -> wasmtime::Result<Vec<Result<(), wire::Refusal>>> {
+        let writes = bounded_batch(writes)?;
+        let cells = writes
+            .iter()
+            .map(|(n, _, v)| node_cost(n).saturating_add(wire_cost(v)))
+            .fold(writes.len().saturating_sub(1), usize::saturating_add);
+        metered(host, cells, || View.set_many(writes), |_| 0)
+    }
     fn root(
         host: wasmtime::component::Access<'_, State, Self>,
         n: u32,
@@ -409,7 +450,7 @@ impl wire::HostWithStore<State> for View {
         declared: u32,
         receiver: Option<Resource<wire::Node>>,
         args: Vec<wire::Arg>,
-    ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
+    ) -> wasmtime::Result<Result<wire::CallReply, wire::Refusal>> {
         let cells = args
             .iter()
             .map(|a| match a {
@@ -426,9 +467,20 @@ impl wire::HostWithStore<State> for View {
                 .saturating_add(cells)
                 .saturating_add(journal_cost()),
             || View.call(declared, receiver, args),
-            reached_cells,
+            |reply| {
+                reply
+                    .updates
+                    .iter()
+                    .map(|cells| wire_cost(cells))
+                    .fold(reached_cells(&reply.result), usize::saturating_add)
+            },
         )
     }
+}
+
+fn bounded_batch<T>(entries: Vec<T>) -> wasmtime::Result<Vec<T>> {
+    wasmtime::ensure!(entries.len() <= 12, "internals batch entry budget");
+    Ok(entries)
 }
 
 fn encode(value: internals::Value) -> Result<Vec<wire::Cell>, wire::Refusal> {
@@ -453,6 +505,24 @@ fn decode(cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
 }
 
 impl View {
+    pub fn get_many(
+        &mut self,
+        reads: Vec<(Resource<wire::Node>, u32)>,
+    ) -> Vec<Result<Vec<wire::Cell>, wire::Refusal>> {
+        reads
+            .into_iter()
+            .map(|(node, field)| self.get(node, field))
+            .collect()
+    }
+    pub fn set_many(
+        &mut self,
+        writes: Vec<(Resource<wire::Node>, u32, Vec<wire::Cell>)>,
+    ) -> Vec<Result<(), wire::Refusal>> {
+        writes
+            .into_iter()
+            .map(|(node, field, value)| self.set(node, field, value))
+            .collect()
+    }
     pub fn field(
         &mut self,
         node: Resource<wire::Node>,
@@ -536,7 +606,7 @@ impl View {
         declared: u32,
         receiver: Option<Resource<wire::Node>>,
         args: Vec<wire::Arg>,
-    ) -> Result<wire::Reached, wire::Refusal> {
+    ) -> Result<wire::CallReply, wire::Refusal> {
         current(|a| {
             let Some(Resolved::Thunk(function)) = a.declared.get(declared as usize) else {
                 return Err(wire::Refusal::NotHere("not a declared function".into()));
@@ -566,10 +636,18 @@ impl View {
             // A game function may dispatch into another wasm group. Its imports must not
             // see this listener's frame, nor alias the mutable borrow held by this call.
             let mask = Scope(CURRENT.replace(std::ptr::null_mut()));
-            let (reached, refused) = a.frame.call(*function, receiver, args)?;
+            let (reply, refused) = a.frame.call(*function, receiver, args)?;
             drop(mask);
             log_refused(refused);
-            a.reached(reached)
+            let updates = reply
+                .updates
+                .into_iter()
+                .map(encode)
+                .collect::<Result<_, _>>()?;
+            Ok(wire::CallReply {
+                result: a.reached(reply.result)?,
+                updates,
+            })
         })
     }
 }
@@ -939,6 +1017,88 @@ mod tests {
     }
 
     #[test]
+    fn batches_preserve_entry_results_and_journal_order() {
+        let mut game = world();
+        let declared = [Resolved::Member { owner: 0, field: 1 }];
+        run(frame(&mut game), &declared, || {
+            let root = View.root(0).unwrap();
+            let results = View.set_many(vec![
+                (borrow(&root), 1, vec![wire::Cell::B(false)]),
+                (borrow(&root), 99, vec![wire::Cell::B(true)]),
+                (borrow(&root), 1, vec![wire::Cell::B(true)]),
+            ]);
+            assert!(results[0].is_ok() && results[1].is_err() && results[2].is_ok());
+            let results = View.get_many(vec![(borrow(&root), 99), (borrow(&root), 1)]);
+            assert!(results[0].is_err());
+            let single = unflatten(View.get(borrow(&root), 1).unwrap()).unwrap();
+            assert_eq!(single, internals::Value::B(true));
+            assert_eq!(
+                unflatten(results.into_iter().nth(1).unwrap().unwrap()).unwrap(),
+                single
+            );
+            assert!(View.get_many(vec![]).is_empty());
+            assert!(View.set_many(vec![]).is_empty());
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
+    fn batch_import_fuel_matches_singles_and_exhausts_before_writes() {
+        use wasmtime::{AsContextMut, component::Access};
+        use wire::{HostNodeWithStore, HostWithStore};
+        let group = fixture_group_with_fuel(true);
+        let mut game = world();
+        let declared = [Resolved::Member { owner: 0, field: 1 }];
+        run(frame(&mut game), &declared, || {
+            let root = View.root(0).unwrap();
+            group.exports.load(|store| {
+                macro_rules! invoke {
+                    ($trait:ident::$method:ident $(, $arg:expr)*) => {
+                        <View as $trait<State>>::$method(Access::new(store.as_context_mut(), |_| View) $(, $arg)*)
+                    };
+                }
+                let writes = || vec![(borrow(&root), 1, vec![wire::Cell::B(true)]), (borrow(&root), 1, vec![wire::Cell::B(true)])];
+                let initial = 1000;
+                store.set_fuel(initial)?;
+                for _ in 0..2 {
+                    invoke!(HostNodeWithStore::set, borrow(&root), 1, vec![wire::Cell::B(true)])?.unwrap();
+                }
+                let single_set = initial - store.get_fuel()?;
+                store.set_fuel(initial)?;
+                invoke!(HostWithStore::set_many, writes())?;
+                assert_eq!(
+                    initial - store.get_fuel()?,
+                    single_set,
+                    "every entry pays its base charge, even refusals"
+                );
+                store.set_fuel(initial)?;
+                for _ in 0..2 {
+                    invoke!(HostNodeWithStore::get, borrow(&root), 1)?.unwrap();
+                }
+                let single_get = initial - store.get_fuel()?;
+                store.set_fuel(initial)?;
+                invoke!(HostWithStore::get_many, vec![(borrow(&root), 1), (borrow(&root), 1)])?;
+                assert_eq!(initial - store.get_fuel()?, single_get);
+                let pending = journal_cost();
+                store.set_fuel(1)?;
+                assert!(invoke!(HostWithStore::set_many, writes()).is_err());
+                let bad = || (Resource::new_borrow(0), 0, Vec::new());
+                assert!(invoke!(HostWithStore::set_many, vec![bad(), bad()]).is_err());
+                store.set_fuel(initial)?;
+                let many = || (0..13).map(|_| (borrow(&root), 1));
+                assert!(invoke!(HostWithStore::get_many, many().collect()).is_err());
+                assert!(invoke!(HostWithStore::set_many, many().map(|(n, f)| (n, f, vec![wire::Cell::B(true)])).collect()).is_err());
+                assert_eq!(journal_cost(), pending);
+                Ok(())
+            }).unwrap();
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn a_binding_reads_writes_and_calls_the_table() {
         let mut game = world();
         run(
@@ -970,7 +1130,8 @@ mod tests {
                     unflatten(host.read(borrow(&first)).unwrap()).unwrap(),
                     internals::Value::Rec(vec![internals::Value::S(10)])
                 );
-                let wire::Reached::Value(left) = host.call(0, Some(borrow(&root)), vec![]).unwrap()
+                let wire::Reached::Value(left) =
+                    host.call(0, Some(borrow(&root)), vec![]).unwrap().result
                 else {
                     panic!("a value")
                 };
@@ -1125,7 +1286,8 @@ mod tests {
         let mut game = world();
         run(frame(&mut game), &[Resolved::Thunk(1)], || {
             let root = View.root(0).unwrap();
-            let wire::Reached::Node(first) = View.call(0, Some(borrow(&root)), vec![]).unwrap()
+            let wire::Reached::Node(first) =
+                View.call(0, Some(borrow(&root)), vec![]).unwrap().result
             else {
                 panic!("a player")
             };
@@ -1238,9 +1400,11 @@ mod tests {
         unsafe fn reenter(
             _: Option<*mut ()>,
             _: Vec<internals::Arg>,
-        ) -> Result<internals::Reply, internals::Refusal> {
+        ) -> Result<internals::CallReply, internals::Refusal> {
             assert!(matches!(View.root(0), Err(wire::Refusal::Gone(_))));
-            Ok(internals::Reply::Value(internals::Value::None))
+            Ok(internals::CallReply::new(internals::Reply::Value(
+                internals::Value::None,
+            )))
         }
         static TABLE: Table = Table {
             types: &[],
@@ -1261,7 +1425,10 @@ mod tests {
         run(frame, &[Resolved::Thunk(0)], || {
             assert!(matches!(
                 View.call(0, None, vec![]),
-                Ok(wire::Reached::Value(_))
+                Ok(wire::CallReply {
+                    result: wire::Reached::Value(_),
+                    ..
+                })
             ));
             // The mask restored the active frame, rather than leaving the imports outside it.
             assert!(matches!(

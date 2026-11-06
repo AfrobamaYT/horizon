@@ -45,7 +45,9 @@ pub fn main() -> horizon_client::Result<()> {
         &crate::test_resources::server_load(),
     )?;
     let book = Book::build(&recipes, &items);
-    let atlas = HudAtlas::build(root)?;
+    let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+        root.to_path_buf(),
+    ))?;
     let root_buf = root.to_path_buf();
     lang::set(lang::Language::load(&[&root_buf], lang::DEFAULT));
     let translate = |key: &str| lang::get(key);

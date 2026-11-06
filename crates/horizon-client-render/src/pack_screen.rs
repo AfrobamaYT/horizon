@@ -1656,9 +1656,12 @@ mod icon_tests {
     /// without one keeps `unknown_pack`.
     #[test]
     fn drawn_icons_take_atlas_slots() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let dirt = load_icon(&png(1, 1, &[134, 96, 67, 255])).unwrap();
         let contrast = load_icon(&png(1, 1, &[0, 0, 0, 255])).unwrap();
@@ -1710,9 +1713,12 @@ mod click_sound_tests {
 
     #[test]
     fn a_cards_parts_do_not_overlap_each_other() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         // Both a wide window (two columns) and a narrow one (one column).
         for (w, h) in [(480, 320), (260, 320)] {
@@ -1751,9 +1757,12 @@ mod click_sound_tests {
 
     #[test]
     fn the_browsers_search_button_submits_what_was_typed() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let mut screen = PackScreen::new(
             &m,
@@ -1789,9 +1798,12 @@ mod click_sound_tests {
 
     #[test]
     fn only_footer_and_confirmation_buttons_request_a_click_sound() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let title = tr("resourcePack.title");
         let mut screen = PackScreen::new(&m, title, 480, 320, false, Vec::new(), &[]);
@@ -1888,9 +1900,12 @@ mod footer_label_tests {
     /// does not panic and scrolls; the short "Done" keeps its centre.
     #[test]
     fn a_footer_label_wider_than_its_button_scrolls() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let wide = Text::literal("Otvori papku s paketami resursov, i jos nesto");
         assert!(m.width(&wide) > 146);
@@ -1927,7 +1942,10 @@ mod footer_label_tests {
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../../.local/horizon-client/26.3")
             });
-        let atlas = crate::hud::HudAtlas::build(&root).unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let before = lang::code();
         let mut codes: Vec<String> = std::fs::read_dir(root.join("assets/minecraft/lang"))

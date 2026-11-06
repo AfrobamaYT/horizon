@@ -7,7 +7,7 @@
 //! The prepared bundles are the built-in pack, so the packs above it are
 //! entries that replace or join a bundle's (`GeneratorData::load_with`).
 use serde_json::Value;
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 /// The bundle of `dimension/<id>.json` level stems. Nothing prepared has
 /// it: a pack's level stem stands in for the world preset's.
@@ -43,7 +43,7 @@ const TAG_KINDS: [(&str, &str); 3] = [
     ("tags/fluid", "fluid_tags"),
     ("tags/worldgen/biome", "biome_tags"),
 ];
-/// The pack folders `add_file` looks at, in walk order.
+/// The pack folders the worldgen resolver reads, in walk order.
 pub const PACK_KINDS: [&str; 5] = [
     "dimension",
     "dimension_type",
@@ -152,25 +152,27 @@ impl LevelHeight {
 /// Replacement and added bundle entries, and tag files, from data packs.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct WorldgenOverrides {
+    templates: BTreeMap<String, horizon_assets::resource_source::Resource>,
     /// Bundle name → id → the highest pack's JSON text for it.
     entries: BTreeMap<String, BTreeMap<String, String>>,
     /// Tag bundle name → (tag id, pack id, tag file text), lowest pack first.
     tags: BTreeMap<String, Vec<(String, String, String)>>,
-    /// Template id → the highest pack's `.nbt` file.
-    templates: BTreeMap<String, Arc<[u8]>>,
 }
 impl WorldgenOverrides {
+    /// Lazy gzip NBT entries, retaining their source generation for cache identity.
+    pub fn templates(&self) -> &BTreeMap<String, horizon_assets::resource_source::Resource> {
+        &self.templates
+    }
+    pub fn set_template(
+        &mut self,
+        id: String,
+        resource: horizon_assets::resource_source::Resource,
+    ) {
+        self.templates.insert(id, resource);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty() && self.tags.is_empty() && self.templates.is_empty()
-    }
-    /// A pack's structure template: called for packs from the lowest to the
-    /// highest, so the last call for an id wins.
-    pub fn set_template(&mut self, id: &str, nbt: Vec<u8>) {
-        self.templates.insert(id.to_owned(), nbt.into());
-    }
-    /// The structure templates packs give, by id.
-    pub fn templates(&self) -> &BTreeMap<String, Arc<[u8]>> {
-        &self.templates
     }
     /// A pack's file for `id` in `bundle`: called for packs from the lowest
     /// to the highest, so the last call for an id wins.

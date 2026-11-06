@@ -50,6 +50,18 @@ pub trait Helpers {
         target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_fire_ticks"
     )]
     fn entity_fire_ticks();
+    /// Remaining portal cooldown in ticks (`Entity.getPortalCooldown`) for players and
+    /// the kinds that go through portals: mobs, items, experience orbs, boats, minecarts,
+    /// primed TNT, falling blocks, arrows and the thrown items and fireballs a chunk saves,
+    /// ender pearls (End gateways only), fireworks and tridents. Zero is a valid value.
+    /// Returns `None` for other kinds (among them armor stands, wind charges and the ender
+    /// dragon), on a client, and for unavailable or stale handles.
+    #[helper(
+        side = "server",
+        receiver = "entity",
+        target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_portal_cooldown"
+    )]
+    fn entity_portal_cooldown();
     #[helper(
         side = "server",
         receiver = "entity",

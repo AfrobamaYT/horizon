@@ -246,9 +246,9 @@ impl Game<'_> {
                         let mut post = load_post(&pack, &folder, &properties, &macros, &inputs);
                         // Textures that name one of the game's: from the resource packs over
                         // the game's own resources.
-                        let resources = self.options.resources.clone();
+                        let resources = self.pack.source.clone();
                         let read = |namespace: &str, path: &str| {
-                            std::fs::read(resources.join("assets").join(namespace).join(path)).ok()
+                            resources.read(&format!("assets/{namespace}/{path}")).ok()
                         };
                         for note in horizon_shaders::resolve_resources(&mut post.textures, &read) {
                             log::warn!("shader pack {name}: {note}");

@@ -63,7 +63,9 @@ fn main() -> horizon_client::Result<()> {
     let stone = assets.registry.default_state("minecraft:stone").unwrap().0;
     let water = assets.registry.default_state("minecraft:water").unwrap().0;
     let tables = Arc::new(SaveTables::new(&assets));
-    let biomes = horizon_client::biome::Biomes::load(root)?;
+    let biomes = horizon_client::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )?;
     let biome_names: Vec<String> = biomes.list.iter().map(|b| b.name.clone()).collect();
     let defaults = horizon_world::item_defaults::read(root)?;
     let sync = horizon_client::lan::data::SyncData::load(
