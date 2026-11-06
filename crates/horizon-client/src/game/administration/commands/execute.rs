@@ -22,6 +22,8 @@ pub(in crate::game) struct Source {
     /// The level this command source uses. Horizon has only this dimension's
     /// chunks loaded in the single-player client.
     pub dimension: Dim,
+    /// Output origin, unchanged by `execute in` or `execute at`.
+    pub origin_dimension: Dim,
     /// The dimension `execute in` named, if any: a server teleports its
     /// players there (`TeleportCommand` into the source's level).
     pub level: Option<super::super::Dim>,
@@ -90,6 +92,7 @@ impl Game<'_> {
             silent: false,
             store: None,
             dimension: self.dim,
+            origin_dimension: self.dim,
             level: None,
             block: None,
             cart: None,
@@ -105,6 +108,7 @@ impl Game<'_> {
             silent: true,
             store: None,
             dimension: self.dim,
+            origin_dimension: self.dim,
             level: None,
             block: None,
             cart: None,

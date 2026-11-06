@@ -58,6 +58,7 @@ impl Game<'_> {
                 silent: false,
                 store: None,
                 dimension: self.dim,
+                origin_dimension: self.dim,
                 level: None,
                 block: None,
                 cart: Some(id),
