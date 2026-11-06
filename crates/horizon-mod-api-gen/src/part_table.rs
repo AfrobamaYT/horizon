@@ -165,6 +165,7 @@ mod tests {
                 .all(|i| matches!(i, Item::Use(_) | Item::Macro(_)))
         );
         assert!(source.contains(OUTPUT));
+        assert!(!api.join("part_table/mod.rs").exists());
         let source = fs::read_to_string(api.join("part_table/shared.rs")).unwrap();
         assert!(source.starts_with("//! Shared table state, cross-kind registration"));
         let file = syn::parse_file(&source).unwrap();
