@@ -4638,6 +4638,30 @@ pub(crate) mod tests {
                 menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
                 (true, 3)
             );
+            // Slot 28 is hotbar 0 in this one-slot mod menu; both indices
+            // refer to inventory cell 0 and the rule caps that cell at three.
+            menu.set_player_item(0, Some(ItemStack::new("minecraft:stone", 8)));
+            menu.click(env, 28, 0, Input::Swap).unwrap();
+            assert_eq!(menu.player_item(0).unwrap().count, 8);
+            assert_eq!(
+                (0..menu.slot_count())
+                    .filter_map(|i| menu.slot(i))
+                    .map(|s| s.count)
+                    .sum::<u32>(),
+                8
+            );
+            // The container's index 0 is distinct, despite the same index.
+            menu.load_slot(0, Some(ItemStack::new("minecraft:dirt", 2)));
+            menu.click(env, 0, 0, Input::Swap).unwrap();
+            assert_eq!(menu.slot(0).unwrap().count, 3);
+            assert_eq!(menu.player_item(0).unwrap().count, 5);
+            assert_eq!(
+                (0..menu.slot_count())
+                    .filter_map(|i| menu.slot(i))
+                    .map(|s| s.count)
+                    .sum::<u32>(),
+                10
+            );
         });
         bare_env_in(&before, |env| {
             assert_eq!(
