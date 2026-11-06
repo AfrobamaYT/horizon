@@ -286,7 +286,7 @@ mod tests {
         observer::IndexedAttachmentObserver,
     };
     use horizon_world::nbt::Tag;
-    use mod_api::{AttachmentHolder, ChunkRef, LevelRef, NativeWorldEpoch};
+    use mod_api::{AttachmentHolder, ChunkRef, DimensionKey, LevelRef, NativeWorldEpoch};
     use std::sync::{Mutex, Weak, atomic::AtomicUsize};
 
     type Index = Arc<Mutex<AttachmentIndex<AttachmentHolder>>>;
@@ -304,7 +304,7 @@ mod tests {
         copy_on_death: false,
         sync: false,
     };
-    fn observe(map: &mut ChunkMap, index: &Index, dimension: &'static str) -> Arc<AtomicUsize> {
+    fn observe(map: &mut ChunkMap, index: &Index, dimension: DimensionKey) -> Arc<AtomicUsize> {
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = calls.clone();
         let level = LevelRef::new(NativeWorldEpoch::new(42), dimension);
@@ -342,13 +342,13 @@ mod tests {
         let mut map = ChunkMap::default();
         // Observer installation also handles chunks loaded before level-open.
         map.insert((3, 5), saved_chunk());
-        let calls = observe(&mut map, &index, "minecraft:overworld");
+        let calls = observe(&mut map, &index, DimensionKey::OVERWORLD);
         let old = index.lock().unwrap().snapshot(&key());
         assert_eq!(old.len(), 1);
         assert_eq!(
             old[0].holder,
             AttachmentHolder::Chunk(ChunkRef::new(
-                LevelRef::new(NativeWorldEpoch::new(42), "minecraft:overworld"),
+                LevelRef::new(NativeWorldEpoch::new(42), DimensionKey::OVERWORLD),
                 [3, 5]
             ))
         );
@@ -391,7 +391,7 @@ mod tests {
         let chunk = Arc::make_mut(map.get_mut(&(3, 5)).unwrap());
         Arc::make_mut(chunk.saved.as_mut().unwrap()).last_update = 20;
         let mut other = ChunkMap::default();
-        observe(&mut other, &other_index, "minecraft:the_nether");
+        observe(&mut other, &other_index, DimensionKey::NETHER);
         other.insert((3, 5), saved_chunk());
         std::mem::swap(&mut map, &mut other);
         map.remove(&(3, 5));
@@ -419,7 +419,7 @@ mod tests {
     fn untouched_empty_chunks_do_not_register_before_attachment_access() {
         let index = Index::default();
         let mut map = ChunkMap::default();
-        let calls = observe(&mut map, &index, "minecraft:overworld");
+        let calls = observe(&mut map, &index, DimensionKey::OVERWORLD);
         map.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         let mut saved_empty = Chunk::empty(1, 0);
         saved_empty.saved = Some(Arc::default());
@@ -441,7 +441,7 @@ mod tests {
     fn chunk_replacement_clear_and_map_drop_retire_only_resident_rows() {
         let index = Index::default();
         let mut map = ChunkMap::default();
-        observe(&mut map, &index, "minecraft:overworld");
+        observe(&mut map, &index, DimensionKey::OVERWORLD);
         map.insert((3, 5), saved_chunk());
         let retained = index.lock().unwrap().snapshot(&key());
         let mut replacement = Chunk::empty(3, 5);
@@ -504,7 +504,7 @@ mod tests {
             Arc::new(chunk)
         };
         let mut map = ChunkMap::default();
-        observe(&mut map, &index, "minecraft:overworld");
+        observe(&mut map, &index, DimensionKey::OVERWORLD);
         map.insert((3, 5), payload());
         drop(map.remove(&(3, 5)));
         map.insert((3, 5), payload());
