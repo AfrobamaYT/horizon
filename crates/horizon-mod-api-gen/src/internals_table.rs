@@ -51,6 +51,8 @@ pub struct Counts {
     pub unbound: BTreeMap<(String, &'static str, String), &'static str>,
     /// Native methods exposed under a collision-free guest name.
     pub renamed_methods: BTreeMap<String, String>,
+    /// Map nodes without key access because native equality cannot be proven structural.
+    pub refused_map_keys: BTreeSet<String>,
     /// Functions with a part that can't cross, or a form a thunk can't make (a generic, a `self`
     /// taken by value, a returned value that is no copy).
     pub skipped: usize,
@@ -105,6 +107,7 @@ struct NodeDef {
     function: TokenStream,
     raw_fields: Vec<u32>,
     raw_index: bool,
+    refused_key: Option<String>,
 }
 
 struct Gen<'r> {
@@ -549,6 +552,12 @@ impl<'r> Gen<'r> {
                 .collect(),
             _ => Vec::new(),
         };
+        if let Shape::Collection(Collection::HashMap | Collection::BTreeMap, args) = shape
+            && (!buildable(&args[0], self.rule) || !structural_key(&args[0]))
+        {
+            self.nodes[id as usize].refused_key =
+                Some(spell(&args[0]).map_or_else(|| format!("{:?}", args[0]), |ty| ty.to_string()));
+        }
         self.nodes[id as usize].raw_fields = fields;
         self.nodes[id as usize].raw_index = match shape {
             Shape::Array(elem, _) | Shape::Slice(elem) => raw(elem),
@@ -765,12 +774,13 @@ impl<'r> Gen<'r> {
                 Collection::HashMap | Collection::BTreeMap
                     if buildable(&args[0], rule) && structural_key(&args[0]) =>
                 {
+                    let key_ty = spell(&args[0]).expect("buildable key");
                     let key = self.decode(&args[0], quote!(key.clone()));
                     let entry = self.element(&args[1]);
                     let encoded = self.encode(&args[0], quote!(&key));
                     quote! {
                         #len
-                        I::Op::CanonicalKey(key) => { let key = #key; Ok(I::Reply::Value(#encoded)) }
+                        I::Op::CanonicalKey(key) => { let key: #key_ty = #key; Ok(I::Reply::Value(#encoded)) }
                         I::Op::Key(key) => {
                             let key = #key;
                             let item: ::std::option::Option<*mut ()> = if w {
@@ -1648,12 +1658,17 @@ pub fn table_with_points(
             quote!(I::Member { path: #path, hash: #hash, owner: #id, field: #field },)
         })
         .collect();
+    counts.refused_map_keys = generator
+        .nodes
+        .iter()
+        .filter_map(|n| n.refused_key.clone())
+        .collect();
     counts.types = generator.nodes.len();
     counts.thunks = thunks.len();
     let types = generator
         .nodes
         .iter()
-        .map(|NodeDef { path, hash, function, raw_fields, raw_index }| quote!(I::Type { path: #path, hash: #hash, node: #function, raw_fields: &[#(#raw_fields),*], raw_index: #raw_index },));
+        .map(|NodeDef { path, hash, function, raw_fields, raw_index, .. }| quote!(I::Type { path: #path, hash: #hash, node: #function, raw_fields: &[#(#raw_fields),*], raw_index: #raw_index },));
     let items = &generator.items;
     let code = quote! {
         #![allow(unsafe_code, unused_unsafe, unused_parens, non_snake_case, dead_code)]
@@ -1738,6 +1753,44 @@ pub(crate) mod tests {
                 .success()
         );
         std::fs::remove_dir_all(build).unwrap();
+    }
+
+    #[test]
+    fn generated_option_map_keys_canonicalize_before_writes() {
+        let entries = [
+            internal(
+                "horizon_client::Player",
+                "struct",
+                "struct Player { health: u32 }",
+            ),
+            internal(
+                "horizon_client::Bag",
+                "struct",
+                "struct Bag { players: std::collections::BTreeMap<Option<u32>, Player> }",
+            ),
+        ];
+        let (code, counts) = all_table(&entries);
+        assert!(counts.refused_map_keys.is_empty());
+        run_fixture(
+            &code,
+            "struct Player { health: u32 } struct Bag { players: std::collections::BTreeMap<Option<u32>, Player> }",
+            r#"
+            let mut bag = Bag { players: std::collections::BTreeMap::from([(None, Player { health: 1 })]) };
+            let ty = __internals::TABLE.types.iter().find(|t| t.path.ends_with("Bag")).unwrap();
+            unsafe {
+                let Reply::Node(map, map_ty, true) = (ty.node)((&raw mut bag).cast(), true, Op::Field(0)).unwrap() else { panic!() };
+                let map_node = __internals::TABLE.types[map_ty as usize].node;
+                let Reply::Value(key1) = map_node(map, true, Op::CanonicalKey(&Value::Var(0, vec![]))).unwrap() else { panic!() };
+                let Reply::Value(key2) = map_node(map, true, Op::CanonicalKey(&Value::Var(0, vec![Value::U(42)]))).unwrap() else { panic!() };
+                assert_eq!(key1, key2);
+                let Reply::Node(player, ty, true) = map_node(map, true, Op::Key(&key1)).unwrap() else { panic!() };
+                let player_node = __internals::TABLE.types[ty as usize].node;
+                assert_eq!(player_node(player, true, Op::Set(0, Value::U(17))), Ok(Reply::Done));
+                let Reply::Node(player, ty, _) = map_node(map, false, Op::Key(&key2)).unwrap() else { panic!() };
+                assert_eq!((__internals::TABLE.types[ty as usize].node)(player, false, Op::Get(0)), Ok(Reply::Value(Value::U(17))));
+            }
+        "#,
+        );
     }
 
     #[test]

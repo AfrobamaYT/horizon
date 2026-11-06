@@ -202,6 +202,9 @@ fn real_catalog_has_compiling_host_and_guest_bindings() {
         skipped
             .iter()
             .map(|(p, r)| format!("- `{p}`: {r}"))
+            .chain(bound.refused_map_keys.iter().map(|key| format!(
+                "- map key `{key}`: native equality is not proven structural or cannot be decoded"
+            )))
             .collect::<Vec<_>>()
             .join("\n")
     );

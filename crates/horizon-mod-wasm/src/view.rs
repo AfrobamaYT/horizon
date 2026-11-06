@@ -263,8 +263,6 @@ fn import<T>(
     contain(|| {
         charge(&mut host, 1 + cells)?;
         let result = f();
-        let walk = current(|active| Ok(active.frame.take_walk_fuel())).unwrap_or(0);
-        charge(&mut host, walk)?;
         if let Ok(value) = &result {
             charge(&mut host, output(value))?;
         }
@@ -283,6 +281,10 @@ fn wire_cost(cells: &[wire::Cell]) -> usize {
     cells.len().saturating_add(bytes.div_ceil(64))
 }
 
+fn node_cost(node: &Resource<wire::Node>) -> usize {
+    current(|active| Ok(crate::frame::walk_cost(&active.node(node)?.path))).unwrap_or(0)
+}
+
 fn reached_cells(value: &wire::Reached) -> usize {
     match value {
         wire::Reached::Value(v) => wire_cost(v),
@@ -298,14 +300,19 @@ impl wire::HostNodeWithStore<State> for View {
         node: Resource<wire::Node>,
         n: u32,
     ) -> wasmtime::Result<Result<Resource<wire::Node>, wire::Refusal>> {
-        import(host, 0, || View.field(node, n), |_| 0)
+        import(host, node_cost(&node), || View.field(node, n), |_| 0)
     }
     fn get(
         host: wasmtime::component::Access<'_, State, Self>,
         node: Resource<wire::Node>,
         n: u32,
     ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
-        import(host, 0, || View.get(node, n), |v| wire_cost(v))
+        import(
+            host,
+            node_cost(&node),
+            || View.get(node, n),
+            |v| wire_cost(v),
+        )
     }
     fn set(
         host: wasmtime::component::Access<'_, State, Self>,
@@ -313,39 +320,54 @@ impl wire::HostNodeWithStore<State> for View {
         n: u32,
         v: Vec<wire::Cell>,
     ) -> wasmtime::Result<Result<(), wire::Refusal>> {
-        import(host, wire_cost(&v), || View.set(node, n, v), |_| 0)
+        import(
+            host,
+            node_cost(&node).saturating_add(wire_cost(&v)),
+            || View.set(node, n, v),
+            |_| 0,
+        )
     }
     fn index(
         host: wasmtime::component::Access<'_, State, Self>,
         node: Resource<wire::Node>,
         i: u64,
     ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
-        import(host, 0, || View.index(node, i), reached_cells)
+        import(
+            host,
+            node_cost(&node),
+            || View.index(node, i),
+            reached_cells,
+        )
     }
     fn key(
         host: wasmtime::component::Access<'_, State, Self>,
         node: Resource<wire::Node>,
         k: Vec<wire::Cell>,
     ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
-        import(host, wire_cost(&k), || View.key(node, k), reached_cells)
+        import(
+            host,
+            node_cost(&node).saturating_add(wire_cost(&k)),
+            || View.key(node, k),
+            reached_cells,
+        )
     }
     fn len(
         host: wasmtime::component::Access<'_, State, Self>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<Result<u64, wire::Refusal>> {
-        import(host, 0, || View.len(node), |_| 0)
+        import(host, node_cost(&node), || View.len(node), |_| 0)
     }
     fn case(
         host: wasmtime::component::Access<'_, State, Self>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<Result<u32, wire::Refusal>> {
-        import(host, 0, || View.case(node), |_| 0)
+        import(host, node_cost(&node), || View.case(node), |_| 0)
     }
     fn read(
         host: wasmtime::component::Access<'_, State, Self>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
-        import(host, 0, || View.read(node), |v| wire_cost(v))
+        import(host, node_cost(&node), || View.read(node), |v| wire_cost(v))
     }
     fn drop(
         mut host: wasmtime::component::Access<'_, State, Self>,
@@ -374,9 +396,12 @@ impl wire::HostWithStore<State> for View {
             .iter()
             .map(|a| match a {
                 wire::Arg::Value(v) => wire_cost(v),
-                _ => 0,
+                wire::Arg::Node(n) => node_cost(n),
             })
-            .sum::<usize>();
+            .fold(
+                receiver.as_ref().map_or(0, node_cost),
+                usize::saturating_add,
+            );
         import(
             host,
             1000 + cells,
@@ -617,6 +642,9 @@ mod tests {
         declared: Vec<Resolved>,
     }
     fn fixture_group() -> FixtureGroup {
+        fixture_group_with_fuel(false)
+    }
+    fn fixture_group_with_fuel(fuel: bool) -> FixtureGroup {
         use mod_api::__private::wasm_host::{Member, instantiate};
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_WASM_INTERNALS").expect("fixture directory"),
@@ -631,6 +659,9 @@ mod tests {
         let mut config = crate::RuntimeConfig::default();
         // These tests must exercise the import refusal, not race the normal hook deadline.
         config.budgets.call = std::time::Duration::from_secs(30);
+        if fuel {
+            config.budgets.fuel = Some(Default::default());
+        }
         let engine = crate::engine(&config).unwrap();
         let component =
             crate::component(&engine, &config, &std, std::slice::from_ref(&package), &[0]).unwrap();
@@ -748,6 +779,28 @@ mod tests {
     #[ignore = "needs compiled internals fixture and std member"]
     fn guest_journal_overflow_refuses_without_affecting_another_group() {
         refuses_group_but_not_another("budget", 1);
+    }
+
+    #[test]
+    #[ignore = "needs compiled internals fixture and std member"]
+    fn reused_large_string_exhausts_fuel_without_stopping_another_group() {
+        let large = fixture_group_with_fuel(true);
+        let small = fixture_group_with_fuel(true);
+        let healthy = fixture_group_with_fuel(true);
+        let mut large_game = fixture_game();
+        let mut small_game = fixture_game();
+        assert!(fixture_call(&large, &mut large_game, &"x".repeat(1_048_576)).is_none());
+        let _ = fixture_call(&small, &mut small_game, "x");
+        let large_calls = large_game.left - 1;
+        let small_calls = small_game.left - 1;
+        assert!(
+            small_calls >= 1000 * (large_calls + 1),
+            "large={large_calls}, small={small_calls}"
+        );
+        assert!(large.exports.stopped());
+        let mut other = fixture_game();
+        assert_eq!(fixture_call(&healthy, &mut other, "before"), Some(()));
+        assert!(!healthy.exports.stopped());
     }
 
     fn borrow(node: &Resource<wire::Node>) -> Resource<wire::Node> {

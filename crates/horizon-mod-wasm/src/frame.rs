@@ -70,7 +70,6 @@ pub struct Frame<'t> {
     /// Bumped by every game function call: every cached pointer is stale after it.
     generation: u64,
     cache_generation: Cell<u64>,
-    walk_fuel: Cell<usize>,
     journal_cells: usize,
     journal_bytes: usize,
     journal_entries: usize,
@@ -82,6 +81,25 @@ fn gone(what: &str) -> Refusal {
 
 fn not_here(what: &str) -> Refusal {
     Refusal::NotHere(what.to_owned())
+}
+
+/// Fuel to walk a stored path, without resolving any game pointers.
+pub(crate) fn walk_cost(path: &Path<Value>) -> usize {
+    let mut bytes = 0usize;
+    let mut pending = Vec::new();
+    for step in &path.steps {
+        if let Step::Key(key) = step {
+            pending.push(key);
+        }
+    }
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Str(s) => bytes = bytes.saturating_add(s.len()),
+            Value::Seq(v) | Value::Rec(v) | Value::Var(_, v) => pending.extend(v),
+            _ => {}
+        }
+    }
+    path.steps.len().saturating_add(bytes.div_ceil(64))
 }
 
 /// The retained payload of a plain value. Sequence storage counts too, including byte arrays.
@@ -137,7 +155,6 @@ impl<'t> Frame<'t> {
             allowed_members: BTreeSet::new(),
             generation: 0,
             cache_generation: Cell::new(0),
-            walk_fuel: Cell::new(0),
             journal_cells: 0,
             journal_bytes: 0,
             journal_entries: 0,
@@ -233,26 +250,6 @@ impl<'t> Frame<'t> {
 
     /// Where `path` leads now, step by step from its root.
     fn walk_with(&self, path: &Path<Value>, writable: bool) -> Result<Resolved, Refusal> {
-        let mut bytes = 0usize;
-        let mut pending = Vec::new();
-        for step in &path.steps {
-            if let Step::Key(key) = step {
-                pending.push(key);
-            }
-        }
-        while let Some(value) = pending.pop() {
-            match value {
-                Value::Str(s) => bytes = bytes.saturating_add(s.len()),
-                Value::Seq(v) | Value::Rec(v) | Value::Var(_, v) => pending.extend(v),
-                _ => {}
-            }
-        }
-        self.walk_fuel.set(
-            self.walk_fuel
-                .get()
-                .saturating_add(path.steps.len())
-                .saturating_add(bytes.div_ceil(64)),
-        );
         let root = self.live_root(path.root)?;
         let mut at = Resolved {
             ptr: root.ptr,
@@ -277,10 +274,6 @@ impl<'t> Frame<'t> {
 
     fn walk(&self, path: &Path<Value>) -> Result<Resolved, Refusal> {
         self.walk_with(path, true)
-    }
-
-    pub(crate) fn take_walk_fuel(&self) -> usize {
-        self.walk_fuel.replace(0)
     }
 
     /// Where `node` is, from its cache when nothing has moved since.
@@ -1184,6 +1177,139 @@ pub(crate) mod tests {
             steps: vec![Step::Field(0)],
         };
         assert!(!frame.walk_with(&path, false).unwrap().writable);
+    }
+
+    #[test]
+    fn call_shared_nodes_through_option_and_map_from_writable_root() {
+        struct World {
+            maybe: Option<Player>,
+            map: std::collections::BTreeMap<u32, Player>,
+        }
+        unsafe fn world(p: *mut (), w: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            match op {
+                Op::Field(0) => Ok(Reply::Node(
+                    unsafe { (&raw const (*p.cast::<World>()).maybe).cast_mut().cast() },
+                    1,
+                    w,
+                )),
+                Op::Field(1) => Ok(Reply::Node(
+                    unsafe { (&raw const (*p.cast::<World>()).map).cast_mut().cast() },
+                    3,
+                    w,
+                )),
+                _ => Err(not_here("world")),
+            }
+        }
+        unsafe fn option(p: *mut (), w: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            match op {
+                Op::Field(0) => Ok(Reply::Node(
+                    unsafe {
+                        (&*p.cast::<Option<Player>>()).as_ref().unwrap() as *const Player as *mut ()
+                    },
+                    PLAYER,
+                    w,
+                )),
+                _ => Err(not_here("option")),
+            }
+        }
+        unsafe fn map(p: *mut (), w: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            match op {
+                Op::CanonicalKey(key) => Ok(Reply::Value(Value::U(
+                    mod_points::internals::int::<u32>(key.clone())?.into(),
+                ))),
+                Op::Key(key) => {
+                    let key = mod_points::internals::int::<u32>(key.clone())?;
+                    let player = unsafe {
+                        (&*p.cast::<std::collections::BTreeMap<u32, Player>>())
+                            .get(&key)
+                            .unwrap()
+                    };
+                    Ok(Reply::Node(
+                        (player as *const Player).cast_mut().cast(),
+                        PLAYER,
+                        w,
+                    ))
+                }
+                _ => Err(not_here("map")),
+            }
+        }
+        unsafe fn sum(_: Option<*mut ()>, args: Vec<Arg>) -> Result<Reply, Refusal> {
+            let [Arg::Node(a), Arg::Node(b)] = mod_points::internals::fields::<_, 2>(args)? else {
+                panic!()
+            };
+            let (a, b) = unsafe { (&*a.cast::<Player>(), &*b.cast::<Player>()) };
+            Ok(Reply::Value(Value::S(a.health + b.health)))
+        }
+        let table = Table {
+            types: Box::leak(Box::new([
+                Type {
+                    path: "World",
+                    hash: "",
+                    node: world,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+                Type {
+                    path: "Option",
+                    hash: "",
+                    node: option,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+                Type {
+                    path: "Player",
+                    hash: "",
+                    node: player,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+                Type {
+                    path: "Map",
+                    hash: "",
+                    node: map,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+            ])),
+            thunks: Box::leak(Box::new([mod_points::internals::Thunk {
+                path: "sum",
+                hash: "",
+                receiver: None,
+                args: &[Some(PLAYER), Some(PLAYER)],
+                writes: 0,
+                call: sum,
+            }])),
+            ..TABLE
+        };
+        let mut world = World {
+            maybe: Some(Player { health: 3 }),
+            map: std::collections::BTreeMap::from([(7, Player { health: 4 })]),
+        };
+        let mut frame = unsafe {
+            Frame::new(
+                &table,
+                vec![Root {
+                    ptr: (&raw mut world).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        let root = frame.root(0).unwrap();
+        let option = frame.field(&root, 0).unwrap();
+        let a = frame.field(&option, 0).unwrap();
+        let map = frame.field(&root, 1).unwrap();
+        let b = node(frame.key(&map, Value::U(7)).unwrap());
+        let (Reached::Value(value), refused) = frame
+            .call(0, None, vec![Call::Node(&a), Call::Node(&b)])
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(value, Value::S(7));
+        assert!(refused.is_empty());
     }
 
     #[test]
