@@ -369,8 +369,7 @@ impl Shapes {
         for file in files {
             let text = fs::read_to_string(&file.path)
                 .map_err(|e| format!("{}: {e}", file.path.display()))?;
-            let parsed =
-                syn::parse_file(&text).map_err(|e| format!("{}: {e}", file.path.display()))?;
+            let parsed = crate::game_modules::parse(&file.path, &text)?;
             self.items(&file.module, &file.cfg, &parsed.items);
         }
         Ok(())
@@ -570,6 +569,9 @@ impl Pass {
             return Ok(index);
         }
         let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        // Staged source copies materialize directory-derived declarations before widening them.
+        // Store that same text so source spans and edits still address the exact bytes parsed.
+        let text = crate::game_modules::expand(path, &text)?;
         let parsed = syn::parse_file(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let lines = std::iter::once(0)
             .chain(text.match_indices('\n').map(|(i, _)| i + 1))
@@ -1361,6 +1363,54 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn game_area_moves_preserve_internals_points_and_helper_targets() {
+        let source = "struct Game; mod feature;";
+        let module = "use super::Game; impl Game { fn action(&self) -> u8 { 7 } }";
+        let before = Fixture::new(source);
+        before.put("crates/horizon-client/src/game/feature.rs", module);
+        let after = Fixture::new(
+            "struct Game;\ninclude!(concat!(env!(\"OUT_DIR\"), \"/game_modules.rs\"));",
+        );
+        after.put("crates/horizon-client/src/game/runtime/.game-area", "");
+        after.put(
+            "crates/horizon-client/src/game/runtime/feature.rs",
+            "include!(\"feature/shared.rs\");",
+        );
+        after.put(
+            "crates/horizon-client/src/game/runtime/feature/shared.rs",
+            module,
+        );
+        fn helpers(root: &Path) -> Vec<String> {
+            let mut methods = Vec::new();
+            crate::game_methods(
+                &root.join("crates/horizon-client/src/game"),
+                "horizon_client::game",
+                &mut methods,
+            )
+            .unwrap();
+            methods
+                .into_iter()
+                .map(|(module, method)| format!("{module}::{}", method.sig.to_token_stream()))
+                .collect()
+        }
+        assert_eq!(helpers(&before.0), helpers(&after.0));
+        fn points(root: &Path) -> BTreeSet<String> {
+            crate::points::game_files(&root.join("crates/horizon-client/src"), true)
+                .unwrap()
+                .into_iter()
+                .map(|file| file.module)
+                .collect()
+        }
+        assert_eq!(points(&before.0), points(&after.0));
+        assert_eq!(
+            widen_with(&before.0, &[]).unwrap().entries,
+            widen_with(&after.0, &[]).unwrap().entries
+        );
+        assert!(after.game().contains("pub mod feature;"));
+        assert!(!after.game().contains("game_modules.rs"));
     }
 
     fn shapes_fixture(game: &str) -> Fixture {
