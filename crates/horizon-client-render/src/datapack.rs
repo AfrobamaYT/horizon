@@ -22,6 +22,12 @@ pub struct DataPack {
     pub selection: Option<crate::pack_screen::PackInfo>,
 }
 impl DataPack {
+    /// Whether this repository entry comes from the feature-pack source.
+    pub fn is_feature(&self) -> bool {
+        self.selection
+            .as_ref()
+            .is_some_and(|info| info.source == crate::pack_screen::Source::Feature)
+    }
     /// A named resource layer, retaining its open source for lazy reads.
     pub fn from_source(id: String, source: ResourceSource) -> Self {
         Self {
@@ -151,11 +157,35 @@ pub fn feature_packs(resources: &Path) -> Vec<DataPack> {
     for e in entries.flatten() {
         let path = e.path();
         if path.join("pack.mcmeta").exists() {
-            packs.push(DataPack {
+            let mut pack = DataPack {
                 id: e.file_name().to_string_lossy().into_owned(),
                 source: ResourceSource::directory(path),
                 selection: None,
+            };
+            let meta = pack.mcmeta();
+            let (description, description_style) =
+                crate::packs::component_root(&meta["pack"]["description"]);
+            let name = format!("dataPack.{}.name", pack.id);
+            pack.selection = Some(crate::pack_screen::PackInfo {
+                id: pack.id.clone(),
+                title: if crate::lang::has(&name) {
+                    crate::text::Text::translate(&name, &[])
+                } else {
+                    crate::text::Text::literal(pack.id.clone())
+                },
+                description,
+                description_style,
+                source: crate::pack_screen::Source::Feature,
+                compat: crate::packs::compatibility_for(
+                    &meta,
+                    horizon_core::version::DATA_PACK_FORMAT,
+                ),
+                icon: None,
+                required: false,
+                position: crate::packs::Position::Bottom,
+                fixed: false,
             });
+            packs.push(pack);
         }
     }
     packs.sort_by(|a, b| a.id.cmp(&b.id));
@@ -233,21 +263,7 @@ pub fn screen_packs(dir: &Path, resources: &Path) -> Vec<crate::pack_screen::Pac
         fixed: false,
     });
     for p in feature_packs(resources) {
-        let meta = p.mcmeta();
-        let (description, description_style) =
-            crate::packs::component_root(&meta["pack"]["description"]);
-        infos.push(PackInfo {
-            icon: None,
-            id: p.id.clone(),
-            title: Text::translate(&format!("dataPack.{}.name", p.id), &[]),
-            description,
-            description_style,
-            source: Source::Feature,
-            compat: crate::packs::compatibility_for(&meta, format),
-            required: false,
-            position: Position::Bottom,
-            fixed: false,
-        });
+        infos.extend(p.selection);
     }
     infos
 }
@@ -836,8 +852,7 @@ pub fn enabled_ids(world: &Path, packs: &[DataPack], enabled_features: &[String]
         }
     }
     for p in packs {
-        let feature_pack = !p.id.starts_with("file/") && p.id != "vanilla";
-        if feature_pack
+        if p.is_feature()
             && !p.features().is_empty()
             && features_enabled(p, enabled_features)
             && !enabled.contains(&p.id)

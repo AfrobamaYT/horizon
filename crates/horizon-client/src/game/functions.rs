@@ -743,8 +743,22 @@ impl Game<'_> {
         };
         let source = if id == "vanilla" {
             "pack.source.builtin"
-        } else if FEATURE_PACKS.iter().any(|(p, _)| *p == id) {
+        } else if self
+            .fns
+            .packs
+            .iter()
+            .any(|pack| pack.id == id && pack.is_feature())
+        {
             "pack.source.feature"
+        } else if self
+            .fns
+            .packs
+            .iter()
+            .find(|pack| pack.id == id)
+            .and_then(|pack| pack.selection.as_ref())
+            .is_some_and(|info| info.source == horizon_client::pack_screen::Source::BuiltIn)
+        {
+            "pack.source.builtin"
         } else {
             "pack.source.world"
         };
@@ -832,6 +846,19 @@ impl Game<'_> {
         ));
         Ok(1)
     }
+    fn missing_pack_features(&self, id: &str) -> Vec<String> {
+        self.fns
+            .packs
+            .iter()
+            .find(|pack| pack.id == id)
+            .map(|pack| {
+                pack.features()
+                    .into_iter()
+                    .filter(|flag| !self.level.enabled_features.contains(flag))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
     pub(super) fn cmd_datapack(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let name = match ctx.get("name") {
             Some(Arg::Str(n)) => Some(n.clone()),
@@ -845,18 +872,9 @@ impl Game<'_> {
         let available: Vec<String> = std::iter::once("vanilla".to_owned())
             .chain(self.fns.packs.iter().map(|p| p.id.clone()))
             .filter(|p| !selected.contains(p))
-            .filter(|p| {
-                FEATURE_PACKS
-                    .iter()
-                    .find(|(f, _)| *f == p.as_str())
-                    .is_none_or(|(_, flag)| self.level.enabled_features.iter().any(|f| f == flag))
-            })
+            .filter(|p| self.missing_pack_features(p).is_empty())
             .collect();
-        let known = |g: &Self, n: &str| {
-            n == "vanilla"
-                || FEATURE_PACKS.iter().any(|(p, _)| *p == n)
-                || g.fns.packs.iter().any(|p| p.id == n)
-        };
+        let known = |g: &Self, n: &str| n == "vanilla" || g.fns.packs.iter().any(|p| p.id == n);
         match id {
             "datapack.create" => self.create_pack(ctx),
             "datapack.list" => {
@@ -908,14 +926,13 @@ impl Game<'_> {
                 if selected.contains(&name) {
                     return Err(err("commands.datapack.enable.failed", &[&name]));
                 }
-                if let Some((_, flag)) = FEATURE_PACKS.iter().find(|(p, _)| *p == name)
-                    && !self.level.enabled_features.iter().any(|f| f == flag)
-                {
+                let missing = self.missing_pack_features(&name);
+                if !missing.is_empty() {
                     // `DataPackCommand`: the pack's requested features must
                     // be a subset of the world's enabled ones.
                     return Err(err(
                         "commands.datapack.enable.failed.no_flags",
-                        &[&name, flag],
+                        &[&name, &missing.join(", ")],
                     ));
                 }
                 if name == "vanilla" {
@@ -932,6 +949,18 @@ impl Game<'_> {
                             return Err(err("commands.datapack.unknown", &[e]));
                         };
                         if ctx.has("before") { i } else { i + 1 }
+                    } else if !ctx.has("last")
+                        && self
+                            .fns
+                            .packs
+                            .iter()
+                            .find(|pack| pack.id == name)
+                            .and_then(|pack| pack.selection.as_ref())
+                            .is_some_and(|info| {
+                                info.position == horizon_client::packs::Position::Bottom
+                            })
+                    {
+                        0
                     } else {
                         self.fns.enabled.len()
                     };
@@ -962,10 +991,22 @@ impl Game<'_> {
                 {
                     return Err(err("horizon.datapack.required", &[&name]));
                 }
-                if FEATURE_PACKS.iter().any(|(p, _)| *p == name) {
+                if self
+                    .fns
+                    .packs
+                    .iter()
+                    .any(|pack| pack.id == name && pack.is_feature() && !pack.features().is_empty())
+                {
                     // `DataPackCommand`'s ERROR_CANNOT_DISABLE_FEATURE: the
                     // flag stays on for the world's life.
                     return Err(err("commands.datapack.disable.failed.feature", &[&name]));
+                }
+                let missing = self.missing_pack_features(&name);
+                if !missing.is_empty() {
+                    return Err(err(
+                        "commands.datapack.enable.failed.no_flags",
+                        &[&name, &missing.join(", ")],
+                    ));
                 }
                 if name == "vanilla" {
                     self.cmds.vanilla_disabled = true;
@@ -1055,14 +1096,6 @@ impl Game<'_> {
         Ok(self.conditions_hold(&json, view.as_ref(), source.pos))
     }
 }
-
-/// The built-in feature packs and the feature flag each needs (none of them
-/// enabled in a world created without experiments).
-const FEATURE_PACKS: &[(&str, &str)] = &[
-    ("minecart_improvements", "minecraft:minecart_improvements"),
-    ("redstone_experiments", "minecraft:redstone_experiments"),
-    ("trade_rebalance", "minecraft:trade_rebalance"),
-];
 
 #[cfg(test)]
 mod tests {
