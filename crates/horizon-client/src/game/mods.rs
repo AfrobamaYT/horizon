@@ -114,6 +114,12 @@ impl ModsState {
 
 /// Capture load inputs at the resource-generation boundary, before workers share them.
 pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client::Result<ItemData> {
+    let phase = mod_api::__private::PhaseOwner::scope(if role.is_client() {
+        mod_api::__private::ModPhase::Setup
+    } else {
+        mod_api::__private::ModPhase::World
+    });
+    let _reload = phase.reloading()?;
     let mut registries: BTreeMap<_, _> = builtin_registries(root)?
         .registries
         .into_iter()
@@ -160,6 +166,11 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
     Ok(())
 }
 
+/// Finish every once-only content declaration on the registration thread.
+pub(super) fn freeze_declarations() {
+    let _ = native_declared();
+}
+
 struct NativeDeclared {
     blocks: Vec<horizon_mods::content::Block>,
     items: Vec<horizon_mods::content::Item>,
@@ -196,6 +207,16 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
     let mut names = Vec::new();
     Game::native_standalone_models(&RegistrationContext::new(), &mut names);
     Some(names)
+}
+/// The native mods' entity model layers (`native_layer_definitions`), kept
+/// once at start for `native_bake_layer`.
+pub(super) fn register_layer_definitions(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut layers = Vec::new();
+    Game::native_layer_definitions(&RegistrationContext::new(), &mut layers);
+    horizon_client::mobs::model_layers::register(layers);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -444,7 +465,7 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    mod_api::__private::validate_block_entity_type_keys(&types)?;
+    mod_api::__private::resolve_block_entity_types(&types).map_err(|errors| errors.join("\n"))?;
     block_entity_types::install(types)?;
     Ok(())
 }

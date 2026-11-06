@@ -68,13 +68,17 @@ fn stage_reads_resolved_asset_bytes_without_a_directory() {
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
-    let prepared = stage_client_reload(&source, listeners).unwrap();
+    let prepared =
+        stage_client_reload(&source, listeners, mod_api::__private::ModPhase::World).unwrap();
     assert_eq!(
         listener.seen.lock().unwrap().as_slice(),
         ["test_mod:top=selected"]
     );
     assert!(applied.lock().unwrap().is_empty());
-    apply_client_reload(prepared);
+    apply_client_reload(
+        &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
+        prepared,
+    );
     assert_eq!(applied.lock().unwrap().as_slice(), ["hats"]);
 }
 
@@ -93,6 +97,7 @@ fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
     let prepared = stage_client_reload(
         &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
         listeners,
+        mod_api::__private::ModPhase::World,
     )
     .unwrap();
     assert_eq!(
@@ -100,7 +105,10 @@ fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
         ["test_mod:top=\"top\""]
     );
     assert!(applied.lock().unwrap().is_empty(), "nothing published yet");
-    apply_client_reload(prepared);
+    apply_client_reload(
+        &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
+        prepared,
+    );
     assert_eq!(applied.lock().unwrap().as_slice(), ["hats"]);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -132,6 +140,7 @@ fn a_listener_error_keeps_every_previous_state() {
     let Err(error) = stage_client_reload(
         &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
         listeners,
+        mod_api::__private::ModPhase::World,
     ) else {
         panic!("a failing listener stops the whole reload")
     };
@@ -156,6 +165,7 @@ fn a_converted_file_outside_the_pack_is_absent_not_empty() {
     stage_client_reload(
         &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
         listeners,
+        mod_api::__private::ModPhase::World,
     )
     .unwrap();
     assert_eq!(
@@ -268,7 +278,7 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
                 "nothing applied before handoff"
             );
             // The same call `start_game` makes once the game owns the assets.
-            apply_client_reload(std::mem::take(&mut loaded.client_applies));
+            apply_client_reload(&game.mod_phase, std::mem::take(&mut loaded.client_applies));
             assert!(applied.load(Ordering::SeqCst), "the first load applies");
             assert!(
                 count.load(Ordering::SeqCst) >= 5,
@@ -442,10 +452,17 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             // The mod's packaged asset over nothing, with the real root's own
             // assets in the same view.
             let root = merged(&[]);
-            let prepared =
-                stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
+            let prepared = stage_client_reload(
+                &root,
+                game.register_client_reload_listeners(),
+                mod_api::__private::ModPhase::World,
+            )
+            .unwrap();
             assert!(live.lock().unwrap().is_empty(), "nothing published yet");
-            apply_client_reload(prepared);
+            apply_client_reload(
+                &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
+                prepared,
+            );
             assert_eq!(live.lock().unwrap().as_slice(), ["mod"]);
             assert!(
                 vanilla.load(Ordering::SeqCst) >= 5,
@@ -458,15 +475,25 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             );
             assert_eq!(packs.len(), 1);
             let root = merged(&packs);
-            let prepared =
-                stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
-            apply_client_reload(prepared);
+            let prepared = stage_client_reload(
+                &root,
+                game.register_client_reload_listeners(),
+                mod_api::__private::ModPhase::World,
+            )
+            .unwrap();
+            apply_client_reload(
+                &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
+                prepared,
+            );
             assert_eq!(live.lock().unwrap().as_slice(), ["mod", "pack"]);
             // A rejected prepare aborts the reload and keeps the previous state.
             reject.store(true, Ordering::Relaxed);
             let root = merged(&[]);
-            let Err(error) = stage_client_reload(&root, game.register_client_reload_listeners())
-            else {
+            let Err(error) = stage_client_reload(
+                &root,
+                game.register_client_reload_listeners(),
+                mod_api::__private::ModPhase::World,
+            ) else {
                 panic!("a failing listener stops the whole reload")
             };
             assert!(error.to_string().contains("client_test:hats"));
@@ -744,4 +771,160 @@ fn resolved_ui_resources_do_not_restore_a_filtered_panorama_face() {
     assert!(base.contains("assets/minecraft/textures/gui/title/background/panorama_1.png"));
     let gui = crate::game::UiResources::load(&ResourceSource::indexed(files)).unwrap();
     assert_eq!(gui.panorama.texels(), [96, 110, 111, 255].repeat(6));
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn client_completion_reads_published_resources_without_world_access() {
+    use crate::game::native_entity_refs::tests::with_client_game;
+    use mod_api::__private::{ModPhase, PhaseOwner};
+    use mod_api::{ClientHost, ClientResourcesReloadedEvent, Hooks, ModEntry};
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Mutex,
+    };
+
+    struct Probe(Arc<Mutex<Vec<u64>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Probe {
+        fn client_resources_reloaded(
+            &self,
+            host: &mut dyn ClientHost,
+            _: &mut ClientResourcesReloadedEvent,
+        ) {
+            assert!(host.block_sprites(&["minecraft:stone"])[0].is_some());
+            assert!(host.texture_sprites(&["minecraft:block/stone"])[0].is_some());
+            let version = host.block_sprites_version();
+            let refused =
+                catch_unwind(AssertUnwindSafe(|| host.level("minecraft:overworld"))).unwrap_err();
+            let text = refused
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| refused.downcast_ref::<&str>().copied())
+                .unwrap();
+            assert!(text.contains("Reloading"), "{text}");
+            self.0.lock().unwrap().push(version);
+        }
+    }
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "published_client",
+        Box::new(Probe(seen.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_client_game(|game| {
+            let version = game.native_block_sprites_version();
+            for entering in [ModPhase::Setup, ModPhase::World] {
+                game.mod_phase = PhaseOwner::new(entering);
+                game.native_client_resources_reloaded();
+                assert_eq!(mod_api::__private::current_phase(), entering);
+            }
+            assert_eq!(*seen.lock().unwrap(), [version, version]);
+        })
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources and RUST_MIN_STACK=33554432"]
+fn client_startup_finishes_configs_before_the_first_runtime_callback() {
+    use crate::game::{
+        Audio, UiResources, native_entity_refs::tests::with_client_game, start_game,
+    };
+    use mod_api::__private::{ModPhase, PhaseOwner};
+    use mod_api::{
+        ClientHost, ClientSetupEvent, ClientTickPreEvent, ConfigLoadingEvent, Hooks, HostSide,
+        ModEntry, NativeConfig, NativeConfigKind, RegisterConfigsEvent, ScreenOpening,
+        ScreenOpeningEvent,
+    };
+    use std::{sync::Mutex, time::Instant};
+
+    struct Probe(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Probe {
+        fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
+            event.configs.push(NativeConfig::new(
+                "startup_phase",
+                NativeConfigKind::Client,
+                "enabled = true\n",
+            ));
+            event.configs.push(NativeConfig::new(
+                "startup_phase",
+                NativeConfigKind::Common,
+                "enabled = true\n",
+            ));
+        }
+        fn client_setup(&self, _: &mut dyn ClientHost, _: &mut ClientSetupEvent) {
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::Setup);
+            self.0.lock().unwrap().push("setup".into());
+        }
+        fn config_loading(&self, _: HostSide<'_>, event: &mut ConfigLoadingEvent<'_>) {
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::Config);
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{:?}", event.config.kind));
+        }
+        fn screen_opening(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut ScreenOpeningEvent<'_>,
+        ) -> Option<ScreenOpening> {
+            assert!(host.level("minecraft:overworld").is_none());
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::World);
+            self.0.lock().unwrap().push("screen".into());
+            None
+        }
+        fn client_tick_pre(&self, host: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {
+            assert!(host.level("minecraft:overworld").is_none());
+            assert!(host.entity(1).is_none());
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::World);
+            self.0.lock().unwrap().push("tick".into());
+        }
+    }
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "startup_phase",
+        Box::new(Probe(seen.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        for pack_error in [None, Some("selected resource pack failed")] {
+            seen.lock().unwrap().clear();
+            with_client_game(|game| {
+                let resources = game.res.clone();
+                let options = game.options.clone();
+                let root = options.resources.clone();
+                let gui = UiResources::server(&root).unwrap();
+                let _setup = PhaseOwner::scope(ModPhase::Setup);
+                let mut started = start_game(
+                    &resources,
+                    game.pack.clone(),
+                    gui,
+                    options,
+                    pack_error.map(str::to_owned),
+                    Audio::silent(&root),
+                    root,
+                    Instant::now(),
+                    None,
+                    Some(game.settings.clone()),
+                    None,
+                    Vec::new(),
+                )
+                .unwrap()
+                .unwrap();
+                // The event loop dispatches this before any per-tick work,
+                // even on the title screen, without a world or renderer.
+                started.native_client_tick_pre();
+                assert_eq!(started.ui.options.resource_error.as_deref(), pack_error);
+                let mut expected = vec!["setup", "Client", "Common", "screen"];
+                if pack_error.is_some() {
+                    assert!(started.ui.options.resource_packs_open());
+                    expected.push("screen");
+                }
+                expected.push("tick");
+                assert_eq!(*seen.lock().unwrap(), expected);
+            })
+        }
+    });
 }

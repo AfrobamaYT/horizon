@@ -451,7 +451,11 @@ impl Game<'_> {
     /// `Raids.createOrExtendRaid`: not for spectators, with the `raids` rule
     /// and where raids may start; the raid centres on the occupied village
     /// points of interest within 64 blocks.
-    fn create_or_extend_raid(&mut self, at: [i32; 3], amplifier: Option<i32>) -> Option<i32> {
+    pub(super) fn create_or_extend_raid(
+        &mut self,
+        at: [i32; 3],
+        amplifier: Option<i32>,
+    ) -> Option<i32> {
         if self.spectator()
             || !self.ui.rules.bool("raids")
             || !self.gameplay_attribute(horizon_client::patrol::CAN_START_RAID, at)
@@ -469,7 +473,13 @@ impl Game<'_> {
         if triggered {
             self.award_custom_stat("raid_trigger", 1);
             self.trigger_player("minecraft:voluntary_exile");
-            self.native_raid_state_change(id, center, "triggered");
+            if let Some(level) = self.native_level(self.dim.id()) {
+                self.native_raid_state_change(
+                    mod_api::RaidRef::new(level, id),
+                    center,
+                    "triggered",
+                );
+            }
         }
         Some(id)
     }
@@ -497,8 +507,10 @@ impl Game<'_> {
         true
     }
     pub(super) fn raid_command_stop(&mut self, id: i32) {
-        if let Some(center) = self.raiding.raids.stop(id) {
-            self.native_raid_state_change(id, center, "stopped");
+        if let Some(center) = self.raiding.raids.stop(id)
+            && let Some(level) = self.native_level(self.dim.id())
+        {
+            self.native_raid_state_change(mod_api::RaidRef::new(level, id), center, "stopped");
         }
     }
     pub(super) fn raid_set_omen(&mut self, id: i32, level: i32) -> i32 {
@@ -656,8 +668,13 @@ impl Game<'_> {
         for (id, (old, _)) in old_states {
             if let Some(r) = self.raiding.raids.get(id)
                 && r.status != old
+                && let Some(level) = self.native_level(self.dim.id())
             {
-                self.native_raid_state_change(id, r.center, r.status.name());
+                self.native_raid_state_change(
+                    mod_api::RaidRef::new(level, id),
+                    r.center,
+                    r.status.name(),
+                );
             }
         }
         for (id, action) in actions {

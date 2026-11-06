@@ -360,7 +360,7 @@ fn direction(face: i32) -> [i32; 3] {
 fn building_players(host: &LanHost) -> Vec<BuildingPlayer> {
     host.hub
         .guests
-        .iter()
+        .simulation_iter()
         .map(|g| BuildingPlayer {
             conn: Some(g.conn),
             dimension: Dim::from_id(&g.dimension),
@@ -396,7 +396,7 @@ impl Game<'_> {
         super::dedicated::crash_fixture("guest", || {
             self.lan
                 .as_ref()
-                .is_some_and(|host| host.hub.guests.iter().any(|g| g.conn == conn && g.placed))
+                .is_some_and(|host| host.hub.guest(conn).is_some_and(|g| g.placed))
         });
         let dimension =
             (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
@@ -408,12 +408,7 @@ impl Game<'_> {
 
     /// Where guest `conn` is in the hub's list.
     pub(super) fn guest_index(&self, conn: u32) -> Option<usize> {
-        self.lan
-            .as_ref()?
-            .hub
-            .guests
-            .iter()
-            .position(|g| g.conn == conn)
+        self.lan.as_ref()?.hub.guests.connection_index(conn)
     }
 
     /// `as_guest`, with the system messages the guest's action earns (the
@@ -3523,7 +3518,7 @@ impl Game<'_> {
         if let Some(g) = host
             .hub
             .guests
-            .iter()
+            .simulation_iter()
             .find(|g| g.entity_id == id && g.conn != conn && host.hub.here(g))
         {
             return Some(g.bounds());
@@ -3959,7 +3954,10 @@ impl Game<'_> {
             return Err(ActionRefused::Stale);
         };
         let (old_yaw, old_pitch) = (host.hub.guests[gi].yaw, host.hub.guests[gi].pitch);
-        if self.look_at_entity(gi, id, None).is_none() {
+        let boat = self.boats.iter().position(|boat| boat.id as i32 == id);
+        // A packet names its target already. Keep the attacker's actual yaw
+        // for the boat's knockback instead of aiming a ray at its center.
+        if boat.is_none() && self.look_at_entity(gi, id, None).is_none() {
             return Err(ActionRefused::InvalidTarget);
         }
         // A mace's smash sets the attacker's velocity and sends it at once, before the
@@ -3970,7 +3968,12 @@ impl Game<'_> {
                     .player
                     .as_mut()
                     .is_some_and(|p| std::mem::take(&mut p.health.sync_velocity));
-                g.attack();
+                if let Some(index) = boat {
+                    g.strike_boat(index);
+                    g.swing_arm();
+                } else {
+                    g.attack();
+                }
                 let p = g.player.as_mut()?;
                 let sent = std::mem::replace(&mut p.health.sync_velocity, marked);
                 sent.then_some(p.velocity)
@@ -7052,10 +7055,14 @@ mod tests {
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
             assert!(!game.lan_open_container(12, (2, 64, 0)));
-            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Fake;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = GuestKind::Fake;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(game.lan_open_container(12, (0, 64, 0)));
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
-            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Network;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = GuestKind::Network;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(game.lan_open_container(12, (0, 64, 0)));
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
         });

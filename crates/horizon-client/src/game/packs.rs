@@ -538,7 +538,7 @@ impl Game<'_> {
         self.ui.chat.rescale(&self.gui.atlas);
         // The creative screen survives the reload; item names may not.
         self.creative_screen.forget_items();
-        super::client_reload::apply_client_reload(client_applies);
+        super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
         self.refresh_loop_context()?;
         self.native_client_resources_reloaded();
         Ok(())
@@ -569,8 +569,12 @@ pub(super) fn stage_pack(
     // The mod listeners prepare against the merged root before the heavy
     // staging builds run: a listener that fails aborts the reload without the
     // renderer work, keeping every listener's previous assets.
-    let client_applies = super::client_reload::stage_client_reload(&source, client_listeners)
-        .map_err(|e| e.to_string())?;
+    let client_applies = super::client_reload::stage_client_reload(
+        &source,
+        client_listeners,
+        mod_api::__private::ModPhase::World,
+    )
+    .map_err(|e| e.to_string())?;
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
     let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
