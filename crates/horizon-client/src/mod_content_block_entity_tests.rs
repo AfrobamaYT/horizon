@@ -173,11 +173,11 @@ fn code_declared_types_build_a_root_and_membership_changes_invalidate_its_cache(
     }];
     let cache = base.with_extension("cache");
     assert_eq!(
-        resource_root(&base, Path::new(""), &mods, &cache).unwrap(),
+        resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap(),
         base
     );
     mods[0].content.block_entity_types = vec![kind("test:machine", &[])];
-    let root = resource_root(&base, Path::new(""), &mods, &cache).unwrap();
+    let root = resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap();
     assert_ne!(root, base);
     assert!(root.join(crate::content_identity::MARKER).exists());
     assert_eq!(
@@ -186,7 +186,7 @@ fn code_declared_types_build_a_root_and_membership_changes_invalidate_its_cache(
     );
     mods[0].content.blocks = declared_mod().content.blocks;
     mods[0].content.block_entity_types[0].blocks = vec!["test:a".into()];
-    let with_a = resource_root(&base, Path::new(""), &mods, &cache).unwrap();
+    let with_a = resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap();
     assert_ne!(with_a, root);
     assert_eq!(
         fs::read_to_string(root.join(BLOCK_ENTITY_TYPES)).unwrap(),
@@ -199,10 +199,10 @@ fn code_declared_types_build_a_root_and_membership_changes_invalidate_its_cache(
     );
     // Same type and wire ID, different valid blocks: the overlay must not be reused.
     mods[0].content.block_entity_types[0].blocks = vec!["test:b".into()];
-    let with_b = resource_root(&base, Path::new(""), &mods, &cache).unwrap();
+    let with_b = resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap();
     assert_ne!(with_a, with_b);
     assert_eq!(
-        resource_root(&base, Path::new(""), &mods, &cache).unwrap(),
+        resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap(),
         with_b
     );
     assert_eq!(fs::read(with_a.join(STAMP)).unwrap(), stamp);

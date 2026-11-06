@@ -88,11 +88,14 @@ pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client
         types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
     }
     let inputs = LoadInputs::new(registries, Game::mod_data_root());
-    let context = LoadContext::new(
-        role.data_load_origin(),
-        Arc::new(inputs),
-        mod_api::__private::loaded_mods().ids(),
-    );
+    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let ids: Vec<_> = if role.is_logical_server() {
+        inventory.server_ids().collect()
+    } else {
+        inventory.client_ids().collect()
+    };
+    let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs), ids);
+
     Ok(ItemData::load(root, context)?)
 }
 
@@ -341,7 +344,20 @@ pub(super) fn content_overlay(
         .collect();
     horizon_mods::dependencies::resolve_content(&loaded).map_err(|error| error.to_string())?;
     let cache = here.join(".horizon-cache");
-    let prepared = mod_content::resource_root(root, jar_store, &mods, &cache)?;
+    // Content admission and the live code-dispatch boundary jointly determine
+    // what loaded. Namespaces and raw startup metadata cannot answer this.
+    let inventory = horizon_mods::enabled::EnabledMods::new(packages.iter().filter_map(|source| {
+        let manifest = source.manifest;
+        let code = !source.content_only || manifest.wasm.is_some();
+        let enabled = if code {
+            mod_api::__private::mod_index(&manifest.id)
+                .is_some_and(mod_api::__private::mod_index_on)
+        } else {
+            mods.iter().any(|loaded| loaded.id == manifest.id)
+        };
+        enabled.then(|| (manifest.id.clone(), manifest.side))
+    }));
+    let prepared = mod_content::resource_root(root, jar_store, &mods, &cache, &inventory)?;
     let root = mod_content::resolved_resources(root, prepared, jar_store, &mods, cache)?;
     Ok(ContentOverlay {
         root,
