@@ -11,22 +11,24 @@ use horizon_core::{
     position::ChunkPos,
     ticks::{ProtoChunkTicks, SavedTick, TickTypeId},
 };
-use horizon_world::{
-    heightmap::HeightmapType,
-    item_defaults::ItemData,
-    loot::PackOverlay,
-    nbt::Tag,
-    registry::BlockRegistry,
-    worldgen::{
-        generator::{
-            GeneratorData, GeneratorWorker, OverworldGenerator, ProtoChunk, SurfaceSample,
+use std::{path::Path, sync::Arc};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        heightmap::HeightmapType,
+        item_defaults::ItemData,
+        loot::PackOverlay,
+        registry::BlockRegistry,
+        worldgen::{
+            generator::{
+                GeneratorData, GeneratorWorker, OverworldGenerator, ProtoChunk, SurfaceSample,
+            },
+            overrides::WorldgenOverrides,
+            structure::legacy::PieceRandom,
+            terrain::PreLightChunkStage,
         },
-        overrides::WorldgenOverrides,
-        structure::legacy::PieceRandom,
-        terrain::PreLightChunkStage,
     },
 };
-use std::{path::Path, sync::Arc};
 mod lod;
 mod structure_mobs;
 use lod::VanillaLodSampler;
@@ -364,7 +366,7 @@ impl VanillaTerrain {
         biome: &str,
         random: &mut dyn PieceRandom,
         group: &mut Option<crate::mobs::finalize::Group>,
-    ) -> Option<horizon_world::nbt::Compound> {
+    ) -> Option<horizon_core::nbt::Compound> {
         self.structure_mobs
             .spawn_generated(kind, position, yaw, biome, random, group)
     }
@@ -1156,7 +1158,7 @@ impl ChunkGenerator for VanillaTerrain {
         // Chest minecarts keep their loot table; the game rolls it on load.
         out.entities = entities
             .into_iter()
-            .map(horizon_world::nbt::Tag::Compound)
+            .map(horizon_core::nbt::Tag::Compound)
             .collect();
         for s in &mut out.sections {
             Arc::make_mut(s).compact();

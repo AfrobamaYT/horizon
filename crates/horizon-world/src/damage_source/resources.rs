@@ -97,8 +97,8 @@ impl Definition {
     /// DamageType.DIRECT_CODEC with NbtOps: float exhaustion, and optional
     /// fields omitted at their codec defaults. FloatTag.valueOf shares ZERO
     /// for either sign of zero; the resident definition still keeps its bits.
-    pub fn to_nbt(&self) -> crate::nbt::Tag {
-        use crate::nbt::Tag;
+    pub fn to_nbt(&self) -> horizon_core::nbt::Tag {
+        use horizon_core::nbt::Tag;
         let mut fields = vec![
             ("message_id", Tag::String(self.message_id.as_str().into())),
             ("scaling", Tag::String(self.scaling.name().into())),

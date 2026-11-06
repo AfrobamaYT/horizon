@@ -11,11 +11,14 @@ use horizon_client::{
 use horizon_core::{
     geometry::Vec3, position::BlockPos, random::LegacyRandom, random::RandomSource,
 };
-use horizon_world::{
-    consumable::{Consumable, EmissionWorld, UseAnimation},
-    teleport_consume::{TeleportConsume, TeleportConsumeWorld},
-};
 use std::convert::Infallible;
+use {
+    horizon_core::use_animation::UseAnimation,
+    horizon_world::{
+        consumable::{Consumable, EmissionWorld},
+        teleport_consume::{TeleportConsume, TeleportConsumeWorld},
+    },
+};
 
 type ItemConsumable = Consumable<String, ConsumeEffect>;
 

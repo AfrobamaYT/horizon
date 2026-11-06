@@ -162,7 +162,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         // isPortal
         if !matches!(
             self.level.dimension(),
-            super::Dimension::Overworld | super::Dimension::Nether
+            horizon_core::dimension::Dimension::Overworld
+                | horizon_core::dimension::Dimension::Nether
         ) {
             return false;
         }

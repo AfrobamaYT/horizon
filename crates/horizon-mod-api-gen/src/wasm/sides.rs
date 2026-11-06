@@ -969,16 +969,38 @@ fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Resul
     let world = resolve
         .select_world(&[package], Some("mod"))
         .map_err(|e| e.to_string())?;
-    let emitted = crate::wasm_imports::emit(&resolve, world, |interface, function| {
-        let short = interface
-            .split('/')
-            .next_back()
-            .unwrap()
-            .split('@')
-            .next()
-            .unwrap();
-        Ok(registrations.remove(&(short.to_string(), function.name.clone())))
-    })?;
+    let allowed: std::collections::BTreeSet<String> = resolve.packages[package]
+        .interfaces
+        .keys()
+        .cloned()
+        .collect();
+    let emitted = crate::wasm_imports::emit(
+        &resolve,
+        world,
+        |name| {
+            let short = name
+                .split('/')
+                .next_back()
+                .unwrap()
+                .split('@')
+                .next()
+                .unwrap();
+            allowed
+                .contains(short)
+                .then_some(())
+                .ok_or_else(|| format!("unhandled {name}"))
+        },
+        |interface, function| {
+            let short = interface
+                .split('/')
+                .next_back()
+                .unwrap()
+                .split('@')
+                .next()
+                .unwrap();
+            Ok(registrations.remove(&(short.to_string(), function.name.clone())))
+        },
+    )?;
     if !registrations.is_empty() {
         return Err(format!(
             "flat-list imports missing from WIT: {:?}",

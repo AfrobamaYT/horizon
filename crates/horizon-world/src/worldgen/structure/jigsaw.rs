@@ -1,18 +1,4 @@
 //! Template pools, pool elements and JigsawPlacement.
-use super::{
-    BoundingBox, Mirror, Rotation, StructureResources, StructureTemplate,
-    processor::{PlaceSettings, Processor, ProcessorList, place_in_world},
-};
-use crate::{
-    heightmap::HeightmapType,
-    nbt::{Compound, Tag},
-    worldgen::{
-        DecodeError,
-        block_feature::FeatureBlockBindings,
-        feature::FeatureWorld,
-        placement::{PlacementContext, PlacementQueryError},
-    },
-};
 use horizon_core::{
     geometry::Direction,
     position::BlockPos,
@@ -24,6 +10,25 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     rc::Rc,
     sync::{Arc, Mutex, OnceLock, RwLock},
+};
+use {
+    super::{
+        Mirror, Rotation, StructureResources, StructureTemplate,
+        processor::{PlaceSettings, Processor, ProcessorList, place_in_world},
+    },
+    horizon_core::bounding_box::BoundingBox,
+};
+use {
+    crate::{
+        heightmap::HeightmapType,
+        worldgen::{
+            DecodeError,
+            block_feature::FeatureBlockBindings,
+            feature::FeatureWorld,
+            placement::{PlacementContext, PlacementQueryError},
+        },
+    },
+    horizon_core::nbt::{Compound, Tag},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

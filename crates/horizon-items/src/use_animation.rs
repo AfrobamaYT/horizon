@@ -1,6 +1,6 @@
 //! The use animation a `consumable` component names.
 
-use horizon_world::consumable::UseAnimation;
+use horizon_core::use_animation::UseAnimation;
 
 /// `ItemUseAnimation.CODEC`'s names; a consumable with none eats.
 pub fn consumable_animation(v: &serde_json::Value) -> UseAnimation {

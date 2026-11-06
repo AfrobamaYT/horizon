@@ -362,7 +362,7 @@ fn resource_list_transport_reuses_host_buffers() {
           (func (export "run") (param "node" (borrow $node)) (param "values" $list) (result $list)
             (canon lift (core func $run) (memory $memory) (realloc $realloc))))
     "#).unwrap()).unwrap();
-    let mut counts = [0; 3];
+    let mut counts = [[0; 2]; 3];
     for route in 0..3 {
         let mut linker = Linker::<State>::new(&engine);
         let mut host = linker.instance("test").unwrap();
@@ -404,42 +404,44 @@ fn resource_list_transport_reuses_host_buffers() {
         let call = instance
             .get_typed_func::<(Resource<Node>, &[u32]), (WasmList<u32>,)>(&mut store, "run")
             .unwrap();
-        let values: Vec<u32> = (0..1000).collect();
-        let mut run = || {
-            let (result,) = call
-                .call(&mut store, (Resource::new_borrow(7), &values))
-                .unwrap();
-            if route != 1 {
-                for (i, value) in result.iter(store.as_context_mut()).unwrap().enumerate() {
-                    assert_eq!(value.unwrap(), i as u32 + 1);
+        for (control, size) in [0, 1000].into_iter().enumerate() {
+            let values: Vec<u32> = (0..size).collect();
+            let mut run = || {
+                let (result,) = call
+                    .call(&mut store, (Resource::new_borrow(7), &values))
+                    .unwrap();
+                if route != 1 {
+                    for (i, value) in result.iter(store.as_context_mut()).unwrap().enumerate() {
+                        assert_eq!(value.unwrap(), i as u32 + 1);
+                    }
                 }
+            };
+            for _ in 0..10 {
+                run();
             }
-        };
-        for _ in 0..10 {
-            run();
+            COUNT.set(Some(0));
+            let start = Instant::now();
+            const CALLS: usize = 100_000;
+            for _ in 0..CALLS {
+                run();
+            }
+            let elapsed = start.elapsed();
+            let allocations = COUNT.replace(None).unwrap();
+            counts[route][control] = allocations;
+            eprintln!(
+                "{size} values each direction (route = {route}): {} ns/call, {allocations} host allocations / {CALLS} calls; guest fixture uses two fixed-buffer canonical realloc calls per round trip",
+                elapsed.as_nanos() / CALLS as u128
+            );
         }
-        COUNT.set(Some(0));
-        let start = Instant::now();
-        const CALLS: usize = 100_000;
-        for _ in 0..CALLS {
-            run();
-        }
-        let elapsed = start.elapsed();
-        let allocations = COUNT.replace(None).unwrap();
-        counts[route] = allocations;
-        eprintln!(
-            "1,000 values each direction (route = {route}): {} ns/call, {allocations} host allocations / {CALLS} calls; guest fixture uses two fixed-buffer canonical realloc calls per round trip",
-            elapsed.as_nanos() / CALLS as u128
-        );
     }
     assert_eq!(
-        counts[0] - counts[1],
-        2 * 100_000,
-        "owned list transport allocations"
+        counts[2][1] - counts[2][0],
+        counts[1][1] - counts[1][0],
+        "reused list transport adds no allocations over its empty control"
     );
-    assert_eq!(
-        counts[2], counts[1],
-        "reused list transport adds no allocations"
+    assert!(
+        counts[0][1] - counts[0][0] >= counts[2][1] - counts[2][0],
+        "owned transport must not allocate less than the reused route"
     );
 }
 

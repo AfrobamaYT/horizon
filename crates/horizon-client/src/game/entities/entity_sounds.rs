@@ -1,7 +1,7 @@
 //! The entity overload of level sounds, shared by mob and player call sites.
 use super::{Game, level_sounds::LevelSound};
 use horizon_client::sound_engine::{SoundEntity, SoundEntityState};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 fn saved_silent(extra: Option<&Tag>) -> bool {
     horizon_client::save::number(extra.and_then(|tag| tag.get("Silent"))).unwrap_or(0) != 0

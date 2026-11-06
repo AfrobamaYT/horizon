@@ -154,9 +154,9 @@ impl Game<'_> {
                     self.using = None;
                     // ItemStack.hurtAndBreak: onEquippedItemBroken for the hand it was used from.
                     let hand = if slot == OFFHAND_SLOT {
-                        horizon_world::player_inventory::EquipmentSlot::OffHand
+                        horizon_core::equipment_slot::EquipmentSlot::OffHand
                     } else {
-                        horizon_world::player_inventory::EquipmentSlot::MainHand
+                        horizon_core::equipment_slot::EquipmentSlot::MainHand
                     };
                     self.player_equipment_broke(hand, &broken);
                     self.award_stat("broken", &broken.item, 1);

@@ -14,7 +14,7 @@ use horizon_client::{
     scoreboard::bracketed,
     text::{self, Text},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use mod_api::__private::reload::ReloadStageError;
 use std::sync::Arc;
 
@@ -73,10 +73,11 @@ pub(super) fn pack_stack(
     content_source: &horizon_assets::resource_source::ResourceSource,
     vanilla_disabled: bool,
     enabled_features: &[String],
+    additional: &[Arc<DataPack>],
 ) -> PackStack {
     let builtin = (!vanilla_disabled)
         .then(|| DataPack::from_source("vanilla".into(), builtin_source.clone()));
-    let packs = datapack::discover_with_features(world_root, resources);
+    let packs = super::pack_finders::data_repository(world_root, resources, additional);
     let enabled = datapack::enabled_ids(world_root, &packs, enabled_features);
     PackStack {
         content: DataPack::from_source("horizon-content".into(), content_source.clone()),
@@ -190,41 +191,59 @@ impl Game<'_> {
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         let resources = next_root
             .as_ref()
-            .map_or(self.options.resources.as_path(), |root| root.prepared());
+            .map_or(self.options.resources.as_path(), |root| root.prepared())
+            .to_path_buf();
         let data = next_root
             .as_ref()
             .map_or(&self.pack.data_source, |root| root.data());
         let changes = next_root
             .as_ref()
             .map_or(&self.pack.data_changes, |root| root.data_changes());
+        let additional = super::pack_finders::data_packs(&self.mods);
         let stack = pack_stack(
             &self.world_root,
-            resources,
+            &resources,
             data,
             changes,
             self.cmds.vanilla_disabled,
             enabled_features,
+            &additional,
         );
         let prepared = self.prepare_server_reload(&stack)?;
+        let context = self
+            .prepare_loop_context(&resources)
+            .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
+        let switched = self.mods.data_switched || next_root.is_some();
+        let prepared = self.apply_server_reload_callbacks(prepared);
+        let world = if run_load && self.remote.is_none() {
+            Some(
+                self.prepare_world_reload(&stack, &resources, switched)
+                    .map_err(|error| ReloadStageError::DataSource(error.to_string()))?,
+            )
+        } else {
+            None
+        };
         if let Some(root) = next_root {
             self.options.resources = root.prepared().to_owned();
             self.pack.data_source = root.data().clone();
             self.pack.data_changes = root.data_changes().clone();
             self.mods.data_switched = true;
         }
+        self.install_loop_context(context);
         if !run_load {
             self.fns = Default::default();
         }
         self.fns.packs = stack.packs.clone();
         self.fns.enabled = stack.enabled.clone();
         self.apply_server_reload(prepared, &stack);
+        self.pack.additional_data = additional.into();
         self.fns.loaded = true;
         self.fns.load_pending = true;
         // An explicit reload (`/reload`, `/datapack`) also rebuilds the
         // content tables, as `ReloadableServerResources` does; on world open
         // `finish_open_world` builds them right after this.
-        if run_load {
-            self.reload_world_tables(&stack);
+        if let Some(world) = world {
+            self.reload_world_tables(world);
         }
         if self.fns.schedule.is_empty() {
             self.load_schedule();
@@ -589,7 +608,7 @@ impl Game<'_> {
             Some(tag)
         } else if let Some(Arg::Str(text)) = ctx.get("arguments") {
             Some(
-                horizon_world::nbt::parse_snbt(text)
+                horizon_core::nbt::parse_snbt(text)
                     .map_err(|e| err("argument.nbt.invalid", &[&e]))?
                     .0,
             )
@@ -768,8 +787,22 @@ impl Game<'_> {
         };
         let source = if id == "vanilla" {
             "pack.source.builtin"
-        } else if FEATURE_PACKS.iter().any(|(p, _)| *p == id) {
+        } else if self
+            .fns
+            .packs
+            .iter()
+            .any(|pack| pack.id == id && pack.is_feature())
+        {
             "pack.source.feature"
+        } else if self
+            .fns
+            .packs
+            .iter()
+            .find(|pack| pack.id == id)
+            .and_then(|pack| pack.selection.as_ref())
+            .is_some_and(|info| info.source == horizon_client::pack_screen::Source::BuiltIn)
+        {
+            "pack.source.builtin"
         } else {
             "pack.source.world"
         };
@@ -857,6 +890,19 @@ impl Game<'_> {
         ));
         Ok(1)
     }
+    fn missing_pack_features(&self, id: &str) -> Vec<String> {
+        self.fns
+            .packs
+            .iter()
+            .find(|pack| pack.id == id)
+            .map(|pack| {
+                pack.features()
+                    .into_iter()
+                    .filter(|flag| !self.level.enabled_features.contains(flag))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
     pub(super) fn cmd_datapack(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let name = match ctx.get("name") {
             Some(Arg::Str(n)) => Some(n.clone()),
@@ -870,18 +916,9 @@ impl Game<'_> {
         let available: Vec<String> = std::iter::once("vanilla".to_owned())
             .chain(self.fns.packs.iter().map(|p| p.id.clone()))
             .filter(|p| !selected.contains(p))
-            .filter(|p| {
-                FEATURE_PACKS
-                    .iter()
-                    .find(|(f, _)| *f == p.as_str())
-                    .is_none_or(|(_, flag)| self.level.enabled_features.iter().any(|f| f == flag))
-            })
+            .filter(|p| self.missing_pack_features(p).is_empty())
             .collect();
-        let known = |g: &Self, n: &str| {
-            n == "vanilla"
-                || FEATURE_PACKS.iter().any(|(p, _)| *p == n)
-                || g.fns.packs.iter().any(|p| p.id == n)
-        };
+        let known = |g: &Self, n: &str| n == "vanilla" || g.fns.packs.iter().any(|p| p.id == n);
         match id {
             "datapack.create" => self.create_pack(ctx),
             "datapack.list" => {
@@ -933,14 +970,13 @@ impl Game<'_> {
                 if selected.contains(&name) {
                     return Err(err("commands.datapack.enable.failed", &[&name]));
                 }
-                if let Some((_, flag)) = FEATURE_PACKS.iter().find(|(p, _)| *p == name)
-                    && !self.level.enabled_features.iter().any(|f| f == flag)
-                {
+                let missing = self.missing_pack_features(&name);
+                if !missing.is_empty() {
                     // `DataPackCommand`: the pack's requested features must
                     // be a subset of the world's enabled ones.
                     return Err(err(
                         "commands.datapack.enable.failed.no_flags",
-                        &[&name, flag],
+                        &[&name, &missing.join(", ")],
                     ));
                 }
                 if name == "vanilla" {
@@ -957,6 +993,18 @@ impl Game<'_> {
                             return Err(err("commands.datapack.unknown", &[e]));
                         };
                         if ctx.has("before") { i } else { i + 1 }
+                    } else if !ctx.has("last")
+                        && self
+                            .fns
+                            .packs
+                            .iter()
+                            .find(|pack| pack.id == name)
+                            .and_then(|pack| pack.selection.as_ref())
+                            .is_some_and(|info| {
+                                info.position == horizon_client::packs::Position::Bottom
+                            })
+                    {
+                        0
                     } else {
                         self.fns.enabled.len()
                     };
@@ -977,10 +1025,32 @@ impl Game<'_> {
                 if !selected.contains(&name) {
                     return Err(err("commands.datapack.disable.failed", &[&name]));
                 }
-                if FEATURE_PACKS.iter().any(|(p, _)| *p == name) {
+                if self
+                    .fns
+                    .packs
+                    .iter()
+                    .find(|pack| pack.id == name)
+                    .and_then(|pack| pack.selection.as_ref())
+                    .is_some_and(|info| info.required)
+                {
+                    return Err(err("horizon.datapack.required", &[&name]));
+                }
+                if self
+                    .fns
+                    .packs
+                    .iter()
+                    .any(|pack| pack.id == name && pack.is_feature() && !pack.features().is_empty())
+                {
                     // `DataPackCommand`'s ERROR_CANNOT_DISABLE_FEATURE: the
                     // flag stays on for the world's life.
                     return Err(err("commands.datapack.disable.failed.feature", &[&name]));
+                }
+                let missing = self.missing_pack_features(&name);
+                if !missing.is_empty() {
+                    return Err(err(
+                        "commands.datapack.enable.failed.no_flags",
+                        &[&name, &missing.join(", ")],
+                    ));
                 }
                 if name == "vanilla" {
                     self.cmds.vanilla_disabled = true;
@@ -1007,6 +1077,7 @@ impl Game<'_> {
         // One resolve for the store and the tables, as `/reload`'s is: the
         // timers already in memory stay, and none come back from disk
         // (`ServerFunctionManager` keeps its queue over a pack change).
+        let additional = super::pack_finders::data_packs(&self.mods);
         let mut stack = pack_stack(
             &self.world_root,
             &self.options.resources,
@@ -1014,8 +1085,10 @@ impl Game<'_> {
             &self.pack.data_changes,
             self.cmds.vanilla_disabled,
             &self.level.enabled_features,
+            &additional,
         );
-        stack.enabled = self.fns.enabled.clone();
+        stack.enabled =
+            datapack::selected_ids(stack.packs.iter().map(Arc::as_ref), &self.fns.enabled);
         let prepared = match self.prepare_server_reload(&stack) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -1024,11 +1097,36 @@ impl Game<'_> {
                 return Err(Self::reload_failure(error));
             }
         };
-        self.save_datapack_settings();
+        let root = self.options.resources.clone();
+        let context = match self.prepare_loop_context(&root) {
+            Ok(context) => context,
+            Err(error) => {
+                self.fns.enabled = previous_enabled;
+                self.cmds.vanilla_disabled = previous_vanilla_disabled;
+                return Err(Self::reload_failure(ReloadStageError::DataSource(
+                    error.to_string(),
+                )));
+            }
+        };
+        let prepared = self.apply_server_reload_callbacks(prepared);
+        let world = match self.prepare_world_reload(&stack, &root, self.mods.data_switched) {
+            Ok(world) => world,
+            Err(error) => {
+                self.fns.enabled = previous_enabled;
+                self.cmds.vanilla_disabled = previous_vanilla_disabled;
+                return Err(Self::reload_failure(ReloadStageError::DataSource(
+                    error.to_string(),
+                )));
+            }
+        };
+        self.install_loop_context(context);
         self.fns.packs = stack.packs.clone();
+        self.fns.enabled = stack.enabled.clone();
+        self.pack.additional_data = additional.into();
+        self.save_datapack_settings();
         self.apply_server_reload(prepared, &stack);
         self.fns.load_pending = true;
-        self.reload_world_tables(&stack);
+        self.reload_world_tables(world);
         Ok(())
     }
 
@@ -1049,7 +1147,7 @@ impl Game<'_> {
         // ResourceOrIdArgument retains either an inline value or a named id.
         // Both use the same evaluator and command-source context below.
         let json = if id.starts_with('{') {
-            let (tag, _) = horizon_world::nbt::parse_snbt(id)
+            let (tag, _) = horizon_core::nbt::parse_snbt(id)
                 .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
             horizon_client::scoreboard::tag_to_json(&tag)
         } else {
@@ -1066,26 +1164,129 @@ impl Game<'_> {
     }
 }
 
-/// The built-in feature packs and the feature flag each needs (none of them
-/// enabled in a world created without experiments).
-const FEATURE_PACKS: &[(&str, &str)] = &[
-    ("minecart_improvements", "minecraft:minecart_improvements"),
-    ("redstone_experiments", "minecraft:redstone_experiments"),
-    ("trade_rebalance", "minecraft:trade_rebalance"),
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn refused_item_key_reload_keeps_previous_world_generation() {
+        use mod_api::{Hooks, ModEntry, Registrar, RegistrationContext};
+
+        struct MissingItem;
+        #[mod_api::__subscriptions]
+        impl Hooks for MissingItem {
+            fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                registrar.block_key("minecraft:stone");
+                registrar.item_key("reload_test:missing");
+            }
+        }
+
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let root =
+                std::env::temp_dir().join(format!("reload-atomicity-{}", std::process::id()));
+            let pack = root.join("datapacks/candidate");
+            let tags = pack.join("data/reload_test/tags/block");
+            std::fs::create_dir_all(&tags).unwrap();
+            std::fs::write(pack.join("pack.mcmeta"), serde_json::to_vec(&serde_json::json!({
+                "pack": {"description": "atomic reload", "min_format": horizon_core::version::DATA_PACK_FORMAT, "max_format": horizon_core::version::DATA_PACK_FORMAT}
+            })).unwrap()).unwrap();
+            std::fs::write(
+                tags.join("candidate.json"),
+                br#"{"values":["minecraft:stone"]}"#,
+            )
+            .unwrap();
+            game.world_root = root.clone();
+            game.set_allow_commands(true);
+            mod_api::__private::install_parts(&[ModEntry::new(
+                "reload_test",
+                Box::new(MissingItem),
+            )])
+            .unwrap();
+            let stone = mod_api::__private::part_tests::block_key("minecraft:stone");
+            let registry = game.pack.assets.registry;
+            mod_api::__private::resolve_blocks(|id| {
+                let default = registry.default_state(id)?;
+                Some(mod_api::__private::ResolvedBlock {
+                    default,
+                    states: mod_api::BlockStateRange::new(default, 1),
+                    block: game.res.behaviours().block(default),
+                })
+            })
+            .unwrap();
+            let old_tag =
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate");
+            let old_context = game.loop_context.clone();
+            let old_root = game.options.resources.clone();
+            let old_data = game.pack.data_source.clone();
+            let old_tables = game.world_tables.as_ref().map(|tables| tables as *const _);
+            let old_generation = game.damage_tag_generation;
+            let old_enabled = game.fns.enabled.clone();
+            let error = game.reload_datapacks(true, &[]).err().unwrap();
+            assert!(error.to_string().contains("reload_test:missing"));
+            assert_eq!(game.options.resources, old_root);
+            assert!(game.pack.data_source.same_generation(&old_data));
+            assert!(Arc::ptr_eq(&game.loop_context, &old_context));
+            assert_eq!(
+                old_tables,
+                game.world_tables.as_ref().map(|tables| tables as *const _)
+            );
+            assert_eq!(game.damage_tag_generation, old_generation);
+            assert_eq!(game.fns.enabled, old_enabled);
+            assert_eq!(
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
+                old_tag
+            );
+            struct Valid;
+            #[mod_api::__subscriptions]
+            impl Hooks for Valid {
+                fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                    registrar.block_key("minecraft:stone");
+                }
+            }
+            mod_api::__private::install_parts(&[ModEntry::new("reload_test", Box::new(Valid))])
+                .unwrap();
+            game.reload_datapacks(true, &[]).unwrap();
+            assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
+            assert_eq!(
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
+                Some(true)
+            );
+            // The command path also prepares the replacement before publishing
+            // its canonical selection or persisting the player's pack settings.
+            assert!(game.run_command("datapack disable \"file/candidate\""));
+            assert!(game.run_command("datapack enable \"file/candidate\""));
+            game.save_datapack_settings();
+            let settings = std::fs::read(root.join("datapacks.json")).unwrap();
+            let enabled = game.fns.enabled.clone();
+            let context = game.loop_context.clone();
+            let generation = game.damage_tag_generation;
+            mod_api::__private::install_parts(&[ModEntry::new(
+                "reload_test",
+                Box::new(MissingItem),
+            )])
+            .unwrap();
+            assert!(!game.run_command("datapack disable \"file/candidate\""));
+            assert_eq!(game.fns.enabled, enabled);
+            assert_eq!(
+                std::fs::read(root.join("datapacks.json")).unwrap(),
+                settings
+            );
+            assert!(Arc::ptr_eq(&game.loop_context, &context));
+            assert_eq!(game.damage_tag_generation, generation);
+            assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
+            let _ = std::fs::remove_dir_all(root);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn pack_changes_publish_the_new_zip_generation_for_template_reads() {
-        use horizon_world::{
-            compression::Compression,
-            nbt::{self, Limits},
-        };
         use std::{io::Write, path::PathBuf};
+        use {
+            horizon_core::{nbt, nbt::Limits},
+            horizon_world::compression::Compression,
+        };
         let root = std::env::temp_dir().join(format!(
             "template-pack-change-{}-{}",
             std::process::id(),
@@ -1266,8 +1467,14 @@ mod tests {
                     .tags
                     .contains(&"test:feature_marker".to_owned())
             );
-            (game.world_tables, game.health_resources) =
-                game.build_world_tables(&stack, false).unwrap();
+            (game.world_tables, game.health_resources) = game
+                .build_world_tables(
+                    &stack,
+                    false,
+                    &game.options.resources.clone(),
+                    game.mods.data_switched,
+                )
+                .unwrap();
             assert!(game.items().item_tags["test:sample"].contains("minecraft:diamond"));
         });
         std::fs::remove_dir_all(root).unwrap();
@@ -1298,6 +1505,7 @@ mod tests {
                 &Default::default(),
                 &Default::default(),
                 true,
+                &[],
                 &[],
             );
             let files = content_overlay(&stack);
@@ -1356,6 +1564,7 @@ mod tests {
             &Default::default(),
             &passive,
             true,
+            &[],
             &[],
         );
         let files = overlay_files(

@@ -9,6 +9,11 @@ pub trait Hooks {
     /// number above zero keeps vanilla's. Only the window's clock changes: a server still ticks
     /// at its own rate. Client-side. Beyond NeoForge: there is no counterpart. Diverges from
     /// upstream: new hook.
-    #[hook(side = "client", contract = "listen", cancellable = false)]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        cancellable = false,
+        neoforge = "none (vanilla Minecraft.getTickTargetMillis; NeoForge adds no event or extension for it)"
+    )]
     fn tick_target_millis();
 }

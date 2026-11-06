@@ -525,7 +525,7 @@ impl HiveHost for ProbeHive<'_, '_> {
     fn set_honey_level(&mut self, at: [i32; 3], level: i32) {
         self.honey.push((at, level));
     }
-    fn load(&mut self, tag: &horizon_world::nbt::Tag) -> Option<Mob> {
+    fn load(&mut self, tag: &horizon_core::nbt::Tag) -> Option<Mob> {
         let index = self.first + self.added.len();
         let mut m = horizon_client::entity_nbt::mob_from_nbt(
             tag,
