@@ -48,4 +48,39 @@ pub trait Helpers {
         target = "horizon_client::game::native_entity_refs::Game<'_>::native_level_set_break_progress"
     )]
     fn level_set_break_progress();
+    /// Applies bone meal to the block at `pos` as a dispenser does, with no player and no item
+    /// (`DispenserBlock`'s `BoneMealItem.growCrop` then `growWaterPlant`): the mods' `bonemeal`
+    /// hook is asked first and a canceled one's answer stands, then the block's own
+    /// `isValidBonemealTarget`, `isBonemealSuccess` and `performBonemeal` decide and run, the
+    /// level's random draws as vanilla's, and level event 1505 (the growth particles and sound)
+    /// follows. True when something grew. False for a block that is no target, a failed roll, an
+    /// unloaded or out-of-height position, a stale or parked handle, and off a server.
+    #[notes = r#"## Bone meal at a position
+
+`LevelRef::bone_meal(host, pos)` runs the whole bone meal sequence on one block for a mod that
+grows things itself (a sprinkler, a growth totem), so it neither reimplements the checks nor
+skips `bonemeal` listeners. It takes no stack: nothing is consumed, and a hook that edits the
+stack it is shown edits a throwaway one."#]
+    #[helper(
+        side = "server",
+        receiver = "level",
+        target = "horizon_client::game::native_entity_refs::Game<'_>::native_level_bone_meal"
+    )]
+    fn level_bone_meal();
+    /// Sets the biome of the 4x4x4 cell holding `pos` to `biome` (`minecraft:plains`), as
+    /// `/fillbiome` does for one cell: the chunk is saved, re-meshed and the players who see it
+    /// are sent the new biome. False for an unknown biome, an unloaded or out-of-height position,
+    /// a cell that already has it, a stale or parked handle, and off a server.
+    #[notes = r#"## Setting a biome
+
+`LevelRef::set_biome(host, pos, biome)` changes one biome cell, the 4x4x4 block volume a biome is
+stored in, so every position in that cell changes with it. It shares `/fillbiome`'s save, mesh and
+resend path, so the change survives a reload and reaches players as the command's does. Name a
+biome the world knows (a data pack's included); anything else is refused."#]
+    #[helper(
+        side = "server",
+        receiver = "level",
+        target = "horizon_client::game::native_entity_refs::Game<'_>::native_level_set_biome"
+    )]
+    fn level_set_biome();
 }
