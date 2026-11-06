@@ -8,7 +8,7 @@ import sys
 PAGE = "reference/hook-notes.md"
 
 
-def expand(book, content):
+def expand(book, content, title, path):
     """Fill the draft chapter from SUMMARY, retaining its published URL and position."""
     found = []
 
@@ -17,13 +17,13 @@ def expand(book, content):
             if "Chapter" not in item:
                 continue
             chapter = item["Chapter"]
-            if chapter["name"] == "Hook notes" and chapter["path"] is None:
-                chapter.update(content=content, path=PAGE, source_path=None)
+            if chapter["name"] == title and chapter["path"] is None:
+                chapter.update(content=content, path=path, source_path=None)
                 found.append(chapter)
             visit(chapter["sub_items"])
 
     visit(book["sections"])
-    assert len(found) == 1, "SUMMARY must contain one draft [Hook notes]() chapter"
+    assert len(found) == 1, f"SUMMARY must contain one draft [{title}]() chapter"
     return book
 
 
@@ -33,7 +33,7 @@ def preprocess(context, book):
         ["cargo", "run", "--quiet", "-p", "xtask", "--", "mod-api", "notes"],
         cwd=root, check=True, stdout=subprocess.PIPE, text=True,
     ).stdout
-    return expand(book, content)
+    return expand(book, content, "Hook notes", PAGE)
 
 
 if __name__ == "__main__" and sys.argv[1:2] != ["supports"]:
