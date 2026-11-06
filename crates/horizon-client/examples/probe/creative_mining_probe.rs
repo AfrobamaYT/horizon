@@ -3,8 +3,8 @@ use horizon_client::{
     item_data::StackData,
     items::{ItemStack, Items},
 };
+use horizon_core::nbt::Tag;
 use horizon_world::loot::PackOverlay;
-use horizon_world::nbt::Tag;
 use serde_json::Value;
 use std::{
     fs::File,

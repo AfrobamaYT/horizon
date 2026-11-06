@@ -656,7 +656,7 @@ mod tests {
         register(&mut m);
         let types = types(&m);
         let load = |tick: i64, now: i64| {
-            let (tag, _) = horizon_world::nbt::parse_snbt(&format!(
+            let (tag, _) = horizon_core::nbt::parse_snbt(&format!(
                 "{{id:\"minecraft:camel\",Pos:[0.0d,0.0d,0.0d],LastPoseTick:{tick}L}}"
             ))
             .unwrap();
@@ -677,8 +677,7 @@ mod tests {
         assert_eq!(pose_time(&m), 5);
         // No tag: standing.
         let (tag, _) =
-            horizon_world::nbt::parse_snbt("{id:\"minecraft:camel\",Pos:[0.0d,0.0d,0.0d]}")
-                .unwrap();
+            horizon_core::nbt::parse_snbt("{id:\"minecraft:camel\",Pos:[0.0d,0.0d,0.0d]}").unwrap();
         let mut m = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();
         finish_load(&mut m, 5000);
         assert!(!refuse_to_move(&m));

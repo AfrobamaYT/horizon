@@ -455,7 +455,7 @@ mod tests {
     fn handle_teleport_keeps_display_easing() {
         use crate::game::{commands::OtherEntity, native_entity_refs::tests::with_game};
         use horizon_core::geometry::Vec3;
-        use horizon_world::nbt::{Compound, Tag};
+        use horizon_core::nbt::{Compound, Tag};
 
         with_game(|game| {
             game.others.push(OtherEntity {

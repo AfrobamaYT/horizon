@@ -459,7 +459,7 @@ pub(crate) fn decode_targets(
 #[cfg(test)]
 mod bound_tag_tests {
     use super::*;
-    use crate::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     fn registry() -> BlockRegistry {
         let state = |id: &str| Tag::compound([("id", Tag::String(id.into()))]);

@@ -12,16 +12,18 @@ use horizon_items::{
     equipment::Equipment,
     items::{ItemStack, Items},
 };
-use horizon_world::{
-    attribute_map::ValueKind,
-    attributes::{
-        AttributeError, Instance, Modifier, Operation, Packed,
-        entity::Catalog,
-        live::{Dirty, Identities, LiveAttributes},
-    },
-    nbt::Tag,
-};
 use std::{cell::OnceCell, convert::Infallible, fmt, io, sync::Arc};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        attribute_map::ValueKind,
+        attributes::{
+            AttributeError, Instance, Modifier, Operation, Packed,
+            entity::Catalog,
+            live::{Dirty, Identities, LiveAttributes},
+        },
+    },
+};
 
 /// An entity's attribute instances, as a player has them.
 pub type Live = LiveAttributes<Box<dyn Identities>>;

@@ -7,20 +7,23 @@ use horizon_core::{
     position::{BlockPos, ChunkPos},
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::{
-    level::{
-        Behaviours, Dimension, EntityQuery, GameRules, LevelAccess, LevelEvent, Ticks,
-        data::load_registry,
-        removal::{PreRemove, drop_item_stack, pre_remove},
-    },
-    registry::BlockStateId,
-};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Write as _,
     io::{BufRead, Write},
     path::Path,
+};
+use {
+    horizon_core::dimension::Dimension,
+    horizon_world::{
+        level::{
+            Behaviours, EntityQuery, GameRules, LevelAccess, LevelEvent, Ticks,
+            data::load_registry,
+            removal::{PreRemove, drop_item_stack, pre_remove},
+        },
+        registry::BlockStateId,
+    },
 };
 
 struct Cells {

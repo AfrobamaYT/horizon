@@ -153,7 +153,7 @@ impl Behaviours {
         template: &crate::worldgen::structure::StructureTemplate,
         pos: BlockPos,
         settings: TemplateSettings,
-    ) -> Option<(bool, Vec<crate::nbt::Compound>)> {
+    ) -> Option<(bool, Vec<horizon_core::nbt::Compound>)> {
         use crate::worldgen::structure::processor::{PlaceSettings, Processor, place_in_world};
         let features = self.live_features()?;
         let resources = features.structure_resources()?;

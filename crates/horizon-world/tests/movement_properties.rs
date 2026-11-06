@@ -1,13 +1,16 @@
 use horizon_core::position::BlockPos;
-use horizon_world::{
-    DATA_VERSION,
-    movement_properties::{
-        BlockFactorEdits, MovementBlockError, MovementBlockProvider, MovementProperties,
-        MovementTags, NoFactorEdits, RegistryMovementWorld,
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        DATA_VERSION,
+        movement_properties::{
+            BlockFactorEdits, MovementBlockError, MovementBlockProvider, MovementProperties,
+            MovementTags, NoFactorEdits, RegistryMovementWorld,
+        },
+        movement_support,
+        movement_support::{MovementBlockWorld, MovementLocation},
+        registry::{BlockRegistry, BlockStateId},
     },
-    movement_support::{self, MovementBlockWorld, MovementLocation},
-    nbt::Tag,
-    registry::{BlockRegistry, BlockStateId},
 };
 fn fixture() -> (Tag, Tag) {
     let states = Tag::List(vec![

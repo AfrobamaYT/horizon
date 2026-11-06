@@ -6,7 +6,7 @@
 //! only the name reads there.
 use super::{Game, commands::Target};
 use horizon_client::{entity_nbt::flag, scoreboard::json_to_tag, text::Text};
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 use mod_api::{EntityRef, MobCategory};
 
 /// The most tags an entity holds (`Entity.addTag`).
@@ -275,7 +275,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::{entities::ArmorStand, mobs::Mob, text::Text};
     use horizon_core::geometry::Vec3;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     use mod_api::{EntityRef, MobCategory};
 
     fn push_mob(game: &mut super::Game<'_>, id: u32, kind: &str) -> EntityRef {

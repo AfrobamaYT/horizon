@@ -2,6 +2,7 @@
 //!
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
+pub mod inject;
 mod jar;
 mod wasm;
 pub use jar::{
@@ -63,6 +64,9 @@ pub struct Manifest {
     pub native: Option<Native>,
     /// A wasm mod's `mod.wasm`, its toolchain and what it was linked against.
     pub wasm: Option<Wasm>,
+    /// Unified listeners; routing and staging are separate from manifest parsing.
+    #[serde(default)]
+    pub inject: Vec<inject::Inject>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -427,6 +431,8 @@ impl Manifest {
                 m.id
             ));
         }
+        inject::Inject::check_all(&m.inject, m.native.is_some() || m.wasm.is_some())
+            .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
             Internal::check_all(&native.internals)?;
             let mut ids = std::collections::HashSet::new();

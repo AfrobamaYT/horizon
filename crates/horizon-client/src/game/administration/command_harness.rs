@@ -650,13 +650,13 @@ impl Game<'_> {
                         let data = saved.get("data").ok_or("frame map: no saved data compound")?;
                         let records = match data.get("frames") {
                             None => &[][..], // the CODEC omits an empty list
-                            Some(horizon_world::nbt::Tag::List(list)) => list.as_slice(),
+                            Some(horizon_core::nbt::Tag::List(list)) => list.as_slice(),
                             _ => return Err("frame map: frames is not a list".into()),
                         };
                         let record = records.iter().find(|r|
                             horizon_client::save::number(r.get("entity_id")) == Some(i64::from(id)));
                         let pos = record.map(|r| match r.get("pos") {
-                            Some(horizon_world::nbt::Tag::IntArray(pos)) => Ok(pos.clone()),
+                            Some(horizon_core::nbt::Tag::IntArray(pos)) => Ok(pos.clone()),
                             _ => Err("frame map: invalid saved position"),
                         }).transpose()?;
                         let rotation = record.map(|r|

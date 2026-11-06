@@ -1,22 +1,5 @@
 //! Consumable component timing and ordered particle/sound emission.
-use horizon_core::random::RandomSource;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum UseAnimation {
-    #[default]
-    None,
-    Eat,
-    Drink,
-    Block,
-    Bow,
-    Trident,
-    Crossbow,
-    Spyglass,
-    TootHorn,
-    Brush,
-    Bundle,
-    Spear,
-}
+use horizon_core::{random::RandomSource, use_animation::UseAnimation};
 
 #[derive(Clone, Debug)]
 pub struct Consumable<S, E = ()> {
