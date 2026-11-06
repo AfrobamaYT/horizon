@@ -1063,7 +1063,7 @@ pub mod tests {
     /// Block entities of one type, or vanilla ones (none).
     struct TypeOf(Option<&'static str>);
     #[cfg(test)]
-    impl mod_api::prelude::BlockEntityRefsBackend for TypeOf {
+    impl mod_api::prelude::BlockEntitiesBackend for TypeOf {
         fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
             self.0.map(type_key)
         }
@@ -1071,9 +1071,9 @@ pub mod tests {
     #[cfg(test)]
     impl Backend for TypeOf {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(TypeOf, except(block_entity_refs));
+    mod_api::impl_backend_areas!(TypeOf, except(block_entities));
     #[cfg(test)]
-    impl mod_api::prelude::BlockEntityRefsHost for TypeOf {
+    impl mod_api::prelude::BlockEntitiesHost for TypeOf {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(crate::__private::game::block_entity_ref(level, position, 1))
         }
@@ -1085,7 +1085,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    mod_api::impl_host_areas!(TypeOf, except(block_entity_refs));
+    mod_api::impl_host_areas!(TypeOf, except(block_entities));
 
     /// How a mod tank misanswers: an extract takes and answers 100 mB more than asked
     /// (`GivesMore`), or an insert answers 100 mB more than went in (`TakesMore`).

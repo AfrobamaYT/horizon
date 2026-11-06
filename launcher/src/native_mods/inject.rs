@@ -89,6 +89,9 @@ pub(super) fn of(manifest: &horizon_mod_package::Manifest) -> Vec<PointInjection
 
 pub(super) fn raw_of(manifest: &horizon_mod_package::Manifest) -> Vec<PointInjection> {
     injections(manifest, true)
+        .into_iter()
+        .chain(super::slots::points(manifest))
+        .collect()
 }
 
 fn injections(manifest: &horizon_mod_package::Manifest, raw: bool) -> Vec<PointInjection> {

@@ -58,7 +58,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl mod_api::prelude::BlockEntityRefsHost for EnergyWorld {
+    impl mod_api::prelude::BlockEntitiesHost for EnergyWorld {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(crate::__private::game::block_entity_ref(level, position, 1))
         }
@@ -70,9 +70,9 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    mod_api::impl_host_areas!(EnergyWorld, except(block_entity_refs));
+    mod_api::impl_host_areas!(EnergyWorld, except(block_entities));
     #[cfg(test)]
-    impl mod_api::prelude::TransactionsServerHost for EnergyWorld {
+    impl mod_api::prelude::ModStateServerHost for EnergyWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
@@ -87,15 +87,15 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    mod_api::impl_server_host_areas!(EnergyWorld, except(transactions));
+    mod_api::impl_server_host_areas!(EnergyWorld, except(mod_state));
     #[cfg(test)]
-    impl mod_api::prelude::LevelReadsBackend for EnergyWorld {
+    impl mod_api::prelude::LevelsBackend for EnergyWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
     }
     #[cfg(test)]
-    impl mod_api::prelude::BlockEntityRefsBackend for EnergyWorld {
+    impl mod_api::prelude::BlockEntitiesBackend for EnergyWorld {
         fn block_entity_kind(
             &self,
             BlockEntityRef { position: pos, .. }: BlockEntityRef,
@@ -104,7 +104,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl mod_api::prelude::EnergyCapabilityBackend for EnergyWorld {
+    impl mod_api::prelude::FluidsEnergyBackend for EnergyWorld {
         fn energy_amount(&self, BlockSide { pos, .. }: BlockSide) -> Option<u32> {
             Some(self.batteries.get(&pos)?.0)
         }
@@ -115,12 +115,9 @@ pub mod tests {
     #[cfg(test)]
     impl Backend for EnergyWorld {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(
-        EnergyWorld,
-        except(level_reads, block_entity_refs, energy_capability)
-    );
+    mod_api::impl_backend_areas!(EnergyWorld, except(block_entities, fluids_energy, levels));
     #[cfg(test)]
-    impl mod_api::prelude::EnergyCapabilityBackendMut for EnergyWorld {
+    impl mod_api::prelude::FluidsEnergyBackendMut for EnergyWorld {
         fn energy_insert(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
             let Some((held, limit)) = self.batteries.get_mut(&at.pos) else {
                 return 0;
@@ -141,7 +138,7 @@ pub mod tests {
     #[cfg(test)]
     impl BackendMut for EnergyWorld {}
     #[cfg(test)]
-    mod_api::impl_backend_mut_areas!(EnergyWorld, except(energy_capability));
+    mod_api::impl_backend_mut_areas!(EnergyWorld, except(fluids_energy));
 
     #[test]
     fn an_energy_move_takes_what_the_targets_room_and_limit_let_in_and_loses_none() {
