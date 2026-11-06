@@ -15,7 +15,7 @@ first working version (2026-10-23). The owner's guide is [docs/hosting.md](hosti
 
 The dedicated server is the game itself, run headless:
 `horizon-client --resources <prepared> --dedicated [--nogui] [--port N] [--world NAME] [--universe DIR]
-[--initSettings]`, started in the server folder (`crates/horizon-client/src/game/dedicated.rs`).
+[--initSettings]`, started in the server folder (`crates/horizon-client/src/game/interface/dedicated/mod.rs`).
 
 - **Startup.** It follows vanilla's `Main.main` and `DedicatedServer.initServer`. It reads `server.properties`
   and writes it straight back with vanilla's defaults filled in (`horizon_client::server`, byte-exact with
@@ -148,7 +148,7 @@ It includes native, wasm and content packages installed in that inventory, in in
 inventory is `{"mods":[]}`. The supervisor's `GET /api/v1/mods` uses this query, never a build-record fallback.
 
 **A proxy moving a player between two servers** uses more requests on this endpoint (`lan/arrivals.rs`,
-`game/dedicated/transfer.rs`). They are a built-in module, **off by default**, that the owner turns on in
+`game/interface/dedicated/transfer.rs`). They are a built-in module, **off by default**, that the owner turns on in
 `server.toml`:
 
 ```toml
@@ -802,7 +802,7 @@ runtime or new dependency. Server-sent events can replace the polling later if a
   - built: the WebSocket and its authentication, TLS, `rpc.discover`, `players`, `players/kick`,
     `server/{status,save,stop,system_message}`, and the four lists (`allowlist/*`, `bans/*`, `ip_bans/*`,
     `operators/*`), whose changes the game applies itself (its control endpoint's `management` request, in
-    `game/dedicated/management.rs`), so the source, expiry, log lines and kicks are vanilla's;
+    `game/interface/dedicated/management.rs`), so the source, expiry, log lines and kicks are vanilla's;
   - notifications: the supervisor pushes them to every connected client as vanilla's `JsonRpcNotificationService`
     does (a JSON-RPC request without an `id`, its one parameter in an array), through a queue and a thread so a slow
     client never holds the game's output. Built: `server/started` (the game's `Done`) and `server/stopping`
@@ -987,7 +987,7 @@ In order, each one small and shippable alone:
      and `whitelist` for a stopped server: #551.
    - b. The control API on 127.0.0.1 with its token, `start`, `stop`, `restart`, `status`, `cmd` and
      `logs`, plus the engine status endpoint. That endpoint is about 30 additive lines in
-     `game/dedicated.rs` plus a new `game/dedicated/status.rs`. perf-ticks-2's branches touch
+     `game/interface/dedicated/mod.rs` plus a new `game/interface/dedicated/status.rs`. perf-ticks-2's branches touch
      `dedicated.rs` elsewhere (`listen: true`), so the edits don't overlap. It also makes the dedicated loop
      record its tick times, so `/tick query` reports them: #552.
    - c. Backups, restore and automatic backups: #553.
