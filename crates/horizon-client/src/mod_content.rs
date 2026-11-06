@@ -2233,7 +2233,7 @@ const BIOME_TAGS: &str = "worldgen/biome_tags.json";
 /// worldgen loader reads each from (id → the file's text): what structure
 /// mods hold. Biomes, noise and density functions change the terrain and
 /// are not read from mods.
-const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
+const WORLDGEN_BUNDLES: [(&str, &str); 7] = [
     ("structure", "worldgen/structures.json"),
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),
