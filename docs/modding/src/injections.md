@@ -21,6 +21,29 @@ A `mod.wasm` listens at points too: its `horizon-mod.toml` lists the same point 
 compiler ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)). Helper injections are
 native-only: a mod that needs one cannot be a wasm mod until the hook exists.
 
+## Unified native slot declarations
+
+Native internals listeners can use `[[inject]]` with a crate-root function instead of a trait method:
+
+```toml
+[[inject]]
+id = "before_tick"
+at = "horizon_client::game::Game<'_>::tick"
+kind = "head"
+with = "before_tick"
+access = "internals"
+hash = "<the function hash in internals.json>"
+```
+
+The function takes the slot's exact receiver and raw record types from the generated internals
+facade. `head`, `return` and `modify_arg` use function slots. `before_call`, `after_call`,
+`modify_call_arg`, `modify_value`, `wrap_call` and `wrap_if` use listed call slots; specify `call`,
+`nth` and `ctx` from the pinned catalog (`ctx` is currently the site's hash). The build log prints
+`mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
+hash or missing target is refused, not silently redirected. Priority is descending, then mod id
+and inject id. API listeners, source injects, `replace`, locals and extension fields are explicitly
+refused until their corresponding implementations land. These declarations are native-only for now.
+
 ## For agents
 
 Apply these rules in order and stop at the first that fits.

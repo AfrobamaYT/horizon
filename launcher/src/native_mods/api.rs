@@ -59,9 +59,12 @@ pub(super) fn main_rs(
         .collect::<String>();
     let raw = mods.iter().enumerate().flat_map(|(i, manifest)| {
         super::inject::raw_of(manifest).into_iter().map(move |injection| {
-            let point = listed.iter().find(|point| point.target == injection.target).expect("raw target checked");
+            let point = listed.iter().find(|point| internals::plain_path(&point.target) == internals::plain_path(&injection.target)).expect("raw target checked");
             let place = point.place(injection.at_return);
-            format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}), // injection {:?}\n", manifest.id, injection.method, injection.id)
+            let order = manifest.inject.iter().find(|entry| entry.id == injection.id)
+                .map(|entry| format!(".ordered({}, {:?})", entry.priority, entry.id))
+                .unwrap_or_default();
+            format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}){order}, // injection {:?}\n", manifest.id, injection.method, injection.id)
         })
     }).collect::<String>();
     let raw = raw
@@ -73,6 +76,23 @@ pub(super) fn main_rs(
                     super::sites::find(sites, injection)
                         .expect("site checked")
                         .registration(index, manifest, injection)
+                })
+            })
+            .collect::<String>()
+        + &mods
+            .iter()
+            .enumerate()
+            .flat_map(|(index, manifest)| {
+                super::slots::sites(sites, manifest).map(move |(entry, site)| {
+                    let adapter =
+                        super::sites::adapter(entry.kind, &format!("mod_{index}::{}", entry.with));
+                    format!(
+                        "        mod_{index}_internals::raw::{}({:?}, {}, {:?}, {adapter}),\n",
+                        site.constructor(),
+                        manifest.id,
+                        entry.priority,
+                        entry.id
+                    )
                 })
             })
             .collect::<String>();

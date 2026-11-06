@@ -75,7 +75,7 @@ pub(super) fn check<'a>(
 }
 
 impl Site {
-    fn constructor(&self) -> String {
+    pub(super) fn constructor(&self) -> String {
         self.name.to_ascii_lowercase()
     }
 
@@ -111,14 +111,17 @@ impl Site {
         injection: &Injection,
     ) -> String {
         let f = format!("mod_{index}::{}", injection.raw.as_ref().expect("raw site"));
-        let adapter = match injection.kind {
-            InjectionKind::BeforeCall | InjectionKind::ModifyArg => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
-            InjectionKind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
-            InjectionKind::ModifyExpressionValue => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, value) }}"),
-            InjectionKind::WrapOperation => f,
-            InjectionKind::WrapWithCondition => format!("|receiver, args, original| {{ if {f}(receiver, &*args) {{ original(receiver, args); }} }}"),
+        use horizon_mods::manifest::inject::Kind;
+        let kind = match injection.kind {
+            InjectionKind::BeforeCall => Kind::BeforeCall,
+            InjectionKind::ModifyArg => Kind::ModifyCallArg,
+            InjectionKind::AfterCall => Kind::AfterCall,
+            InjectionKind::ModifyExpressionValue => Kind::ModifyValue,
+            InjectionKind::WrapOperation => Kind::WrapCall,
+            InjectionKind::WrapWithCondition => Kind::WrapIf,
             _ => unreachable!("manifest checked a site kind"),
         };
+        let adapter = adapter(kind, &f);
         format!(
             "        mod_{index}_internals::raw::{}({:?}, {}, {:?}, {adapter}),\n",
             self.constructor(),
@@ -126,6 +129,18 @@ impl Site {
             injection.priority.unwrap_or(0),
             injection.id
         )
+    }
+}
+
+pub(super) fn adapter(kind: horizon_mods::manifest::inject::Kind, f: &str) -> String {
+    use horizon_mods::manifest::inject::Kind;
+    match kind {
+        Kind::BeforeCall | Kind::ModifyCallArg => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
+        Kind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
+        Kind::ModifyValue => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, value) }}"),
+        Kind::WrapCall => f.into(),
+        Kind::WrapIf => format!("|receiver, args, original| {{ if {f}(receiver, &*args) {{ original(receiver, args); }} }}"),
+        _ => unreachable!("a site kind"),
     }
 }
 
