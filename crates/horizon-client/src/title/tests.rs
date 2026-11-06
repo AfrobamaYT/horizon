@@ -2764,3 +2764,37 @@ fn vanilla_creation_rules_keep_original_nbt_bytes() {
     };
     assert_eq!(encode(&options.rules), encode(&GameRules::default()));
 }
+
+#[test]
+fn late_registry_handoff_preserves_open_creation_edits() {
+    use crate::gamerules::{Rule, RuleRegistry, Value};
+    let rule = Rule {
+        name: "example:enabled".into(),
+        category: "example:machines".into(),
+        default: Value::Bool(true),
+        min: 0,
+        max: 0,
+    };
+    let registry = std::sync::Arc::new(
+        RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule]).unwrap(),
+    );
+    let mut fixture = Fixture::new();
+    fixture.title.enter_singleplayer();
+    fixture.title.close_rules(Exit::Apply(vec![(
+        "minecraft:keep_inventory".into(),
+        Value::Bool(true),
+    )]));
+    fixture.title.set_rule_registry(registry.clone());
+    let Action::Create { options, .. } = fixture.title.create_action() else {
+        panic!("creation")
+    };
+    assert!(std::sync::Arc::ptr_eq(options.rules.registry(), &registry));
+    assert_eq!(
+        options.rules.get("minecraft:keep_inventory"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        options.rules.get("example:enabled"),
+        Some(Value::Bool(true))
+    );
+}

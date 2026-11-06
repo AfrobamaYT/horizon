@@ -771,6 +771,24 @@ impl Title {
     }
     /// Supply the installed definitions for world creation.
     pub fn set_rule_registry(&mut self, registry: std::sync::Arc<crate::gamerules::RuleRegistry>) {
+        fn rebind(mode: &mut Mode, registry: &std::sync::Arc<crate::gamerules::RuleRegistry>) {
+            match mode {
+                Mode::Create { options, .. }
+                | Mode::CreateFlat { options, .. }
+                | Mode::CreateBuffet { options, .. } => {
+                    options.rules.rebind_registry(registry.clone())
+                }
+                Mode::Error { return_to, .. } => rebind(return_to, registry),
+                _ => {}
+            }
+        }
+        rebind(&mut self.mode, &registry);
+        if let Some(mode) = &mut self.requested {
+            rebind(mode, &registry);
+        }
+        if let Some(screen) = self.rules.get_mut() {
+            screen.rebind_registry(registry.clone());
+        }
         self.rule_registry = registry;
     }
     /// Names the player for the `<NAME> IS YOU` splash; `name` is only asked for when that splash was rolled.

@@ -904,8 +904,10 @@ mod tests {
         };
         let registry =
             Arc::new(RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule]).unwrap());
-        let mut create = horizon_client::title::WorldOptions::default();
-        create.rules = GameRules::with_registry(registry.clone(), &[]);
+        let mut create = horizon_client::title::WorldOptions {
+            rules: GameRules::with_registry(registry.clone(), &[]),
+            ..Default::default()
+        };
         assert!(create.rules.set("example:enabled", Value::Bool(false)));
         let dir = std::env::current_dir()
             .unwrap()
