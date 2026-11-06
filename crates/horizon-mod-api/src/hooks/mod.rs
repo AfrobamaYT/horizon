@@ -130,6 +130,7 @@ mod entity_mob_griefing;
 mod entity_motion;
 mod entity_moves;
 mod entity_outline;
+mod entity_physics;
 mod entity_place;
 mod entity_remove;
 mod entity_riding;

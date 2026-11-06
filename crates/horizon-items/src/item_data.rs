@@ -55,7 +55,11 @@ use std::sync::Arc;
 /// Enchantment id and level, in insertion order.
 pub type Levels = Vec<(Arc<str>, u32)>;
 
+/// A stack's modelled and preserved components. Start with `Default` (or
+/// `ItemStack::data_mut`) and use the fields and setters; component storage may
+/// gain private decoded data alongside its saved form.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct StackData {
     /// `minecraft:enchantments`.
     pub enchantments: Levels,

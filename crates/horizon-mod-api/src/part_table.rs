@@ -6313,10 +6313,8 @@ pub mod tests {
 
     #[cfg(test)]
     fn potion(amount: u32, potion: &str) -> FluidStack {
-        let components = horizon_items::item_data::StackData {
-            potion: Some(Arc::from(potion)),
-            ..Default::default()
-        };
+        let mut components = horizon_items::item_data::StackData::default();
+        components.potion = Some(Arc::from(potion));
         FluidStack {
             components: Some(Box::new(components)),
             ..FluidStack::new(
