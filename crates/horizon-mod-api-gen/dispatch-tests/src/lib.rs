@@ -371,6 +371,8 @@ mod tests {
             #[derive(Clone, Copy)]
             pub struct RaidRef;
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub enum CameraType {}
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum ToastKind {
                 Advancement,
             }
