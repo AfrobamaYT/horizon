@@ -1076,7 +1076,7 @@ mod tests {
         let archive = scratch.0.join("datapacks/templates.zip");
         let publish = |marker: &str| {
             let named = nbt::NamedTag {
-                name: String::new(),
+                name: String::new().into(),
                 tag: Tag::compound([("marker", Tag::String(marker.into()))]),
             };
             let bytes = Compression::Gzip
