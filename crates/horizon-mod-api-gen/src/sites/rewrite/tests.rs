@@ -294,7 +294,7 @@ fn pinned_site_context_refusal_table() {
         source,
         "horizon_client::game",
         &entries(),
-        &[request.clone()],
+        std::slice::from_ref(&request),
     )
     .unwrap();
     let mut request = request;
@@ -316,7 +316,7 @@ fn pinned_site_context_refusal_table() {
             &source,
             "horizon_client::game",
             &entries(),
-            &[request.clone()],
+            std::slice::from_ref(&request),
         );
         match reason {
             None => {
