@@ -172,13 +172,25 @@ fn code_declared_types_build_a_root_and_membership_changes_invalidate_its_cache(
         jars: Vec::new(),
     }];
     let cache = base.with_extension("cache");
+    // Even before a code-only mod declares content, its accepted package ID
+    // belongs to a distinct resource generation for load conditions.
+    let code_only = resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap();
+    assert_ne!(code_only, base);
     assert_eq!(
-        resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap(),
-        base
+        horizon_mods::enabled::EnabledMods::read(&code_only)
+            .unwrap()
+            .server_ids()
+            .collect::<Vec<_>>(),
+        vec!["test"]
+    );
+    assert_eq!(
+        fs::read(code_only.join("registries.json")).unwrap(),
+        fs::read(base.join("registries.json")).unwrap()
     );
     mods[0].content.block_entity_types = vec![kind("test:machine", &[])];
     let root = resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap();
     assert_ne!(root, base);
+    assert_ne!(root, code_only);
     assert!(root.join(crate::content_identity::MARKER).exists());
     assert_eq!(
         fs::read_to_string(root.join(BLOCK_ENTITY_TYPES)).unwrap(),
