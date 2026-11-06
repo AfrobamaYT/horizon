@@ -537,7 +537,7 @@ impl Game<'_> {
     /// `ServerPlayer.hurtServer` refuses it when the `pvp` game rule or their
     /// teams forbid it (`canHarmPlayer`); the trident bounces off either way.
     fn trident_hits_guest(&mut self, t: &ThrownTrident, conn: u32, damage: f32) {
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return;
         };
         let team_of = |game: &Self, name: &str| game.score.board.players_team(name).cloned();
@@ -546,18 +546,20 @@ impl Game<'_> {
             None => self.player_team().cloned(),
         };
         let target = host.hub.guest(conn).and_then(|g| team_of(self, &g.name));
-        let refused = !(self.ui.rules.bool("pvp")
+        let refused = !(self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::PVP)
             && horizon_client::scoreboard::teams_allow_damage(target.as_ref(), attacker.as_ref()));
-        let shooter = self.player_attacker(&host, t.guest);
+        let shooter = self.player_attacker(t.guest);
         let from = [t.previous.x, t.previous.y, t.previous.z];
-        self.guest_hit_by(&mut host, conn, |g| {
+        self.guest_hit_by(conn, |g| {
             g.combat.refuse_player_hit = refused;
             g.combat.projectile_attacker = shooter;
             g.mob_hits_player(damage, from, "minecraft:trident");
             g.combat.refuse_player_hit = false;
             g.combat.projectile_attacker = None;
         });
-        self.lan = Some(host);
     }
     /// The players tridents fly back to or land at: this game's player and the
     /// guests in this level. A server has no player of its own, so its
