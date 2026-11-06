@@ -419,6 +419,17 @@ impl Game<'_> {
             .as_ref()
             .and_then(|s| s.merchant.as_ref())
             .and_then(|m| m.mob);
+        if mob
+            .and_then(|id| self.mobs.iter().find(|m| m.id == id))
+            .is_some_and(|m| {
+                m.species() == Species::Villager && m.extra.profession.index().is_none()
+            })
+        {
+            if let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) {
+                m.session = session;
+            }
+            return;
+        }
         let (mut session, traded) = self.merchant_apply(session, mob);
         self.merchant_traded(mob, &mut session.offers, &traded);
         if let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) {
