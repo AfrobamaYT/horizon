@@ -59,14 +59,14 @@ hooks this game doesn't have, or has with another type, names the first such imp
 ## Listening at points
 
 API function slots use `[[inject]]`, with a crate-root function named by `with`, rather than
-`impl Points`. The [chat fixture's manifest](../../../../crates/horizon-mod-wasm/tests/points/chat_tail/horizon-mod.toml)
-and [listener](../../../../crates/horizon-mod-wasm/tests/points/chat_tail/src/lib.rs) are compiled examples.
+`impl Points`. The [chat fixture's manifest](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/chat_tail/horizon-mod.toml)
+and [listener](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/chat_tail/src/lib.rs) are compiled examples.
 The function takes the point's host and API record (only the record for a hostless point).
 
 A build script parses the manifest once, projects its validated declarations into
 `horizon_mod_api_gen::points::GuestInject`, and calls `guest_exports` with the pinned game's root.
 This generates the one generic listeners export, including its subscriptions and record shapes.
-The [shared fixture build script](../../../../crates/horizon-mod-wasm/tests/points/build.rs) shows the
+The [shared fixture build script](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/build.rs) shows the
 complete path; the generator itself has no manifest-crate dependency. Include its output in the guest
 bootstrap, not one hand-written wasm adapter per point.
 
