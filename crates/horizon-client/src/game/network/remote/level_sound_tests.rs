@@ -47,6 +47,147 @@ impl mod_api::Hooks for Tuner {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct Request {
+    sound: String,
+    source: SoundSource,
+    emitter: Option<u32>,
+}
+struct LocalTuner(Arc<Mutex<Vec<Request>>>);
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for LocalTuner {
+    fn play_level_sound_at_position(
+        &self,
+        host: HostSide<'_>,
+        e: &mut mod_api::PlayLevelSoundAtPositionEvent,
+    ) -> Flow {
+        assert!(matches!(host, HostSide::Client(_)));
+        self.0.lock().unwrap().push(Request {
+            sound: e.sound.to_string(),
+            source: *e.source,
+            emitter: None,
+        });
+        Flow::Cancel
+    }
+    fn play_level_sound_at_entity(
+        &self,
+        host: HostSide<'_>,
+        e: &mut mod_api::PlayLevelSoundAtEntityEvent,
+    ) -> Flow {
+        assert!(matches!(host, HostSide::Client(_)));
+        let sound = e.sound.to_string();
+        self.0.lock().unwrap().push(Request {
+            sound: sound.clone(),
+            source: *e.source,
+            emitter: Some(e.entity.id()),
+        });
+        if sound == "minecraft:block.honey_block.slide" {
+            Flow::Continue
+        } else {
+            Flow::Cancel
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn local_level_requests_can_mute_sound_without_undoing_prediction() {
+    use horizon_core::position::BlockPos;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![mod_api::ModEntry::new(
+        "local_tuner",
+        Box::new(LocalTuner(requests.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_client_game(|game| {
+            let _server = logged_client(game);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(1.0, 64.0, 1.0)).unwrap());
+            game.streaming
+                .insert_remote(&mut game.world, Chunk::empty(0, 0));
+            let old = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:oak_door")
+                .unwrap();
+            let new = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:birch_door")
+                .unwrap();
+            game.world.set(1, 64, 1, old).unwrap();
+            let at = BlockPos::new(1, 64, 1);
+            game.predict_use(
+                &(
+                    vec![(at, new)],
+                    vec![(at, "block.wooden_door.open".into(), 1.0, 0.9)],
+                ),
+                1,
+            );
+            assert_eq!(
+                game.world.block(1, 64, 1),
+                new,
+                "sound cancellation does not cancel the use"
+            );
+            game.player_menu_sound(horizon_client::bundle::INSERT_FAIL);
+            let stack = ItemStack {
+                item: "minecraft:apple".into(),
+                count: 1,
+                damage: 0,
+                extra: None,
+            };
+            let consumable = game
+                .items()
+                .get(&stack.item)
+                .unwrap()
+                .consumable
+                .clone()
+                .unwrap();
+            game.emit_consume(&consumable, &stack, 16);
+            game.play_player_bound_sound("minecraft:item.goat_horn.sound.0", 2, 8.0, 1.0, true);
+            assert!(
+                game.audio.heard.is_empty(),
+                "all four canceled requests stop before Audio"
+            );
+            let expected = [
+                Request {
+                    sound: "minecraft:block.wooden_door.open".into(),
+                    source: SoundSource::Blocks,
+                    emitter: None,
+                },
+                Request {
+                    sound: horizon_client::bundle::INSERT_FAIL.into(),
+                    source: SoundSource::Players,
+                    emitter: Some(7),
+                },
+                Request {
+                    sound: "minecraft:entity.generic.eat".into(),
+                    source: SoundSource::Players,
+                    emitter: Some(7),
+                },
+                Request {
+                    sound: "minecraft:item.goat_horn.sound.0".into(),
+                    source: SoundSource::Records,
+                    emitter: Some(7),
+                },
+            ];
+            assert_eq!(*requests.lock().unwrap(), expected);
+            game.audio.engine.loaded = true;
+            game.play_client_player_sound("minecraft:block.honey_block.slide", 1.0, 1.0);
+            assert_eq!(
+                game.audio.heard.get("minecraft:block.honey_block.slide"),
+                Some(&1)
+            );
+            assert!(
+                game.audio.engine.bound_entities().is_empty(),
+                "LocalPlayer.playSound stays positional"
+            );
+        });
+    });
+}
+
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn packets_ask_client_level_before_playback_not_ui() {

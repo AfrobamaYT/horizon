@@ -12,7 +12,9 @@ pub trait Hooks {
     /// the tick are asked as they go out, at the end of the tick, with the state
     /// then. `/playsound` sends its packet directly and isn't asked, as in
     /// vanilla on the server. On the client, incoming sound packets ask before
-    /// playback, including `/playsound`. Server and client requests are separate:
+    /// playback, including `/playsound`; client-predicted level requests ask
+    /// here too. Canceling a sound does not cancel its action or prediction.
+    /// Server and client requests are separate:
     /// `HostSide` identifies which one is being edited. UI and sound-engine-only
     /// playback do not ask this hook. Both sides.
     #[hook(
@@ -44,7 +46,9 @@ pub trait Hooks {
     /// bound to an entity. Asked after the tick's other sounds. The fields and
     /// their rules are `play_level_sound_at_position`'s. Client entity-sound
     /// packets ask before playback and keep following their emitter; an absent
-    /// emitter plays nothing. Both sides, distinguished by `HostSide`.
+    /// emitter plays nothing. `LocalPlayer.playSound` also asks this hook,
+    /// including steps, falls, hurt, bundle clicks and consumption; these remain
+    /// positional sounds, not following sounds. Both sides, distinguished by `HostSide`.
     #[hook(
         side = "both",
         contract = "cancel",

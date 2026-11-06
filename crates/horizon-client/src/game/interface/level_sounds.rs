@@ -113,6 +113,37 @@ impl Game<'_> {
         }
     }
 
+    /// A client-local level request without a packet seed. LocalPlayer.playSound
+    /// asks AtEntity but still creates a positional, not entity-bound, instance.
+    pub(super) fn play_client_local_sound(&mut self, sound: LevelSound<'_>) {
+        let seed = self.audio.next_sound_seed();
+        let at = sound.at;
+        if let Some(heard) = self.ask_level_sound(self.dim.id(), sound) {
+            self.audio.play_on_seeded(
+                heard.source.index(),
+                &heard.name,
+                Some(at),
+                heard.volume,
+                heard.pitch,
+                seed,
+            );
+        }
+    }
+
+    /// `LocalPlayer.playSound`, including inherited step, fall and consume sounds.
+    pub(super) fn play_client_player_sound(&mut self, name: &str, volume: f32, pitch: f32) {
+        let Some(player) = self.player.as_ref() else {
+            return;
+        };
+        let at = [player.position.x, player.position.y, player.position.z];
+        let Some(remote) = self.remote.as_ref() else {
+            return;
+        };
+        let mut sound = LevelSound::new(name, at, volume, pitch).in_source(SoundSource::Players);
+        sound.emitter = Some(remote.entity_id as u32);
+        self.play_client_local_sound(sound);
+    }
+
     /// `ServerLevel.playSeededSound`'s entity overload, `playSound(except,
     /// emitter, ...)`: `sound` plays here and, while the level's sounds are
     /// captured for others, joins the tick's bound sounds. `lan_broadcast_effects` asks

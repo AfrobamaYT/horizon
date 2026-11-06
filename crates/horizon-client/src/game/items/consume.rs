@@ -338,7 +338,9 @@ impl EmissionWorld for Emitter<'_, '_> {
     /// a guest's server turn leaves the guest out.
     fn play_sound(&mut self, sound: String, volume: f32, pitch: f32) -> Result<(), Infallible> {
         let at = self.0.feet();
-        if self.0.lan_acting.is_some() {
+        if !self.0.is_logical_server() {
+            self.0.play_client_player_sound(&sound, volume, pitch);
+        } else if self.0.lan_acting.is_some() {
             self.0.audio.play_unshared(&sound, at, volume, pitch);
             if let Some(at) = at {
                 self.0.guest_player_sounds.push((sound, at, volume, pitch));

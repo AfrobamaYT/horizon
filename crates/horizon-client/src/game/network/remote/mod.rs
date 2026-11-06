@@ -2761,8 +2761,10 @@ impl Game<'_> {
                 f64::from(pos[1]) + 0.5,
                 f64::from(pos[2]) + 0.5,
             ];
-            self.audio
-                .play(&s.place, Some(at), (s.volume + 1.0) / 2.0, s.pitch * 0.8);
+            self.play_client_local_sound(
+                LevelSound::new(&s.place, at, (s.volume + 1.0) / 2.0, s.pitch * 0.8)
+                    .in_source(mod_api::SoundSource::Blocks),
+            );
             if let Some(r) = self.remote.as_mut() {
                 r.placing = None;
             }
@@ -4256,23 +4258,11 @@ impl Game<'_> {
                 let own = me == Some(p.id);
                 self.pvp_hurt(p.id, own, p.direct.map(|d| Some(d) == me));
                 if own {
-                    let at = self
-                        .player
-                        .as_ref()
-                        .map(|pl| [pl.position.x, pl.position.y, pl.position.z]);
                     if let Some(pl) = self.player.as_mut() {
                         pl.health.animate_hurt();
-                    }
-                    if let Some(at) = at {
                         let sound = self.remote_hurt_sound(p.source_type);
                         let pitch = player_voice_pitch();
-                        self.audio.play_on(
-                            horizon_client::settings::sound_source(sound),
-                            sound,
-                            Some(at),
-                            1.0,
-                            pitch,
-                        );
+                        self.play_client_player_sound(sound, 1.0, pitch);
                     }
                 } else if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     m.limb_speed = 1.5;
@@ -4405,18 +4395,11 @@ impl Game<'_> {
                 // (the server's goes to everyone else).
                 if p.event == 3
                     && self.remote.as_ref().is_some_and(|r| r.entity_id == p.id)
-                    && let Some(pl) = self.player.as_ref()
+                    && self.player.is_some()
                 {
-                    let at = [pl.position.x, pl.position.y, pl.position.z];
                     let sound = "minecraft:entity.player.death";
                     let pitch = player_voice_pitch();
-                    self.audio.play_on(
-                        horizon_client::settings::sound_source(sound),
-                        sound,
-                        Some(at),
-                        1.0,
-                        pitch,
-                    );
+                    self.play_client_player_sound(sound, 1.0, pitch);
                 }
                 // The events that start a mob's animation (the warden's).
                 if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
@@ -6531,7 +6514,6 @@ impl Game<'_> {
         let events = std::mem::take(&mut player.events);
         self.previous_eye = self.eye;
         self.eye += (player.dimensions.eye_height - self.eye) * 0.5;
-        let feet = [player.position.x, player.position.y, player.position.z];
         for event in events {
             match event {
                 horizon_client::motion::MotionEvent::Emission { state, muffled, .. } => {
@@ -6542,11 +6524,10 @@ impl Game<'_> {
                     } else {
                         (sounds.volume * 0.15, sounds.pitch)
                     };
-                    self.audio.play(&sounds.step, Some(feet), volume, pitch);
+                    self.play_client_player_sound(&sounds.step, volume, pitch);
                 }
                 horizon_client::motion::MotionEvent::Swim { volume, pitch } => {
-                    self.audio
-                        .play("minecraft:entity.player.swim", Some(feet), volume, pitch);
+                    self.play_client_player_sound("minecraft:entity.player.swim", volume, pitch);
                 }
                 // Entity.doWaterSplashEffect on the client's own level: the
                 // server's splash skips this player (Player.playSound), and
@@ -6561,7 +6542,7 @@ impl Game<'_> {
                     } else {
                         "minecraft:entity.player.splash"
                     };
-                    self.audio.play(name, Some(feet), volume, pitch);
+                    self.play_client_player_sound(name, volume, pitch);
                 }
                 horizon_client::motion::MotionEvent::SplashParticle {
                     bubble,
@@ -6581,9 +6562,8 @@ impl Game<'_> {
                     );
                 }
                 horizon_client::motion::MotionEvent::Chime { volume, pitch } => {
-                    self.audio.play(
+                    self.play_client_player_sound(
                         "minecraft:block.amethyst_block.chime",
-                        Some(feet),
                         volume,
                         pitch,
                     );
@@ -6601,8 +6581,7 @@ impl Game<'_> {
                 // the slide sound, heard here (LocalPlayer.playSound); the
                 // particles come from the server's event 53.
                 horizon_client::motion::MotionEvent::HoneySlide { sound: true, .. } => {
-                    self.audio
-                        .play("minecraft:block.honey_block.slide", Some(feet), 1.0, 1.0);
+                    self.play_client_player_sound("minecraft:block.honey_block.slide", 1.0, 1.0);
                 }
                 // LivingEntity.causeFallDamage and HoneyBlock.fallOn on the
                 // client's own level: the fall and honey sounds are heard here
@@ -6620,7 +6599,7 @@ impl Game<'_> {
                         .player_fall_sound()
                         .or_else(|| sound.honey_landing_sound())
                     {
-                        self.audio.play(name, Some(feet), volume, pitch);
+                        self.play_client_player_sound(name, volume, pitch);
                     }
                 }
                 _ => {}
@@ -8420,13 +8399,17 @@ impl Game<'_> {
                 .is_some();
             if waxes {
                 self.level_event_at(3003, hit.pos, 0);
-                self.audio
-                    .play("minecraft:item.honeycomb.wax_on", Some(at), 1.0, 1.0);
+                self.play_client_local_sound(
+                    LevelSound::new("minecraft:item.honeycomb.wax_on", at, 1.0, 1.0)
+                        .in_source(mod_api::SoundSource::Blocks),
+                );
             }
             waxes
         } else if let Some((_, sound, _, _, particle)) = self.block_transform(stack, hit) {
             self.transform_particle(&particle, hit.pos);
-            self.audio.play(&sound, Some(at), 1.0, 1.0);
+            self.play_client_local_sound(
+                LevelSound::new(&sound, at, 1.0, 1.0).in_source(mod_api::SoundSource::Blocks),
+            );
             true
         } else if self
             .res
@@ -8503,7 +8486,9 @@ impl Game<'_> {
             } else {
                 format!("minecraft:{sound}")
             };
-            self.audio.play(&name, Some(at), *volume, *pitch);
+            self.play_client_local_sound(
+                LevelSound::new(&name, at, *volume, *pitch).in_source(mod_api::SoundSource::Blocks),
+            );
         }
     }
 
@@ -8871,7 +8856,10 @@ impl Game<'_> {
                 } else {
                     format!("minecraft:{sound}")
                 };
-                self.audio.play(&name, Some(at), volume, pitch);
+                self.play_client_local_sound(
+                    LevelSound::new(&name, at, volume, pitch)
+                        .in_source(mod_api::SoundSource::Blocks),
+                );
             }
             // BucketItem.use's SUCCESS (SwingSource.CLIENT) on this client.
             if succeeded {
