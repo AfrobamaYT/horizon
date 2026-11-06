@@ -253,7 +253,12 @@ impl Game<'_> {
             self.native_player_unleash_entity(player, &name, id);
         }
         // Leashable.tickLeash gates a dying entity's lead drop on entity_drops.
-        let drop = drop && (alive || self.ui.rules.bool("entity_drops"));
+        let drop = drop
+            && (alive
+                || self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS));
         if sound {
             self.lead_sound("break", at);
         }

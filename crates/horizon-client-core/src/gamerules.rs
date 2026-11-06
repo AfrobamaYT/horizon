@@ -164,6 +164,16 @@ const fn vanilla_index(name: &str) -> RuleIndex {
 /// Resolved vanilla rules used by the simulation.
 pub mod vanilla {
     use super::{RuleIndex, vanilla_index};
+    /// The `spawn_wandering_traders` rule.
+    pub const SPAWN_WANDERING_TRADERS: RuleIndex = vanilla_index("spawn_wandering_traders");
+    /// The `spawn_wardens` rule.
+    pub const SPAWN_WARDENS: RuleIndex = vanilla_index("spawn_wardens");
+    /// The `spawn_patrols` rule.
+    pub const SPAWN_PATROLS: RuleIndex = vanilla_index("spawn_patrols");
+    /// The `raids` rule.
+    pub const RAIDS: RuleIndex = vanilla_index("raids");
+    /// The `entity_drops` rule.
+    pub const ENTITY_DROPS: RuleIndex = vanilla_index("entity_drops");
     /// The `advance_time` rule.
     pub const ADVANCE_TIME: RuleIndex = vanilla_index("advance_time");
     /// The `water_source_conversion` rule.

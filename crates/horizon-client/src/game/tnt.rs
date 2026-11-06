@@ -174,7 +174,11 @@ impl Game<'_> {
         self.native_tnt_primed(self.lan_acting_uuid, [pos.x, pos.y, pos.z], &mut cancel);
         // `TntBlock.prime` leaves the block alone with `tnt_explodes` off, for
         // redstone, fire and an unstable block breaking alike.
-        !cancel && self.ui.rules.bool("tnt_explodes")
+        !cancel
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
     }
     /// Primes TNT a level event announced, or, when the mods refuse, puts
     /// back the block the fire or signal had already taken out.
@@ -290,7 +294,11 @@ impl Game<'_> {
             let in_water = self.bounds_in_water(bounds);
             self.tnts.remove(i);
             // PrimedTnt.tick: with `tnt_explodes` off it goes away without exploding.
-            if !self.ui.rules.bool("tnt_explodes") {
+            if !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+            {
                 return Ok(());
             }
             // ExplosionInteraction.TNT: the tnt_explosion_drop_decay rule.
@@ -327,7 +335,11 @@ impl Game<'_> {
             return Ok(false);
         }
         let pos = BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             // TntBlock.useItemOn: the rule is off, the acting player's overlay
             // says so, and PASS lets the item's own useOn light a fire there.
             let message = Text::translate("block.minecraft.tnt.disabled", &[]);

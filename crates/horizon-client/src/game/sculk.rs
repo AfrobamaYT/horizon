@@ -1223,7 +1223,10 @@ impl Game<'_> {
         use horizon_world::food::Difficulty;
         self.state_property(state, "can_summon") == Some("true")
             && self.world.health_rules.difficulty != Difficulty::Peaceful
-            && self.ui.rules.bool("spawn_wardens")
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_WARDENS)
     }
     /// `SculkShriekerBlockEntity.tryShriek`.
     fn try_shriek(&mut self, key: (i32, i32, i32), by_player: bool) -> Result<()> {
