@@ -679,7 +679,11 @@ trusting native code is the player's decision, never an agent's.
 4. **Stage.** The projects are copied first, so the build and its key use that copy whatever happens to the
    folder meanwhile. For raw injections the launcher writes `horizon-mixin.toml` and runs `horizon-mixins apply`.
    It stages the mod crates and generated executable, copying only changed files into `native/stage/`,
-   so Cargo, which goes by file times, recompiles only the crates the mods touch. Registry dependencies
+   so Cargo, which goes by file times, recompiles only the crates the mods touch.
+   Each file written gets the current time, never the archive's (the commit's) or the copy's original: on
+   Windows and macOS a copy keeps it, and a file older than the last build reads as already compiled, so
+   switching Nightlies linked the previous one's crates (horizon-rust/horizon#10421). A stage from before
+   that fix is written again once (`native/stage.stamped` marks it). Registry dependencies
    are checked against Horizon's `Cargo.lock` ([The mod's crate](#the-mods-crate)).
 5. **Compile**: `cargo build --locked --profile <fast|release> [--config ...] [--features horizon-client/mods] -p
    horizon-native-game`, into `native/target/`, with one of three build modes:
