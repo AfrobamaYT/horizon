@@ -1133,6 +1133,60 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn shared_walk_does_not_use_writable_projections() {
+        unsafe fn checked(p: *mut (), writable: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            match op {
+                Op::Field(_) if !writable => Ok(Reply::Node(p, PLAYER, false)),
+                _ => Err(not_here("writable projection")),
+            }
+        }
+        let table = Table {
+            types: Box::leak(Box::new([
+                Type {
+                    path: "parent",
+                    hash: "",
+                    node: checked,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+                Type {
+                    path: "unused",
+                    hash: "",
+                    node: players,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+                Type {
+                    path: "Player",
+                    hash: "",
+                    node: player,
+                    raw_fields: &[],
+                    raw_index: false,
+                },
+            ])),
+            ..TABLE
+        };
+        let mut player = Player { health: 4 };
+        let frame = unsafe {
+            Frame::new(
+                &table,
+                vec![Root {
+                    ptr: (&raw mut player).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        let path = Path {
+            root: 0,
+            steps: vec![Step::Field(0)],
+        };
+        assert!(!frame.walk_with(&path, false).unwrap().writable);
+    }
+
+    #[test]
     fn equivalent_option_keys_share_journal_identity() {
         unsafe fn map(p: *mut (), w: bool, op: Op<'_>) -> Result<Reply, Refusal> {
             let decode = |key: &Value| match key {
