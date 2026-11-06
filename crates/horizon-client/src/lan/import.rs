@@ -361,7 +361,7 @@ struct Kept {
         Option<(String, [i32; 3])>,
         bool,
         Vec<String>,
-        horizon_world::attachments::Attachments,
+        horizon_mod_runtime::attachments::Attachments,
     )>,
     dimension: String,
 }

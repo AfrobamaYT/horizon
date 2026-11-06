@@ -51,8 +51,9 @@ pub fn block_entity_types() -> &'static [BlockEntityType] {
     installed().map_or(&[], |installed| &installed.block_entity_types)
 }
 
-pub(crate) fn resolved_block_entity_types() -> &'static OnceLock<super::registry_keys::Names> {
-    static EMPTY: OnceLock<super::registry_keys::Names> = OnceLock::new();
+pub(crate) fn resolved_block_entity_types()
+-> &'static OnceLock<horizon_mod_runtime::registry_keys::Names> {
+    static EMPTY: OnceLock<horizon_mod_runtime::registry_keys::Names> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.resolved_block_entity_types)
 }
 
@@ -367,18 +368,20 @@ pub mod tests {
             )
         };
         assert_eq!(
-            crate::registry_keys::resolve_block_entity_types(&types(&["minecraft:chest"]))
-                .unwrap_err(),
+            {
+                let types = &types(&["minecraft:chest"]);
+                crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
+            }
+            .unwrap_err(),
             [
                 "mod first requested unknown block entity type owner:press",
                 "mod owner requested unknown block entity type owner:press"
             ]
         );
-        crate::registry_keys::resolve_block_entity_types(&types(&[
-            "minecraft:chest",
-            "owner:press",
-            "minecraft:furnace",
-        ]))
+        {
+            let types = &types(&["minecraft:chest", "owner:press", "minecraft:furnace"]);
+            crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
+        }
         .unwrap();
         let keys = keys.lock().unwrap();
         assert_eq!(keys[0], keys[1]);

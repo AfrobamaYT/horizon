@@ -1,9 +1,9 @@
 use super::{BlockStateId, Game};
-use horizon_world::{
-    attachments::{ATTACHMENTS_KEY, attachment_compound},
-    level::Ticks,
-};
 use mod_api::{AttachmentAccess, BlockPos, Direction};
+use {
+    horizon_mod_runtime::attachments::{ATTACHMENTS_KEY, attachment_compound},
+    horizon_world::level::Ticks,
+};
 
 fn world_attachments(
     world: &mut horizon_client::world::World,
@@ -44,7 +44,7 @@ fn world_attachments(
 impl Game<'_> {
     /// A guest's attachments back in their record, for `playerdata` to save.
     pub(super) fn guest_attachments_into(
-        attachments: &std::collections::HashMap<u32, horizon_world::attachments::Attachments>,
+        attachments: &std::collections::HashMap<u32, horizon_mod_runtime::attachments::Attachments>,
         guest: &mut horizon_client::lan::guest::Guest,
     ) {
         guest.attachments = attachments.get(&guest.conn).cloned().unwrap_or_default();
@@ -154,11 +154,13 @@ impl Game<'_> {
             if let Some(i) = painting {
                 let level = level.ok_or(AttachmentError::MissingHolder)?;
                 if !self.paintings[i].attachment_lifetime.is_bound() {
-                    super::attachment_index::bind_entity_map(
+                    self.paintings[i].attachment_lifetime.bind(
                         map,
                         self.attachment_indexes.entry(self.dim).or_default(),
-                        mod_api::EntityRef::new(level.epoch(), id),
-                        &mut self.paintings[i].attachment_lifetime,
+                        mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(
+                            level.epoch(),
+                            id,
+                        )),
                     );
                 }
             }

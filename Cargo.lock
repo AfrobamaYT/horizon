@@ -1687,6 +1687,7 @@ dependencies = [
  "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-points",
+ "horizon-mod-runtime",
  "horizon-mod-wasm",
  "horizon-narrator",
  "horizon-optifine",
@@ -1771,6 +1772,7 @@ dependencies = [
  "horizon-mcp",
  "horizon-mod-api",
  "horizon-mod-package",
+ "horizon-mod-runtime",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1827,6 +1829,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-macros",
  "horizon-mod-package",
+ "horizon-mod-runtime",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1949,6 +1952,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-package",
+ "horizon-mod-runtime",
  "horizon-world",
  "log",
  "serde",
@@ -2057,6 +2061,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-runtime"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+]
+
+[[package]]
 name = "horizon-mod-wasm"
 version = "0.1.0"
 dependencies = [
@@ -2144,6 +2155,7 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "horizon-core",
+ "horizon-mod-runtime",
  "horizon-world",
  "ipconfig",
  "log",
@@ -2276,6 +2288,7 @@ dependencies = [
  "flate2",
  "horizon-assets",
  "horizon-core",
+ "horizon-mod-runtime",
  "libm",
  "log",
  "lz4_flex",

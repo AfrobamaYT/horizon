@@ -16,7 +16,7 @@ use horizon_core::{
     random::RandomSource,
     ticks::ChunkTicks,
 };
-use horizon_world::attachments::{ATTACHMENTS_KEY, attachment_compound};
+use horizon_mod_runtime::attachments::{ATTACHMENTS_KEY, attachment_compound};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -147,18 +147,19 @@ pub(super) fn with_raw(modelled: Tag, raw: Option<&Tag>) -> Tag {
 fn read_attachments(
     tag: &Tag,
     uuid: [i32; 4],
-    maps: &mut HashMap<[i32; 4], horizon_world::attachments::Attachments>,
+    maps: &mut HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
 ) {
     if let Ok(Some(data)) = attachment_compound(tag.get(ATTACHMENTS_KEY)) {
-        maps.entry(uuid)
-            .or_insert_with(|| horizon_world::attachments::Attachments::from_nbt(data.clone()));
+        maps.entry(uuid).or_insert_with(|| {
+            horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone())
+        });
     }
 }
 
 /// Overlay live attachment maps on entity tags, including passenger trees.
 pub(super) fn write_attachments(
     tag: &mut Tag,
-    maps: &HashMap<[i32; 4], horizon_world::attachments::Attachments>,
+    maps: &HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
 ) {
     let uuid = entity_nbt::uuid(tag);
     if let Tag::Compound(root) = tag {
@@ -2146,7 +2147,7 @@ mod tests {
 
     #[test]
     fn entity_attachment_boundary_includes_passengers() {
-        use horizon_world::attachments::{
+        use horizon_mod_runtime::attachments::{
             AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
         };
         let key = AttachmentType {
@@ -2227,7 +2228,7 @@ mod tests {
             None,
         )
         .unwrap();
-        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        use horizon_mod_runtime::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
         static MARK: AttachmentType<i32> = AttachmentType {
             namespace: "holdproof",
             name: "mark",

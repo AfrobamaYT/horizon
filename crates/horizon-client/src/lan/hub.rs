@@ -33,10 +33,11 @@ use horizon_protocol::{
 use std::sync::{Arc, Mutex, atomic::Ordering};
 use {
     horizon_core::nbt::{JavaString, Tag},
+    horizon_mod_runtime::attachments::Holder,
     horizon_world::{
-        attachments::Holder, block_collision::BlockCollisionRegistry,
-        block_collision_scan::BlockCollisionScan, collision_context::CollisionContext,
-        native_load_context::LoopContext, world_movement::in_range_of_ground,
+        block_collision::BlockCollisionRegistry, block_collision_scan::BlockCollisionScan,
+        collision_context::CollisionContext, native_load_context::LoopContext,
+        world_movement::in_range_of_ground,
     },
 };
 

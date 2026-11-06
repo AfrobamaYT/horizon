@@ -39,6 +39,16 @@ macro_rules! impl_attachment_lifetime {
 }
 
 impl AttachmentLifetime {
+    /// Bind an authoritative entity's map to its already resolved holder identity.
+    pub fn bind<H: Copy + Eq + std::hash::Hash + Send + Sync + 'static>(
+        &mut self,
+        map: &mut super::Attachments,
+        index: &std::sync::Arc<std::sync::Mutex<super::index::AttachmentIndex<H>>>,
+        holder: H,
+    ) {
+        *self = AttachmentLifetime::new(map.bind_index(index, holder));
+    }
+
     /// Whether this entity owns a registration.
     pub fn is_bound(&self) -> bool {
         self.registration.is_some()

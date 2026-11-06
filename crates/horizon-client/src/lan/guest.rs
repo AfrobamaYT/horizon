@@ -443,7 +443,7 @@ pub struct Guest {
     /// The compound this player was loaded from, for fields Horizon does not model.
     pub saved: Option<horizon_core::nbt::Tag>,
     /// Server-owned attachment data for this player.
-    pub attachments: horizon_world::attachments::Attachments,
+    pub attachments: horizon_mod_runtime::attachments::Attachments,
     /// `ServerPlayer.seenCredits`: the end poem has been shown.
     pub seen_credits: bool,
     /// `ServerPlayer.postEffects` and `postEffectsDirty`.

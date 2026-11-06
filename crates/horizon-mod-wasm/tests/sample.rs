@@ -141,7 +141,12 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     );
     // Its `register` runs in the mod and attaches a part to sticks, which listens to use_item.
     mod_api::__private::install_parts(&loaded.mods).unwrap();
-    mod_api::__private::resolve_effects().unwrap();
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .unwrap();
     mod_api::__private::resolve_fluids(&["minecraft:empty", "minecraft:water", "minecraft:lava"])
         .unwrap();
     let load = horizon_world::native_load_context::LoadContext::new(

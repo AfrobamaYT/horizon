@@ -193,7 +193,7 @@ pub fn resolve_block_entity_types<'a, T>(
             src = src.replace(f"super::registry_keys::{name}", f"horizon_mod_runtime::registry_keys::{name}")
         if src != p.read_text():
             write(p, src)
-    api = api.replace("{Effects, Names, Requests}", "Names")
+    api = api.replace("use horizon_mod_runtime::registry_keys::{Effects, Names, Requests};\n", "")
     write(path, api)
     write("crates/horizon-mod-runtime/src/registry_keys.rs", '''//! Load-owned declarations and resolved mappings for registration-slot keys.
 use std::collections::HashMap;
@@ -220,7 +220,11 @@ use std::sync::{LazyLock, RwLock};
                 elif text[end] == ")": depth -= 1
                 end += 1
             arg = text[start:end - 1].strip().removesuffix(",").strip()
-            call = "{ let types = " + arg + "; " + match[1] + "(types.names(), |id| types.key(id)) }"
+            if re.fullmatch(r"&?\w+", arg):
+                binding = arg.removeprefix("&")
+                call = match[1] + "(" + binding + ".names(), |id| " + binding + ".key(id))"
+            else:
+                call = "{ let types = " + arg + "; " + match[1] + "(types.names(), |id| types.key(id)) }"
             text = text[:match.start()] + call + text[end:]
         if text != previous:
             write(path, text)
@@ -244,9 +248,13 @@ use std::sync::{LazyLock, RwLock};
         if text != old:
             write(path, text)
 
+    path = ROOT / "crates/horizon-mod-api-gen/src/wasm/index.rs"
+    write(path, replace(path.read_text(),
+        '("horizon_core", "crates/horizon-core/src"),',
+        '("horizon_core", "crates/horizon-core/src"),\n    ("horizon_mod_runtime", "crates/horizon-mod-runtime/src"),'))
     # Every crate compiling the affected sources needs a direct dependency. The
     # client-lib manifest uses sources physically stored in horizon-client.
-    for crate in ["horizon-world", "horizon-client", "horizon-client-lib", "horizon-client-render", "horizon-mod-api"]:
+    for crate in ["horizon-world", "horizon-client", "horizon-client-lib", "horizon-client-render", "horizon-mod-api", "horizon-protocol"]:
         path = ROOT / "crates" / crate / "Cargo.toml"
         text = path.read_text()
         text = replace(text, "[dependencies]\n", '[dependencies]\nhorizon-mod-runtime = { path = "../horizon-mod-runtime" }\n')
@@ -272,6 +280,12 @@ use std::sync::{LazyLock, RwLock};
             new = replace(new, row, "| `horizon-mod-runtime` | Engine-independent mod attachment storage, query index and generic registry slot tables; depends only on `horizon-core` |\n" + row)
         if new != text:
             write(path, new)
+    write("crates/horizon-mod-runtime/tests/registry_keys.rs",
+          (Path(__file__).parent / "registry_tests.rs").read_text())
+    path = ROOT / "docs/modding/src/concepts/trait-mods/028-server-attachments.md"
+    text = path.read_text()
+    text += '\nThe API owns these public names. Their engine-independent storage and query index\nlive in `horizon-mod-runtime`, which depends only on the shared vocabulary in\n`horizon-core`; world and game storage use the same implementation.\n'
+    write(path, text)
     subprocess.run(["rustfmt", "--edition", "2024", "--config", "skip_children=true", *map(str, sorted(changed))], cwd=ROOT, check=True)
     print(f"API PR 2a: moved attachment files and generic key tables; formatted {len(changed)} Rust files")
 
