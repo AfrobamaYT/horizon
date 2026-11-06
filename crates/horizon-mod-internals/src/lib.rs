@@ -82,8 +82,8 @@ pub mod runtime {
         fields.get()
     }
     /// Journal several writes in one crossing, with one result per entry.
-    /// Writes join the listener's journal like single writes and are applied when the
-    /// listener returns, not immediately (or before a declared thunk call).
+    /// Writes join the listener's journal like single writes and are applied on listener return
+    /// or before a declared thunk call, not immediately at this call.
     pub fn set_many<W: WriteFields>(writes: W) -> W::Results {
         writes.set()
     }

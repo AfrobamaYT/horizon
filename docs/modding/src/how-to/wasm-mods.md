@@ -142,8 +142,8 @@ fields in one crossing. It returns the matching tuple of typed `Result`s; a refu
 does not stop the others. Use `set_many((game.copy_field().write(7), other.value_field().write(11)))`
 to write a tuple. Both helpers are in `mod_internals::view`.
 
-`set_many` writes join the listener's journal like single writes and are applied when the
-listener returns, not immediately (or before a declared function call). Reads see that journal,
+`set_many` writes join the listener's journal like single writes and are applied on listener return
+or before a declared function call, not immediately at `set_many`. Reads see that journal,
 including the last successful write to a field in a batch. Batches pay the same per-entry
 base, path, journal scan and value fuel costs as single calls, including refused entries.
 All input costs are charged before any entry runs; read outputs are charged before returning.
