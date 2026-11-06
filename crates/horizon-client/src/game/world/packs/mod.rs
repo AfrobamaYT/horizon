@@ -389,8 +389,8 @@ impl Game<'_> {
             ui_metadata,
             language,
         } = staged;
-        let standalone_sprites =
-            super::native_block_entity_draw::StandaloneSprites::new(&pack, &gui);
+        let standalone_geometry =
+            super::native_block_entity_draw::StandaloneGeometry::new(&pack, &gui);
         // Keep the working GPU resources, and hand its window surface over.
         if let Some(renderer) = &mut self.renderer {
             renderer.release_surface();
@@ -444,7 +444,7 @@ impl Game<'_> {
         self.options.resources = root.clone();
         self.pack = pack;
         self.gui = gui;
-        self.standalone_sprites = standalone_sprites;
+        self.standalone_geometry = standalone_geometry;
         // The new atlas's skin and map slots are blank: players and maps
         // upload into it again instead of naming sprites it does not have.
         self.skin_slots.forget();
@@ -543,6 +543,7 @@ impl Game<'_> {
         self.creative_screen.forget_items();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
         self.refresh_loop_context()?;
+        self.texture_atlases_stitched();
         self.native_client_resources_reloaded();
         Ok(())
     }

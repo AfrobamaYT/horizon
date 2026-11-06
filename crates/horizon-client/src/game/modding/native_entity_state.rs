@@ -5,6 +5,7 @@
 //! keeps for them (an armor stand's fire and invisibility, an item's fire),
 //! and `None` for the rest, as for a stale handle. Secondary use also reads
 //! the local client's live semantic sneak state; the other flags are server-only.
+//! Ticks lived (`Entity.tickCount`) are read for mobs, items, orbs and minecarts.
 use super::{Game, commands::Target};
 use horizon_client::mobs::{Mob, Species, sync};
 use horizon_client::motion::PlayerMotion;
@@ -370,6 +371,17 @@ impl Game<'_> {
             _ => None,
         }
     }
+    /// Ticks the entity has lived (`Entity.tickCount`): mobs, item entities,
+    /// experience orbs and minecarts. Wraps as vanilla's `int` does.
+    pub(super) fn native_entity_tick_count(&self, entity: EntityRef) -> Option<i32> {
+        Some(match self.native_entity_target(entity)? {
+            Target::Mob(id) => self.mobs.iter().find(|m| m.id == id)?.age as i32,
+            Target::Item(id) => self.dropped.iter().find(|i| i.id == id)?.ticks as i32,
+            Target::Orb(id) => self.orbs.iter().find(|o| o.id == id)?.ticks as i32,
+            Target::Cart(id) => self.carts.iter().find(|c| c.id == id)?.tick_count,
+            _ => return None,
+        })
+    }
     /// Sets the mob's persistent glowing tag (`Entity.setGlowingTag`). Returns false for players and guests.
     pub(super) fn native_entity_set_glowing(&mut self, entity: EntityRef, glowing: bool) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(entity) else {
@@ -558,6 +570,83 @@ mod tests {
             assert_eq!(boat.fire_ticks(game), None);
             let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
             assert_eq!(stale.fire_ticks(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn tick_count_reads_supported_entities_and_refuses_others() {
+        use super::super::minecarts::{CartKind, Minecart};
+        use horizon_client::entities::ExperienceOrb;
+        use horizon_core::geometry::Vec3;
+        use mod_api::{ItemStack, NativeWorldEpoch};
+
+        with_player(|game, player| {
+            assert_eq!(player.tick_count(game), None);
+
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(42, kind, Vec3::ZERO, 0.0));
+            game.mobs[0].age = 2401;
+            game.mobs[0].extra.age = -24000;
+            let mob = game.native_entity(42).unwrap();
+            assert_eq!(mob.tick_count(game), Some(2401));
+
+            game.spawn_item(
+                ItemStack {
+                    item: "minecraft:stone".into(),
+                    count: 1,
+                    damage: 0,
+                    extra: None,
+                },
+                [0.0; 3],
+                [0.0; 3],
+                0,
+            );
+            game.dropped[0].ticks = 77;
+            game.dropped[0].age = 5000;
+            let item = game.native_entity(game.dropped[0].id).unwrap();
+            assert_eq!(item.tick_count(game), Some(77));
+
+            game.orbs.push(ExperienceOrb {
+                attachment_lifetime: Default::default(),
+                rotation: [0.0, 0.0],
+                join: Default::default(),
+                id: 43,
+                position: Vec3::ZERO,
+                previous: Vec3::ZERO,
+                velocity: Vec3::ZERO,
+                value: 7,
+                age: 600,
+                on_ground: true,
+                count: 1,
+                ticks: 21,
+                health: 5,
+                no_gravity: true,
+            });
+            let orb = game.native_entity(43).unwrap();
+            assert_eq!(orb.tick_count(game), Some(21));
+
+            game.carts
+                .push(Minecart::new(44, CartKind::Rideable, Vec3::ZERO));
+            game.carts[0].tick_count = 5;
+            let cart = game.native_entity(44).unwrap();
+            assert_eq!(cart.tick_count(game), Some(5));
+
+            game.boats.push(super::super::boats::Boat::new(
+                45,
+                "oak".into(),
+                Vec3::ZERO,
+                0.0,
+            ));
+            let boat = game.native_entity(45).unwrap();
+            assert_eq!(boat.tick_count(game), None);
+            let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), mob.id());
+            assert_eq!(stale.tick_count(game), None);
         });
     }
 
