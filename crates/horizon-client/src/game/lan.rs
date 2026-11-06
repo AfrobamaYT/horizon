@@ -3521,7 +3521,6 @@ impl Game<'_> {
         self.streaming.extra = host
             .hub
             .loading_chunks(|g| super::game_mode::loads_chunks(rule, g.spectator()))
-            .into_iter()
             .map(|chunk| (chunk, radius))
             .chain(
                 self.arrival_chunks(self.dim)

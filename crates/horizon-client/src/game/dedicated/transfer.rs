@@ -111,7 +111,7 @@ impl Game<'_> {
             .and_then(arrivals::parse_handover)
             .and_then(|id| host.hub.placed_arrival(uuid, id).map(|g| (id, g)));
         if let Some((id, i)) = retried {
-            let reply = json!({
+            return json!({
                 "ok": true,
                 "handover": arrivals::handover_text(id),
                 "placed": true,
@@ -119,10 +119,9 @@ impl Game<'_> {
                 "recentered": host.hub.guests[i].arrival_recentered,
                 "retried": true,
             });
-            return reply;
         }
         let result = horizon_client::lan::import::import_player(&mut host.hub, uuid, &request);
-        let reply = match result {
+        match result {
             Ok(done) => {
                 self.take_arrival_records(uuid, &done);
                 let handover = arrivals::handover_text(done.handover);
@@ -144,8 +143,7 @@ impl Game<'_> {
                 }
             }
             Err(e) => json!({ "error": e }),
-        };
-        reply
+        }
     }
 
     /// What an import brought that the game keeps itself: the advancements (`PlayerAdvancements

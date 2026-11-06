@@ -1936,9 +1936,15 @@ mod hub_tests {
         elsewhere.placed = true;
         elsewhere.dimension = "minecraft:the_nether".into();
         hub.guests.push(overworld(elsewhere, [900.0, 64.0, 900.0]));
-        assert_eq!(hub.loading_chunks(|_| true), vec![(0, 0), (6, -1)]);
+        assert_eq!(
+            hub.loading_chunks(|_| true).collect::<Vec<_>>(),
+            vec![(0, 0), (6, -1)]
+        );
         // The caller can leave a player out (a spectator that may not load chunks).
-        assert_eq!(hub.loading_chunks(|g| g.name != "Held"), vec![(0, 0)]);
+        assert_eq!(
+            hub.loading_chunks(|g| g.name != "Held").collect::<Vec<_>>(),
+            vec![(0, 0)]
+        );
     }
 
     #[test]
@@ -2490,6 +2496,10 @@ mod hub_tests {
             g.inventory[20] = Some(stack("minecraft:cobblestone", 9));
             g.armor[0] = Some(stack("minecraft:iron_boots", 1));
             g.offhand = Some(stack("minecraft:shield", 1));
+            g.equipment.set(
+                horizon_items::equipment::BODY,
+                Some(stack("minecraft:diamond", 1)),
+            );
             g.ender_items[0] = Some(stack("minecraft:diamond", 2));
         }
         import_player(
@@ -2512,6 +2522,7 @@ mod hub_tests {
         }
         assert!(g.armor.iter().all(Option::is_none), "the old armour stayed");
         assert!(g.offhand.is_none(), "the old off hand item stayed");
+        assert!(g.equipment.is_empty(), "the old body or saddle item stayed");
         assert!(
             g.ender_items.iter().all(Option::is_none),
             "the old ender chest stayed"
@@ -2542,6 +2553,55 @@ mod hub_tests {
         assert!(
             hub.guests[1].inventory[0].is_none(),
             "the record's stone must not come"
+        );
+    }
+
+    #[test]
+    fn the_game_mode_part_keeps_or_imports_the_whole_abilities_state() {
+        let (mut source, i) = exported_guest();
+        let g = &mut source.guests[i];
+        g.game_mode = 1;
+        g.previous_game_mode = Some(2);
+        g.abilities.update_for_mode(1);
+        g.abilities.flying = true;
+        g.abilities.flying_speed = 0.2;
+        g.abilities.walking_speed = 0.3;
+        let record = super::export_record(&mut source, i, true, Default::default()).unwrap();
+        let (_, mut hub, _seen, _mine) = held_in_a_second_hub();
+        let g = &mut hub.guests[1];
+        g.game_mode = 3;
+        g.previous_game_mode = Some(0);
+        g.abilities.update_for_mode(3);
+        g.abilities.flying_speed = 0.4;
+        g.abilities.walking_speed = 0.5;
+        let kept = g.abilities;
+        import_player(
+            &mut hub,
+            UUID_N,
+            &serde_json::json!({
+                "record": record, "parts": ["inventory"], "place": false,
+            }),
+        )
+        .unwrap();
+        let g = &hub.guests[1];
+        assert_eq!(
+            (g.game_mode, g.previous_game_mode, g.abilities),
+            (3, Some(0), kept)
+        );
+        import_player(
+            &mut hub,
+            UUID_N,
+            &serde_json::json!({
+                "record": record, "parts": ["game_mode"], "place": false,
+            }),
+        )
+        .unwrap();
+        let g = &hub.guests[1];
+        assert_eq!((g.game_mode, g.previous_game_mode), (1, Some(2)));
+        assert!(g.abilities.flying && g.abilities.instabuild && g.abilities.may_fly);
+        assert_eq!(
+            (g.abilities.flying_speed, g.abilities.walking_speed),
+            (0.2, 0.3)
         );
     }
 

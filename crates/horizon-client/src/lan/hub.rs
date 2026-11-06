@@ -956,12 +956,14 @@ impl Hub {
     /// it and the held ones, which are sent its chunks too ([`Self::watches`]), whose `loads`
     /// says so (a spectator may not load chunks). A server with only a held player must load
     /// and generate the world around it, or the player waits for ever for its world.
-    pub fn loading_chunks(&self, loads: impl Fn(&Guest) -> bool) -> Vec<(i32, i32)> {
+    pub fn loading_chunks(
+        &self,
+        loads: impl Fn(&Guest) -> bool,
+    ) -> impl Iterator<Item = (i32, i32)> {
         self.guests
             .iter()
-            .filter(|g| self.watches(g) && loads(g))
+            .filter(move |g| self.watches(g) && loads(g))
             .map(Guest::chunk)
-            .collect()
     }
     /// `PlayerList.broadcastAll(packet, dimension)`: the players in the
     /// level in place.
@@ -1608,7 +1610,12 @@ impl Hub {
         let entries: Vec<_> = self
             .guests
             .iter()
-            .filter(|o| o.conn != conn && o.placed && self.sees(permission, o.uuid))
+            .filter(|o| {
+                o.conn != conn
+                    && o.placed
+                    && o.participates_online()
+                    && self.sees(permission, o.uuid)
+            })
             .map(|o| {
                 self.player_info(
                     o.uuid,
@@ -1646,7 +1653,11 @@ impl Hub {
                 overlay: false,
             })
             .encode();
-            for g in self.guests.iter().filter(|g| g.placed && g.conn != conn) {
+            for g in self
+                .guests
+                .iter()
+                .filter(|g| g.placed && g.participates_online() && g.conn != conn)
+            {
                 if self.sees(g.permission, uuid) {
                     g.sender.send(joined.clone());
                 }

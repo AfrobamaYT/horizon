@@ -1403,8 +1403,7 @@ impl Game<'_> {
             // holds the world loaded around it as a placed player does.
             h.hub
                 .loading_chunks(|g| super::game_mode::loads_chunks(rule, g.spectator()))
-                .first()
-                .copied()
+                .next()
         });
         if self.standalone_server() {
             self.streaming.radius = if guest.is_some() {

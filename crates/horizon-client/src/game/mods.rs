@@ -511,7 +511,7 @@ fn live_switch_of(
     content_ids: &mut std::collections::BTreeSet<String>,
     live_ids: &mut std::collections::BTreeSet<String>,
 ) {
-    if package.is_native() || package.wasm.is_some() {
+    if package.is_native() || package.manifest.wasm.is_some() {
         return;
     }
     let id = &package.manifest.id;

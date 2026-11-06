@@ -330,6 +330,12 @@ fn check_values(level: &Level) -> Result<(), String> {
     Ok(())
 }
 
+struct GameMode {
+    mode: i32,
+    previous: Option<i32>,
+    abilities: super::abilities::PlayerAbilities,
+}
+
 /// What the held player has now, for the parts that are not imported.
 struct Kept {
     inventory: Option<(
@@ -338,11 +344,12 @@ struct Kept {
         Option<crate::items::ItemStack>,
         usize,
     )>,
+    equipment: Option<horizon_items::equipment::Equipment>,
     ender: Option<Vec<Option<crate::items::ItemStack>>>,
     experience: Option<(i32, f32, i32, i32)>,
     health: Option<(f32, Option<f32>, i32, f32)>,
     effects: Option<crate::effects::PlayerEffects>,
-    game_mode: Option<(i32, bool, f32)>,
+    game_mode: Option<GameMode>,
     position: Option<([f64; 3], [f64; 3], f32, f32, f32, bool, Option<[i32; 4]>)>,
     spawn: Option<(Option<[f64; 3]>, Option<(String, [i32; 3], f32, bool)>)>,
     recipes: Option<crate::recipe_book::Settings>,
@@ -372,6 +379,7 @@ impl Kept {
                     g.selected,
                 )
             }),
+            equipment: (!has("inventory")).then(|| g.equipment.clone()),
             ender: (!has("ender_chest")).then(|| g.ender_items.clone()),
             experience: (!has("experience")).then_some((
                 g.xp_level,
@@ -386,7 +394,11 @@ impl Kept {
                 g.saturation,
             )),
             effects: (!has("effects")).then(|| g.effects.clone()),
-            game_mode: (!has("game_mode")).then_some((g.game_mode, g.flying, g.flying_speed)),
+            game_mode: (!has("game_mode")).then_some(GameMode {
+                mode: g.game_mode,
+                previous: g.previous_game_mode,
+                abilities: g.abilities,
+            }),
             position: (!has("position")).then_some((
                 g.position,
                 g.previous_position,
@@ -418,6 +430,9 @@ impl Kept {
         if let Some((inventory, armor, offhand, selected)) = self.inventory {
             (g.inventory, g.armor, g.offhand, g.selected) = (inventory, armor, offhand, selected);
         }
+        if let Some(equipment) = self.equipment {
+            g.equipment = equipment;
+        }
         if let Some(ender) = self.ender {
             g.ender_items = ender;
         }
@@ -431,8 +446,10 @@ impl Kept {
         if let Some(effects) = self.effects {
             g.effects = effects;
         }
-        if let Some((mode, flying, speed)) = self.game_mode {
-            (g.game_mode, g.flying, g.flying_speed) = (mode, flying, speed);
+        if let Some(mode) = self.game_mode {
+            g.game_mode = mode.mode;
+            g.previous_game_mode = mode.previous;
+            g.abilities = mode.abilities;
         }
         if let Some((position, previous, yaw, pitch, head, ground, vehicle)) = self.position {
             (g.position, g.previous_position) = (position, previous);
@@ -544,6 +561,7 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
             g.inventory.iter_mut().for_each(|slot| *slot = None);
             g.armor = Default::default();
             g.offhand = None;
+            g.equipment = Default::default();
         }
         if request.parts.contains(&"ender_chest") {
             g.ender_items.iter_mut().for_each(|slot| *slot = None);
