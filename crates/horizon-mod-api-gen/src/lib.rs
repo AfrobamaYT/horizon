@@ -979,6 +979,7 @@ mod host_param;
 pub mod internals;
 pub mod internals_table;
 pub mod internals_view;
+pub mod notes;
 pub mod points;
 // Inactive until the dispatch/activation step of I4.
 #[expect(
@@ -989,6 +990,7 @@ pub(crate) mod sites;
 pub mod staging;
 mod wasm;
 pub use build::{generate, generate_points};
+pub use notes::generate as generate_hook_notes;
 pub use wasm::{Wasm, generate as generate_wasm};
 
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.

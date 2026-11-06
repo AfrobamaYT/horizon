@@ -9,6 +9,8 @@
 //! - `Hooks`: `#[hook(side = "...", contract = "...", ...)]`, one per moment the game tells mods about.
 //! - `Helpers`: `#[helper(side = "...", ...)]`, a game function mods reach through the `Host` or a handle.
 //! - `DrawContexts`: `#[draw_context(surface = "...", name = "...", prefix = "...")]`, a drawing surface.
+//! - `Notes`: `#[notes = "..."]`, prose for the hook-notes page that belongs to no one hook or helper.
+//!   A hook or helper's own prose is a `#[notes]` beside its declaration.
 //!
 //! A hook's arguments:
 //!
@@ -226,6 +228,7 @@ mod native_potential_spawns;
 mod native_village_siege;
 mod neighbor_notify;
 mod note_block_play;
+mod notes;
 mod on_item_use_first;
 mod permissions_changed;
 mod player_abilities_write;
