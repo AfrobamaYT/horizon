@@ -2686,6 +2686,10 @@ impl Game<'_> {
     /// Selection/F3+T and server-pack reloads share this point; initial startup does not
     /// (`client_setup` is the once-only moment after the initial load).
     pub(super) fn native_client_resources_reloaded(&mut self) {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("client reload notice on its owning thread");
         self.fire_client_resources_reloaded();
     }
     /// NeoForge's `FMLClientSetupEvent`: the client started. Fires once per game process,
@@ -2974,6 +2978,10 @@ impl Game<'_> {
     /// Server-side (the single player's integrated server included); a client
     /// connected to a server never fires it.
     pub(super) fn native_server_data_loaded(&mut self, reload: bool) {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("server data notice on its owning thread");
         self.fire_server_data_loaded(reload);
     }
     /// The folders of JSON files native mods read from the data

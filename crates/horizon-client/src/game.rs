@@ -3497,6 +3497,7 @@ struct Game<'a> {
     held_out: Vec<u32>,
     /// Native mods' config files this game loaded (game/native_configs.rs).
     native_configs: native_configs::NativeConfigs,
+    mod_phase: mod_api::__private::PhaseOwner,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
@@ -20781,6 +20782,14 @@ impl<'a> Game<'a> {
         audio: Audio,
         prepared: Option<GameCpuResources>,
     ) -> Result<Self> {
+        let phase = match mod_api::__private::current_phase() {
+            mod_api::__private::ModPhase::Packages if cfg!(test) => {
+                mod_api::__private::ModPhase::World
+            }
+            mod_api::__private::ModPhase::Packages => mod_api::__private::ModPhase::Setup,
+            phase => phase,
+        };
+        let mod_phase = mod_api::__private::PhaseOwner::new(phase);
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
         let loop_side = options.execution_role.loop_side();
@@ -21226,6 +21235,7 @@ impl<'a> Game<'a> {
             native_lifecycle: Default::default(),
             held_out: Vec::with_capacity(4),
             native_configs: Default::default(),
+            mod_phase,
             native_net: Default::default(),
             native_mod_screen: None,
             sky_darken_memo: Default::default(),
@@ -21701,6 +21711,10 @@ impl Game<'_> {
         stack: &functions::PackStack,
         reload: bool,
     ) -> Result<(Option<WorldTables>, horizon_client::health::HealthResources)> {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("server tables on their owning thread");
         // The ask of this load, both here and on `/reload`: a native mod
         // recomputes the pack files it contributes every time.
         let mut contributed = Vec::new();
@@ -22583,6 +22597,7 @@ fn load_resources(
         match client_reload::stage_client_reload(
             &root,
             client_reload::register_startup_client_reload_listeners(),
+            mod_api::__private::ModPhase::Setup,
         ) {
             Ok(steps) => steps,
             Err(error) => {
@@ -23097,13 +23112,11 @@ fn start_game<'a>(
     let mut game = Game::new(res, pack, gui, options, settings, audio, prepared)?;
     game.rest_loader = rest_loader;
     game.ui.vanilla_root = vanilla_root;
-    if let Some(error) = pack_error {
+    if pack_error.is_some() {
         // Minecraft.clearResourcePacksOnError: the selection is cleared and
         // saved, so the next launch starts without the packs.
         game.settings.resource_packs.clear();
         game.settings.save(&Game::options_path());
-        game.open_options_at(true, horizon_client::options_ui::Page::Packs);
-        game.ui.options.resource_error = Some(error);
     }
     if game.options.benchmark.is_some() {
         // The same conditions on every machine: no VSync, no frame cap, no
@@ -23120,7 +23133,7 @@ fn start_game<'a>(
     }
     // The initial load's client reload listeners, registered and staged by
     // the loader thread, publish now that the game owns the assets.
-    client_reload::apply_client_reload(client_applies);
+    client_reload::apply_client_reload(&game.mod_phase, client_applies);
     game.refresh_loop_context();
     // After the mods: their templates are among the ids it lists.
     game.preload_registries();
@@ -23171,6 +23184,12 @@ fn start_game<'a>(
     // another local player of the same process.
     if game.options.is_client_start() {
         game.native_client_setup();
+    }
+    // Finish Setup -> Config -> World before any screen, connection, input or tick hooks.
+    game.native_configs_client_start();
+    if let Some(error) = pack_error {
+        game.open_options_at(true, horizon_client::options_ui::Page::Packs);
+        game.ui.options.resource_error = Some(error);
     }
     match game.options.world.clone() {
         _ if game.options.server.is_some() => {
@@ -23873,7 +23892,9 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     options
         .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
+    let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);
+    mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     if let Err(refused) = mod_api::__private::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
     }
@@ -23888,6 +23909,8 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
+    mods::freeze_declarations();
+    mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not
     // finished until onGameLoadFinished. A dedicated server has no options.txt.
     if options.execution_role.is_client() {
