@@ -179,6 +179,10 @@ use std::sync::{Arc, OnceLock};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod __private;
+mod world_draw;
+pub use world_draw::{
+    DrawError, WorldDepth, WorldDrawUsage, WorldLine, WorldQuad, WorldRenderView,
+};
 mod model_layers;
 pub use model_layers::{
     CubeDefinition, CubeDeformation, CubeListBuilder, LayerDefinition, MeshDefinition, ModelPart,
@@ -4387,7 +4391,7 @@ mod generated_host {
 pub use generated_host::{Backend, BackendMut, ClientBackendMut};
 pub use generated_host::{
     BlockEntityDrawContext, ClientHost, ClientSession, Commands, DrawContext, Host, HostSide,
-    LevelSide, Levels, Messages, Players, RenderAssets, ServerHost,
+    LevelSide, Levels, Messages, Players, RenderAssets, ServerHost, WorldDrawContext,
 };
 
 /// Result of accessing or decoding an attachment.

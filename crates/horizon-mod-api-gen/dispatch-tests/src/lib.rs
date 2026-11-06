@@ -289,6 +289,7 @@ mod tests {
     trait Host {}
     trait ServerHost: Host {}
     trait ClientHost: Host {}
+    trait WorldDrawContext {}
     trait DrawContext {
         fn mark(&mut self, value: u32);
     }
@@ -358,6 +359,7 @@ mod tests {
                 pub struct FovPlayer;
             }
             pub struct NativeClientInfo;
+            pub struct WorldRenderView;
             #[derive(Clone, Copy)]
             pub struct FluidKey;
             #[derive(Clone, Copy)]

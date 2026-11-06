@@ -250,6 +250,7 @@ mod native_components;
 mod native_config_files;
 mod native_configs;
 mod native_criteria;
+mod native_custom_geometry;
 #[cfg(test)]
 mod native_damage_tests;
 mod native_data_maps;
@@ -3071,6 +3072,7 @@ struct Game<'a> {
     /// Mod block entities' geometry their mods kept
     /// (game/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
     /// `item_level` for one frame, game time, day time and dimension.
@@ -18085,6 +18087,21 @@ impl Game<'_> {
         if !title {
             self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
         }
+        let mut world_geometry = self.world_geometry.take().expect("view storage");
+        let white = self.gui.atlas.sprites["horizon/white"];
+        world_geometry.reset(
+            camera.to_array(),
+            view,
+            [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5],
+        );
+        if !title {
+            let view = mod_api::WorldRenderView::new(
+                camera.to_array(),
+                alpha as f32,
+                self.world.game_time,
+            );
+            self.native_submit_custom_geometry(&view, &mut world_geometry);
+        }
         let colored_lights = if self.title.is_none() {
             visuals.finish(self, camera)
         } else {
@@ -18197,7 +18214,7 @@ impl Game<'_> {
             },
             additive: &additive,
             see_through: &see_through,
-            world_primitives: Default::default(),
+            world_primitives: world_geometry.batch(),
             shadow_only: &shadow_only,
             celestial: if self.settings.horizon.sky || title {
                 &celestial
@@ -18271,6 +18288,7 @@ impl Game<'_> {
         self.frame_drawn = matches!(result, Ok(true));
         // Restore storage even when rendering fails (for example, a lost surface).
         self.entity_vertices = entities;
+        self.world_geometry = Some(world_geometry);
         *self.entity_spans.get_mut() = entity_spans;
         *self.entity_motion.get_mut() = entity_motion;
         *self.glowing_vertices.get_mut() = glowing;
@@ -21375,6 +21393,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            world_geometry: Some(Default::default()),
             mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
             world_frames: 0,
