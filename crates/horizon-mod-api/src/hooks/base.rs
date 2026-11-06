@@ -385,8 +385,10 @@ pub trait Hooks {
     #[hook(side = "server", contract = "collect", out = "commands")]
     fn register_commands();
     /// A player's command on the server (`Commands.performCommand`),
-    /// without its slash, for a command a mod registered and the player's
-    /// level allows: set `ran` when it is yours. The player's state is
+    /// parsed into `command` with typed, source-resolved arguments, for a command
+    /// a mod registered and the player's level allows: set `ran` when it is yours.
+    /// Missing optional arguments are absent; parsing or resolution failures never
+    /// reach listeners. The player's state is
     /// swapped in for the call, so `native_player` and the other helpers
     /// read that player; `host.commands().feedback()` answers them. A single player's
     /// owner console (`horizon-ctl command`) reaches it too, as the owner at
@@ -1436,8 +1438,11 @@ pub trait Hooks {
     fn player_command();
     /// A command a mod registered, typed on the dedicated server's console
     /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), without its slash: set `ran`
-    /// when it is yours. There is no player: the source is the console, at
+    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
+    /// typed arguments: set `ran` when it is yours. Relative coordinates and
+    /// selectors use the console at the Overworld spawn, with zero rotation.
+    /// Missing optional arguments are absent; invalid input never reaches listeners.
+    /// There is no player: the source is the console, at
     /// permission level 4, so `host.players().acting_player()` is None and the
     /// player-only helpers give nothing; `host.commands().feedback()` answers on the
     /// console. A name no mod registered goes to vanilla's dispatcher as
