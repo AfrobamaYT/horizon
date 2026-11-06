@@ -13,6 +13,34 @@ use horizon_client::{
 use horizon_world::consumable::UseAnimation;
 
 impl Game<'_> {
+    /// Resolve an item's animation once for the caller's rendering decision.
+    pub(super) fn item_use_animation(&self, stack: &ItemStack) -> UseAnimation {
+        let components = self
+            .pack
+            .item_renderer
+            .models
+            .components(&horizon_client::item_render::stack_view(stack));
+        let mut animation = if let Some(consumable) = components.get("minecraft:consumable") {
+            horizon_client::first_person::consumable_animation(consumable)
+        } else {
+            self.items()
+                .get(&stack.item)
+                .map_or_else(Default::default, |info| {
+                    if info.consumable.is_some() {
+                        UseAnimation::None
+                    } else {
+                        horizon_client::first_person::item_use_animation(info)
+                    }
+                })
+        };
+        self.native_use_animation(stack, &mut animation);
+        // A spear pose needs the item's kinetic data; refuse that override if absent.
+        if animation == UseAnimation::Spear && Kinetic::of(&stack.item).is_none() {
+            animation = UseAnimation::None;
+        }
+        animation
+    }
+
     /// `LivingEntity.startUsingItem` for the acting player's hand: nothing
     /// when a use runs already or the hand is empty. The use lasts
     /// `getUseDuration` ticks, which mods may change or refuse
@@ -309,6 +337,71 @@ mod tests {
     };
     use horizon_client::first_person::ItemPose;
     use horizon_world::consumable::UseAnimation;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn item_animation_dispatches_vanilla_parts_and_refuses_invalid_spears() {
+        use mod_api::{ClientHost, Hooks, ItemPart, ModEntry, Mods, Registrar, UseAnimationEvent};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Clone)]
+        struct Part(Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
+        impl ItemPart for Part {
+            fn use_animation(&self, _: &dyn ClientHost, event: &mut UseAnimationEvent<'_>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                *event.animation = if &*event.stack.item == "minecraft:stick" {
+                    UseAnimation::Spear
+                } else {
+                    UseAnimation::Drink
+                };
+            }
+        }
+        struct Mod(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                for id in [
+                    "minecraft:bow",
+                    "minecraft:crossbow",
+                    "minecraft:trident",
+                    "minecraft:brush",
+                    "minecraft:stick",
+                ] {
+                    r.item_part(id, Part(self.0.clone()));
+                }
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: Mods = vec![ModEntry::new("animation", Box::new(Mod(calls.clone())))].into();
+        mod_api::__private::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                for id in [
+                    "minecraft:bow",
+                    "minecraft:crossbow",
+                    "minecraft:trident",
+                    "minecraft:brush",
+                ] {
+                    assert_eq!(
+                        game.item_use_animation(&horizon_client::items::ItemStack::new(id, 1)),
+                        UseAnimation::Drink
+                    );
+                }
+                assert_eq!(
+                    game.item_use_animation(&horizon_client::items::ItemStack::new(
+                        "minecraft:stick",
+                        1
+                    )),
+                    UseAnimation::None
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 5);
+            });
+        });
+    }
 
     #[test]
     fn a_use_runs_out_on_its_last_tick() {

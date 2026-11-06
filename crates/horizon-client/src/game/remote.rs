@@ -6954,6 +6954,19 @@ impl Game<'_> {
             if (!running && !player) || driven == Some(id) {
                 continue;
             }
+            let animation = if player && self.mobs[i].extra.using_item > 0 {
+                let extra = &self.mobs[i].extra;
+                let slot = if extra.using_off_hand {
+                    horizon_items::equipment::OFFHAND
+                } else {
+                    horizon_items::equipment::MAINHAND
+                };
+                extra
+                    .slot_stack(slot)
+                    .map_or_else(Default::default, |stack| self.item_use_animation(stack))
+            } else {
+                Default::default()
+            };
             let player_ref = tick_listened
                 .then(|| {
                     self.remote.as_ref().and_then(|r| {
@@ -7094,18 +7107,7 @@ impl Game<'_> {
             if player {
                 // AvatarRenderer.getArmPose: the used item's use animation
                 // poses the arm.
-                let used = if m.extra.using_off_hand {
-                    m.extra.off_hand_id()
-                } else {
-                    m.extra.main_hand_id()
-                };
-                m.extra.use_animation = used
-                    .and_then(|i| world_items!(self).get(i))
-                    .filter(|_| m.extra.using_item > 0)
-                    .map_or_else(
-                        Default::default,
-                        horizon_client::first_person::item_use_animation,
-                    );
+                m.extra.use_animation = animation;
             }
             if m.extra.using_item > 0 {
                 if player {
