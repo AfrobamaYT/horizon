@@ -1412,7 +1412,11 @@ impl Game<'_> {
     /// shows; `screen_init_post` follows. With no world open nothing else can
     /// show, so a mod's `Cancel` or its own screen doesn't keep it shut (a
     /// mod's screen can't open over the title).
-    pub(super) fn show_title(&mut self, title: horizon_client::title::Title) {
+    pub(super) fn show_title(&mut self, mut title: horizon_client::title::Title) {
+        title.set_rule_registry(Arc::new(mod_api::__private::game_rule_registry()));
+        self.show_title_with_registry(title);
+    }
+    pub(super) fn show_title_with_registry(&mut self, title: horizon_client::title::Title) {
         if !self.screen_hooks_heard() {
             self.title = Some(title);
             return;
