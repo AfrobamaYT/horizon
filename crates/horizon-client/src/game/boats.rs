@@ -1526,7 +1526,12 @@ impl Game<'_> {
             }
             // `VehicleEntity.destroy(level, dropItem)` drops the boat item on
             // the death path only, and only with `entity_drops` on.
-            if !creative && self.ui.rules.bool("entity_drops") {
+            if !creative
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            {
                 let item = b.entity_type();
                 self.spawn_item(
                     ItemStack {

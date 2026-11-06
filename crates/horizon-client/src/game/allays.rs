@@ -60,7 +60,10 @@ impl Game<'_> {
     }
 
     pub(super) fn tick_allays(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         // The playing jukeboxes, found at the first allay: no allay starts
         // or stops one, and the block entities run into the thousands.
         let mut jukeboxes: Option<Vec<(i32, i32, i32)>> = None;

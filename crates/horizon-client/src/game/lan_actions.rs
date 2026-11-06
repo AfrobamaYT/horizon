@@ -4479,7 +4479,12 @@ impl Game<'_> {
             progress: g.xp_progress,
             total: g.xp_total,
         };
-        xp.respawn(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
+        xp.respawn(
+            self.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                || g.game_mode == SPECTATOR,
+        );
         (g.xp_level, g.xp_progress, g.xp_total) = (xp.level, xp.progress, xp.total);
         // PlayerEvent.Clone, at the end of `restoreFrom`: the data is copied,
         // the new player not yet placed.
@@ -4922,7 +4927,12 @@ impl Game<'_> {
                 progress: g.xp_progress,
                 total: g.xp_total,
             }
-            .death_reward(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
+            .death_reward(
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                    || g.game_mode == SPECTATOR,
+            );
             let (name, uuid) = (g.name.clone(), g.uuid);
             // ServerPlayer.die: dropAllDeathLoot unless a spectator, from the eyes less 0.3.
             let drops = (g.game_mode != SPECTATOR)
@@ -4941,7 +4951,11 @@ impl Game<'_> {
             // ServerPlayer.die: with showDeathMessages, the message goes to
             // the dying player's death screen and to everyone the team lets
             // see it; without it, the death screen gets an empty one.
-            let message = if self.ui.rules.bool("show_death_messages") {
+            let message = if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SHOW_DEATH_MESSAGES)
+            {
                 let me = self.player_text(&name, uuid);
                 let text = match cause {
                     Some(key) => horizon_client::text::Text::translate(&key, &[me]),
@@ -5470,7 +5484,12 @@ impl Game<'_> {
 
     /// `SleepStatus.sleepersNeeded`.
     fn sleepers_needed(&self, active: i64) -> i64 {
-        let percent = i64::from(self.ui.rules.int("players_sleeping_percentage").max(0));
+        let percent = i64::from(
+            self.ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+                .max(0),
+        );
         ((active * percent + 99) / 100).max(1)
     }
 
@@ -5499,7 +5518,12 @@ impl Game<'_> {
             return;
         }
         // ServerLevel.canSleepThroughNights.
-        if self.ui.rules.int("players_sleeping_percentage") > 100 {
+        if self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+            > 100
+        {
             return;
         }
         let needed = self.sleepers_needed(active);
