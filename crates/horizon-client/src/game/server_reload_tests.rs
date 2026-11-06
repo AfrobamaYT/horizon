@@ -100,7 +100,11 @@ fn build_mod_resources(
     mods: &[horizon_client::mod_content::ContentMod],
     prepared: &Path,
 ) -> horizon_assets::resource_source::ResourceRoot {
-    horizon_client::mod_content::build(base, jar_store, mods, prepared).unwrap();
+    let inventory = horizon_mods::enabled::EnabledMods::new(
+        mods.iter()
+            .map(|m| (m.id.clone(), horizon_mods::Side::Both)),
+    );
+    horizon_client::mod_content::build(base, jar_store, mods, prepared, &inventory).unwrap();
     let resolved = horizon_client::mod_content::resolved_resources(
         base,
         prepared.to_owned(),

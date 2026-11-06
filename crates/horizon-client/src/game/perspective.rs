@@ -5,7 +5,7 @@
 use super::{Game, Screen, native_mob_draw::NativePlayerRender, shoulders::shoulder_variants};
 use horizon_client::{
     blocks::BlockFacts,
-    camera::{CameraEntity, LivingCamera},
+    camera::{CameraEntity, CameraType, LivingCamera},
     collisions::SceneCollisions,
 };
 use horizon_client::{
@@ -134,25 +134,6 @@ impl RayWorld for VisualRays<'_, '_> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum CameraType {
-    #[default]
-    FirstPerson,
-    ThirdPersonBack,
-    ThirdPersonFront,
-}
-impl CameraType {
-    pub(super) fn first_person(self) -> bool {
-        self == CameraType::FirstPerson
-    }
-    fn cycle(self) -> Self {
-        match self {
-            CameraType::FirstPerson => CameraType::ThirdPersonBack,
-            CameraType::ThirdPersonBack => CameraType::ThirdPersonFront,
-            CameraType::ThirdPersonFront => CameraType::FirstPerson,
-        }
-    }
-}
 /// `Entity.isInvisible` for the window's player: shared flag 5 as its server
 /// sets it (`shared_flag`), with the Invisibility effect or by a plugin's
 /// `setInvisible` alone, as pose plugins hide the real body under the pose
@@ -290,13 +271,20 @@ fn wrap(d: f32) -> f32 {
     }
 }
 impl Game<'_> {
-    /// `key.togglePerspective`.
+    /// `key.togglePerspective`: the next camera type, as a mod's `camera_type_cycle` leaves it.
     pub(super) fn cycle_camera(&mut self) {
         let previous = self.camera_type;
-        self.camera_type = self.camera_type.cycle();
-        // Minecraft.handleKeybinds: the chain follows the first-person view.
-        if previous.first_person() != self.camera_type.first_person() {
-            self.check_entity_post_effect(self.camera_type.first_person());
+        let mut next = previous.cycle();
+        self.native_camera_type_cycle(previous, &mut next);
+        self.set_camera_type(next);
+    }
+    /// `Options.setCameraType`, then `Minecraft.handleKeybinds`' check: the chain
+    /// follows the first-person view.
+    pub(super) fn set_camera_type(&mut self, camera_type: CameraType) {
+        let previous = self.camera_type;
+        self.camera_type = camera_type;
+        if previous.is_first_person() != camera_type.is_first_person() {
+            self.check_entity_post_effect(camera_type.is_first_person());
         }
     }
     /// `Camera.update` (`alignWithEntity` and `getMaxZoom`): the
@@ -320,11 +308,7 @@ impl Game<'_> {
             }
         };
         let mut view = self.view;
-        let kind = match self.camera_type {
-            CameraType::FirstPerson => horizon_client::camera::CameraType::FirstPerson,
-            CameraType::ThirdPersonBack => horizon_client::camera::CameraType::ThirdPersonBack,
-            CameraType::ThirdPersonFront => horizon_client::camera::CameraType::ThirdPersonFront,
-        };
+        let kind = self.camera_type;
         let context = CollisionContext::for_entity(
             CollisionEntity {
                 identity: EntityIdentity(0),
@@ -693,7 +677,7 @@ impl Game<'_> {
     /// `LevelExtractor`'s skip of the camera entity: the player's own body
     /// is drawn unless the camera is in first person, or while it sleeps.
     pub(super) fn own_body_in_view(&self) -> bool {
-        !self.camera_type.first_person() || self.sleeping.is_some()
+        !self.camera_type.is_first_person() || self.sleeping.is_some()
     }
     /// Whether the player's own model shows in the world view (its body or,
     /// while invisible, only its armour and held items).

@@ -1197,7 +1197,7 @@ impl Game<'_> {
             }
         }
         // The player's own, unless the camera is in its head.
-        if !self.camera_type.first_person()
+        if !self.camera_type.is_first_person()
             && let Some(p) = &self.player
         {
             let d = p.dimensions;
