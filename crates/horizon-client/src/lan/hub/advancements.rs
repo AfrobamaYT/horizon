@@ -34,21 +34,17 @@ impl<'a> AdvancementOwners<'a> {
     pub fn state<'b>(
         &'b mut self,
         guests: &'b mut [Guest],
-        mut index: usize,
+        index: usize,
     ) -> Option<AdvancementState<'b>> {
         let conn = guests.get(index)?.conn;
-        if let Some(turn) = self.turns.iter().position(|active| *active == conn) {
-            if let Some(next) = self.turns.get(turn + 1) {
-                index = guests.iter().position(|guest| guest.conn == *next)?;
-            } else {
-                let live = self.live.as_mut()?;
-                return Some(AdvancementState {
-                    progress: live.progress,
-                    changed: live.changed,
-                    unlocked: live.unlocked,
-                    book: live.book,
-                });
-            }
+        if self.turns.last() == Some(&conn) {
+            let live = self.live.as_mut()?;
+            return Some(AdvancementState {
+                progress: live.progress,
+                changed: live.changed,
+                unlocked: live.unlocked,
+                book: live.book,
+            });
         }
         let guest = guests.get_mut(index)?;
         Some(AdvancementState {

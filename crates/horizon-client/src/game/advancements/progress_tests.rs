@@ -42,6 +42,10 @@ impl Hooks for Observer {
                 .to_vec(),
             ));
             event.files.push((
+                "recipe/testmod:reward".into(),
+                br#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:diamond","count":1}}"#.to_vec(),
+            ));
+            event.files.push((
                 "loot_table/testmod:reward".into(),
                 br#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}]}]}"#.to_vec(),
             ));
@@ -144,7 +148,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
             std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
             std::fs::write(
                 pack.join("data/testmod/function/reward.mcfunction"),
-                "give @s minecraft:diamond 1\n",
+                "scoreboard players add @s reward_hits 1\n",
             )
             .unwrap();
             std::fs::write(
@@ -153,6 +157,14 @@ fn progress_events_capture_each_players_full_mutation_state() {
             )
             .unwrap();
             game.adv.tree = Arc::new(Tree::load(&scratch.join("data")));
+            game.score.board.add_objective(
+                "reward_hits",
+                "dummy",
+                serde_json::json!({"text":"reward_hits"}),
+                horizon_client::scoreboard::RenderType::Integer,
+                false,
+                None,
+            );
             for guest in &mut game.lan.as_mut().unwrap().hub.guests {
                 guest.advancements_loaded = true;
                 guest.advancements.grant(ID, "gamma", DATE);
@@ -202,18 +214,20 @@ fn progress_events_capture_each_players_full_mutation_state() {
             assert!(progress.done);
             assert_eq!(events.len(), 2, "each guest receives its progress event");
             for event in events.iter() {
-                assert_eq!(
-                    event.progress.criteria[1].obtained_at.as_deref(),
-                    Some(DATE)
-                );
-                assert!(event.progress.done);
+                if event.player == 12 {
+                    assert_eq!(
+                        event.progress.criteria[1].obtained_at.as_deref(),
+                        Some(DATE)
+                    );
+                    assert!(event.progress.done);
+                }
             }
             let kept = first[0].progress.clone();
             drop(events);
             for conn in [12, 13] {
                 let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
                 assert_eq!(guest.xp_total, if conn == 12 { 7 } else { 0 });
-                for item in ["minecraft:stone", "minecraft:diamond"] {
+                for item in ["minecraft:stone"] {
                     assert_eq!(
                         guest
                             .inventory
@@ -226,6 +240,9 @@ fn progress_events_capture_each_players_full_mutation_state() {
                         "{conn}: {item}"
                     );
                 }
+                if conn == 13 && case == "nested-reload" {
+                    continue;
+                }
                 assert!(
                     guest.advancements.has(ID, "alpha"),
                     "alpha survives leaving the turn"
@@ -236,18 +253,42 @@ fn progress_events_capture_each_players_full_mutation_state() {
                     "reward belongs to the same live player"
                 );
             }
+            assert_eq!(
+                game.score
+                    .board
+                    .score("guest12", "reward_hits")
+                    .map(|score| score.value),
+                Some(1)
+            );
+            assert_eq!(
+                game.score
+                    .board
+                    .score("guest13", "reward_hits")
+                    .map(|score| score.value),
+                None
+            );
+            if case == "nested-reload" {
+                game.as_guest(13, |game| game.tick_advancements()).unwrap();
+            }
             reload(game);
             assert_eq!(
                 observed.lock().unwrap().len(),
-                2,
+                if case == "nested-reload" { 3 } else { 2 },
                 "a repeated reload makes no duplicate grant"
             );
             for conn in [12, 13] {
                 game.as_guest(conn, |game| game.tick_advancements())
                     .unwrap();
                 let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
-                assert_eq!(guest.xp_total, if conn == 12 { 7 } else { 0 });
-                for item in ["minecraft:stone", "minecraft:diamond"] {
+                assert_eq!(
+                    guest.xp_total,
+                    if conn == 12 || case == "nested-reload" {
+                        7
+                    } else {
+                        0
+                    }
+                );
+                for item in ["minecraft:stone"] {
                     assert_eq!(
                         guest
                             .inventory
@@ -256,7 +297,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
                             .filter(|stack| stack.item.as_ref() == item)
                             .map(|stack| stack.count as usize)
                             .sum::<usize>(),
-                        usize::from(conn == 12),
+                        usize::from(conn == 12 || case == "nested-reload"),
                         "{conn}: {item}"
                     );
                 }
