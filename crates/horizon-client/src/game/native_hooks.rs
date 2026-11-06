@@ -1026,7 +1026,7 @@ use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
     LogicalSide, NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags,
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
-    TooltipElement, TooltipPlace, UsePhase,
+    TooltipElement, UsePhase,
 };
 use mod_api::{BlockKey, EffectKey};
 pub(crate) use mod_api::{
