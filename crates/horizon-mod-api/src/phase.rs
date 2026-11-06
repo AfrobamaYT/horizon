@@ -415,7 +415,7 @@ impl LoadedMods {
 /// ```
 ///
 /// ```compile_fail
-/// use mod_api::{Host, RegistrationContext};
+/// use mod_api::{prelude::EntitiesHost, RegistrationContext};
 /// fn registration(context: &RegistrationContext) { let _ = EntitiesHost::entity(context, 1); }
 /// ```
 ///
@@ -453,7 +453,7 @@ impl RegistrationContext {
 /// ```
 ///
 /// ```compile_fail
-/// use mod_api::{DataLoadContext, Host};
+/// use mod_api::{prelude::EntitiesHost, DataLoadContext};
 /// fn load(context: &dyn DataLoadContext) { let _ = EntitiesHost::entity(context, 1); }
 /// ```
 ///
