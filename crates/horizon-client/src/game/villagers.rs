@@ -362,7 +362,10 @@ impl Game<'_> {
     /// `Mob.aiStep` item pickup for villagers (`InventoryCarrier`): food,
     /// seeds and what their profession wants, from within a block.
     pub(super) fn villager_pickups(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         if self.dropped.is_empty() || (!griefing && !self.grief_hooked()) {
             return;
         }
