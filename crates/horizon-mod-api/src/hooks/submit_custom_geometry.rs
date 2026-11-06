@@ -8,12 +8,10 @@ pub trait DrawContexts {
     fn world_draw_context();
 }
 pub trait Hooks {
-    /// Submit unlit lines and quads after particle submission, before opaque
-    /// rendering (NeoForge 26.3 `SubmitCustomGeometryEvent`, vanilla
-    /// `LevelRenderer.submitFeatures`). Client-only, noncancellable. `view` is
-    /// an immutable camera/partial-tick/game-time snapshot, not the full NeoForge
-    /// extracted level state or visible-section iterable. Use extracted state,
-    /// not world writes or resource loading, while submitting geometry.
+    /// Submit unlit geometry after particle submission, before opaque rendering
+    /// (NeoForge 26.3 `SubmitCustomGeometryEvent`, vanilla `LevelRenderer.submitFeatures`).
+    /// Client-only, noncancellable. `view` holds only camera, partial tick and game time,
+    /// not full extracted level state or visible sections. Submit from extracted state.
     #[hook(
         side = "client",
         contract = "listen",

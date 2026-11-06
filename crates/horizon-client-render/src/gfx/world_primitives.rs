@@ -231,7 +231,7 @@ impl WorldPrimitives {
 
     /// Reserves CPU and GPU geometry storage for `quads` and `lines`, total across both depth
     /// modes. Call before preparing a frame, at setup to avoid growth during submission. Only
-    /// newly needed indices upload; geometry must be prepared again after buffer growth.
+    /// index growth uploads the full index array; prepare geometry again after buffer growth.
     pub fn reserve(&mut self, device: &wgpu::Device, upload: Upload<'_>, quads: u32, lines: u32) {
         self.quad_vertices
             .reserve((quads as usize * 4).saturating_sub(self.quad_vertices.len()));

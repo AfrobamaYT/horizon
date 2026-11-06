@@ -3,7 +3,6 @@ use crate::{gizmos, mesher::Vertex};
 use glam::Mat4;
 use mod_api::{DrawError, WorldDepth, WorldDrawUsage, WorldLine, WorldQuad};
 
-/// Reused between views, including frames with no subscribers or output.
 pub struct WorldGeometry {
     camera: [f64; 3],
     view: Mat4,
@@ -23,7 +22,6 @@ impl Default for WorldGeometry {
     }
 }
 impl WorldGeometry {
-    /// Start a view even if nothing will be submitted; previous output disappears.
     pub fn reset(&mut self, camera: [f64; 3], view: Mat4, white: [f32; 2]) {
         self.camera = camera;
         self.view = view;
@@ -31,7 +29,6 @@ impl WorldGeometry {
         self.lines.iter_mut().for_each(Vec::clear);
         self.quads.iter_mut().for_each(Vec::clear);
     }
-    /// The current counts and setup-time limits across both depth modes.
     pub fn usage(&self) -> WorldDrawUsage {
         WorldDrawUsage::new(
             self.lines.iter().map(|v| v.len() as u32).sum(),
@@ -50,7 +47,6 @@ impl WorldGeometry {
         }
         Ok(())
     }
-    /// Append an entire line batch or leave the output unchanged.
     pub fn lines(&mut self, lines: &[WorldLine]) -> Result<(), DrawError> {
         if lines.len() > (CAPACITY - self.usage().lines) as usize {
             return Err(DrawError::CapacityExceeded);
@@ -76,7 +72,6 @@ impl WorldGeometry {
         }
         Ok(())
     }
-    /// Append an entire quad batch or leave the output unchanged.
     pub fn quads(&mut self, quads: &[WorldQuad]) -> Result<(), DrawError> {
         if quads.len() > (CAPACITY - self.usage().quads) as usize {
             return Err(DrawError::CapacityExceeded);
@@ -98,7 +93,6 @@ impl WorldGeometry {
         }
         Ok(())
     }
-    /// Borrow the existing renderer's batch, with no copying or frame allocation.
     pub fn batch(&self) -> Batch<'_> {
         Batch {
             lines: &self.lines[0],
