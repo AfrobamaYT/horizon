@@ -1027,6 +1027,15 @@ struct Mining {
     ticks: u32,
 }
 #[derive(Clone, Copy)]
+struct TransformContext<'a> {
+    world: &'a World,
+    player: Option<u32>,
+    hand: mod_api::Hand,
+    blocking: bool,
+    simulated: bool,
+}
+
+#[derive(Clone, Copy)]
 struct Hit {
     pos: [i32; 3],
     face: [i32; 3],
@@ -14468,7 +14477,38 @@ impl Game<'_> {
         stack: &ItemStack,
         hit: &Hit,
     ) -> Option<(BlockStateId, String, Option<String>, u32, String)> {
+        let blocking = self
+            .offhand
+            .as_ref()
+            .is_some_and(|s| self.blocks_attacks(s).is_some())
+            && !self.keys.held(Mapping::Sneak);
+        self.block_transform_in(
+            stack,
+            hit,
+            TransformContext {
+                world: &self.world,
+                player: self.player.is_some().then(|| self.own_entity_id() as u32),
+                hand: self.hand,
+                blocking,
+                simulated: false,
+            },
+        )
+    }
+
+    fn block_transform_in(
+        &self,
+        stack: &ItemStack,
+        hit: &Hit,
+        context: TransformContext<'_>,
+    ) -> Option<(BlockStateId, String, Option<String>, u32, String)> {
         use horizon_client::block_transform::Around;
+        let TransformContext {
+            world,
+            player,
+            hand,
+            blocking,
+            simulated,
+        } = context;
         let Hit { pos, face, .. } = *hit;
         struct Column<'w> {
             world: &'w World,
@@ -14495,11 +14535,7 @@ impl Game<'_> {
             .and_then(|i| i.block_transformer.clone())?;
         // playerHasBlockingItemUseIntent: a shield in the off hand is raised
         // instead, unless sneaking.
-        let shield = self
-            .offhand
-            .as_ref()
-            .is_some_and(|s| self.blocks_attacks(s).is_some());
-        if shield && !self.keys.held(Mapping::Sneak) {
+        if blocking {
             return None;
         }
         let face_name = match face {
@@ -14512,7 +14548,7 @@ impl Game<'_> {
         };
         let registry = self.pack.assets.registry;
         let around = Column {
-            world: &self.world,
+            world,
             registry,
             pos,
         };
@@ -14548,13 +14584,13 @@ impl Game<'_> {
             let matches_vanilla = state.is_some();
             let mut cancel = false;
             let tool = mod_api::ToolUse::from(mod_api::__private::built::ToolUse {
-                player: self.player.is_some().then(|| self.own_entity_id() as u32),
-                hand: self.hand,
+                player,
+                hand,
                 pos,
                 face,
                 click: hit.point,
                 ability,
-                simulated: false,
+                simulated,
             });
             self.native_block_tool_modification(stack, &tool, &mut state, &mut cancel);
             if cancel {

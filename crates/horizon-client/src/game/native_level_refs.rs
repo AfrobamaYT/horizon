@@ -10,8 +10,8 @@ use horizon_core::{
 };
 use mod_api::mod_chunk_tickets::ModTicket;
 use mod_api::{
-    BlockStateId, ChunkRef, ChunkStatus, LevelRef, LightLayer, NativeTicketOwner, TicketController,
-    Vec3,
+    BlockHit, BlockStateId, BlockTransformPreview, ChunkRef, ChunkStatus, Hand, ItemStack,
+    LevelRef, LightLayer, NativeTicketOwner, PlayerRef, TicketController, Vec3,
 };
 
 fn block_pos([x, y, z]: [i32; 3]) -> BlockPos {
@@ -260,6 +260,62 @@ impl Game<'_> {
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
+    /// Preview a held tool's transformation without changing the block or stack. The existing
+    /// block-tool hook fires with `simulated` true; listeners must not mutate the level in a
+    /// simulation. The player must be live in the level in place, and the block must be loaded;
+    /// parked levels cannot provide the hook's level context. A stale handle, invalid face,
+    /// unavailable player or level, or no transformation returns None.
+    pub(super) fn native_level_block_transform(
+        &self,
+        level: LevelRef,
+        player: PlayerRef,
+        hand: Hand,
+        stack: &ItemStack,
+        pos: [i32; 3],
+        hit: BlockHit,
+    ) -> Option<BlockTransformPreview> {
+        use super::native_server::PlayerRead;
+        let world = self.native_level_read_world(level)?;
+        if level.dimension() != self.dim.id()
+            || !world.is_loaded_at(pos[0], pos[1], pos[2])
+            || !matches!(
+                hit.face,
+                [1, 0, 0] | [-1, 0, 0] | [0, 1, 0] | [0, -1, 0] | [0, 0, 1] | [0, 0, -1]
+            )
+        {
+            return None;
+        }
+        let (offhand, sneaking) = match self.player_handle_read(player)? {
+            PlayerRead::Acting { .. } if self.dim.id() == level.dimension() => {
+                (self.offhand.as_ref(), self.keys.held(super::Mapping::Sneak))
+            }
+            PlayerRead::Guest(guest) if guest.dimension == level.dimension() => {
+                (guest.offhand.as_ref(), guest.sneaking)
+            }
+            _ => return None,
+        };
+        let blocking = !sneaking && offhand.is_some_and(|s| self.blocks_attacks(s).is_some());
+        let hit = super::Hit {
+            pos,
+            face: hit.face,
+            point: hit.point,
+            inside: hit.inside,
+        };
+        let (state, sound, loot, durability, particle) = self.block_transform_in(
+            stack,
+            &hit,
+            super::TransformContext {
+                world,
+                player: Some(player.entity().id()),
+                hand,
+                blocking,
+                simulated: true,
+            },
+        )?;
+        Some(BlockTransformPreview::new(
+            state, sound, loot, durability, particle,
+        ))
+    }
     /// `FluidState.getFlow` at `pos`: the current that pushes an entity there, after the
     /// `fluid_flow` hook, as entities feel it. Zero where no fluid flows. None as for
     /// `block_state`.
@@ -431,6 +487,94 @@ mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_transform_preview_preserves_state_and_marks_simulation() {
+        use super::super::native_guest_turn_tests::with_guests;
+        use horizon_client::{chunk::Chunk, items::ItemStack};
+        use mod_api::{BlockHit, BlockToolModificationEvent, Flow, Hand, Hooks, Host};
+        use std::sync::{Arc, Mutex};
+
+        struct Observer(Arc<Mutex<Vec<bool>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Observer {
+            fn block_tool_modification(
+                &self,
+                _: &dyn Host,
+                event: &mut BlockToolModificationEvent<'_>,
+            ) -> Flow {
+                self.0.lock().unwrap().push(event.tool.simulated);
+                Flow::Continue
+            }
+        }
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "preview_test",
+            Box::new(Observer(heard.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_guests(|game| {
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let pos = [0, 64, 0];
+                let log = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:oak_log")
+                    .unwrap();
+                game.world.set(pos[0], pos[1], pos[2], log).unwrap();
+                let tool = ItemStack::new("minecraft:iron_axe", 1);
+                game.lan.as_mut().unwrap().hub.guests[0].inventory[0] = Some(tool.clone());
+                let player = game.native_player_ref(12).unwrap();
+                let level = game.native_level(game.dim.id()).unwrap();
+                let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
+                let preview = level
+                    .block_transform(game, player, Hand::Main, &tool, pos, hit)
+                    .unwrap();
+                let stripped = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stripped_oak_log")
+                    .unwrap();
+                assert_eq!(preview.state, stripped);
+                assert_eq!(preview.durability, 1);
+                assert_eq!(game.world.block(pos[0], pos[1], pos[2]), log);
+                assert_eq!(
+                    game.lan.as_ref().unwrap().hub.guests[0].inventory[0],
+                    Some(tool.clone())
+                );
+                assert!(
+                    level
+                        .block_transform(game, player, Hand::Main, &tool, [16, 64, 0], hit)
+                        .is_none()
+                );
+                game.as_guest(12, |game| {
+                    let hit = super::super::Hit {
+                        pos,
+                        face: hit.face,
+                        point: hit.point,
+                        inside: hit.inside,
+                    };
+                    assert!(game.use_block_transformer(&tool, &hit).unwrap());
+                })
+                .unwrap();
+                assert_eq!(game.world.block(pos[0], pos[1], pos[2]), stripped);
+                assert_eq!(
+                    game.lan.as_ref().unwrap().hub.guests[0].inventory[0]
+                        .as_ref()
+                        .unwrap()
+                        .damage,
+                    1
+                );
+            })
+        });
+        assert_eq!(*heard.lock().unwrap(), vec![true, false]);
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
