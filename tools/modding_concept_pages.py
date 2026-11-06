@@ -3,6 +3,7 @@
 import argparse
 from collections import Counter
 from html.parser import HTMLParser
+from itertools import chain
 import json
 from pathlib import Path
 import posixpath
@@ -15,6 +16,7 @@ SRC = ROOT / "docs/modding/src"
 GROUPS = ("concepts/trait-mods.md", "how-to/native-mods.md")
 MARKER = "<!-- concept-pages -->"
 LINK = re.compile(r"(\!?\[[^\n]*?\]\()([^\s)]+)(\))")
+REFERENCE = re.compile(r"^( {0,3}\[[^\]\n]+\]:[ \t]*<?)([^\s>]+)(>?)", re.MULTILINE)
 INCLUDE = re.compile(r"(\{\{#(?:rustdoc_)?include )([^ }]+)(\s*\}\})")
 TITLE = re.compile(r"<!-- chapter: (.+) -->\n(?:<!-- separator: (\d+) -->\n)?\n")
 
@@ -35,7 +37,8 @@ def headings(text):
 
 
 def rewrite(text, link, include):
-    text = LINK.sub(lambda m: m[1] + link(m[2]) + m[3], text)
+    for pattern in (LINK, REFERENCE):
+        text = pattern.sub(lambda m: m[1] + link(m[2]) + m[3], text)
     return INCLUDE.sub(lambda m: m[1] + include(m[2]) + m[3], text)
 
 
@@ -86,10 +89,11 @@ def aggregate(src, group):
 
 
 def validate(text, path, src, contents):
-    for match in LINK.finditer(text):
+    for match in chain(LINK.finditer(text), REFERENCE.finditer(text)):
         url = urlsplit(match[2])
-        if url.scheme or url.netloc or match[2].startswith("/"):
+        if url.scheme or url.netloc:
             continue
+        assert not unquote(url.path).startswith("/"), f"{path}: root-relative link {match[2]}"
         target = (src / path).parent / unquote(url.path) if url.path else src / path
         target = target.resolve()
         assert target.is_file(), f"{path}: missing link target {match[2]}"
@@ -156,8 +160,9 @@ def check_html(directory, src=SRC):
         html = HtmlLinks(path.read_text())
         for link in html.links:
             url = urlsplit(link)
-            if url.scheme or url.netloc or link.startswith("/"):
+            if url.scheme or url.netloc:
                 continue
+            assert not unquote(url.path).startswith("/"), f"{page}: root-relative link {link}"
             target = (path.parent / unquote(url.path)).resolve() if url.path else path
             # Existing links outside the book refer to repository source, not book pages.
             if not target.is_relative_to(directory.resolve()):

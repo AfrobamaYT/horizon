@@ -31,6 +31,7 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
   Each `legacy-anchors.txt` freezes the pre-split published anchors; never extend it per new concept.
   Optional `<!-- separator: N -->` metadata preserves original inter-section blank lines in aggregates
   without trailing blank lines in source files; new pages default to one blank line.
+  Use relative links (inline or reference-style); root-relative links are refused.
 - `src/llms.txt` is the index for agents; keep it in step with `SUMMARY.md`.
 
 Build the book with `mdbook build docs/modding` and the reference with `cargo doc -p horizon-mod-api --no-deps`.

@@ -54,6 +54,37 @@ class ConceptPages(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, error):
                 pages.expand(copy.deepcopy(self.book), self.src)
 
+    def test_reference_destinations_are_checked_and_relocated(self):
+        path = "concepts/trait-mods/000-first.md"
+        for target, error in [("missing.md", "missing link target"),
+                              ("001-second.md#absent", "missing anchor")]:
+            text = f"[x][ref]\n\n[ref]: <{target}>\n"
+            with self.assertRaisesRegex(AssertionError, error):
+                pages.validate(text, path, self.src, {})
+        original = "[x][ref]\n\n[ref]: <#second> \"Title\"\n"
+        transformed = pages.rewrite(original, lambda u: pages.relocate(u, "original.md", path,
+            {("original.md", "second"): "concepts/trait-mods/001-second.md"}), lambda u: u)
+        self.assertEqual(transformed, '[x][ref]\n\n[ref]: <001-second.md#second> "Title"\n')
+        pages.validate(transformed, path, self.src, {})
+
+    def test_source_root_relative_links_are_rejected(self):
+        for url in ("/missing.html", "%2Fmissing.html"):
+            for text in (f"[x]({url})", f"[x][ref]\n\n[ref]: {url}\n"):
+                with self.assertRaisesRegex(AssertionError, "root-relative link"):
+                    pages.validate(text, "concepts/trait-mods/000-first.md", self.src, {})
+
+    def test_rendered_root_and_reference_destinations_are_checked(self):
+        output = self.src / "html"
+        path = (output / pages.GROUPS[0]).with_suffix(".html")
+        path.parent.mkdir(parents=True)
+        for href, error in [("/missing.html", "root-relative link"),
+                            ("%2Fmissing.html", "root-relative link"),
+                            ("missing.html", "missing rendered link"),
+                            ("#absent", "missing rendered anchor")]:
+            path.write_text(f'<a href="{href}">x</a>')
+            with self.assertRaisesRegex(AssertionError, error):
+                pages.check_html(output, self.src)
+
     def test_missing_compiled_include_anchor_fails(self):
         (self.src / "code.rs").write_text("// ANCHOR: present\n// ANCHOR_END: present\n")
         text = "{{#include ../../code.rs:missing}}"
