@@ -24,7 +24,10 @@ fn fixture() -> (BlockRegistry, Biomes) {
     let folder = root.join("data/minecraft/worldgen/biome");
     fs::create_dir_all(&folder).unwrap();
     fs::write(folder.join("plains.json"), "{}").unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     fs::remove_dir_all(&root).unwrap();
     let registry = BlockRegistry::from_nbt(&Tag::compound([
         ("DataVersion", Tag::Int(DATA_VERSION)),

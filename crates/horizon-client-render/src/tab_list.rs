@@ -765,7 +765,9 @@ mod tests {
 
     #[test]
     fn cached_tab_layout_matches_rebuilt_layout_and_animated_health() {
-        let font = Font::metrics(std::path::Path::new("missing-tab-test-resources"));
+        let font = Font::metrics(&horizon_assets::resource_source::ResourceSource::directory(
+            std::path::PathBuf::from("missing-tab-test-resources"),
+        ));
         let mut board = Scoreboard::default();
         board.add_objective(
             "hp",

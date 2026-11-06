@@ -136,7 +136,16 @@ fn jar_data_layers_merge_tags_and_replace_recipes_below_world_datapacks() {
     );
     let beta = f.content("beta", &[], vec![later]);
     let root = f.0.join("root");
-    build(&f.0.join("base"), &f.0.join("jars"), &[alpha, beta], &root).unwrap();
+    let mods = [alpha, beta];
+    build(&f.0.join("base"), &f.0.join("jars"), &mods, &root).unwrap();
+    let resources = resolved_resources(
+        &f.0.join("base"),
+        root.clone(),
+        &f.0.join("jars"),
+        &mods,
+        f.0.join("cache"),
+    )
+    .unwrap();
     let values: serde_json::Value =
         serde_json::from_slice(&fs::read(root.join(tag)).unwrap()).unwrap();
     assert_eq!(
@@ -150,12 +159,22 @@ fn jar_data_layers_merge_tags_and_replace_recipes_below_world_datapacks() {
         ])
     );
     assert_eq!(
-        fs::read(root.join(recipe)).unwrap(),
+        resources.data().read(recipe).unwrap(),
         later_recipe.as_bytes()
     );
     assert!(
-        root.join("data/original/function/passive.mcfunction")
-            .is_file()
+        resources
+            .data()
+            .contains("data/original/function/passive.mcfunction")
+    );
+    assert!(
+        !root
+            .join("data/original/function/passive.mcfunction")
+            .exists()
+    );
+    assert_eq!(
+        fs::read(root.join(recipe)).unwrap(),
+        json("stone").as_bytes()
     );
     let namespaces: Vec<String> =
         serde_json::from_slice(&fs::read(root.join(MARKER)).unwrap()).unwrap();
@@ -181,7 +200,7 @@ fn jar_data_layers_merge_tags_and_replace_recipes_below_world_datapacks() {
         "world/datapacks/overrides/data/minecraft/function/layers/world.mcfunction",
         "say world",
     );
-    let builtin = DataPack::builtin(&root);
+    let builtin = DataPack::from_source("vanilla".into(), resources.data().clone());
     let world = datapack::discover(&f.0.join("world"));
     let mut packs = vec![&builtin];
     packs.extend(world.iter());
@@ -202,7 +221,7 @@ fn jar_data_layers_merge_tags_and_replace_recipes_below_world_datapacks() {
         ]
     );
     // The real server data store supplies these as overrides above the
-    // composed root's recipe file, which still contains the later mod's data.
+    // retained passive recipe, which still contains the later mod's data.
     assert_eq!(
         store.files["recipe/alpha:jar_probe"].last().unwrap(),
         world_recipe.as_bytes()
@@ -220,16 +239,29 @@ fn changing_jar_list_or_order_rebuilds_and_missing_after_compose_keeps_the_old_r
     let store = f.0.join("jars");
     let cache = f.0.join("cache");
     let first = resource_root(&base, &store, &mods, &cache).unwrap();
-    assert_eq!(fs::read(first.join(path)).unwrap(), b"b");
+    let first_source = resolved_resources(&base, first.clone(), &store, &mods, cache.clone())
+        .unwrap()
+        .source()
+        .clone();
+    assert_eq!(first_source.read(path).unwrap(), b"b");
     assert_eq!(resource_root(&base, &store, &mods, &cache).unwrap(), first);
     mods[0].jars.reverse();
     let reversed = resource_root(&base, &store, &mods, &cache).unwrap();
+    let reversed_source = resolved_resources(&base, reversed.clone(), &store, &mods, cache.clone())
+        .unwrap()
+        .source()
+        .clone();
     assert_ne!(first, reversed);
-    assert_eq!(fs::read(reversed.join(path)).unwrap(), b"a");
+    assert_eq!(reversed_source.read(path).unwrap(), b"a");
     mods[0].jars.pop();
     let shortened = resource_root(&base, &store, &mods, &cache).unwrap();
+    let shortened_source =
+        resolved_resources(&base, shortened.clone(), &store, &mods, cache.clone())
+            .unwrap()
+            .source()
+            .clone();
     assert_ne!(shortened, reversed);
-    assert_eq!(fs::read(shortened.join(path)).unwrap(), b"b");
+    assert_eq!(shortened_source.read(path).unwrap(), b"b");
     check_jars(&shortened, &store).unwrap();
     let relabeled = JarRef::new(b.id().into(), "2".into(), b.sha512().into()).unwrap();
     mods[0].jars[0] = relabeled.clone();
@@ -251,15 +283,15 @@ fn changing_jar_list_or_order_rebuilds_and_missing_after_compose_keeps_the_old_r
     assert_eq!(missing.jar, b);
     assert_eq!(missing.path, b.cache_path(&store));
     assert_eq!(fs::read_dir(&cache).unwrap().count(), before);
-    assert_eq!(fs::read(shortened.join(path)).unwrap(), b"b");
+    assert_eq!(shortened_source.read(path).unwrap(), b"b");
     let error = check_jars(&shortened, &store).unwrap_err();
     let JarInputsError::Missing(accepted_missing) = error else {
         panic!("expected typed missing accepted input, got {error:?}");
     };
     assert_eq!(accepted_missing.as_ref(), missing);
     // Neither failed preparation mutates any previously published snapshot.
-    assert_eq!(fs::read(first.join(path)).unwrap(), b"b");
-    assert_eq!(fs::read(reversed.join(path)).unwrap(), b"a");
+    assert_eq!(first_source.read(path).unwrap(), b"b");
+    assert_eq!(reversed_source.read(path).unwrap(), b"a");
 }
 
 #[test]

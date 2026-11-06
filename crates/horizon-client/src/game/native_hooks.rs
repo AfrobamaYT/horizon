@@ -2700,6 +2700,19 @@ impl Game<'_> {
     ) {
         self.fire_item_model_property(property, stack, value);
     }
+    /// Client-side value of a numeric item model property a mod registered
+    /// (`register_range_select_item_model_property`), asked each time a `minecraft:range_dispatch`
+    /// on it picks a branch. Set value only for a property your mod owns; unanswered it stays 0.
+    /// The model's `scale` is applied afterwards. The borrowed stack is the one being resolved,
+    /// including nested bundle items.
+    pub(super) fn native_item_model_range_property(
+        &self,
+        property: &str,
+        stack: &StackView,
+        value: &mut f32,
+    ) {
+        self.fire_item_model_range_property(property, stack, value);
+    }
     /// The frame rate this window is about to be held to: Max Framerate after the
     /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
     /// window has focus, `minimized` whether it is minimised and `in_world` whether a world
@@ -3735,6 +3748,15 @@ impl Game<'_> {
         entries: &mut Vec<DebugEntry>,
     ) {
         Self::fire_register_debug_entries(context, entries);
+    }
+    /// The numeric item model properties a mod adds (NeoForge's
+    /// `RegisterRangeSelectItemModelPropertyEvent`): push each id, `<mod id>:<path>`.
+    /// Asked once at start on the client, before resources load.
+    pub(super) fn native_register_range_select_item_model_property(
+        context: &mod_api::RegistrationContext,
+        properties: &mut Vec<String>,
+    ) {
+        Self::fire_register_range_select_item_model_property(context, properties);
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
@@ -12780,7 +12802,7 @@ mod tests {
             return;
         }
         assert_eq!(keys.shared.get(), keys.own.get());
-        with_game_at(root.unwrap(), |game| {
+        with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -13071,7 +13093,7 @@ mod tests {
         .unwrap();
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -13091,7 +13113,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -13171,7 +13195,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -13191,7 +13215,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -13278,7 +13304,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -13297,7 +13323,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();

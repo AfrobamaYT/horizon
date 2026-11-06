@@ -1,6 +1,7 @@
 //! VillagerProfessionLayer's cached texture metadata and type-layer head visibility.
 use super::anim::Poses;
-use std::{collections::HashMap, path::Path};
+use horizon_assets::resource_source::ResourceSource;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 enum Hat {
@@ -14,7 +15,7 @@ enum Hat {
 pub struct VillagerHats(HashMap<String, Hat>);
 
 impl VillagerHats {
-    pub fn load(root: &Path) -> Self {
+    pub fn load(root: &ResourceSource) -> Self {
         let mut hats = HashMap::new();
         for texture in crate::atlas_sources::list_textures(root) {
             let (namespace, path) = texture.split_once(':').expect("qualified texture");
@@ -29,8 +30,9 @@ impl VillagerHats {
             {
                 continue;
             }
-            let metadata_path = root.join(format!("assets/{namespace}/textures/{path}.png.mcmeta"));
-            let metadata = horizon_core::prepared_files::read(&metadata_path)
+            let metadata_path = format!("assets/{namespace}/textures/{path}.png.mcmeta");
+            let metadata = root
+                .read(&metadata_path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
             let hat = match metadata
@@ -70,6 +72,38 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn resolved_texture_metadata_controls_villager_hats_without_files() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            (
+                "assets/minecraft/textures/entity/villager/profession/farmer.png".into(),
+                Resource::bytes(Vec::new()),
+            ),
+            (
+                "assets/minecraft/textures/entity/villager/profession/farmer.png.mcmeta".into(),
+                Resource::bytes(br#"{"villager":{"hat":"full"}}"#.to_vec()),
+            ),
+            (
+                "assets/example/textures/entity/villager/type/nested/plains.png".into(),
+                Resource::bytes(Vec::new()),
+            ),
+            (
+                "assets/example/textures/entity/villager/type/nested/plains.png.mcmeta".into(),
+                Resource::bytes(br#"{"villager":{"hat":"partial"}}"#.to_vec()),
+            ),
+        ]));
+        let hats = VillagerHats::load(&source);
+        assert_eq!(
+            hats.0["minecraft:entity/villager/profession/farmer"],
+            Hat::Full
+        );
+        assert_eq!(
+            hats.0["example:entity/villager/type/nested/plains"],
+            Hat::Partial
+        );
+    }
+
+    #[test]
     fn namespaced_nested_hat_metadata_comes_from_effective_root() {
         let root =
             std::env::temp_dir().join(format!("horizon-profession-hats-{}", std::process::id()));
@@ -82,7 +116,7 @@ mod tests {
             r#"{"villager":{"hat":"full"}}"#,
         )
         .unwrap();
-        let hats = VillagerHats::load(&root);
+        let hats = VillagerHats::load(&ResourceSource::directory(root.clone()));
         assert_eq!(
             hats.0["example:entity/villager/profession/nested/engineer"],
             Hat::Full
@@ -95,7 +129,8 @@ mod tests {
     fn metadata_head_visibility_matches_exported_no_hat_models() {
         use crate::mobs::{load_model, render::draw};
         let root = std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES");
-        let mut hats = VillagerHats::load(Path::new(&root));
+        let mut hats =
+            VillagerHats::load(&ResourceSource::directory(std::path::PathBuf::from(&root)));
         assert_eq!(
             hats.0["minecraft:entity/villager/profession/farmer"],
             Hat::Full
@@ -107,9 +142,16 @@ mod tests {
             ("zombie_villager", "entity/zombie_villager"),
             ("zombie_villager_baby", "entity/zombie_villager"),
         ] {
-            let model = load_model(Path::new(&root), &format!("minecraft:{name}#main")).unwrap();
-            let no_hat =
-                load_model(Path::new(&root), &format!("minecraft:{name}_no_hat#main")).unwrap();
+            let model = load_model(
+                std::path::Path::new(&root),
+                &format!("minecraft:{name}#main"),
+            )
+            .unwrap();
+            let no_hat = load_model(
+                std::path::Path::new(&root),
+                &format!("minecraft:{name}_no_hat#main"),
+            )
+            .unwrap();
             for (type_hat, profession_hat, hidden) in [
                 (Hat::None, Hat::Full, true),
                 (Hat::Full, Hat::Partial, true),

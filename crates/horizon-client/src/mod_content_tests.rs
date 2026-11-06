@@ -11,7 +11,7 @@ mod farmland_tests;
 mod jar_tests;
 
 /// A Java jar's assets are a pack layer under the mod's own files, in mod
-/// order under the later mods. Passive assets/data leave the jar, and the files
+/// order under the later mods. Passive assets stay in the jar, and the files
 /// every pack stacks (atlases here) merge across vanilla, the jars and the
 /// mods in that same order.
 #[test]
@@ -115,7 +115,18 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
         vec![jar_b.clone()],
     );
     let root = scratch.join("root");
-    let warnings = build(&base, &scratch.join("jars"), &[alpha, beta], &root).unwrap();
+    let mods = [alpha, beta];
+    let warnings = build(&base, &scratch.join("jars"), &mods, &root).unwrap();
+    let resources = resolved_resources(
+        &base,
+        root.clone(),
+        &scratch.join("jars"),
+        &mods,
+        scratch.join("cache"),
+    )
+    .unwrap();
+    assert!(!root.join("assets/alpha").exists());
+    assert!(!root.join("assets/beta").exists());
     let mut listed = warnings.clone();
     listed.sort();
     assert_eq!(
@@ -128,22 +139,31 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
     // A mod's own files win over its jars; a later mod's jar wins over an
     // earlier mod's own file; a jar wins over vanilla.
     assert_eq!(
-        fs::read(root.join("assets/alpha/own_only.png")).unwrap(),
+        resources
+            .source()
+            .read("assets/alpha/own_only.png")
+            .unwrap(),
         b"mod-a"
     );
     assert_eq!(
-        fs::read(root.join("assets/alpha/own_and_jar.png")).unwrap(),
+        resources
+            .source()
+            .read("assets/alpha/own_and_jar.png")
+            .unwrap(),
         b"jar-b"
     );
-    assert_eq!(fs::read(root.join(vanilla_path)).unwrap(), b"jar-a-mc");
+    assert_eq!(resources.source().read(vanilla_path).unwrap(), b"jar-a-mc");
     assert_eq!(
-        fs::read(root.join("assets/beta/only_jar.png")).unwrap(),
+        resources.source().read("assets/beta/only_jar.png").unwrap(),
         b"jar-b-only"
     );
     // The stacked files merge across vanilla, the jars and the mods in the
     // same order, and no root Java bytecode leaves the jar.
     let sources: Vec<_> = serde_json::from_slice::<serde_json::Value>(
-        &fs::read(root.join("assets/minecraft/atlases/blocks.json")).unwrap(),
+        &resources
+            .source()
+            .read("assets/minecraft/atlases/blocks.json")
+            .unwrap(),
     )
     .unwrap()["sources"]
         .as_array()
@@ -156,24 +176,28 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
     // A mod without its own files still layers its jar, under an earlier
     // mod's own files.
     let root = scratch.join("root2");
-    build(
+    let mods = [
+        ported(
+            "alpha2",
+            "alpha",
+            &[own("assets/alpha/own.png", "mod-a")],
+            vec![jar_a],
+        ),
+        ported("beta-empty", "beta", &[], vec![jar_b]),
+    ];
+    build(&base, &scratch.join("jars"), &mods, &root).unwrap();
+    let resources = resolved_resources(
         &base,
+        root.clone(),
         &scratch.join("jars"),
-        &[
-            ported(
-                "alpha2",
-                "alpha",
-                &[own("assets/alpha/own.png", "mod-a")],
-                vec![jar_a],
-            ),
-            ported("beta-empty", "beta", &[], vec![jar_b]),
-        ],
-        &root,
+        &mods,
+        scratch.join("cache"),
     )
     .unwrap();
-    assert!(root.join("assets/alpha/own.png").is_file());
+    assert!(resources.source().contains("assets/alpha/own.png"));
+    assert!(!root.join("assets/alpha").exists());
     assert_eq!(
-        fs::read(root.join("assets/beta/only_jar.png")).unwrap(),
+        resources.source().read("assets/beta/only_jar.png").unwrap(),
         b"jar-b-only"
     );
     let _ = fs::remove_dir_all(&scratch);
@@ -629,6 +653,14 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
 }
 
 fn prepared() -> Option<PathBuf> {
+    if let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") {
+        let root = PathBuf::from(root);
+        assert!(
+            root.join("gameplay-facts.json").is_file(),
+            "HORIZON_TEST_RESOURCES is not prepared"
+        );
+        return Some(root);
+    }
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     [
         manifest.join("../../.local/horizon-client/26.3"),
@@ -636,6 +668,43 @@ fn prepared() -> Option<PathBuf> {
     ]
     .into_iter()
     .find(|root| root.join("gameplay-facts.json").exists())
+}
+
+fn content_files(
+    resources: &horizon_assets::resource_source::ResourceRoot,
+) -> Vec<(String, Vec<Vec<u8>>)> {
+    let content = crate::datapack::DataPack::from_source(
+        "horizon-content".into(),
+        resources.data_changes().clone(),
+    );
+    crate::datapack::DataStore::load(&[&content])
+        .files
+        .into_iter()
+        .collect()
+}
+
+/// Exercise relative prepared roots even when the data lives outside this checkout.
+fn relative_base(base: &Path) -> PathBuf {
+    let base = std::path::absolute(base).unwrap();
+    let current = std::env::current_dir().unwrap();
+    let target = base.components().collect::<Vec<_>>();
+    let origin = current.components().collect::<Vec<_>>();
+    let shared = target
+        .iter()
+        .zip(&origin)
+        .take_while(|(a, b)| a == b)
+        .count();
+    if shared == 0 {
+        return base;
+    }
+    let mut relative = PathBuf::new();
+    for _ in &origin[shared..] {
+        relative.push("..");
+    }
+    for component in &target[shared..] {
+        relative.push(component.as_os_str());
+    }
+    relative
 }
 
 /// A content mod folder: a full block, a door and an item-less glass from
@@ -745,16 +814,26 @@ fn content_root_loads_with_every_table() {
     let m = ruby_mod_with_pistons(&scratch.join("ruby"), true);
     // The base as a relative path (cargo runs tests in the crate's folder):
     // the overlay's links still resolve.
-    let relative = Path::new("../../.local/horizon-client/26.3");
+    let relative = relative_base(&base);
     let root = resource_root(
-        relative,
+        &relative,
         Path::new(""),
         std::slice::from_ref(&m),
         &scratch.join("cache"),
     )
     .unwrap();
     assert_ne!(root, base);
+    let resources = resolved_resources(
+        &base,
+        root.clone(),
+        Path::new(""),
+        std::slice::from_ref(&m),
+        scratch.join("cache"),
+    )
+    .unwrap();
 
+    let files = content_files(&resources);
+    let overlay = PackOverlay { files: &files };
     let vanilla = Assets::load(&base).unwrap();
     let assets = Assets::load(&root).unwrap();
     let (old, new) = (vanilla.registry, assets.registry);
@@ -917,7 +996,7 @@ fn content_root_loads_with_every_table() {
     assert_eq!(&*facts.get(iron).name, "minecraft:iron_block");
 
     let defaults = horizon_world::item_defaults::read(&root).unwrap();
-    let items = Items::load(&root, new, &facts, &PackOverlay::NONE, &defaults).unwrap();
+    let items = Items::load(&root, new, &facts, &overlay, &defaults).unwrap();
     let ruby_block = &items.items["ruby:ruby_block"];
     assert_eq!(ruby_block.block, Some(ruby));
     let iron_block = &items.items["minecraft:iron_block"];
@@ -1076,7 +1155,7 @@ fn content_root_loads_with_every_table() {
     let recipes = crate::crafting::Recipes::load(
         &root,
         &items,
-        &PackOverlay::NONE,
+        &overlay,
         &crate::test_resources::server_load(),
     )
     .unwrap();
@@ -1105,10 +1184,13 @@ fn content_root_loads_with_every_table() {
     crate::light::LightTables::load(&root, new, &facts).unwrap();
     crate::motion::MotionResources::load(&root, &assets).unwrap();
     horizon_world::worldgen::generator::GeneratorData::load(&root.join("worldgen"), new).unwrap();
-    assert!(root.join("assets/ruby/lang/en_us.json").is_file());
+    assert!(resources.source().contains("assets/ruby/lang/en_us.json"));
     // Blocks without a blockstate of their own take their template's.
     assert_eq!(
-        fs::read(root.join("assets/ruby/blockstates/ruby_door.json")).unwrap(),
+        resources
+            .source()
+            .read("assets/ruby/blockstates/ruby_door.json")
+            .unwrap(),
         fs::read(base.join("assets/minecraft/blockstates/oak_door.json")).unwrap()
     );
 
@@ -1459,7 +1541,7 @@ fn content_root_is_reused_until_a_mod_changes() {
         root
     );
     assert!(sentinel.exists(), "an unchanged mod rebuilt the root");
-    let old_lang = fs::read(root.join("assets/ruby/lang/en_us.json")).unwrap();
+    let old_tables = fs::read(root.join("facts.json")).unwrap();
     let lang = scratch.join("ruby/assets/ruby/lang/en_us.json");
     fs::write(&lang, r#"{"block.ruby.ruby_block": "Ruby Block"}"#).unwrap();
     let file = fs::File::options().write(true).open(&lang).unwrap();
@@ -1468,15 +1550,23 @@ fn content_root_is_reused_until_a_mod_changes() {
     let changed = resource_root(&base, Path::new(""), std::slice::from_ref(&m), &cache).unwrap();
     assert_ne!(changed, root);
     assert!(sentinel.exists(), "a rebuild removed the active root");
-    assert_eq!(
-        fs::read(root.join("assets/ruby/lang/en_us.json")).unwrap(),
-        old_lang
-    );
+    assert_eq!(fs::read(root.join("facts.json")).unwrap(), old_tables);
+    let resources = resolved_resources(
+        &base,
+        changed.clone(),
+        Path::new(""),
+        std::slice::from_ref(&m),
+        cache.clone(),
+    )
+    .unwrap();
     assert!(
-        fs::read_to_string(changed.join("assets/ruby/lang/en_us.json"))
+        resources
+            .source()
+            .read_to_string("assets/ruby/lang/en_us.json")
             .unwrap()
             .contains("Ruby Block")
     );
+    assert!(!changed.join("assets/ruby/lang/en_us.json").exists());
     m.content.blocks[0].template = "minecraft:missing_template".into();
     assert!(resource_root(&base, Path::new(""), std::slice::from_ref(&m), &cache).is_err());
     assert!(
@@ -1566,8 +1656,27 @@ fn content_root_carries_a_structure_mod() {
         content: Content::read(&dir, &package.manifest).unwrap(),
         jars: Vec::new(),
     };
-    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
-    assert!(root.join("worldgen/structure/huts/hut.nbt").exists());
+    let root = resource_root(
+        &base,
+        Path::new(""),
+        std::slice::from_ref(&m),
+        &scratch.join("cache"),
+    )
+    .unwrap();
+    let resources = resolved_resources(
+        &base,
+        root.clone(),
+        Path::new(""),
+        std::slice::from_ref(&m),
+        scratch.join("cache"),
+    )
+    .unwrap();
+    assert!(
+        resources
+            .data_changes()
+            .contains("data/huts/structure/hut.nbt")
+    );
+    assert!(!root.join("worldgen/structure/huts/hut.nbt").exists());
     let tags: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(root.join("worldgen/biome_tags.json")).unwrap()).unwrap();
     let hut: serde_json::Value = serde_json::from_str(&tags["huts:has_hut"]).unwrap();
@@ -1635,10 +1744,14 @@ fn content_root_carries_a_structure_mod() {
     }
 
     let assets = Assets::load(&root).unwrap();
-    let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: Some(resources.data_changes()),
         dir: &root.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,
@@ -1664,10 +1777,14 @@ fn a_superflat_world_runs_its_structure_sets_on_flat_ground() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: None,
         dir: &base.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,
@@ -1740,7 +1857,10 @@ fn a_decorated_superflat_world_without_structures_grows_its_features() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data = crate::test_resources::item_data(
         &base,
         horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
@@ -1763,6 +1883,7 @@ fn a_decorated_superflat_world_without_structures_grows_its_features() {
         };
         let terrain = crate::vanillagen::VanillaTerrain::for_flat(
             crate::vanillagen::TerrainResources {
+                data: None,
                 dir: &base.join("worldgen"),
                 registry: assets.registry,
                 biomes: &biomes,
@@ -1812,10 +1933,14 @@ fn a_superflat_world_keeps_its_strongholds_on_every_seed_and_leaves_null_layers_
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: None,
         dir: &base.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,
@@ -1892,10 +2017,14 @@ fn a_superflat_structure_override_naming_no_set_lets_every_set_generate() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: None,
         dir: &base.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,
@@ -2259,13 +2388,27 @@ fn a_content_root_appends_a_mods_atlas_sources() {
         ],
     );
     let root = scratch.join("root");
-    build(&base, Path::new(""), &[m], &root).unwrap();
-    let sources = |dir: &Path| -> Vec<serde_json::Value> {
-        let text = fs::read(dir.join("assets/minecraft/atlases/blocks.json")).unwrap();
-        let doc: serde_json::Value = serde_json::from_slice(&text).unwrap();
-        doc["sources"].as_array().unwrap().clone()
-    };
-    let (vanilla, built) = (sources(&base), sources(&root));
+    build(&base, Path::new(""), std::slice::from_ref(&m), &root).unwrap();
+    let resources = resolved_resources(
+        &base,
+        root.clone(),
+        Path::new(""),
+        std::slice::from_ref(&m),
+        scratch.join("cache"),
+    )
+    .unwrap();
+    let sources =
+        |source: &horizon_assets::resource_source::ResourceSource| -> Vec<serde_json::Value> {
+            let text = source.read("assets/minecraft/atlases/blocks.json").unwrap();
+            let doc: serde_json::Value = serde_json::from_slice(&text).unwrap();
+            doc["sources"].as_array().unwrap().clone()
+        };
+    let (vanilla, built) = (
+        sources(&horizon_assets::resource_source::ResourceSource::directory(
+            base.clone(),
+        )),
+        sources(resources.source()),
+    );
     assert_eq!(built.len(), vanilla.len() + 1);
     assert_eq!(built[..vanilla.len()], vanilla[..]);
     assert_eq!(built[vanilla.len()]["source"], "gauge_liquid");
@@ -2411,10 +2554,14 @@ fn exploration_maps_skip_the_starts_a_chunk_saved_as_referenced() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: None,
         dir: &base.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,
@@ -2452,10 +2599,14 @@ fn exploration_maps_skip_the_structures_maps_pointed_at() {
     let scratch = std::env::temp_dir().join(format!("horizon-map-refs-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: None,
         dir: &base.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,
@@ -2505,10 +2656,14 @@ fn debug_density_line_lists_the_noise_settings_functions() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: None,
         dir: &base.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,
@@ -2739,7 +2894,7 @@ fn connecting_blocks_join_themselves_and_their_tag() {
     use horizon_world::level::{Behaviours, LevelAccess, Ticks};
     use std::collections::HashMap;
 
-    let Some(_) = prepared() else {
+    let Some(base) = prepared() else {
         return;
     };
     let scratch = std::env::temp_dir().join(format!("horizon-mod-pipe-{}", std::process::id()));
@@ -2773,9 +2928,9 @@ fn connecting_blocks_join_themselves_and_their_tag() {
         content: Content::read(&dir, &package.manifest).unwrap(),
         jars: Vec::new(),
     };
-    let relative = Path::new("../../.local/horizon-client/26.3");
+    let relative = relative_base(&base);
     let root = resource_root(
-        relative,
+        &relative,
         Path::new(""),
         std::slice::from_ref(&m),
         &scratch.join("cache"),
@@ -2897,10 +3052,14 @@ fn an_old_chunks_saved_village_comes_back_with_its_pieces() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: None,
         dir: &base.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,
@@ -3050,9 +3209,9 @@ fn an_old_chunks_saved_village_comes_back_with_its_pieces() {
 #[test]
 #[ignore = "full content root: CI and pr_ready run it"]
 fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
-    if prepared().is_none() {
+    let Some(base) = prepared() else {
         return;
-    }
+    };
     let scratch = std::env::temp_dir().join(format!("horizon-mod-results-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
     let dir = scratch.join("ruby");
@@ -3100,23 +3259,33 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
         content: Content::read(&dir, &package.manifest).unwrap(),
         jars: Vec::new(),
     };
-    let relative = Path::new("../../.local/horizon-client/26.3");
+    let relative = relative_base(&base);
     let root = resource_root(
-        relative,
+        &relative,
         Path::new(""),
         std::slice::from_ref(&m),
         &scratch.join("cache"),
     )
     .unwrap();
+    let resources = resolved_resources(
+        &base,
+        root.clone(),
+        Path::new(""),
+        std::slice::from_ref(&m),
+        scratch.join("cache"),
+    )
+    .unwrap();
+    let files = content_files(&resources);
+    let overlay = PackOverlay { files: &files };
     let assets = Assets::load(&root).unwrap();
     let new = assets.registry;
     let facts = BlockFacts::load(&root, new).unwrap();
     let defaults = horizon_world::item_defaults::read(&root).unwrap();
-    let items = Items::load(&root, new, &facts, &PackOverlay::NONE, &defaults).unwrap();
+    let items = Items::load(&root, new, &facts, &overlay, &defaults).unwrap();
     let recipes = crate::crafting::Recipes::load(
         &root,
         &items,
-        &PackOverlay::NONE,
+        &overlay,
         &crate::test_resources::server_load(),
     )
     .unwrap();
@@ -3141,7 +3310,7 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
 #[test]
 #[ignore = "full content root: CI and pr_ready run it"]
 fn creative_tabs_come_on_their_own_page() {
-    let Some(_) = prepared() else {
+    let Some(base) = prepared() else {
         return;
     };
     let scratch = std::env::temp_dir().join(format!("horizon-mod-tabs-{}", std::process::id()));
@@ -3179,9 +3348,9 @@ fn creative_tabs_come_on_their_own_page() {
         content: Content::read(&dir, &package.manifest).unwrap(),
         jars: Vec::new(),
     };
-    let relative = Path::new("../../.local/horizon-client/26.3");
+    let relative = relative_base(&base);
     let root = resource_root(
-        relative,
+        &relative,
         Path::new(""),
         std::slice::from_ref(&m),
         &scratch.join("cache"),
@@ -4933,10 +5102,14 @@ fn content_root_generates_a_biome_modifier_ore() {
         let root = resource_root(&base, Path::new(""), &[m], &dir.join("cache")).unwrap();
         let assets = Assets::load(&root).unwrap();
         let zinc = assets.registry.default_state("zinc:zinc_ore").unwrap().0;
-        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let item_data =
             crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
         let terrain_resources = crate::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,
@@ -5261,8 +5434,12 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
     assert_eq!(&*block("signs:board").item, "signs:notice");
     assert_eq!(&*block("signs:bracket").item, "signs:lantern");
     let defaults = horizon_world::item_defaults::read(&root).unwrap();
-    let mut renderer =
-        crate::block_entity_render::BlockEntityRenderer::load(&root, registry, &defaults).unwrap();
+    let mut renderer = crate::block_entity_render::BlockEntityRenderer::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        registry,
+        &defaults,
+    )
+    .unwrap();
     renderer.add_mod_signs(&facts, registry);
     for name in [
         "signs:notice",
@@ -5496,10 +5673,14 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
     let assets = Assets::load(&root).unwrap();
     let registry = assets.registry;
     let facts = BlockFacts::load(&root, registry).unwrap();
-    let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
+        data: None,
         dir: &root.join("worldgen"),
         registry,
         biomes: &biomes,
@@ -5812,16 +5993,25 @@ fn a_data_mod_loads_unloads_and_loads_again() {
     let dirt = || Some(crate::items::ItemStack::new("minecraft:dirt", 1));
     let grid = [dirt(), dirt(), None, None];
     // What a world reads from a root: the item tags and the recipes.
-    let tables = |root: &Path| {
+    let tables = |root: &Path, mods: &[ContentMod]| {
+        let resources = resolved_resources(
+            &base,
+            root.to_path_buf(),
+            Path::new(""),
+            mods,
+            cache.clone(),
+        )
+        .unwrap();
+        let files = content_files(&resources);
+        let overlay = PackOverlay { files: &files };
         let assets = Assets::load(root).unwrap();
         let facts = BlockFacts::load(root, assets.registry).unwrap();
         let defaults = horizon_world::item_defaults::read(root).unwrap();
-        let items =
-            Items::load(root, assets.registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
+        let items = Items::load(root, assets.registry, &facts, &overlay, &defaults).unwrap();
         let recipes = crate::crafting::Recipes::load(
             root,
             &items,
-            &PackOverlay::NONE,
+            &overlay,
             &crate::test_resources::server_load(),
         )
         .unwrap();
@@ -5832,7 +6022,7 @@ fn a_data_mod_loads_unloads_and_loads_again() {
         (
             crafted,
             tagged,
-            root.join("assets/glint/lang/en_us.json").is_file(),
+            resources.source().contains("assets/glint/lang/en_us.json"),
         )
     };
     let loaded = (
@@ -5845,13 +6035,25 @@ fn a_data_mod_loads_unloads_and_loads_again() {
     let on = resource_root(&base, Path::new(""), std::slice::from_ref(&glint), &cache).unwrap();
     eprintln!("content root built in {} ms", started.elapsed().as_millis());
     assert_ne!(on, base);
-    assert_eq!(tables(&on), loaded);
+    assert_eq!(tables(&on, std::slice::from_ref(&glint)), loaded);
 
     // Off: the base root, without any of it.
     let off = resource_root(&base, Path::new(""), &[], &cache).unwrap();
     assert_eq!(off, base);
-    assert_eq!(tables(&off), (None, None, false));
-    assert!(on.join("assets/glint/lang/en_us.json").is_file());
+    assert_eq!(tables(&off, &[]), (None, None, false));
+    assert!(!on.join("assets/glint/lang/en_us.json").exists());
+    assert!(
+        resolved_resources(
+            &base,
+            on.clone(),
+            Path::new(""),
+            std::slice::from_ref(&glint),
+            cache.clone()
+        )
+        .unwrap()
+        .source()
+        .contains("assets/glint/lang/en_us.json")
+    );
 
     // On again: the same root, not built again.
     let sentinel = on.join("sentinel");
@@ -5864,7 +6066,7 @@ fn a_data_mod_loads_unloads_and_loads_again() {
     );
     assert_eq!(again, on);
     assert!(sentinel.exists());
-    assert_eq!(tables(&again), loaded);
+    assert_eq!(tables(&again, std::slice::from_ref(&glint)), loaded);
 
     // Another set of mods builds its own root beside it and leaves this one as it was.
     let ruby = ruby_mod(&scratch.join("ruby"));
@@ -5874,10 +6076,11 @@ fn a_data_mod_loads_unloads_and_loads_again() {
         jars: Vec::new(),
         content: Content::read(&scratch.join("glint"), &package.manifest).unwrap(),
     };
-    let both = resource_root(&base, Path::new(""), &[glint_again, ruby], &cache).unwrap();
+    let both_mods = [glint_again, ruby];
+    let both = resource_root(&base, Path::new(""), &both_mods, &cache).unwrap();
     assert_ne!(both, on);
     assert!(sentinel.exists());
-    assert_eq!(tables(&both).0, loaded.0);
+    assert_eq!(tables(&both, &both_mods).0, loaded.0);
     fs::remove_dir_all(&scratch).unwrap();
 }
 

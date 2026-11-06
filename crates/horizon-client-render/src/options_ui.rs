@@ -5489,7 +5489,10 @@ mod tests {
         assert_eq!(file.int("renderDistance"), 128);
     }
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap()
     }
 
     /// Picking another pack keeps the last one's changed options before the next one's are

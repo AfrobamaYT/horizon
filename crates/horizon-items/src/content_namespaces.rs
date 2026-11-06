@@ -11,8 +11,13 @@ pub const MARKER: &str = "horizon-mod-content.json";
 pub fn namespaces(root: &Path) -> Vec<String> {
     fs::read(root.join(MARKER))
         .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
+        .map(|bytes| decode_namespaces(&bytes))
         .unwrap_or_default()
+}
+
+/// Namespaces from the generated content marker, shared with resource-source loaders.
+pub fn decode_namespaces(bytes: &[u8]) -> Vec<String> {
+    serde_json::from_slice(bytes).unwrap_or_default()
 }
 
 /// The namespaces whose tags loaders read in `root`: `minecraft`, and in a
