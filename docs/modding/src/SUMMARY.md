@@ -11,6 +11,7 @@
 
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)
+- [Design: transactional block-entity removal](concepts/block-entity-removal.md)
 
 # How-to
 
