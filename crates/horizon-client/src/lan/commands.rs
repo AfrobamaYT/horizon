@@ -482,6 +482,16 @@ mod tests {
 
     #[test]
     fn native_argument_alternatives_survive_packet_reconstruction() {
+        let mut builtin = Builtin::default();
+        builtin.registries.insert(
+            "minecraft:command_argument_type".into(),
+            horizon_protocol::registry::Ids::from_names(
+                horizon_protocol::packets::play::ARGUMENT_TYPES
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect(),
+            ),
+        );
         let mods = serde_json::json!({"type": "root", "children": {
             "foo": {"type": "literal", "children": {
                 "a": {"type": "argument", "parser": "brigadier:integer", "executable": true, "execution_level": 4,
@@ -495,7 +505,7 @@ mod tests {
         }});
         let tree = CommandTree { root: Value::Null };
         for level in 0..=4 {
-            let packet = tree.packet_with(level, true, &Builtin::default(), &mods);
+            let packet = tree.packet_with(level, true, &builtin, &mods);
             let dispatcher =
                 crate::command::network::from_packet(&packet, &crate::command::Dispatcher::new());
             let registries = crate::command::Registries::default();
