@@ -447,7 +447,7 @@ impl SyncData {
         // registry's a pack has tag files for (a block made climbable).
         drop(registries_step);
         let tags_step = startup::step("sync.tags");
-        let mut tags = Self::load_tags(&root, &builtin, &dynamic);
+        let mut tags = Self::load_tags(&root, &builtin, &dynamic, overlay.conditions);
         Self::merge_pack_tags(&mut tags, &root, overlay, &builtin, &dynamic);
         Self::merge_damage_tags(&mut tags, resources, overlay, &builtin, &dynamic)?;
         drop(tags_step);
@@ -653,11 +653,17 @@ impl SyncData {
         let mut own = BTreeMap::new();
         walk(&root.join("tags").join(kind), &mut own);
         for (name, value) in own {
+            if !overlay.conditions.allows(&value) {
+                continue;
+            }
             Self::add_tag_values(files.entry(qualified(&name)).or_default(), &value);
         }
         for (id, packs) in overlay.tag_kind(kind) {
             for bytes in packs {
                 if let Ok(value) = serde_json::from_slice::<Value>(bytes) {
+                    if !overlay.conditions.allows(&value) {
+                        continue;
+                    }
                     Self::add_tag_values(files.entry(id.clone()).or_default(), &value);
                 }
             }
@@ -743,7 +749,12 @@ impl SyncData {
     }
 
     /// TagNetworkSerialization.serializeTagsToNetwork from the tag files.
-    fn load_tags(root: &Path, builtin: &Builtin, dynamic: &Dynamic) -> UpdateTags {
+    fn load_tags(
+        root: &Path,
+        builtin: &Builtin,
+        dynamic: &Dynamic,
+        conditions: &horizon_world::conditions::LoadConditions,
+    ) -> UpdateTags {
         let tag_root = root.join("tags");
         let mut registries = Vec::new();
         let mut keys: Vec<String> = builtin
@@ -760,6 +771,7 @@ impl SyncData {
             }
             let mut files = BTreeMap::new();
             walk(&dir, &mut files);
+            files.retain(|_, value| conditions.allows(value));
             if files.is_empty() {
                 continue;
             }
@@ -1083,7 +1095,12 @@ mod tests {
             ]),
         };
         let dynamic = Dynamic::default();
-        let mut tags = SyncData::load_tags(&root, &builtin, &dynamic);
+        let mut tags = SyncData::load_tags(
+            &root,
+            &builtin,
+            &dynamic,
+            &horizon_world::conditions::LoadConditions::vanilla(),
+        );
         let item_tags = RegistryTags {
             registry: "minecraft:item".into(),
             tags: vec![TagEntry {
@@ -1103,7 +1120,10 @@ mod tests {
             ),
             (
                 "tags/minecraft:block/mineable/pickaxe".to_owned(),
-                vec![br#"{"replace":true,"values":["minecraft:dirt"]}"#.to_vec()],
+                vec![
+                    br#"{"replace":true,"values":["minecraft:dirt"]}"#.to_vec(),
+                    br#"{"neoforge:conditions":[{"type":"unsupported"}],"replace":true,"values":["minecraft:stone"]}"#.to_vec(),
+                ],
             ),
         ];
         let overlay = horizon_world::loot::PackOverlay {
