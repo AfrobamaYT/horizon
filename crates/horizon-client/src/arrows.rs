@@ -652,7 +652,7 @@ pub fn finish_entity_hit(p: &mut Projectile, scene: &ArrowScene, outcome: Entity
         EntityHit::Hurt => {
             ticker.hit_sound();
             // A piercing arrow flies on (`getPierceLevel() <= 0` discards).
-            if ticker.st.pierce == 0 {
+            if (ticker.st.pierce as i8) <= 0 {
                 ticker.st.removed = true;
             }
         }
@@ -661,7 +661,7 @@ pub fn finish_entity_hit(p: &mut Projectile, scene: &ArrowScene, outcome: Entity
         EntityHit::Deflected => {
             // The deflection comes before `onHitEntity` adds the entity to
             // `piercingIgnoreEntityIds`.
-            if ticker.st.pierce > 0 {
+            if (ticker.st.pierce as i8) > 0 {
                 ticker.st.pierced.pop();
             }
         }
@@ -951,7 +951,7 @@ impl Ticker<'_, '_, '_, '_> {
             }
             // AbstractArrow.onHitEntity: past pierce level + 1 entities the
             // arrow is discarded before it hurts the next one.
-            if self.st.pierce > 0 {
+            if (self.st.pierce as i8) > 0 {
                 if self.st.pierced.len() > usize::from(self.st.pierce) {
                     self.st.removed = true;
                     return Hit::None;

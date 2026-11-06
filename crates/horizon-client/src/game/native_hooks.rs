@@ -1019,7 +1019,7 @@ use mod_api::{
     CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LayerDefinition,
     LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
     NativeLifecycleContext, NativeNoteBlockChange, NativeServerPlayer, PathComputationType,
-    Placement, PlayerRef, RecipeBookCategory, ScreenOpening, ScreenshotImage,
+    Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
     ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
@@ -1141,6 +1141,18 @@ impl Game<'_> {
                 partial_tick: self.clock.fraction() as f32,
             },
         ))
+    }
+
+    /// The last window focus state reported by the window system.
+    pub(super) fn native_window_focused(&self) -> bool {
+        self.focused
+    }
+
+    /// The same screen identifier provided to screen hooks.
+    pub(super) fn native_observed_screen_id(&self) -> Option<ScreenId> {
+        self.observed_screen_view().map(|view| ScreenId {
+            id: view.id.to_owned(),
+        })
     }
 
     /// Opens `screen` (`Gui.setScreen`; `Screen::Playing` is vanilla's null):
@@ -13991,6 +14003,86 @@ mod screen_open_tests {
         with_game_of(mods, |game| {
             game.open_sign_editor((0, 64, 0), true);
             assert_eq!(take(&log), ["opening sign_editor", "init sign_editor"]);
+        });
+    }
+
+    /// The read and the hook see the same live screen, including overlays.
+    #[test]
+    #[ignore = "needs prepared resources and an X11 display"]
+    fn client_gui_state_matches_screen_init_hook() {
+        use mod_api::ScreenInitPostEvent;
+        struct Observe(Arc<Mutex<Vec<(String, Option<String>)>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Observe {
+            fn screen_opening(
+                &self,
+                _host: &dyn ClientHost,
+                _event: &mut ScreenOpeningEvent<'_>,
+            ) -> Option<ScreenOpening> {
+                None
+            }
+            fn screen_init_post(&self, host: &dyn ClientHost, event: &mut ScreenInitPostEvent<'_>) {
+                self.0.lock().unwrap().push((
+                    event.screen.id.to_owned(),
+                    host.observed_screen_id().map(|id| id.id),
+                ));
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new("observe", Box::new(Observe(seen.clone())))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                game.focused = false;
+                assert!(!ClientHost::window_focused(game));
+                game.focused = true;
+                assert!(ClientHost::window_focused(game));
+                game.title = None;
+                game.screen = Screen::Playing;
+                assert!(ClientHost::observed_screen_id(game).is_none());
+                game.screen = Screen::Inventory;
+                assert!(ClientHost::observed_screen_id(game).is_none());
+                let mut builder = winit::event_loop::EventLoop::builder();
+                #[cfg(target_os = "linux")]
+                {
+                    use winit::platform::x11::EventLoopBuilderExtX11;
+                    builder.with_x11().with_any_thread(true);
+                }
+                let event_loop = builder.build().unwrap();
+                #[allow(deprecated)]
+                let window = Arc::new(
+                    event_loop
+                        .create_window(
+                            winit::window::Window::default_attributes()
+                                .with_visible(false)
+                                .with_inner_size(winit::dpi::PhysicalSize::new(320, 240)),
+                        )
+                        .unwrap(),
+                );
+                game.options.offscreen = true;
+                game.renderer = Some(game.new_renderer(window).unwrap());
+                game.screen = Screen::Playing;
+                assert!(ClientHost::observed_screen_id(game).is_none());
+                game.set_screen(Screen::Inventory);
+                game.observe_screen();
+                assert_eq!(
+                    ClientHost::observed_screen_id(game).unwrap().id,
+                    "inventory"
+                );
+                game.open_screen_overlay("link_prompt", |game| {
+                    game.link_prompt = Some("https://example.com".into());
+                });
+                assert_eq!(
+                    ClientHost::observed_screen_id(game).unwrap().id,
+                    "link_prompt"
+                );
+                let seen = seen.lock().unwrap();
+                assert!(
+                    seen.iter().any(|(event, read)| event == "inventory"
+                        && read.as_deref() == Some("inventory"))
+                );
+                assert!(seen.iter().any(|(event, read)| event == "link_prompt"
+                    && read.as_deref() == Some("link_prompt")));
+            });
         });
     }
 

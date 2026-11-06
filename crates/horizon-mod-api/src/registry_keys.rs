@@ -1,11 +1,12 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
-use crate::{BlockKey, BlockStateId, BlockStateRange, EffectKey};
+use crate::{BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, EffectKey};
 use std::collections::HashMap;
 
 #[derive(Clone, Default)]
 pub(crate) struct Requests {
     pub(crate) blocks: Names,
     pub(crate) effects: Names,
+    pub(crate) block_entity_types: Names,
 }
 
 #[derive(Clone, Default)]
@@ -107,6 +108,66 @@ impl EffectKey {
             Ok(Self(slot))
         })
     }
+}
+
+impl BlockEntityTypeKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::part_table::with_registering_keys(|registering| {
+            let names = match registering {
+                Some(requests) => &requests.block_entity_types,
+                None => crate::part_table::resolved_block_entity_types()
+                    .get()
+                    .unwrap_or(&crate::part_table::requested_keys().block_entity_types),
+            };
+            names.id(slot).ok_or("unknown BlockEntityTypeKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
+/// Resolve all block entity types after registration and content loading.
+pub fn resolve_block_entity_types(
+    types: &horizon_client_core::block_entity_types::BlockEntityTypes,
+) -> Result<(), Vec<String>> {
+    let mut names = crate::part_table::requested_keys()
+        .block_entity_types
+        .clone();
+    names.resolve("block entity type", |id| types.key(id))?;
+    for id in types.names() {
+        names
+            .request("horizon", id)
+            .expect("registry owns valid ids");
+    }
+    let _ = crate::part_table::resolved_block_entity_types().set(names);
+    Ok(())
+}
+
+/// Lookup an engine-owned name after the registry is resolved.
+pub fn block_entity_type_key(id: &str) -> Option<BlockEntityTypeKey> {
+    Some(BlockEntityTypeKey(
+        *crate::part_table::resolved_block_entity_types()
+            .get()?
+            .slots
+            .get(id)?,
+    ))
+}
+
+/// Canonical name of a load-owned block entity type slot.
+pub fn block_entity_type_name(key: BlockEntityTypeKey) -> Option<&'static str> {
+    crate::part_table::resolved_block_entity_types()
+        .get()
+        .unwrap_or(&crate::part_table::requested_keys().block_entity_types)
+        .id(key.0)
+}
+
+pub(crate) fn block_entity_type_display_name(key: BlockEntityTypeKey) -> String {
+    crate::part_table::with_registering_keys(|registering| {
+        registering
+            .and_then(|r| r.block_entity_types.id(key.0))
+            .or_else(|| block_entity_type_name(key))
+            .unwrap_or("<invalid>")
+            .to_owned()
+    })
 }
 
 /// A block slot's mappings in one game's current tables.
