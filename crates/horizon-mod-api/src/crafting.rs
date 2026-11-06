@@ -259,33 +259,6 @@ impl WalkedIngredient {
             custom: None,
         })
     }
-    /// `test` by id: a shape asks each child its own way — a mod's kind
-    /// among them answers through `custom` — and a plain list names it.
-    pub(crate) fn test(
-        &self,
-        id: &str,
-        custom: &dyn Fn(&str, &serde_json::Map<String, Value>) -> bool,
-    ) -> bool {
-        match &self.children {
-            // Each child its own `test`, as on NeoForge — a mod's kind
-            // among them answers through its hook.
-            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test(id, custom)),
-            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test(id, custom)),
-            Some((Shape::Difference, kids)) => {
-                kids.first().is_some_and(|k| k.test(id, custom))
-                    && kids.get(1).is_none_or(|k| !k.test(id, custom))
-            }
-            None => {
-                if !self.set.contains(id) {
-                    return false;
-                }
-                match &self.custom {
-                    Some((kind, data)) => custom(kind, data),
-                    None => true,
-                }
-            }
-        }
-    }
 }
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).

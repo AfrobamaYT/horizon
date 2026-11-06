@@ -2,12 +2,12 @@
 //! `Capabilities.Fluid.BLOCK`, a [`ResourceHandler`] of [`FluidResource`]s as
 //! [`ITEMS`](super::ITEMS) is of items. Amounts are millibuckets: a bucket is 1000.
 use super::{
-    BlockSide, CapabilityKey, DataLoadContext, ItemCapabilityKey, ItemPlace, ItemResource,
-    ItemStack, ResourceHandler, ServerHost, Transaction,
+    BlockSide, CapabilityKey, DataLoadContext, FluidKey, ItemCapabilityKey, ItemPlace,
+    ItemResource, ItemStack, ResourceHandler, ServerHost, Transaction,
 };
 use crate::crafting::WalkedIngredient;
 use horizon_items::item_data::StackData;
-use std::{fmt, marker::PhantomData, sync::Arc};
+use std::{fmt, marker::PhantomData};
 
 /// An amount of one fluid, as NeoForge's `FluidStack`: its id (`minecraft:water`), how many
 /// millibuckets, and its data components, kept as an item stack's are (a potion fluid's
@@ -16,7 +16,7 @@ use std::{fmt, marker::PhantomData, sync::Arc};
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct FluidStack {
     /// The fluid.
-    pub fluid: Arc<str>,
+    pub fluid: FluidKey,
     /// The amount.
     pub amount: u32,
     /// The components.
@@ -25,13 +25,18 @@ pub struct FluidStack {
 
 impl FluidStack {
     /// `amount` of `fluid`, with no components.
-    pub fn new(fluid: &str, amount: u32) -> Self {
+    pub fn new(fluid: FluidKey, amount: u32) -> Self {
         Self {
-            fluid: Arc::from(fluid),
+            fluid,
             amount,
             components: None,
         }
     }
+    /// The registered fluid key, or none for an unresolved saved fluid.
+    pub fn key(&self) -> Option<FluidKey> {
+        Some(self.fluid)
+    }
+
     /// The same fluid with the same components, `amount` of it.
     pub fn with_amount(&self, amount: u32) -> Self {
         Self {
@@ -66,8 +71,8 @@ impl FluidResource {
     pub fn of(stack: &FluidStack) -> Self {
         Self(stack.with_amount(1))
     }
-    /// The fluid's id (`minecraft:water`).
-    pub fn fluid(&self) -> &str {
+    /// The resolved fluid key.
+    pub fn fluid(&self) -> &FluidKey {
         &self.0.fluid
     }
     /// `amount` millibuckets of it as a stack.
@@ -93,6 +98,16 @@ impl fmt::Debug for FluidResource {
     }
 }
 
+/// Why a fluid ingredient could not be parsed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FluidIngredientError {
+    /// Invalid or unsupported ingredient shape.
+    Invalid,
+    /// A fluid name is not registered.
+    UnknownFluid(String),
+}
+
 /// A set of accepted fluids, as NeoForge's `FluidIngredient`: a fluid
 /// (`minecraft:water`), a `#tag`, a list of them, or the three shapes with
 /// their children, parsed from a recipe's JSON by the same walk an item
@@ -102,14 +117,17 @@ impl fmt::Debug for FluidResource {
 /// Components are not checked — any stack of a named fluid answers.
 #[derive(Clone, Debug)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct FluidIngredient(WalkedIngredient);
+pub struct FluidIngredient {
+    fluids: Vec<FluidKey>,
+}
 
 impl FluidIngredient {
-    /// The fluids `v` names, as the load's fluid tags resolve them: a fluid,
-    /// a `#tag`, a list, or NeoForge's three shapes. `None` fails the
-    /// file: an empty list, a tag that isn't loaded, a kind outside the
-    /// standard shapes.
-    pub fn from_json(v: &serde_json::Value, context: &dyn DataLoadContext) -> Option<Self> {
+    /// Parse a fluid, tag, list or standard shape against this load's fluid registry.
+    /// Invalid shapes or unknown names return a typed error.
+    pub fn from_json(
+        v: &serde_json::Value,
+        context: &dyn DataLoadContext,
+    ) -> Result<Self, FluidIngredientError> {
         let mut tags = std::collections::HashMap::new();
         if let Some(list) = context.fluid_tags() {
             tags.reserve(list.len());
@@ -119,19 +137,30 @@ impl FluidIngredient {
         }
         // A custom kind is the item ingredient's hook; a fluid one fails
         // the file, as a kind outside these does.
-        WalkedIngredient::walk(v, &tags, &|_| None).map(Self)
+        let source =
+            WalkedIngredient::walk(v, &tags, &|_| None).ok_or(FluidIngredientError::Invalid)?;
+        let fluids = source
+            .order
+            .iter()
+            .map(|id| {
+                context
+                    .fluid_key(id)
+                    .ok_or_else(|| FluidIngredientError::UnknownFluid(id.clone()))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self { fluids })
     }
     /// `FluidIngredient.test`: the stack's fluid among the ones the source
     /// named — and for a shape, each child its own way (any for
     /// `compound`, all for `intersection`, base-but-not-subtracted for
     /// `difference`).
     pub fn test(&self, stack: &FluidStack) -> bool {
-        self.0.test(&stack.fluid, &|_, _| false)
+        stack.key().is_some_and(|key| self.fluids.contains(&key))
     }
     /// The fluids it accepts, in the sources' order (`HolderSet`) — what a
     /// recipe book shows.
-    pub fn fluids(&self) -> &[String] {
-        &self.0.order
+    pub fn fluids(&self) -> &[FluidKey] {
+        &self.fluids
     }
 }
 
@@ -157,7 +186,7 @@ impl SizedFluidIngredient {
     /// defaults to a bucket (1000 mB) and must be positive.
     pub fn from_json(v: &serde_json::Value, context: &dyn DataLoadContext) -> Option<Self> {
         let o = v.as_object()?;
-        let ingredient = FluidIngredient::from_json(o.get("ingredient")?, context)?;
+        let ingredient = FluidIngredient::from_json(o.get("ingredient")?, context).ok()?;
         // `ExtraCodecs.POSITIVE_INT` with the bucket default.
         let amount = match o.get("amount") {
             Some(a) => u32::try_from(a.as_u64()?).ok().filter(|n| *n > 0)?,
@@ -248,11 +277,17 @@ impl ResourceHandler<FluidResource> for GameFluids {
 /// whole, an empty bucket taking plain water or lava.
 pub const ITEM_FLUIDS: ItemCapabilityKey<dyn ResourceHandler<FluidResource>> = ItemCapabilityKey {
     name: "horizon:item_fluids",
-    default: Some(|_, place, stack| {
+    default: Some(|host, place, stack| {
         BUCKETS
             .iter()
             .any(|&(bucket, _)| *stack.item == *bucket)
-            .then(|| Box::new(GameBucket(place.clone())) as Box<dyn ResourceHandler<FluidResource>>)
+            .then(|| {
+                let water = host.fluid_key("minecraft:water")?;
+                let lava = host.fluid_key("minecraft:lava")?;
+                Some(Box::new(GameBucket(place.clone(), water, lava))
+                    as Box<dyn ResourceHandler<FluidResource>>)
+            })
+            .flatten()
     }),
     handler: PhantomData,
 };
@@ -268,25 +303,30 @@ const BUCKETS: [(&str, Option<&str>); 3] = [
 const BUCKET: u32 = 1000;
 
 /// The game's own [`ITEM_FLUIDS`] for the bucket at `.0`.
-struct GameBucket(ItemPlace);
+struct GameBucket(ItemPlace, FluidKey, FluidKey);
 impl GameBucket {
     /// What the bucket here holds: none for an empty one, or where no bucket is now.
-    fn held(&self, host: &mut dyn ServerHost) -> Option<&'static str> {
+    fn held(&self, host: &mut dyn ServerHost) -> Option<FluidKey> {
         let stack = self.0.stack(host)?;
-        BUCKETS
-            .iter()
-            .find(|&&(bucket, _)| *stack.item == *bucket)?
-            .1
+        match &*stack.item {
+            "minecraft:water_bucket" => Some(self.1),
+            "minecraft:lava_bucket" => Some(self.2),
+            _ => None,
+        }
     }
     /// The bucket holding `fluid`, plain water or lava; none for another fluid.
-    fn bucket_of(fluid: &FluidResource) -> Option<&'static str> {
+    fn bucket_of(&self, fluid: &FluidResource) -> Option<&'static str> {
         if fluid.0.has_components() {
             return None;
         }
-        let &(bucket, _) = BUCKETS[1..]
-            .iter()
-            .find(|&&(_, held)| held == Some(fluid.fluid()))?;
-        Some(bucket)
+        let key = *fluid.fluid();
+        if key == self.1 {
+            Some("minecraft:water_bucket")
+        } else if key == self.2 {
+            Some("minecraft:lava_bucket")
+        } else {
+            None
+        }
     }
     /// One bucket here exchanged for `bucket`: `BUCKET` when that goes through, else 0.
     fn exchange(&self, host: &mut dyn ServerHost, tx: &Transaction, bucket: &str) -> u32 {
@@ -312,7 +352,7 @@ impl ResourceHandler<FluidResource> for GameBucket {
         }
     }
     fn capacity(&self, _: &mut dyn ServerHost, index: usize, resource: &FluidResource) -> u32 {
-        match Self::bucket_of(resource) {
+        match self.bucket_of(resource) {
             Some(_) if index == 0 => BUCKET,
             _ => 0,
         }
@@ -329,7 +369,7 @@ impl ResourceHandler<FluidResource> for GameBucket {
             .0
             .stack(host)
             .is_some_and(|stack| *stack.item == *BUCKETS[0].0);
-        match Self::bucket_of(resource) {
+        match self.bucket_of(resource) {
             Some(full) if index == 0 && empty && amount >= BUCKET => self.exchange(host, tx, full),
             _ => 0,
         }
@@ -364,6 +404,17 @@ mod tests {
     /// tags the game ships in `worldgen/fluid_tags.json` — water holds the
     /// flowing fluid too.
     fn load() -> LoadContext {
+        crate::__private::install(Default::default());
+        crate::install_parts(&[]).unwrap();
+        crate::registry_keys::resolve_fluids(&[
+            "minecraft:empty",
+            "minecraft:water",
+            "minecraft:flowing_water",
+            "minecraft:lava",
+            "minecraft:flowing_lava",
+            "minecraft:milk",
+        ])
+        .unwrap();
         let mut tags = HashMap::new();
         tags.insert(
             "minecraft:water".to_owned(),
@@ -378,10 +429,10 @@ mod tests {
     }
     fn parse(s: &str) -> Option<FluidIngredient> {
         let load = load();
-        FluidIngredient::from_json(&serde_json::from_str(s).unwrap(), &OwningLoad::new(&load))
+        FluidIngredient::from_json(&serde_json::from_str(s).unwrap(), &OwningLoad::new(&load)).ok()
     }
     fn stack(fluid: &str, amount: u32) -> FluidStack {
-        FluidStack::new(fluid, amount)
+        FluidStack::new(crate::registry_keys::fluid_key(fluid).unwrap(), amount)
     }
 
     /// A single fluid matches itself and nothing else.
@@ -390,7 +441,10 @@ mod tests {
         let single = parse(r#""minecraft:water""#).unwrap();
         assert!(single.test(&stack("minecraft:water", 100)));
         assert!(!single.test(&stack("minecraft:lava", 100)));
-        assert_eq!(single.fluids(), ["minecraft:water"]);
+        assert_eq!(
+            single.fluids(),
+            [stack("minecraft:water", 1).key().unwrap()]
+        );
     }
 
     /// A `#tag` resolves through the fluid tags, keeping their order; a
@@ -398,7 +452,13 @@ mod tests {
     #[test]
     fn a_tag_resolves_through_the_fluid_tags() {
         let tag = parse(r##""#minecraft:water""##).unwrap();
-        assert_eq!(tag.fluids(), ["minecraft:water", "minecraft:flowing_water"]);
+        assert_eq!(
+            tag.fluids(),
+            [
+                stack("minecraft:water", 1).key().unwrap(),
+                stack("minecraft:flowing_water", 1).key().unwrap()
+            ]
+        );
         assert!(tag.test(&stack("minecraft:flowing_water", 1)));
         assert!(!tag.test(&stack("minecraft:lava", 1)));
         assert!(parse(r##""#minecraft:unloaded""##).is_none());
@@ -411,9 +471,9 @@ mod tests {
         assert_eq!(
             list.fluids(),
             [
-                "minecraft:water",
-                "minecraft:flowing_water",
-                "minecraft:lava"
+                stack("minecraft:water", 1).key().unwrap(),
+                stack("minecraft:flowing_water", 1).key().unwrap(),
+                stack("minecraft:lava", 1).key().unwrap()
             ]
         );
         assert!(parse(r#"[]"#).is_none());
@@ -441,7 +501,10 @@ mod tests {
             r##"{"type":"neoforge:difference","base":"#minecraft:water","subtracted":"minecraft:flowing_water"}"##,
         )
         .unwrap();
-        assert_eq!(difference.fluids(), ["minecraft:water"]);
+        assert_eq!(
+            difference.fluids(),
+            [stack("minecraft:water", 1).key().unwrap()]
+        );
         assert!(!difference.test(&stack("minecraft:flowing_water", 1)));
         // A mod's own kind, an unknown minecraft kind and a kindless
         // object all fail the file.
