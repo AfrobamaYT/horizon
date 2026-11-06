@@ -996,6 +996,7 @@ impl Game<'_> {
             }
         };
         self.save_datapack_settings();
+        self.fns.packs = stack.packs.clone();
         self.apply_server_reload(prepared, &stack);
         self.fns.load_pending = true;
         self.reload_world_tables(&stack);
@@ -1047,6 +1048,79 @@ const FEATURE_PACKS: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn pack_changes_publish_the_new_zip_generation_for_template_reads() {
+        use horizon_world::{
+            compression::Compression,
+            nbt::{self, Limits},
+        };
+        use std::{io::Write, path::PathBuf};
+        let root = std::env::temp_dir().join(format!(
+            "template-pack-change-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("datapacks")).unwrap();
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let scratch = Scratch(root);
+        let archive = scratch.0.join("datapacks/templates.zip");
+        let publish = |marker: &str| {
+            let named = nbt::NamedTag {
+                name: String::new(),
+                tag: Tag::compound([("marker", Tag::String(marker.into()))]),
+            };
+            let bytes = Compression::Gzip
+                .encode(&nbt::write_named(&named, Limits::templates()).unwrap())
+                .unwrap();
+            let next = archive.with_extension("next");
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&next).unwrap());
+            zip.start_file("pack.mcmeta", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"{}").unwrap();
+            zip.start_file(
+                "data/generation_test/structure/probe.nbt",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            zip.write_all(&bytes).unwrap();
+            zip.finish().unwrap();
+            std::fs::rename(next, &archive).unwrap();
+        };
+        publish("old");
+        let mut ran = false;
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            ran = true;
+            game.world_root = scratch.0.clone();
+            game.reload_datapacks(false, &[]).unwrap();
+            let marker = |game: &Game<'_>| {
+                game.read_template_tag("generation_test:probe")
+                    .and_then(|tag| tag.get("marker").cloned())
+            };
+            assert_eq!(marker(game), Some(Tag::String("old".into())));
+            publish("new");
+            assert!(game.run_command("datapack disable \"file/templates.zip\""));
+            assert_eq!(marker(game), None);
+            assert!(game.run_command("datapack enable \"file/templates.zip\""));
+            assert_eq!(marker(game), Some(Tag::String("new".into())));
+            assert!(
+                !scratch
+                    .0
+                    .join("data/generation_test/structure/probe.nbt")
+                    .exists()
+            );
+        });
+        assert!(ran, "the prepared-resource fixture must run this case");
+    }
 
     #[test]
     #[ignore = "needs prepared resources"]
