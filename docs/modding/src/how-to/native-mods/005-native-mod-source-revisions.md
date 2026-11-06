@@ -15,9 +15,10 @@ Hook points are functions the game calls at fixed places. Their names, parameter
 game source and may change. Per-hook catalog versions describe individual contracts, not minimum game versions
 or a cross-release compatibility range.
 
-Hooks are declared in Rust now, not in JSON: a hook or helper author adds a `#[hook(...)]` (or `#[helper(...)]`)
+Hooks are declared in Rust now, not in JSON: a hook author adds a `#[hook(...)]`
 declaration, with its `///` doc, to a file under `crates/horizon-mod-api/src/hooks/` (a new file for a new area, named
-for it). The generator discovers these files without a shared module list. `native-hooks.json` and
+for it). A host method is not declared there: it goes in the area trait of
+`crates/horizon-mod-api/src/host/<area>.rs`, with its game side in `crates/horizon-client/src/game/host/<area>.rs`. The generator discovers these files without a shared module list. `native-hooks.json` and
 `tools/native-hook-fragments/` are retired, and a file there fails the build. Collection updates
 the catalog, not a global API number, source comments or documentation histories.
 

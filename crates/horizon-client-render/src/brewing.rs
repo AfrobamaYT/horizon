@@ -635,7 +635,9 @@ mod tests {
     /// A server host that answers nothing: the hooks here don't call it.
     struct NoHost;
     impl mod_api::Host for NoHost {}
+    mod_api::impl_host_areas!(NoHost);
     impl mod_api::ServerHost for NoHost {}
+    mod_api::impl_server_host_areas!(NoHost);
 
     /// Cancels every brew and leaves its own slots; records what it saw.
     struct BrewSwapper(Arc<Mutex<Vec<String>>>);
