@@ -761,6 +761,30 @@ mod tests {
     }
 
     #[test]
+    fn registered_rule_is_grouped_under_its_category() {
+        let rule = Rule {
+            name: "example:enabled".into(),
+            category: "example:machines".into(),
+            default: Value::Bool(true),
+            min: 0,
+            max: 0,
+        };
+        let registry = std::sync::Arc::new(
+            crate::gamerules::RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule])
+                .unwrap(),
+        );
+        let mut screen = RulesScreen::new(&GameRules::with_registry(registry, &[]));
+        screen.search.set_value("example:enabled");
+        assert_eq!(
+            screen.rows(),
+            [
+                Row::Category("example:machines".into()),
+                Row::Rule("example:enabled".into())
+            ]
+        );
+    }
+
+    #[test]
     fn categories_without_matching_rules_are_hidden() {
         let registry = std::sync::Arc::new(crate::gamerules::RuleRegistry::with_categories(&[
             "example:machines".into(),
