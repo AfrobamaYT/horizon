@@ -76,6 +76,14 @@ unsafe fn add(receiver: Option<*mut ()>, args: Vec<Arg>) -> Result<I::CallReply,
 struct Small {
     count: u32,
 }
+unsafe fn small(ptr: *mut (), _: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+    // SAFETY: the descriptor identifies a live Small when this node is reached.
+    let small = unsafe { &*ptr.cast::<Small>() };
+    match op {
+        Op::Read => Ok(Reply::Value(Value::Rec(vec![Value::U(small.count.into())]))),
+        _ => Err(I::not_here("not on Small")),
+    }
+}
 fn mutate_copies(n: &mut u32, small: &mut Small) -> u32 {
     *n += 5;
     small.count += 7;
@@ -114,6 +122,13 @@ pub fn table() -> &'static Table {
                 path: "fixture::Raw",
                 hash: "",
                 node: record,
+                raw_fields: &[],
+                raw_index: false,
+            },
+            Type {
+                path: "horizon_client::Small",
+                hash: "small-hash",
+                node: small,
                 raw_fields: &[],
                 raw_index: false,
             },
