@@ -123,7 +123,9 @@ impl Game<'_> {
 
     // ---- /damage ----------------------------------------------------------------
 
-    fn damage_kind(ty: &str) -> DamageKind {
+    /// The `DamageKind` of a damage type id, for the sources the engine's own
+    /// hurt paths take (`DamageCommand`'s and `EntityRef::hurt`'s).
+    pub(in crate::game) fn damage_kind(ty: &str) -> DamageKind {
         match ty.trim_start_matches("minecraft:") {
             "player_attack" => DamageKind::PlayerAttack,
             "mace_smash" => DamageKind::MaceSmash,
@@ -195,7 +197,37 @@ impl Game<'_> {
         };
         // A lethal item hit discards it before the success message is built.
         let item_name = matches!(target, Target::Item(_)).then(|| self.target_name(target));
-        let hurt = match target {
+        let hurt = self.hurt_target(target, amount, &ty, by, cause, from);
+        if !hurt {
+            return Err(err("commands.damage.invulnerable", &[]));
+        }
+        let name = item_name.unwrap_or_else(|| self.target_name(target));
+        self.feedback(Text::translate(
+            "commands.damage.success",
+            &[
+                Text::literal(horizon_client::snbt::java_float(amount)),
+                name,
+            ],
+        ));
+        Ok(1)
+    }
+
+    /// `DamageCommand.damage`'s routing, the engine's one damage entry by
+    /// kind: the player and mob hurt paths (the direct and causing entity
+    /// and the source position kept, the death message and thorns credited
+    /// to the causing one), the item, dragon and crystal branches. False
+    /// when the kind refuses the damage. `EntityRef::hurt` (#924) enters
+    /// here too — there is no second damage pipeline.
+    pub(in crate::game) fn hurt_target(
+        &mut self,
+        target: Target,
+        amount: f32,
+        ty: &str,
+        by: Option<Target>,
+        cause: Option<Target>,
+        from: Option<[f64; 3]>,
+    ) -> bool {
+        match target {
             // The causing mob is the one the hit is credited to and thorns
             // answer; the source position gives the knockback its direction.
             Target::Player | Target::Guest(_) => {
@@ -224,9 +256,9 @@ impl Game<'_> {
                         return false;
                     }
                     if let Some(name) = named {
-                        g.note_direct_entity(&ty, name);
+                        g.note_direct_entity(ty, name);
                     }
-                    let hurt = g.hurt_player_from(amount, from, &ty, attacker);
+                    let hurt = g.hurt_player_from(amount, from, ty, attacker);
                     if hurt && let Some(credit) = by_player {
                         g.combat.note_hurt_by_player(credit, now);
                     }
@@ -245,7 +277,7 @@ impl Game<'_> {
                     _ => None,
                 };
                 let damage = Damage {
-                    kind: Self::damage_kind(&ty),
+                    kind: Self::damage_kind(ty),
                     attacker,
                     from,
                     attacker_species,
@@ -268,35 +300,21 @@ impl Game<'_> {
                     self.command_damage_mob(id, amount, damage)
                 }
             }
-            Target::Item(id) => self.command_damage_item(id, amount, &ty, cause.or(by)),
+            Target::Item(id) => self.command_damage_item(id, amount, ty, cause.or(by)),
             Target::Dragon(id) => self.command_damage_dragon(
                 id,
                 amount,
-                &ty,
-                Self::damage_kind(&ty),
+                ty,
+                Self::damage_kind(ty),
                 (
                     by,
                     cause.or(by),
                     from.map(|[x, y, z]| horizon_core::geometry::Vec3::new(x, y, z)),
                 ),
             ),
-            Target::Crystal(id) => {
-                self.command_damage_crystal(id, &ty, Self::damage_kind(&ty), cause.or(by))
-            }
+            Target::Crystal(id) => self.command_damage_crystal(id, ty, Self::damage_kind(ty), cause.or(by)),
             _ => false,
-        };
-        if !hurt {
-            return Err(err("commands.damage.invulnerable", &[]));
         }
-        let name = item_name.unwrap_or_else(|| self.target_name(target));
-        self.feedback(Text::translate(
-            "commands.damage.success",
-            &[
-                Text::literal(horizon_client::snbt::java_float(amount)),
-                name,
-            ],
-        ));
-        Ok(1)
     }
 
     /// `ItemEntity.hurtServer`: the item branch reached by `DamageCommand.damage`.
