@@ -120,7 +120,7 @@ mod tests {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         let directory = root.join(DIRECTORY);
         fs::create_dir_all(&directory).unwrap();
-        let source = "fn run() -> u32 { add(2) } fn add(value: u32) -> u32 { value + 1 }";
+        let source = "fn run() -> u32 { add(2) } fn add(value: u32) -> u32 { value + 1 } struct Game; trait Ext { fn run(); fn helper() -> u32; } impl Ext for Game { fn run() { Self::helper(); } fn helper() -> u32 { 7 } }";
         fs::write(&file, source).unwrap();
         let entries = vec![
             internal("horizon_client::game::run", "fn", "fn run() -> u32"),
@@ -133,7 +133,7 @@ mod tests {
         let list = directory.join("test.txt");
         fs::write(
             &list,
-            "horizon_client::game::run | add | 0\nhorizon_client::game::missing | add | 0\n",
+            "horizon_client::game::run | add | 0\nhorizon_client::game::Game::run | Self::helper | 0\n",
         )
         .unwrap();
         let error = stage(&root, &entries).unwrap_err();

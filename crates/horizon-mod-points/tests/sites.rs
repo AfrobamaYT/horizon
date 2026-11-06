@@ -40,6 +40,7 @@ fn site_listeners_nest_repeat_original_and_skip_stopped_mods() {
     };
     assert_eq!(
         horizon_mod_api_macros::site!(
+            __test_site_wrap,
             S7173cf1fd760a6e4,
             Listener,
             Receiver,
@@ -62,6 +63,7 @@ fn site_listeners_nest_repeat_original_and_skip_stopped_mods() {
     assert!(SITES[SITE as usize].load(Ordering::Relaxed));
     assert_eq!(
         horizon_mod_api_macros::site!(
+            __test_site_wrap,
             S7173cf1fd760a6e4,
             Listener,
             Receiver,
@@ -82,6 +84,7 @@ fn site_listeners_nest_repeat_original_and_skip_stopped_mods() {
     mod_points::stop("z_low");
     assert_eq!(
         horizon_mod_api_macros::site!(
+            __test_site_wrap,
             S7173cf1fd760a6e4,
             Listener,
             Receiver,
