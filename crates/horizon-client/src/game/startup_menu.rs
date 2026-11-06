@@ -1400,7 +1400,10 @@ mod tests {
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("example", Box::new(Mod))].into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
-                let mut title = Title::new(std::env::temp_dir(), &game.options.resources);
+                let saves = std::env::temp_dir()
+                    .join(format!("horizon-startup-rules-{}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&saves);
+                let mut title = Title::new(saves, &game.options.resources);
                 title.enter_singleplayer();
                 let Action::Create { mut options, .. } = title.create_action() else {
                     panic!("creation")
