@@ -1026,7 +1026,7 @@ use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
     LogicalSide, NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags,
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
-    TooltipElement, TooltipPlace, UsePhase,
+    TooltipElement, UsePhase,
 };
 use mod_api::{BlockKey, EffectKey};
 pub(crate) use mod_api::{
@@ -7385,14 +7385,9 @@ impl Game<'_> {
     /// Set `cancel` and nothing is drawn, and no `tooltip_color` is asked. Client-side.
     pub(super) fn native_render_tooltip_pre(
         &self,
-        stack: Option<&ItemStack>,
-        screen_width: i32,
-        screen_height: i32,
-        elements: &[TooltipElement],
-        place: &mut TooltipPlace,
-        cancel: &mut bool,
+        call: mod_api::__private::RenderTooltipPreCall<'_>,
     ) {
-        self.fire_render_tooltip_pre(stack, screen_width, screen_height, elements, place, cancel);
+        self.fire_render_tooltip_pre(call);
     }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
@@ -11314,7 +11309,7 @@ impl Game<'_> {
         actor: Option<&GameRuleActor<'_>>,
     ) {
         if mod_api::__private::listened(mod_api::HookId::GameRuleChanged) {
-            self.native_game_rule_changed(&["minecraft:", name].concat(), value, actor);
+            self.native_game_rule_changed(name, value, actor);
         }
     }
     /// `MobSplitEvent` for the dying cube mob `m`, which made `count`

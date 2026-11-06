@@ -87,7 +87,7 @@ pub trait Helpers {
     fn block_entity_set_name();
     /// Read a snapshot of a mod block entity's menu data slots, not its item storage.
     /// Reads the server's entity or the client's own copy; None for vanilla/missing,
-    /// stale or unloaded entities. Access item storage through Parts.
+    /// stale or unloaded entities. Use item_slot for internal items, ITEMS for automation.
     #[helper(
         side = "both",
         receiver = "block_entity",
@@ -104,4 +104,44 @@ pub trait Helpers {
         target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_set_data_slot"
     )]
     fn block_entity_set_data_slot();
+    /// Declare or replace a mod block entity's menu data slots on the server.
+    /// Creation and loading start with no data slots; call this with their initial
+    /// values to size the vector, instead of assigning a mutable tick payload's
+    /// data field. Use `set_data_slot` for later scalar changes without resizing.
+    /// Joins the current journal: abort restores the previous vector; a committed
+    /// change calls setChanged and the normal menu broadcast sends its values.
+    /// Returns Ok(true) for a change, Ok(false) for identical values, or a typed
+    /// BlockEntityDataError for an unavailable holder or too many slots (currently
+    /// 256, the mod-menu limit). No values are clamped. Resolution follows the
+    /// existing level-and-position handle, including replacement at that position.
+    #[helper(
+        side = "server",
+        receiver = "block_entity",
+        target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_set_data_slots"
+    )]
+    fn block_entity_set_data_slots();
+    /// Read an internal slot of a configured mod block entity on the server or
+    /// the client's own loaded copy. A lazily missing slot is empty. Bounds use
+    /// the current container's declared count; saved excess slots are not exposed.
+    /// Returns BlockEntityItemError for unavailable holders or invalid indices.
+    #[helper(
+        side = "both",
+        receiver = "block_entity",
+        target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_item_slot"
+    )]
+    fn block_entity_item_slot();
+    /// Writes any slot of any mod block entity the caller holds a handle to;
+    /// automation policy (inputs, outputs, faces) is not applied. Vanilla block
+    /// entities are `Unavailable`. Use the `ITEMS` capability for external insertion.
+    /// Requires the existing transaction: abort restores the before-image, and
+    /// Changed runs at root commit. None clears; identical values return Ok(false).
+    /// Bounds and registered/component stack limits are checked without clamping.
+    /// Refusals return BlockEntityItemError without partial writes or Changed.
+    /// Public positional handles follow replacements and their current container.
+    #[helper(
+        side = "server",
+        receiver = "block_entity",
+        target = "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_set_item_slot"
+    )]
+    fn block_entity_set_item_slot();
 }

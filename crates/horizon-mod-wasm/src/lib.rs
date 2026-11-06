@@ -13,7 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+pub mod frame;
+pub mod journal;
 mod points;
+mod raw;
+pub mod view;
 
 pub use points::Listening;
 
@@ -73,6 +77,16 @@ pub enum Refusal {
         built: String,
         game: String,
     },
+    /// The prebuilt game did not opt into a declared internal.
+    MissingInternal {
+        path: String,
+        file: String,
+        native_only: bool,
+    },
+    /// A declared internal has a different fingerprint in this game.
+    ChangedInternal { path: String },
+    /// This game was built without an internals table.
+    NoInternalsTable,
     /// Its listeners couldn't be set up.
     Points(String),
 }
@@ -119,7 +133,35 @@ impl std::fmt::Display for Refusal {
                 f,
                 "was built for another {point}: its record is ({built}), this game's ({game}); rebuild it"
             ),
+            Self::MissingInternal {
+                path,
+                native_only: true,
+                ..
+            } => write!(f, "native only: {path}"),
+            Self::MissingInternal { path, file, .. } => write!(
+                f,
+                "this game build has no `{path}`: add it to `{file}`, and it ships in the next daily build"
+            ),
+            Self::ChangedInternal { path } => write!(f, "this game build has a changed `{path}`"),
+            Self::NoInternalsTable => write!(
+                f,
+                "this game was built without the internals table; build from an instance with the wasm mod installed, or use the daily prebuilt game or server"
+            ),
             Self::Points(why) => write!(f, "{why}"),
+        }
+    }
+}
+
+impl Refusal {
+    pub(crate) fn missing_internal(
+        table: &mod_points::internals::Table,
+        mod_id: &str,
+        path: &str,
+    ) -> Self {
+        Self::MissingInternal {
+            path: path.into(),
+            file: format!("crates/horizon-mod-api-gen/wasm-internals/{mod_id}.txt"),
+            native_only: table.native_only.contains(&path),
         }
     }
 }
@@ -463,6 +505,7 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
                     &component,
                     &group,
                     config.budgets,
+                    view::add_to_linker,
                 )
                 .map_err(Refusal::Load)
             });
@@ -528,6 +571,15 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
         refused,
         listening,
     }
+}
+
+static INTERNALS: OnceLock<&'static mod_points::internals::Table> = OnceLock::new();
+
+/// Supplies the staged game's internals table before loading mods.
+pub fn set_internals(table: &'static mod_points::internals::Table) {
+    INTERNALS
+        .set(table)
+        .unwrap_or_else(|_| panic!("the internals table was supplied twice"));
 }
 
 static REFUSED: OnceLock<Vec<(String, Refusal)>> = OnceLock::new();
@@ -640,6 +692,7 @@ mod tests {
             &component,
             &[],
             Budgets::default(),
+            view::add_to_linker,
         )
         .err()
         .unwrap();

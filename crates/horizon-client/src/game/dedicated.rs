@@ -1053,7 +1053,7 @@ impl Game<'_> {
         if let Some(announce) = props.announce_player_achievements {
             let value = horizon_client::gamerules::Value::Bool(announce);
             if self.ui.rules.set("show_advancement_messages", value) {
-                self.game_rule_changed("show_advancement_messages", value, None);
+                self.game_rule_changed("minecraft:show_advancement_messages", value, None);
             }
         }
         self.settings.render_distance = props.view_distance.clamp(2, 32);
@@ -2494,7 +2494,8 @@ mod tests {
             assert_eq!(game.online_player("GUEST12").unwrap().id, 12);
             // A fake with the same name must not hide a real player later in join order.
             let guests = &mut game.lan.as_mut().unwrap().hub.guests;
-            guests.iter_mut().find(|g| g.uuid == 12).unwrap().name = "robot".into();
+            let index = guests.iter().position(|g| g.uuid == 12).unwrap();
+            guests.update(index, |g| g.name = "robot".into());
             guests.reverse();
             assert_eq!(game.online_player("ROBOT").unwrap().id, 12);
         });
@@ -2513,9 +2514,8 @@ mod tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(12)
-                .unwrap()
-                .address = "0.0.0.0:1".parse().unwrap();
+                .update_guest(12, |guest| guest.address = "0.0.0.0:1".parse().unwrap())
+                .unwrap();
             assert_eq!(game.ip_ban_players("0.0.0.0"), [12]);
             assert_eq!(game.ip_ban_players("127.0.0.1"), [13]);
         });

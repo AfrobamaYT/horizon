@@ -581,14 +581,17 @@ impl Game<'_> {
             _ => return false,
         };
         match conn {
-            Some(conn) => {
-                let Some(g) = self.lan.as_mut().and_then(|h| h.hub.guest_mut(conn)) else {
-                    return false;
-                };
-                let changed = change(&mut g.post_effects);
-                g.post_effects_dirty |= changed;
-                changed
-            }
+            Some(conn) => self
+                .lan
+                .as_mut()
+                .and_then(|h| {
+                    h.hub.update_guest(conn, |g| {
+                        let changed = change(&mut g.post_effects);
+                        g.post_effects_dirty |= changed;
+                        changed
+                    })
+                })
+                .unwrap_or(false),
             None => change(&mut self.cmds.post_effects),
         }
     }

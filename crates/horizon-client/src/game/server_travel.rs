@@ -328,9 +328,10 @@ impl Game<'_> {
                 return;
             };
             if self.dim == Dim::End && !host.hub.guest(conn).is_some_and(|g| g.seen_credits) {
-                if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn) {
-                    g.seen_credits = true;
-                }
+                let _ = host
+                    .hub
+                    .guests
+                    .update_connection(conn, |g| g.seen_credits = true);
                 host.play.entry(conn).or_default().won_game = true;
                 // ClientboundGameEventPacket.WIN_GAME.
                 host.hub.send_to(
@@ -786,9 +787,10 @@ impl Game<'_> {
                             } else if d.moved
                                 && let Some(host) = self.lan.as_mut()
                             {
-                                let g = &mut host.hub.guests[i];
-                                (g.yaw, g.pitch) = (d.to.yaw, d.to.pitch);
-                                g.new_body(true);
+                                host.hub.guests.update(i, |g| {
+                                    (g.yaw, g.pitch) = (d.to.yaw, d.to.pitch);
+                                    g.new_body(true);
+                                });
                                 host.hub
                                     .teleport(i, Some([d.to.at.x, d.to.at.y, d.to.at.z]));
                             }
@@ -884,14 +886,15 @@ impl Game<'_> {
                 return;
             };
             host.play.entry(trip.conn).or_default().portal.cooldown = 10;
-            let g = &mut host.hub.guests[i];
-            g.yaw = yaw;
-            if let Some(pitch) = pitch {
-                g.pitch = pitch;
-            }
-            // A new body at the exit: no fall distance or motion carried over,
-            // but the player's attributes (ServerPlayer.teleport keeps the entity).
-            g.new_body(true);
+            host.hub.guests.update(i, |g| {
+                g.yaw = yaw;
+                if let Some(pitch) = pitch {
+                    g.pitch = pitch;
+                }
+                // A new body at the exit: no fall distance or motion carried over,
+                // but the player's attributes (ServerPlayer.teleport keeps the entity).
+                g.new_body(true);
+            });
             let at = [position.x, position.y, position.z];
             if portal {
                 host.hub.land(i, at);
@@ -982,28 +985,31 @@ impl Game<'_> {
                 return;
             };
             let (uuid, name) = (host.hub.guests[i].uuid, host.hub.guests[i].name.clone());
-            let g = &mut host.hub.guests[i];
-            let [yaw, pitch] = t.rotation.unwrap_or([g.yaw, g.pitch]);
-            let origin = g.position;
-            // A new body there: no fall distance or motion carried over, but
-            // the player's attributes (ServerPlayer.teleport keeps the entity).
-            let passenger_body = if t.vehicle.is_some() {
-                g.motion.take()
-            } else {
-                g.new_body(true);
-                None
-            };
+            let (yaw, pitch, origin, passenger_body) = host.hub.guests.update(i, |g| {
+                let [yaw, pitch] = t.rotation.unwrap_or([g.yaw, g.pitch]);
+                let origin = g.position;
+                // A new body there: no fall distance or motion carried over, but
+                // the player's attributes (ServerPlayer.teleport keeps the entity).
+                let passenger_body = if t.vehicle.is_some() {
+                    g.motion.take()
+                } else {
+                    g.new_body(true);
+                    None
+                };
+                (yaw, pitch, origin, passenger_body)
+            });
             let cooldown = host.play.get(&t.conn).map_or(0, |p| p.portal.cooldown);
             let ctx = server_ctx!(self);
             if let Some(host) = self.lan.as_mut() {
                 host.hub
                     .change_level(i, t.at, yaw, Some(pitch), false, cooldown, &ctx);
-                let g = &mut host.hub.guests[i];
-                g.vehicle = t.vehicle;
-                if let Some(mut body) = passenger_body {
-                    body.position = Vec3::new(t.at[0], t.at[1], t.at[2]);
-                    g.motion = Some(body);
-                }
+                host.hub.guests.update(i, |g| {
+                    g.vehicle = t.vehicle;
+                    if let Some(mut body) = passenger_body {
+                        body.position = Vec3::new(t.at[0], t.at[1], t.at[2]);
+                        g.motion = Some(body);
+                    }
+                });
             }
             self.as_guest(t.conn, |g| {
                 g.trigger_dimension(source, t.dim, origin);

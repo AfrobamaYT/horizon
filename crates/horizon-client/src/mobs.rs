@@ -1113,6 +1113,8 @@ pub struct Extra {
     pub variant: u8,
     /// Secondary variant (horse markings, tropical fish pattern colours, panda hidden gene).
     pub variant2: u8,
+    /// Villager or zombie-villager profession; no numeric mirror is stored.
+    pub profession: villager::ProfessionState,
     pub variant3: u8,
     /// VillagerData.level for villagers and zombie villagers.
     pub villager_level: i32,
@@ -2579,10 +2581,11 @@ pub struct Seen {
     /// A villager's `POTENTIAL_JOB_SITE` and `MEETING_POINT`.
     pub potential_job: Option<[i32; 3]>,
     pub meeting: Option<[i32; 3]>,
-    /// `variant2`: a villager's profession (index into
-    /// `villager::PROFESSIONS`), a llama's strength or a horse's markings.
-    /// And a villager's experience.
-    pub profession: u8,
+    /// A villager's vanilla profession projection, absent for unknown IDs.
+    pub profession: Option<u8>,
+    /// A llama's strength or a horse's markings.
+    pub secondary_variant: u8,
+    /// A villager's experience.
     pub xp: i32,
     /// What other villagers read of a villager's state and brain.
     pub villager: Option<Arc<villager::Seen>>,
@@ -2623,7 +2626,7 @@ impl Mob {
         }
         // Villager.getTypeName returns its registered profession's name.
         if self.species() == Species::Villager {
-            let profession = villager::profession(self.extra.variant2).id;
+            let profession = villager::profession(self.extra.profession.index().unwrap_or(0)).id;
             return crate::text::Text::translate(
                 &format!("entity.minecraft.villager.{profession}"),
                 &[],
@@ -2785,7 +2788,8 @@ impl Mob {
             category: m.category(),
             potential_job: villager_brain::potential_job_site(m),
             meeting: villager.then_some(m.extra.meeting).flatten(),
-            profession: m.extra.variant2,
+            profession: villager.then(|| m.extra.profession.index()).flatten(),
+            secondary_variant: m.extra.variant2,
             xp: villager::xp(m),
             villager: villager.then(|| Arc::new(villager::seen(m))),
             stats: [
@@ -3588,6 +3592,25 @@ impl Mob {
         source: Damage,
         armor_effectiveness: Option<&mut dyn FnMut(f32, &mut LegacyRandom) -> f32>,
     ) -> bool {
+        // Enderman.hurtServer: past `isInvulnerableTo`, the teleport draw
+        // follows `super.hurtServer` whatever it answered (a hurt cooldown, a
+        // dead enderman), its hurt sound's pitch included.
+        let enderman = self.species() == Species::Enderman
+            && !self.removed
+            && !(self.invulnerable_flag && !source.kind.bypasses_invulnerability());
+        let hurt = self.hurt_server(level, amount, source, armor_effectiveness);
+        if enderman {
+            enderman::after_hurt(self, &source);
+        }
+        hurt
+    }
+    fn hurt_server(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        amount: f32,
+        source: Damage,
+        armor_effectiveness: Option<&mut dyn FnMut(f32, &mut LegacyRandom) -> f32>,
+    ) -> bool {
         axolotl::before_damage(self, amount, &source);
         raider::note_hurt(self);
         // SulfurCube.hurtServer: the priming and a block's immune knockback
@@ -3905,7 +3928,17 @@ impl Mob {
         source: Damage,
         direct: &'static str,
     ) -> bool {
+        // Enderman.hurtServer: only a thrown potion skips the teleport draw;
+        // a lingering cloud's `indirect_magic` goes through it.
+        let cloud = self.species() == Species::Enderman
+            && direct == "minecraft:area_effect_cloud"
+            && !self.removed
+            && !(self.invulnerable_flag && !source.kind.bypasses_invulnerability());
         let hurt = self.damage(level, amount, source);
+        if cloud {
+            enderman::teleport_chance(self, &source);
+        }
+
         if hurt {
             self.last_direct = Some(direct);
         }

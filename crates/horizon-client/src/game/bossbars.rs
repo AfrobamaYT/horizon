@@ -827,15 +827,9 @@ pub(super) mod audience_tests {
         game.next_entity = game.next_entity.max(1);
         let level = game.native_level(game.dim.id()).unwrap();
         game.native_fake_player(level, 2, "fake").unwrap();
-        game.lan
-            .as_mut()
-            .unwrap()
-            .hub
-            .guests
-            .iter_mut()
-            .find(|g| g.uuid == 2)
-            .unwrap()
-            .position = [0.0, 100.0, 0.0];
+        let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+        let index = guests.iter().position(|g| g.uuid == 2).unwrap();
+        guests.update(index, |g| g.position = [0.0, 100.0, 0.0]);
     }
 
     #[test]
