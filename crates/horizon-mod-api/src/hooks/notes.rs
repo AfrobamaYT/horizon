@@ -42,7 +42,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   executable alternative takes precedence over a denied one; equally valid alternatives keep registration order.
   A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
 
-- **`perform_command` / `perform_console_command`**: `event.command` is an owned `CommandInvocation`
+- **`run_mod_command`**: `event.command` is an owned `CommandInvocation`
   with its literal path and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean
   values retain the dispatcher's types; word and greedy text are strings. Player selectors resolve to a single live
   `PlayerRef`, items become component-bearing stacks of one, and block positions resolve source-relative/local
@@ -79,7 +79,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (`from` and `to` are ids such as `minecraft:overworld` and `minecraft:the_nether`), heard when the move has ended:
   the portal's exit is found and the player stands there, a command's teleport has landed, or a respawn in another
   level than the death's is placed for good. `to` is the level in place and the player's state is swapped in (as in
-  `native_perform_command`), so `host.players().acting_player` and `PlayerRef::tell` reach them. Heard for Nether and End portals
+  `native_run_mod_command`), so `host.players().acting_player` and `PlayerRef::tell` reach them. Heard for Nether and End portals
   (also riding, and leaving the End as its winner), `/execute in ... run tp` and any command teleporting into another
   level, and the death respawn. Not heard: a move within a level (`/tp`, an End gateway), a player who leaves before
   the move ends, a respawn in the dimension of the death, and anything outside a dedicated server.
@@ -135,11 +135,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (a quiet batch drops them). The player's state is not swapped in, and `PlayerRef::tell` and the other helpers that take a
   UUID reach nobody inside this hook: answer through `replies`. Commands may carry secrets (`/msg`, a login plugin's
   password), so don't log them carelessly.
-- **`native_perform_console_command(command, ran)`**: a registered command typed on the dedicated server's console
-  (without its slash), run as the server at level 4: no player, so `host.players().acting_player()` is None and the player-only
-  helpers give nothing. The mod parses the line and sets `ran`; `host.commands().feedback` answers on the console. A name no mod
-  registered goes to vanilla's dispatcher. The single player owner's console (`horizon-ctl command`, the MCP
-  command tool) is a player's: it reaches `native_perform_command` with the owner, at level 4.
+- **`native_run_mod_command(source, command, ran)`**: executes a registered command with typed origin and
+  permission. Feedback honours silence and track-output; set `ran` when handled, otherwise execution fails.
 - **`native_player_respawned(player, name)`**: a dead player came back, once per respawn, on a server: after
   `PlayerList.respawn` reset their health, food and experience and placed them at their bed, anchor or the world spawn
   (NeoForge's `PlayerRespawnEvent`). The player's state is swapped in for the call, as for their other actions, so
@@ -388,10 +385,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_jump(player, name)`**: accepted guest movement made the server player jump from the ground, after movement simulation finishes. The guest's state is swapped in.
 - **`native_player_kicked(player, name, reason)`**: a guest was kicked after the hub recorded the rendered disconnect reason and sent the disconnect. The guest's state is swapped in, unless the guest was already removed in the same poll (a kick and the disconnect arriving together): the hook still fires, without it.
 - **`native_player_level_change(player, name, from, to)`**: a server player's experience change altered their level, after the new level was applied. The guest's state is swapped in when the player is a guest.
-- **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
-  their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
-  player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
-  registered command no mod takes answers as vanilla's unknown command.
 - **`native_player_swap_hands(player, name, cancel)`**: a player pressed the swap-hands key (not a spectator), heard
   before the main and off hand items swap. Set `cancel` and they stay where they are; the player's client, which swapped
   them at once, gets its slots back. The player's state is swapped in, so `host.players().acting_player`, `PlayerRef::tell` and the item
@@ -420,7 +413,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (`checkTotemDeathProtection`), heard just before it is used up. Listen only: the health state machine decides before a
   mod is asked, so a mod cannot veto it. The player's state is swapped in, so `host.players().acting_player`, `PlayerRef::tell` and the
   item helpers reach them. Not heard: the host of a LAN world.
-- `host.players().acting_player()`, the player whose state is swapped in (inside `native_perform_command`,
+- `host.players().acting_player()`, the player whose state is swapped in (inside `native_run_mod_command`,
   `native_right_click_block`, `native_use_on`, `native_break_block`...; None elsewhere);
   `host.commands().run_command(line)`, a command run as the server's console (level 4, no output), including during a guest's
   turn. The acting player and other live guests are reachable; displaced outer players are excluded only on this
@@ -1821,7 +1814,7 @@ or transactions. Declarations still go on each event or registrar.
 - Giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
   the player's [`ENTITY_ITEMS`](../concepts/trait-mods.md#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
 
-- A mod's command typed on the dedicated server's console: `native_perform_console_command(command, ran)` hears a command a mod registered with `native_register_commands`, without its slash, from the console (permission level 4, no player: `host.players().acting_player` is None), and a mod sets `ran`. `host.commands().feedback` answers on the console. A name no mod registered goes to vanilla's dispatcher; the single player owner's console is not covered.
+- Registered mod commands from every source use `native_run_mod_command(source, command, ran)`. Players retain their swapped-in state; the console has no acting player. Functions are silent, and block/cart feedback follows track-output. Unhandled invocations fail as unknown commands.
 
 - Player-use drops to `native_loot_drops`: shears on a sheep, a mooshroom, a snow golem or a bogged, a brush on an
   armadillo or a suspicious block, carving a pumpkin, picking sweet berries or cave vines, and a player taking an item frame or
@@ -2701,7 +2694,7 @@ registration path.
   server tick, with `world_running`. A frozen world reports false except during a requested step.
 
 - Server commands and players: `native_register_commands` (the commands a mod adds to every player's
-  command tree) and `native_perform_command` (a player's command on the server), with helpers to answer
+  command tree) and `native_run_mod_command` (a player's command on the server), with helpers to answer
   ([Server commands and players](#server-commands-and-players)).
 
 - A player's items for server mods: counting, taking and giving go through the player's

@@ -1637,22 +1637,14 @@ impl Game<'_> {
     pub(in crate::game) fn native_register_commands(&mut self, commands: &mut Vec<NativeCommand>) {
         self.fire_register_commands(commands);
     }
-    /// A player's command on the server (`Commands.performCommand`),
-    /// parsed into `command` with typed, source-resolved arguments, for a command
-    /// a mod registered and the player's level allows: set `ran` when it is yours.
-    /// Missing optional arguments are absent; parsing or resolution failures never
-    /// reach listeners. The player's state is
-    /// swapped in for the call, so `native_player` and the other helpers
-    /// read that player; `native_feedback` answers them. A single player's
-    /// owner console (`horizon-ctl command`) reaches it too, as the owner at
-    /// level 4.
-    pub(in crate::game) fn native_perform_command(
+    /// Execute a parsed mod command with its origin and effective permission.
+    pub(in crate::game) fn native_run_mod_command(
         &mut self,
-        player: &NativeServerPlayer,
+        source: &mod_api::CommandSource,
         command: &CommandInvocation,
         ran: &mut bool,
     ) {
-        self.fire_perform_command(player, command, ran);
+        self.fire_run_mod_command(source, command, ran);
     }
     /// A player takes an item from an armor stand or puts one on it
     /// (`ArmorStand.interactAt`, after the stand's disabled-slot checks and
@@ -1680,7 +1672,7 @@ impl Game<'_> {
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
     /// after the tick moved it. Once a tick for each vehicle that carries a
     /// server player, whose state is then swapped in (as for
-    /// `native_perform_command`: `native_acting_player`, `native_tell` and
+    /// `native_run_mod_command`: `native_acting_player`, `native_tell` and
     /// the item helpers reach them; `player` is their UUID), and for one a
     /// server player rode and left, until it has stood still for ten
     /// seconds (`player` is none, nobody is swapped in). It only hears.
@@ -1708,7 +1700,7 @@ impl Game<'_> {
     /// spectator) and before the menu that was open closes. Set `cancel` and
     /// nothing opens: the open menu stays as it was and the click is spent.
     /// The player's state is swapped in for the call, as for
-    /// `native_perform_command`, so `native_acting_player`, `native_tell` and
+    /// `native_run_mod_command`, so `native_acting_player`, `native_tell` and
     /// the item helpers reach them. Not heard: a menu a mod opens
     /// (`native_open_menu`), the inventory screen, and the editors (sign,
     /// book, command block). Server-side, for every player of the world.
@@ -1731,7 +1723,7 @@ impl Game<'_> {
     /// packet passed vanilla's checks (a creative player, a real slot, a valid
     /// stack) and before the slot changes or the stack drops. Set `cancel`
     /// and the packet is ignored. The player's state is swapped in for the
-    /// call, as for `native_perform_command`, so `native_acting_player`,
+    /// call, as for `native_run_mod_command`, so `native_acting_player`,
     /// `native_tell` and the item helpers reach them. Not heard: stacks a
     /// creative player gets other ways (middle-click pick block, `/give`).
     /// Server-side, for every player of the world.
@@ -1776,7 +1768,7 @@ impl Game<'_> {
     /// death's is placed for good (a bed or anchor, or the world spawn's
     /// free column, after the fallback when a respawn block was gone). The
     /// level of `to` is the one in place, and the player's state is swapped
-    /// in, as for `native_perform_command`: `native_acting_player`,
+    /// in, as for `native_run_mod_command`: `native_acting_player`,
     /// `native_tell`, the item helpers and the rest reach them. Heard for:
     /// Nether and End portals (also riding a vehicle, and leaving the End as
     /// its winner), `/execute in ... run tp` and any other command that
@@ -1865,24 +1857,6 @@ impl Game<'_> {
         replies: &mut Vec<Text>,
     ) {
         self.fire_player_command(player, name, command, canceled, replies);
-    }
-    /// A command a mod registered, typed on the dedicated server's console
-    /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
-    /// typed arguments: set `ran` when it is yours. Relative coordinates and
-    /// selectors use the console at the Overworld spawn, with zero rotation.
-    /// Missing optional arguments are absent; invalid input never reaches listeners.
-    /// There is no player: the source is the console, at
-    /// permission level 4, so `native_acting_player` is None and the
-    /// player-only helpers give nothing; `native_feedback` answers on the
-    /// console. A name no mod registered goes to vanilla's dispatcher as
-    /// before.
-    pub(in crate::game) fn native_perform_console_command(
-        &mut self,
-        command: &CommandInvocation,
-        ran: &mut bool,
-    ) {
-        self.fire_perform_console_command(command, ran);
     }
     /// A server player's ender pearl landed and is about to teleport them
     /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's

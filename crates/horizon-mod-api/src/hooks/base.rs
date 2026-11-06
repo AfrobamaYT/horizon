@@ -449,22 +449,17 @@ pub trait Hooks {
         neoforge = "RegisterCommandsEvent"
     )]
     fn register_commands();
-    /// A player's command on the server (`Commands.performCommand`),
-    /// parsed into `command` with typed, source-resolved arguments, for a command
-    /// a mod registered and the player's level allows: set `ran` when it is yours.
-    /// Missing optional arguments are absent; parsing or resolution failures never
-    /// reach listeners. The player's state is
-    /// swapped in for the call, so `native_player` and the other helpers
-    /// read that player; `host.commands().feedback()` answers them. A single player's
-    /// owner console (`horizon-ctl command`) reaches it too, as the owner at
-    /// level 4.
+    /// Execute a registered mod command after parsing, permission checks and
+    /// argument resolution. Return `Flow::Cancel` when handled. `source` identifies
+    /// the origin and effective permission, independent of `execute as`. Feedback
+    /// follows its silence and track-output rules; a player's state is swapped in.
     #[hook(
         side = "server",
         contract = "cancel",
         out = "ran",
         neoforge = "none (a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions)"
     )]
-    fn perform_command();
+    fn run_mod_command();
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
@@ -1691,24 +1686,6 @@ pub trait Hooks {
         cancellable = true
     )]
     fn player_command();
-    /// A command a mod registered, typed on the dedicated server's console
-    /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
-    /// typed arguments: set `ran` when it is yours. Relative coordinates and
-    /// selectors use the console at the Overworld spawn, with zero rotation.
-    /// Missing optional arguments are absent; invalid input never reaches listeners.
-    /// There is no player: the source is the console, at
-    /// permission level 4, so `host.players().acting_player()` is None and the
-    /// player-only helpers give nothing; `host.commands().feedback()` answers on the
-    /// console. A name no mod registered goes to vanilla's dispatcher as
-    /// before.
-    #[hook(
-        side = "server",
-        contract = "cancel",
-        out = "ran",
-        neoforge = "none (a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions)"
-    )]
-    fn perform_console_command();
     /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`,
     /// vanilla's `Screen.keyPressed`): `screen` is the screen it is, `key`
     /// vanilla's name for the key (`key.keyboard.e`) — a key with no name
@@ -3623,7 +3600,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// spectator) and before the menu that was open closes. Set `cancel` and
     /// nothing opens: the open menu stays as it was and the click is spent.
     /// The player's state is swapped in for the call, as for
-    /// `native_perform_command`, so `host.players().acting_player()`, `PlayerRef::tell` and
+    /// `native_run_mod_command`, so `host.players().acting_player()`, `PlayerRef::tell` and
     /// the item helpers reach them. Not heard: a menu a mod opens
     /// (`native_open_menu`), the inventory screen, and the editors (sign,
     /// book, command block). Server-side, for every player of the world.
@@ -3644,7 +3621,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// packet passed vanilla's checks (a creative player, a real slot, a valid
     /// stack) and before the slot changes or the stack drops. Set `cancel`
     /// and the packet is ignored. The player's state is swapped in for the
-    /// call, as for `native_perform_command`, so `host.players().acting_player()`,
+    /// call, as for `native_run_mod_command`, so `host.players().acting_player()`,
     /// `PlayerRef::tell` and the item helpers reach them. Not heard: stacks a
     /// creative player gets other ways (middle-click pick block, `/give`).
     /// Server-side, for every player of the world.
@@ -3736,7 +3713,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// death's is placed for good (a bed or anchor, or the world spawn's
     /// free column, after the fallback when a respawn block was gone). The
     /// level of `to` is the one in place, and the player's state is swapped
-    /// in, as for `native_perform_command`: `host.players().acting_player()`,
+    /// in, as for `native_run_mod_command`: `host.players().acting_player()`,
     /// `PlayerRef::tell`, the item helpers and the rest reach them. Heard for:
     /// Nether and End portals (also riding a vehicle, and leaving the End as
     /// its winner), `/execute in ... run tp` and any other command that
@@ -4082,7 +4059,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
     /// after the tick moved it. Once a tick for each vehicle that carries a
     /// server player, whose state is then swapped in (as for
-    /// `native_perform_command`: `host.players().acting_player()`, `PlayerRef::tell` and
+    /// `native_run_mod_command`: `host.players().acting_player()`, `PlayerRef::tell` and
     /// the item helpers reach them; `player` is their UUID), and for one a
     /// server player rode and left, until it has stood still for ten
     /// seconds (`player` is none, nobody is swapped in). It only hears.

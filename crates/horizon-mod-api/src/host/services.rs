@@ -98,7 +98,7 @@ pub trait ClientSession {
 /// The commands service, reached through its host.
 pub trait Commands {
     /// Side: server.
-    /// A line of the command's answer, inside `native_perform_command`:
+    /// A line of the command's answer, inside `native_run_mod_command`:
     /// sent to the player whose command it is after the call, as vanilla
     /// commands' feedback is.
     fn feedback(&mut self, line: Text) {
@@ -182,7 +182,7 @@ pub trait Players {
     }
     /// Side: server.
     /// The player whose action or command a hook hears, as their state is
-    /// swapped in (`native_perform_command`, `native_right_click_block`,
+    /// swapped in (`native_run_mod_command`, `native_right_click_block`,
     /// `native_use_on`, `native_break_block`...): None outside such a
     /// hook.
     fn acting_player(&self) -> Option<PlayerRef> {

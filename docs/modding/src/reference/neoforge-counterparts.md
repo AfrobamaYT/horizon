@@ -6,7 +6,7 @@ It is written by `tools/neoforge_counterparts.py` (run it again after changing a
 stale). A key names the event class (`PlayerEvent.Clone`) or the extension method (`IPlayerExtension.openMenu`);
 notes about cancelling or the event bus belong in the hook's `///` doc, not in the key.
 
-577 hooks: 333 name a counterpart, 244 say they have none.
+577 hooks: 334 name a counterpart, 243 say they have none.
 The names were checked against the NeoForge 26.3.0.101 sources (`neoforge-26.3.0.101-sources.jar` on
 maven.neoforged.net): each class or extension method named below exists there. A `none` says why no event or method
 matches; the keys naming FML classes (`FMLClientSetupEvent`, `ModConfigEvent`, `ModContainer`) or a vanilla one
@@ -18,6 +18,7 @@ own note.
 | Hook | Side | NeoForge |
 | --- | --- | --- |
 | `add_client_reload_listeners` | client | `AddClientReloadListenersEvent` |
+| `add_pack_finders` | both | `AddPackFindersEvent` |
 | `add_server_reload_listeners` | server | `AddServerReloadListenersEvent` |
 | `animal_tame` | server | `AnimalTameEvent` |
 | `anvil_craft_post` | server | `AnvilCraftEvent.Post` |
@@ -220,8 +221,8 @@ own note.
 | `pickup_xp` | server | `PlayerXpEvent.PickupXp` |
 | `piston_post` | server | `PistonEvent.Post` |
 | `piston_pre` | server | `PistonEvent.Pre` |
-| `play_level_sound_at_entity` | server | `PlayLevelSoundEvent.AtEntity` |
-| `play_level_sound_at_position` | server | `PlayLevelSoundEvent.AtPosition` |
+| `play_level_sound_at_entity` | both | `PlayLevelSoundEvent.AtEntity` |
+| `play_level_sound_at_position` | both | `PlayLevelSoundEvent.AtPosition` |
 | `play_sound` | client | `PlaySoundEvent` |
 | `play_sound_source` | client | `PlaySoundSourceEvent` |
 | `play_streaming_source` | client | `PlayStreamingSourceEvent` |
@@ -485,8 +486,6 @@ A hook with no NeoForge counterpart is judged on its merits like any other. The 
 | `on_effect_added` | server | vanilla MobEffect.onEffectAdded; NeoForge adds no event or extension for it |
 | `panel_event` | client | Horizon-only; NeoForge has no counterpart |
 | `perform_bonemeal` | server | vanilla BonemealableBlock.performBonemeal; NeoForge adds no event or extension for it |
-| `perform_command` | server | a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions |
-| `perform_console_command` | server | a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions |
 | `player_arm_swing` | server | NeoForge has no such event; Bukkit's PlayerAnimationEvent |
 | `player_attack_cooldown_reset` | server | NeoForge has no such event |
 | `player_bed_enter` | server | NeoForge has no such event; Bukkit's PlayerBedEnterEvent |
@@ -558,6 +557,7 @@ A hook with no NeoForge counterpart is judged on its merits like any other. The 
 | `recipe_book_categories` | both | RegisterRecipeBookSearchCategoriesEvent registers search groups only, not a recipe type's categories |
 | `render_needs` | client | Horizon-only; NeoForge has no counterpart |
 | `resource_pack_status` | server | NeoForge has no resource-pack status event |
+| `run_mod_command` | server | a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions |
 | `screen` | both | Horizon declares a block's screen through hooks; NeoForge registers a Screen class per menu with RegisterMenuScreensEvent |
 | `screen_click` | client | see screen |
 | `screen_draw` | client | see screen |

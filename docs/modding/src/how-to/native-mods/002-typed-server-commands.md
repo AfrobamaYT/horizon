@@ -4,7 +4,7 @@
 ## Typed server commands
 
 Register each server usage with `register_commands` and `NativeCommand`. The
-`perform_command` and `perform_console_command` events carry a `CommandInvocation`,
+`run_mod_command` event carries a `CommandInvocation`,
 not a raw line to split. Match its `literals` to your command path, then read named
 values through `command.argument(name)` and `CommandArgumentValue`. An integer is
 already an `i32`; a player argument is a live `PlayerRef`, not selector text.
@@ -20,4 +20,14 @@ are component-bearing stacks of one item. Block positions are resolved and floor
 from the source's world, relative or local coordinates without loading chunks.
 A player's source is their position and rotation. The console has no source
 entity and uses the Overworld spawn's block corner with zero rotation, so `@s`
-cannot resolve there. Both hooks receive the same owned data, on native and wasm.
+cannot resolve there. Every source receives the same owned data, on native and wasm.
+
+`event.source` is a non-exhaustive `CommandSource`: `Player { player, .. }`,
+`Console { .. }`, `CommandBlock { position, level, .. }`,
+`CommandBlockMinecart { entity, .. }` or `Function { id, .. }`.
+`source.permission()` returns the effective `NativePermissionLevel`: functions use
+function permission; blocks and carts use game-master permission. `execute as`,
+`at` and `in` change argument resolution, not the origin. Feedback through
+`host.commands().feedback` honours the underlying source's silence and track-output.
+
+`player_command` stays player-only pre-execution cancellation (NeoForge's `CommandEvent`), including vanilla commands.
