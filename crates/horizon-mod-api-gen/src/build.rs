@@ -9,13 +9,37 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     track(root)?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
-        Target::Client => vec![
-            ("mod_api_host_generated.rs", generated.implementation),
-            ("mod_api_fire_generated.rs", generated.fire),
-            // The mob tick's goal read view (#1077), included beside the
-            // engine's `GoalCx` in `mobs/part_goals.rs`.
-            ("mod_api_goal_view_generated.rs", generated.goal_view),
-        ],
+        Target::Client => {
+            let dir = root.join("crates/horizon-client/src/game/native_hooks");
+            let mut paths = fs::read_dir(&dir)
+                .map_err(|e| e.to_string())?
+                .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            paths.retain(|path| {
+                path.extension().is_some_and(|ext| ext == "rs")
+                    && !matches!(
+                        path.file_stem().and_then(|s| s.to_str()),
+                        Some("mod" | "shared" | "fire")
+                    )
+            });
+            paths.sort();
+            let mut modules = String::new();
+            for path in paths {
+                let module = path.file_stem().unwrap().to_str().unwrap();
+                syn::parse_str::<syn::Ident>(module).map_err(|e| e.to_string())?;
+                let path = fs::canonicalize(&path).map_err(|e| e.to_string())?;
+                modules.push_str(&format!("#[path = {path:?}] mod {module};\n"));
+            }
+            fs::write(out_dir.join("native_hook_modules.rs"), modules)
+                .map_err(|e| e.to_string())?;
+            vec![
+                ("mod_api_host_generated.rs", generated.implementation),
+                ("mod_api_fire_generated.rs", generated.fire),
+                // The mob tick's goal read view (#1077), included beside the
+                // engine's `GoalCx` in `mobs/part_goals.rs`.
+                ("mod_api_goal_view_generated.rs", generated.goal_view),
+            ]
+        }
         Target::Api => {
             let hooks = generated.hooks;
             let included = [

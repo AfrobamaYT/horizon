@@ -1,9 +1,11 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
 mod catalog;
 mod host;
+mod layout;
 pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
+pub use layout::native_hook_layout;
 use quote::ToTokens;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -902,12 +904,16 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     for path in paths {
         let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
+        let mut names = HashSet::new();
         for item in file.items {
             if let Item::Impl(item) = item {
-                methods.extend(impl_functions(item));
+                for method in impl_functions(item) {
+                    names.insert(method.sig.ident.to_string());
+                    methods.push(method);
+                }
             }
         }
-        files.push((path, source));
+        files.push((path, source, names));
     }
     let dispatch::HookSources {
         traits,
@@ -962,10 +968,10 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     }
     if matches!(fill, FillMode::Fill) {
         let mut outputs = Vec::new();
-        for (path, source) in &files {
+        for (path, source, names) in &files {
             let local = fills
                 .iter()
-                .filter(|fill| source.contains(&format!("fn {}(", fill.native)))
+                .filter(|fill| names.contains(&fill.native))
                 .cloned()
                 .collect::<Vec<_>>();
             if !local.is_empty() {
@@ -973,7 +979,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             }
         }
         for (path, output) in outputs {
-            fs::write(path, output).map_err(|e| e.to_string())?;
+            fs::write(path, output).map_err(|e| format!("{}: {e}", path.display()))?;
         }
     }
     Ok(Sources {
@@ -1669,7 +1675,7 @@ mod tests {
             without_counterparts
         );
         std::fs::write(&first, original).unwrap();
-        let hooks = root.join("crates/horizon-client/src/game/native_hooks/mod.rs");
+        let hooks = root.join("crates/horizon-client/src/game/native_hooks/base.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
         let call = "self.fire_item_damaged(player, name, item, amount, cancel);";
         assert_eq!(shipped.matches(call).count(), 1);
@@ -1710,7 +1716,20 @@ mod tests {
                 .contains("item_damaged: needs a #[hook(...)] attribute")
         );
         std::fs::write(&declared, shipped_declarations).unwrap();
+        let second = root.join("crates/horizon-client/src/game/native_hooks/client_tick_pre.rs");
+        let second_shipped = std::fs::read_to_string(&second).unwrap();
+        std::fs::write(
+            &second,
+            second_shipped.replace("self.fire_client_tick_pre();", "let _ = ();"),
+        )
+        .unwrap();
+        // A comment in another file must not become a second fill owner.
+        let decoy = root.join("crates/horizon-client/src/game/native_hooks/decoy.rs");
+        let comment = "// fn native_item_damaged(\n";
+        std::fs::write(&decoy, comment).unwrap();
         super::fill_hooks(&root).unwrap();
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), second_shipped);
+        assert_eq!(std::fs::read_to_string(&decoy).unwrap(), comment);
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");
         assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&shipped));
