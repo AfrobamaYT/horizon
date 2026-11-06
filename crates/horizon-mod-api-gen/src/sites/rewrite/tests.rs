@@ -187,3 +187,34 @@ fn trait_impl_callers_are_left_for_the_coordinators_missing_target_refusal() {
     assert_eq!(actual, source);
     assert!(sites.is_empty());
 }
+
+#[test]
+fn site_rewrite_places_records_after_eof_without_a_final_newline() {
+    let mut catalog = entries();
+    catalog.push(internal(
+        "horizon_client::game::run",
+        "fn",
+        "fn run() -> u32",
+    ));
+    for (target, source, selector) in [
+        (
+            "Game::run",
+            "impl Game {\n fn run(&mut self) { self.step(1); }\n}",
+            ".step",
+        ),
+        (
+            "Game::run",
+            "impl Game {\n fn run(&mut self) { let café = 1; self.step(café); }\n}",
+            ".step",
+        ),
+        ("run", "fn run() -> u32 { add(1) }", "add"),
+    ] {
+        let mut request = declaration(selector, Some(0));
+        request.target = format!("horizon_client::game::{target}");
+        let (actual, sites) =
+            rewrite(source, "horizon_client::game", &catalog, &[request]).unwrap();
+        assert_eq!(sites.len(), 1);
+        let parsed = syn::parse_file(&actual).unwrap();
+        assert!(matches!(parsed.items.last(), Some(syn::Item::Type(_))));
+    }
+}

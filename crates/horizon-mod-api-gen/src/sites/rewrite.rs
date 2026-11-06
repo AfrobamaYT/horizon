@@ -37,13 +37,7 @@ pub fn rewrite(
     let lines: Vec<_> = std::iter::once(0)
         .chain(source.match_indices('\n').map(|(i, _)| i + 1))
         .collect();
-    let offset = |at: proc_macro2::LineColumn| {
-        lines[at.line - 1]
-            + source[lines[at.line - 1]..]
-                .char_indices()
-                .nth(at.column)
-                .map_or(0, |(i, _)| i)
-    };
+    let offset = |at| crate::points::offset(source, &lines, at);
     for declaration in declarations {
         for found in functions
             .iter()

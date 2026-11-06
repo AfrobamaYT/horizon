@@ -660,7 +660,7 @@ pub struct Staged {
 }
 
 /// The byte offset of `at` in `source`, whose line starts are `lines`.
-fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn) -> usize {
+pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn) -> usize {
     let line = lines[at.line - 1];
     source[line..]
         .char_indices()
