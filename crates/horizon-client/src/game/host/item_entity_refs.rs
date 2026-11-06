@@ -1,6 +1,5 @@
 //! The game's side of the `item_entity_refs` area (`horizon-mod-api/src/host/item_entity_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ItemEntityRefsHost for Game<'_> {
     fn item_entity(&self, entity: EntityRef) -> Option<ItemEntityRef> {

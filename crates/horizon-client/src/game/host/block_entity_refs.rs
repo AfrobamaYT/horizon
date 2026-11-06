@@ -1,6 +1,5 @@
 //! The game's side of the `block_entity_refs` area (`horizon-mod-api/src/host/block_entity_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl BlockEntityRefsHost for Game<'_> {
     fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {

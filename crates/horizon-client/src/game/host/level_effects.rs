@@ -1,6 +1,5 @@
 //! The game's side of the `level_effects` area (`horizon-mod-api/src/host/level_effects.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelEffectsBackendMut for Game<'_> {
     fn level_play_sound(

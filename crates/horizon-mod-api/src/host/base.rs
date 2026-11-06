@@ -723,6 +723,7 @@ pub trait BaseClientHost {
     }
 }
 /// The handles' reads of the `base` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait BaseBackend {
     /// Side: server.
@@ -749,6 +750,7 @@ pub trait BaseBackend {
     }
 }
 /// The handles' server writes of the `base` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait BaseBackendMut {
     /// Side: server.

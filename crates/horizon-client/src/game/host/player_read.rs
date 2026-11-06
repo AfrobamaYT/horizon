@@ -1,6 +1,5 @@
 //! The game's side of the `player_read` area (`horizon-mod-api/src/host/player_read.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl PlayerReadHost for Game<'_> {
     fn player(&self, uuid: u128) -> Option<PlayerRef> {

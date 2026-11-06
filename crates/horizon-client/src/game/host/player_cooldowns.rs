@@ -1,6 +1,5 @@
 //! The game's side of the `player_cooldowns` area (`horizon-mod-api/src/host/player_cooldowns.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl PlayerCooldownsHost for Game<'_> {
     fn item_cooldown_group(&self, stack: &ItemStack) -> String {

@@ -1470,7 +1470,7 @@ mod tests {
             );
         }
         fn inventory(root: &Path) -> Vec<serde_json::Value> {
-            let points = crate::points::game_points(root)
+            crate::points::game_points(root)
                 .unwrap()
                 .into_iter()
                 .map(|point| {
@@ -1479,8 +1479,7 @@ mod tests {
                         .replace("::turns", "");
                     serde_json::from_str(&json).unwrap()
                 })
-                .collect();
-            points
+                .collect()
         }
         assert_eq!(inventory(&before.0), inventory(&after.0));
         let old = discover(&before.0).unwrap();

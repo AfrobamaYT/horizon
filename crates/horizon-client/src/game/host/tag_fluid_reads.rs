@@ -1,6 +1,5 @@
 //! The game's side of the `tag_fluid_reads` area (`horizon-mod-api/src/host/tag_fluid_reads.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl TagFluidReadsHost for Game<'_> {
     fn unresolved_fluid_id(&self, fluid: UnresolvedFluid) -> String {

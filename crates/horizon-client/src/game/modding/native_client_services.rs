@@ -6,6 +6,7 @@ use horizon_client::{
     hud::{HudBatch, rgba},
     hud_layout::GuiDraw,
 };
+#[cfg(test)]
 use mod_api::prelude::*;
 use mod_api::{ItemStack, Text};
 
@@ -66,7 +67,6 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn tooltip_helpers_read_live_keys_and_draw_count_overrides() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
-            use mod_api::ClientHost;
             use winit::keyboard::KeyCode;
 
             game.physical_keys.insert(KeyCode::ShiftLeft);

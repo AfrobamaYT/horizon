@@ -1,6 +1,5 @@
 //! The game's side of the `level_world` area (`horizon-mod-api/src/host/level_world.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelWorldBackend for Game<'_> {
     fn level_dimension_shape(&self, level: LevelRef) -> Option<LevelDimensionShape> {

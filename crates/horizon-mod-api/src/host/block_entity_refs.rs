@@ -15,6 +15,7 @@ pub trait BlockEntityRefsHost {
     }
 }
 /// The handles' reads of the `block_entity_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait BlockEntityRefsBackend {
     /// Side: both.
@@ -114,6 +115,7 @@ pub trait BlockEntityRefsBackend {
     }
 }
 /// The handles' server writes of the `block_entity_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait BlockEntityRefsBackendMut {
     /// Side: server.

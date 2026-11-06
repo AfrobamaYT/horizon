@@ -1,6 +1,5 @@
 //! The game's side of the `level_block_writes` area (`horizon-mod-api/src/host/level_block_writes.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelBlockWritesBackendMut for Game<'_> {
     fn level_set_block(

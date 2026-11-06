@@ -1,6 +1,5 @@
 //! The game's side of the `player_death_location` area (`horizon-mod-api/src/host/player_death_location.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl PlayerDeathLocationBackend for Game<'_> {
     fn player_last_death_location(&self, player: PlayerRef) -> Option<GlobalPos> {

@@ -140,6 +140,48 @@ impl Area {
     }
 }
 
+/// The traits of one area file by tier. A trait is a tier's when it is named `<Camel><Tier>`; any
+/// other trait whose name ends like a host trait is refused, since it would reach neither a union
+/// nor the WIT. Other traits (the draw contexts and services of `draw.rs` and `services.rs`) are not
+/// host traits and stay with their own generators.
+fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>, String> {
+    let mut tiers = BTreeMap::new();
+    for item in file.items {
+        let Item::Trait(item) = item else {
+            continue;
+        };
+        let name = item.ident.to_string();
+        let Some(tier) = Tier::ALL
+            .into_iter()
+            .find(|tier| name == format!("{camel}{}", tier.suffix()))
+        else {
+            if Tier::ALL
+                .into_iter()
+                .any(|tier| name.ends_with(tier.suffix()))
+            {
+                return Err(format!(
+                    "trait `{name}` looks like a host trait but is not named `{camel}<Host|ServerHost|ClientHost|Backend|ClientBackend|BackendMut|ClientBackendMut>`"
+                ));
+            }
+            continue;
+        };
+        let entries = item
+            .items
+            .into_iter()
+            .filter_map(|member| match member {
+                syn::TraitItem::Fn(method) => Some(Entry {
+                    name: method.sig.ident.to_string(),
+                    sig: method.sig,
+                    attrs: method.attrs,
+                }),
+                _ => None,
+            })
+            .collect();
+        tiers.insert(tier, entries);
+    }
+    Ok(tiers)
+}
+
 /// The area files, `base` first and then by name, as the catalog's are.
 fn load(root: &Path) -> Result<Vec<Area>, String> {
     let dir = root.join(DIRECTORY);
@@ -150,31 +192,7 @@ fn load(root: &Path) -> Result<Vec<Area>, String> {
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         let camel = stem.to_upper_camel_case();
-        let mut tiers = BTreeMap::new();
-        for item in file.items {
-            let Item::Trait(item) = item else {
-                continue;
-            };
-            let Some(tier) = Tier::ALL
-                .into_iter()
-                .find(|tier| item.ident == format!("{camel}{}", tier.suffix()))
-            else {
-                continue;
-            };
-            let entries = item
-                .items
-                .into_iter()
-                .filter_map(|member| match member {
-                    syn::TraitItem::Fn(method) => Some(Entry {
-                        name: method.sig.ident.to_string(),
-                        sig: method.sig,
-                        attrs: method.attrs,
-                    }),
-                    _ => None,
-                })
-                .collect();
-            tiers.insert(tier, entries);
-        }
+        let tiers = area_tiers(&camel, file).map_err(|e| format!("{}: {e}", path.display()))?;
         areas.push(Area { stem, camel, tiers });
     }
     println!("cargo:rerun-if-changed={}", dir.display());
@@ -764,18 +782,41 @@ mod tests {
     }
 
     #[test]
-    fn an_area_file_names_its_traits_after_its_stem() {
+    fn an_area_file_reads_its_tier_traits() {
+        let file = syn::parse_str(
+            "pub trait ItemsHost { fn a(&self); } pub trait ItemsBackendMut { fn b(&mut self); } pub trait Unrelated {}",
+        )
+        .unwrap();
+        let tiers = area_tiers("Items", file).unwrap();
+        assert_eq!(
+            tiers.keys().copied().collect::<Vec<_>>(),
+            [Tier::Host, Tier::BackendMut]
+        );
+        assert_eq!(tiers[&Tier::Host][0].name, "a");
+    }
+
+    #[test]
+    fn a_host_like_trait_that_is_not_named_for_its_area_is_refused() {
+        for wrong in ["ItemHost", "ItemsReadBackend", "OtherServerHost"] {
+            let file = syn::parse_str(&format!(
+                "pub trait {wrong} {{ fn a(&self) -> &std::path::Path; }}"
+            ))
+            .unwrap();
+            let error = area_tiers("Items", file).err().unwrap();
+            assert!(error.contains(wrong), "{error}");
+        }
+    }
+
+    #[test]
+    fn every_area_file_of_the_checkout_loads() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let areas = load(&root).unwrap();
         assert!(areas.iter().any(|area| area.stem == "base"));
-        for area in &areas {
-            // Every trait method of an area file is in a trait the unions name, or in a
-            // service or draw trait of its own.
-            assert!(
-                area.tiers.values().all(|entries| !entries.is_empty()),
-                "{}",
-                area.stem
-            );
-        }
+        assert!(
+            areas
+                .iter()
+                .filter(|area| area.tiers.is_empty())
+                .all(|area| matches!(area.stem.as_str(), "draw" | "services"))
+        );
     }
 }

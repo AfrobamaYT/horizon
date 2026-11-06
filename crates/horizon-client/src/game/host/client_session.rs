@@ -1,6 +1,5 @@
 //! The game's side of the `client_session` area (`horizon-mod-api/src/host/client_session.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ClientSessionClientBackend for Game<'_> {
     fn player_block_breaking(&self, player: PlayerRef) -> Option<BlockBreakingState> {

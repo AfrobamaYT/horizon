@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `energy_capability` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EnergyCapabilityBackend {
     /// Side: server.
@@ -27,6 +28,7 @@ pub trait EnergyCapabilityBackend {
     }
 }
 /// The handles' server writes of the `energy_capability` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EnergyCapabilityBackendMut {
     /// Side: server.

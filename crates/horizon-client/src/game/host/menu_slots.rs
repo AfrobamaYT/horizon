@@ -1,6 +1,5 @@
 //! The game's side of the `menu_slots` area (`horizon-mod-api/src/host/menu_slots.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl MenuSlotsBackend for Game<'_> {
     fn menu_slot_backing(&self, menu: MenuRef, slot: usize) -> Option<MenuSlotBacking> {
