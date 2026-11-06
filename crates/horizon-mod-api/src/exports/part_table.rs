@@ -14,8 +14,8 @@ mod __private {
     pub use crate::part_table::{
         HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, TooltipAppenderPart,
         block_entity_types, block_listens, entity_parts, game_rule_bool_slot, game_rule_registry,
-        has_entity_parts, has_part_hook, has_scoped_hook, install_parts, key_mappings,
-        mark_game_thread, parts, resolve_parts, tooltip_appenders,
+        has_entity_parts, has_part_hook, has_scoped_hook, install_parts, install_resolved_parts,
+        key_mappings, mark_game_thread, parts, prepare_parts, resolve_parts, tooltip_appenders,
     };
     #[cfg(any(test, feature = "testing"))]
     pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
