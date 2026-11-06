@@ -538,11 +538,20 @@ pub(super) fn stage_pack(
             )
             .map_err(|e| e.to_string())
         });
-        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&root, vanilla_root));
+        let panorama = s.spawn(|| {
+            horizon_client::gfx::panorama::Faces::load(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                &horizon_assets::resource_source::ResourceSource::directory(
+                    vanilla_root.to_path_buf(),
+                ),
+            )
+        });
         let small = s.spawn(|| {
             (
                 horizon_client::sound_events::SoundRegistry::load(&root),
-                horizon_client::ui::read_metadata(&root),
+                horizon_client::ui::read_metadata(
+                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                ),
                 lang::Language::load(&[&root], &lang::code()),
             )
         });

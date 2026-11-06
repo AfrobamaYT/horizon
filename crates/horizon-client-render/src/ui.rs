@@ -5,12 +5,8 @@ use crate::{
     hud::{HudAtlas, HudBatch, Rect, rgba},
     text::Text,
 };
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::RwLock,
-    time::Instant,
-};
+use horizon_assets::resource_source::ResourceSource;
+use std::{collections::HashMap, sync::RwLock, time::Instant};
 
 /// `GuiSpriteScaling.NineSlice`: the sprite's size in GUI pixels, whatever
 /// its texture's resolution, its borders (left, top, right, bottom) in the
@@ -54,7 +50,7 @@ fn parse_nine_slice(v: &serde_json::Value) -> Option<NineSlice> {
     })
 }
 /// Read `gui.scaling` metadata for every GUI sprite under `root`.
-pub fn load_metadata(root: &Path) {
+pub fn load_metadata(root: &ResourceSource) {
     set_metadata(read_metadata(root));
 }
 /// The GUI sprites' nine-slice metadata of a resource root, read off the
@@ -66,42 +62,14 @@ pub fn set_metadata(metadata: UiMetadata) {
     *NINE_SLICE.write().unwrap_or_else(|e| e.into_inner()) = Some(metadata.0);
 }
 /// Reads the metadata [`load_metadata`] puts in use, without putting it in use.
-pub fn read_metadata(root: &Path) -> UiMetadata {
+pub fn read_metadata(root: &ResourceSource) -> UiMetadata {
     let mut map = HashMap::new();
-    let base = root.join("assets/minecraft/textures");
-    let sprites = base.join("gui/sprites");
-    // A prepared root's: from its data file, without listing the disk.
-    let files: Vec<PathBuf> = match horizon_core::prepared_files::files_under(&sprites) {
-        Some(files) => files
-            .iter()
-            .filter(|file| file.ends_with(".png.mcmeta"))
-            .map(|file| sprites.join(file))
-            .collect(),
-        None => {
-            let mut files = Vec::new();
-            let mut stack = vec![sprites];
-            while let Some(dir) = stack.pop() {
-                let Ok(entries) = std::fs::read_dir(&dir) else {
-                    continue;
-                };
-                for e in entries.flatten() {
-                    let p = e.path();
-                    if p.is_dir() {
-                        stack.push(p);
-                    } else if p.to_string_lossy().ends_with(".png.mcmeta") {
-                        files.push(p);
-                    }
-                }
-            }
-            files
-        }
-    };
-    for p in files {
-        let name = p.to_string_lossy().into_owned();
+    let base = "assets/minecraft/textures/";
+    for name in root.list("assets/minecraft/textures/gui/sprites/") {
         let Some(stripped) = name.strip_suffix(".png.mcmeta") else {
             continue;
         };
-        let Ok(text) = horizon_core::prepared_files::read_to_string(&p) else {
+        let Ok(text) = root.read_to_string(&name) else {
             continue;
         };
         let Some(nine_slice) = serde_json::from_str(&text)
@@ -111,10 +79,7 @@ pub fn read_metadata(root: &Path) -> UiMetadata {
         else {
             continue;
         };
-        let key = Path::new(stripped)
-            .strip_prefix(&base)
-            .map(|r| r.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
+        let key = stripped.strip_prefix(base).unwrap_or_default().to_owned();
         map.insert(key, nine_slice);
     }
     UiMetadata(map)
@@ -1769,6 +1734,7 @@ impl EditBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     /// The quads' destination rectangles and their UVs.
     fn quads(batch: &HudBatch) -> Vec<([f32; 4], [f32; 4])> {
@@ -2423,6 +2389,23 @@ mod tests {
         assert_eq!(
             menu_tooltip_position(screen, (100, 200), [100, 200, 150, 20], size),
             (112, 170)
+        );
+    }
+    #[test]
+    fn nine_slice_metadata_reads_resolved_resource_names_without_files() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            ("assets/minecraft/textures/gui/sprites/widget/button.png.mcmeta".to_owned(),
+             Resource::bytes(br#"{"gui":{"scaling":{"type":"nine_slice","width":20,"height":12,"border":3}}}"#.to_vec())),
+            ("assets/minecraft/textures/gui/sprites/broken.png.mcmeta".to_owned(), Resource::bytes(b"invalid".to_vec())),
+            ("assets/minecraft/textures/block/stone.png.mcmeta".to_owned(), Resource::bytes(b"{}".to_vec())),
+        ]));
+        let metadata = read_metadata(&source);
+        assert_eq!(metadata.0.len(), 1);
+        let button = metadata.0.get("gui/sprites/widget/button").unwrap();
+        assert_eq!(
+            (button.width, button.height, button.border),
+            (20, 12, [3; 4])
         );
     }
 }

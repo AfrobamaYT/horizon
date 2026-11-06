@@ -2529,7 +2529,14 @@ impl UiResources {
         std::thread::scope(|scope| {
             let panorama = named_scope(scope, "panorama", || {
                 startup::time("ui.panorama", || {
-                    horizon_client::gfx::panorama::Faces::load(root, defaults)
+                    horizon_client::gfx::panorama::Faces::load(
+                        &horizon_assets::resource_source::ResourceSource::directory(
+                            root.to_path_buf(),
+                        ),
+                        &horizon_assets::resource_source::ResourceSource::directory(
+                            defaults.to_path_buf(),
+                        ),
+                    )
                 })
             });
             let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
@@ -22179,7 +22186,9 @@ fn load_resources(
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(4);
     if !menu {
-        horizon_client::ui::load_metadata(&root);
+        horizon_client::ui::load_metadata(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        );
         horizon_client::lang::set(horizon_client::lang::Language::load(
             &[&root],
             &settings.language,

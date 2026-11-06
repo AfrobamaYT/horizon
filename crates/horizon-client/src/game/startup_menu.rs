@@ -84,7 +84,9 @@ impl StartupMenu {
     }
 
     pub(super) fn set_root(&mut self, root: PathBuf, settings: &Settings) {
-        horizon_client::ui::load_metadata(&root);
+        horizon_client::ui::load_metadata(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        );
         horizon_client::lang::set(horizon_client::lang::Language::load(
             &[&root],
             &settings.language,
