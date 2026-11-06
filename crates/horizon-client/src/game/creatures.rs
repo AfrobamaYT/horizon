@@ -378,6 +378,18 @@ enum OrbOrder {
 }
 
 impl Game<'_> {
+    /// The game's own player's uuid and entity id — the identity behind
+    /// [`Self::player_view`], so a tick that lends no guest's view names its
+    /// player (#1077). None where the view stands for nobody: no player of
+    /// the game's own, a fake one, or a guest's turn acting in its place.
+    pub(super) fn player_identity(&self) -> Option<([i32; 4], u32)> {
+        if self.lan_acting_fake || self.lan_acting_uuid.is_some() || self.player.is_none() {
+            return None;
+        }
+        let uuid = self.level.player_uuid?;
+        let id = u32::try_from(self.player.as_ref()?.entity_id).ok()?;
+        Some((uuid, id))
+    }
     pub(super) fn player_view(&self) -> Option<PlayerView> {
         if self.lan_acting_fake {
             return None;
@@ -401,6 +413,7 @@ impl Game<'_> {
                 p.position.z,
             ],
             alive: !p.health.dead_or_dying(),
+            invulnerable: p.invulnerable,
             // EntitySelector.NO_CREATIVE_OR_SPECTATOR.
             creative: self.creative || self.spectator(),
             sneaking: self.keys.held(Action::Sneak),
@@ -968,6 +981,7 @@ impl Game<'_> {
             controlling_player_movement: None,
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
             player,
+            player_identity: self.player_identity(),
             others,
             dragon: self.dragon_target(),
             leash_boats: &self.leash_boats,
@@ -1022,6 +1036,8 @@ impl Game<'_> {
                 .into_iter()
                 .any(mod_api::__private::listened))
             .then_some(self as &dyn horizon_client::mobs::MobHooks),
+            goal_host: (self.native_authoritative() && mod_api::__private::has_entity_parts())
+                .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
             asks_animal_tame: self.remote.is_none()
                 && mod_api::__private::listened(mod_api::HookId::AnimalTame),
             asks_living_destroy_block: self.remote.is_none()
@@ -1404,7 +1420,9 @@ impl Game<'_> {
                 let from = events.len();
                 // The guest's view is lent to the mob for its tick, not copied:
                 // the tick only reads it (`&MobWorld`), and it goes back to the
-                // guest's slot straight after.
+                // guest's slot straight after. Its identity is captured with
+                // it, once: the player a goal resolves is the one the tick
+                // sees — a guest on a server, the game's own otherwise (#1077).
                 let lent = seen_guest.and_then(|conn| guests.iter().position(|g| g.0 == conn));
                 let active_player = match (seen_guest, lent) {
                     (None, _) => base.player.take(),
@@ -1412,6 +1430,10 @@ impl Game<'_> {
                         .take()
                         .map(|stand_in| std::mem::replace(&mut guests[k].1, stand_in)),
                     (Some(_), None) => None,
+                };
+                let active_identity = match seen_guest {
+                    None => base.player_identity,
+                    Some(conn) => self.guest_identity(conn),
                 };
                 let mut w = MobWorld {
                     others: &snapshot,
@@ -1421,6 +1443,7 @@ impl Game<'_> {
                     difficulty,
                     nearest_player,
                     player: active_player,
+                    player_identity: active_identity,
                     teams: std::sync::Arc::clone(&base.teams),
                     ..base
                 };
@@ -7627,9 +7650,9 @@ impl Game<'_> {
             }),
             player_rot: [self.pitch, self.yaw],
             paused: self.pause,
-            first_person: self.camera_type.first_person(),
+            first_person: self.camera_type.is_first_person(),
             third_person_reversed: self.camera_type
-                == super::perspective::CameraType::ThirdPersonFront,
+                == horizon_client::camera::CameraType::ThirdPersonFront,
             ..Default::default()
         });
         for mob in &self.mobs {
@@ -8187,7 +8210,7 @@ impl Game<'_> {
 /// They stay continuous at pitch ±90, and in third-person front view they are
 /// the turned-round camera's, not the player's.
 fn thrown_item_axes(
-    camera_type: super::perspective::CameraType,
+    camera_type: horizon_client::camera::CameraType,
     yaw: f32,
     pitch: f32,
 ) -> (glam::Vec3, glam::Vec3) {
@@ -8808,7 +8831,7 @@ mod local_sound_event_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -8830,7 +8853,9 @@ mod local_sound_event_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -8879,11 +8904,11 @@ mod local_sound_event_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::super::perspective::CameraType;
     use super::mob_effect_instance;
     use super::thrown_item_axes;
     use super::thrown_item_quad;
     use super::{ProjectileKind, is_item_billboard};
+    use horizon_client::camera::CameraType;
 
     #[test]
     #[ignore = "needs prepared resources"]
@@ -9954,12 +9979,22 @@ mod pearl_tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let registry = assets.registry;
         let facts = horizon_client::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let data = horizon_client::mobs::MobData::load(&root, &facts);
-        let biomes = horizon_client::biome::Biomes::load(&root).unwrap();
+        let data = horizon_client::mobs::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
+        let biomes = horizon_client::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = horizon_client::items::Items::load(
             &root,
@@ -9986,6 +10021,7 @@ mod pearl_tests {
         }
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
+            goal_host: None,
             teams: Default::default(),
             loop_context: &crate::game::test_server_load()
                 .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
@@ -9998,6 +10034,7 @@ mod pearl_tests {
             suffocation: &suffocation,
             data: &data,
             player: None,
+            player_identity: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],
@@ -10629,7 +10666,7 @@ mod conversion_tag_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -10649,7 +10686,9 @@ mod conversion_tag_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

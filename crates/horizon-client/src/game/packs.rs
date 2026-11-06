@@ -59,12 +59,18 @@ pub fn startup_root(
     selected: &[String],
     server: &[Pack],
     mod_sources: &super::mods::ModsState,
-) -> horizon_client::Result<PathBuf> {
+) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let all = packs::discover(vanilla, &packs_dir());
     let mut enabled = packs::enabled(&all, selected);
     enabled.extend_from_slice(server);
     let base = super::mods::content_root(vanilla, mod_sources)?;
-    Ok(packs::resource_root(&base, &enabled, &cache_dir())?)
+    let source = packs::resources(base.source().clone(), &enabled)?;
+    Ok(horizon_assets::resource_source::ResourceRoot::new(
+        base.prepared().to_path_buf(),
+        cache_dir(),
+        source,
+    )
+    .with_data(base.data().clone(), base.data_changes().clone()))
 }
 fn info(p: &Pack) -> PackInfo {
     let built_in = !p.id.starts_with("file/");
@@ -376,6 +382,9 @@ impl Game<'_> {
             textures,
             cem,
             block_entity_shapes,
+            waypoint_styles,
+            armor_stand_assets,
+            frame_models,
             sounds,
             ui_metadata,
             language,
@@ -420,8 +429,14 @@ impl Game<'_> {
             }
         };
         // Everything loaded: switch over.
-        self.waypoint_styles = horizon_client::locator_bar::WaypointStyles::load(&root);
-        self.armor_stand_assets.reload_trims(&root);
+        [
+            self.frame_model,
+            self.glow_frame_model,
+            self.map_frame_model,
+            self.glow_map_frame_model,
+        ] = frame_models;
+        self.waypoint_styles = waypoint_styles;
+        self.armor_stand_assets.apply_resources(armor_stand_assets);
         self.random_tick_sections.clear();
         self.portals.sections.clear();
         self.options.resources = root.clone();
@@ -432,7 +447,7 @@ impl Game<'_> {
         self.skin_slots.forget();
         self.skin_downloads
             .borrow_mut()
-            .set_resource_root(self.options.resources.clone());
+            .set_resource_root(self.pack.source.clone());
         self.maps.slots.forget();
         self.map_patches.clear();
         // Kept mod block entities name the old atlas's sprites, and their view distances the old
@@ -441,8 +456,11 @@ impl Game<'_> {
         self.mod_view_distances.take();
         // The atlas's sprites moved: the particle engine re-reads every rect
         // and the packs' sprite sets, or every particle draws a stale region.
-        self.particles
-            .reload(&root, &self.gui.atlas.sprites, &self.gui.atlas.translucent);
+        self.particles.reload(
+            &self.pack.source,
+            &self.gui.atlas.sprites,
+            &self.gui.atlas.translucent,
+        );
         horizon_client::ui_theme::reset_atlas();
         // Villager hats come from the pack's texture metadata (shared data, swapped in place).
         *self
@@ -451,7 +469,7 @@ impl Game<'_> {
             .villager_hats
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            horizon_client::mobs::villager_hats::VillagerHats::load(&root);
+            horizon_client::mobs::villager_hats::VillagerHats::load(&self.pack.source);
         *self
             .res
             .mob_data()
@@ -490,10 +508,10 @@ impl Game<'_> {
         lang::set(if language.code == code {
             language
         } else {
-            lang::Language::load(&[&root], &code)
+            lang::Language::load(&[&self.pack.source], &code)
         });
         self.refresh_remote_language();
-        self.audio.reload_with(&root, sounds);
+        self.audio.reload_with(&self.pack.source, sounds);
         self.clear_lod();
         // A pack that may replace leaf models falls back to `Off` before the
         // reload marks every section dirty.
@@ -521,7 +539,7 @@ impl Game<'_> {
         // The creative screen survives the reload; item names may not.
         self.creative_screen.forget_items();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
-        self.refresh_loop_context();
+        self.refresh_loop_context()?;
         self.texture_atlases_stitched();
         self.native_client_resources_reloaded();
         Ok(())
@@ -545,13 +563,15 @@ pub(super) fn stage_pack(
     japanese: bool,
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
-    let root = startup_root(vanilla_root, selected, server, mod_sources)?;
+    let resource_root = startup_root(vanilla_root, selected, server, mod_sources)?;
+    let root = resource_root.prepared().to_path_buf();
+    let source = resource_root.source().clone();
     progress.set(1);
     // The mod listeners prepare against the merged root before the heavy
     // staging builds run: a listener that fails aborts the reload without the
     // renderer work, keeping every listener's previous assets.
     let client_applies = super::client_reload::stage_client_reload(
-        &root,
+        &source,
         client_listeners,
         mod_api::__private::ModPhase::World,
     )
@@ -563,19 +583,18 @@ pub(super) fn stage_pack(
     // the frame that applies the reload (about 20 ms of it).
     let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {
         let atlas = s.spawn(|| {
-            HudAtlas::build_over_with_image(&root, vanilla_root, mod_image)
-                .map_err(|e| e.to_string())
+            HudAtlas::build_over_with_image(&source, &source, mod_image).map_err(|e| e.to_string())
         });
-        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&root, vanilla_root));
+        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&source, &source));
         let small = s.spawn(|| {
             (
-                horizon_client::sound_events::SoundRegistry::load(&root),
-                horizon_client::ui::read_metadata(&root),
-                lang::Language::load(&[&root], &lang::code()),
+                horizon_client::sound_events::SoundRegistry::load(&source),
+                horizon_client::ui::read_metadata(&source),
+                lang::Language::load(&[&source], &lang::code()),
             )
         });
         (
-            assets.reload(&root),
+            assets.reload(&resource_root),
             atlas.join(),
             panorama.join(),
             small
@@ -593,7 +612,7 @@ pub(super) fn stage_pack(
     };
     progress.set(2);
     let pack = PackResources::load(
-        &root,
+        &resource_root,
         assets.clone(),
         render,
         res.facts(),
@@ -603,10 +622,13 @@ pub(super) fn stage_pack(
     )?;
     let textures = prepare_renderer_textures(&pack);
     let cem = Arc::new(horizon_client::mobs::cem::CemModels::load(
-        &root,
+        &source,
         res.mob_types(),
     ));
-    let block_entity_shapes = res.block_entity_render().shapes_for(&root);
+    let block_entity_shapes = res.block_entity_render().shapes_for(&source);
+    let waypoint_styles = horizon_client::locator_bar::WaypointStyles::load(&source);
+    let armor_stand_assets = super::armor_stands::ArmorStandAssets::load(&source, None);
+    let frame_models = super::frames::bake_frames(&source);
     progress.set(3);
     Ok(StagedPack {
         root,
@@ -616,6 +638,9 @@ pub(super) fn stage_pack(
         textures,
         cem,
         block_entity_shapes,
+        waypoint_styles,
+        armor_stand_assets,
+        frame_models,
         sounds,
         ui_metadata,
         language,
@@ -626,6 +651,9 @@ pub(super) fn stage_pack(
 /// it on the render thread).
 pub(super) struct StagedPack {
     pub root: PathBuf,
+    pub waypoint_styles: horizon_client::locator_bar::WaypointStyles,
+    pub armor_stand_assets: super::armor_stands::ArmorStandAssets,
+    pub frame_models: [super::frames::FrameModel; 4],
     /// The mod reload listeners' prepared applies, run when the rest of the
     /// staged pack is published.
     pub client_applies: Vec<super::client_reload::PreparedClientReload>,
@@ -790,17 +818,40 @@ mod tests {
             br#"{"pack":{"description":"test","pack_format":97}}"#,
         )
         .unwrap();
+        {
+            use std::io::Write;
+            let mut archive =
+                zip::ZipWriter::new(fs::File::create(dir.join("packs/override.zip")).unwrap());
+            for name in ["pack.mcmeta", asset] {
+                archive
+                    .start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                archive
+                    .write_all(&fs::read(pack_dir.join(name)).unwrap())
+                    .unwrap();
+            }
+            archive.finish().unwrap();
+            fs::remove_dir_all(&pack_dir).unwrap();
+        }
         let mut sources = super::super::mods::ModsState {
             dev: vec![mod_dir],
             ..Default::default()
         };
         sources.select(&std::env::current_dir().unwrap(), &Default::default());
         let without_pack = startup_root(&vanilla, &[], &[], &sources).unwrap();
-        assert_eq!(fs::read(without_pack.join(asset)).unwrap(), b"mod");
+        assert_eq!(without_pack.source().read(asset).unwrap(), b"mod");
         let pack = packs::folder(&dir.join("packs"), packs::RESOURCE_FORMAT);
         assert_eq!(pack.len(), 1);
         let with_pack = startup_root(&vanilla, &[], &pack, &sources).unwrap();
-        assert_eq!(fs::read(with_pack.join(asset)).unwrap(), b"pack");
+        assert_eq!(with_pack.source().read(asset).unwrap(), b"pack");
+        // The selected archive changes resource lookup without materializing
+        // its override beside generated tables.
+        assert_eq!(with_pack.prepared(), without_pack.prepared());
+        assert_ne!(
+            fs::read(with_pack.prepared().join(asset)).ok().as_deref(),
+            Some(b"pack".as_slice())
+        );
+        assert!(!pack_dir.exists());
         fs::remove_dir_all(dir).unwrap();
     }
 

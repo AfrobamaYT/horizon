@@ -8,11 +8,15 @@ screen (the same screen as vanilla's) or in game, and every loader reloads from 
 
 `packs.rs` finds the packs (`FolderRepositorySource`: folders and zips, plus the built-in Programmer Art and High
 Contrast, which only the asset index holds: preparation copies them, `horizon-prepare packs` repairs older resources),
-reads `pack.mcmeta` (format range, overlays, filters) and builds one overlay directory that layers the
-selected packs over the prepared vanilla resources, later packs winning. Files vanilla reads as a resource *stack*
-(language files, `sounds.json`, font definitions, atlas definitions) are merged layer by layer as vanilla merges them.
-Every loader then reads that one tree; `game/packs.rs` (`reload_packs`) reloads all of them in game, as
-`Minecraft.reloadResourcePacks` does. Unchanged selections reuse the overlay ([reuse-pack-overlays.md](reuse-pack-overlays.md)).
+reads `pack.mcmeta` (format range, overlays, filters) and resolves one shared resource view over the
+prepared vanilla resources, later packs winning. Folders and open zip files use the same lookup and listing
+interface; archive entries stay in their archives. Files vanilla reads as a resource *stack* (language files,
+`sounds.json`, font definitions, atlas definitions) are merged layer by layer as vanilla merges them.
+Every loader reads that view; `game/packs.rs` (`reload_packs`) prepares a new generation on a worker and
+publishes it after loading succeeds, as `Minecraft.reloadResourcePacks` does. Readers of the previous
+archive generation retain its open files. Prepared registry tables and disposable decoding caches have
+separate filesystem locations. [The older overlay measurements](reuse-pack-overlays.md) describe the
+previous materializing loader, not the current startup path.
 
 Vanilla 26.3's reload listeners (`Minecraft.<init>`, `Gui`, `Hud`): languages, textures, shaders, sounds, atlases,
 fonts, grass / foliage / dry foliage colour maps, models (block states, block models, item definitions), equipment
@@ -24,7 +28,7 @@ of them.
 
 **Works**: Horizon reads it from the pack and draws or plays it like vanilla. **Partly**: some of it.
 **No**: ignored (the vanilla version stays). Proof: a parity harness in `tools/` (compares with the pinned 26.3
-client), a unit test, or the loader reading the overlay (vanilla's files go through the same loader, and the
+client), a unit test, or the loader reading the resolved resources (vanilla's files go through the same loader, and the
 harness named checks that loader against vanilla).
 
 | Feature | Files | State | Proof |

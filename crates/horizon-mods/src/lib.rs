@@ -3,6 +3,7 @@
 //! native (docs/modding/src/how-to/native-mods.md).
 pub mod content;
 pub mod dependencies;
+pub mod enabled;
 pub mod game_identity;
 pub mod icon;
 #[cfg(feature = "index")]
