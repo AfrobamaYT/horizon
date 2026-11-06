@@ -233,6 +233,7 @@ mod tests {
             registry,
             facts: &facts,
             fluid_tables: &motion.fluids,
+            attributes: &motion.attributes,
             movement: &motion.blocks,
             collision: &collision,
             suffocation: &suffocation,
