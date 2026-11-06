@@ -58,6 +58,7 @@ fn overlay_key(overlay: &horizon_world::loot::PackOverlay) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     overlay.files.hash(&mut hasher);
+    overlay.conditions.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -4271,7 +4272,7 @@ mod tests {
             vec![br#"{"message_id":"world_heat","scaling":"never","exhaustion":0.25}"#.to_vec()],
         )];
         barrier.wait();
-        let overlay = PackOverlay { files: &files };
+        let overlay = PackOverlay::new(&files);
         let damage = horizon_world::damage_source::Catalog::load(&root, &overlay).unwrap();
         initialize_world_sync_data(
             &mut cache.lock().unwrap(),
@@ -4344,7 +4345,7 @@ mod tests {
             initialize_world_sync_data(
                 &mut cache,
                 &root.join("absent"),
-                &PackOverlay { files: &files },
+                &PackOverlay::new(&files),
                 &damage,
                 &item_data,
             )
@@ -4386,7 +4387,7 @@ mod tests {
         initialize_world_sync_data(
             &mut cache,
             &root,
-            &PackOverlay { files: &initial },
+            &PackOverlay::new(&initial),
             &damage,
             &item_data,
         )
@@ -4416,7 +4417,7 @@ mod tests {
                 ],
             ),
         ];
-        let overlay = PackOverlay { files: &changed };
+        let overlay = PackOverlay::new(&changed);
         assert!(prepare_sync_reload(&mut cache, &overlay).is_none());
         let health = damage.reload_tags(&root, &overlay).unwrap();
         let wire = cached_sync_data(&mut cache, &root, &overlay, &item_data).unwrap();
@@ -4489,7 +4490,7 @@ mod tests {
         initialize_world_sync_data(
             &mut cache,
             &root,
-            &PackOverlay { files: &files },
+            &PackOverlay::new(&files),
             &damage,
             &item_data,
         )
@@ -5253,7 +5254,12 @@ mod sources_tests {
     fn the_server_sources_key_follows_the_packs_bytes() {
         let files = vec![("recipe/a:b".to_owned(), vec![b"{}".to_vec()])];
         let changed = vec![("recipe/a:b".to_owned(), vec![b"{ }".to_vec()])];
-        let key = |files: &[(String, Vec<Vec<u8>>)]| overlay_key(&PackOverlay { files });
+        let key = |files: &[(String, Vec<Vec<u8>>)]| {
+            overlay_key(&PackOverlay {
+                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+                files,
+            })
+        };
         assert_eq!(key(&files), key(&files.clone()));
         assert_ne!(key(&files), key(&changed));
         assert_ne!(key(&files), key(&[]));

@@ -150,6 +150,7 @@ fn loot_key(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> u64 {
     let mut hasher = DefaultHasher::new();
     root.hash(&mut hasher);
     overlay.files.hash(&mut hasher);
+    overlay.conditions.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -511,7 +512,7 @@ mod tests {
             "loot_table/chests/x".to_owned(),
             vec![br#"{"pools": []}"#.to_vec()],
         )];
-        let packs = PackOverlay { files: &files };
+        let packs = PackOverlay::new(&files);
         let other = reuse_or_load(&mut slot, &root, &packs, &defaults).unwrap();
         assert!(!Arc::ptr_eq(&first, &other));
         let next_defaults = horizon_world::item_defaults::read(&root).unwrap();

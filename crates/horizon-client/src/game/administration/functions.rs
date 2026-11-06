@@ -209,7 +209,7 @@ impl Game<'_> {
             enabled_features,
             &additional,
         );
-        let prepared = self.prepare_server_reload(&stack)?;
+        let prepared = self.prepare_server_reload(&stack, &resources)?;
         let context = self
             .prepare_loop_context(&resources)
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
@@ -1089,7 +1089,7 @@ impl Game<'_> {
         );
         stack.enabled =
             datapack::selected_ids(stack.packs.iter().map(Arc::as_ref), &self.fns.enabled);
-        let prepared = match self.prepare_server_reload(&stack) {
+        let prepared = match self.prepare_server_reload(&stack, &self.options.resources) {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.fns.enabled = previous_enabled;
@@ -1596,7 +1596,7 @@ mod tests {
             .find(|(id, _)| id == "tags/pkg:item/both")
             .unwrap();
         assert!(horizon_world::loot::PackOverlay::top(versions).starts_with(b"{\"replace\""));
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let overlay = horizon_world::loot::PackOverlay::new(&files);
         let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
         assert!(tags["pkg:both"].contains("pkg:from_pack"));
         assert!(!tags["pkg:both"].contains("pkg:from_mod"));
@@ -1610,7 +1610,7 @@ mod tests {
             &stack,
             vec![("tags/pkg:item/mod_only".to_owned(), tag("pkg:second_load"))],
         );
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let overlay = horizon_world::loot::PackOverlay::new(&files);
         let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
         assert_eq!(
             tags["pkg:mod_only"].iter().collect::<Vec<_>>(),
@@ -1624,7 +1624,7 @@ mod tests {
                 ("tags/pkg:item/good".to_owned(), tag("pkg:good")),
             ],
         );
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let overlay = horizon_world::loot::PackOverlay::new(&files);
         let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
         assert!(!tags.contains_key("pkg:mod_only"));
         assert!(tags["pkg:good"].contains("pkg:good"));

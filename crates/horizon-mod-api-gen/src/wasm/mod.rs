@@ -908,6 +908,22 @@ mod tests {
     }
 
     #[test]
+    fn client_option_snapshots_have_generated_wasm_bindings() {
+        with_interface("client-host", |client, unbound| {
+            for (function, name) in [
+                ("graphics-options", "graphics_options"),
+                ("gui-options", "gui_options"),
+                ("chat-options", "chat_options"),
+                ("audio-options", "audio_options"),
+            ] {
+                assert!(client.functions.contains_key(function), "{function}");
+                let unbound_name = format!("ClientHost::{name}");
+                assert!(!unbound.contains(&unbound_name), "{name}");
+            }
+        });
+    }
+
+    #[test]
     fn recipe_rules_are_generated_in_wasm_contract() {
         std::thread::Builder::new()
             .stack_size(64 << 20)
@@ -1204,6 +1220,37 @@ mod tests {
                         .unbound
                         .iter()
                         .any(|name| name == "ClientHost::modifiers")
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn client_camera_entity_has_a_generated_wasm_binding() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let client =
+                    &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
+                assert!(client.functions.contains_key("camera-entity"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name == "ClientHost::camera_entity")
                 );
             })
             .unwrap()
