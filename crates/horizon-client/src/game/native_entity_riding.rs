@@ -144,7 +144,7 @@ impl Game<'_> {
         }
         if !force {
             match rider {
-                Target::Player if self.keys.held(horizon_client::gamepad::Action::Sneak) => {
+                Target::Player if self.keys.held(horizon_client::actions::Action::Sneak) => {
                     return false;
                 }
                 Target::Mob(id)
