@@ -340,8 +340,6 @@ pub struct Hub {
     pub encoder: ChunkEncoder,
     pub guests: super::guest_list::GuestList,
     pub(super) sync: Arc<SyncData>,
-    /// Immutable definitions of the world served by this hub.
-    pub rule_registry: Arc<crate::gamerules::RuleRegistry>,
     pub ticks: u64,
     /// The next `Guest.vehicle_order`: a rider that boards later sits behind.
     pub seat_order: u64,
@@ -727,7 +725,6 @@ impl Hub {
             encoder,
             guests: Default::default(),
             sync,
-            rule_registry: crate::gamerules::rule_registry(),
             ticks: 0,
             seat_order: 0,
             sound_seeds: Mutex::new(LegacyRandom::new(crate::sound_engine::unique_seed())),
@@ -5304,15 +5301,6 @@ mod tests {
             horizon_protocol::registry::Ids::from_names(vec!["minecraft:speed".to_string()]),
         );
         hub_with_sync(sync)
-    }
-
-    #[test]
-    fn resource_reload_keeps_the_session_rule_registry() {
-        let (mut hub, _rx) = hub_with_sync(SyncData::empty());
-        let registry = Arc::new(crate::gamerules::RuleRegistry::vanilla());
-        hub.rule_registry = registry.clone();
-        hub.reload_resources(Arc::new(SyncData::empty()), &mut Default::default());
-        assert!(Arc::ptr_eq(&hub.rule_registry, &registry));
     }
 
     /// [`hub_with_a_guest`] over a sync the test built.

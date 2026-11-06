@@ -354,10 +354,6 @@ impl GameRules {
             minecart_improvements: features.iter().any(|f| f == MINECART_IMPROVEMENTS),
         }
     }
-    /// The definitions shared by this rule set's session.
-    pub fn registry(&self) -> &Arc<RuleRegistry> {
-        &self.registry
-    }
     /// GameRules.copy(enabledFeatures): keep available values, add defaults for
     /// newly enabled rules and discard rules absent from the target feature set.
     pub fn copy_with_features(&self, features: &[String]) -> Self {
@@ -578,8 +574,8 @@ mod tests {
         let rules = GameRules::with_registry(first.clone(), &[]);
         let loaded = GameRules::from_nbt_with_registry(&rules.to_nbt().tag, &[], first.clone());
         let copied = loaded.copy_with_features(&[MINECART_IMPROVEMENTS.to_owned()]);
-        assert!(Arc::ptr_eq(copied.registry(), &first));
-        assert!(!Arc::ptr_eq(copied.registry(), &second));
+        assert!(Arc::ptr_eq(&copied.registry, &first));
+        assert!(!Arc::ptr_eq(&copied.registry, &second));
     }
 
     #[test]
