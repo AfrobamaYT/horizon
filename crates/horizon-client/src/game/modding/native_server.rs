@@ -1308,9 +1308,8 @@ impl Game<'_> {
         super::dedicated::events::record("announce", name, uuid, json!({ "message": message }));
         true
     }
-    /// A line of the command's answer, inside `native_run_mod_command`:
-    /// sent to the player whose command it is after the call, as vanilla
-    /// commands' feedback is.
+    /// A command's success feedback, routed to its originating source using
+    /// vanilla's silence, send-command-feedback and block/cart track-output rules.
     pub(super) fn native_feedback(&mut self, line: Text) {
         let source = self.command_source.unwrap_or_else(|| self.player_source());
         self.with_source(
@@ -1942,7 +1941,7 @@ mod tests {
             game.world.block_entities.insert(
                 (1, 64, 1),
                 BlockEntity::CommandBlock(Box::new(CommandBlock {
-                    command: "origin".into(),
+                    command: "execute in minecraft:the_nether run origin".into(),
                     condition_met: true,
                     ..Default::default()
                 })),
