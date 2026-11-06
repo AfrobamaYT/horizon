@@ -5,7 +5,8 @@
 //! member), compiled once and cached by its members' hashes, and instantiated with the
 //! mod API as its only imports. A group runs sandboxed from the others and from the game; a
 //! trap stops its group. Every refusal names its reason for the Mods page.
-use horizon_mods::manifest::{Dependency, Manifest};
+use horizon_mods::dependencies;
+use horizon_mods::manifest::Manifest;
 use mod_api::__private::wasm_host::{Budgets, EPOCH, LoadError, Member};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -41,6 +42,8 @@ pub struct WasmPackage {
 pub enum Refusal {
     /// A required dependency isn't installed, or none installed matches its version.
     MissingDependency { dependency: String, version: String },
+    /// The shared native/wasm resolver refused the dependency graph.
+    DependencyOrder { reason: String },
     /// A dependency's installed `mod.wasm` isn't the one this mod was linked against.
     LinkedAgainst { dependency: String },
     /// Members of one group were built with different toolchains.
@@ -82,6 +85,7 @@ impl std::fmt::Display for Refusal {
             } => {
                 write!(f, "needs {dependency} {version}, which isn't installed")
             }
+            Self::DependencyOrder { reason } => write!(f, "{reason}"),
             Self::LinkedAgainst { dependency } => {
                 write!(f, "built against another build of {dependency}")
             }
@@ -158,13 +162,6 @@ pub fn engine(config: &RuntimeConfig) -> wasmtime::Result<wasmtime::Engine> {
     Ok(engine)
 }
 
-fn dependency_version(dependency: &Dependency) -> (&semver::VersionReq, bool) {
-    match dependency {
-        Dependency::Version(version) => (version, false),
-        Dependency::Detailed(details) => (&details.version, details.optional),
-    }
-}
-
 /// Splits the packages into groups: each mod with everything it depends on, transitively;
 /// two mods sharing a dependency share its group, so a library has one copy. A mod whose
 /// required dependency is missing, or whose linked hashes or toolchain disagree, is refused
@@ -176,25 +173,81 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
         .map(|(i, p)| (p.manifest.id.as_str(), i))
         .collect();
     let mut refused: BTreeMap<usize, Refusal> = BTreeMap::new();
+    let declared: Vec<_> = packages
+        .iter()
+        .map(|p| dependencies::from_manifest(&p.manifest.dependencies))
+        .collect();
+    // Refuse exactly the resolver's owners, then their dependents, preserving
+    // unrelated libraries. There is no second semver or topological rule here.
+    let order = loop {
+        let active: Vec<_> = (0..packages.len())
+            .filter(|i| !refused.contains_key(i))
+            .collect();
+        let inputs: Vec<_> = active
+            .iter()
+            .map(|&i| dependencies::Mod {
+                id: &packages[i].manifest.id,
+                version: &packages[i].manifest.version,
+                has_api: true,
+                dependencies: &declared[i],
+            })
+            .collect();
+        match dependencies::resolve(&inputs) {
+            Ok(resolution) => {
+                break resolution
+                    .order
+                    .into_iter()
+                    .map(|i| active[i])
+                    .collect::<Vec<_>>();
+            }
+            Err(error) => {
+                let reason = error.to_string();
+                let owners: Vec<&str> = match &error {
+                    dependencies::Error::Cycle { mods } => {
+                        mods.iter().map(String::as_str).collect()
+                    }
+                    dependencies::Error::Duplicate(id) => vec![id],
+                    dependencies::Error::Manifest { owner, .. }
+                    | dependencies::Error::Missing { owner, .. }
+                    | dependencies::Error::NoApi { owner, .. }
+                    | dependencies::Error::CargoConflict { owner, .. }
+                    | dependencies::Error::Version { owner, .. } => vec![owner],
+                };
+                for &i in &active {
+                    if owners.contains(&packages[i].manifest.id.as_str()) {
+                        let refusal = match &error {
+                            dependencies::Error::Missing { target, .. }
+                            | dependencies::Error::Version { target, .. } => {
+                                Refusal::MissingDependency {
+                                    dependency: target.clone(),
+                                    version: declared[i]
+                                        .iter()
+                                        .find(|d| d.id == *target)
+                                        .unwrap()
+                                        .requirement
+                                        .to_string(),
+                                }
+                            }
+                            _ => Refusal::DependencyOrder {
+                                reason: reason.clone(),
+                            },
+                        };
+                        refused.insert(i, refusal);
+                    }
+                }
+                propagate_refusals(packages, &by_id, &mut refused);
+            }
+        }
+    };
+
     for (i, package) in packages.iter().enumerate() {
         let wasm = package
             .manifest
             .wasm
             .as_ref()
             .expect("a wasm package declares [wasm]");
-        for (id, dependency) in &package.manifest.dependencies {
-            let (version, optional) = dependency_version(dependency);
-            let found = by_id.get(id.as_str()).filter(|&&d| {
-                semver::Version::parse(&packages[d].manifest.version)
-                    .is_ok_and(|v| version.matches(&v))
-            });
-            let Some(&d) = found else {
-                if !optional {
-                    refused.entry(i).or_insert(Refusal::MissingDependency {
-                        dependency: id.clone(),
-                        version: version.to_string(),
-                    });
-                }
+        for id in package.manifest.dependencies.keys() {
+            let Some(&d) = by_id.get(id.as_str()) else {
                 continue;
             };
             let dep = packages[d]
@@ -219,30 +272,7 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
             }
         }
     }
-    // A refused mod takes its dependents with it, until nothing changes.
-    loop {
-        let before = refused.len();
-        for (i, package) in packages.iter().enumerate() {
-            if refused.contains_key(&i) {
-                continue;
-            }
-            if let Some(id) = package.manifest.dependencies.keys().find(|id| {
-                by_id
-                    .get(id.as_str())
-                    .is_some_and(|d| refused.contains_key(d))
-            }) {
-                refused.insert(
-                    i,
-                    Refusal::DependencyRefused {
-                        dependency: id.clone(),
-                    },
-                );
-            }
-        }
-        if refused.len() == before {
-            break;
-        }
-    }
+    propagate_refusals(packages, &by_id, &mut refused);
     // Union-find over the dependency edges of the mods that stay.
     let mut parent: Vec<usize> = (0..packages.len()).collect();
     fn root(parent: &mut [usize], mut i: usize) -> usize {
@@ -270,7 +300,13 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
     }
     let groups = by_root
         .into_values()
-        .map(|members| dependency_order(packages, members))
+        .map(|members| {
+            order
+                .iter()
+                .copied()
+                .filter(|i| members.contains(i))
+                .collect()
+        })
         .collect();
     let refused = refused
         .into_iter()
@@ -279,30 +315,35 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
     (groups, refused)
 }
 
-/// A group's members, each after the members it depends on (ties by id).
-fn dependency_order(packages: &[WasmPackage], members: Vec<usize>) -> Vec<usize> {
-    let mut placed: Vec<usize> = Vec::new();
-    let mut left: BTreeSet<(&str, usize)> = members
-        .iter()
-        .map(|&i| (packages[i].manifest.id.as_str(), i))
-        .collect();
-    while !left.is_empty() {
-        let ready = left
-            .iter()
-            .copied()
-            .find(|&(_, i)| {
-                packages[i]
-                    .manifest
-                    .dependencies
-                    .keys()
-                    .all(|id| !left.iter().any(|&(other, _)| other == id))
-            })
-            // A cycle: link the rest as they are; the linker resolves symbols both ways.
-            .unwrap_or_else(|| *left.iter().next().unwrap());
-        left.remove(&ready);
-        placed.push(ready.1);
+/// A refused mod takes its dependents with it, until nothing changes.
+fn propagate_refusals(
+    packages: &[WasmPackage],
+    by_id: &BTreeMap<&str, usize>,
+    refused: &mut BTreeMap<usize, Refusal>,
+) {
+    loop {
+        let before = refused.len();
+        for (i, package) in packages.iter().enumerate() {
+            if refused.contains_key(&i) {
+                continue;
+            }
+            if let Some(id) = package.manifest.dependencies.keys().find(|id| {
+                by_id
+                    .get(id.as_str())
+                    .is_some_and(|d| refused.contains_key(d))
+            }) {
+                refused.insert(
+                    i,
+                    Refusal::DependencyRefused {
+                        dependency: id.clone(),
+                    },
+                );
+            }
+        }
+        if refused.len() == before {
+            break;
+        }
     }
-    placed
 }
 
 /// The linked component of one group, from the cache when its members are unchanged.
@@ -494,7 +535,7 @@ pub fn load_installed(
     game_dir: &Path,
     dev: &[PathBuf],
     config: &RuntimeConfig,
-) -> (Vec<mod_api::ModEntry>, Vec<Listening>) {
+) -> (Vec<mod_api::ModEntry>, Vec<Listening>, Vec<Manifest>) {
     let enabled = horizon_mods::mod_list::ModList::load(game_dir).enabled;
     let mut refused = Vec::new();
     let packages: Vec<WasmPackage> =
@@ -513,6 +554,7 @@ pub fn load_installed(
                 },
             )
             .collect();
+    let mut manifests: Vec<_> = packages.iter().map(|p| p.manifest.clone()).collect();
     let loaded = if packages.is_empty() {
         (Vec::new(), Vec::new())
     } else {
@@ -536,7 +578,8 @@ pub fn load_installed(
         log::warn!("wasm mod {id} refused: {why}");
     }
     let _ = REFUSED.set(refused);
-    loaded
+    manifests.retain(|m| loaded.0.iter().any(|entry| entry.id == m.id));
+    (loaded.0, loaded.1, manifests)
 }
 
 #[cfg(test)]
@@ -640,6 +683,46 @@ mod tests {
             ids(&packages, &groups),
             [vec!["lib", "b", "c"], vec!["alone"]]
         );
+    }
+
+    #[test]
+    fn bundle_ties_and_cycle_refusals_match_the_native_resolver() {
+        let packages = vec![
+            package("z", "1", "lib = '^1'", 'b', "t", ""),
+            package("lib", "1.2", "", 'a', "t", ""),
+            package("a", "1", "lib = '^1'", 'c', "t", ""),
+        ];
+        let (group, refused) = groups(&packages);
+        assert!(refused.is_empty());
+        assert_eq!(ids(&packages, &group), [vec!["lib", "z", "a"]]);
+        let declared: Vec<_> = packages
+            .iter()
+            .map(|p| dependencies::from_manifest(&p.manifest.dependencies))
+            .collect();
+        let native: Vec<_> = packages
+            .iter()
+            .zip(&declared)
+            .map(|(p, dependencies)| dependencies::Mod {
+                id: &p.manifest.id,
+                version: &p.manifest.version,
+                has_api: true,
+                dependencies,
+            })
+            .collect();
+        assert_eq!(group[0], dependencies::resolve(&native).unwrap().order);
+        let cyclic = vec![
+            package("a", "1", "b = '^1'", 'a', "t", ""),
+            package("b", "1", "a = '^1'", 'b', "t", ""),
+            package("user", "1", "a = '^1'", 'c', "t", ""),
+            package("free", "1", "", 'd', "t", ""),
+        ];
+        let (group, refused) = groups(&cyclic);
+        assert_eq!(ids(&cyclic, &group), [vec!["free"]]);
+        assert!(
+            matches!(&refused[0].1, Refusal::DependencyOrder { reason } if reason.contains("a -> b -> a"))
+        );
+        assert!(matches!(&refused[1].1, Refusal::DependencyOrder { .. }));
+        assert!(matches!(&refused[2].1, Refusal::DependencyRefused { .. }));
     }
 
     #[test]

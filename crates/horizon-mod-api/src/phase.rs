@@ -2,6 +2,197 @@
 pub use horizon_world::native_load_context::{DataLoadOrigin, LoopSide};
 use std::sync::{Arc, OnceLock};
 
+/// The permission boundary of the current owning thread. Only the game advances it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ModPhase {
+    /// Package discovery, before declarations.
+    Packages,
+    /// Once-only declarations, without a Host.
+    Registration,
+    /// One side's startup, before its configs and world.
+    Setup,
+    /// Config loading: settings reads only.
+    Config,
+    /// The owning game's normal runtime.
+    World,
+    /// Restricted data or asset loading, returning to its entering phase.
+    Reloading,
+}
+
+#[derive(Clone, Copy)]
+struct PhaseState {
+    phase: ModPhase,
+    resume: Option<ModPhase>,
+}
+
+thread_local! {
+    static PHASE: std::cell::Cell<PhaseState> = const { std::cell::Cell::new(PhaseState {
+        phase: if cfg!(test) { ModPhase::World } else { ModPhase::Packages }, resume: None,
+    }) };
+}
+
+/// A refused engine transition never changes the phase or dispatches a hook.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PhaseError {
+    /// The token belongs to another thread.
+    WrongThread,
+    /// The requested edge is not part of the phase machine.
+    Transition {
+        /// Unchanged current phase.
+        from: ModPhase,
+        /// Refused destination.
+        to: ModPhase,
+    },
+}
+impl std::fmt::Display for PhaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "mod phase transition refused: {self:?}")
+    }
+}
+impl std::error::Error for PhaseError {}
+
+/// Engine-only authority for one thread; moving it does not transfer authority.
+#[derive(Clone)]
+pub struct PhaseOwner {
+    thread: std::thread::ThreadId,
+}
+impl PhaseOwner {
+    /// Bind a new owning thread (or a loader) to its initial phase. Registration
+    /// is process-owned; a new side starts at Setup after those tables are frozen.
+    pub fn new(initial: ModPhase) -> Self {
+        PHASE.set(PhaseState {
+            phase: initial,
+            resume: None,
+        });
+        Self {
+            thread: std::thread::current().id(),
+        }
+    }
+    /// A loader's temporary thread-local phase; the calling thread's state is restored.
+    pub fn scope(initial: ModPhase) -> PhaseScope {
+        let previous = PHASE.with(std::cell::Cell::get);
+        PhaseScope {
+            owner: Self::new(initial),
+            previous,
+            _thread: std::marker::PhantomData,
+        }
+    }
+    /// Advance a legal edge on the bound thread, without dispatching anything.
+    pub fn advance(&self, to: ModPhase) -> Result<(), PhaseError> {
+        if self.thread != std::thread::current().id() {
+            return Err(PhaseError::WrongThread);
+        }
+        PHASE.with(|cell| {
+            let mut state = cell.get();
+            let from = state.phase;
+            match (from, to) {
+                (ModPhase::Packages, ModPhase::Registration)
+                | (ModPhase::Registration, ModPhase::Setup)
+                | (ModPhase::Setup, ModPhase::Config)
+                | (ModPhase::Config, ModPhase::World)
+                | (ModPhase::World, ModPhase::Config) => {}
+                (ModPhase::Setup | ModPhase::World, ModPhase::Reloading) => {
+                    state.resume = Some(from);
+                }
+                (ModPhase::Reloading, _) if state.resume == Some(to) => {
+                    state.resume = None;
+                }
+                _ => return Err(PhaseError::Transition { from, to }),
+            }
+            state.phase = to;
+            cell.set(state);
+            Ok(())
+        })
+    }
+    /// Load configs before returning to normal runtime, including on failure.
+    pub fn config(&self) -> Result<ReloadPhase<'_>, PhaseError> {
+        self.advance(ModPhase::Config)?;
+        Ok(ReloadPhase {
+            owner: self,
+            resume: ModPhase::World,
+            _thread: std::marker::PhantomData,
+        })
+    }
+    /// Nest a reload in Setup or World; errors and panics restore the caller's phase.
+    pub fn reloading(&self) -> Result<ReloadPhase<'_>, PhaseError> {
+        let resume = current_phase();
+        self.advance(ModPhase::Reloading)?;
+        Ok(ReloadPhase {
+            owner: self,
+            resume,
+            _thread: std::marker::PhantomData,
+        })
+    }
+}
+
+/// A temporary loader context, not authority transferred to a worker.
+// exhaustive: engine-only constructor and private state
+pub struct PhaseScope {
+    owner: PhaseOwner,
+    previous: PhaseState,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+impl std::ops::Deref for PhaseScope {
+    type Target = PhaseOwner;
+    fn deref(&self) -> &PhaseOwner {
+        &self.owner
+    }
+}
+impl Drop for PhaseScope {
+    fn drop(&mut self) {
+        PHASE.set(self.previous);
+    }
+}
+
+/// Engine-only phase scope, restored during unwinding too.
+// exhaustive: only the engine constructs it
+pub struct ReloadPhase<'a> {
+    owner: &'a PhaseOwner,
+    resume: ModPhase,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+impl Drop for ReloadPhase<'_> {
+    fn drop(&mut self) {
+        self.owner
+            .advance(self.resume)
+            .expect("reload returns to its entering phase");
+    }
+}
+
+/// The phase of this thread, used in refusal diagnostics.
+pub fn current_phase() -> ModPhase {
+    PHASE.with(|cell| cell.get().phase)
+}
+
+/// One cell read at the generated API boundary, not a tick scan or registry lookup.
+/// A refused mod call panics so a listener cannot ignore a Result and continue.
+pub fn check_access(operation: &str, setup_read: bool) {
+    let phase = current_phase();
+    let metadata = matches!(
+        operation,
+        "on" | "block_key_id"
+            | "effect_key_id"
+            | "block_states_of"
+            | "block_state_default"
+            | "block_item"
+            | "block_in_tag"
+    ) || operation.starts_with("block_state_");
+    let settings = operation == "setting";
+    let allowed = match phase {
+        ModPhase::World => true,
+        ModPhase::Setup => settings || metadata || setup_read,
+        ModPhase::Config => settings,
+        ModPhase::Reloading => settings || metadata,
+        ModPhase::Packages | ModPhase::Registration => false,
+    };
+    assert!(
+        allowed,
+        "mod API {operation} is unavailable during {phase:?}"
+    );
+}
+
 /// Whether a package contains compiled code or content alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -109,6 +300,14 @@ fn inventory(
             packages.push(PackageInfo::new(kind, manifest));
         }
     }
+    // The code inventory follows the one installed native/wasm dispatch slice;
+    // content-only packages remain after it in their selected layer order.
+    packages.sort_by_key(|p| {
+        crate::mods()
+            .iter()
+            .position(|entry| entry.id == p.id)
+            .unwrap_or(usize::MAX)
+    });
     packages
 }
 
@@ -340,6 +539,117 @@ impl LoopContext for OwningLoop<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phase_edges_are_exhaustive_and_refusal_leaves_state_unchanged() {
+        use ModPhase::*;
+        let phases = [Packages, Registration, Setup, Config, World, Reloading];
+        let edges = [
+            (Packages, Registration),
+            (Registration, Setup),
+            (Setup, Config),
+            (Config, World),
+            (World, Config),
+            (Setup, Reloading),
+            (World, Reloading),
+        ];
+        for from in phases {
+            for to in phases {
+                let owner = PhaseOwner::new(from);
+                let result = owner.advance(to);
+                assert_eq!(
+                    result.is_ok(),
+                    edges.contains(&(from, to)),
+                    "{from:?} -> {to:?}"
+                );
+                assert_eq!(current_phase(), if result.is_ok() { to } else { from });
+            }
+        }
+        let owner = PhaseOwner::new(Packages);
+        let other = owner.clone();
+        assert_eq!(
+            std::thread::spawn(move || other.advance(Registration))
+                .join()
+                .unwrap(),
+            Err(PhaseError::WrongThread)
+        );
+        assert_eq!(current_phase(), Packages);
+    }
+
+    #[test]
+    fn reloads_restore_setup_or_world_and_world_config_can_repeat() {
+        use ModPhase::*;
+        let owner = PhaseOwner::new(Packages);
+        owner.advance(Registration).unwrap();
+        owner.advance(Setup).unwrap();
+        {
+            let _reload = owner.reloading().unwrap();
+            assert_eq!(current_phase(), Reloading);
+            assert!(owner.reloading().is_err());
+        }
+        assert_eq!(current_phase(), Setup);
+        assert!(owner.advance(Registration).is_err());
+        for _world in 0..2 {
+            {
+                let _config = owner.config().unwrap();
+                assert_eq!(current_phase(), Config);
+                check_access("setting", false);
+            }
+            assert_eq!(current_phase(), World);
+            for _reload in 0..2 {
+                let _ = std::panic::catch_unwind(|| {
+                    let _reload = owner.reloading().unwrap();
+                    assert_eq!(current_phase(), Reloading);
+                    check_access("block_state_default", false);
+                    panic!("failed prepare");
+                });
+                assert_eq!(current_phase(), World);
+            }
+        }
+        {
+            let _loader = PhaseOwner::scope(Setup);
+            assert_eq!(current_phase(), Setup);
+        }
+        assert_eq!(current_phase(), World);
+    }
+
+    #[test]
+    fn early_world_handle_and_transaction_calls_panic_naming_the_phase() {
+        use crate::{Host, HostTransaction, ServerHost, TransactionSeal};
+        struct HostDouble;
+        impl Host for HostDouble {}
+        impl ServerHost for HostDouble {
+            fn transaction_open(&mut self, _: TransactionSeal) {
+                panic!("must refuse before opening")
+            }
+        }
+        for phase in [
+            ModPhase::Registration,
+            ModPhase::Config,
+            ModPhase::Reloading,
+        ] {
+            let _owner = PhaseOwner::new(phase);
+            for action in [0, 1, 2] {
+                let panic = std::panic::catch_unwind(|| {
+                    let mut host = HostDouble;
+                    match action {
+                        0 => {
+                            let _ = host.entity(1);
+                        }
+                        1 => {
+                            let _ = host.level("minecraft:overworld");
+                        }
+                        _ => {
+                            let _: Result<(), ()> = host.transaction(|_, _| Ok(()));
+                        }
+                    }
+                })
+                .expect_err("early access must panic, not return a refusal");
+                let message = panic.downcast_ref::<String>().unwrap();
+                assert!(message.contains(&format!("{phase:?}")), "{message}");
+            }
+        }
+    }
 
     #[test]
     fn inventory_keeps_first_content_package_after_code_mods() {

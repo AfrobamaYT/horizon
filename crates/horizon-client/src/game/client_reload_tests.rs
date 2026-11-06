@@ -70,7 +70,10 @@ fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
         ["test_mod:top=\"top\""]
     );
     assert!(applied.lock().unwrap().is_empty(), "nothing published yet");
-    apply_client_reload(prepared);
+    apply_client_reload(
+        &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
+        prepared,
+    );
     assert_eq!(applied.lock().unwrap().as_slice(), ["hats"]);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -231,7 +234,7 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
                 "nothing applied before handoff"
             );
             // The same call `start_game` makes once the game owns the assets.
-            apply_client_reload(std::mem::take(&mut loaded.client_applies));
+            apply_client_reload(&game.mod_phase, std::mem::take(&mut loaded.client_applies));
             assert!(applied.load(Ordering::SeqCst), "the first load applies");
             assert!(
                 count.load(Ordering::SeqCst) >= 5,
@@ -394,7 +397,10 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             let prepared =
                 stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
             assert!(live.lock().unwrap().is_empty(), "nothing published yet");
-            apply_client_reload(prepared);
+            apply_client_reload(
+                &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
+                prepared,
+            );
             assert_eq!(live.lock().unwrap().as_slice(), ["mod"]);
             assert!(
                 vanilla.load(Ordering::SeqCst) >= 5,
@@ -409,7 +415,10 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             let root = merged(&packs);
             let prepared =
                 stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
-            apply_client_reload(prepared);
+            apply_client_reload(
+                &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
+                prepared,
+            );
             assert_eq!(live.lock().unwrap().as_slice(), ["mod", "pack"]);
             // A rejected prepare aborts the reload and keeps the previous state.
             reject.store(true, Ordering::Relaxed);

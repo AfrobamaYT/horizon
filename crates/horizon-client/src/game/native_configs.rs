@@ -161,6 +161,10 @@ impl NativeConfigs {
 impl Game<'_> {
     /// Asks the mods for their configs and loads those of `kinds`.
     fn native_configs_load(&mut self, kinds: &[NativeConfigKind], world: Option<&Path>) {
+        let phase = self.mod_phase.clone();
+        let _config = phase
+            .config()
+            .expect("config load on its owning game thread");
         let config_dir = match Self::native_config_dir() {
             Ok(dir) => dir,
             Err(e) => {
