@@ -19,8 +19,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod customize_boss_event_progress_tests {
     use horizon_client::hud_layout::GuiDraw;
+    use horizon_core::nbt::Tag;
     use horizon_protocol::packets::play::{BossAction, BossEvent};
-    use horizon_world::nbt::Tag;
     use mod_api::{
         BossBarColor, ClientHost, CustomizeBossEventProgressEvent, Flow, Hooks, ModEntry,
         testing::with_mods,
