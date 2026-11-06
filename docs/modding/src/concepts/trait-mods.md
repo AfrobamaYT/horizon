@@ -186,7 +186,9 @@ None of them loads a chunk. Light above the build height reads as full sky and b
 none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
 so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`,
 `item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
-`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
+`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. Fluid reads return `FluidState` with a
+`FluidKey`, amount, falling flag and engine-derived source flag; `is_empty()` and `is_source()` report
+those states without a registry lookup. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
 `LevelHost` has no random, by design: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
@@ -279,6 +281,10 @@ authoritative context or an unavailable mapping returns `None`, not a stale memb
 `block_state_id`, tag names and existing fluid operation arguments remain strings for now.
 
 Declare a tank-only fluid in your own namespace with `r.declare_fluid("chocolate")`; the returned `FluidKey` identifies it for the mod load. Request vanilla or another mod's declared fluid with `r.fluid_key("minecraft:water")` or `r.fluid_key("other:chocolate")`. Requests resolve after all registrations, so declaration order does not matter; an unknown request stops the load and names the requesting mod. Tank-only fluids have no world simulation or world state. Fluid stacks and recipe ingredients use these keys; remaining fluid operations move to them in subsequent changes.
+A saved tank whose fluid's mod is absent carries an opaque unresolved identity. Its stack's
+`key()` is `None`; `UnresolvedFluid::id(host)` reads its saved name. It can move between
+name-backed mod tanks, but not into vanilla buckets or cauldrons.
+
 `NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
 application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
 uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks
@@ -468,6 +474,10 @@ host.transaction(|host, tx| {
     Ok(())
 })
 ```
+
+Cauldron interactions outside a transaction keep vanilla's effect order. Inside an open
+transaction, their statistic award (including `player_stat_award`), sound and overflow
+item toss/spawn wait until the outermost successful commit; an abort emits none of them.
 
 #### Entity energy and fluids
 

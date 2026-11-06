@@ -797,8 +797,9 @@ mod tests {
                 gm.merchant.session.xp = 17;
                 gm.slots[1] = Some(ItemStack::new("minecraft:coal", 2));
             }
-            game.lan.as_mut().unwrap().hub.guests[0].carried =
-                Some(ItemStack::new("minecraft:apple", 3));
+            game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                g.carried = Some(ItemStack::new("minecraft:apple", 3))
+            });
             let wheat = ItemStack::new("minecraft:wheat", 1);
             game.lan
                 .as_mut()
@@ -860,6 +861,7 @@ mod tests {
                 [0; 4],
                 None,
                 Some(game.pack.assets.registry),
+                |_| None,
             );
             game.apply_entity_nbt(super::super::commands::Target::Mob(40), tag)
                 .unwrap();
@@ -870,6 +872,7 @@ mod tests {
                 [0; 4],
                 None,
                 Some(game.pack.assets.registry),
+                |_| None,
             );
             if let Tag::Compound(data) = &mut tag {
                 data.insert(

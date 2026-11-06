@@ -2452,6 +2452,7 @@ pub struct SaveDir {
     /// Set by `Persistent` before the first load.
     pub tables: OnceLock<Arc<SaveTables>>,
     loot: crate::structure_blocks::LootSnapshot,
+    trusted_fluid_load: bool,
     /// The dimension's skylight and height, from its folder name.
     pub shape: LevelShape,
     /// Which chunks each region file holds, for far terrain (`lod_saved`).
@@ -2462,6 +2463,20 @@ pub struct SaveDir {
     /// What older chunks are upgraded with, found on the first one read.
     datafix_context: OnceLock<Option<DatafixContext>>,
 }
+fn intern_saved_fluids(root: &NamedTag) {
+    if let Some(Tag::List(entities)) = root.tag.get("block_entities") {
+        for entity in entities {
+            if let Some(Tag::List(tanks)) = entity.get("fluids") {
+                for tank in tanks {
+                    if let Some(Tag::String(id)) = tank.get("Fluid") {
+                        mod_api::__private::intern_unresolved_fluid(&id.to_string_lossy());
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn mod_ticket_to_nbt(ticket: &ModTicket, controller: &str) -> Tag {
     let owner = match ticket.owner {
         TicketOwner::Block(pos) => ("block", Tag::IntArray(pos.to_vec())),
@@ -2600,11 +2615,16 @@ impl SaveDir {
             outstanding: Default::default(),
             tables: OnceLock::new(),
             loot: Default::default(),
+            trusted_fluid_load: false,
             shape,
             lod_regions: Default::default(),
             lod_decoded: Default::default(),
             datafix_context: OnceLock::new(),
         }
+    }
+    /// Mark this as a server-owned world save, not a remote cache.
+    pub fn enable_trusted_fluid_load(&mut self) {
+        self.trusted_fluid_load = true;
     }
     /// Share the world's loot snapshot with this dimension's chunk readers.
     pub fn set_loot_source(&mut self, loot: crate::structure_blocks::LootSnapshot) {
@@ -2828,7 +2848,15 @@ impl SaveDir {
             Folder::Poi => &self.poi_regions,
         };
         match read_region_record(&self.root, cache, folder, x, z) {
-            Ok(record) => record,
+            Ok(record) => {
+                if self.trusted_fluid_load
+                    && folder == "region"
+                    && let Some(root) = &record
+                {
+                    intern_saved_fluids(root);
+                }
+                record
+            }
             Err(e) => {
                 crate::chunk_io::report_load_failure(&self.root, x, z, &e);
                 None
@@ -6884,6 +6912,51 @@ mod tests {
     }
     use super::*;
     use crate::chunk::{MIN_Y, SECTIONS};
+
+    #[test]
+    fn only_server_disk_records_intern_saved_fluid_names() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-fluid-source-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let mut save = SaveDir::new(root.clone(), LevelShape::OVERWORLD);
+        save.enable_trusted_fluid_load();
+        let record = |id: &str| NamedTag {
+            name: "".into(),
+            tag: Tag::compound([(
+                "block_entities",
+                Tag::List(vec![Tag::compound([(
+                    "fluids",
+                    Tag::List(vec![Tag::compound([("Fluid", Tag::String(id.into()))])]),
+                )])]),
+            )]),
+        };
+        let disk = "fixture:trusted_saved_fluid";
+        let live = "fixture:untrusted_pending_fluid";
+        fs::create_dir_all(root.join("region")).unwrap();
+        let mut region = RegionFile::open_writable(save.region_path("region", 0, 0), true).unwrap();
+        region
+            .write(
+                ChunkPos::new(0, 0),
+                &ChunkRecord::from_nbt(&record(disk), Compression::Zlib, 0, Limits::saved())
+                    .unwrap(),
+            )
+            .unwrap();
+        drop(region);
+        save.read_record_raw("region", 0, 0).unwrap();
+        assert!(mod_api::__private::lookup_unresolved_fluid(disk).is_some());
+        let oversized = format!("fixture:{}", "x".repeat(257));
+        let original = record(&oversized);
+        intern_saved_fluids(&original);
+        assert!(mod_api::__private::lookup_unresolved_fluid(&oversized).is_none());
+        assert_eq!(original, record(&oversized));
+        save.pending.lock().unwrap().insert(
+            (Folder::Region, 1, 0),
+            (0, Record::Tag(Arc::new(record(live)))),
+        );
+        save.read_record_raw("region", 1, 0).unwrap();
+        assert!(mod_api::__private::lookup_unresolved_fluid(live).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn end_gateway_block_entity_round_trips() {
