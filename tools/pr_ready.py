@@ -482,6 +482,9 @@ def run_windows(steps, verbose):
         cwd = ROOT
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
+        if command and command[0].startswith("CARGO_BUILD_JOBS="):  # the shell form, with no shell to read it
+            command.pop(0)
+            env.setdefault("CARGO_BUILD_JOBS", "4")
         if step.name == "Public tree":
             command = [sys.executable, "tools/check_public_tree.py"]
         elif step.name == "Python tests":
