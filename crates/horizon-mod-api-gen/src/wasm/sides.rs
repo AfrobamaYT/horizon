@@ -1,6 +1,8 @@
 //! The two sides' code: the guest's `Guest` (every imported trait) and exports, and the game's
 //! imports and proxies (every exported trait).
-use super::glue::{InPlace, conversions, lift, lower, rust_path, unpack};
+use super::glue::{
+    InPlace, conversions, flat_element, flat_method, lift, lower, lower_owned, rust_path, unpack,
+};
 use super::ty::{Kind, List, Str, Ty, Types, bound_ident, wit_ident};
 use super::wit::{self, Signature, interface, signature};
 use super::{Method, exports};
@@ -569,6 +571,7 @@ pub(super) fn host(
         }
         code.push_str("}\n");
     }
+    code.push_str(&flat_imports(types, methods)?);
     // Proxies: the mod's traits, each method calling its export.
     for owner in owners.iter().filter(|o| exports().contains(o)) {
         let iface = bound_ident(&interface(owner));
@@ -834,6 +837,106 @@ fn host_import(
                 call_args.join(", ")
             )
             .unwrap();
+    Ok(code)
+}
+
+fn flat_imports(types: &Types<'_>, methods: &[&Method]) -> Result<String, String> {
+    let mut code = String::from(
+        "pub(super) fn add_flat_lists(linker: &mut wasmtime::component::Linker<super::State>) -> wasmtime::Result<()> { linker.allow_shadowing(true);\n",
+    );
+    for method in methods.iter().filter(|m| {
+        (!exports().contains(&m.owner) || super::held(m.owner)) && flat_method(types, m)
+    }) {
+        let held = exports().contains(&method.owner);
+        let interface = if held {
+            format!("held-{}", interface(method.owner))
+        } else {
+            interface(method.owner)
+        };
+        let receiver = if held {
+            format!(
+                "&*super::held::<dyn {}>(handler)?",
+                trait_path(method.owner)
+            )
+        } else {
+            format!(
+                "frame::{}{}()?",
+                method.owner.rsplit("::").next().unwrap().to_snake_case(),
+                if method.receiver == Some(true) {
+                    "_mut"
+                } else {
+                    ""
+                }
+            )
+        };
+        let object = |name: &str, mutable: bool| {
+            format!(
+                "frame::{}{}()?",
+                name.rsplit("::").next().unwrap().to_snake_case(),
+                if mutable { "_mut" } else { "" }
+            )
+        };
+        let place = InPlace::new(types, &object);
+        let mut params = Vec::new();
+        let mut args = Vec::new();
+        let mut scratch = Vec::new();
+        let mut prep = String::from("let keep = super::Keep::default();");
+        if held {
+            params.push("handler: u32".to_string());
+        }
+        for (name, ty) in &method.params {
+            let wire = wit::wit(types, ty)?;
+            let source = if wire.is_some() {
+                bound_ident(&wit_ident(name))
+            } else {
+                "()".into()
+            };
+            if let Ty::List(item, List::Slice) = ty
+                && flat_element(types, item, &mut Default::default())
+            {
+                params.push(format!(
+                    "{source}: wasmtime::component::WasmList<{}>",
+                    wire_type(types, item)
+                ));
+                let var = format!("b{}", scratch.len());
+                scratch.push((var.clone(), format!("Vec<{}>", rust_ty(types, item, false))));
+                writeln!(prep, "{var}.clear(); for value in {source}.iter(wasmtime::AsContextMut::as_context_mut(&mut store))? {{ let value = value?; {var}.push({}); }}", lift(types, item, "value")).unwrap();
+                args.push(format!("{var}.as_slice()"));
+            } else {
+                if wire.is_some() {
+                    params.push(format!("{source}: {}", wire_type(types, ty)));
+                }
+                args.push(place.value(ty, &source)?);
+            }
+        }
+        let mut output = lower_owned(types, &method.ret, "r");
+        if let Ty::List(item, List::Vec) = &method.ret
+            && flat_element(types, item, &mut Default::default())
+        {
+            let var = format!("b{}", scratch.len());
+            scratch.push((
+                var.clone(),
+                format!("std::sync::Arc<Vec<{}>>", wire_type(types, item)),
+            ));
+            output = format!(
+                "{{ let values = std::sync::Arc::get_mut({var}).unwrap(); values.clear(); for value in &r {{ values.push({}); }} {var}.clone() }}",
+                lower(types, item, "value")
+            );
+        }
+        let mut body = format!(
+            "{prep} let r = <_ as {}>::{}({receiver}, {}); Ok(({output},))",
+            trait_path(method.owner),
+            method.name,
+            args.join(", ")
+        );
+        for (var, ty) in scratch.iter().rev() {
+            body = format!(
+                "super::State::with_buffer::<{ty}, _>(store, |{var}, mut store| {{ {body} }})"
+            );
+        }
+        writeln!(code, "linker.instance(\"horizon:mod-api/{interface}@0.1.0\")?.func_wrap(\"{}\", |mut store: wasmtime::StoreContextMut<'_, super::State>, ({},)| {{ {body} }})?;", wit_ident(&method.name), params.join(", ")).unwrap();
+    }
+    code.push_str("linker.allow_shadowing(false); Ok(()) }\n");
     Ok(code)
 }
 

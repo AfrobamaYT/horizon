@@ -19,7 +19,11 @@ use std::fmt::Write;
 const EVERY_CASE: &str = r#"_ => unreachable!("every case was read from the enum's source")"#;
 
 /// A list element is flat only if lifting it cannot allocate another list or string.
-fn flat_element(types: &Types<'_>, ty: &Ty, seen: &mut std::collections::BTreeSet<usize>) -> bool {
+pub(super) fn flat_element(
+    types: &Types<'_>,
+    ty: &Ty,
+    seen: &mut std::collections::BTreeSet<usize>,
+) -> bool {
     match ty {
         Ty::Unit | Ty::Prim(..) | Ty::Wide(..) | Ty::Duration => true,
         Ty::Array(item, n) if (1..=12).contains(n) => flat_element(types, item, seen),

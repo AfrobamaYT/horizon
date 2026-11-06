@@ -857,6 +857,7 @@ pub fn instantiate(
     let mut linker = Linker::<State>::new(engine);
     glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(&mut linker, |s| s)
         .expect("the game's own imports are defined once");
+    glue::add_flat_lists(&mut linker).expect("the flat list imports are defined once");
     imports(&mut linker);
     let limits = wasmtime::StoreLimitsBuilder::new()
         .memory_size(budgets.memory)
