@@ -7,8 +7,8 @@ pub trait Hooks {
     /// `Client` and `Common` configs), by a dedicated server when it starts
     /// (`Common` and `Server`) and by a server before each world it opens
     /// (`Server`); a game reads only its own kinds, so push them all every
-    /// time. Runs in Config: only settings reads are available; world handles
-    /// and transactions panic naming the phase. A file outside `config/`, or one already registered, is skipped.
+    /// time. Runs in Config: settings reads and the scoped ConfigFiles service
+    /// are available; world handles and transactions panic naming the phase. A file outside `config/`, or one already registered, is skipped.
     #[hook(
         side = "both",
         contract = "collect",
@@ -20,8 +20,8 @@ pub trait Hooks {
     /// says whose, which file and its text, which the mod parses (TOML by
     /// convention). Every mod hears every config, so check `mod_id`. Fired
     /// where the config's kind loads (`native_register_configs`), a `Server`
-    /// one before `native_server_about_to_start`. Config allows settings reads,
-    /// not world handles or transactions. Client and Common load once on their
+    /// one before `native_server_about_to_start`. Config allows settings reads
+    /// and the scoped ConfigFiles service, not world handles or transactions. Client and Common load once on their
     /// owning side, Server once per world.
     #[hook(
         side = "both",

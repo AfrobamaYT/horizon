@@ -49,7 +49,8 @@ and the apply re-checks the decision's preconditions and refuses, never recomput
 ## Load access belongs to the owning thread
 
 Registration has only a `RegistrationContext`. Each side then enters Setup, Config and World;
-config loading can read settings but cannot acquire world handles or open transactions. Data and
+config loading can read settings and use its existing scoped `ConfigFiles` service, but cannot
+acquire world handles, open transactions or call other game operations. Data and
 asset reloads temporarily enter Reloading and restore Setup (initial client assets) or World when
 they finish or fail. Server reload Host reads are restricted to registry facts, settings and the
 mod list; existing data-context callbacks keep `DataLoadContext`. A forbidden operation panics naming

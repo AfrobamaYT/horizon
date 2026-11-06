@@ -12,7 +12,7 @@ pub enum ModPhase {
     Registration,
     /// One side's startup, before its configs and world.
     Setup,
-    /// Config loading: settings reads only.
+    /// Config loading: settings reads and scoped config files.
     Config,
     /// The owning game's normal runtime.
     World,
@@ -202,7 +202,7 @@ pub fn check_access(operation: &str, setup_read: bool) {
     let allowed = match phase {
         ModPhase::World => true,
         ModPhase::Setup => settings || metadata || setup_read,
-        ModPhase::Config => settings,
+        ModPhase::Config => settings || operation == "config_files",
         ModPhase::Reloading => settings || metadata,
         ModPhase::Packages | ModPhase::Registration => false,
     };

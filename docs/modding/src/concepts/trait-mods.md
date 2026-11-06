@@ -76,11 +76,22 @@ checks present optional dependencies too, and refuses cycles for both build targ
 packages stay after code in the loaded-mod inventory; listener-specific edges still use `ReloadOrder`.
 
 Each owning thread progresses through `Packages → Registration → Setup → Config → World`.
+
+| Phase | Available access |
+| --- | --- |
+| Packages | Package discovery; no game Host operations. |
+| Registration | Declarations through `RegistrationContext`; no Host. |
+| Setup | Client resource reads and registry/settings/mod-list reads; no world handles or transactions. |
+| Config | Settings reads and the existing mod-scoped `ConfigFiles` service; no world handles, transactions or other game operations. |
+| Reloading | Registry facts, settings and mod-list reads, listener registration, and existing `DataLoadContext` callbacks; no world handles or transactions. |
+| World | The owning game's side-typed `ServerHost` or `ClientHost`. |
+
 Registration runs once: `register`, `component_types`, `blocks`, `items` and `standalone_models`
 receive only `RegistrationContext`. Client setup runs once after the initial asset apply. Client
 and Common configs load once on their owning side; Server configs load and unload per world.
-A second world does not repeat registration or client setup. Config loading can read settings,
-but world handles, transactions and other game operations panic with `Config` in the diagnostic.
+A second world does not repeat registration or client setup. Config loading can read settings and
+use the existing scoped `ConfigFiles` service to read or save its own config files. World handles,
+transactions and other game operations panic with `Config` in the diagnostic.
 Config file polling is not a phase transition, and Server config unloading leaves the World phase.
 
 Every data or asset reload enters `Reloading`, including listener registration, prepare, apply and
