@@ -421,6 +421,9 @@ mod tests {
             assert!(game.start_riding_target(Target::Mob(73), Target::Mob(70), true));
             assert!(game.start_riding_target(Target::Mob(74), Target::Mob(70), true));
             assert!(!game.start_riding_target(Target::Mob(75), Target::Mob(70), true));
+            let mut riding = horizon_client::lan::entity::Riding::default();
+            game.lan_riding(&[(70, 1)], &mut riding);
+            assert_eq!(riding.passengers(70), &[1, 73, 74]);
             game.dismount_mob(73);
             game.dismount_mob(74);
             game.riding = None;
