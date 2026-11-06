@@ -231,10 +231,11 @@ impl Game<'_> {
         // The vehicle is gone (broken, in another level) or the rider died:
         // its client drops it with the entity or the death screen.
         if dead || (boat.is_none() && !cart && !mount && !cushion) {
-            let g = &mut host.hub.guests[gi];
-            (g.vehicle, g.vehicle_good) = (None, None);
-            // Entity.removePassenger: the rider waits 60 ticks to board again.
-            g.boarding_cooldown = super::boat_passengers::BOARDING_COOLDOWN;
+            host.hub.guests.update(gi, |g| {
+                (g.vehicle, g.vehicle_good) = (None, None);
+                // Entity.removePassenger: the rider waits 60 ticks to board again.
+                g.boarding_cooldown = super::boat_passengers::BOARDING_COOLDOWN;
+            });
             return;
         }
         let mut ejected = false;
@@ -259,7 +260,12 @@ impl Game<'_> {
                 .map(|m| m.position)
         });
         if let Some(p) = at {
-            host.hub.guests[gi].vehicle_good = Some([p.x, p.y, p.z]);
+            {
+                let value = Some([p.x, p.y, p.z]);
+                host.hub
+                    .guests
+                    .update(gi, |guest| guest.vehicle_good = value);
+            }
         }
         // Getting out goes through leave_guest, which tells the client and
         // teleports it (ServerPlayer.dismountTo).
@@ -297,9 +303,10 @@ impl Game<'_> {
         if let Some(Some(at)) = seat
             && let Some(host) = self.lan.as_mut()
         {
-            let g = &mut host.hub.guests[gi];
-            g.previous_position = g.position;
-            g.position = at;
+            host.hub.guests.update(gi, |g| {
+                g.previous_position = g.position;
+                g.position = at;
+            });
         }
     }
 
@@ -320,7 +327,10 @@ impl Game<'_> {
         }
         // The host in the window rides it already.
         if self.riding == Some(vehicle) {
-            host.hub.guests[gi].vehicle = before;
+            {
+                let value = before;
+                host.hub.guests.update(gi, |guest| guest.vehicle = value);
+            }
             return;
         }
         let at = self
@@ -344,11 +354,12 @@ impl Game<'_> {
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            let g = &mut host.hub.guests[gi];
-            g.vehicle_good = Some([p.x, p.y, p.z]);
-            g.previous_position = g.position;
-            g.position = [seat.x, seat.y, seat.z];
-            g.on_ground = false;
+            host.hub.guests.update(gi, |g| {
+                g.vehicle_good = Some([p.x, p.y, p.z]);
+                g.previous_position = g.position;
+                g.position = [seat.x, seat.y, seat.z];
+                g.on_ground = false;
+            });
             return;
         }
         // An animal: the rider sits where `positionRider` puts it.
@@ -361,10 +372,11 @@ impl Game<'_> {
         if let Some(Some(at)) = seat
             && let Some(host) = self.lan.as_mut()
         {
-            let g = &mut host.hub.guests[gi];
-            g.previous_position = g.position;
-            g.position = at;
-            g.on_ground = false;
+            host.hub.guests.update(gi, |g| {
+                g.previous_position = g.position;
+                g.position = at;
+                g.on_ground = false;
+            });
         }
     }
 
@@ -502,15 +514,16 @@ impl Game<'_> {
         };
         let no_blocks = no_blocks_in(&self.world, corner(false), corner(true));
         let allow_flight = host.hub.config.allow_flight;
-        let g = &mut host.hub.guests[gi];
-        g.vehicle_good = Some([target.x, target.y, target.z]);
-        let rested = std::mem::replace(
-            &mut g.vehicle_rests,
-            wanted.y < 0.0 && resolved.y != wanted.y,
-        );
-        g.vehicle_floating =
-            wanted.y >= -0.03125 && !rested && !allow_flight && !no_gravity && no_blocks;
-        g.vehicle_gravity = gravity;
+        host.hub.guests.update(gi, |g| {
+            g.vehicle_good = Some([target.x, target.y, target.z]);
+            let rested = std::mem::replace(
+                &mut g.vehicle_rests,
+                wanted.y < 0.0 && resolved.y != wanted.y,
+            );
+            g.vehicle_floating =
+                wanted.y >= -0.03125 && !rested && !allow_flight && !no_gravity && no_blocks;
+            g.vehicle_gravity = gravity;
+        });
         if let Some(i) = mount {
             // absSnapTo: where and how its rider's client turned it; the
             // rider sits on it from its own ride tick.
@@ -535,9 +548,10 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let g = &mut host.hub.guests[gi];
-        g.previous_position = g.position;
-        g.position = [seat.x, seat.y, seat.z];
+        host.hub.guests.update(gi, |g| {
+            g.previous_position = g.position;
+            g.position = [seat.x, seat.y, seat.z];
+        });
     }
 
     /// `Entity.getControllingPassenger` of a vehicle a server player rides: a
