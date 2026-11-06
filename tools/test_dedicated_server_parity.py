@@ -308,11 +308,13 @@ def server_files(directory):
 
 def forced_chunk_barrier(server, label):
     # ServerLevel.setChunkForced loads a newly forced column before returning.
-    # Queue the observation immediately after the command, without waiting for
-    # chunk generation or polling readiness between the two commands.
+    # A block-region self-comparison first checks FULL chunk presence. Unlike
+    # `execute if loaded`, it does not also require entities to be ticking.
+    # Queue it without waiting for generation or polling readiness.
     server.console('forceload add 20000 20000')
-    server.console('execute if loaded 20000 100 20000 run say forced chunk ready')
-    server.console('execute unless loaded 20000 100 20000 run say forced chunk missing')
+    region = '20000 100 20000 20000 100 20000 20000 100 20000 all'
+    server.console(f'execute if blocks {region} run say forced chunk ready')
+    server.console(f'execute unless blocks {region} run say forced chunk missing')
     server.console('say forced chunk barrier checked')
     server.wait_for(r'\[Server\] forced chunk barrier checked', timeout=120)
     assert any('[Server] forced chunk ready' in line for line in server.lines), label
