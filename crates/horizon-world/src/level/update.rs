@@ -726,7 +726,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
 }
 
-impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     pub fn state(&self, pos: BlockPos) -> BlockStateId {
         self.level.block_state(pos)
     }

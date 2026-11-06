@@ -173,8 +173,8 @@ impl crate::block_collision::DynamicCollisionWorld for NoBlockEntities {
 /// Block-entity lookups for dynamic shapes, read from the level itself: a
 /// shulker box's lid state decides whether its support shape is the open plate
 /// or the closed full cube (`ShulkerBoxBlock.getBlockSupportShape`).
-struct LevelBlockEntities<'a, L: LevelAccess + ?Sized>(&'a L);
-impl<L: LevelAccess + ?Sized> crate::dynamic_support::DynamicSupportWorld
+struct LevelBlockEntities<'a, L: super::signal_access::SignalAccess + ?Sized>(&'a L);
+impl<L: super::signal_access::SignalAccess + ?Sized> crate::dynamic_support::DynamicSupportWorld
     for LevelBlockEntities<'_, L>
 {
     type Error = std::convert::Infallible;
@@ -226,6 +226,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub fn is_water_at(&self, pos: BlockPos) -> bool {
         self.signals().is_water_at(pos)
     }
+}
+
+/// `Sim` reads these through its [`Signals`], so there is one implementation of each.
+impl<L: LevelAccess + ?Sized> Sim<'_, L> {
+    pub fn sturdy(&self, pos: BlockPos, direction: Direction) -> bool {
+        self.signals().sturdy(pos, direction)
+    }
+    pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
+        self.signals().is_redstone_conductor(state, _pos)
+    }
+    pub(crate) fn above_state(&self, pos: BlockPos) -> BlockStateId {
+        self.signals().above_state(pos)
+    }
+}
+
+impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `Level.getRawBrightness(pos, darken)`.
     pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
         self.signals().raw_brightness(pos, darken)
@@ -245,7 +261,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
 }
 
-impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     /// The state whose cached support facts stand in for the block at `pos`.
     /// Vanilla reads a retracting piston's `moving_piston` block through its
     /// block entity, whose collision shape contains the extended base; the
@@ -382,14 +398,6 @@ impl<L: LevelAccess + ?Sized> Signals<'_, L> {
     pub fn is_water_at(&self, pos: BlockPos) -> bool {
         self.b.is_water_fluid(self.b.fluid(self.state(pos)).kind())
     }
-    /// `Level.getRawBrightness(pos, darken)`.
-    pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
-        super::raw_brightness(self.level, pos, darken)
-    }
-    /// `LevelReader.getMaxLocalRawBrightness(pos)`.
-    pub fn max_local_raw_brightness(&self, pos: BlockPos) -> i32 {
-        self.raw_brightness(pos, self.level.sky_darken())
-    }
     pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
         self.b.has_flag(state, state_flags::CONDUCTOR)
     }
@@ -398,15 +406,13 @@ impl<L: LevelAccess + ?Sized> Signals<'_, L> {
     }
 }
 
-/// `Sim` reads these through its [`Signals`], so there is one implementation of each.
-impl<L: LevelAccess + ?Sized> Sim<'_, L> {
-    pub fn sturdy(&self, pos: BlockPos, direction: Direction) -> bool {
-        self.signals().sturdy(pos, direction)
+impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+    /// `Level.getRawBrightness(pos, darken)`.
+    pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
+        super::raw_brightness(self.level, pos, darken)
     }
-    pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
-        self.signals().is_redstone_conductor(state, _pos)
-    }
-    pub(crate) fn above_state(&self, pos: BlockPos) -> BlockStateId {
-        self.signals().above_state(pos)
+    /// `LevelReader.getMaxLocalRawBrightness(pos)`.
+    pub fn max_local_raw_brightness(&self, pos: BlockPos) -> i32 {
+        self.raw_brightness(pos, self.level.sky_darken())
     }
 }
