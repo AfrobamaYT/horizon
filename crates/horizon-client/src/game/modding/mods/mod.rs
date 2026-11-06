@@ -930,6 +930,7 @@ impl Game<'_> {
         let root = self.options.resources.clone();
         let data_source = self.pack.data_source.clone();
         let data_changes = self.pack.data_changes.clone();
+        let additional_data = self.pack.additional_data.clone();
         let enabled = self.applied_mods();
         let selected = self.mods.selected.clone();
         let refused = self.mods.refused.clone();
@@ -938,6 +939,7 @@ impl Game<'_> {
             g.options.resources = root;
             g.pack.data_source = data_source;
             g.pack.data_changes = data_changes;
+            g.pack.additional_data = additional_data;
             g.settings.mods.enabled = enabled.clone();
             g.mods.applied = Some(enabled);
             g.mods.selected = selected;

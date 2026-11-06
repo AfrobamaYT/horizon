@@ -2628,6 +2628,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -3004,6 +3005,7 @@ mod structure_tag_tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -3073,6 +3075,7 @@ mod structure_tag_tests {
             &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
             &Default::default(),
             false,
+            &[],
             &[],
         );
         let (tables, _) = game

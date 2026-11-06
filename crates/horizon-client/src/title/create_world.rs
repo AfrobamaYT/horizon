@@ -46,6 +46,8 @@ pub struct WorldOptions {
     /// The folder of packs for the new world (vanilla's `mcworld-`
     /// temporary folder), made when Data Packs first opens.
     pub pack_dir: Option<std::path::PathBuf>,
+    /// Additional repository sources retained for this creation configuration.
+    pub additional_data_packs: std::sync::Arc<[std::sync::Arc<crate::datapack::DataPack>]>,
 }
 impl Default for WorldOptions {
     fn default() -> Self {
@@ -62,10 +64,35 @@ impl Default for WorldOptions {
             rules: crate::gamerules::GameRules::default(),
             data_packs: vec!["vanilla".into()],
             pack_dir: None,
+            additional_data_packs: std::sync::Arc::from([]),
         }
     }
 }
 impl WorldOptions {
+    /// Refresh additional sources and insert required packs while preserving
+    /// the chosen ids, including folder packs already copied to the new world.
+    pub fn set_additional_data_packs(
+        &mut self,
+        packs: std::sync::Arc<[std::sync::Arc<crate::datapack::DataPack>]>,
+    ) {
+        let mut available: Vec<_> = packs
+            .iter()
+            .filter_map(|pack| pack.selection.as_ref())
+            .map(crate::pack_screen::PackInfo::selectable)
+            .collect();
+        for id in &self.data_packs {
+            if !available.iter().any(|pack| pack.id == *id) {
+                available.push(crate::packs::Selectable::optional(id, true));
+            }
+        }
+        self.data_packs = crate::packs::SelectionModel::new(available, &self.data_packs)
+            .selected
+            .into_iter()
+            .rev()
+            .map(|pack| pack.id)
+            .collect();
+        self.additional_data_packs = packs;
+    }
     /// Re-Create: the saved world's choices.
     pub(super) fn of_world(
         level: &crate::save::Level,
@@ -143,6 +170,11 @@ impl WorldOptions {
     }
     fn available_packs(&self, resources: &std::path::Path) -> Vec<crate::datapack::DataPack> {
         let mut packs = crate::datapack::feature_packs(resources);
+        packs.extend(
+            self.additional_data_packs
+                .iter()
+                .map(|pack| (**pack).clone()),
+        );
         if let Some(dir) = &self.pack_dir {
             packs.extend(crate::datapack::discover_folder(dir));
         }
