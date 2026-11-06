@@ -33,7 +33,8 @@
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
-- [Hook notes](reference/hook-notes.md)
+<!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
+- [Hook notes]()
 
 # For agents
 

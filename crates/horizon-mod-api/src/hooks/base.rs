@@ -2239,6 +2239,15 @@ pub trait Hooks {
     /// side, before any resource loads: push the same ones every time, from
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
+    #[notes = r#"## Villager farming
+
+Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
+`native_blocks`. A crop block's generated item is its seed: add that item to
+`minecraft:villager_plantable_seeds` to let farmers plant its default block state from their inventory.
+Untagged items and tagged items without a block are skipped. Crop maturity follows the template's class:
+beetroots mature at age 3, ordinary crops at 7; torchflower crops never reach their maximum age 2 while
+still crops. Pitcher crops are not `CropBlock`s and are not harvested by this behavior. Farming still
+requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "both",
         contract = "collect",
