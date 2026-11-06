@@ -77,10 +77,13 @@ impl Game<'_> {
                 };
                 Some([dims.0, dims.1, dims.2])
             }
-            // The dragon's box follows no pose (EntityType.ENDER_DRAGON).
+            // The dragon's box follows no pose (EntityType.ENDER_DRAGON):
+            // the type's own row (`entity-types.json`), the one box the
+            // engine keeps for it.
             Target::Dragon(id) => {
                 self.dragon.as_ref().filter(|d| d.id == id)?;
-                Some([16.0, 8.0, 6.8])
+                let ty = self.res.mob_types().get("minecraft:ender_dragon")?;
+                Some([ty.width, ty.height, ty.eye_height])
             }
             _ => None,
         }

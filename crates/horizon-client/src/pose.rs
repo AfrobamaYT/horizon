@@ -19,16 +19,10 @@ pub enum Pose {
 }
 impl Pose {
     /// `Pose` by its network id (`Pose.id`); the poses a player never takes
-    /// are standing.
+    /// are standing. One id table: `mod_api::Pose`'s, narrowed to the avatar's
+    /// six stances.
     pub fn from_id(id: i32) -> Self {
-        match id {
-            1 => Self::FallFlying,
-            2 => Self::Sleeping,
-            3 => Self::Swimming,
-            4 => Self::SpinAttack,
-            5 => Self::Crouching,
-            _ => Self::Standing,
-        }
+        mod_api::Pose::from_id(id).into()
     }
     pub fn name(self) -> &'static str {
         match self {
