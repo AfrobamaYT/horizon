@@ -146,7 +146,7 @@ impl LevelHost for ReadLevel<'_, '_> {
     fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
         self.game.native_block_state_id(name)
     }
-    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+    fn block_state_default(&self, block: mod_api::BlockKey) -> Option<BlockStateId> {
         self.game.native_block_state_default(block)
     }
     fn state_string(&self, state: BlockStateId) -> Option<String> {
@@ -158,12 +158,8 @@ impl LevelHost for ReadLevel<'_, '_> {
     fn height(&self) -> i32 {
         self.game.world.shape.height
     }
-    fn block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
-        Some(super::native_world_read::block_in_tag(
-            self.game.items(),
-            block,
-            tag,
-        ))
+    fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
+        super::native_world_read::block_in_tag(block, tag)
     }
     fn item_stack_in_tag(&self, stack: &mod_api::ItemStack, tag: &str) -> Option<bool> {
         Some(super::native_world_read::stack_in_tag(
