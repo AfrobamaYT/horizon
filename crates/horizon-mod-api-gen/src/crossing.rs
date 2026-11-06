@@ -444,23 +444,39 @@ impl Rule {
             if !matches!(head, "std" | "core" | "alloc") {
                 return false;
             }
-            matches!(
-                tail,
-                "string::String"
-                    | "option::Option"
+            match (head, tail) {
+                (
+                    "std" | "alloc",
+                    "string::String"
                     | "boxed::Box"
                     | "sync::Arc"
                     | "rc::Rc"
                     | "borrow::Cow"
                     | "vec::Vec"
                     | "collections::VecDeque"
-                    | "collections::HashMap"
+                    | "collections::vec_deque::VecDeque"
                     | "collections::BTreeMap"
-                    | "collections::HashSet"
+                    | "collections::btree_map::BTreeMap"
                     | "collections::BTreeSet"
-            ) || (tail
-                .strip_prefix("primitive::")
-                .is_some_and(|n| SCALARS.iter().any(|(s, _)| *s == n)))
+                    | "collections::btree_set::BTreeSet",
+                ) => true,
+                ("std" | "core", "option::Option") => true,
+                (
+                    "std",
+                    "collections::HashMap"
+                    | "collections::hash_map::HashMap"
+                    | "collections::HashSet"
+                    | "collections::hash_set::HashSet",
+                ) => true,
+                ("std" | "core", primitive) => {
+                    primitive.strip_prefix("primitive::").is_some_and(|n| {
+                        SCALARS
+                            .iter()
+                            .any(|(s, scalar)| *s == n && *scalar != Scalar::String)
+                    })
+                }
+                _ => false,
+            }
         });
         if !builtin {
             return opaque;

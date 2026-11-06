@@ -135,7 +135,10 @@ the declared layouts and functions are unchanged.
 ### Internals budgets and trust boundary
 
 Each listener call can retain at most 4,096 live nodes and journal 4,096 writes totaling 65,536
-value cells. A value can contain at most 1 MiB of string or byte data. A write is checked against
+value cells (including writes flushed before a thunk). Retained journal payloads and keys together
+are capped at 1 MiB per frame, and live-node paths have a separate 1 MiB cap; sequence storage
+counts toward these byte limits too. A value can contain at most 1 MiB of string or byte data.
+A write is checked against
 its field's codec before entering the journal. Exceeding these limits returns
 `NotHere("internals budget")`. With fuel enabled, every import costs 1 plus its input and output
 cells; a native thunk call also costs a fixed 1,000 fuel units.

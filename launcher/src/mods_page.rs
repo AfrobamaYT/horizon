@@ -1362,10 +1362,6 @@ impl Launcher {
         } else {
             Vec::new()
         };
-        if entries.is_empty() && native_entries.is_empty() {
-            return None;
-        }
-        let busy = self.mods.busy.is_some();
         let wasm_internals = if self.mods.java.is_none() && kind == PackKind::Mod {
             let home = self.mods.home();
             let key = native_status::fingerprint(&home, None);
@@ -1377,6 +1373,10 @@ impl Launcher {
         } else {
             false
         };
+        if entries.is_empty() && native_entries.is_empty() && !wasm_internals {
+            return None;
+        }
+        let busy = self.mods.busy.is_some();
         let native = wasm_internals
             || !native_entries.is_empty()
             || self.mods.java.is_none()

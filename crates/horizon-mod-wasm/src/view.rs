@@ -109,9 +109,15 @@ pub fn resolve(
         .collect()
 }
 
+struct KeptNode {
+    node: Node,
+    bytes: usize,
+}
+
 struct Active<'a> {
     frame: Frame<'a>,
-    nodes: BTreeMap<u32, Node>,
+    nodes: BTreeMap<u32, KeptNode>,
+    node_path_bytes: usize,
     declared: &'a [Resolved],
 }
 
@@ -138,24 +144,27 @@ impl Active<'_> {
     fn node(&self, resource: &Resource<wire::Node>) -> Result<&Node, wire::Refusal> {
         self.nodes
             .get(&resource.rep())
+            .map(|held| &held.node)
             .ok_or_else(|| gone("the node's call is over"))
     }
 
     fn keep(&mut self, node: Node) -> Result<Resource<wire::Node>, wire::Refusal> {
-        if self.nodes.len() >= 4096 {
+        let bytes = crate::frame::path_bytes(&node.path)?;
+        if self.nodes.len() >= 4096 || self.node_path_bytes + bytes > 1_048_576 {
             return Err(wire::Refusal::NotHere("internals budget".into()));
         }
         let rep = NEXT_NODE
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
             .map_err(|_| gone("node resource ids exhausted"))?;
-        self.nodes.insert(rep, node);
+        self.nodes.insert(rep, KeptNode { node, bytes });
+        self.node_path_bytes += bytes;
         Ok(Resource::new_own(rep))
     }
 
     fn reached(&mut self, reached: Reached) -> Result<wire::Reached, wire::Refusal> {
         match reached {
             Reached::Node(node) => self.keep(node).map(wire::Reached::Node),
-            Reached::Value(value) => Ok(wire::Reached::Value(flatten(value))),
+            Reached::Value(value) => encode(value).map(wire::Reached::Value),
         }
     }
 }
@@ -181,6 +190,7 @@ pub fn run<T>(
     let mut active = Active {
         frame,
         nodes: BTreeMap::new(),
+        node_path_bytes: 0,
         declared,
     };
     let scope = Scope(CURRENT.replace((&raw mut active).cast()));
@@ -367,6 +377,11 @@ impl wire::HostWithStore<State> for View {
     }
 }
 
+fn encode(value: internals::Value) -> Result<Vec<wire::Cell>, wire::Refusal> {
+    crate::frame::value_size(&value)?;
+    Ok(flatten(value))
+}
+
 fn decode(cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
     if cells.len() > 65_536
         || cells
@@ -399,7 +414,7 @@ impl View {
         node: Resource<wire::Node>,
         n: u32,
     ) -> Result<Vec<wire::Cell>, wire::Refusal> {
-        current(|a| Ok(flatten(a.frame.get(a.node(&node)?, n)?)))
+        current(|a| encode(a.frame.get(a.node(&node)?, n)?))
     }
     pub fn set(
         &mut self,
@@ -412,7 +427,7 @@ impl View {
                 .nodes
                 .get(&node.rep())
                 .ok_or_else(|| gone("the node's call is over"))?;
-            a.frame.set(node, n, decode(v)?).map_err(Into::into)
+            a.frame.set(&node.node, n, decode(v)?).map_err(Into::into)
         })
     }
     pub fn index(
@@ -442,11 +457,13 @@ impl View {
         current(|a| a.frame.case(a.node(&node)?).map_err(Into::into))
     }
     pub fn read(&mut self, node: Resource<wire::Node>) -> Result<Vec<wire::Cell>, wire::Refusal> {
-        current(|a| Ok(flatten(a.frame.read(a.node(&node)?)?)))
+        current(|a| encode(a.frame.read(a.node(&node)?)?))
     }
     pub fn drop(&mut self, node: Resource<wire::Node>) -> wasmtime::Result<()> {
         let _ = current(|a| {
-            a.nodes.remove(&node.rep());
+            if let Some(held) = a.nodes.remove(&node.rep()) {
+                a.node_path_bytes -= held.bytes;
+            }
             Ok(())
         });
         Ok(())
@@ -474,12 +491,14 @@ impl View {
                 a.nodes
                     .get_mut(&receiver.rep())
                     .ok_or_else(|| gone("the node's call is over"))?
+                    .node
                     .restricted = true;
             }
             let nodes = &a.nodes;
             let node = |r: &Resource<wire::Node>| {
                 nodes
                     .get(&r.rep())
+                    .map(|held| &held.node)
                     .ok_or_else(|| gone("the node's call is over"))
             };
             let receiver = receiver.as_ref().map(node).transpose()?;
@@ -525,6 +544,52 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn live_node_paths_hit_the_byte_budget_before_the_node_count() {
+        use mod_points::internals::{Op, Reply, Type};
+        unsafe fn cycle(ptr: *mut (), w: bool, op: Op<'_>) -> Result<Reply, internals::Refusal> {
+            match op {
+                Op::Field(0) => Ok(Reply::Node(ptr, 0, w)),
+                _ => Err(internals::not_here("cycle")),
+            }
+        }
+        let table = Table {
+            types: &[Type {
+                path: "Cycle",
+                hash: "",
+                node: cycle,
+                raw_fields: &[0],
+                raw_index: false,
+            }],
+            ..Table::EMPTY
+        };
+        let mut value = ();
+        let frame = unsafe {
+            Frame::new(
+                &table,
+                vec![Root {
+                    ptr: (&raw mut value).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        run(frame, &[], || {
+            let mut next = View.root(0).unwrap();
+            for _ in 0..4095 {
+                match View.field(borrow(&next), 0) {
+                    Ok(node) => next = node,
+                    Err(wire::Refusal::NotHere(why)) if why == "internals budget" => return Ok(()),
+                    other => panic!("unexpected path result: {other:?}"),
+                }
+            }
+            panic!("path bytes must exhaust before the node count");
+        })
+        .unwrap();
+    }
+
     mod fixture {
         include!("../tests/internals/host.rs");
     }
@@ -547,7 +612,9 @@ mod tests {
             module: horizon_mods::Package::read_wasm(&package).unwrap(),
         };
         let std = std::fs::read(std::env::var_os("HORIZON_WASM_STD").expect("std member")).unwrap();
-        let config = crate::RuntimeConfig::default();
+        let mut config = crate::RuntimeConfig::default();
+        // These tests must exercise the import refusal, not race the normal hook deadline.
+        config.budgets.call = std::time::Duration::from_secs(30);
         let engine = crate::engine(&config).unwrap();
         let component =
             crate::component(&engine, &config, &std, std::slice::from_ref(&package), &[0]).unwrap();

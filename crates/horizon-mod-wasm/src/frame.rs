@@ -71,6 +71,7 @@ pub struct Frame<'t> {
     generation: u64,
     cache_generation: Cell<u64>,
     journal_cells: usize,
+    journal_bytes: usize,
     journal_entries: usize,
 }
 
@@ -82,23 +83,42 @@ fn not_here(what: &str) -> Refusal {
     Refusal::NotHere(what.to_owned())
 }
 
-/// Validates the size of an untrusted value once, before retaining or decoding it.
-pub(crate) fn value_cells(value: &Value) -> Result<usize, Refusal> {
+/// The retained payload of a plain value. Sequence storage counts too, including byte arrays.
+pub(crate) struct ValueSize {
+    pub cells: usize,
+    pub bytes: usize,
+}
+
+/// Validates value size at the boundary, before retaining or returning it.
+pub(crate) fn value_size(value: &Value) -> Result<ValueSize, Refusal> {
     let mut pending = vec![value];
-    let mut cells = 0;
-    let mut bytes = 0;
+    let mut size = ValueSize { cells: 0, bytes: 0 };
     while let Some(value) = pending.pop() {
-        cells += 1;
+        size.cells += 1;
         match value {
-            Value::Str(s) => bytes += s.len(),
-            Value::Seq(v) | Value::Rec(v) | Value::Var(_, v) => pending.extend(v),
+            Value::Str(s) => size.bytes += s.capacity(),
+            Value::Seq(v) | Value::Rec(v) | Value::Var(_, v) => {
+                size.bytes += v.capacity() * std::mem::size_of::<Value>();
+                pending.extend(v);
+            }
             _ => {}
         }
-        if cells > 65_536 || bytes > 1_048_576 {
+        if size.cells > 65_536 || size.bytes > 1_048_576 {
             return Err(not_here("internals budget"));
         }
     }
-    Ok(cells)
+    Ok(size)
+}
+
+/// Heap storage retained by a node or journal path, including all key payloads.
+pub(crate) fn path_bytes(path: &Path<Value>) -> Result<usize, Refusal> {
+    let mut bytes = path.steps.capacity() * std::mem::size_of::<Step<Value>>();
+    for step in &path.steps {
+        if let Step::Key(key) = step {
+            bytes += value_size(key)?.bytes;
+        }
+    }
+    Ok(bytes)
 }
 
 impl<'t> Frame<'t> {
@@ -117,6 +137,7 @@ impl<'t> Frame<'t> {
             generation: 0,
             cache_generation: Cell::new(0),
             journal_cells: 0,
+            journal_bytes: 0,
             journal_entries: 0,
         }
     }
@@ -189,12 +210,12 @@ impl<'t> Frame<'t> {
         };
         for (a, b) in left.path.steps.iter().zip(&right.path.steps) {
             let at = self.walk(&prefix)?;
-            let op = match a {
-                Step::Field(n) => Op::Field(*n),
-                Step::Index(i) => Op::Index(*i),
-                Step::Key(k) => Op::Key(k),
+            let raw = |step: &Step<Value>| match step {
+                Step::Field(n) => self.raw_step(at.ty, &Op::Field(*n)),
+                Step::Index(i) => self.raw_step(at.ty, &Op::Index(*i)),
+                Step::Key(_) => false,
             };
-            if !self.raw_step(at.ty, &op) {
+            if !raw(a) || !raw(b) {
                 return Ok(false);
             }
             if a != b {
@@ -324,18 +345,23 @@ impl<'t> Frame<'t> {
         if !at.writable {
             return Err(not_here("a read-only node"));
         }
-        let mut cells = value_cells(&value)?;
+        let mut size = value_size(&value)?;
+        size.bytes += path_bytes(&node.path)?;
         for step in &node.path.steps {
             if let Step::Key(key) = step {
-                cells += value_cells(key)?;
+                size.cells += value_size(key)?.cells;
             }
         }
-        if self.journal_entries >= 4096 || self.journal_cells + cells > 65_536 {
+        if self.journal_entries >= 4096
+            || self.journal_cells + size.cells > 65_536
+            || self.journal_bytes + size.bytes > 1_048_576
+        {
             return Err(not_here("internals budget"));
         }
         self.op(at, Op::Check(field, &value))?;
         self.journal_entries += 1;
-        self.journal_cells += cells;
+        self.journal_cells += size.cells;
+        self.journal_bytes += size.bytes;
         self.journal.set(node.path.clone(), field, value);
         Ok(())
     }
@@ -379,8 +405,6 @@ impl<'t> Frame<'t> {
     /// Applies the call's writes, in order: before a game function call, and when the listener
     /// returns. Answers the writes whose path led nowhere, each with its field and why.
     pub fn apply(&mut self) -> Vec<(Path<Value>, u32, Refusal)> {
-        self.journal_entries = 0;
-        self.journal_cells = 0;
         let mut refused = Vec::new();
         let mut journal = std::mem::take(&mut self.journal);
         let gone = journal.apply(|path, field, value| {
@@ -616,8 +640,8 @@ pub(crate) mod tests {
             path: "Game",
             hash: "game-hash",
             node: game,
-            raw_fields: &[0, 1],
-            raw_index: true,
+            raw_fields: &[0],
+            raw_index: false,
         },
         Type {
             path: "Vec<Player>",
@@ -630,8 +654,8 @@ pub(crate) mod tests {
             path: "Player",
             hash: "player-hash",
             node: player,
-            raw_fields: &[0, 1],
-            raw_index: true,
+            raw_fields: &[],
+            raw_index: false,
         },
     ];
     unsafe fn inspect_player(_: Option<*mut ()>, _: Vec<Arg>) -> Result<Reply, Refusal> {
@@ -927,7 +951,7 @@ pub(crate) mod tests {
                 hash: "fields-hash",
                 node: fields,
                 raw_fields: &[0, 1],
-                raw_index: true,
+                raw_index: false,
             },
             Type {
                 path: "Vec<Player>",
@@ -940,8 +964,8 @@ pub(crate) mod tests {
                 path: "Player",
                 hash: "player-hash",
                 node: player,
-                raw_fields: &[0, 1],
-                raw_index: true,
+                raw_fields: &[],
+                raw_index: false,
             },
         ];
         let table = Table {
@@ -973,6 +997,36 @@ pub(crate) mod tests {
             .unwrap();
         drop(frame);
         assert_eq!((fields.left.health, fields.right.health), (20, 20));
+        let mixed = Table {
+            types: Box::leak(Box::new([
+                Type {
+                    raw_fields: &[0],
+                    ..FIELD_TYPES[0]
+                },
+                Type { ..FIELD_TYPES[1] },
+                Type { ..FIELD_TYPES[2] },
+            ])),
+            ..table
+        };
+        let mut frame = unsafe {
+            Frame::new(
+                &mixed,
+                vec![Root {
+                    ptr: (&raw mut fields).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        let root = frame.root(0).unwrap();
+        let left = frame.field(&root, 0).unwrap();
+        let right = frame.field(&root, 1).unwrap();
+        // Both divergent steps, not just the first argument's, must be raw.
+        assert!(
+            matches!(frame.call(2, None, vec![Call::Node(&left), Call::Node(&right)]), Err(Refusal::NotHere(why)) if why == "arguments overlap")
+        );
     }
 
     #[test]
@@ -1084,28 +1138,49 @@ pub(crate) mod tests {
             ..TABLE
         };
         let mut value = Choice::Players(vec![Player { health: 1 }, Player { health: 2 }]);
+        let mut siblings = vec![Player { health: 3 }, Player { health: 4 }];
         let mut frame = unsafe {
             Frame::new(
                 &table,
-                vec![Root {
-                    ptr: (&raw mut value).cast(),
-                    ty: 0,
-                    writable: true,
-                    receiver: false,
-                    born: None,
-                }],
+                vec![
+                    Root {
+                        ptr: (&raw mut value).cast(),
+                        ty: 0,
+                        writable: true,
+                        receiver: false,
+                        born: None,
+                    },
+                    Root {
+                        ptr: (&raw mut siblings).cast(),
+                        ty: PLAYERS,
+                        writable: true,
+                        receiver: false,
+                        born: None,
+                    },
+                ],
             )
         };
         let root = frame.root(0).unwrap();
         let v = frame.field(&root, 0).unwrap();
         let a = node(frame.index(&v, 0).unwrap());
         let b = node(frame.index(&v, 1).unwrap());
+        let siblings = frame.root(1).unwrap();
+        let left = node(frame.index(&siblings, 0).unwrap());
+        let right = node(frame.index(&siblings, 1).unwrap());
         let _again = frame.field(&root, 0).unwrap();
         frame.set(&a, 0, Value::S(7)).unwrap();
         frame.set(&b, 0, Value::S(8)).unwrap();
         assert_eq!(frame.get(&a, 0).unwrap(), Value::S(7));
         assert_eq!(frame.get(&b, 0).unwrap(), Value::S(8));
-        frame.apply();
+        frame.set(&left, 0, Value::S(9)).unwrap();
+        frame.set(&right, 0, Value::S(10)).unwrap();
+        assert_eq!(frame.get(&a, 0).unwrap(), Value::S(7));
+        assert_eq!(frame.get(&left, 0).unwrap(), Value::S(9));
+        frame
+            .call(2, None, vec![Call::Node(&left), Call::Node(&right)])
+            .unwrap();
+        assert_eq!(frame.get(&left, 0).unwrap(), Value::S(20));
+        assert_eq!(frame.get(&right, 0).unwrap(), Value::S(20));
         assert_eq!(frame.get(&a, 0).unwrap(), Value::S(7));
         assert_eq!(frame.get(&b, 0).unwrap(), Value::S(8));
         // A shared enum prefix reborrows, so it is deliberately not provably disjoint.
@@ -1134,8 +1209,61 @@ pub(crate) mod tests {
             frame.set(&root, 1, Value::B(true)),
             Err(not_here("internals budget"))
         );
+        frame.apply();
+        assert_eq!(
+            frame.set(&root, 1, Value::B(true)),
+            Err(not_here("internals budget"))
+        );
         drop(frame);
-        assert!(!game.flag);
+        assert!(game.flag);
+    }
+
+    #[test]
+    fn large_strings_hit_the_retained_byte_budget_before_the_entry_budget() {
+        struct Text {
+            value: String,
+        }
+        unsafe fn text(_: *mut (), _: bool, op: Op<'_>) -> Result<Reply, Refusal> {
+            match op {
+                Op::Check(0, Value::Str(_)) => Ok(Reply::Done),
+                _ => Err(not_here("text field")),
+            }
+        }
+        let table = Table {
+            types: &[Type {
+                path: "Text",
+                hash: "",
+                node: text,
+                raw_fields: &[],
+                raw_index: false,
+            }],
+            ..Table::EMPTY
+        };
+        let mut text = Text {
+            value: "before".into(),
+        };
+        let mut frame = unsafe {
+            Frame::new(
+                &table,
+                vec![Root {
+                    ptr: (&raw mut text).cast(),
+                    ty: 0,
+                    writable: true,
+                    receiver: false,
+                    born: None,
+                }],
+            )
+        };
+        let root = frame.root(0).unwrap();
+        for _ in 0..16 {
+            frame.set(&root, 0, Value::Str("x".repeat(65_536))).unwrap();
+        }
+        assert_eq!(
+            frame.set(&root, 0, Value::Str("x".repeat(65_536))),
+            Err(not_here("internals budget"))
+        );
+        drop(frame);
+        assert_eq!(text.value, "before");
     }
 
     #[test]

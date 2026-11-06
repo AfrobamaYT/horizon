@@ -261,6 +261,11 @@ jobs:
           HORIZON_MOD_INTERNALS_MANIFEST: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals/coverage.toml
           HORIZON_MOD_INTERNALS_CATALOG: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals/coverage.json
         run: cargo +1.99.1 check -p horizon-mod-internals --target wasm32-unknown-unknown
+      - name: Every crossable real internal has compiling host and guest bindings
+        run: |
+          export HORIZON_COVERAGE_WASM_CARGO="$(rustup which --toolchain 1.99.1 cargo)"
+          export HORIZON_COVERAGE_WASM_RUSTC="$(rustup which --toolchain 1.99.1 rustc)"
+          cargo +stable test -j4 -p horizon-mod-api-gen --lib real_catalog_has_compiling_host_and_guest_bindings -- --ignored --nocapture
       - name: Build all wasm fixtures and the std member in one shared target
         run: |
           cargo +stable build -p cargo-horizon-mod -p xtask
@@ -307,6 +312,11 @@ jobs:
           HORIZON_WASM_INTERNALS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: '"$WASM_TEST_INTERNALS" --ignored'
+      - name: Internals panics and journal overflow stop only the calling group
+        env:
+          HORIZON_WASM_INTERNALS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/internals
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: cargo +stable test -j4 -p horizon-mod-wasm --lib view::tests:: -- --ignored
       - name: A listener refused with its library keeps nothing of their group
         env:
           HORIZON_WASM_GROUPS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/groups

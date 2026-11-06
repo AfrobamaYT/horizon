@@ -28,6 +28,9 @@ pub struct Counts {
     /// Declared paths that cannot be exposed, with their reason.
     pub refused: BTreeMap<String, &'static str>,
     pub thunks: usize,
+    /// Entries without a field/codec/thunk binding, keyed by path, kind and hash. Unlike
+    /// `refused`, this retains the reason when another kind at the same path is accepted.
+    pub unbound: BTreeMap<(String, &'static str, String), &'static str>,
     /// Functions with a part that can't cross, or a form a thunk can't make (a generic, a `self`
     /// taken by value, a returned value that is no copy).
     pub skipped: usize,
@@ -75,15 +78,26 @@ impl Selection {
     }
 }
 
+#[derive(Default)]
+struct NodeDef {
+    path: String,
+    hash: String,
+    function: TokenStream,
+    raw_fields: Vec<u32>,
+    raw_index: bool,
+}
+
 struct Gen<'r> {
     rule: &'r Rule,
     guest: bool,
+    /// Selection validates signatures without regenerating the receiver's entire graph.
+    probing: bool,
     hashes: &'r HashMap<String, (&'r str, &'r str)>,
     selection: Selection,
     /// Each walked type's id, by its spelling.
     ids: HashMap<String, u32>,
     /// Each walked type, in id order: its spelling and node function.
-    nodes: Vec<(String, String, TokenStream, Vec<u32>, bool)>,
+    nodes: Vec<NodeDef>,
     /// Each listed copy type's codec, by path: already generated.
     codecs: HashMap<String, bool>,
     items: Vec<TokenStream>,
@@ -215,6 +229,7 @@ impl<'r> Gen<'r> {
         Self {
             rule,
             guest: false,
+            probing: false,
             hashes,
             selection,
             ids: HashMap::new(),
@@ -464,6 +479,9 @@ impl<'r> Gen<'r> {
     /// The id of the walked type `shape`, generating its node function once. Reference and
     /// wrapper layers are stepped through when a node is made, so `shape` is never one.
     fn node(&mut self, shape: &Shape) -> u32 {
+        if self.probing {
+            return 0;
+        }
         let ty = spell(shape).expect("crossable").to_string();
         if let Some(id) = self.ids.get(&ty) {
             return *id;
@@ -478,13 +496,16 @@ impl<'r> Gen<'r> {
                 .unwrap_or((path.clone(), String::new())),
             _ => (ty, String::new()),
         };
-        self.nodes
-            .push((path, hash, TokenStream::new(), Vec::new(), false));
+        self.nodes.push(NodeDef {
+            path,
+            hash,
+            ..NodeDef::default()
+        });
         // Wrapper traversal must also be raw before a field/index can prove separation.
         fn raw(shape: &Shape) -> bool {
             match shape {
-                Shape::Ref { to, .. } | Shape::Wrapped(Wrapper::Box, to) => raw(to),
-                Shape::Wrapped(..) => false,
+                Shape::Wrapped(Wrapper::Box, to) => raw(to),
+                Shape::Ref { .. } | Shape::Wrapped(..) => false,
                 _ => true,
             }
         }
@@ -508,8 +529,8 @@ impl<'r> Gen<'r> {
                 .collect(),
             _ => Vec::new(),
         };
-        self.nodes[id as usize].3 = fields;
-        self.nodes[id as usize].4 = match shape {
+        self.nodes[id as usize].raw_fields = fields;
+        self.nodes[id as usize].raw_index = match shape {
             Shape::Array(elem, _) | Shape::Slice(elem) => raw(elem),
             Shape::Collection(Collection::Vec, args) => raw(&args[0]),
             _ => false,
@@ -522,7 +543,7 @@ impl<'r> Gen<'r> {
                 unsafe { #body }
             }
         });
-        self.nodes[id as usize].2 = quote!(#name);
+        self.nodes[id as usize].function = quote!(#name);
         id
     }
 
@@ -699,13 +720,13 @@ impl<'r> Gen<'r> {
                     #some
                 }
             }
-            Shape::Array(elem, _) | Shape::Slice(elem) => {
-                let index = self.raw_indexed(&rust, elem, false);
+            Shape::Array(elem, n) => {
+                let index = self.raw_indexed(&rust, elem, Some(*n));
                 quote!(#len #index)
             }
             Shape::Collection(collection, args) => match collection {
                 Collection::Vec => {
-                    let index = self.raw_indexed(&rust, &args[0], true);
+                    let index = self.raw_indexed(&rust, &args[0], None);
                     quote!(#len #index)
                 }
                 Collection::VecDeque => {
@@ -752,10 +773,16 @@ impl<'r> Gen<'r> {
         }
     }
 
-    fn raw_indexed(&mut self, rust: &TokenStream, elem: &Shape, vector: bool) -> TokenStream {
+    fn raw_indexed(
+        &mut self,
+        rust: &TokenStream,
+        elem: &Shape,
+        length: Option<usize>,
+    ) -> TokenStream {
         let element = self.element(elem);
         let ty = spell(elem).expect("element");
-        let ptr = if vector {
+        let len = length.map_or_else(|| quote!((&*(p as *const #rust)).len()), |n| quote!(#n));
+        let ptr = if length.is_none() {
             quote!(if w { (*(p as *mut #rust)).as_mut_ptr() } else { (*(p as *const #rust)).as_ptr() as *mut #ty })
         } else {
             quote!(p.cast::<#ty>())
@@ -763,7 +790,7 @@ impl<'r> Gen<'r> {
         quote! {
             I::Op::Index(i) => {
                 let i = usize::try_from(i).unwrap_or(usize::MAX);
-                if i >= (&*(p as *const #rust)).len() { return Err(I::not_here("an index past the end")); }
+                if i >= #len { return Err(I::not_here("an index past the end")); }
                 let q = (#ptr).add(i).cast::<()>();
                 #element
             }
@@ -868,8 +895,10 @@ impl<'r> Gen<'r> {
         let key = rust.to_string();
         let id = self.nodes.len() as u32;
         self.ids.insert(key.clone(), id);
-        self.nodes
-            .push((key, String::new(), TokenStream::new(), Vec::new(), false));
+        self.nodes.push(NodeDef {
+            path: key,
+            ..NodeDef::default()
+        });
         let arms: Vec<_> = fields
             .iter()
             .enumerate()
@@ -890,7 +919,7 @@ impl<'r> Gen<'r> {
                 unsafe { match op { #(#arms)* _ => Err(I::not_here("not on this raw record")) } }
             }
         });
-        self.nodes[id as usize].2 = quote!(#node);
+        self.nodes[id as usize].function = quote!(#node);
         let writable = sig.receiver().is_some_and(|r| r.mutability.is_some());
         let variant = shape.variant();
         let target = &point.target;
@@ -909,8 +938,11 @@ impl<'r> Gen<'r> {
             let id = self.nodes.len() as u32;
             let node = format_ident!("node_{id}");
             let path = format!("{module}::{}ReturnPlace", shape.raw_record());
-            self.nodes
-                .push((path, String::new(), quote!(#node), Vec::new(), false));
+            self.nodes.push(NodeDef {
+                path,
+                function: quote!(#node),
+                ..NodeDef::default()
+            });
             let arm = self.part(
                 0,
                 &returned,
@@ -1421,7 +1453,7 @@ pub(crate) fn select<'a>(
                         *counts.skipped_types.entry(reason).or_default() += 1;
                         reason
                     } else {
-                        selection.reach(&shape, &rule);
+                        selection.reach(&shape, rule);
                         exposed.insert(path.to_owned());
                         continue;
                     }
@@ -1446,7 +1478,7 @@ pub(crate) fn select<'a>(
                                 .or_default()
                                 .insert(index);
                             members.push((internal, owner.to_owned(), index as u32));
-                            selection.reach(&shape, &rule);
+                            selection.reach(&shape, rule);
                             exposed.insert(path.to_owned());
                             continue;
                         }
@@ -1456,6 +1488,10 @@ pub(crate) fn select<'a>(
                 }
                 _ => "unsupported item kind",
             };
+            counts.unbound.insert(
+                (internal.path.clone(), internal.kind, internal.hash.clone()),
+                reason,
+            );
             counts.refused.insert(path.into(), reason);
         }
     }
@@ -1466,7 +1502,10 @@ pub(crate) fn select<'a>(
     for internal in functions {
         let mut has_place = false;
         if let Some(point) = points.iter().find(|p| p.raw && p.target == internal.path) {
-            let mut probe = Gen::new(&rule, &hashes, selection.clone());
+            let mut probe = Gen {
+                probing: true,
+                ..Gen::new(rule, hashes, selection.clone())
+            };
             if probe.raw_place(internal, point).is_some() {
                 selection = probe.selection;
                 raw.push((internal, point));
@@ -1474,19 +1513,28 @@ pub(crate) fn select<'a>(
                 exposed.insert(internal.path.clone());
             }
         }
-        let mut probe = Gen::new(&rule, &hashes, selection.clone());
+        let mut probe = Gen {
+            probing: true,
+            ..Gen::new(rule, hashes, selection.clone())
+        };
         if probe.thunk(internal).is_some() {
             selection = probe.selection;
             accepted.push(internal);
             exposed.insert(internal.path.clone());
-        } else if !has_place {
-            *counts
-                .skipped_functions
-                .entry(probe.skip_reason)
-                .or_default() += 1;
-            counts
-                .refused
-                .insert(internal.path.clone(), probe.skip_reason);
+        } else {
+            counts.unbound.insert(
+                (internal.path.clone(), internal.kind, internal.hash.clone()),
+                probe.skip_reason,
+            );
+            if !has_place {
+                *counts
+                    .skipped_functions
+                    .entry(probe.skip_reason)
+                    .or_default() += 1;
+                counts
+                    .refused
+                    .insert(internal.path.clone(), probe.skip_reason);
+            }
         }
     }
     counts.refused.retain(|path, _| !exposed.contains(path));
@@ -1564,7 +1612,7 @@ pub fn table_with_points(
     let types = generator
         .nodes
         .iter()
-        .map(|(path, hash, node, fields, index)| quote!(I::Type { path: #path, hash: #hash, node: #node, raw_fields: &[#(#fields),*], raw_index: #index },));
+        .map(|NodeDef { path, hash, function, raw_fields, raw_index }| quote!(I::Type { path: #path, hash: #hash, node: #function, raw_fields: &[#(#raw_fields),*], raw_index: #raw_index },));
     let items = &generator.items;
     let code = quote! {
         #![allow(unsafe_code, unused_unsafe, unused_parens, non_snake_case, dead_code)]
@@ -1661,6 +1709,65 @@ pub(crate) mod tests {
                 assert_eq!((__internals::TABLE.types[ty as usize].node)(p, writable, Op::Index(0)), Ok(Reply::Value(Value::U(7))));
             }
         "#,
+        );
+    }
+
+    #[test]
+    fn generated_raw_arrays_and_vecs_keep_disjoint_siblings_and_validate_writes() {
+        let entries = [
+            internal(
+                "horizon_client::Pair",
+                "struct",
+                "struct Pair { value: u32 }",
+            ),
+            internal(
+                "horizon_client::Choice",
+                "enum",
+                "enum Choice { Values(Vec<Pair>) }",
+            ),
+            internal(
+                "horizon_client::Bag",
+                "struct",
+                "struct Bag { array: [Pair; 17], items: Vec<Pair>, choice: Choice }",
+            ),
+            internal(
+                "horizon_client::heal",
+                "fn",
+                "fn heal(a: &mut Pair, b: &mut Pair)",
+            ),
+        ];
+        let (code, _) = all_table(&entries);
+        run_fixture(
+            &code,
+            "#[derive(Clone, Copy)] struct Pair { value: u32 } enum Choice { Values(Vec<Pair>) } struct Bag { array: [Pair; 17], items: Vec<Pair>, choice: Choice } fn heal(a: &mut Pair, b: &mut Pair) { a.value = 20; b.value = 21; }",
+            r#"
+            let mut bag = Bag { array: [Pair { value: 1 }; 17], items: vec![Pair { value: 2 }, Pair { value: 3 }], choice: Choice::Values(vec![Pair { value: 4 }]) };
+            let table = &__internals::TABLE;
+            let bag_ty = table.types.iter().find(|t| t.path.ends_with("Bag")).unwrap();
+            assert_eq!(bag_ty.raw_fields, &[0, 1, 2]);
+            unsafe {
+                for field in [0, 1] {
+                    let Reply::Node(p, ty, _) = (bag_ty.node)((&raw mut bag).cast(), true, Op::Field(field)).unwrap() else { panic!("collection") };
+                    let collection = &table.types[ty as usize];
+                    assert!(collection.raw_index);
+                    let Reply::Node(left, ty, _) = (collection.node)(p, true, Op::Index(0)).unwrap() else { panic!("left") };
+                    let Reply::Node(right, _, _) = (collection.node)(p, true, Op::Index(1)).unwrap() else { panic!("right") };
+                    let pair = &table.types[ty as usize];
+                    assert!((pair.node)(left, true, Op::Check(0, &Value::B(true))).is_err());
+                    assert_eq!((pair.node)(left, true, Op::Check(0, &Value::U(7))), Ok(Reply::Done));
+                    assert_eq!((pair.node)(left, true, Op::Set(0, Value::U(7))), Ok(Reply::Done));
+                    assert_eq!((pair.node)(right, true, Op::Set(0, Value::U(8))), Ok(Reply::Done));
+                    assert_eq!((pair.node)(left, true, Op::Get(0)), Ok(Reply::Value(Value::U(7))));
+                    assert_eq!((pair.node)(right, true, Op::Get(0)), Ok(Reply::Value(Value::U(8))));
+                    (table.thunks[0].call)(None, vec![internals::Arg::Node(left), internals::Arg::Node(right)]).unwrap();
+                    assert_eq!((pair.node)(left, true, Op::Get(0)), Ok(Reply::Value(Value::U(20))));
+                }
+                let Reply::Node(p, ty, _) = (bag_ty.node)((&raw mut bag).cast(), true, Op::Field(2)).unwrap() else { panic!("enum") };
+                assert!(table.types[ty as usize].raw_fields.is_empty());
+                (table.types[ty as usize].node)(p, true, Op::Field(0)).unwrap();
+            }
+            assert_eq!((bag.array[0].value, bag.items[1].value), (20, 21));
+            "#,
         );
     }
 
@@ -2254,3 +2361,6 @@ pub(crate) mod tests {
         assert!(code.contains("fn dec__horizon_client__g__Pos"));
     }
 }
+
+#[cfg(test)]
+mod catalog_coverage;

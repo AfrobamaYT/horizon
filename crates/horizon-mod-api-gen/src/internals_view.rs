@@ -187,6 +187,17 @@ pub struct Injection {
     pub listener: String,
 }
 
+/// A callable the host supports but the guest cannot yet express as a typed parameter.
+/// Coverage reports these paths explicitly instead of silently omitting a binding.
+pub fn binding_skip(internal: &Internal, rule: &Rule) -> Option<&'static str> {
+    let sig = signature(&internal.signature)?;
+    let (module, this) = function_scope(rule, internal)?;
+    sig.inputs.iter().any(|a| {
+        let syn::FnArg::Typed(a) = a else { return false; };
+        matches!(rule.shape(&module, this.as_deref(), &a.ty), Shape::Ref { mutable: true, to } if matches!(rule.crossing_of(&to), Crossing::Copy(_)))
+    }).then_some("mutable copy arguments need copy-field node stepping on the host")
+}
+
 /// The generated view and raw-listener export macro. Nothing per game type is handwritten.
 pub fn generate(
     internals: &[Internal],
@@ -426,7 +437,6 @@ pub fn generate(
         }
     }
     let mut free_aliases = BTreeMap::<String, Vec<syn::Ident>>::new();
-    let mut omitted = Vec::new();
     let mut has_game_error = false;
     for (index, d) in declared.iter().enumerate() {
         if let Some(i) = selected
@@ -439,14 +449,8 @@ pub fn generate(
             let (_, func) = path.rsplit_once("::").unwrap();
             let (module, this) = function_scope(&rule, i).expect("validated function scope");
             let (module, this) = (module.as_str(), this.as_deref());
-            // Copy fields currently have Get/Set operations, but no node step. There is no
-            // typed guest argument that could supply the host thunk's mutable copy borrow.
-            if sig.inputs.iter().any(|a| {
-                let syn::FnArg::Typed(a) = a else { return false; };
-                matches!(rule.shape(module, this, &a.ty), Shape::Ref { mutable: true, to } if matches!(rule.crossing_of(&to), Crossing::Copy(_)))
-            }) {
-                omitted.push(format!("// Not on wasm: {}: mutable copy arguments need copy-field node stepping on the host.", i.path));
-                continue;
+            if let Some(reason) = binding_skip(i, &rule) {
+                return Err(format!("{}: Not on wasm: {reason}", i.path));
             }
             let mut args = Vec::new();
             let mut params = Vec::new();
@@ -742,7 +746,7 @@ pub fn generate(
             };
         }
     };
-    Ok(format!("{}\n{code}", omitted.join("\n")))
+    Ok(code.to_string())
 }
 
 fn handle(ty: &syn::Ident, methods: Vec<TokenStream>) -> TokenStream {
@@ -951,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn mutable_copy_arguments_do_not_emit_an_unsupplyable_guest_parameter() {
+    fn mutable_copy_arguments_are_explicitly_refused_and_reported() {
         let entries = [
             entry(
                 "horizon_client::Counter",
@@ -964,37 +968,15 @@ mod tests {
                 "fn mutate(&mut self, out: &mut u8)",
             ),
         ];
-        let code = generate(&entries, &[declaration(&entries[1])], &[], &[]).unwrap();
-        let file = syn::parse_file(&code).unwrap();
-        let view = file
-            .items
-            .iter()
-            .find_map(|i| match i {
-                syn::Item::Mod(m) if m.ident == "view" => Some(&m.content.as_ref().unwrap().1),
-                _ => None,
-            })
-            .unwrap();
-        assert!(!view.iter().any(|i| {
-            match i {
-                syn::Item::Impl(i) => i
-                    .items
-                    .iter()
-                    .any(|i| matches!(i, syn::ImplItem::Fn(f) if f.sig.ident == "mutate")),
-                _ => false,
-            }
-        }));
-        let listed = view
-            .iter()
-            .find_map(|i| match i {
-                syn::Item::Const(c) if c.ident == "DECLARED" => {
-                    Some(c.expr.to_token_stream().to_string())
-                }
-                _ => None,
-            })
-            .unwrap();
+        let reason = binding_skip(&entries[1], &Rule::new(&entries)).unwrap();
+        assert_eq!(
+            reason,
+            "mutable copy arguments need copy-field node stepping on the host"
+        );
         assert!(
-            listed.contains("horizon_client::Counter::mutate"),
-            "load-time compatibility still checks every manifest entry"
+            generate(&entries, &[declaration(&entries[1])], &[], &[])
+                .unwrap_err()
+                .contains(reason)
         );
     }
 
