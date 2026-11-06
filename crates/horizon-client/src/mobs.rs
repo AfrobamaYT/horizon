@@ -2940,7 +2940,7 @@ pub fn apply_mob_pushes(m: &mut Mob, pending: &mut PendingPushes) {
 /// index `from` on), at once: vanilla sets them on the other entity during
 /// the tick, before the mobs after it tick.
 pub fn apply_brain_events(
-    mobs: &mut [Mob],
+    mobs: &mut crate::join_seq::JoinList<Mob>,
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
     from: usize,

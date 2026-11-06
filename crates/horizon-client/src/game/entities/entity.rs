@@ -2196,7 +2196,8 @@ mod join_order_tests {
         lists.tridents.swap(0, 1);
         assert!(matches!(lists.walk(), Err(JoinOrderError::OutOfOrder(_))));
         let (mut lists, _) = mixed();
-        Vec::push(&mut lists.stands, ArmorStand::new(9, at(), 0.0));
+        lists.stands.push(ArmorStand::new(9, at(), 0.0));
+        lists.stands[2].join = horizon_client::join_seq::JoinSeq::UNJOINED;
         assert_eq!(
             lists.walk(),
             Err(JoinOrderError::Unjoined(EntityHandle::ArmorStand(2)))
