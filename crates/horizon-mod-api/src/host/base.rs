@@ -739,6 +739,17 @@ pub trait BaseBackend {
         )
     }
     /// Side: server.
+    /// The brand the player's client announced when it connected (`ServerPlayer.clientBrand`),
+    /// empty when it sent none. Displaced connected players keep theirs; an acting player with
+    /// no known connection has an empty one. None for a stale or unavailable player.
+    fn player_client_brand(&self, player: PlayerRef) -> Option<String> {
+        crate::phase::unprovided(
+            "Backend::player_client_brand",
+            "player_client_brand",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: server.
     /// The stable name of a connected or acting player. None for a stale or
     /// unavailable player; displaced online players retain their identity.
     fn player_name(&self, player: PlayerRef) -> Option<String> {

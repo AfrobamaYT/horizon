@@ -361,6 +361,13 @@ impl BaseBackend for Game<'_> {
         );
         self.native_player_address(player)
     }
+    fn player_client_brand(&self, player: PlayerRef) -> Option<String> {
+        mod_api::__private::check_access(
+            "player_client_brand",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_player_client_brand(player)
+    }
     fn player_name(&self, player: PlayerRef) -> Option<String> {
         mod_api::__private::check_access("player_name", mod_api::__private::LoadAccess::WorldOnly);
         self.native_player_name(player)
