@@ -3540,6 +3540,9 @@ struct Game<'a> {
     water_plane_memo: std::cell::Cell<Option<f32>>,
     /// The camera's block and the second `water_plane` last scanned at.
     water_plane_scan: std::cell::Cell<Option<([i32; 3], i64)>>,
+    /// The mobs' box reach while the boats and minecarts tick, with the mob count it was
+    /// worked out for (`vehicle_mob_reach`).
+    vehicle_mob_reach: std::cell::Cell<Option<(usize, horizon_client::mobs::BoxReach)>>,
     persist: persist::EntityMemory,
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
     /// Connected to a server: the world comes from the network (game/remote.rs).
@@ -8842,8 +8845,6 @@ impl Game<'_> {
         if let Some(log) = self.world.block_log.as_mut() {
             log.extend(held);
         }
-        // Everything that has joined has had its spawn packet.
-        self.ordered.announced = horizon_client::join_seq::JoinSeq::upcoming();
         self.tick_friends();
         horizon_client::spans::time("tick_hand", || self.tick_hand());
         horizon_client::spans::time("tick_sleep", || self.tick_sleep());
@@ -8862,6 +8863,10 @@ impl Game<'_> {
             self.run_ordered_ticks(horizon_client::join_seq::JoinSeq::MAX, true)?;
             self.apply_late_wind_pushes();
         }
+        // Everything that has joined has had its spawn packet and, if it joined
+        // before the entity passes (TNT a piston or repeater primed), its first
+        // tick in the late pass above (#10063).
+        self.ordered.announced = horizon_client::join_seq::JoinSeq::upcoming();
         if running {
             horizon_client::spans::time("tick_moving_pistons", || self.tick_moving_pistons())?;
             horizon_client::spans::time("tick_block_entities", || self.tick_block_entities())?;
@@ -13179,7 +13184,7 @@ impl Game<'_> {
         );
     }
     /// `Player.canCriticalAttack` for a living target at attack strength
-    /// `scale`: falling, off the ground, not in water, not blind (mobility
+    /// `scale`: falling, off the ground, not in water, not on a ladder, not blind (mobility
     /// restricted), not riding, not sprinting.
     pub(super) fn critical_attack(&self, scale: f32) -> bool {
         let player = self.player.as_ref();
@@ -13187,6 +13192,7 @@ impl Game<'_> {
             !p.ground.on_ground
                 && p.fall_distance > 0.0
                 && !p.fluids.was_touching_water
+                && !p.on_climbable
                 && !p.sprinting
         });
         let restricted = self.potions.effects.get("blindness").is_some() || self.riding.is_some();
@@ -14840,7 +14846,7 @@ impl Game<'_> {
                 return Ok(UseResult::Pass);
             };
             // `BucketItem.use`: `level.mayInteract` and `mayUseItemAt`.
-            if !self.may_build() {
+            if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
                 return Ok(UseResult::Fail);
             }
             let mut canceled = false;
@@ -14891,7 +14897,7 @@ impl Game<'_> {
         };
         let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
         if let Some((content, sound, mob)) = bucket {
-            if !self.may_build() {
+            if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
                 return Ok(UseResult::Fail);
             }
             let target = self.bucket_target(content, &hit);
@@ -15010,7 +15016,7 @@ impl Game<'_> {
             }
         }
         if item == "flint_and_steel" || item == "fire_charge" {
-            if !self.may_build() {
+            if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
                 return Ok(UseResult::Fail);
             }
             let name = self.res.facts().get(clicked).name.clone();
@@ -15468,11 +15474,7 @@ impl Game<'_> {
             a.fired_from_weapon = weapon;
         }
         // Flame: the arrow is spawned burning (EnchantmentHelper.onProjectileSpawned).
-        if let Some(seconds) = self.bow_projectile_ignite()
-            && let Some(a) = arrow.arrow.as_mut()
-        {
-            a.ignite_for_seconds(seconds);
-        }
+        self.ignite_spawned_arrow(stack, &mut arrow);
         let (velocity, on_ground) = self.player.as_ref().map_or((Vec3::ZERO, true), |pl| {
             (self.known_player_movement(), pl.ground.on_ground)
         });
@@ -20496,6 +20498,9 @@ impl Game<'_> {
                     } else {
                         Vec::new()
                     };
+                    if horizon_client::spans::trace::due() {
+                        horizon_client::spans::trace::stop();
+                    }
                     if let Some(threshold) = self.options.spikes
                         && let Some(r) = self.renderer.as_ref()
                     {
@@ -21286,6 +21291,7 @@ impl<'a> Game<'a> {
             sky_darken_memo: Default::default(),
             water_plane_memo: Default::default(),
             water_plane_scan: Default::default(),
+            vehicle_mob_reach: Default::default(),
             persist: Default::default(),
             entity_attachments: Default::default(),
             remote: None,
