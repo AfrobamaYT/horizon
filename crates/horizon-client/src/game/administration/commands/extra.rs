@@ -1038,7 +1038,7 @@ impl Game<'_> {
     /// `DebugCommand.TraceCustomExecutor`: run the functions with a tracer
     /// writing to `debug/debug-trace-<time>.txt`.
     fn cmd_debug_function(&mut self, ctx: &Context) -> R<i32> {
-        if self.exec.function_depth > 0 {
+        if !self.exec.functions.is_empty() {
             return Err(err("commands.debug.function.noRecursion", &[]));
         }
         let Some(Arg::Resource(id)) = ctx.get("name").cloned() else {
