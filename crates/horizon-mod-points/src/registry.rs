@@ -224,7 +224,7 @@ impl RawListener {
         }
     }
 
-    /// Orders a point listener by priority, mod id and inject id, like call-site listeners.
+    /// Orders a point by priority, then dependency order, then inject id within its mod.
     pub const fn ordered(mut self, priority: i32, injection: &'static str) -> Self {
         self.priority = priority;
         self.injection = injection;
