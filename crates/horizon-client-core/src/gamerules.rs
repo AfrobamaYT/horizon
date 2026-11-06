@@ -373,6 +373,11 @@ impl GameRules {
     pub fn available_rules(&self) -> impl Iterator<Item = &Rule> {
         self.registry.available_rules(self.minecart_improvements)
     }
+    /// Look up a definition in this rule set's registry.
+    pub fn rule(&self, name: &str) -> Option<&Rule> {
+        self.available_rules()
+            .find(|rule| rule.name == name.strip_prefix("minecraft:").unwrap_or(name))
+    }
     pub fn get(&self, name: &str) -> Option<Value> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
         let index = self.available_rules().position(|rule| rule.name == name)?;

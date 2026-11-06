@@ -6,7 +6,7 @@
 use crate::{
     confirm_screen::Confirm,
     font::Font,
-    gamerules::{self, GameRules, Rule, Value},
+    gamerules::{GameRules, Rule, Value},
     hud::{HudAtlas, HudBatch},
     lang,
     text::{Style, Text, named_color},
@@ -240,9 +240,11 @@ impl RulesScreen {
     }
     /// An invalid number disables Done (markInvalid).
     fn invalid(&self) -> bool {
-        self.numbers
-            .iter()
-            .any(|(name, b)| gamerules::rule(name).is_none_or(|r| parse(r, &b.value).is_none()))
+        self.numbers.iter().any(|(name, b)| {
+            self.values
+                .rule(name)
+                .is_none_or(|r| parse(r, &b.value).is_none())
+        })
     }
     fn changes(&self) -> Vec<(String, Value)> {
         self.values
@@ -313,7 +315,7 @@ impl RulesScreen {
             self.scroll.amount = 0.0;
             return;
         };
-        let Some(r) = gamerules::rule(&name) else {
+        let Some(r) = self.values.rule(&name) else {
             return;
         };
         let value = self.number(&name).map(|b| parse(r, &b.value));
@@ -386,7 +388,7 @@ impl RulesScreen {
         let Row::Rule(ref name) = rows[i] else {
             return None;
         };
-        let r = gamerules::rule(name).expect("row rule exists");
+        let r = self.values.rule(name).expect("row rule exists");
         if !on(control_x(w), self.row_top(i) + 2.0, 44.0, 20.0) {
             return None;
         }
@@ -425,7 +427,7 @@ impl RulesScreen {
         }
         let rows = self.rows();
         self.hovered(rows.len(), cursor, size).is_some_and(|i| {
-            matches!(&rows[i], Row::Rule(name) if gamerules::rule(name).is_some_and(|r| matches!(r.default, Value::Bool(_))))
+            matches!(&rows[i], Row::Rule(name) if self.values.rule(name).is_some_and(|r| matches!(r.default, Value::Bool(_))))
                 && ui::hovered(cursor, control_x(w), self.row_top(i) + 2.0, 44.0, 20.0)
         })
     }
@@ -506,7 +508,7 @@ impl RulesScreen {
                     });
                 }
                 Row::Rule(id) => {
-                    let r = gamerules::rule(id).expect("row rule exists");
+                    let r = self.values.rule(id).expect("row rule exists");
                     let name = lines(&atlas.font, &Text::translate(&name_key(r), &[]), 170.0);
                     match name.as_slice() {
                         [one] => {
@@ -628,7 +630,7 @@ impl RulesScreen {
         }
         // The hovered rule's tooltip: its id, description and default.
         if let Some(Row::Rule(id)) = hovered.map(|i| &rows[i]) {
-            let r = gamerules::rule(id).expect("row rule exists");
+            let r = self.values.rule(id).expect("row rule exists");
             let mut tip = vec![Text::literal(r.name).with_color(yellow())];
             let description = format!("{}.description", name_key(r));
             if lang::has(&description) {
@@ -654,7 +656,7 @@ impl RulesScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gamerules::RULES;
+    use crate::gamerules::{self, RULES};
 
     #[test]
     fn a_switch_narrates_its_name_value_description_and_next_value() {
