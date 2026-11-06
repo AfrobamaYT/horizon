@@ -1594,6 +1594,15 @@ impl Menu {
     // ---- Slot ----
 
     fn may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
+        if self.slots[s].role == Role::Hidden {
+            return false;
+        }
+        let own = self.vanilla_may_place(env, s, stack);
+        self.slot_rules(env, s, stack, own, self.vanilla_slot_max(s, stack))
+            .0
+    }
+
+    fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
         match self.slots[s].role {
             Role::Plain | Role::CreativeDisplay => true,
             Role::Armor(eq) => env
@@ -1624,7 +1633,7 @@ impl Menu {
                         .is_some_and(|m| i.equip_allowed.as_ref().is_none_or(|a| a.contains(m)))
             }),
             Role::Shulker => fits_inside_container_items(stack),
-            Role::Mod | Role::ModResult => self.mod_slot(env, s, stack).0,
+            Role::Mod | Role::ModResult => self.slots[s].role == Role::Mod,
             Role::Hidden => false,
             Role::Fuel => Self::is_fuel(env, stack) || Self::is_bucket(stack),
             Role::Output | Role::CraftResult | Role::Inert => false,
@@ -1775,27 +1784,42 @@ impl Menu {
         partial
     }
 
-    /// A mod menu type's slot `s`: whether it takes `stack` (`Slot.mayPlace`:
-    /// anything but on a result) and how many it holds (`Slot.getMaxStackSize`),
-    /// then as the mods' hook says.
-    fn mod_slot(&self, env: &Env, s: usize, stack: &ItemStack) -> (bool, u32) {
-        let Kind::Mod(t) = self.kind else {
-            return (false, 0);
+    fn slot_rules(
+        &self,
+        env: &Env,
+        s: usize,
+        stack: &ItemStack,
+        own: bool,
+        max: u32,
+    ) -> (bool, u32) {
+        let Some(id) = self.registry_id() else {
+            return (own, max.min(Self::max_stack(env, stack)));
         };
         apply_menu_slot_rules(
             env.loop_context,
-            t.id,
+            id,
             self.slots[s].index,
             stack,
-            self.slots[s].role == Role::Mod,
-            CONTAINER_MAX,
-            u32::MAX,
+            own,
+            max,
+            Self::max_stack(env, stack),
         )
     }
 
     /// `Slot.getMaxStackSize(stack)`.
     fn slot_max(&self, env: &Env, s: usize, stack: &ItemStack) -> u32 {
-        let own = match self.slots[s].role {
+        self.slot_rules(
+            env,
+            s,
+            stack,
+            self.vanilla_may_place(env, s, stack),
+            self.vanilla_slot_max(s, stack),
+        )
+        .1
+    }
+
+    fn vanilla_slot_max(&self, s: usize, stack: &ItemStack) -> u32 {
+        match self.slots[s].role {
             Role::Armor(_)
             | Role::MountEquip(_)
             | Role::Potion
@@ -1804,12 +1828,11 @@ impl Menu {
             // The lectern's bookAccess holds one.
             Role::Plain if self.kind == Kind::Lectern && self.slots[s].container == MAIN => 1,
             Role::Fuel if Self::is_bucket(stack) => return 1,
-            Role::Mod | Role::ModResult => self.mod_slot(env, s, stack).1,
+            Role::Mod | Role::ModResult => CONTAINER_MAX,
             // `Container.getMaxStackSize` is vanilla's 99, which no data pack's
             // item reaches; a native mod's item may, and its own size is the cap.
             _ => u32::MAX,
-        };
-        own.min(Self::max_stack(env, stack))
+        }
     }
 
     /// `Container.setItem` (a grid change recomputes the result).
@@ -2405,7 +2428,7 @@ impl Menu {
                 // never aims at its result.
                 let refuses = match self.slots[dest].role {
                     Role::Hidden => true,
-                    Role::ModResult => !self.mod_slot(env, dest, stack).0,
+                    Role::ModResult => !self.may_place(env, dest, stack),
                     _ => false,
                 };
                 let max = match self.slot(dest) {
@@ -4478,6 +4501,7 @@ pub(crate) mod tests {
             results: vec![],
         })));
         let mut menu = Menu::new(kind);
+        menu.set_registry_id(Some("test:rules"));
         let stack = ItemStack::new("minecraft:stone", 1);
         // A `/reload` builds the next context from the settings then on disk; the
         // next call sees it, and the one before it keeps its own.
@@ -4489,15 +4513,24 @@ pub(crate) mod tests {
         let before = load.loop_context(LoopSide::Server, []);
         assert_eq!(before.setting("rules_mod", "stack"), None);
         bare_env_in(&before, |env| {
-            assert_eq!(menu.mod_slot(env, 0, &stack), (true, 7));
+            assert_eq!(
+                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
+                (true, 7)
+            );
         });
         std::fs::write(&file, "3").unwrap();
         let after = load.loop_context(LoopSide::Server, ["rules_mod"]);
         bare_env_in(&after, |env| {
-            assert_eq!(menu.mod_slot(env, 0, &stack), (true, 3));
+            assert_eq!(
+                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
+                (true, 3)
+            );
         });
         bare_env_in(&before, |env| {
-            assert_eq!(menu.mod_slot(env, 0, &stack), (true, 7));
+            assert_eq!(
+                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
+                (true, 7)
+            );
         });
         // The other loop hooks read the same context: before the reload the
         // setting is missing, after it every one sees it.

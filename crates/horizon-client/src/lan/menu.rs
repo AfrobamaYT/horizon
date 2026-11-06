@@ -45,6 +45,8 @@ pub struct Menu {
     pub window: i32,
     /// The `minecraft:menu` registry id.
     pub kind: i32,
+    /// Canonical name from the menu registry, retained for slot dispatch.
+    pub registry_id: Box<str>,
     pub pos: Option<(i32, i32, i32)>,
     /// Where the container's slots live.
     pub slots: Slots,
@@ -293,23 +295,52 @@ impl View<'_> {
     fn enabled(&self, i: usize) -> bool {
         (self.container.is_some() || i >= 5) && !self.hidden.contains(&i)
     }
-    fn may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
+    fn vanilla_may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
         if self.container.is_none() && (5..=8).contains(&i) {
             return rules.armor_index(&stack.item) == Some(i - 5);
         }
-        if self.shulker
+        !(self.shulker
             && self.container.as_ref().is_some_and(|c| i < c.len())
-            && !crate::menu::fits_inside_container_items(stack)
-        {
-            return false;
-        }
-        self.enabled(i)
+            && !crate::menu::fits_inside_container_items(stack))
+    }
+    fn slot_rules(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> (bool, u32) {
+        let own = self.vanilla_may_place(i, stack, rules);
+        let max = if self.container.is_none() && (5..=8).contains(&i) {
+            1
+        } else {
+            u32::MAX
+        };
+        let item_max = rules.max_stack(&stack.item).max(1);
+        let Some(menu) = self
+            .guest
+            .menu
+            .as_ref()
+            .filter(|_| self.container.is_some())
+        else {
+            return (own, max.min(item_max));
+        };
+        let index = self.container.as_ref().map_or(i, |c| {
+            if i < c.len() {
+                i
+            } else {
+                player_slot(i - c.len())
+            }
+        });
+        crate::menu::apply_menu_slot_rules(
+            self.loop_context,
+            &menu.registry_id,
+            index,
+            stack,
+            own,
+            max,
+            item_max,
+        )
+    }
+    fn may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
+        self.enabled(i) && self.slot_rules(i, stack, rules).0
     }
     fn slot_max(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> u32 {
-        if self.container.is_none() && (5..=8).contains(&i) {
-            return 1;
-        }
-        rules.max_stack(&stack.item).max(1)
+        self.slot_rules(i, stack, rules).1
     }
     /// `Slot.mayPickup`: whether menu slot `i` gives its stack up. The
     /// armour slots refuse while a survival player wears a binding curse
