@@ -156,3 +156,61 @@ fn lexical_call_identity_refuses_shadowing_in_all_binding_contexts() {
     assert!(Scope::scan(&sig, Some(&body)).check_target(&method).is_ok());
     assert!(opaque_argument(&syn::parse_quote!(unknown!(1))));
 }
+
+#[test]
+fn argument_records_refuse_hidden_receiver_aliases_and_macro_expansions() {
+    let receiver = syn::parse_quote!(self.child);
+    for written in [
+        "self.value",
+        "alias.value",
+        "*alias",
+        "read(alias)",
+        "opaque!(value)",
+    ] {
+        let arg = syn::parse_str(written).unwrap();
+        assert!(
+            arguments(&[&arg], Some(&receiver), true).is_err(),
+            "{written}"
+        );
+    }
+    for written in ["value", "(value)", "7", "-7", "!true", "Type::CONSTANT"] {
+        let arg = syn::parse_str(written).unwrap();
+        assert!(
+            arguments(&[&arg], Some(&receiver), true).is_ok(),
+            "{written}"
+        );
+    }
+}
+
+#[test]
+fn review_raw_binding_must_shadow_plain_callee() {
+    let sig = syn::parse_quote!(fn run(r#add: fn(u32) -> bool));
+    let call = syn::parse_quote!(add(1));
+    assert!(Scope::scan(&sig, None).check_target(&call).is_err());
+}
+
+#[test]
+fn review_plain_binding_must_shadow_raw_callee() {
+    let sig = syn::parse_quote!(fn run(add: fn(u32) -> bool));
+    let call = syn::parse_quote!(r#add(1));
+    assert!(Scope::scan(&sig, None).check_target(&call).is_err());
+}
+
+#[test]
+fn review_raw_identifier_must_reserve_plain_generated_name() {
+    let sig = syn::parse_quote!(fn run(r#__recv: u32));
+    assert_eq!(Scope::scan(&sig, None).fresh("__recv"), "__recv_1");
+}
+
+#[test]
+fn raw_receiver_and_argument_names_share_the_same_identifier_set() {
+    for (receiver, argument) in [
+        ("r#child", "child"),
+        ("child", "r#child"),
+        ("self.r#child", "self.child"),
+    ] {
+        let receiver = syn::parse_str(receiver).unwrap();
+        let argument = syn::parse_str(argument).unwrap();
+        assert!(arguments(&[&argument], Some(&receiver), true).is_err());
+    }
+}

@@ -1,4 +1,5 @@
 //! Conservative lexical facts shared by site resolution and expression rewriting.
+use crate::points::unraw;
 use proc_macro2::{Ident, Span, TokenStream, TokenTree};
 use quote::ToTokens;
 use std::collections::BTreeSet;
@@ -14,7 +15,7 @@ fn tokens(stream: TokenStream, identifiers: &mut BTreeSet<String>) {
     for token in stream {
         match token {
             TokenTree::Ident(id) => {
-                identifiers.insert(id.to_string());
+                identifiers.insert(unraw(&id));
             }
             TokenTree::Group(group) => tokens(group.stream(), identifiers),
             _ => {}
@@ -23,10 +24,10 @@ fn tokens(stream: TokenStream, identifiers: &mut BTreeSet<String>) {
 }
 impl<'a> Visit<'a> for Bindings {
     fn visit_ident(&mut self, id: &'a Ident) {
-        self.identifiers.insert(id.to_string());
+        self.identifiers.insert(unraw(id));
     }
     fn visit_pat_ident(&mut self, pattern: &'a syn::PatIdent) {
-        self.names.insert(pattern.ident.to_string());
+        self.names.insert(unraw(&pattern.ident));
         syn::visit::visit_pat_ident(self, pattern);
     }
     fn visit_macro(&mut self, mac: &'a syn::Macro) {
@@ -35,10 +36,10 @@ impl<'a> Visit<'a> for Bindings {
     }
     fn visit_use_name(&mut self, name: &'a syn::UseName) {
         self.opaque |= name.ident == "self";
-        self.names.insert(name.ident.to_string());
+        self.names.insert(unraw(&name.ident));
     }
     fn visit_use_rename(&mut self, name: &'a syn::UseRename) {
-        self.names.insert(name.rename.to_string());
+        self.names.insert(unraw(&name.rename));
     }
     fn visit_use_glob(&mut self, _: &'a syn::UseGlob) {
         self.opaque = true;
@@ -66,7 +67,7 @@ impl<'a> Visit<'a> for Bindings {
             }
             _ => return,
         };
-        self.names.insert(id.to_string());
+        self.names.insert(unraw(id));
     }
 }
 
@@ -104,7 +105,7 @@ impl Scope {
                     .first()
                     .filter(|s| {
                         !matches!(
-                            s.ident.to_string().as_str(),
+                            unraw(&s.ident).as_str(),
                             "crate" | "self" | "super" | "Self"
                         )
                     })
@@ -114,7 +115,7 @@ impl Scope {
             _ => None,
         };
         if let Some((name, parameter)) = lexical {
-            let name = name.to_string();
+            let name = unraw(name);
             if self.locals.contains(&name)
                 || parameter && self.parameters.contains(&name)
                 || self.opaque && name != "self"
@@ -158,6 +159,51 @@ pub(crate) fn opaque_argument(expr: &Expr) -> bool {
     let mut scan = Bindings::default();
     scan.visit_expr(expr);
     scan.opaque
+}
+
+/// Check expression lowering after the callee's record fields have been proven scalar/unit.
+/// A mutable receiver is borrowed before record construction, so argument expressions needing
+/// alias analysis are refused rather than losing Rust's two-phase borrowing semantics.
+pub(crate) fn arguments(
+    args: &[&Expr],
+    receiver: Option<&Expr>,
+    mutable: bool,
+) -> Result<(), super::Cause> {
+    fn simple_value(expr: &Expr) -> bool {
+        match expr {
+            Expr::Lit(_) | Expr::Path(_) => true,
+            Expr::Paren(e) => simple_value(&e.expr),
+            Expr::Group(e) => simple_value(&e.expr),
+            Expr::Unary(e) => {
+                matches!(e.op, syn::UnOp::Neg(_) | syn::UnOp::Not(_))
+                    && matches!(&*e.expr, Expr::Lit(_))
+            }
+            _ => false,
+        }
+    }
+    let root = receiver.and_then(root).map(unraw);
+    for arg in args {
+        if opaque_argument(arg) {
+            return Err(super::Cause::Record(
+                "macro-dependent argument cannot be hygienically lowered",
+            ));
+        }
+        let mut identifiers = BTreeSet::new();
+        tokens(arg.to_token_stream(), &mut identifiers);
+        if identifiers.contains("self")
+            || root.as_ref().is_some_and(|name| identifiers.contains(name))
+        {
+            return Err(super::Cause::Record(
+                "argument borrows or reads the receiver: two-phase borrowing is not record-safe",
+            ));
+        }
+        if mutable && !simple_value(arg) {
+            return Err(super::Cause::Record(
+                "mutable-receiver argument needs a literal or independent scalar binding: two-phase borrowing is not record-safe",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Matching calls in source order, excluding every AST context whose expressions are constant.
