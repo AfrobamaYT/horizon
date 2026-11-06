@@ -1359,7 +1359,6 @@ mod tests {
         assert_eq!(view(&first), (3.0, 320.0, 240.0));
         assert_eq!(view(&second), (4.0, 240.0, 180.0));
         super::super::native_entity_refs::tests::with_game(|server| {
-            server.serving = true;
             server.settings.gui_scale = 1;
             server.apply_ui_settings();
             assert_eq!(view(&first), (3.0, 320.0, 240.0));
