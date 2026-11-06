@@ -210,11 +210,20 @@ pub(crate) fn resolve<'a>(
     if arguments.len() != fields.len() {
         return Err(Cause::Record("callee argument count differs").into());
     }
+    let root = recv.map(|r| {
+        r.to_token_stream()
+            .to_string()
+            .split('.')
+            .next()
+            .expect("receiver")
+            .trim()
+            .to_owned()
+    });
     if arguments.iter().any(|arg| {
         arg.to_token_stream()
             .to_string()
             .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .any(|s| s == "self")
+            .any(|s| s == "self" || root.as_deref() == Some(s))
     }) {
         return Err(Cause::Record(
             "argument borrows or reads the receiver: two-phase borrowing is not record-safe",

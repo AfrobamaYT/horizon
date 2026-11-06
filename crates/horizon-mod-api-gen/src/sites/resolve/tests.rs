@@ -113,12 +113,13 @@ fn site_resolution_refuses_unresolved_receivers_and_non_record_shapes() {
         ("&u32", "self.child.step(1)", "borrowing or non-Copy"),
         ("String", "self.child.step(1)", "borrowing or non-Copy"),
         ("u32", "self.child.step(self.x)", "two-phase borrowing"),
+        ("u32", "child.step(child.x)", "two-phase borrowing"),
         ("u32", "self.child.step()", "argument count"),
         ("u32", "unknown(1)", "unresolved callee path"),
     ] {
         let entries = catalog(parameter);
         let rule = Rule::new(&entries);
-        let sig = syn::parse_quote!(fn tick(&mut self));
+        let sig = syn::parse_quote!(fn tick(&mut self, child: &mut Child));
         let expr = syn::parse_str(call).unwrap();
         let error = resolve(&expr, &entries[3], &sig, &entries, &rule)
             .err()
