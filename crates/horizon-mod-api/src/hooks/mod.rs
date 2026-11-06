@@ -80,6 +80,7 @@ mod client_chat;
 mod client_chat_received;
 mod client_gui_state;
 mod client_information_updated;
+mod client_input_options;
 mod client_input_reads;
 mod client_packet;
 mod client_pause_change;

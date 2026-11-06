@@ -27,6 +27,12 @@ including overlays. `None` means no view is available: there may be no open
 screen or no renderer yet. It does not mean the client is outside a world.
 Read again after a screen or focus change.
 
+## Input preferences
+
+`ClientHost::input_options()` returns a copy of the current mouse and movement
+input preferences, even outside a world. Read again after settings change; an
+older snapshot stays unchanged. The fields are documented in the API reference.
+
 ## Client session and local-player status
 
 `ClientHost::client_session()` supplies read-only `client_server()`,

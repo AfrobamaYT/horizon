@@ -748,11 +748,12 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn client_gui_state_has_generated_wasm_bindings() {
+    /// Builds the generated wasm interface and hands its `client-host` interface and the unbound
+    /// method names to `check`.
+    fn with_client_host(check: impl FnOnce(&wit_parser::Interface, &[String]) + Send + 'static) {
         std::thread::Builder::new()
             .stack_size(64 << 20)
-            .spawn(|| {
+            .spawn(move || {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
                 let generated =
                     super::super::sources(&root, super::super::FillMode::Require).unwrap();
@@ -766,19 +767,38 @@ mod tests {
                 let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
                 let client =
                     &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
-                for method in ["window-focused", "observed-screen-id"] {
-                    assert!(client.functions.contains_key(method));
-                }
-                for name in [
-                    "ClientHost::window_focused",
-                    "ClientHost::observed_screen_id",
-                ] {
-                    assert!(!wasm.unbound.iter().any(|unbound| unbound == name));
-                }
+                check(client, &wasm.unbound);
             })
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn client_gui_state_has_generated_wasm_bindings() {
+        with_client_host(|client, unbound| {
+            for method in ["window-focused", "observed-screen-id"] {
+                assert!(client.functions.contains_key(method));
+            }
+            for name in [
+                "ClientHost::window_focused",
+                "ClientHost::observed_screen_id",
+            ] {
+                assert!(!unbound.iter().any(|unbound| unbound == name));
+            }
+        });
+    }
+
+    #[test]
+    fn client_input_options_have_a_generated_wasm_binding() {
+        with_client_host(|client, unbound| {
+            assert!(client.functions.contains_key("input-options"));
+            assert!(
+                !unbound
+                    .iter()
+                    .any(|name| name == "ClientHost::input_options")
+            );
+        });
     }
 
     #[test]
