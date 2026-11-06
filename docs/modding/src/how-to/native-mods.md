@@ -261,6 +261,10 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
 
+`MobRef::portal_cooldown` reads the current mob portal cooldown in ticks from the server's portal state.
+Zero means no cooldown; `None` means a stale, parked or otherwise unavailable mob, a client, or the separately
+modelled dragon. The read does not load levels.
+
 Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`) and
 `set_baby` (`Mob.setBaby` through the canonical species-specific setup). Ageable mobs start at their species'
 baby age (`-48000` for a sniffer, otherwise `-24000`) or become adults at `0`, including the age-boundary

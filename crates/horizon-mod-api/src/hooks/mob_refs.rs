@@ -6,6 +6,14 @@ pub trait Helpers {
         target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_ref"
     )]
     fn mob();
+    /// Current portal cooldown in ticks. Zero is a valid cooldown; `None` means
+    /// the mob is stale, parked, unavailable, a client, or the separately modelled dragon.
+    #[helper(
+        side = "both",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_portal_cooldown"
+    )]
+    fn mob_portal_cooldown();
     #[helper(
         side = "server",
         receiver = "mob",
