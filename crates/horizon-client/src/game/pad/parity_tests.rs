@@ -39,7 +39,7 @@ fn playing(test: impl FnOnce(&mut Game)) {
         options,
         settings,
         Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-            (&root).to_path_buf(),
+            root.to_path_buf(),
         )),
         None,
     )

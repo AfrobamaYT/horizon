@@ -51,7 +51,7 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
         options,
         settings,
         Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-            (&root).to_path_buf(),
+            root.to_path_buf(),
         )),
         None,
     )
@@ -262,7 +262,7 @@ fn a_villager_raid_sweat_event_draws_particles() {
         options,
         settings,
         Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-            (&root).to_path_buf(),
+            root.to_path_buf(),
         )),
         None,
     )

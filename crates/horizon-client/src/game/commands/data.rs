@@ -1356,7 +1356,7 @@ mod wolf_live_anger_tests {
             options,
             settings,
             Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                (&root).to_path_buf(),
+                root.to_path_buf(),
             )),
             None,
         )
@@ -1495,7 +1495,7 @@ mod loot_table_tests {
             options,
             settings,
             Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                (&root).to_path_buf(),
+                root.to_path_buf(),
             )),
             None,
         )
