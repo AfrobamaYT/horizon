@@ -1298,7 +1298,9 @@ pub trait Hooks {
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
     /// Selection/F3+T and server-pack reloads share this point; initial startup does not
-    /// (`client_setup` is the once-only moment after the initial load).
+    /// (`client_setup` is the once-only moment after the initial load). Runs in
+    /// Reloading: published asset/data queries may refresh caches, but world
+    /// handles and transactions remain unavailable.
     #[hook(side = "client", contract = "listen")]
     fn client_resources_reloaded();
     /// Append an item's custom decorations after its default bar, cooldown and count.
@@ -1543,7 +1545,9 @@ pub trait Hooks {
     /// players were sent the new data. The place to
     /// drop caches derived from the data and to rebind what depends on it.
     /// Server-side (the single player's integrated server included); a client
-    /// connected to a server never fires it.
+    /// connected to a server never fires it. Runs in Reloading: published
+    /// asset/data queries can rebind caches, including on first open; world
+    /// handles and transactions remain unavailable.
     #[hook(side = "server", contract = "listen")]
     fn server_data_loaded();
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
@@ -4243,8 +4247,9 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn raid_spawn_wave();
-    /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`).
+    /// A server raid at `pos` changed to `state` (`triggered`, `victory`,
+    /// `loss` or `stopped`). `raid` identifies its owning level, including a
+    /// parked level. A terminal raid already removed from storage cannot be read.
     #[hook(
         side = "server",
         contract = "listen",
@@ -4784,11 +4789,11 @@ pub trait Helpers {
     fn config_files();
     #[helper(side = "client")]
     fn panel_items();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipes_of_type();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_ingredient();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_result();
     #[helper(side = "both")]
     fn known_recipes();

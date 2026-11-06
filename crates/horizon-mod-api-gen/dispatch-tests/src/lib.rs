@@ -357,6 +357,8 @@ mod tests {
                 pub struct FovPlayer;
             }
             pub struct NativeClientInfo;
+            #[derive(Clone, Copy)]
+            pub struct RaidRef;
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum ToastKind {
                 Advancement,

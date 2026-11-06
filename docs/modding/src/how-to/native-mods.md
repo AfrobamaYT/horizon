@@ -304,7 +304,16 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
 
+`MobRef::portal_cooldown` reads the current mob portal cooldown in ticks from the server's portal state.
+Zero means no cooldown; `None` means a stale, parked or otherwise unavailable mob, a client, or the separately
+modelled dragon. The read does not load levels.
+
 `MobRef::can_use_portal` reads the existing server portal decision for a mob in the current level, including mounts and player riders. It takes `&dyn Host`: `Some(false)` means the mob is ineligible, while `None` means a client, stale or unavailable handle, parked mob, or the separately modelled dragon. It does not load a level.
+
+`MobRef::leash_holder` takes `&dyn ServerHost` and reads the live mob leash. `MobLeashHolder::Unleashed`
+is a definite absence; `Entity` holds an existing entity handle for a player, mob or boat, and `Knot` holds
+fence coordinates. `None` means the mob or holder is unavailable, the level is parked, or a saved holder has
+not resolved; this read neither loads a level nor changes the leash.
 
 Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`) and
 `set_baby` (`Mob.setBaby` through the canonical species-specific setup). Ageable mobs start at their species'
