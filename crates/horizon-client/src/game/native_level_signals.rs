@@ -49,7 +49,7 @@ impl SignalAccess for ReadLevel<'_, '_> {
     }
     fn shulker_is_closed(&self, pos: BlockPos) -> Option<bool> {
         self.game
-            .world
+            .be_anims
             .shulkers
             .get(&[pos.x, pos.y, pos.z])
             .map(|s| s.status == horizon_client::block_entity_anim::ShulkerStatus::Closed)
