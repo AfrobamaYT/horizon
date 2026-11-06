@@ -278,3 +278,30 @@ fn conditions_skip_winning_definitions_before_decode_and_each_tag_layer() {
     ));
     assert!(!catalog.tags.contains_key("demo:absent"));
 }
+
+#[test]
+fn a_rejected_override_does_not_uncover_an_exported_definition() {
+    let f = Fixture::new();
+    let base = Catalog::load(&f.0, &PackOverlay::NONE).unwrap();
+    let fall = base.id("minecraft:fall").unwrap();
+    let stalagmite = base.id("minecraft:stalagmite").unwrap();
+    let files = [file(
+        "damage_type/minecraft:fall",
+        json!({"neoforge:conditions":[{"type":"unsupported"}]}),
+    )];
+    let filtered = base
+        .with_packs(
+            &f.0,
+            &PackOverlay {
+                files: &files,
+                ..PackOverlay::NONE
+            },
+        )
+        .unwrap();
+    assert!(filtered.id("minecraft:fall").is_none());
+    assert!(filtered.definition(fall).is_none());
+    assert!(filtered.source::<()>(fall, None, None, None).is_none());
+    assert!(filtered.entries().all(|(_, d)| d.name != "minecraft:fall"));
+    assert_eq!(filtered.id("minecraft:stalagmite"), Some(stalagmite));
+    assert!(base.definition(fall).is_some());
+}

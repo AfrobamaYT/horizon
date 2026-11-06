@@ -208,6 +208,9 @@ impl Catalog {
         for (id, bytes) in files {
             let value: Value = serde_json::from_slice(&bytes)?;
             if !overlay.conditions.allows(&value) {
+                // The export is the lowest resource layer too: omitting a
+                // winning file must not uncover its exported definition.
+                catalog.ids.remove(&id);
                 continue;
             }
             let definition = Definition::from_json(&id, &bytes)

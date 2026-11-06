@@ -509,7 +509,7 @@ impl SyncData {
         self.dynamic = kept.dynamic.clone();
         self.registries = kept.registries.clone();
         let root = resources.join("data/minecraft");
-        self.tags = Self::load_tags(&root, &self.builtin, &self.dynamic);
+        self.tags = Self::load_tags(&root, &self.builtin, &self.dynamic, overlay.conditions);
         Self::merge_pack_tags(&mut self.tags, &root, overlay, &self.builtin, &self.dynamic);
     }
 
