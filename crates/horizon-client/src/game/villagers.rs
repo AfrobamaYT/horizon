@@ -220,7 +220,7 @@ impl Game<'_> {
         };
         if let Some(child) = self.mobs.iter_mut().find(|m| m.id == id) {
             child.extra.variant = variant;
-            child.extra.variant2 = villager::NONE;
+            child.extra.profession = Default::default();
             child.extra.age = -24000;
             child.extra.bed = Some(bed);
         }

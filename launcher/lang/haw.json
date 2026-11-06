@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "ʻAʻole hiki ke heluhelu i ka moʻolelo kūkulu: {error}",
   "Could not read the saved sign-in.": "ʻAʻole hiki ke heluhelu i ke kau inoa i mālama ʻia.",
   "Could not read the saved sign-in. Sign in again.": "ʻAʻole hiki ke heluhelu i ke kau inoa i mālama ʻia. E komo hou.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "ʻAʻole hiki ke heluhelu {name}: {error}",
   "Could not run {program}: {error}": "ʻAʻole hiki ke holo {program}: {error}",
   "Could not save the renewed sign-in.": "ʻAʻole hiki ke mālama i ke kau inoa hou ʻana.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Hoʻoiho ʻia, kau inoa a me nā mea hou i kēia proxy (http://host:port, socks5://host:port). ʻAʻohe manaʻo ʻole: HTTPS_PROXY ke hoʻohana ʻia i ka wā i hoʻomaka ai ka mea hoʻolaha me hoʻokahi.",
   "{name} was left out: made for another Horizon version": "Ua waiho ʻia ʻo {name}: hana ʻia no kekahi mana ʻē aʻe o Horizon",
   "{name} was left out: clashes with {other}": "Ua waiho ʻia ʻo {name}: kūʻē ia me {other}",
-  "{name} was left out: it needs {other}, which was left out": "Ua waiho ʻia ʻo {name}: pono iā ia ʻo {other}, i waiho ʻia"
+  "{name} was left out: it needs {other}, which was left out": "Ua waiho ʻia ʻo {name}: pono iā ia ʻo {other}, i waiho ʻia",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

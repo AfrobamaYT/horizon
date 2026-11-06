@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Impossibile leggere il registro di creazione: {error}",
   "Could not read the saved sign-in.": "Impossibile leggere l'accesso salvato.",
   "Could not read the saved sign-in. Sign in again.": "Impossibile leggere l'accesso salvato. Accedi di nuovo.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Impossibile leggere {name}: {error}",
   "Could not run {program}: {error}": "Impossibile eseguire {program}: {error}",
   "Could not save the renewed sign-in.": "Impossibile salvare il nuovo accesso.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Download, accessi e aggiornamenti passano attraverso questo proxy (http://host:port, socks5://host:port). Vuoto significa nessuno: HTTPS_PROXY viene invece utilizzato quando il programma di avvio è stato avviato con uno.",
   "{name} was left out: made for another Horizon version": "{name} è stato escluso: fatto per un'altra versione di Horizon",
   "{name} was left out: clashes with {other}": "{name} è stato escluso: va in conflitto con {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} è stato escluso: richiede {other}, che è stato escluso"
+  "{name} was left out: it needs {other}, which was left out": "{name} è stato escluso: richiede {other}, che è stato escluso",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

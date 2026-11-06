@@ -17,6 +17,9 @@ pub struct Wasm {
     /// which a wasm mod writes like a native one, without `[native]`'s pins (it builds nothing).
     #[serde(skip)]
     pub(crate) points: Vec<super::Injection>,
+    /// The same fingerprinted internals declaration used by a native mod.
+    #[serde(skip)]
+    pub(crate) internals: Vec<super::Internal>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +52,7 @@ impl TryFrom<Fields> for Wasm {
             linked: fields.linked,
             built_with: fields.built_with,
             points: Vec::new(),
+            internals: Vec::new(),
         })
     }
 }
@@ -119,6 +123,11 @@ impl Wasm {
     /// The points its `mod.wasm` listens at, each a `trait_method` at a point's head or return.
     pub fn points(&self) -> &[super::Injection] {
         &self.points
+    }
+
+    /// The internals the package declares, checked against the game's generated table at load.
+    pub fn internals(&self) -> &[super::Internal] {
+        &self.internals
     }
 
     /// The SHA-512 of the package's `mod.wasm`.

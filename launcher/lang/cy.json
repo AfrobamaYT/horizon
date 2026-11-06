@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Methu darllen y log adeiladu: {error}",
   "Could not read the saved sign-in.": "Methu darllen y mewngofnodi a gadwyd.",
   "Could not read the saved sign-in. Sign in again.": "Methu darllen y mewngofnodi a gadwyd. Mewngofnodwch eto.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Methu darllen {name}: {error}",
   "Could not run {program}: {error}": "Methu rhedeg {program}: {error}",
   "Could not save the renewed sign-in.": "Ni fu modd cadw'r mewngofnodiad newydd.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Mae lawrlwythiadau, mewngofnodi a diweddariadau yn mynd trwy'r dirprwy hwn (http://host:port, socks5://host:port). Gwag yn golygu dim: HTTPS_PROXY yn cael ei ddefnyddio yn lle hynny pan ddechreuwyd y lansiwr gydag un.",
   "{name} was left out: made for another Horizon version": "Gadawyd {name} allan: wedi'i wneud ar gyfer fersiwn arall o Horizon",
   "{name} was left out: clashes with {other}": "Gadawyd {name} allan: mae'n gwrthdaro â {other}",
-  "{name} was left out: it needs {other}, which was left out": "Gadawyd {name} allan: mae angen {other} arno, a adawyd allan"
+  "{name} was left out: it needs {other}, which was left out": "Gadawyd {name} allan: mae angen {other} arno, a adawyd allan",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

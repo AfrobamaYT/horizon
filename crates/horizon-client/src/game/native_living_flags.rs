@@ -100,17 +100,11 @@ impl Game<'_> {
                 p.fall_flying = false;
                 true
             }
-            Some(Target::Guest(conn)) => {
-                let Some(g) = self
-                    .lan
-                    .as_mut()
-                    .and_then(|h| h.hub.guests.iter_mut().find(|g| g.conn == conn))
-                else {
-                    return false;
-                };
-                g.fall_flying = false;
-                true
-            }
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|h| h.hub.update_guest(conn, |g| g.fall_flying = false))
+                .is_some(),
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
@@ -465,6 +459,7 @@ mod tests {
                 [1, 2, 3, 4],
                 None,
                 Some(game.pack.assets.registry),
+                |_| None,
             );
             let restored = horizon_client::entity_nbt::mob_from_nbt(
                 &tag,
@@ -495,6 +490,7 @@ mod tests {
                 [5, 6, 7, 8],
                 None,
                 Some(game.pack.assets.registry),
+                |_| None,
             );
             let restored = horizon_client::entity_nbt::mob_from_nbt(
                 &tag,
@@ -911,9 +907,8 @@ mod tests {
                         .as_mut()
                         .unwrap()
                         .hub
-                        .guest_mut(13)
-                        .unwrap()
-                        .dimension = "minecraft:the_nether".into();
+                        .update_guest(13, |guest| guest.dimension = "minecraft:the_nether".into())
+                        .unwrap();
                     // Entity/living lookup intentionally still includes all
                     // server players; the sleep write must own the refusal.
                     assert_eq!(game.native_entity(13), Some(foreign.entity()));
@@ -1039,9 +1034,8 @@ mod tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(12)
-                .unwrap()
-                .fall_flying = true;
+                .update_guest(12, |guest| guest.fall_flying = true)
+                .unwrap();
             let vine = game
                 .pack
                 .assets
@@ -1122,9 +1116,8 @@ mod tests {
                     .as_mut()
                     .unwrap()
                     .hub
-                    .guest_mut(conn)
-                    .unwrap()
-                    .fall_flying = true;
+                    .update_guest(conn, |guest| guest.fall_flying = true)
+                    .unwrap();
                 game.as_guest(conn, |game| {
                     game.player.as_mut().unwrap().fall_fly_ticks = conn as i32
                 })
@@ -1202,6 +1195,7 @@ mod tests {
                     [1, 2, 3, 4],
                     None,
                     Some(game.pack.assets.registry),
+                    |_| None,
                 );
                 assert!(!game.native_living_start_sleeping(living, pos), "{pos:?}");
                 assert_eq!(
@@ -1209,7 +1203,8 @@ mod tests {
                         &game.mobs[0],
                         [1, 2, 3, 4],
                         None,
-                        Some(game.pack.assets.registry)
+                        Some(game.pack.assets.registry),
+                        |_| None
                     ),
                     before
                 );

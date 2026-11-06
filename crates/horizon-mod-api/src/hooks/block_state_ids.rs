@@ -1,12 +1,24 @@
 //! The `block_state_ids` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Helpers {
+    /// Resolve a registered fluid identifier.
+    #[helper(
+        side = "both",
+        target = "horizon_client::game::native_block_states::Game<'_>::native_fluid_key"
+    )]
+    fn fluid_key();
     #[helper(
         side = "both",
         receiver = "block_key",
         target = "horizon_client::game::native_block_states::Game<'_>::native_block_key_id"
     )]
     fn block_key_id();
+    #[helper(
+        side = "both",
+        receiver = "item_key",
+        target = "horizon_client::game::native_block_states::Game<'_>::native_item_key_id"
+    )]
+    fn item_key_id();
     #[helper(
         side = "both",
         receiver = "effect_key",

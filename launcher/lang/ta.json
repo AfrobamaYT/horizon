@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "உருவாக்கப் பதிவைப் படிக்க முடியவில்லை: {error}",
   "Could not read the saved sign-in.": "சேமித்த உள்நுழைவைப் படிக்க முடியவில்லை.",
   "Could not read the saved sign-in. Sign in again.": "சேமித்த உள்நுழைவைப் படிக்க முடியவில்லை. மீண்டும் உள்நுழையவும்.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "{name}: {error} படிக்க முடியவில்லை",
   "Could not run {program}: {error}": "{program}: {error} ஐ இயக்க முடியவில்லை",
   "Could not save the renewed sign-in.": "புதுப்பிக்கப்பட்ட உள்நுழைவைச் சேமிக்க முடியவில்லை.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "பதிவிறக்கங்கள், உள்நுழைவுகள் மற்றும் புதுப்பிப்புகள் இந்த ப்ராக்ஸி (http://host:port, socks5://host:port) மூலம் செல்கின்றன. வெறுமை என்றால் எதுவுமில்லை: லாஞ்சர் ஒன்றைத் தொடங்கும் போது அதற்குப் பதிலாக HTTPS_PROXY பயன்படுத்தப்பட்டது.",
   "{name} was left out: made for another Horizon version": "{name} விடப்பட்டது: Horizon இன் வேறு பதிப்புக்காக உருவாக்கப்பட்டது",
   "{name} was left out: clashes with {other}": "{name} விடப்பட்டது: {other} உடன் முரண்படுகிறது",
-  "{name} was left out: it needs {other}, which was left out": "{name} விடப்பட்டது: இதற்கு {other} தேவை, அது விடப்பட்டது"
+  "{name} was left out: it needs {other}, which was left out": "{name} விடப்பட்டது: இதற்கு {other} தேவை, அது விடப்பட்டது",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

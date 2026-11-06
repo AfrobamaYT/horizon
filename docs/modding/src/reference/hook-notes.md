@@ -19,6 +19,23 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Transparent screen backgrounds and landing changes
+
+`Hooks::screen_transparent_background` runs immediately before an in-game screen's
+translucent gradient. Returning `Flow::Cancel` suppresses that gradient, not the
+screen's contents. Its `batch` is a `DrawContext`: custom drawing survives
+cancellation. `ClientHost::apply_screen_blur()` requests the normal menu blur
+at most once per frame; `menu_blur_radius()` reads the configured radius.
+`DrawContext::draw_menu_background` and `tiled_sprite` draw menu textures through
+the same atlas. The whole-screen `screen_render_pre` remains a separate moment.
+
+`Hooks::entity_change_block_pre` can cancel a player's landing block change before
+its neighbour notifications and level events. The resident write is restored
+before those consumers run, so a crop above cancelled farmland stays untouched.
+The event identifies the player, position and old/new block names. This veto is
+separate from `entity_change_block`, the existing post-change mob notification,
+and from `farmland_trample`, the farmland-specific in-write event.
+
 ## Client window and screen state
 
 `ClientHost::window_focused()` reports the last focus state from the window
@@ -1218,7 +1235,7 @@ registration path.
 
 - `native_block_entity` gives a block a block entity whatever its template: a mod's stone casing or thin part can use any template. The engine removes it when its block is broken or replaced, no piston moves it, and a mod that draws it (`native_block_entity_submit`) is asked for it.
 
-- Slot rules a mod decides in code for its content menu types: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)`, in `horizon-client`'s `menu.rs`, is given the type's own answer (false on one of its `results`, [making a content mod](../how-to/content-mods.md#menu-types), true elsewhere, and 99) and may change both, as a NeoForge mod overrides `Slot.mayPlace` and `Slot.getMaxStackSize`. A mod menu type's clicks run on the vanilla menu engine (`menu::Kind::Mod`).
+- Slot rules a mod decides in code for its content menu types: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)` starts with the slot's own answers and may change both, as a NeoForge mod overrides `Slot.mayPlace` and `Slot.getMaxStackSize`.
 
 - An item's use tick and release, as vanilla's `Item.onUseTick` and `releaseUsing` and NeoForge's `LivingEntityUseItemEvent.Tick` and `.Stop`. Each tick of a use, `native_living_entity_use_item_tick` may change the ticks left: at 0 or less, or on a cancel, the server finishes the use, as NeoForge's code does, and an item used on release stays frozen until let go. `native_on_use_tick` is what a mod's own item does then (cook, charge). When the player lets go early, `native_living_entity_use_item_stop` may skip the release, and `native_release_using` acts with the ticks left (a bow-like item shoots by its charge); setting `used` starts the item's cooldown. All four run on both sides, as vanilla's do, and take the using entity, None for a player; the tick and stop take the hand too. Change the world only where this game runs the world, not on a server's client.
 
@@ -1235,6 +1252,8 @@ registration path.
 - An entity getting on or off a vehicle, which a mod can cancel, through `native_entity_mount` (NeoForge's `EntityMountEvent`): the rider's id and type (`minecraft:player`, `minecraft:zombie`), the vehicle's id and type (`minecraft:oak_boat`, `minecraft:horse`), whether it is mounting, and a `canceled` flag. Set `canceled` and the rider does not board, or keeps riding; a `/ride` that is canceled fails. It is told for a player boarding a boat, minecart, cushion or mount (pig, strider, horse and its kin, llama, nautilus, happy ghast) and getting off by their own input, `/ride`, a stab, a buck, a teleport or spectator mode, and for the mobs Horizon seats on a vehicle (jockeys, raiders on a ravager, `/ride`) and lets off one with `/ride` or a stab. It is not told for a rider whose vehicle is gone or dies, nor for riders loaded with a save. On the single player server thread and on a dedicated server.
 
 - `native_interaction_key_mapping_triggered(key, hand, swing_hand, canceled)` fires while playing when an interaction key is about to act on the crosshair (NeoForge's `InputEvent.InteractionKeyMappingTriggered`): `key` is `InteractionKey::Attack` (when an attack is allowed, and each tick a held key keeps digging a block), `Use` (once for each hand tried, main first, before the hand's target and item) or `PickBlock` (only with a block or entity aimed at). Set `canceled` to skip the action; a cancelled use ends the click, so the other hand gets no turn. A cancelled attack or use still swings `hand` unless the mod clears `swing_hand` (true on entry). A single player's window and a server's player (any window that plays on a server).
+
+- `native_key_mapping_pre(mapping, pressed, canceled)` is asked while playing, before the game acts on a physical key or mouse button bound to a gameplay mapping (`key.jump`, `key.attack`...), once for each mapping bound to it. `pressed` is true for a press (a key's repeats too) and false for its release. Set `canceled` on a press to drop it for every mapping bound to that input: the mapping is not held, nothing acts on it, and a mouse press is not counted as a click. A cancel on a release is ignored, so what the game holds is always let go. A release is asked too, while playing: a screen that opens lets go of what it holds without asking. A key bound to two mappings (forward and sprint) is canceled as one. It is asked for the window's keys and mouse buttons, agent control's included, after the window's own shortcuts (fullscreen, screenshot, debug keys) and with no screen open. A controller's presses are not asked.
 
 - `native_gui_layer_pre(layer, batch, canceled)` and `native_gui_layer_post(layer, batch)` fire around each vanilla HUD layer Horizon draws, in its paint order, so a mod places its own drawing below a layer (in `pre`) or above it (in `post`), NeoForge's `RegisterGuiLayersEvent` registerBelow/registerAbove, and hides a layer by setting `canceled` in `pre` (`RenderGuiLayerEvent.Pre`). Layer ids: `minecraft:crosshair`, `hotbar`, `effects`, `boss_overlay`, `vehicle_health` (riding a mount), `contextual_info_bar` (the jump bar, locator bar or experience bar with the level number), `player_health` (health, armor, food and air rows, one pass), `selected_item_name`, `sleep_overlay`, `overlay_message` (action bar), `title`, `scoreboard_sidebar`, `subtitle_overlay`, `chat` (the unfocused lines) and `tab_list`. F1 hides the layers it hides in vanilla, and then nothing fires for them. The camera overlays (drawn by the screen-effects pass) and the debug screen are not layers. A hidden layer still runs its game logic (the health rows' blink, the bubble pop sound) and `post` still fires.
 
@@ -2999,21 +3018,9 @@ Look blocks up once and keep what you need (a few words a block for your own sha
 
 ### Menu slot rules
 
-`crates/horizon-client/src/menu.rs`: `native_menu_slot_rules(context, menu, slot, stack, may_place, max_stack)`, a free function
-a bundle targets as `horizon_client::menu::native_menu_slot_rules`. A content mod menu type's container slot `slot`
-(from 0) is asked whether it takes `stack` (`Slot.mayPlace`) and how many it holds (`Slot.getMaxStackSize`), as a
-NeoForge mod's own `Slot` overrides them. `may_place` and `max_stack` come in with the type's own answer (false on one
-of its `results` ([making a content mod](../how-to/content-mods.md#menu-types)), true elsewhere, and 99): change them for your own menu types.
-`max_stack` is kept to 1 to 99, and the item's own stack size still caps it. It runs inside a click, a drag or a
-shift-click (several times for one), with no level or player at hand: answer from the stack and the `LoopContext` it
-is given, and fast. The context's `side()` is `LoopSide::Server`, and a mod's setting read through it is the one captured
-when the server last loaded its data: a `/reload` builds the next context, which the next call sees. The hook's contract
-version is `2`: a mod written for `1` takes the context as a new first argument of `Hooks::menu_slot_rules` and
-`MenuPart::menu_slot_rules`. It is asked
-only for a server's players (single player's server thread, LAN guests, a dedicated server), and vanilla's menus
-never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
-shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
-slot from filling that way, lower `max_stack`.
+`native_menu_slot_rules(context, menu, slot, stack, may_place, max_stack)` asks a content mod menu's scoped `MenuPart` whether a slot takes a stack and how many it holds. `slot` is the backing container index. The slot's own answers arrive first; the final maximum is clamped to 1–99 and the item's stack limit.
+
+The hook runs during clicks, drags and shift-clicks in the restricted loop context, without a level or player; answer from the stack and context alone, and fast. It runs on the server and during client prediction. The context carries the resource generation's side, registries and settings; `/reload` builds the next context.
 
 ### Shift-click in a mod container
 
@@ -3199,3 +3206,20 @@ or block entity submit hook received. There is no separate Host drawing helper. 
 are texels, +y down and the front towards -z; convert the mob's frame with scale
 `[1.0, -1.0, -1.0]` then translation `[0.0, -1.501, 0.0]`, as `LivingEntityRenderer` does.
 The sprite is the entity texture ID and the tint is `0xRRGGBB`.
+
+## Debug screen entries
+
+`Hooks::register_debug_entries` is the client registration-phase counterpart of NeoForge
+26.3's `RegisterDebugEntriesEvent`. It receives a `RegistrationContext`, once at client
+startup, and collects a `DebugEntry` per entry: an id `<mod id>:<path>` and the `DebugGroup`
+whose vanilla group its lines join (`Position`, `Light`, `Memory`, `LookingAtBlock`,
+`LookingAtEntity`, `LookingAtFluid` or `ChunkGeneration`). An id in vanilla's namespace, not
+of that form, or registered already is logged and left out.
+
+An entry is listed in the debug options' text section, sorted by its id with vanilla's, and
+is switched like them (`alwaysOn`, `inOverlay`, `never`), saved in `debug-profile.json` under
+its full id. On the overlay, its group comes after vanilla's groups.
+Its lines are asked for each frame the overlay draws it, and only while it is on:
+`Hooks::debug_entry_lines` receives the entry's id and a `&mut Vec<String>` to push lines to,
+with legacy colour codes (§) working. A disabled entry, or one with no lines, costs nothing.
+Nothing is uploaded or recorded: the lines are drawn on the local screen only.

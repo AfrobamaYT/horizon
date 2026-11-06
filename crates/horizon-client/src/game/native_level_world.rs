@@ -141,7 +141,7 @@ impl Game<'_> {
         Some(
             rules
                 .available_rules()
-                .filter_map(|r| Some((["minecraft:", r.name].concat(), rules.get(r.name)?)))
+                .filter_map(|r| Some((r.name.clone(), rules.get(&r.name)?)))
                 .collect(),
         )
     }

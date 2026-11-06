@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Kon nie die boulogboek lees nie: {error}",
   "Could not read the saved sign-in.": "Kon nie die gestoorde aanmelding lees nie.",
   "Could not read the saved sign-in. Sign in again.": "Kon nie die gestoorde aanmelding lees nie. Meld weer aan.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Kon nie {name} lees nie: {error}",
   "Could not run {program}: {error}": "Kon nie {program}: {error} laat loop nie",
   "Could not save the renewed sign-in.": "Kon nie die hernude aanmelding stoor nie.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Aflaaie, aanmeldings en opdaterings gaan deur hierdie instaanbediener (http://gasheer:poort, socks5://gasheer:poort). Leeg beteken geen: HTTPS_PROXY word eerder gebruik wanneer die lanseerder met een begin is.",
   "{name} was left out: made for another Horizon version": "{name} is weggelaat: gemaak vir 'n ander Horizon-weergawe",
   "{name} was left out: clashes with {other}": "{name} is weggelaat: bots met {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} is weggelaat: dit het {other} nodig, wat weggelaat is"
+  "{name} was left out: it needs {other}, which was left out": "{name} is weggelaat: dit het {other} nodig, wat weggelaat is",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

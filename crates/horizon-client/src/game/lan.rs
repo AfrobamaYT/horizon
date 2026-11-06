@@ -2,7 +2,10 @@
 //! server threads and the play-state hub, feeds it the world's entities each
 //! tick and turns what the guests do into gameplay. A world that is not open
 //! costs one `Option` check per tick.
+mod event_timings;
+
 use super::{Game, shield::OFFHAND_SLOT};
+use event_timings::EventTimings;
 use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
     Result,
@@ -935,7 +938,8 @@ pub(super) fn mob_meta(
                 defaults.push((19, serializer::BOOLEAN, Value::Bool(false)));
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
-            let profession = horizon_client::mobs::villager::profession(e.variant2).id;
+            let profession =
+                horizon_client::mobs::villager::profession(e.profession.index().unwrap_or(0)).id;
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),
@@ -1572,6 +1576,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config, self.loop_context.clone());
+        hub.rule_registry = self.level.rule_registry.clone();
         hub.sync_attachments = !mod_api::__private::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
@@ -1851,15 +1856,16 @@ impl Game<'_> {
             };
             host.hub.seat_order += 1;
             let order = host.hub.seat_order;
-            let g = &mut host.hub.guests[i];
-            if let Some(horizon_world::nbt::Tag::Compound(p)) = &mut g.saved {
-                p.remove(&"RootVehicle".into());
-            }
-            g.vehicle = Some(id);
-            g.vehicle_order = order;
-            g.saved_vehicle = None;
-            // Pair the stationary restored entities before their passenger packet.
-            g.moved = true;
+            host.hub.guests.update(i, |g| {
+                if let Some(horizon_world::nbt::Tag::Compound(p)) = &mut g.saved {
+                    p.remove(&"RootVehicle".into());
+                }
+                g.vehicle = Some(id);
+                g.vehicle_order = order;
+                g.saved_vehicle = None;
+                // Pair the stationary restored entities before their passenger packet.
+                g.moved = true;
+            });
         }
     }
     /// The file name of a player's advancements and statistics: an
@@ -1955,16 +1961,16 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        if let Some(g) = host.hub.guest_mut(conn)
-            && let Some(json) = saved
-        {
-            let mut progress = horizon_client::advancements::Progress::from_json(&json);
-            // PlayerAdvancements.applyFrom: advancements this server lacks are dropped.
-            progress
-                .criteria
-                .retain(|id, _| tree.by_id.contains_key(id));
-            g.advancements = progress;
-            g.advancements_loaded = true;
+        if let Some(json) = saved {
+            let _ = host.hub.update_guest(conn, |g| {
+                let mut progress = horizon_client::advancements::Progress::from_json(&json);
+                // PlayerAdvancements.applyFrom: advancements this server lacks are dropped.
+                progress
+                    .criteria
+                    .retain(|id, _| tree.by_id.contains_key(id));
+                g.advancements = progress;
+                g.advancements_loaded = true;
+            });
         }
         let mut stats =
             super::stats::Stats::read(&super::stats::player_json(&self.world_root, "stats", uuid));
@@ -2251,9 +2257,10 @@ impl Game<'_> {
         // the fork's borrow shape), so the host is put back for the match and taken out
         // again on the way through.
         self.lan = Some(host);
+        let mut timings = EventTimings::new(horizon_client::spans::NOTE_MS);
         for event in events {
             if timed && let Some(host) = self.lan.as_ref() {
-                note_event(host, previous.take());
+                note_event(host, previous.take(), &mut timings);
             }
             if timed {
                 let detail = self
@@ -2615,7 +2622,10 @@ impl Game<'_> {
             }
         }
         if timed && let Some(host) = self.lan.as_ref() {
-            note_event(host, previous);
+            note_event(host, previous, &mut timings);
+            for burst in timings.bursts() {
+                horizon_client::spans::note(burst.ms, || describe_burst(host, &burst));
+            }
         }
         self.lan.take()
     }
@@ -3157,34 +3167,40 @@ impl Game<'_> {
         let root = self.world_root.clone();
         let in_place = host.hub.config.dimension.clone();
         let owner = host.owner.as_mut();
-        let Some(g) = host.hub.guest_mut(conn) else {
+        let Some((known, uuid, name)) = host.hub.update_guest(conn, |g| {
+            // PlayerList.loadPlayerData: the owner gets the world's player file,
+            // everyone else their own.
+            let known = match owner.filter(|o| o.uuid == g.uuid) {
+                Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
+                None => playerdata::load(g, &root),
+            };
+            self.guest_attachments
+                .insert(g.conn, std::mem::take(&mut g.attachments));
+            // PlayerEvent.LoadFromFile: the player's data is read and applied,
+            // the player not yet placed.
+            (known, g.uuid, g.name.clone())
+        }) else {
             return;
         };
-        // PlayerList.loadPlayerData: the owner gets the world's player file,
-        // everyone else their own.
-        let known = match owner.filter(|o| o.uuid == g.uuid) {
-            Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
-            None => playerdata::load(g, &root),
-        };
-        self.guest_attachments
-            .insert(g.conn, std::mem::take(&mut g.attachments));
-        // PlayerEvent.LoadFromFile: the player's data is read and applied,
-        // the player not yet placed.
-        let (uuid, name) = (g.uuid, g.name.clone());
         self.native_player_load_from_file(uuid, &name, &playerdata::directory(&root));
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some(g) = host.hub.guest_mut(conn) else {
+        if host
+            .hub
+            .update_guest(conn, |g| {
+                // PrepareSpawnTask: with no saved rotation the player faces the world
+                // spawn's angle (`/setworldspawn ... <angle>`).
+                playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
+                if !known || force {
+                    g.game_mode = default_mode;
+                    // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
+                    g.abilities.update_for_mode(default_mode);
+                }
+            })
+            .is_none()
+        {
             return;
-        };
-        // PrepareSpawnTask: with no saved rotation the player faces the world
-        // spawn's angle (`/setworldspawn ... <angle>`).
-        playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
-        if !known || force {
-            g.game_mode = default_mode;
-            // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
-            g.abilities.update_for_mode(default_mode);
         }
         if !known {
             // ServerPlayer.adjustSpawnLocation: a player new to the world
@@ -3199,31 +3215,38 @@ impl Game<'_> {
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            let Some(g) = host.hub.guest_mut(conn) else {
+            if host
+                .hub
+                .update_guest(conn, |g| {
+                    g.position = feet;
+                    g.previous_position = feet;
+                    // Ready.spawn uses the world spawn's yaw and pitch.
+                    [g.yaw, g.pitch] = self.level.world_spawn_angle;
+                    g.head_yaw = g.yaw;
+                    g.health = 20.0;
+                    g.food = 20;
+                    g.dimension = super::Dim::Overworld.id().to_owned();
+                })
+                .is_none()
+            {
                 return;
-            };
-            g.position = feet;
-            g.previous_position = feet;
-            // Ready.spawn uses the world spawn's yaw and pitch.
-            [g.yaw, g.pitch] = self.level.world_spawn_angle;
-            g.head_yaw = g.yaw;
-            g.health = 20.0;
-            g.food = 20;
-            g.dimension = super::Dim::Overworld.id().to_owned();
+            }
         }
         // A server places each player in their own level (`PlayerList.placeNewPlayer`).
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some(g) = host.hub.guest_mut(conn) else {
+        let back = self.dim;
+        let Some((level, elsewhere)) = host.hub.update_guest(conn, |g| {
+            let level = super::Dim::from_id(&g.dimension);
+            let elsewhere = level != back;
+            if !elsewhere {
+                g.dimension = in_place;
+            }
+            (level, elsewhere)
+        }) else {
             return;
         };
-        let back = self.dim;
-        let level = super::Dim::from_id(&g.dimension);
-        let elsewhere = level != back;
-        if !elsewhere {
-            g.dimension = in_place;
-        }
         self.load_guest_records(conn);
         // The mods say which commands the newcomer's tree keeps.
         self.native_filter_commands(Some(conn));
@@ -3798,23 +3821,61 @@ fn level_event_except(id: i32, acting: Option<u32>, collateral_break: bool) -> O
 
 /// Notes how long the event that started at `started` took (`spans::note`), with what it
 /// was about when [`Game::event_detail`] said.
-fn note_event(host: &LanHost, started: Option<(Instant, EventKind, Option<UseDetail>)>) {
-    let Some((started, (kind, conn, name), detail)) = started else {
+fn note_event(
+    host: &LanHost,
+    started: Option<(Instant, EventKind, Option<UseDetail>)>,
+    timings: &mut EventTimings<(Option<u32>, Option<String>), UseDetail>,
+) {
+    let Some((started, kind, detail)) = started else {
         return;
     };
-    horizon_client::spans::note(started.elapsed().as_secs_f32() * 1000.0, || {
-        let who = name
-            .or_else(|| conn.and_then(|c| host.hub.guest(c)).map(|g| g.name.clone()))
-            .or_else(|| conn.map(|c| format!("connection {c}")));
-        let line = match who {
-            Some(who) => format!("{kind} of {who}"),
-            None => kind.to_owned(),
-        };
-        match detail {
-            Some(d) => format!("{line} ({d})"),
-            None => line,
-        }
-    });
+    let ms = started.elapsed().as_secs_f32() * 1000.0;
+    horizon_client::spans::note(ms, || describe_event(host, &kind, detail.as_ref()));
+    let (name, conn, player) = kind;
+    timings.add(name, (conn, player), detail, ms);
+}
+
+/// The player an event came from: its name, else its connection.
+fn who(host: &LanHost, conn: Option<u32>, name: Option<String>) -> Option<String> {
+    name.or_else(|| conn.and_then(|c| host.hub.guest(c)).map(|g| g.name.clone()))
+        .or_else(|| conn.map(|c| format!("connection {c}")))
+}
+
+/// A burst's note: `213 x UseItemOn under 10 ms each (…); most from Steve: 140 of them, 710.0 ms`.
+fn describe_burst(
+    host: &LanHost,
+    burst: &event_timings::Burst<(Option<u32>, Option<String>), UseDetail>,
+) -> String {
+    let mut line = format!(
+        "{} x {} under {} ms each",
+        burst.count,
+        burst.kind,
+        horizon_client::spans::NOTE_MS
+    );
+    if let Some(d) = &burst.detail {
+        line.push_str(&format!(" ({d})"));
+    }
+    if let Some(((conn, name), count, ms)) = &burst.top
+        && let Some(who) = who(host, *conn, name.clone())
+    {
+        line.push_str(&format!("; most from {who}: {count} of them, {ms:.1} ms"));
+    }
+    line
+}
+
+fn describe_event(
+    host: &LanHost,
+    (kind, conn, name): &EventKind,
+    detail: Option<&UseDetail>,
+) -> String {
+    let line = match who(host, *conn, name.clone()) {
+        Some(who) => format!("{kind} of {who}"),
+        None => (*kind).to_owned(),
+    };
+    match detail {
+        Some(d) => format!("{line} ({d})"),
+        None => line,
+    }
 }
 
 /// A client's settings as the mod API names them.
@@ -3848,6 +3909,7 @@ fn client_info(
 
 /// What a use packet was about, taken before it ran (the use may consume the item or change
 /// the block): the item in the hand it names and, on a block, that block, where, and the face.
+#[derive(PartialEq)]
 struct UseDetail {
     item: Option<Arc<str>>,
     block: Option<(Arc<str>, [i32; 3], i32)>,
@@ -3894,7 +3956,30 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
+    use super::{EventTimings, OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
+
+    #[test]
+    fn a_burst_of_short_events_still_has_a_slow_tick_note() {
+        use horizon_client::spans;
+        // Thread-local recording avoids changing instrumentation on other test threads.
+        spans::record_here(true);
+        spans::take_notes();
+        let mut timings = EventTimings::new(spans::NOTE_MS);
+        for _ in 0..200 {
+            spans::note(5.0, || "UseItemOn of fixture player".into());
+            timings.add("UseItemOn", "fixture player", None::<()>, 5.0);
+        }
+        assert!(
+            spans::take_notes().is_empty(),
+            "every individual event is below NOTE_MS"
+        );
+        for burst in timings.bursts() {
+            spans::note(burst.ms, || format!("{} x {}", burst.count, burst.kind));
+        }
+        let notes = spans::take_notes();
+        spans::record_here(false);
+        assert_eq!(notes, vec![(1000.0, "200 x UseItemOn".into())]);
+    }
     use horizon_client::mobs::Mob;
     use horizon_protocol::entity_data::{Value, serializer};
 
@@ -4359,6 +4444,31 @@ mod tests {
         });
     }
 
+    #[test]
+    fn unresolved_profession_sends_none_without_changing_saved_identity() {
+        let types = super::super::mods::living_mod_types();
+        let hub = meta_hub("MissingProfessionMeta");
+        let mut mob = Mob::new(
+            1,
+            types["minecraft:villager"].clone(),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        let metadata = |mob: &Mob| {
+            let (mut entries, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(mob, &hub, None, 0, &mut entries, &mut defaults);
+            entries
+                .into_iter()
+                .find(|(_, serializer, _)| *serializer == serializer::VILLAGER_DATA)
+        };
+        let expected = metadata(&mob);
+        assert!(expected.is_some());
+        mob.extra.profession =
+            horizon_client::mobs::villager::ProfessionState::from_id("example:engineer");
+        assert_eq!(metadata(&mob), expected);
+        assert_eq!(mob.extra.profession.id(), "example:engineer");
+    }
+
     /// A content mod's living type sends the entity data of its template's
     /// class (`Zombie.DATA_BABY_ID`, the villager's unhappy counter), entry
     /// for entry what its template sends.
@@ -4392,7 +4502,17 @@ mod tests {
     /// A hub with no players and empty registries, for `mob_meta`.
     fn meta_hub(name: &str) -> horizon_client::lan::hub::Hub {
         use horizon_client::lan::{Lan, NetConfig, chunks::ChunkEncoder, data, hub};
-        let sync = std::sync::Arc::new(data::SyncData::empty());
+        let mut sync = data::SyncData::empty();
+        for (registry, id) in [
+            ("minecraft:villager_type", "minecraft:plains"),
+            ("minecraft:villager_profession", "minecraft:none"),
+        ] {
+            sync.builtin.registries.insert(
+                registry.into(),
+                horizon_protocol::registry::Ids::from_names(vec![id.into()]),
+            );
+        }
+        let sync = std::sync::Arc::new(sync);
         let config = NetConfig {
             announce: false,
             ..NetConfig::loopback(0, name.into(), 2)
