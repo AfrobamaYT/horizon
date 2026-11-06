@@ -1350,7 +1350,8 @@ mod tests {
         } else {
             assert_eq!(ids, ["plain"]);
         }
-        std::env::set_current_dir(&f.0).unwrap();
+        // Out of the fixture: Windows won't remove a process's working directory.
+        std::env::set_current_dir(std::env::temp_dir()).unwrap();
     }
 
     #[test]
