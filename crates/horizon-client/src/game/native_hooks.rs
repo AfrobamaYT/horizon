@@ -2964,6 +2964,14 @@ impl Game<'_> {
     ) {
         self.fire_block_highlight(pos, state, partial, canceled);
     }
+    /// After particle submission, before the renderer executes world draws.
+    pub(super) fn native_submit_custom_geometry(
+        &self,
+        view: &mod_api::WorldRenderView,
+        draw: &mut horizon_client::world_geometry::WorldGeometry,
+    ) {
+        self.fire_submit_custom_geometry(view, draw);
+    }
     /// The world frame's local visual sources. Push requests; Horizon validates
     /// and limits them before rendering. Called only while a world is visible.
     pub(super) fn native_visuals(

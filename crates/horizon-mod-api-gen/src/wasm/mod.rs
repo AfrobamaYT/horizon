@@ -22,6 +22,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "ClientBackendMut",
     "DrawContext",
     "BlockEntityDrawContext",
+    "WorldDrawContext",
     "LevelHost",
     "LevelRandomHost",
     "LevelTicksHost",
@@ -772,6 +773,20 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn world_geometry_has_generated_wasm_bindings() {
+        with_client_host(|_, unbound| {
+            for name in [
+                "WorldDrawContext::lines",
+                "WorldDrawContext::quads",
+                "WorldDrawContext::usage",
+                "Hooks::submit_custom_geometry",
+            ] {
+                assert!(!unbound.iter().any(|method| method == name));
+            }
+        });
     }
 
     #[test]

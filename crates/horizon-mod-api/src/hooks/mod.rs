@@ -289,6 +289,7 @@ mod sound_events;
 mod sound_refs;
 mod spread_players_teleport;
 mod structure_template;
+mod submit_custom_geometry;
 mod sweep_attack;
 mod tag_fluid_reads;
 mod teleport_command;
