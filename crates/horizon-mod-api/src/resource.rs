@@ -109,6 +109,13 @@ impl ItemResource {
         backend_of(host)
             .is_some_and(|backend| backend.item_has_enchantment_effect(&self.0, effect.as_str()))
     }
+    /// The slot this item is equipped to (`Equippable.slot`): `head`, `chest`, `legs`, `feet`,
+    /// `body`, `mainhand`, `offhand` or `saddle`, by its `equippable` component after the stack's
+    /// own patch; none where it is not equippable. Whether a given entity may wear it is another
+    /// question, not answered here.
+    pub fn equippable_slot(&self, host: &dyn Host) -> Option<String> {
+        backend_of(host)?.item_equippable_slot(&self.0)
+    }
     /// This item with component `id` set to `value` (`ItemResource.with`, as vanilla's
     /// `PatchedDataComponentMap.set`): a removal of it dropped, and the stack's own value too
     /// where `value` is the item's default (`host.item_default_component`), so the stack is
