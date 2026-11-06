@@ -2,8 +2,9 @@
 //! native mod too.
 // ANCHOR: mod
 use mod_api::{
-    BlockKey, EffectKey, Flow, Hooks, HostSide, ItemPart, Registrar, RegistrationContext,
-    ServerChatEvent, ServerHost, Text, UseItemEvent,
+    BlockKey, DataLoadContext, EffectKey, Flow, FluidIngredient, FluidStack, Hooks, HostSide,
+    ItemPart, LootTableLoadEvent, Registrar, RegistrationContext, ServerChatEvent, ServerHost,
+    Text, UseItemEvent,
 };
 use mod_points::{Points, TickArgs};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,6 +34,18 @@ impl Hooks for Mod {
         registrar.item_part("minecraft:stick", Stick);
         let _ = self.stone.set(registrar.block_key("minecraft:stone"));
         let _ = self.speed.set(registrar.effect_key("minecraft:speed"));
+    }
+
+    fn loot_table_load(&self, context: &dyn DataLoadContext, event: &mut LootTableLoadEvent<'_>) {
+        if event.id != "test:loot" {
+            return;
+        }
+        let water = context.fluid_key("minecraft:water").expect("water");
+        let ingredient =
+            FluidIngredient::from_json(&mod_api::serde_json::json!("minecraft:water"), context)
+                .expect("ingredient");
+        assert!(ingredient.test(&FluidStack::new(water, 1)));
+        *event.table = mod_api::serde_json::json!({"fluid_guest_ok": true});
     }
 
     fn server_chat(&self, host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
