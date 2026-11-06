@@ -40,18 +40,8 @@ horizon_client::game::Resources::items
 horizon_client::game::remote::Remote::profile
 # horizon_client::game::Dim::min_y — removed since the adapter's pinned game; bounds now live on World.shape.
 # horizon_client::game::Dim::max_y — removed since the adapter's pinned game; bounds now live on World.shape.
-# horizon_client_render::world::World::loaded — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_client_render::world::World::block — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_client_render::world::World::is_air — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_items::blocks::BlockFacts::get — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_items::blocks::BlockFacts::is_air — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_items::items::Items::get — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_items::items::Items::block_in_tag — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_world::registry::BlockRegistry::state — no internals.json method entry (lower-crate shapes expose layout only).
-# horizon_world::registry::BlockRegistry::default_state — no internals.json method entry (lower-crate shapes expose layout only).
 # horizon_core::position::BlockPos::new — no internals.json method entry (lower-crate shapes expose layout only).
 # horizon_client_core::text::Text::literal — no internals.json method entry; its impl Into<String> argument also cannot cross.
-# horizon_client_lib::lan::hub::Hub::guest — no internals.json method entry (lower-crate shapes expose layout only).
 
 # Named lower-crate data read or constructed by the adapter (also reached below fields).
 horizon_items::items::ItemStack
@@ -73,3 +63,16 @@ horizon_client::game::lan_actions::GuestCommand
 # lan::playerdata::uuid_ints has no internals.json function entry (lower-crate layout-only scan).
 # The original guest_command adapter took &mut LanHost; current guest_command has no host argument.
 # Standard collections, Arc/Option, atomics and mod-owned settings/runtime are not manifest items.
+
+# Lower-crate methods used by the Treefall wasm adapter.
+horizon_client_render::world::World::loaded
+horizon_client_render::world::World::block
+horizon_client_render::world::World::is_air
+horizon_items::blocks::BlockFacts::get
+horizon_items::blocks::BlockFacts::is_air
+horizon_items::items::Items::get
+horizon_items::items::Items::block_in_tag
+horizon_world::registry::BlockRegistry::state
+horizon_world::registry::BlockRegistry::default_state
+horizon_client_lib::lan::playerdata::uuid_ints
+horizon_client_lib::lan::hub::Hub::guest

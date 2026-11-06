@@ -86,3 +86,17 @@ horizon_world::worldgen::generator_structures::StructureState
 horizon_world::worldgen::overrides::WorldgenOverrides
 horizon_world::worldgen::structure::BoundingBox
 horizon_world::worldgen::structure::legacy::PieceRandom
+
+# Treefall: typed lower-crate reads used by its Blocks/Host adapter.
+# Each is an API request; optional references remain call-scoped nodes.
+horizon_client_render::world::World::loaded
+horizon_client_render::world::World::block
+horizon_client_render::world::World::is_air
+horizon_items::blocks::BlockFacts::get
+horizon_items::blocks::BlockFacts::is_air
+horizon_items::items::Items::get
+horizon_items::items::Items::block_in_tag
+horizon_world::registry::BlockRegistry::state
+horizon_world::registry::BlockRegistry::default_state
+horizon_client_lib::lan::playerdata::uuid_ints
+horizon_client_lib::lan::hub::Hub::guest

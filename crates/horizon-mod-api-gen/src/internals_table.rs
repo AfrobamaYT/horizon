@@ -1059,20 +1059,41 @@ impl<'r> Gen<'r> {
         let result = match output {
             syn::ReturnType::Default => quote!(Ok(I::Reply::Done)),
             syn::ReturnType::Type(_, ty) => {
-                let shape = rule.shape(module, this, ty);
-                self.selection.reach(&shape, rule);
-                match (&shape, rule.crossing_of(&shape)) {
-                    (_, Crossing::Opaque) => return None,
-                    (_, Crossing::Copy(_)) => {
-                        let value = self.encode(&shape, quote!((&result)));
-                        quote!(Ok(I::Reply::Value(#value)))
+                if let Some(reference) = optional_reference(rule, module, this, ty) {
+                    self.selection.reach(&reference, rule);
+                    let node =
+                        self.step(&reference, quote!(&raw mut value as *mut ()), quote!(true));
+                    quote!(match result {
+                        Some(mut value) => #node,
+                        None => Ok(I::Reply::Value(V::Var(0, vec![]))),
+                    })
+                } else {
+                    let success = result_success(rule, module, this, ty);
+                    let shape = success
+                        .clone()
+                        .unwrap_or_else(|| rule.shape(module, this, ty));
+                    self.selection.reach(&shape, rule);
+                    match (&shape, rule.crossing_of(&shape)) {
+                        (_, Crossing::Opaque) => return None,
+                        (_, Crossing::Copy(_)) => {
+                            if success.is_some() {
+                                let value = self.encode(&shape, quote!((&value)));
+                                quote!(Ok(I::Reply::Value(match result {
+                                    Ok(value) => V::Var(0, vec![#value]),
+                                    Err(_) => V::Var(1, vec![]),
+                                })))
+                            } else {
+                                let value = self.encode(&shape, quote!((&result)));
+                                quote!(Ok(I::Reply::Value(#value)))
+                            }
+                        }
+                        (Shape::Ref { .. }, Crossing::Handle) => {
+                            let node =
+                                self.step(&shape, quote!(&raw mut result as *mut ()), quote!(true));
+                            quote!({ let mut result = result; #node })
+                        }
+                        _ => return None,
                     }
-                    (Shape::Ref { .. }, Crossing::Handle) => {
-                        let node =
-                            self.step(&shape, quote!(&raw mut result as *mut ()), quote!(true));
-                        quote!({ let mut result = result; #node })
-                    }
-                    _ => return None,
                 }
             }
         };
@@ -1108,6 +1129,48 @@ impl<'r> Gen<'r> {
             quote!(I::Thunk { path: #path, hash: #hash, receiver: #receiver_ty, args: &[#(#nodes),*], writes: #writes, call: #thunk },),
         )
     }
+}
+
+/// A function return may discard an opaque error while preserving its copyable success value.
+/// This applies to written `Result<T>` aliases too, without ever naming their error type.
+pub(crate) fn result_success(
+    rule: &Rule,
+    module: &str,
+    this: Option<&str>,
+    ty: &syn::Type,
+) -> Option<Shape> {
+    let syn::Type::Path(ty) = ty else {
+        return None;
+    };
+    let segment = ty.path.segments.last()?;
+    if segment.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    if !(1..=2).contains(&args.args.len()) {
+        return None;
+    }
+    let syn::GenericArgument::Type(success) = args.args.first()? else {
+        return None;
+    };
+    let shape = rule.shape(module, this, success);
+    matches!(rule.crossing_of(&shape), Crossing::Copy(_)).then_some(shape)
+}
+
+/// A returned optional reference to state reaches the same call-scoped node as a reference.
+pub(crate) fn optional_reference(
+    rule: &Rule,
+    module: &str,
+    this: Option<&str>,
+    ty: &syn::Type,
+) -> Option<Shape> {
+    let Shape::Option(inner) = rule.shape(module, this, ty) else {
+        return None;
+    };
+    matches!(&*inner, Shape::Ref { .. }).then_some(())?;
+    (rule.crossing_of(&inner) == Crossing::Handle).then_some(*inner)
 }
 
 /// A function a thunk calls, and how.
@@ -1529,6 +1592,69 @@ pub(crate) mod tests {
                 assert_eq!((__internals::TABLE.types[ty as usize].node)(p, writable, Op::Index(0)), Ok(Reply::Value(Value::U(7))));
             }
         "#,
+        );
+    }
+
+    #[test]
+    fn optional_reference_returns_keep_the_referent_not_the_temporary_option() {
+        let entries = [
+            internal(
+                "horizon_client::Bag",
+                "struct",
+                "struct Bag { values: Vec<u8> }",
+            ),
+            internal(
+                "horizon_client::Bag::find",
+                "method",
+                "fn find(&mut self, present: bool) -> Option<&mut Bag>",
+            ),
+        ];
+        let (code, counts) = all_table(&entries);
+        assert_eq!(counts.thunks, 1);
+        run_fixture(
+            &code,
+            "struct Bag { values: Vec<u8> } impl Bag { fn find(&mut self, present: bool) -> Option<&mut Self> { present.then_some(self) } }",
+            r#"
+            let _ = Op::Read;
+            let mut bag = Bag { values: vec![7] };
+            unsafe {
+                let thunk = &__internals::TABLE.thunks[0];
+                let ptr = &raw mut bag as *mut ();
+                assert!(matches!((thunk.call)(Some(ptr), vec![internals::Arg::Value(Value::B(true))]).unwrap(), Reply::Node(p, _, true) if p == ptr));
+                assert_eq!((thunk.call)(Some(ptr), vec![internals::Arg::Value(Value::B(false))]), Ok(Reply::Value(Value::Var(0, vec![]))));
+            }
+            "#,
+        );
+    }
+
+    #[test]
+    fn result_returns_discard_opaque_errors_but_not_success_values() {
+        let entries = [
+            internal(
+                "horizon_client::succeed",
+                "fn",
+                "fn succeed() -> Result<u32>",
+            ),
+            internal(
+                "horizon_client::fail",
+                "fn",
+                "fn fail() -> std::result::Result<(), Box<dyn std::error::Error>>",
+            ),
+        ];
+        let (code, counts) = all_table(&entries);
+        assert_eq!(counts.thunks, 2);
+        run_fixture(
+            &code,
+            "type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>; fn succeed() -> Result<u32> { Ok(37) } fn fail() -> Result<()> { Err(std::io::Error::other(\"opaque\").into()) }",
+            r#"
+            let _ = Op::Read;
+            unsafe {
+                for thunk in __internals::TABLE.thunks {
+                    let expected = if thunk.path.ends_with("succeed") { Value::Var(0, vec![Value::U(37)]) } else { Value::Var(1, vec![]) };
+                    assert_eq!((thunk.call)(None, vec![]), Ok(Reply::Value(expected)));
+                }
+            }
+            "#,
         );
     }
 

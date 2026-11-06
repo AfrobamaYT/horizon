@@ -1,7 +1,9 @@
 //! The per-mod wasm view, generated from the same layouts and selection as the staged table.
 use crate::crossing::{Collection, Crossing, Rule, Scalar, Shape, bare};
 use crate::internals::Internal;
-use crate::internals_table::{function_scope, guest_codecs, select, signature};
+use crate::internals_table::{
+    function_scope, guest_codecs, optional_reference, result_success, select, signature,
+};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use sha2::{Digest, Sha256};
@@ -33,6 +35,7 @@ fn short_alias_available(name: &str) -> bool {
     ![
         "I",
         "V",
+        "GameError",
         "Node",
         "Reached",
         "Arg",
@@ -418,6 +421,7 @@ pub fn generate(
     }
     let mut free_aliases = BTreeMap::<String, Vec<syn::Ident>>::new();
     let mut omitted = Vec::new();
+    let mut has_game_error = false;
     for (index, d) in declared.iter().enumerate() {
         if let Some(i) = selected
             .accepted
@@ -475,12 +479,58 @@ pub fn generate(
                     args.push(quote!(Arg::Value(flatten(#a.to_value()))));
                 }
             }
-            let result = match &sig.output {
-                syn::ReturnType::Default => Shape::Unit,
-                syn::ReturnType::Type(_, t) => rule.shape(module, this, t),
+            let success = match &sig.output {
+                syn::ReturnType::Default => None,
+                syn::ReturnType::Type(_, t) => result_success(&rule, module, this, t),
             };
+            let optional = match &sig.output {
+                syn::ReturnType::Default => None,
+                syn::ReturnType::Type(_, t) => optional_reference(&rule, module, this, t),
+            };
+            let result =
+                optional
+                    .clone()
+                    .or(success.clone())
+                    .unwrap_or_else(|| match &sig.output {
+                        syn::ReturnType::Default => Shape::Unit,
+                        syn::ReturnType::Type(_, t) => rule.shape(module, this, t),
+                    });
             copy_shapes(&result, &rule, &mut copies);
             let result = spell(&result, &rule);
+            let (result, decode) = if let Some(Shape::Ref { to, .. }) = optional {
+                let ty = spell(&to, &rule);
+                (
+                    quote!(Option<#ty>),
+                    quote! {
+                        match answer {
+                            Reached::Node(node) => Ok(Some(<#ty as ViewType>::from_reached(Reached::Node(node))?)),
+                            Reached::Value(cells) => match unflatten(cells).map_err(wire_refusal)? {
+                                Value::Var(0, fields) if fields.is_empty() => Ok(None),
+                                _ => Err(changed("an optional reference")),
+                            },
+                        }
+                    },
+                )
+            } else if success.is_some() {
+                has_game_error = true;
+                (
+                    quote!(Result<#result, GameError>),
+                    quote! {
+                        let Reached::Value(cells) = answer else { return Err(changed("a result value")); };
+                        match unflatten(cells).map_err(wire_refusal)? {
+                            Value::Var(0, mut fields) if fields.len() == 1 =>
+                                Ok(Ok(<#result as CopyValue>::from_value(fields.remove(0))?)),
+                            Value::Var(1, fields) if fields.is_empty() => Ok(Err(GameError)),
+                            _ => Err(changed("a result case")),
+                        }
+                    },
+                )
+            } else {
+                (
+                    result.clone(),
+                    quote!(<#result as ViewType>::from_reached(answer)),
+                )
+            };
             let func = if let Some(this) = this {
                 let collision = rule.fields(this).iter().enumerate().any(|(n, f)| {
                     f.member.to_token_stream().to_string() == func
@@ -512,7 +562,8 @@ pub fn generate(
             };
             let self_param = sig.receiver().map(|_| quote!(&self,));
             let f = quote!(pub fn #func(#self_param #(#params),*) -> Result<#result, Refusal> {
-                <#result as ViewType>::from_reached(call(#index, #receiver, &[#(#args),*])?)
+                let answer = call(#index, #receiver, &[#(#args),*])?;
+                #decode
             });
             if let Some(this) = this {
                 let ty = node_name(this, &rule);
@@ -521,6 +572,13 @@ pub fn generate(
                 items.push(f);
             }
         }
+    }
+    if has_game_error {
+        items.push(quote! {
+            /// A declared game function failed; its opaque native error stays in the game.
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            pub struct GameError;
+        });
     }
     for (alias, functions) in free_aliases {
         if functions.len() == 1 && short_alias_available(&alias) {
@@ -765,11 +823,35 @@ mod tests {
                 "struct Owner { first: u8, second: i64, hidden: Vec<u8> }",
             ),
             entry("horizon_client::Owner::second", "field", "second: i64"),
+            entry(
+                "horizon_client::succeed",
+                "fn",
+                "fn succeed() -> Result<u32>",
+            ),
+            entry(
+                "horizon_client::fail",
+                "fn",
+                "fn fail() -> std::result::Result<(), Box<dyn std::error::Error>>",
+            ),
+            entry(
+                "horizon_client::find",
+                "fn",
+                "fn find() -> Option<&'static Owner>",
+            ),
+            entry(
+                "horizon_client::missing",
+                "fn",
+                "fn missing() -> Option<&'static Owner>",
+            ),
         ];
         let declared = [
             declaration(&entries[2]),
             declaration(&entries[3]),
             declaration(&entries[5]),
+            declaration(&entries[6]),
+            declaration(&entries[7]),
+            declaration(&entries[8]),
+            declaration(&entries[9]),
         ];
         let code = generate(&entries, &declared, &[], &[])
             .unwrap()
@@ -793,7 +875,17 @@ mod tests {
                 pub trait ViewType: Sized {{ fn from_reached(reached: Reached) -> Result<Self, Refusal>; }}
                 pub trait AsNode {{ fn node(&self) -> &Node; }}
                 pub enum Reached {{ Node(Node), Value(Vec<Value>) }}
+                pub enum Arg<'a> {{ Node(&'a Node), Value(Vec<Value>) }}
+                pub fn call(index: u32, _: Option<&Node>, _: &[Arg<'_>]) -> Result<Reached, Refusal> {{
+                    if index == 5 {{ return Ok(Reached::Node(Node)); }}
+                    Ok(Reached::Value(vec![match index {{
+                        3 => Value::Var(0, vec![Value::U(37)]),
+                        6 => Value::Var(0, vec![]),
+                        _ => Value::Var(1, vec![]),
+                    }}]))
+                }}
                 pub struct Seq<T>(T); pub struct Map<K,V>(K,V); pub struct Opt<T>(T);
+                impl<T> ViewType for Seq<T> {{ fn from_reached(_: Reached) -> Result<Self, Refusal> {{ unimplemented!() }} }}
                 pub struct Node;
                 impl Node {{
                     pub fn get(&self, n: u32) -> Result<Vec<Value>, Refusal> {{ Ok(vec![Value::S(n as i64)]) }}
@@ -820,7 +912,11 @@ mod tests {
                 assert_eq!(Borrowed::from_value(value.to_value()).unwrap(), value);
                 assert_eq!(<Owner as runtime::ViewType>::from_reached(runtime::Reached::Node(runtime::Node)).unwrap().second().unwrap(), 1, "declaration-order field number, not selected-field order");
                 assert!(Data::from_value(V::None).is_err());
-                assert_eq!(DECLARED.len(), 6, "three declarations plus three additional walked layouts");
+                assert_eq!(succeed().unwrap(), Ok(37));
+                assert_eq!(fail().unwrap(), Err(GameError));
+                assert_eq!(find().unwrap().unwrap().second().unwrap(), 1);
+                assert!(missing().unwrap().is_none());
+                assert_eq!(DECLARED.len(), 10, "seven declarations plus three additional walked layouts");
             }}
         "#
         );
