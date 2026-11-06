@@ -1484,7 +1484,11 @@ impl Game<'_> {
     /// (`EntityEvent.TNT_PRIME`, 70) and `SoundEvents.TNT_PRIMED`. A client
     /// that receives 70 only sets the fuse (`handleEntityEvent`).
     pub(super) fn prime_cart(&mut self, c: &mut Minecart) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         c.fuse = 80;
@@ -1509,7 +1513,11 @@ impl Game<'_> {
         }
     }
     fn explode_cart(&mut self, c: &Minecart, speed_sqr: f64) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         let speed = speed_sqr.sqrt().min(5.0);
@@ -2429,7 +2437,11 @@ impl Game<'_> {
                 self.carts.insert(i, c);
             } else {
                 let at = [c.position.x, c.position.y, c.position.z];
-                if self.ui.rules.bool("entity_drops") {
+                if self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+                {
                     for s in c.items.iter().flatten() {
                         self.spawn_item(s.clone(), at, [0.0, 0.1, 0.0], 10);
                     }
