@@ -221,7 +221,7 @@ pub trait CapabilityProviders {
     fn block_entity_provider(
         &self,
         name: &str,
-        kind: &str,
+        kind: BlockEntityTypeKey,
         index: &mut u32,
     ) -> Option<(BlockProviderOf, &'static str, bool)>;
     /// The next enabled provider of item capability `name` for item `item`, advancing `index`.
@@ -256,9 +256,10 @@ impl CapabilityProviders for InstalledProviders {
     fn block_entity_provider(
         &self,
         name: &str,
-        kind: &str,
+        kind: BlockEntityTypeKey,
         index: &mut u32,
     ) -> Option<(BlockProviderOf, &'static str, bool)> {
+        let kind = crate::registry_keys::block_entity_type_name(kind)?;
         next(&installed()?.keys.capabilities, name, kind, index)
     }
     fn item_provider(
@@ -1663,6 +1664,9 @@ pub mod tests {
         }
         super::install_registrar(registrar).unwrap();
         crate::registry_keys::resolve_effects().unwrap();
+        if let Some(types) = horizon_client_core::block_entity_types::current() {
+            crate::registry_keys::resolve_block_entity_types(types).unwrap();
+        }
     }
 
     /// A previously requested block in the game fixture. Unknown names are a fixture error.
@@ -4951,7 +4955,7 @@ pub mod tests {
         r.mod_index = 1;
         (&mut r as &mut dyn Registrar).place_provider("test:charms", Arc::new(Charms));
         (&mut r as &mut dyn Registrar).place_provider("charms", Arc::new(Charms));
-        let invalid = r.block_entity_type_key("pipe");
+        let invalid = r.block_entity_type_key("minecraft:");
         (&mut r as &mut dyn Registrar)
             .block_entity_capability(&ITEMS, &invalid, |_, at| Some(Box::new(Pipe(at))));
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
@@ -4960,7 +4964,7 @@ pub mod tests {
                 .contains("item places test:charms are provided twice, by first and second")
         );
         assert!(r.refused[1].contains("not a namespaced name"));
-        assert!(r.refused[2].contains("invalid block entity type \"pipe\""));
+        assert!(r.refused[2].contains("invalid registry key \"minecraft:\""));
     }
 
     /// A mod declaring its own key under a name another mod's providers answer with another
