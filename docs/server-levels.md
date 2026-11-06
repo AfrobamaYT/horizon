@@ -17,7 +17,7 @@ dimensions at the same time.
 ## How the single-level `Game` maps onto vanilla's levels
 
 The game's tick code reads one level: the one held in `Game`'s own fields (the world, its streaming
-and save, block ticks, entities, block entities and their per-level queues). `game/levels.rs` keeps
+and save, block ticks, entities, block entities and their per-level queues). `game/world/levels.rs` keeps
 the other dimensions' levels as `Parked` values and swaps one into place (`enter_level`). The swap is
 `mem::swap` of each per-level field, so the tick code runs unchanged, one level at a time.
 

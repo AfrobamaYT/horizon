@@ -18,6 +18,7 @@ pub(crate) enum Cause {
     Signature(&'static str),
     Record(&'static str),
     Conflict(String),
+    Source(String),
 }
 
 /// The declaration that failed and its machine-distinguishable cause.
@@ -63,6 +64,7 @@ impl std::fmt::Display for Error {
             | Cause::Ambiguous(s)
             | Cause::Signature(s)
             | Cause::Record(s) => f.write_str(s),
+            Cause::Source(message) => f.write_str(message),
             Cause::Conflict(other) => {
                 write!(f, "conflicts with {other}: both select the same call")
             }
@@ -160,6 +162,12 @@ pub(crate) struct Site {
     pub args: Vec<(String, String)>,
     pub output: String,
 }
+
+pub(crate) mod analysis;
+pub(crate) mod resolve;
+pub(crate) mod rewrite;
+mod stage;
+pub(crate) use stage::{ids, stage, tracked};
 
 #[cfg(test)]
 mod tests;

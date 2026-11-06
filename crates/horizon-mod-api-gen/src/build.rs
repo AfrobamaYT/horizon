@@ -1,5 +1,5 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
-use super::{Catalog, Target, free_function_source, sources};
+use super::{Catalog, Target, free_function_source, native_hook_files, sources};
 use quote::ToTokens;
 use std::{fs, path::Path};
 
@@ -10,6 +10,11 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
         Target::Client => vec![
+            (
+                "game_modules.rs",
+                super::game_modules::declarations(&root.join("crates/horizon-client/src/game"))?,
+            ),
+            ("native_hook_modules.rs", native_hook_modules(root)?),
             ("mod_api_host_generated.rs", generated.implementation),
             ("mod_api_fire_generated.rs", generated.fire),
             // The mob tick's goal read view (#1077), included beside the
@@ -17,6 +22,14 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
         Target::Api => {
+            fs::write(
+                out_dir.join(super::part_table::OUTPUT),
+                super::part_table::source(root)?,
+            )
+            .map_err(|e| e.to_string())?;
+            for (name, code) in super::exports::sources(root)? {
+                fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
+            }
             let hooks = generated.hooks;
             let included = [
                 ("mod_api_generated.rs", hooks.as_str()),
@@ -53,16 +66,37 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     Ok(())
 }
 
+pub(crate) fn native_hook_modules(root: &Path) -> Result<String, String> {
+    let mut modules = String::new();
+    for path in native_hook_files(root)? {
+        let module = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| format!("{}: invalid native hook module name", path.display()))?;
+        if matches!(module, "mod" | "shared") {
+            continue;
+        }
+        syn::parse_str::<syn::Ident>(module).map_err(|e| e.to_string())?;
+        let path = fs::canonicalize(&path).map_err(|e| e.to_string())?;
+        modules.push_str(&format!("#[path = {path:?}] mod {module};\n"));
+    }
+    Ok(modules)
+}
+
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and the `Points` trait,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     let src = root.join("crates/horizon-client/src");
     println!("cargo:rerun-if-changed={}", src.join("game.rs").display());
     println!("cargo:rerun-if-changed={}", src.join("game").display());
-    for path in super::points::tracked(root)? {
+    for path in super::points::tracked(root)?
+        .into_iter()
+        .chain(super::sites::tracked(root).map_err(|e| e.to_string())?)
+    {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    let code = super::points::records(&super::points::game_points(root)?);
+    let code = super::points::records(&super::points::game_points(root)?)
+        + &super::sites::ids(root).map_err(|e| e.to_string())?;
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
     // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
     let mut code = String::new();
@@ -100,6 +134,8 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
         }
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
+    directory(&root.join(super::exports::DIRECTORY), "rs", false)?;
+    directory(&root.join(super::part_table::DIRECTORY), "rs", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
     println!(
         "cargo:rerun-if-changed={}",

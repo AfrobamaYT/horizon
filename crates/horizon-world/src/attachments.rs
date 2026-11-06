@@ -1,6 +1,12 @@
 //! Typed native-mod data attached to server-owned holders.
 #[doc(hidden)]
 pub mod index;
+mod lifetime;
+#[doc(hidden)]
+pub mod observer;
+
+#[doc(hidden)]
+pub use lifetime::{AttachmentLifetime, HasAttachmentLifetime};
 
 use std::{
     any::Any,
@@ -581,6 +587,20 @@ impl AttachmentHost for Attachments {
 }
 
 impl Attachments {
+    /// Whether stored attachment memberships exist, excluding preserved unknown NBT.
+    #[doc(hidden)]
+    pub fn has_index_entries(&self) -> bool {
+        !self.entries.is_empty()
+    }
+
+    /// Whether this map retains an index publisher. Detached clones do not.
+    /// This is not a residency check: storage must rebind on installation or scope
+    /// changes, and retire membership explicitly on unload.
+    #[doc(hidden)]
+    pub fn has_index_binding(&self) -> bool {
+        self.registration.is_some()
+    }
+
     /// Install this authoritative map in key order, invalidating any prior binding
     /// for the holder. Rebind a detached COW map before its first attachment write.
     /// The weak publisher does not keep the dimension alive. Map Drop never unloads;

@@ -1491,6 +1491,8 @@ impl BoxReach {
 
 #[derive(Clone, Debug)]
 pub struct Mob {
+    /// Entity-owned registration metadata; content clones are detached.
+    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
@@ -3369,6 +3371,7 @@ impl Mob {
     pub fn new_remote(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
         let random = entity_random(id, position);
         let mut mob = Self {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id,
             health: kind.max_health,
@@ -6292,6 +6295,7 @@ mod effect_refusal_tests {
     }
 }
 crate::impl_joined!(Mob);
+horizon_world::impl_attachment_lifetime!(Mob);
 
 #[cfg(test)]
 mod named_damage_tests {

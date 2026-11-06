@@ -2,7 +2,7 @@ name: modding-book
 on:
   push:
     branches: [main]
-    paths: ["docs/modding/**", "crates/horizon-mod-api/**"]
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "tools/*modding*", "tests/test_modding_concept_pages.py"]
   workflow_dispatch:
 jobs:
   book:
@@ -15,7 +15,11 @@ jobs:
       - if: steps.book.outputs.present == 'true'
         run: cargo install mdbook --locked --version 0.4.52
       - if: steps.book.outputs.present == 'true'
+        run: python3 -m unittest tests.test_modding_concept_pages
+      - if: steps.book.outputs.present == 'true'
         run: mdbook build docs/modding
+      - if: steps.book.outputs.present == 'true'
+        run: python3 tools/modding_concept_pages.py --html target/modding-book
       - if: steps.book.outputs.present == 'true'
         run: RUSTDOCFLAGS="-D warnings" cargo doc -p horizon-mod-api --no-deps
       # The game's constructors live in the hidden `mod_api::__private`; no rustdoc page or link may name it.

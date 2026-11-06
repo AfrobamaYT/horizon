@@ -31,4 +31,16 @@ pub trait Helpers {
         target = "horizon_client::game::native_mob_navigation::Game<'_>::native_mob_set_navigation_speed"
     )]
     fn mob_set_navigation_speed();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_navigation::Game<'_>::native_mob_pathfinding_malus"
+    )]
+    fn mob_pathfinding_malus();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_navigation::Game<'_>::native_mob_set_pathfinding_malus"
+    )]
+    fn mob_set_pathfinding_malus();
 }
