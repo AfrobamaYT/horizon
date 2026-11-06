@@ -2951,7 +2951,7 @@ impl Game<'_> {
                             .available_rules()
                             .map(|r| play::GameRuleEntry {
                                 name: format!("minecraft:{}", r.name),
-                                value: self.ui.rules.get(r.name).unwrap_or(r.default).to_string(),
+                                value: self.ui.rules.get(&r.name).unwrap_or(r.default).to_string(),
                             })
                             .collect(),
                     }),
@@ -2961,7 +2961,7 @@ impl Game<'_> {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
                         if let Some(rule) = self.ui.rules.rule(&entry.name).cloned()
-                            && let Some(value) = self.ui.rules.get(rule.name)
+                            && let Some(value) = self.ui.rules.get(&rule.name)
                         {
                             let Some(host) = self.lan.as_ref() else {
                                 return;
@@ -2974,7 +2974,7 @@ impl Game<'_> {
                                 entity_id,
                                 name: &name,
                             };
-                            self.game_rule_changed(rule.name, value, Some(&actor));
+                            self.game_rule_changed(&rule.name, value, Some(&actor));
                         }
                         let message = horizon_client::text::Text::tr(
                             "commands.gamerule.set",
