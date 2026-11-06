@@ -678,19 +678,23 @@ pub trait Hooks {
     /// A message from `player`'s client on `channel` (`mod_id:name`), within
     /// the caps (`native_net.rs`): check `channel`, and treat `data` as the
     /// player's own bytes, checked by nothing. Runs in the tick after it
-    /// arrives, with no player's state swapped in. Server-side.
+    /// arrives, with no player's state swapped in. Server-side. The NeoForge
+    /// counterpart is the registered `IPayloadHandler.handle` callback, not
+    /// the registration event.
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "RegisterPayloadHandlersEvent"
+        neoforge = "IPayloadHandler.handle"
     )]
     fn net_from_client();
     /// A message from the server on `channel` (`mod_id:name`), whose `data`
-    /// is the sender's own bytes. The window's game only.
+    /// is the sender's own bytes. The window's game only. The NeoForge
+    /// counterpart is the registered `IPayloadHandler.handle` callback, not
+    /// the registration event.
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "RegisterPayloadHandlersEvent"
+        neoforge = "IPayloadHandler.handle"
     )]
     fn net_from_server();
     /// `player` died: where `ServerPlayer.die` starts, with the death
@@ -1081,7 +1085,7 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "RegisterItemDecorationsEvent"
+        neoforge = "none (vanilla Item.isBarVisible/getBarWidth/getBarColor; RegisterItemDecorationsEvent registers decorators, not bar queries)"
     )]
     fn item_bar();
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
@@ -1310,8 +1314,13 @@ pub trait Hooks {
     /// for this call. The kind and the JSON the file wrote are here; the acting
     /// player is the one consuming, and the game's own effects,
     /// sounds, teleports and drops are open. An unclaimed kind does
-    /// nothing.
-    #[hook(side = "server", contract = "listen", neoforge = "RegisterEvent")]
+    /// nothing. This is the runtime `ConsumeEffect.apply` moment, not effect
+    /// type registration through NeoForge's `RegisterEvent`.
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "none (runtime ConsumeEffect.apply; RegisterEvent registers effect types, not invocations)"
+    )]
     fn consume_effect();
     /// A native mod's hook point (docs/modding/src/how-to/native-mods.md), declared in `hooks/*.rs` with the game's:
     /// the loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,
@@ -1554,12 +1563,14 @@ pub trait Hooks {
     /// no item translation is active.
     /// Runs wherever the shared item-decoration path is used (hotbar, menus, tooltips,
     /// and the other screens that draw item icons: advancements, beacon, stats, trading).
+    /// The NeoForge counterpart is `IItemDecorator.render`; registration through
+    /// `RegisterItemDecorationsEvent` is a separate moment.
     #[hook(
         side = "client",
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "RegisterItemDecorationsEvent"
+        neoforge = "IItemDecorator.render"
     )]
     fn item_decorations();
     /// `Item.getUseDuration` of `stack`, in ticks: `duration` arrives with
