@@ -1,8 +1,8 @@
 //! Real generated imports against the canonical load-owned registry tables.
 use super::*;
 use crate::{
-    Backend, BackendRef, BlockEntityTypeKey, BlockKey, EffectKey, FluidKey, Hooks, Host, ItemKey,
-    ModEntry, Registrar,
+    Backend, BackendRef, BlockEntityTypeKey, BlockKey, BoolGameRuleKey, EffectKey, FluidKey, Hooks,
+    Host, ItemKey, ModEntry, Registrar,
 };
 
 #[test]
