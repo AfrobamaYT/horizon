@@ -1237,7 +1237,7 @@ pub(crate) mod tests {
             ])),
             ..TABLE
         };
-        let mut map = std::collections::BTreeMap::from([(None, Player { health: 4 })]);
+        let mut map = std::collections::BTreeMap::from([(None::<u32>, Player { health: 4 })]);
         let mut frame = unsafe {
             Frame::new(
                 &table,

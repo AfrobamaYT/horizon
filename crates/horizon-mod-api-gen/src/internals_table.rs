@@ -1741,6 +1741,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn generated_shared_enum_arguments() {
+        let entries = [
+            internal(
+                "horizon_client::Large",
+                "struct",
+                "struct Large { data: [u64; 17] }",
+            ),
+            internal(
+                "horizon_client::Choice",
+                "enum",
+                "enum Choice { Both { a: Large, b: Large } }",
+            ),
+            internal(
+                "horizon_client::inspect",
+                "fn",
+                "fn inspect(a: &Large, b: &Large) -> u64",
+            ),
+        ];
+        let (code, _) = all_table(&entries);
+        run_fixture(
+            &code,
+            "struct Large { data: [u64; 17] } enum Choice { Both { a: Large, b: Large } } fn inspect(a: &Large, b: &Large) -> u64 { a.data[0] + b.data[0] }",
+            r#"
+            let mut choice = Choice::Both { a: Large { data: [2; 17] }, b: Large { data: [3; 17] } };
+            let ty = __internals::TABLE.types.iter().find(|t| t.path.ends_with("Choice")).unwrap();
+            unsafe {
+                let Reply::Node(a, _, false) = (ty.node)((&raw mut choice).cast(), false, Op::Field(0)).unwrap() else { panic!() };
+                let Reply::Node(b, _, false) = (ty.node)((&raw mut choice).cast(), false, Op::Field(1)).unwrap() else { panic!() };
+                let thunk = __internals::TABLE.thunks.iter().find(|t| t.path.ends_with("inspect")).unwrap();
+                assert_eq!((thunk.call)(None, vec![internals::Arg::Node(a), internals::Arg::Node(b)]), Ok(Reply::Value(Value::U(5))));
+            }
+        "#,
+        );
+    }
+
+    #[test]
     fn generated_collection_nodes_compile_and_read_the_actual_element() {
         let (code, _) = all_table(&[internal(
             "horizon_client::Bag",
