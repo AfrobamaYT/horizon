@@ -15123,9 +15123,9 @@ mod tick_target_millis_tests {
     struct Timer(Arc<Mutex<Vec<f32>>>, fn(f32) -> f32);
     #[mod_api::__subscriptions]
     impl Hooks for Timer {
-        fn tick_target_millis(&self, _: &mut dyn ClientHost, event: &mut TickTargetMillisEvent) {
-            self.0.lock().unwrap().push(*event.millis);
-            *event.millis = (self.1)(*event.millis);
+        fn tick_target_millis(&self, _: &dyn ClientHost, event: &mut TickTargetMillisEvent) {
+            self.0.lock().unwrap().push(event.millis);
+            event.millis = (self.1)(event.millis);
         }
     }
 
