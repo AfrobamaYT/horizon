@@ -196,7 +196,9 @@ impl Sprites {
     /// cache file in `root`.
     pub fn with_disk_cache(root: &Path) -> Self {
         Self {
-            disk: crate::sprite_cache::SpriteCache::open(root),
+            disk: crate::sprite_cache::SpriteCache::open(
+                &crate::resource_source::ResourceRoot::directory(root.to_owned()),
+            ),
             ..Self::default()
         }
     }

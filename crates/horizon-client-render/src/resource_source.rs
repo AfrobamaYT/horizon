@@ -3,8 +3,10 @@
 //! Diverges from upstream: asset and passive jar-data layers share this source.
 use crate::zip::Zip;
 use std::{
-    collections::BTreeMap,
-    fs, io,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    fs,
+    hash::{DefaultHasher, Hash, Hasher},
+    io,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -50,6 +52,37 @@ impl Resource {
 /// Clones share the open archive; construct a new source for a resource reload.
 #[derive(Clone)]
 pub struct ResourceSource(Arc<Storage>);
+
+/// Prepared registry tables, resource reads and disposable loader caches have
+/// separate locations. Archive resources never acquire a filesystem pathname.
+#[derive(Clone)]
+pub struct ResourceRoot(Arc<Root>);
+struct Root {
+    prepared: PathBuf,
+    cache: PathBuf,
+    source: ResourceSource,
+}
+impl ResourceRoot {
+    pub fn directory(path: PathBuf) -> Self {
+        Self::new(path.clone(), path.clone(), ResourceSource::directory(path))
+    }
+    pub fn new(prepared: PathBuf, cache: PathBuf, source: ResourceSource) -> Self {
+        Self(Arc::new(Root {
+            prepared,
+            cache,
+            source,
+        }))
+    }
+    pub fn prepared(&self) -> &Path {
+        &self.0.prepared
+    }
+    pub fn cache(&self) -> &Path {
+        &self.0.cache
+    }
+    pub fn source(&self) -> &ResourceSource {
+        &self.0.source
+    }
+}
 impl Default for ResourceSource {
     fn default() -> Self {
         Self::indexed(BTreeMap::new())
@@ -69,16 +102,27 @@ fn prefix_inside(prefix: &str) -> bool {
     prefix.is_empty() || stays_inside(prefix.trim_end_matches('/'))
 }
 
-fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+fn walk(root: &Path, dir: &Path, out: &mut Vec<String>, active: &mut BTreeSet<PathBuf>) {
+    let Ok(canonical) = fs::canonicalize(dir) else {
+        return;
+    };
+    if !active.insert(canonical.clone()) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(dir) else {
+        active.remove(&canonical);
         return;
     };
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(fs::DirEntry::file_name);
     for entry in entries {
         let path = entry.path();
-        if path.is_dir() {
-            walk(root, &path, out);
+        let directory = match entry.file_type() {
+            Ok(kind) if !kind.is_symlink() => kind.is_dir(),
+            _ => path.is_dir(),
+        };
+        if directory {
+            walk(root, &path, out, active);
         } else if let Ok(relative) = path.strip_prefix(root) {
             let name = relative.to_string_lossy().replace('\\', "/");
             if stays_inside(&name) {
@@ -86,6 +130,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
             }
         }
     }
+    active.remove(&canonical);
 }
 
 impl ResourceSource {
@@ -156,7 +201,7 @@ impl ResourceSource {
                 } else {
                     prefix.rsplit_once('/').map_or("", |(parent, _)| parent)
                 };
-                walk(root, &root.join(directory), &mut out);
+                walk(root, &root.join(directory), &mut out, &mut BTreeSet::new());
                 out.retain(|name| name.starts_with(prefix));
                 out.sort();
                 out
@@ -197,7 +242,7 @@ impl ResourceSource {
                 let mut out = Vec::new();
                 for namespace in namespaces {
                     for kind in kinds {
-                        walk(root, &namespace.join(kind), &mut out);
+                        walk(root, &namespace.join(kind), &mut out, &mut BTreeSet::new());
                     }
                 }
                 out.sort();
@@ -218,6 +263,57 @@ impl ResourceSource {
                         })
                 })
                 .collect(),
+        }
+    }
+
+    /// The decoded-sprite cache covers textures and their companions, as it
+    /// did for folder roots. Memoization is local to one fingerprint operation:
+    /// a later reload observes folder edits even when a source is shared.
+    pub(crate) fn texture_fingerprint(&self) -> Option<u64> {
+        if let Storage::Directory(root) = self.0.as_ref()
+            && !root.join("assets").is_dir()
+        {
+            return None;
+        }
+        let mut archives = HashMap::new();
+        let mut hash = DefaultHasher::new();
+        for name in self.list_under("assets", &["textures"]) {
+            name.hash(&mut hash);
+            self.file_fingerprint(&name, &mut archives)?.hash(&mut hash);
+        }
+        Some(hash.finish())
+    }
+    fn file_fingerprint(&self, name: &str, archives: &mut HashMap<usize, u64>) -> Option<u64> {
+        match self.0.as_ref() {
+            Storage::Directory(root) => {
+                crate::zip::metadata_fingerprint(&fs::metadata(root.join(name)).ok()?).ok()
+            }
+            Storage::Archive(archive) => {
+                let key = Arc::as_ptr(&self.0) as usize;
+                let fingerprint = match archives.get(&key) {
+                    Some(fingerprint) => *fingerprint,
+                    None => {
+                        let fingerprint = archive.fingerprint().ok()?;
+                        archives.insert(key, fingerprint);
+                        fingerprint
+                    }
+                };
+                let mut hash = DefaultHasher::new();
+                fingerprint.hash(&mut hash);
+                name.hash(&mut hash);
+                Some(hash.finish())
+            }
+            Storage::Prefix { source, prefix } => {
+                source.file_fingerprint(&format!("{prefix}{name}"), archives)
+            }
+            Storage::Index(files) => match &files.get(name)?.0 {
+                ResourceStorage::File { source, name } => source.file_fingerprint(name, archives),
+                ResourceStorage::Bytes(bytes) => {
+                    let mut hash = DefaultHasher::new();
+                    bytes.hash(&mut hash);
+                    Some(hash.finish())
+                }
+            },
         }
     }
 }
@@ -259,6 +355,34 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn directory_aliases_are_listed_but_cycles_are_not_followed() {
+        let fixture = Fixture::new();
+        fs::create_dir_all(fixture.0.join("assets/demo/textures")).unwrap();
+        fs::write(fixture.0.join("assets/demo/textures/one.png"), b"one").unwrap();
+        std::os::unix::fs::symlink(
+            fixture.0.join("assets"),
+            fixture.0.join("assets/demo/textures/loop"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            fixture.0.join("assets/demo"),
+            fixture.0.join("assets/alias"),
+        )
+        .unwrap();
+        let source = ResourceSource::directory(fixture.0.clone());
+        assert_eq!(
+            source.list("assets/"),
+            [
+                "assets/alias/textures/one.png",
+                "assets/demo/textures/one.png"
+            ]
+        );
+        let first = source.texture_fingerprint().unwrap();
+        fs::write(fixture.0.join("assets/demo/textures/one.png"), b"changed").unwrap();
+        assert_ne!(source.texture_fingerprint(), Some(first));
     }
 
     #[test]

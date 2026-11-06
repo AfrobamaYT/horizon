@@ -5,6 +5,7 @@
 use std::{
     collections::BTreeMap,
     fs,
+    hash::{DefaultHasher, Hash, Hasher},
     io::{self, Read, Seek, SeekFrom},
     path::Path,
     sync::Arc,
@@ -14,6 +15,30 @@ use zip::{CompressionMethod, ZipArchive};
 /// The most one entry inflates to: far above any real pack file, but a zip
 /// bomb stops here.
 const MAX_ENTRY: usize = 1 << 30;
+
+/// File identity/change stamps for resource-cache keys, following symlinks.
+pub(crate) fn metadata_fingerprint(metadata: &fs::Metadata) -> io::Result<u64> {
+    let mut hash = DefaultHasher::new();
+    metadata.len().hash(&mut hash);
+    metadata.modified()?.hash(&mut hash);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+        )
+            .hash(&mut hash);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.creation_time().hash(&mut hash);
+    }
+    Ok(hash.finish())
+}
 
 /// One archive with its entries indexed by name (`\` read as `/`), files
 /// and folders apart.
@@ -92,6 +117,32 @@ impl Seek for Reader {
     }
 }
 impl Zip {
+    /// Hash the open archive snapshot, rather than reopening its pathname (a
+    /// reload may already have replaced it). Match the pack-cache policy for
+    /// large jars: central directory and file stamps above 250 MiB.
+    pub(crate) fn fingerprint(&self) -> io::Result<u64> {
+        let mut hash = DefaultHasher::new();
+        let mut reader = self.archive.clone().into_inner();
+        if self.len > 250 << 20 {
+            reader.tail.hash(&mut hash);
+            if let Some(file) = &reader.file {
+                metadata_fingerprint(&file.metadata()?)?.hash(&mut hash);
+            }
+        } else {
+            reader.position = 0;
+            let mut remaining = reader.tail_at + reader.tail.len() as u64;
+            let mut buffer = [0; 64 * 1024];
+            while remaining > 0 {
+                let read = reader.read(&mut buffer[..remaining.min(64 * 1024) as usize])?;
+                if read == 0 {
+                    return Err(io::ErrorKind::UnexpectedEof.into());
+                }
+                hash.write(&buffer[..read]);
+                remaining -= read as u64;
+            }
+        }
+        Ok(hash.finish())
+    }
     /// Reads the central directory, not the entries: opening a pack of many
     /// gigabytes for its `pack.mcmeta` costs what opening a small one does.
     pub fn open(path: &Path) -> io::Result<Self> {
