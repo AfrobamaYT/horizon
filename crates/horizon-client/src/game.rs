@@ -3838,6 +3838,14 @@ impl Dim {
             _ => Self::Overworld,
         }
     }
+    /// The dimension as mods' level handles name it.
+    fn key(self) -> mod_api::DimensionKey {
+        match self {
+            Self::Overworld => mod_api::DimensionKey::OVERWORLD,
+            Self::Nether => mod_api::DimensionKey::NETHER,
+            Self::End => mod_api::DimensionKey::END,
+        }
+    }
     /// The level's shape in a world of vanilla's dimension types.
     fn shape(self) -> horizon_client::save::LevelShape {
         use horizon_client::save::LevelShape;

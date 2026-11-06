@@ -9,15 +9,16 @@
 //! it shows. The entities are those of the level in place (the one a hook runs
 //! in) and the server's players, whatever their level.
 use super::{
-    Dim, Game,
+    Game,
     commands::Target,
     entity::{Entity as _, entity_lists_of, for_each_entity},
 };
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 use mod_api::{
-    EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
-    NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType, NeighbourUpdate,
+    DimensionKey, EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind,
+    NativeBlockUpdateFlags, NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
+    NeighbourUpdate,
 };
 
 impl Game<'_> {
@@ -118,20 +119,31 @@ impl Game<'_> {
             || self.native_client_tracked(entity).is_some())
         .then_some(entity)
     }
-    /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
-    /// client, with no world open, or for a dimension the server hasn't
-    /// loaded. API 373.
+    /// The level `dimension` (`minecraft:the_nether`) as a handle: on a client,
+    /// the level it shows, whatever the server calls it. None with no world
+    /// open, or for a dimension the server hasn't loaded. API 373.
     pub(super) fn native_level(&self, dimension: &str) -> Option<LevelRef> {
         if !self.is_logical_server() {
             let epoch = self.native_lifecycle.epoch()?;
-            self.remote.as_ref().filter(|r| r.logged_in)?;
-            return (self.dim.id() == dimension).then(|| LevelRef::new(epoch, self.dim.id()));
+            let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
+            return (remote.level == dimension).then(|| LevelRef::new(epoch, remote.level_key));
         }
         let epoch = self.native_lifecycle.epoch()?;
         let dim = std::iter::once(self.dim)
             .chain(self.levels.parked_dims())
             .find(|d| d.id() == dimension)?;
-        Some(LevelRef::new(epoch, dim.id()))
+        Some(LevelRef::new(epoch, dim.key()))
+    }
+    /// The name of a dimension's key.
+    pub(super) fn native_dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+        mod_api::__private::dimension_id(key).map(str::to_owned)
+    }
+    /// The key of the level in place: on a client the level it shows, which
+    /// `Dim` may have no name for.
+    pub(super) fn native_level_key(&self) -> DimensionKey {
+        self.remote
+            .as_ref()
+            .map_or_else(|| self.dim.key(), |r| r.level_key)
     }
     /// Loaded server levels, in vanilla dimension order. Empty without a server world.
     pub(super) fn native_list_levels(&self) -> Vec<LevelRef> {
@@ -161,7 +173,7 @@ impl Game<'_> {
     ) -> Option<Vec<EntityRef>> {
         if !self.is_logical_server()
             || self.native_lifecycle.epoch() != Some(level.epoch())
-            || level.dimension() != self.dim.id()
+            || level.dimension() != self.dim.key()
         {
             return None;
         }
@@ -179,7 +191,7 @@ impl Game<'_> {
         for guest in self.lan.iter().flat_map(|h| &h.hub.guests) {
             if !guest.participates_in_player_simulation()
                 || !guest.placed
-                || guest.dimension != level.dimension()
+                || guest.dimension != level.dimension_id()
             {
                 continue;
             }
@@ -222,7 +234,7 @@ impl Game<'_> {
         if !self.native_level_write_allowed(level, pos) {
             return false;
         }
-        self.native_set_block(level.dimension(), pos, state, flags.bits())
+        self.native_set_block(level.dimension_id(), pos, state, flags.bits())
     }
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
     pub(super) fn native_level_remove_block(
@@ -231,7 +243,7 @@ impl Game<'_> {
         pos: [i32; 3],
         moved: bool,
     ) -> bool {
-        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
         let changed =
@@ -255,7 +267,7 @@ impl Game<'_> {
         update: NeighbourUpdate,
     ) -> bool {
         if !self.native_level_write_allowed(level, pos)
-            || self.dim.id() != level.dimension()
+            || self.dim.key() != level.dimension()
             || self.pack.assets.registry.state(source).is_none()
         {
             return false;
@@ -278,7 +290,7 @@ impl Game<'_> {
         source: BlockStateId,
     ) -> bool {
         if !self.native_level_write_allowed(level, pos)
-            || self.dim.id() != level.dimension()
+            || self.dim.key() != level.dimension()
             || self.pack.assets.registry.state(source).is_none()
         {
             return false;
@@ -303,7 +315,7 @@ impl Game<'_> {
         tool: Option<&ItemStack>,
         collect: bool,
     ) -> Option<Vec<ItemStack>> {
-        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return None;
         }
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
@@ -326,7 +338,7 @@ impl Game<'_> {
         pos: [i32; 3],
         progress: i32,
     ) -> bool {
-        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
         self.server_destroy_block_progress(breaker, pos, progress);
@@ -351,14 +363,14 @@ impl Game<'_> {
         if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(level.epoch()) {
             return None;
         }
-        let (world, anims) = if self.dim.id() == level.dimension() {
+        let (world, anims) = if self.dim.key() == level.dimension() {
             (&self.world, &self.be_anims)
         } else {
             let dim = self
                 .levels
                 .parked_dims()
                 .into_iter()
-                .find(|dim| dim.id() == level.dimension())?;
+                .find(|dim| dim.key() == level.dimension())?;
             (
                 self.levels.parked_world(dim)?,
                 self.levels.parked_anims(dim)?,
@@ -557,11 +569,14 @@ impl Game<'_> {
     /// The level the entity is in (`Entity.level`): on a client, the
     /// client's level. API 373.
     pub(super) fn native_entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
-        let dim: Dim = match self.native_entity_read_target(entity) {
-            Some(t) => self.target_level(t),
-            None => self.native_client_tracked(entity).map(|_| self.dim)?,
+        let key = match self.native_entity_read_target(entity) {
+            Some(t) if self.is_logical_server() => self.target_level(t).key(),
+            Some(_) => self.native_level_key(),
+            None => self
+                .native_client_tracked(entity)
+                .map(|_| self.native_level_key())?,
         };
-        Some(LevelRef::new(entity.epoch(), dim.id()))
+        Some(LevelRef::new(entity.epoch(), key))
     }
 }
 
@@ -1875,7 +1890,7 @@ pub(super) mod tests {
             );
             assert!(
                 game.native_level_entities_in(
-                    LevelRef::new(NativeWorldEpoch::new(0), game.dim.id()),
+                    LevelRef::new(NativeWorldEpoch::new(0), game.dim.key()),
                     [0.0; 3],
                     [2.0; 3]
                 )

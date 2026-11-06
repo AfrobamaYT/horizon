@@ -11,6 +11,13 @@ pub trait Helpers {
         target = "horizon_client::game::native_entity_refs::Game<'_>::native_level"
     )]
     fn level();
+    /// The name of a dimension's key (`minecraft:the_nether`). None for a key the game never gave out.
+    #[helper(
+        side = "both",
+        receiver = "dimension_key",
+        target = "horizon_client::game::native_entity_refs::Game<'_>::native_dimension_key_id"
+    )]
+    fn dimension_key_id();
     #[helper(
         side = "both",
         receiver = "entity",

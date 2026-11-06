@@ -2295,7 +2295,7 @@ pub mod tests {
 
     /// The level the test worlds are.
     fn here() -> LevelRef {
-        LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld")
+        LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD)
     }
 
     /// The block at `pos` in [`here`], through `side`.
@@ -2976,7 +2976,7 @@ pub mod tests {
     fn a_host_without_a_backend_refuses_handle_calls() {
         // NoHost implements nothing, so Host::backend keeps its None default:
         // every handle answers its typed refusal, never a no-op success.
-        let level = LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld");
+        let level = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD);
         assert!(!level.in_place(&NoHost));
         assert_eq!(
             level.entities_in(&NoHost, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
@@ -3551,7 +3551,7 @@ pub mod tests {
         }
         fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
             Some(match entity.id() {
-                4 => LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether"),
+                4 => LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER),
                 _ => here(),
             })
         }
@@ -4775,7 +4775,7 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut world;
         // The pipe's type has a provider, which answers in the level in place; parked while
         // the server ticks another, the same block entity's level gives none.
-        let parked = LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether");
+        let parked = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER);
         assert!(here().capability(host, &ITEMS, PIPE, None).is_some());
         assert!(parked.capability(host, &ITEMS, PIPE, None).is_none());
     }

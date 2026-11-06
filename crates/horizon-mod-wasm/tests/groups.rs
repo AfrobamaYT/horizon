@@ -14,7 +14,7 @@ use mod_api::{
 struct World;
 
 fn overworld() -> LevelRef {
-    LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld")
+    LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD)
 }
 
 impl Backend for World {

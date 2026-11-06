@@ -22,7 +22,7 @@ struct World;
 impl Host for World {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         (dimension == "minecraft:overworld")
-            .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+            .then(|| LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD))
     }
     fn entity(&self, _id: u32) -> Option<mod_api::EntityRef> {
         None

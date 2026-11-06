@@ -456,7 +456,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .find(|g| g.uuid == uuid && g.dimension == level.dimension())
+            .find(|g| g.uuid == uuid && g.dimension == level.dimension_id())
         {
             return (g.name == name).then_some(mod_api::__private::game::player_ref(
                 mod_api::EntityRef::new(epoch, g.entity_id as u32),
@@ -473,7 +473,7 @@ impl Game<'_> {
         let host = self.lan.as_mut()?;
         let conn = host.hub.lan.shared.next_id()?;
         let mut guest = Guest::connectionless(conn, uuid, name.into(), entity_id, [0.0; 3], motion);
-        guest.dimension = level.dimension().to_owned();
+        guest.dimension = level.dimension_id().to_owned();
         host.hub.guests.push(guest);
         host.play
             .insert(conn, super::lan_actions::GuestPlay::default());
@@ -1908,7 +1908,7 @@ mod tests {
                 hook,
                 player.entity().id(),
                 player.uuid(),
-                chunk.level().dimension(),
+                chunk.level().dimension_id(),
                 chunk.pos(),
             ));
         }

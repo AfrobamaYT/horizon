@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(values, [73, 17, 7, 3]);
         assert!(!game.native_level_award_experience(level, 100.5, 70.0, 0.5, 0));
 
-        let stale = LevelRef::new(NativeWorldEpoch::new(0), game.dim.id());
+        let stale = LevelRef::new(NativeWorldEpoch::new(0), game.dim.key());
         assert!(
             game.native_level_spawn_item(stale, 0.0, 0.0, 0.0, stone(), 0)
                 .is_none()

@@ -111,7 +111,7 @@ impl Game<'_> {
             NativeExplosionInteraction::Tnt => NativeBlast::Tnt,
             _ => unreachable!("NativeExplosionInteraction: unhandled variant"),
         };
-        self.native_explode(level.dimension(), center, radius, fire, blast)
+        self.native_explode(level.dimension_id(), center, radius, fire, blast)
     }
     /// Strikes lightning at `at`, as summoning a `minecraft:lightning_bolt`
     /// does: it sets fire, hurts and converts what it hits (a pig to a

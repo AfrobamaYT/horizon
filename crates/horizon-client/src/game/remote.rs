@@ -532,6 +532,8 @@ pub(super) struct Remote {
     pub(super) dimension: DimensionType,
     /// The level's key (`minecraft:overworld`): where its far terrain is kept.
     pub(super) level: String,
+    /// `level`'s key, as mods' handles name the level.
+    pub(super) level_key: mod_api::DimensionKey,
     /// `ClientPlayerNetworkEvent.LoggingOut` was fired for this connection: every way out
     /// of a world reports it once.
     logged_out: bool,
@@ -1107,6 +1109,7 @@ impl Game<'_> {
             use_item: None,
             dimension: DimensionType::vanilla("minecraft:overworld"),
             level: "minecraft:overworld".into(),
+            level_key: mod_api::DimensionKey::OVERWORLD,
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
                 &DimensionType::vanilla("minecraft:overworld"),
@@ -2338,6 +2341,7 @@ impl Game<'_> {
         r.resolve_clocks();
         self.world.day_time = r.clock_time(r.default_clock);
         r.level = spawn.dimension.clone();
+        r.level_key = mod_api::__private::dimension_key(&spawn.dimension);
         r.hashed_seed = spawn.seed;
         r.game_mode = spawn.game_type;
         r.flat = spawn.flat;
@@ -12670,6 +12674,45 @@ mod tests {
         });
     }
 
+    /// A client names the level it shows by the server's key, even where `Dim` has
+    /// no name for it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_handles_reach_a_custom_level() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+        use mod_api::{DimensionKey, LevelRef};
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "CustomLevelTest").unwrap();
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "test:pocket".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            game.remote.as_mut().unwrap().logged_in = true;
+
+            let level = game.native_level("test:pocket").unwrap();
+            assert_ne!(level.dimension(), DimensionKey::OVERWORLD);
+            assert_eq!(level.dimension().id(game).as_deref(), Some("test:pocket"));
+            assert!(game.native_level("minecraft:overworld").is_none());
+            assert!(level.height(game).is_some());
+            let overworld = LevelRef::new(level.epoch(), DimensionKey::OVERWORLD);
+            assert_eq!(overworld.height(game), None);
+        });
+    }
+
     /// The `both` handle reads answer on a client from its own copy: the local
     /// player's health, effects, equipment and last death, the blocks and time
     /// of day of the level it shows and the entities it tracks.
@@ -12942,7 +12985,7 @@ mod tests {
             };
             game.handle_packet(login(spawn.clone())).unwrap();
             let end = game.native_level("minecraft:the_end").unwrap();
-            let wrong_level = LevelRef::new(end.epoch(), "minecraft:overworld");
+            let wrong_level = LevelRef::new(end.epoch(), mod_api::DimensionKey::OVERWORLD);
             assert_eq!(wrong_level.day_time(game), None);
             game.handle_packet(C::SetTime(play::SetTime {
                 game_time: 100,
