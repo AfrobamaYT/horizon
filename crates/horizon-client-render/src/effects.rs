@@ -229,15 +229,26 @@ pub struct ShownEffect {
 pub fn effect_particles(
     effects: impl IntoIterator<Item = ShownEffect>,
 ) -> (Vec<ParticleOptions>, bool) {
-    let mut ambient = true;
-    let particles = (effects.into_iter())
-        .filter(|e| e.visible)
-        .filter_map(|e| {
-            ambient &= e.ambient;
-            effect_particle(e.effect, e.ambient)
+    visible_effect_particles(
+        (effects.into_iter())
+            .filter(|e| e.visible)
+            .map(|e| (e.ambient, effect_particle(e.effect, e.ambient))),
+    )
+}
+/// The swirls of an entity's `visible` effects, each as whether it is ambient
+/// and its particle, if it has one: the particles and
+/// `areAllEffectsAmbient` (true when none is visible).
+pub fn visible_effect_particles(
+    visible: impl IntoIterator<Item = (bool, Option<ParticleOptions>)>,
+) -> (Vec<ParticleOptions>, bool) {
+    let mut all_ambient = true;
+    let particles = (visible.into_iter())
+        .filter_map(|(ambient, particle)| {
+            all_ambient &= ambient;
+            particle
         })
         .collect();
-    (particles, ambient)
+    (particles, all_ambient)
 }
 /// A living entity's `DATA_EFFECT_PARTICLES` and `DATA_EFFECT_AMBIENCE_ID`
 /// as the native mods left them (`effect_particle_modification`), with the

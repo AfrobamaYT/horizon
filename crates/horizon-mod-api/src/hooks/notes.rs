@@ -1563,11 +1563,6 @@ one, where vanilla gives the `by` one.
   refuses the expiry, and the effect stays, kept at no ticks and asked again next tick;
   `mob_effect_remove` (`.Remove`) hears one about to be removed by any path — a command, milk or a
   mod's removal helper — and cancelling keeps it. All three name their entity as a `LivingRef`, the player's own included.
-  Separate from them, `native_effect_particle_modification` (NeoForge's `EffectParticleModificationEvent`) changes the
-  swirls of a living entity's visible effects and their ambient flag as the server sends them (`DATA_EFFECT_PARTICLES`,
-  `DATA_EFFECT_AMBIENCE_ID`): the mobs and the players every client is sent. As in vanilla it is asked when the
-  entity's effects change, not every tick, and its answer is sent until the next change; with no listener nothing is
-  kept and vanilla's list goes out. The window's own player draws its swirls from its own effects.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.

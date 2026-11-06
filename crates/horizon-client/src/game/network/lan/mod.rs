@@ -4,12 +4,19 @@
 //! costs one `Option` check per tick.
 mod event_timings;
 
-use super::{Game, shield::OFFHAND_SLOT};
+use super::{
+    Game,
+    native_living_effects::{active_effect, mob_effect},
+    shield::OFFHAND_SLOT,
+};
 use event_timings::EventTimings;
 use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
     Result,
-    effects::{EffectInstance, ModifiedEffectParticles, ShownEffect},
+    effects::{
+        EffectInstance, ModifiedEffectParticles, ShownEffect, effect_particle,
+        visible_effect_particles,
+    },
     lan::{
         self, Lan, NetConfig,
         chunks::ChunkEncoder,
@@ -2312,6 +2319,7 @@ impl Game<'_> {
                 m.id,
                 m.extra.modified_effect_particles.as_ref(),
                 || mob_effects(m),
+                |i| mob_effect(m, &m.extra.effects[i]),
             ) {
                 self.mobs[i].extra.modified_effect_particles = update;
             }
@@ -2329,6 +2337,7 @@ impl Game<'_> {
                 g.entity_id as u32,
                 g.modified_effect_particles.as_ref(),
                 || g.effects.list.iter().map(EffectInstance::shown),
+                |i| active_effect(&g.effects.list[i]),
             ) && let Some(host) = self.lan.as_mut()
             {
                 host.hub
@@ -2338,16 +2347,18 @@ impl Game<'_> {
         }
     }
 
-    /// What the living entity `entity`, with `effects` and `kept` from the
-    /// last time, keeps now: None while its effects are unchanged, else the
-    /// mods' answer for them (`effect_particle_modification`), or none when
-    /// it has no effects.
+    /// What the living entity `entity`, with `effects` (`active` names the
+    /// nth for the mods) and `kept` from the last time, keeps now: None while
+    /// its effects are unchanged, else the mods' answers for them
+    /// (`effect_particle_modification`, once per effect), or none when it has
+    /// no effects.
     fn modified_effect_particles<I: Iterator<Item = ShownEffect>>(
         &self,
         hub: &Hub,
         entity: u32,
         kept: Option<&ModifiedEffectParticles>,
         effects: impl Fn() -> I,
+        active: impl Fn(usize) -> mod_api::NativeActiveEffect,
     ) -> Option<Option<ModifiedEffectParticles>> {
         if effects().next().is_none() {
             return kept.is_some().then_some(None);
@@ -2355,12 +2366,27 @@ impl Game<'_> {
         if kept.is_some_and(|k| k.computed_for(effects())) {
             return None;
         }
-        let (mut particles, mut ambient) = horizon_client::effects::effect_particles(effects());
         // Before the world has an epoch no handle can name the entity.
-        if let Some(epoch) = self.native_lifecycle.epoch() {
-            let living = mod_api::LivingRef::new(mod_api::EntityRef::new(epoch, entity));
-            self.native_effect_particle_modification(living, &mut particles, &mut ambient);
-        }
+        let living = (self.native_lifecycle.epoch())
+            .map(|epoch| mod_api::LivingRef::new(mod_api::EntityRef::new(epoch, entity)));
+        let (particles, ambient) = visible_effect_particles(effects().enumerate().filter_map(
+            |(i, e)| {
+                let original = effect_particle(e.effect, e.ambient);
+                let mut particle = original.clone();
+                let mut visible = e.visible;
+                // An effect with no particle has no registry entry to name it by.
+                if let (Some(living), Some(original)) = (living, &original) {
+                    self.native_effect_particle_modification(
+                        living,
+                        &active(i),
+                        original,
+                        &mut particle,
+                        &mut visible,
+                    );
+                }
+                visible.then(|| (e.ambient, particle.or(original)))
+            },
+        ));
         let meta = hub.particle_meta(&particles, ambient);
         Some(Some(ModifiedEffectParticles::new(effects(), meta)))
     }
@@ -4869,12 +4895,13 @@ mod tests {
         });
     }
 
-    /// `effect_particle_modification` sees vanilla's swirls of a mob's and a
-    /// guest's effects, and what it leaves is what players are sent: a
-    /// replaced list and ambient flag, or nothing once cleared. With no
-    /// listener, vanilla's list goes out. As vanilla, the mods are asked when
-    /// an entity's effects change, not each tick, and their last answer goes
-    /// out until then (a guest whose effects just changed included).
+    /// `effect_particle_modification` is asked once per effect of a mob and a
+    /// guest, hidden ones included, and what it leaves is what players are
+    /// sent: a replaced particle, the default again, a visible effect hidden
+    /// and a hidden one shown, with the ambient flag decided from the result.
+    /// With no listener, vanilla's list goes out. As vanilla, the mods are
+    /// asked when an entity's effects change, not each tick, and their last
+    /// answers go out until then (a guest whose effects just changed included).
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_changes_the_effect_particles_players_are_sent() {
@@ -4892,29 +4919,73 @@ mod tests {
         };
         const ZOMBIE: i32 = 40;
         const PLAYER: i32 = 12;
-        // What the mod was asked: the entity, vanilla's particles and ambient flag.
-        static ASKED: Mutex<Vec<(u32, Vec<ParticleOptions>, bool)>> = Mutex::new(Vec::new());
-        // MobEffects.SPEED's colour, 3402751, as `entity_effect` takes it.
-        let speed = |alpha: u32| ParticleData::Color(((alpha << 24) | 0x33_EB_FF) as i32);
-        let speed_options = |alpha: f32| {
-            let rgb = [0x33, 0xEB, 0xFF].map(|c| c as f32 / 255.0);
-            ParticleOptions::colored(ParticleType::EntityEffect, [rgb[0], rgb[1], rgb[2], alpha])
+        // What the first mod was asked: the entity, the effect's name and
+        // amplifier, the original and current particle, and `visible`.
+        type Asked = (u32, String, i32, ParticleOptions, Option<ParticleOptions>, bool);
+        static ASKED: Mutex<Vec<Asked>> = Mutex::new(Vec::new());
+        // MobEffects' colours as `entity_effect` takes them, with their alpha.
+        let swirl = |alpha: u32, rgb: u32| ParticleData::Color(((alpha << 24) | rgb) as i32);
+        let options = |alpha: f32, rgb: u32| {
+            let channel = |shift: u32| ((rgb >> shift) & 255) as f32 / 255.0;
+            ParticleOptions::colored(
+                ParticleType::EntityEffect,
+                [channel(16), channel(8), channel(0), alpha],
+            )
         };
+        const SPEED: u32 = 0x33_EB_FF;
+        const STRENGTH: u32 = 0xFF_C7_00;
+        const REGENERATION: u32 = 0xCD_5C_AB;
+        const SLOWNESS: u32 = 0x8B_AF_E0;
+        const WEAKNESS: u32 = 0x48_4D_48;
+        const FAINT: f32 = 38.0 / 255.0;
+        // Replaces, shows and hides, and tries to replace the omen.
         struct Mod;
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn effect_particle_modification(
                 &self,
-                _: &dyn Host,
+                host: &dyn Host,
                 event: &mut EffectParticleModificationEvent<'_>,
             ) {
                 let id = event.entity.id();
-                (ASKED.lock().unwrap()).push((id, event.particles.clone(), event.ambient));
-                if id == ZOMBIE as u32 {
-                    *event.particles = vec![ParticleOptions::simple(ParticleType::Flame)];
-                    event.ambient = true;
-                } else {
-                    event.particles.clear();
+                let name = event.effect.id.id(host).to_string();
+                assert_eq!(event.visible, event.effect.visible);
+                ASKED.lock().unwrap().push((
+                    id,
+                    name.clone(),
+                    event.effect.amplifier,
+                    event.original_particle.clone(),
+                    event.particle.clone(),
+                    event.visible,
+                ));
+                match name.as_str() {
+                    "minecraft:speed" if id == ZOMBIE as u32 => {
+                        *event.particle = Some(ParticleOptions::simple(ParticleType::Flame))
+                    }
+                    "minecraft:trial_omen" => {
+                        *event.particle = Some(ParticleOptions::simple(ParticleType::Flame))
+                    }
+                    "minecraft:strength" | "minecraft:weakness" => event.visible = true,
+                    "minecraft:regeneration" | "minecraft:slowness" => event.visible = false,
+                    _ => {}
+                }
+            }
+        }
+        // Puts the omen back to its default after the first mod.
+        struct Reset;
+        #[mod_api::__subscriptions]
+        impl Hooks for Reset {
+            fn effect_particle_modification(
+                &self,
+                host: &dyn Host,
+                event: &mut EffectParticleModificationEvent<'_>,
+            ) {
+                if event.effect.id.id(host) == "minecraft:trial_omen" {
+                    assert_eq!(
+                        *event.particle,
+                        Some(ParticleOptions::simple(ParticleType::Flame))
+                    );
+                    *event.particle = None;
                 }
             }
         }
@@ -4964,7 +5035,9 @@ mod tests {
                 10,
             );
             guest.placed = true;
-            guest.effects.list = vec![EffectInstance::new("speed", 600, 0)];
+            let mut faint_speed = EffectInstance::new("speed", 600, 0);
+            faint_speed.ambient = true;
+            guest.effects.list = vec![faint_speed.clone(), EffectInstance::new("slowness", 600, 0)];
             game.lan.as_mut().unwrap().hub.guests.push(guest);
             let kind = game
                 .res
@@ -4973,10 +5046,16 @@ mod tests {
                 .unwrap()
                 .clone();
             let mut zombie = Mob::new(ZOMBIE as u32, kind, Vec3::ZERO, 0.0);
-            zombie
-                .extra
-                .effects
-                .push(horizon_client::mobs::StoredEffect::new("speed", 600, 0));
+            zombie.extra.effects.extend(
+                [
+                    ("speed", 1),
+                    ("strength", 0),
+                    ("trial_omen", 0),
+                    ("regeneration", 0),
+                ]
+                .map(|(id, amplifier)| horizon_client::mobs::StoredEffect::new(id, 600, amplifier)),
+            );
+            zombie.extra.hidden_effects.push("strength");
             game.mobs.push(zombie);
 
             let builtin = super::sync_data(
@@ -5018,84 +5097,121 @@ mod tests {
                 (effect_entries(&zombie.meta), effect_entries(&player))
             };
             let asked = || std::mem::take(&mut *ASKED.lock().unwrap());
-            let vanilla = vec![(
-                10,
-                vec![("minecraft:entity_effect".to_owned(), Some(speed(255)))],
-            )];
-            assert_eq!(sent(game), (vanilla.clone(), vanilla.clone()));
+            let particle = |name: &str, data| (format!("minecraft:{name}"), data);
+            let entity_effect = |alpha, rgb| particle("entity_effect", Some(swirl(alpha, rgb)));
+            let omen = particle("trial_omen", None);
+            assert_eq!(
+                sent(game),
+                (
+                    vec![(
+                        10,
+                        vec![
+                            entity_effect(255, SPEED),
+                            omen.clone(),
+                            entity_effect(255, REGENERATION),
+                        ],
+                    )],
+                    vec![(
+                        10,
+                        vec![entity_effect(38, SPEED), entity_effect(255, SLOWNESS)],
+                    )],
+                )
+            );
 
-            let mods: Mods = vec![ModEntry::new("effect-swirls", Box::new(Mod))].into();
+            let mods: Mods = vec![
+                ModEntry::new("effect-swirls", Box::new(Mod)),
+                ModEntry::new("effect-reset", Box::new(Reset)),
+            ]
+            .into();
             mod_api::testing::with_mods(mods, || {
-                let flame = vec![
-                    (10, vec![("minecraft:flame".to_owned(), None)]),
-                    (11, Vec::new()),
-                ];
-                assert_eq!(sent(game), (flame.clone(), Vec::new()));
+                // The zombie's speed is replaced, its hidden strength shown,
+                // its omen back at the default and its regeneration hidden,
+                // and the strength it shows keeps the flag off. The guest's
+                // slowness is hidden, which leaves only ambient swirls.
+                let zombie_swirls = vec![(
+                    10,
+                    vec![
+                        particle("flame", None),
+                        entity_effect(255, STRENGTH),
+                        omen.clone(),
+                    ],
+                )];
+                let guest_swirls = vec![(10, vec![entity_effect(38, SPEED)]), (11, Vec::new())];
+                assert_eq!(sent(game), (zombie_swirls.clone(), guest_swirls.clone()));
+                let omen_options = ParticleOptions::simple(ParticleType::TrialOmen);
+                let asked_for = |id: i32, name: &str, amplifier, original: &ParticleOptions, visible| {
+                    (
+                        id as u32,
+                        format!("minecraft:{name}"),
+                        amplifier,
+                        original.clone(),
+                        Some(original.clone()),
+                        visible,
+                    )
+                };
                 let mut first = asked();
                 first.sort_by_key(|a| a.0);
                 assert_eq!(
                     first,
                     [
-                        (PLAYER as u32, vec![speed_options(1.0)], false),
-                        (ZOMBIE as u32, vec![speed_options(1.0)], false),
+                        asked_for(PLAYER, "speed", 0, &options(FAINT, SPEED), true),
+                        asked_for(PLAYER, "slowness", 0, &options(1.0, SLOWNESS), true),
+                        asked_for(ZOMBIE, "speed", 1, &options(1.0, SPEED), true),
+                        asked_for(ZOMBIE, "strength", 0, &options(1.0, STRENGTH), false),
+                        asked_for(ZOMBIE, "trial_omen", 0, &omen_options, true),
+                        asked_for(ZOMBIE, "regeneration", 0, &options(1.0, REGENERATION), true),
                     ]
                 );
 
-                // Nothing changed: not asked again, and the answers still go out.
-                assert_eq!(sent(game), (flame.clone(), Vec::new()));
+                // Nothing changed: not asked again, and the answers still go
+                // out. A duration counting down is no change either.
+                assert_eq!(sent(game), (zombie_swirls.clone(), guest_swirls.clone()));
+                assert!(asked().is_empty());
+                let zombie = game
+                    .mobs
+                    .iter_mut()
+                    .find(|m| m.id == ZOMBIE as u32)
+                    .unwrap();
+                zombie.extra.effects[0].duration -= 1;
+                assert_eq!(sent(game), (zombie_swirls.clone(), guest_swirls.clone()));
                 assert!(asked().is_empty());
 
-                // The zombie gains an omen: only it is asked, with both swirls.
-                let zombie = game
-                    .mobs
-                    .iter_mut()
-                    .find(|m| m.id == ZOMBIE as u32)
-                    .unwrap();
-                zombie
-                    .extra
-                    .effects
-                    .push(horizon_client::mobs::StoredEffect::new(
-                        "trial_omen",
-                        600,
-                        0,
-                    ));
-                assert_eq!(sent(game), (flame.clone(), Vec::new()));
-                let omen = ParticleOptions::simple(ParticleType::TrialOmen);
-                assert_eq!(
-                    asked(),
-                    [(ZOMBIE as u32, vec![speed_options(1.0), omen.clone()], false)]
-                );
-
-                // A hidden effect changes the effects, so the mods are asked,
-                // but it has no swirl in what they get.
-                let zombie = game
-                    .mobs
-                    .iter_mut()
-                    .find(|m| m.id == ZOMBIE as u32)
-                    .unwrap();
-                zombie
-                    .extra
-                    .effects
-                    .push(horizon_client::mobs::StoredEffect::new("strength", 600, 0));
-                zombie.extra.hidden_effects.push("strength");
-                assert_eq!(sent(game), (flame.clone(), Vec::new()));
-                assert_eq!(
-                    asked(),
-                    [(ZOMBIE as u32, vec![speed_options(1.0), omen], false)]
-                );
-
-                // The guest's effect turns ambient after the mods were asked:
-                // their answer (nothing) still goes out, not vanilla's, until
-                // the next pass asks them again with vanilla's faint swirl;
-                // the mod clears the particles and leaves the flag set.
+                // The guest's slowness goes and a hidden weakness comes: their
+                // answers still go out until the next pass, which asks about
+                // both effects. The weakness the mod shows is visible and not
+                // ambient, so the flag goes, where vanilla would have set it.
                 let hub = &mut game.lan.as_mut().unwrap().hub;
-                hub.guests.update(0, |g| g.effects.list[0].ambient = true);
-                assert!(hub.player_effect_meta(&hub.guests[0], true).is_empty());
-                assert_eq!(sent(game), (flame, vec![(11, Vec::new())]));
+                let mut weakness = EffectInstance::new("weakness", 600, 0);
+                weakness.visible = false;
+                hub.guests
+                    .update(0, |g| g.effects.list = vec![faint_speed, weakness]);
+                assert_eq!(
+                    effect_entries(&hub.player_effect_meta(&hub.guests[0], true)),
+                    guest_swirls
+                );
+                assert_eq!(
+                    sent(game),
+                    (
+                        zombie_swirls.clone(),
+                        vec![(
+                            10,
+                            vec![entity_effect(38, SPEED), entity_effect(255, WEAKNESS)],
+                        )],
+                    )
+                );
                 assert_eq!(
                     asked(),
-                    [(PLAYER as u32, vec![speed_options(38.0 / 255.0)], true)]
+                    [
+                        asked_for(PLAYER, "speed", 0, &options(FAINT, SPEED), true),
+                        asked_for(PLAYER, "weakness", 0, &options(1.0, WEAKNESS), false),
+                    ]
                 );
+
+                // The guest's effects run out: nothing is kept or sent.
+                let hub = &mut game.lan.as_mut().unwrap().hub;
+                hub.guests.update(0, |g| g.effects.list.clear());
+                assert_eq!(sent(game), (zombie_swirls, Vec::new()));
+                assert!(asked().is_empty());
             });
         });
     }

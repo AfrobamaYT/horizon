@@ -27,7 +27,7 @@ pub(super) fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
 }
 
 /// A mob's stored effect as the API's: ambient and particle flags remain in their own lists.
-fn mob_effect(m: &Mob, e: &horizon_client::mobs::StoredEffect) -> NativeActiveEffect {
+pub(super) fn mob_effect(m: &Mob, e: &horizon_client::mobs::StoredEffect) -> NativeActiveEffect {
     NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
         id: mod_api::__private::effect_key(e.registry_index.expect("active effect registry index"))
             .expect("effects resolved at load"),
