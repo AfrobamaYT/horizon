@@ -744,12 +744,12 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
     impl Hooks for Probe {
         fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
             event.configs.push(NativeConfig::new(
-                "startup_client",
+                "startup_phase",
                 NativeConfigKind::Client,
                 "enabled = true\n",
             ));
             event.configs.push(NativeConfig::new(
-                "startup_common",
+                "startup_phase",
                 NativeConfigKind::Common,
                 "enabled = true\n",
             ));
