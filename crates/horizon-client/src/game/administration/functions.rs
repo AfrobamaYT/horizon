@@ -1251,6 +1251,27 @@ mod tests {
                 super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
                 Some(true)
             );
+            // The command path also prepares the replacement before publishing
+            // its canonical selection or persisting the player's pack settings.
+            game.save_datapack_settings();
+            let settings = std::fs::read(root.join("datapacks.json")).unwrap();
+            let enabled = game.fns.enabled.clone();
+            let context = game.loop_context.clone();
+            let generation = game.damage_tag_generation;
+            mod_api::__private::install_parts(&[ModEntry::new(
+                "reload_test",
+                Box::new(MissingItem),
+            )])
+            .unwrap();
+            assert!(!game.run_command("datapack disable \"file/candidate\""));
+            assert_eq!(game.fns.enabled, enabled);
+            assert_eq!(
+                std::fs::read(root.join("datapacks.json")).unwrap(),
+                settings
+            );
+            assert!(Arc::ptr_eq(&game.loop_context, &context));
+            assert_eq!(game.damage_tag_generation, generation);
+            assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
             let _ = std::fs::remove_dir_all(root);
         });
     }
