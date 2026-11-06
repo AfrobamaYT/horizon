@@ -1687,6 +1687,45 @@ mod tests {
         }
     }
 
+    #[test]
+    fn oversized_hotbar_swap_respects_slot_limit_and_returns_displaced_items() {
+        let Some(rules) = rules() else { return };
+        let mut guest = guest();
+        let mut dirt = ItemStack::new("minecraft:dirt", 8);
+        dirt.data_mut().set_other(
+            "minecraft:max_stack_size",
+            Some(horizon_world::nbt::Tag::Int(16)),
+        );
+        let mut partial = dirt.clone();
+        partial.count = 15;
+        guest.inventory[1] = Some(partial);
+        guest.selected = 1;
+        guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 80));
+        let mut chest = vec![Some(dirt)];
+        let mut view = View {
+            guest: &mut guest,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+            loop_context: crate::test_resources::server_loop_context(),
+        };
+        let (drops, _) = click(&mut view, &mut None, 0, 0, input::SWAP, &rules);
+        assert!(drops.is_empty());
+        assert_eq!(view.get(0).unwrap().count, 64);
+        assert_eq!(view.guest.inventory[0].as_ref().unwrap().count, 16);
+        assert_eq!(view.guest.inventory[1].as_ref().unwrap().count, 16);
+        assert_eq!(
+            view.guest
+                .inventory
+                .iter()
+                .flatten()
+                .filter(|s| &*s.item == "minecraft:dirt")
+                .map(|s| s.count)
+                .sum::<u32>(),
+            23
+        );
+    }
+
     /// `doClick`'s SWAP and THROW arms take the clicked slot's stack through
     /// `Slot.mayPickup` (`SWAP` puts it straight into the `Inventory`, and
     /// `THROW` goes through `safeTake`), so a slot that withholds its stack
