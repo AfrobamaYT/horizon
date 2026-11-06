@@ -18,6 +18,26 @@ pub struct AttachmentLifetime {
     registration: Option<Box<AttachmentRegistration>>,
 }
 
+/// An authoritative entity that can own an attachment registration. There is no
+/// default accessor: every supported kind must provide its actual owning slot.
+pub trait HasAttachmentLifetime {
+    /// The entity's lifecycle slot, never a detached map or snapshot's slot.
+    fn attachment_lifetime(&mut self) -> &mut AttachmentLifetime;
+}
+
+/// Implement the internal lifecycle accessor for entities with an owning slot.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_attachment_lifetime {
+    ($($ty:ty),* $(,)?) => {$(
+        impl $crate::attachments::HasAttachmentLifetime for $ty {
+            fn attachment_lifetime(&mut self) -> &mut $crate::attachments::AttachmentLifetime {
+                &mut self.attachment_lifetime
+            }
+        }
+    )*};
+}
+
 impl AttachmentLifetime {
     /// Take lifetime ownership of an authoritative map's registration. Rebinding
     /// the map creates a new generation before replacing an old slot, so destruction

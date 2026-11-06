@@ -794,7 +794,7 @@ impl Game<'_> {
         {
             return;
         }
-        self.bind_level_attachments(dim);
+        self.bind_dimension_attachments(dim);
         self.levels.heard_open.push(dim);
         self.native_level_load(dim.id());
         self.validate_mod_chunk_tickets(dim);

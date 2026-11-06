@@ -1,8 +1,10 @@
 //! Per-dimension attachment indexes, retained independently of level swaps.
 
 use super::{Dim, Game};
-use horizon_world::attachments::index::AttachmentIndex;
-use mod_api::AttachmentHolder;
+use horizon_world::attachments::{
+    AttachmentLifetime, Holder, index::AttachmentIndex, observer::IndexedAttachmentObserver,
+};
+use mod_api::{AttachmentHolder, ChunkRef};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -10,9 +12,36 @@ use std::{
 
 pub(super) type Indexes = HashMap<Dim, Arc<Mutex<AttachmentIndex<AttachmentHolder>>>>;
 
+#[cfg(test)]
+mod painting_tests;
+
 impl Game<'_> {
-    /// Publish the loaded level's saved entries before listeners observe its load.
-    pub(super) fn bind_level_attachments(&mut self, dim: Dim) {
+    /// Publish saved contents only when an authoritative entity owns their lifetime.
+    pub(super) fn bind_saved_entity_attachments(&mut self, id: u32, slot: &mut AttachmentLifetime) {
+        if !self.native_authoritative() {
+            return;
+        }
+        let Some(level) = self.native_level(self.dim.id()) else {
+            return;
+        };
+        let Some(map) = self
+            .persist
+            .uuids
+            .get(&id)
+            .and_then(|uuid| self.entity_attachments.get_mut(uuid))
+            .filter(|map| map.has_index_entries())
+        else {
+            return;
+        };
+        let index = self.attachment_indexes.entry(self.dim).or_default();
+        *slot = AttachmentLifetime::new(map.bind_index(
+            index,
+            AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id)),
+        ));
+    }
+
+    /// Publish the dimension's saved maps before listeners observe its load.
+    pub(super) fn bind_dimension_attachments(&mut self, dim: Dim) {
         let Some(level) = self.native_level(dim.id()) else {
             return;
         };
@@ -20,6 +49,15 @@ impl Game<'_> {
         self.world
             .attachments
             .bind_index(index, AttachmentHolder::Level(level));
+        self.world
+            .chunks
+            .observe_attachments(Arc::new(IndexedAttachmentObserver::new(
+                index,
+                move |holder| match holder {
+                    Holder::Chunk(pos) => Some(AttachmentHolder::Chunk(ChunkRef::new(level, pos))),
+                    _ => None,
+                },
+            )));
     }
 }
 
@@ -42,6 +80,88 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn chunk_residency_uses_the_owning_level_through_cow_and_swaps() {
+        use horizon_client::chunk::{Chunk, ChunkExtras};
+        use horizon_world::attachments::{AttachmentError, AttachmentType, Holder};
+        use mod_api::HostTransaction;
+        static VALUE: AttachmentType<i32> = AttachmentType {
+            namespace: "test",
+            name: "mana",
+            default: || 0,
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let chunk = || {
+                let mut chunk = Chunk::empty(2, 3);
+                chunk.saved = Some(Arc::new(ChunkExtras {
+                    attachments: saved(),
+                    ..Default::default()
+                }));
+                Arc::new(chunk)
+            };
+            let key = ("test".into(), "mana".into());
+            game.native_level_opened(Dim::Overworld);
+            let level = game.native_level(Dim::Overworld.id()).unwrap();
+            let overworld = game.attachment_indexes[&Dim::Overworld].clone();
+            game.world.chunks.insert((2, 3), chunk());
+            let old = overworld.lock().unwrap().snapshot(&key);
+            assert_eq!(old.len(), 1);
+            assert_eq!(
+                old[0].holder,
+                AttachmentHolder::Chunk(ChunkRef::new(level, [2, 3]))
+            );
+            let save = game.world.chunks[&(2, 3)].clone();
+            Arc::make_mut(game.world.chunks.get_mut(&(2, 3)).unwrap()).lit = true;
+            VALUE
+                .set(
+                    game.attachment_slot(Holder::Chunk([2, 3])).unwrap(),
+                    Holder::Chunk([2, 3]),
+                    13,
+                )
+                .unwrap();
+            let current = overworld.lock().unwrap().snapshot(&key);
+            assert_eq!(current[0].entry.read(&VALUE), Ok(&13));
+            let aborted: Result<(), AttachmentError> = game.transaction(|host, _| {
+                VALUE.set(host, Holder::Chunk([2, 3]), 14)?;
+                let tentative = overworld.lock().unwrap().snapshot(&key);
+                assert_eq!(tentative[0].entry.read(&VALUE), Ok(&14));
+                Err(AttachmentError::MissingHolder)
+            });
+            assert!(aborted.is_err());
+            let restored = overworld.lock().unwrap().snapshot(&key);
+            assert_eq!(restored[0].entry.read(&VALUE), Ok(&13));
+            assert!(!Arc::ptr_eq(&old[0].entry, &current[0].entry));
+            assert!(Arc::ptr_eq(
+                &old[0].entry,
+                save.saved
+                    .as_ref()
+                    .unwrap()
+                    .attachments
+                    .entry("test", "mana")
+                    .unwrap()
+                    .unwrap()
+            ));
+            game.enter_level(Dim::Nether).unwrap();
+            let nether_level = game.native_level(Dim::Nether.id()).unwrap();
+            let nether = game.attachment_indexes[&Dim::Nether].clone();
+            game.world.chunks.insert((2, 3), chunk());
+            assert_eq!(
+                nether.lock().unwrap().snapshot(&key)[0].holder,
+                AttachmentHolder::Chunk(ChunkRef::new(nether_level, [2, 3]))
+            );
+            game.enter_level(Dim::Overworld).unwrap();
+            game.world.chunks.remove(&(2, 3));
+            assert!(overworld.lock().unwrap().snapshot(&key).is_empty());
+            assert_eq!(nether.lock().unwrap().snapshot(&key).len(), 1);
+            assert_eq!(current[0].entry.read(&VALUE), Ok(&13));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn loaded_levels_keep_independent_index_through_swaps_and_close() {
         with_game(|game| {
             let key = ("test".into(), "mana".into());
@@ -55,7 +175,7 @@ mod tests {
 
             game.enter_level(Dim::Nether).unwrap();
             game.world.attachments = saved();
-            game.bind_level_attachments(Dim::Nether);
+            game.bind_dimension_attachments(Dim::Nether);
             let nether = game.attachment_indexes[&Dim::Nether].clone();
             assert_eq!(nether.lock().unwrap().snapshot(&key).len(), 1);
             game.enter_level(Dim::Overworld).unwrap();

@@ -168,6 +168,7 @@ mod tests {
     fn item_at(x: f64, y: f64, z: f64) -> ItemEntity {
         let p = Vec3::new(x, y, z);
         ItemEntity {
+            attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),
