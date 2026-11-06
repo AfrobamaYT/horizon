@@ -775,6 +775,54 @@ fn resolved_ui_resources_do_not_restore_a_filtered_panorama_face() {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn refused_client_context_keeps_pack_and_listeners() {
+    use crate::game::{Progress, native_entity_refs::tests::with_client_game, packs::stage_pack};
+    use mod_api::__private::reload::PreparedStep;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    with_client_game(|game| {
+        let mut staged = stage_pack(
+            &game.vanilla_root(),
+            &[],
+            &[],
+            &game.mods,
+            game.register_client_reload_listeners(),
+            &game.pack.assets,
+            game.res,
+            &game.pack.context,
+            game.settings.force_unicode,
+            game.settings.japanese_glyphs,
+            &Progress::new(),
+        )
+        .unwrap();
+        let root =
+            std::env::temp_dir().join(format!("client-reload-refusal-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(horizon_mods::enabled::MARKER), b"invalid json").unwrap();
+        staged.root = root.clone();
+        let applied = Arc::new(AtomicBool::new(false));
+        let flag = applied.clone();
+        staged.client_applies.push(PreparedStep::Mod {
+            apply: <dyn ReloadApply>::new(move || {
+                flag.store(true, Ordering::SeqCst);
+            }),
+            owner: None,
+            id: id("test:listener"),
+        });
+        let old_root = game.options.resources.clone();
+        let old_pack = game.pack.source.clone();
+        let old_context = game.loop_context.clone();
+        assert!(game.apply_staged_pack(staged).is_err());
+        assert_eq!(game.options.resources, old_root);
+        assert!(game.pack.source.same_generation(&old_pack));
+        assert!(Arc::ptr_eq(&game.loop_context, &old_context));
+        assert!(!applied.load(Ordering::SeqCst));
+        std::fs::remove_dir_all(root).unwrap();
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn client_completion_reads_published_resources_without_world_access() {
     use crate::game::native_entity_refs::tests::with_client_game;
     use mod_api::__private::{ModPhase, PhaseOwner};
