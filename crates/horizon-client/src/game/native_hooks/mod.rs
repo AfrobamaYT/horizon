@@ -992,7 +992,7 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
-    mod_list::{self, Installed, NativePage},
+    mod_list::{self, Installed, KeyMapping, NativePage},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
     text::Text,
@@ -1035,8 +1035,8 @@ use mod_api::{
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
-    NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
-    NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    NativeItemFished, NativeLootDrops, NativeMinimap, NativePanelEvent, NativePortalShape,
+    NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use std::{
     collections::HashMap,
@@ -3783,10 +3783,6 @@ impl Game<'_> {
         properties: &mut Vec<String>,
     ) {
         Self::fire_register_range_select_item_model_property(context, properties);
-    }
-    /// Options > Mods lists the native mods: push yours.
-    pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
-        self.fire_mods(mods);
     }
     /// The buttons of mod `mod_id`'s settings page, under its keys: push
     /// their labels when it is yours. Asked again each time the page opens
@@ -10911,17 +10907,21 @@ impl Game<'_> {
             label: keybinds::display_name(self.settings.keys.get(name)),
         })
     }
-    /// The key the player chose for a mod's key `name`, else `default`
-    /// (`key.keyboard.z`), as the WebAssembly mods' keys were kept
-    /// (`key.<mod id>.<name>` in `horizon-mods.txt`).
-    pub(super) fn native_mod_key(&self, mod_id: &str, name: &str, default: &str) -> String {
-        let chosen = self
-            .settings
-            .mods
-            .keys
-            .get(mod_id)
-            .and_then(|k| k.get(name));
-        chosen.map_or(default, String::as_str).to_owned()
+    /// The saved key and modifiers for an owner-bound registration, or its declared default.
+    pub(super) fn native_mod_key(
+        &self,
+        mod_id: &str,
+        name: &str,
+    ) -> Option<(String, ClientModifiers)> {
+        let (_, registration) = mod_api::__private::key_mappings()
+            .iter()
+            .find(|(owner, mapping)| *owner == mod_id && mapping.id == name)?;
+        let (key, modifiers) = self.settings.mods.binding(
+            mod_id,
+            name,
+            (&registration.key, registration.modifiers.bits),
+        );
+        Some((key, ClientModifiers::new(modifiers)))
     }
     /// A line in chat from the client.
     pub(super) fn native_chat(&mut self, text: &str) {
@@ -12183,8 +12183,10 @@ impl Game<'_> {
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.
     pub(super) fn list_native_mods(&mut self) {
-        let mut mods = Vec::new();
-        self.native_mods(&mut mods);
+        let registered = super::mods::collect_key_mappings(
+            self.options.execution_role,
+            mod_api::__private::key_mappings(),
+        );
         let native = self.mods.native.clone();
         // Wasm proxies are installed in the same dispatch table as native mods. Their rows
         // need the same live switch and settings page, not a frozen content-only toggle.
@@ -12217,14 +12219,19 @@ impl Game<'_> {
         for mut row in rows {
             let mut buttons = Vec::new();
             self.native_settings(&row.id, &mut buttons);
-            row.native = Some(NativePage {
-                keys: mods
-                    .iter_mut()
-                    .find(|page| page.id == row.id)
-                    .map(|page| std::mem::take(&mut page.keys))
-                    .unwrap_or_default(),
-                buttons,
-            });
+            let mappings: Vec<KeyMapping> = registered
+                .iter()
+                .filter(|(owner, _)| *owner == row.id)
+                .map(|(_, k)| KeyMapping {
+                    id: k.id.clone(),
+                    label: k.label.clone(),
+                    key: k.key.clone(),
+                    modifiers: k.modifiers.bits,
+                    context: k.context,
+                    category: k.category.clone(),
+                })
+                .collect();
+            row.native = Some(NativePage { mappings, buttons });
             self.settings.mods.installed.push(row);
         }
     }
