@@ -166,6 +166,13 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Str(Str::Static) if types.guest.get() => format!("super::name_id(*{e})"),
         Ty::Str(Str::Static) => format!("super::name_id(*{e})?"),
         Ty::Str(_) => format!("{e}.to_string()"),
+        Ty::Array(item, n) if (1..=12).contains(n) => format!(
+            "({},)",
+            (0..*n)
+                .map(|i| lower(types, item, &format!("(&{e}[{i}])")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Ty::List(item, _) | Ty::Array(item, _) => {
             format!(
                 "{e}.iter().map(|x| Ok({})).collect::<Result<Vec<_>, Refused>>()?",
@@ -294,6 +301,13 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
                 _ => format!("{vec}.into()"),
             }
         }
+        Ty::Array(item, n) if (1..=12).contains(n) => format!(
+            "[{}]",
+            (0..*n)
+                .map(|i| lift(types, item, &format!("{e}.{i}")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Ty::Array(item, _) => format!(
             "super::array({e}.into_iter().map(|x| Ok({})).collect::<Result<Vec<_>, Refused>>()?)?",
             lift(types, item, "x")
@@ -370,6 +384,13 @@ impl<'t, 'a> InPlace<'t, 'a> {
             Ty::Str(Str::Borrowed) => format!("keep.str({e})"),
             Ty::List(item, List::Slice) => format!("keep.slice({})", collect(item)?),
             Ty::List(item, _) => format!("{}.into()", collect(item)?),
+            Ty::Array(item, n) if (1..=12).contains(n) => format!(
+                "[{}]",
+                (0..*n)
+                    .map(|i| self.value(item, &format!("{e}.{i}")))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ")
+            ),
             Ty::Array(item, _) => format!("super::array({})?", collect(item)?),
             Ty::Option(item) => format!(
                 "match {e} {{ Some(x) => Some({}), None => None }}",
@@ -783,8 +804,13 @@ pub(super) fn conversions(
                 Kind::Opaque(_) => unreachable!(),
             };
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn lift_{id}(w: {wire}) -> Result<{path}, Refused> {{ Ok({body}) }}").unwrap();
-            if def.rust == "mod_api::Recipe" {
-                writeln!(code, "#[cfg(test)] pub(super) fn recipe_roundtrip(v: &{rust}) -> Result<{path}, Refused> {{ lift_{id}(lower_{id}(v)?) }}").unwrap();
+            if def.rust == "mod_api::Recipe" || def.rust == "mod_api::WorldLine" {
+                let name = if def.rust == "mod_api::Recipe" {
+                    "recipe"
+                } else {
+                    "world_line"
+                };
+                writeln!(code, "#[cfg(test)] pub(super) fn {name}_roundtrip(v: &{rust}) -> Result<{path}, Refused> {{ lift_{id}(lower_{id}(v)?) }}").unwrap();
             }
         }
         // An event's written-back fields, both ways.
