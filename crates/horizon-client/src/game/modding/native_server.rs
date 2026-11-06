@@ -2022,6 +2022,9 @@ mod tests {
             );
             assert!(game.chat_capture.take().unwrap().is_empty());
             assert!(game.command_source.is_none());
+            game.exec.functions.push("test:outer".into());
+            assert!(game.native_run_command("time query daytime"));
+            assert_eq!(game.exec.functions, ["test:outer"]);
         });
     }
 
