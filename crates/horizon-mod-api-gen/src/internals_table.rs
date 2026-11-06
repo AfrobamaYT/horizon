@@ -10,6 +10,24 @@
 //! - **Functions.** Each listed function whose receiver, arguments and return can all cross gets a
 //!   thunk: copies are decoded, references come in as nodes, and a returned reference goes back
 //!   as a node.
+fn structural_key(shape: &crate::crossing::Shape) -> bool {
+    use crate::crossing::{Scalar, Shape};
+    match shape {
+        Shape::Scalar(
+            Scalar::Bool
+            | Scalar::Char
+            | Scalar::Signed(_)
+            | Scalar::Unsigned(_)
+            | Scalar::Wide(_)
+            | Scalar::String,
+        )
+        | Shape::Unit => true,
+        Shape::Tuple(parts) => parts.iter().all(structural_key),
+        Shape::Option(inner) | Shape::Array(inner, _) => structural_key(inner),
+        _ => false,
+    }
+}
+
 use crate::crossing::{Collection, Crossing, Rule, Scalar, Shape, Wrapper, bare};
 use crate::internals::Internal;
 use proc_macro2::TokenStream;
@@ -687,7 +705,7 @@ impl<'r> Gen<'r> {
                         None => (
                             quote!(&(*(p as *const #rust)).#member),
                             quote!(&mut (*(p as *mut #rust)).#member),
-                            quote!(&raw mut (*(p as *mut #rust)).#member as *mut ()),
+                            quote!(if w { &raw mut (*(p as *mut #rust)).#member as *mut () } else { &raw const (*(p as *const #rust)).#member as *mut () }),
                         ),
                         Some((_, case)) => {
                             Self::matched(&rust, quote!(#path_ty::#case { #member: field, .. }))
@@ -717,7 +735,7 @@ impl<'r> Gen<'r> {
                         part,
                         quote!(&(*(p as *const #rust)).#index),
                         quote!(&mut (*(p as *mut #rust)).#index),
-                        quote!(&raw mut (*(p as *mut #rust)).#index as *mut ()),
+                        quote!(if w { &raw mut (*(p as *mut #rust)).#index as *mut () } else { &raw const (*(p as *const #rust)).#index as *mut () }),
                     ));
                 }
                 quote!(#(#arms)*)
@@ -744,11 +762,15 @@ impl<'r> Gen<'r> {
                     let index = self.indexed(&rust, &args[0], quote!(get(i)), quote!(get_mut(i)));
                     quote!(#len #index)
                 }
-                Collection::HashMap | Collection::BTreeMap if buildable(&args[0], rule) => {
+                Collection::HashMap | Collection::BTreeMap
+                    if buildable(&args[0], rule) && structural_key(&args[0]) =>
+                {
                     let key = self.decode(&args[0], quote!(key.clone()));
                     let entry = self.element(&args[1]);
+                    let encoded = self.encode(&args[0], quote!(&key));
                     quote! {
                         #len
+                        I::Op::CanonicalKey(key) => { let key = #key; Ok(I::Reply::Value(#encoded)) }
                         I::Op::Key(key) => {
                             let key = #key;
                             let item: ::std::option::Option<*mut ()> = if w {
@@ -1652,6 +1674,15 @@ pub fn table_with_points(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn map_keys_require_structural_equality() {
+        use crate::crossing::{Scalar, Shape};
+        assert!(super::structural_key(&Shape::Option(Box::new(
+            Shape::Scalar(Scalar::Unsigned("u32"))
+        ))));
+        assert!(!super::structural_key(&Shape::Named("CustomEq".into(), 0)));
+    }
+
     use super::*;
     use crate::crossing::tests::internal;
 

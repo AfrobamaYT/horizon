@@ -263,6 +263,8 @@ fn import<T>(
     contain(|| {
         charge(&mut host, 1 + cells)?;
         let result = f();
+        let walk = current(|active| Ok(active.frame.take_walk_fuel())).unwrap_or(0);
+        charge(&mut host, walk)?;
         if let Ok(value) = &result {
             charge(&mut host, output(value))?;
         }
@@ -270,9 +272,20 @@ fn import<T>(
     })
 }
 
+fn wire_cost(cells: &[wire::Cell]) -> usize {
+    let bytes: usize = cells
+        .iter()
+        .map(|cell| match cell {
+            wire::Cell::Str(s) => s.len(),
+            _ => 0,
+        })
+        .sum();
+    cells.len().saturating_add(bytes.div_ceil(64))
+}
+
 fn reached_cells(value: &wire::Reached) -> usize {
     match value {
-        wire::Reached::Value(v) => v.len(),
+        wire::Reached::Value(v) => wire_cost(v),
         _ => 0,
     }
 }
@@ -292,7 +305,7 @@ impl wire::HostNodeWithStore<State> for View {
         node: Resource<wire::Node>,
         n: u32,
     ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
-        import(host, 0, || View.get(node, n), Vec::len)
+        import(host, 0, || View.get(node, n), |v| wire_cost(v))
     }
     fn set(
         host: wasmtime::component::Access<'_, State, Self>,
@@ -300,7 +313,7 @@ impl wire::HostNodeWithStore<State> for View {
         n: u32,
         v: Vec<wire::Cell>,
     ) -> wasmtime::Result<Result<(), wire::Refusal>> {
-        import(host, v.len(), || View.set(node, n, v), |_| 0)
+        import(host, wire_cost(&v), || View.set(node, n, v), |_| 0)
     }
     fn index(
         host: wasmtime::component::Access<'_, State, Self>,
@@ -314,7 +327,7 @@ impl wire::HostNodeWithStore<State> for View {
         node: Resource<wire::Node>,
         k: Vec<wire::Cell>,
     ) -> wasmtime::Result<Result<wire::Reached, wire::Refusal>> {
-        import(host, k.len(), || View.key(node, k), reached_cells)
+        import(host, wire_cost(&k), || View.key(node, k), reached_cells)
     }
     fn len(
         host: wasmtime::component::Access<'_, State, Self>,
@@ -332,7 +345,7 @@ impl wire::HostNodeWithStore<State> for View {
         host: wasmtime::component::Access<'_, State, Self>,
         node: Resource<wire::Node>,
     ) -> wasmtime::Result<Result<Vec<wire::Cell>, wire::Refusal>> {
-        import(host, 0, || View.read(node), Vec::len)
+        import(host, 0, || View.read(node), |v| wire_cost(v))
     }
     fn drop(
         mut host: wasmtime::component::Access<'_, State, Self>,
@@ -360,7 +373,7 @@ impl wire::HostWithStore<State> for View {
         let cells = args
             .iter()
             .map(|a| match a {
-                wire::Arg::Value(v) => v.len(),
+                wire::Arg::Value(v) => wire_cost(v),
                 _ => 0,
             })
             .sum::<usize>();
@@ -518,6 +531,13 @@ impl View {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wire_cost_charges_string_bytes() {
+        let small = super::wire_cost(&[super::wire::Cell::Str("x".into())]);
+        let large = super::wire_cost(&[super::wire::Cell::Str("x".repeat(1_048_576))]);
+        assert!(large > small * 1000);
+    }
+
     use super::*;
     use crate::frame::Root;
     use crate::frame::tests::{TABLE, frame, world};

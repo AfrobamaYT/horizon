@@ -53,6 +53,8 @@ pub enum Op<'v> {
     Index(u64),
     /// A map's entry by key: answers its node.
     Key(&'v Value),
+    /// Canonical wire representation of a native map key.
+    CanonicalKey(&'v Value),
     /// The number of elements or entries.
     Len,
     /// An enum's or an `Option`'s case.
