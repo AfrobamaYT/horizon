@@ -20,7 +20,9 @@ interface view {
   variant reached { node(node), value(list<cell>) }
   variant arg { value(list<cell>), node(borrow<node>) }
   root: func(n: u32) -> result<node, refusal>;
-  call: func(declared: u32, receiver: option<borrow<node>>, args: list<arg>) -> result<reached, refusal>;
+  /// Final mutable copy arguments are returned in parameter order, separate from node results.
+  record call-reply { %result: reached, updates: list<list<cell>> }
+  call: func(declared: u32, receiver: option<borrow<node>>, args: list<arg>) -> result<call-reply, refusal>;
 }
 
 interface raw-listeners {
