@@ -89,6 +89,7 @@ pub fn main_with(
             budgets,
         };
         let game_dir = &launch.context.game_dir;
+        horizon_mod_wasm::set_internals(&crate::__internals::TABLE);
         let loaded =
             horizon_mod_wasm::load_installed(exe, game_dir, &launch.context.dev_mods, &config);
         mods.extend(loaded.mods);

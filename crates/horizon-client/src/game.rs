@@ -236,6 +236,8 @@ mod names;
 mod narrator;
 mod native_biome_colors;
 pub mod native_block_entity_draw;
+#[cfg(test)]
+mod native_block_entity_item_tests;
 mod native_block_entity_refs;
 mod native_block_sprites;
 mod native_block_states;
@@ -16527,11 +16529,17 @@ impl Game<'_> {
             && let Some(host) = self.lan.as_mut()
         {
             // The live turn may have changed its bed since entry.
-            host.hub.guests[i].bed = Some(head);
+            {
+                let value = Some(head);
+                host.hub.guests.update(i, |guest| guest.bed = value);
+            }
             host.hub.wake(i);
             // This live body applies the stand-up pose below, not the later
             // wake_woken_guests pass over stored guest bodies.
-            host.hub.guests[i].woke_from = None;
+            {
+                let value = None;
+                host.hub.guests.update(i, |guest| guest.woke_from = value);
+            }
         }
         let stand = self.bed_wake_pose(head, self.yaw);
         if let Some(p) = self.player.as_mut() {
@@ -17316,10 +17324,12 @@ impl Game<'_> {
         {
             // The vehicle tree goes into a player's file when they leave
             // (`take_parent_vehicle`); here it stays in the chunk saves.
-            for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
-                Self::guest_attachments_into(&self.guest_attachments, g);
-                self.player_autosaves.enqueue(g, &self.world_root);
-            }
+            host.hub.guests.update_all(|g| {
+                if g.placed {
+                    Self::guest_attachments_into(&self.guest_attachments, g);
+                    self.player_autosaves.enqueue(g, &self.world_root);
+                }
+            });
         }
         self.save_world_state();
         self.message = Some(("Saved the game".into(), Instant::now()));

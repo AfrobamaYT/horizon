@@ -435,12 +435,12 @@ impl Game<'_> {
         };
         host.hub.teams.clone_from(&self.score.board.teams);
         let view = horizon_client::lan::scoreboard::View::of(&self.score.board);
-        for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
-            if g.scoreboard != view {
+        host.hub.guests.update_all(|g| {
+            if g.placed && g.scoreboard != view {
                 g.send_all(&g.scoreboard.changes(&view));
                 g.scoreboard = view.clone();
             }
-        }
+        });
     }
     /// `ServerPlayer.doTick` score updates and the statistic criteria.
     pub(super) fn tick_scoreboard(&mut self) {

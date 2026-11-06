@@ -302,12 +302,13 @@ impl Game<'_> {
             menu.slot(2).cloned(),
         ];
         if let Some(host) = self.lan.as_mut() {
-            let g = &mut host.hub.guests[gi];
-            for i in 0..36 {
-                g.inventory[i] = menu.player_item(i).cloned();
-            }
-            g.offhand = menu.player_item(40).cloned();
-            g.carried = menu.carried.take();
+            host.hub.guests.update(gi, |g| {
+                for i in 0..36 {
+                    g.inventory[i] = menu.player_item(i).cloned();
+                }
+                g.offhand = menu.player_item(40).cloned();
+                g.carried = menu.carried.take();
+            });
         }
         self.register_exploration_maps(made);
         let opaque = gm
@@ -796,8 +797,9 @@ mod tests {
                 gm.merchant.session.xp = 17;
                 gm.slots[1] = Some(ItemStack::new("minecraft:coal", 2));
             }
-            game.lan.as_mut().unwrap().hub.guests[0].carried =
-                Some(ItemStack::new("minecraft:apple", 3));
+            game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                g.carried = Some(ItemStack::new("minecraft:apple", 3))
+            });
             let wheat = ItemStack::new("minecraft:wheat", 1);
             game.lan
                 .as_mut()

@@ -10,7 +10,10 @@ use horizon_client::{
 };
 use horizon_world::nbt::{Compound, Tag};
 use mod_api::__private::game::*;
-use mod_api::{BlockEntityDataError, BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef};
+use mod_api::{
+    BlockEntityDataError, BlockEntityItemError, BlockEntityRef, BlockEntityTypeKey, ItemStack,
+    LevelRef, PlayerRef, Transaction,
+};
 
 impl Game<'_> {
     fn native_block_entity_target(&self, entity: BlockEntityRef) -> Option<(&World, &BlockEntity)> {
@@ -169,8 +172,7 @@ impl Game<'_> {
     }
 
     /// A snapshot of a mod block entity's menu data slots, on the server or in the
-    /// client's copy. None for a stale/missing/vanilla entity. Item storage is accessed
-    /// through Parts, not included in this snapshot.
+    /// client's copy. None for a stale/missing/vanilla entity. Item storage is separate.
     pub(super) fn native_block_entity_data_slots(
         &self,
         entity: BlockEntityRef,
@@ -190,19 +192,19 @@ impl Game<'_> {
         slot: u32,
         value: i32,
     ) -> bool {
-        self.write_block_entity_data_slots(entity, |block_entity| {
-            let index = slot as usize;
-            if block_entity
-                .data
-                .get(index)
-                .is_none_or(|current| *current == value)
-            {
-                return false;
-            }
-            block_entity.data[index] = value;
-            true
-        })
-        .unwrap_or(false)
+        let Some((key, block_entity)) = self.mod_block_entity_write_target(entity) else {
+            return false;
+        };
+        let index = slot as usize;
+        if block_entity
+            .data
+            .get(index)
+            .is_none_or(|current| *current == value)
+        {
+            return false;
+        }
+        self.write_mod_block_entity(key, |block_entity| block_entity.data[index] = value);
+        true
     }
 
     /// Sizes a mod block entity's menu data explicitly, using the same write
@@ -219,31 +221,98 @@ impl Game<'_> {
                 limit: limit as u64,
             });
         }
-        self.write_block_entity_data_slots(entity, |block_entity| {
-            if block_entity.data == values {
-                return false;
-            }
-            block_entity.data = values;
-            true
-        })
-    }
-
-    fn write_block_entity_data_slots(
-        &mut self,
-        entity: BlockEntityRef,
-        edit: impl FnOnce(&mut ModBlockEntity) -> bool,
-    ) -> Result<bool, BlockEntityDataError> {
-        let key = self
-            .native_block_entity_write_key(entity)
+        let (key, block_entity) = self
+            .mod_block_entity_write_target(entity)
             .ok_or(BlockEntityDataError::Unavailable)?;
-        self.journal_block_entity(key);
-        let Some(BlockEntity::Mod(block_entity)) = self.world.block_entities.get_mut(&key) else {
-            return Err(BlockEntityDataError::Unavailable);
-        };
-        if !edit(block_entity) {
+        if block_entity.data == values {
             return Ok(false);
         }
+        self.write_mod_block_entity(key, |block_entity| block_entity.data = values);
+        Ok(true)
+    }
+
+    fn mod_block_entity_write_target(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<((i32, i32, i32), &ModBlockEntity)> {
+        let key = self.native_block_entity_write_key(entity)?;
+        let BlockEntity::Mod(block_entity) = self.world.block_entities.get(&key)? else {
+            return None;
+        };
+        Some((key, block_entity))
+    }
+
+    // The target was resolved above, and journaling invokes no listener that could replace it.
+    fn write_mod_block_entity(
+        &mut self,
+        key: (i32, i32, i32),
+        edit: impl FnOnce(&mut ModBlockEntity),
+    ) {
+        self.journal_block_entity(key);
+        let BlockEntity::Mod(block_entity) = self.world.block_entities.get_mut(&key).unwrap()
+        else {
+            unreachable!("resolved mod holder replaced before its write")
+        };
+        edit(block_entity);
         self.after_commit(After::Changed(key));
+    }
+
+    /// Read a configured mod holder's declared internal item slot, without automation policy.
+    pub(super) fn native_block_entity_item_slot(
+        &self,
+        entity: BlockEntityRef,
+        slot: u32,
+    ) -> Result<Option<ItemStack>, BlockEntityItemError> {
+        let (world, BlockEntity::Mod(block_entity)) = self
+            .native_block_entity_target(entity)
+            .ok_or(BlockEntityItemError::Unavailable)?
+        else {
+            return Err(BlockEntityItemError::Unavailable);
+        };
+        let [x, y, z] = entity.fields().position;
+        mod_item_slots(world, (x, y, z), slot)?;
+        Ok(block_entity.items.get(slot as usize).cloned().flatten())
+    }
+
+    /// Replace internal storage under the existing transaction; external ITEMS routing is separate.
+    pub(super) fn native_block_entity_set_item_slot(
+        &mut self,
+        entity: BlockEntityRef,
+        tx: &Transaction,
+        slot: u32,
+        stack: Option<ItemStack>,
+    ) -> Result<bool, BlockEntityItemError> {
+        let _ = tx;
+        let (key, block_entity) = self
+            .mod_block_entity_write_target(entity)
+            .ok_or(BlockEntityItemError::Unavailable)?;
+        let slots = mod_item_slots(&self.world, key, slot)?;
+        if let Some(stack) = &stack {
+            if stack.count == 0
+                || stack.item.as_ref() == "minecraft:air"
+                || self.items().get(&stack.item).is_none()
+            {
+                return Err(BlockEntityItemError::InvalidStack);
+            }
+            let limit = self.stack_max_size(stack);
+            if stack.count > limit {
+                return Err(BlockEntityItemError::StackTooLarge {
+                    count: stack.count,
+                    limit,
+                });
+            }
+        }
+        let index = slot as usize;
+        if block_entity.items.get(index).and_then(Option::as_ref) == stack.as_ref() {
+            return Ok(false);
+        }
+        self.write_mod_block_entity(key, |block_entity| {
+            let items = &mut block_entity.items;
+            if items.len() < slots {
+                items.resize(slots, None);
+            }
+            items[index] = stack;
+        });
         Ok(true)
     }
 
@@ -435,6 +504,25 @@ fn nameable(pos: (i32, i32, i32), entity: &BlockEntity, block: &str) -> bool {
     block_entity_nbt::canonical(&tag).is_some_and(|tag| tag.get("CustomName").is_some())
 }
 
+fn mod_item_slots(
+    world: &World,
+    key: (i32, i32, i32),
+    slot: u32,
+) -> Result<usize, BlockEntityItemError> {
+    let slots = world
+        .block_entities
+        .mod_container(world.block(key.0, key.1, key.2).0)
+        .ok_or(BlockEntityItemError::Unavailable)?
+        .slots;
+    if slot as usize >= slots {
+        return Err(BlockEntityItemError::SlotOutOfBounds {
+            slot,
+            slots: slots as u32,
+        });
+    }
+    Ok(slots)
+}
+
 fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntity> {
     if !world.loaded(x, z) {
         return None;
@@ -536,11 +624,19 @@ mod tests {
             game.world
                 .block_entities
                 .insert((0, 64, 0), BlockEntity::Chest(vec![None; 27]));
-            let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-            let dimension =
-                std::mem::replace(&mut guest.dimension, "minecraft:the_nether".to_owned());
+            let dimension = game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                std::mem::replace(&mut guest.dimension, "minecraft:the_nether".to_owned())
+            });
             assert!(!player.open_menu(game, chest));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = dimension;
+            {
+                let value = dimension;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             let host = game.lan.take();
             assert!(!player.open_menu(game, chest));
             assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Refused);
@@ -558,10 +654,25 @@ mod tests {
             assert!(chest.set_lock(game, Some(stick_lock.clone())));
             assert_eq!(chest.lock(game), Some(stick_lock));
             assert!(!player.open_menu(game, chest));
-            game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
-                Some(horizon_client::items::ItemStack::new("minecraft:stick", 1));
+            {
+                let value = Some(horizon_client::items::ItemStack::new("minecraft:stick", 1));
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.inventory[0] = value);
+            }
             assert!(player.open_menu(game, chest));
-            game.lan.as_mut().unwrap().hub.guests[0].inventory[0] = None;
+            {
+                let value = None;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.inventory[0] = value);
+            }
             assert!(chest.set_lock(game, None));
             assert!(player.open_menu(game, chest));
             assert!(player.open_menu(game, furnace));
