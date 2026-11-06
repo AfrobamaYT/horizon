@@ -1448,11 +1448,11 @@ impl Mob {
         }
         let mut y = movement.y;
         // LivingEntity.travelInAir: levitation lifts by its amplifier.
-        if let Some(&(_, _, amp)) = self
+        if let Some(&super::StoredEffect { amplifier: amp, .. }) = self
             .extra
             .effects
             .iter()
-            .find(|e| e.0 == "minecraft:levitation")
+            .find(|e| e.id == "minecraft:levitation")
         {
             y += (0.05 * f64::from(amp + 1) - movement.y) * 0.2;
         } else {
@@ -1680,8 +1680,8 @@ impl Mob {
         self.extra
             .effects
             .iter()
-            .find(|e| e.0 == "minecraft:jump_boost")
-            .map_or(0.0, |e| 0.1 * (e.2 + 1) as f32)
+            .find(|e| e.id == "minecraft:jump_boost")
+            .map_or(0.0, |e| 0.1 * (e.amplifier + 1) as f32)
     }
     /// `Entity.getBlockJumpFactor`: the block the mob stands in, or the one
     /// below that affects movement when the current block has a neutral jump factor of 1.0.
@@ -2852,20 +2852,22 @@ mod tests {
             // 3. Enabled positive / Jump boost: With minecraft:jump_boost effect (amp 0 and amp 1),
             // jump power increases by +0.1 and +0.2 respectively.
             let mut boosted_0 = Mob::new(3, cow_kind.clone(), Vec3::new(0.5, 1.0, 0.5), 0.0);
-            boosted_0
-                .extra
-                .effects
-                .push(("minecraft:jump_boost", 200, 0));
+            boosted_0.extra.effects.push(crate::mobs::StoredEffect::new(
+                "minecraft:jump_boost",
+                200,
+                0,
+            ));
             assert!(close(boosted_0.jump_boost_power(), 0.1));
             assert!(close(boosted_0.jump_power(w), 0.42 + 0.1));
             boosted_0.jump_from_ground(w);
             assert!((boosted_0.velocity.y - 0.52).abs() < 1.0e-5);
 
             let mut boosted_1 = Mob::new(4, cow_kind.clone(), Vec3::new(0.5, 1.0, 0.5), 0.0);
-            boosted_1
-                .extra
-                .effects
-                .push(("minecraft:jump_boost", 200, 1));
+            boosted_1.extra.effects.push(crate::mobs::StoredEffect::new(
+                "minecraft:jump_boost",
+                200,
+                1,
+            ));
             assert!(close(boosted_1.jump_boost_power(), 0.2));
             assert!(close(boosted_1.jump_power(w), 0.42 + 0.2));
             boosted_1.jump_from_ground(w);
@@ -2873,10 +2875,11 @@ mod tests {
 
             // 4. Edge / Special case: Combined honey block + jump boost and custom modified attrs.jump_strength.
             let mut combined = Mob::new(5, cow_kind.clone(), Vec3::new(2.5, 1.0, 0.5), 0.0);
-            combined
-                .extra
-                .effects
-                .push(("minecraft:jump_boost", 200, 1));
+            combined.extra.effects.push(crate::mobs::StoredEffect::new(
+                "minecraft:jump_boost",
+                200,
+                1,
+            ));
             // jump_strength * 0.5 + 0.2 = 0.42 * 0.5 + 0.2 = 0.41
             assert!(close(combined.jump_power(w), 0.42 * 0.5 + 0.2));
             combined.jump_from_ground(w);
@@ -2888,7 +2891,11 @@ mod tests {
             custom_attr
                 .extra
                 .effects
-                .push(("minecraft:jump_boost", 200, 0));
+                .push(crate::mobs::StoredEffect::new(
+                    "minecraft:jump_boost",
+                    200,
+                    0,
+                ));
             // 0.80 * 0.5 + 0.1 = 0.50
             assert!(close(custom_attr.jump_power(w), 0.50));
             custom_attr.jump_from_ground(w);

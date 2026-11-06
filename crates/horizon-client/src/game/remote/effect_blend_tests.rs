@@ -6,7 +6,7 @@ use horizon_protocol::{
     connection::Pipe,
     packets::play::{self, Clientbound as C},
 };
-use mod_api::LivingRef;
+use mod_api::{__private::part_tests::effect_key, LivingRef};
 
 fn with_client(test: impl FnOnce(&mut Game<'_>, LivingRef, i32)) {
     with_game(|game| {
@@ -50,14 +50,14 @@ fn assert_blend(game: &Game<'_>, living: LivingRef, expected: [f32; 6]) {
     // Vanilla Mth.lerp does not clamp partial ticks, even outside a frame.
     for (partial, expected) in [-1.0, 0.0, 0.25, 0.5, 1.0, 2.0].into_iter().zip(expected) {
         assert_eq!(
-            living.effect_blend_factor(game, "minecraft:speed", partial),
+            living.effect_blend_factor(game, effect_key("minecraft:speed"), partial),
             Some(expected),
             "partial tick {partial}"
         );
     }
     assert!(
         living
-            .effect_blend_factor(game, "speed", f32::NAN)
+            .effect_blend_factor(game, effect_key("speed"), f32::NAN)
             .unwrap()
             .is_nan()
     );
@@ -68,7 +68,7 @@ fn assert_blend(game: &Game<'_>, living: LivingRef, expected: [f32; 6]) {
 fn ordinary_effect_blends_follow_the_client_lifecycle() {
     with_client(|game, living, speed| {
         assert_eq!(
-            living.effect_blend_factor(game, "speed", f32::NAN),
+            living.effect_blend_factor(game, effect_key("speed"), f32::NAN),
             Some(0.0)
         );
         // Independent expected factors from vanilla 26.3 BlendState: its
@@ -84,13 +84,19 @@ fn ordinary_effect_blends_follow_the_client_lifecycle() {
             assert_blend(game, living, [1.0; 6]);
             if duration == 3 {
                 game.tick_client_effects();
-                assert_eq!(living.effect(game, "speed").unwrap().duration, 0);
+                assert_eq!(
+                    living.effect(game, effect_key("speed")).unwrap().duration,
+                    0
+                );
                 assert_blend(game, living, [2.0, 1.0, 0.75, 0.5, 0.0, -1.0]);
                 game.tick_client_effects();
                 assert_blend(game, living, [0.0; 6]);
             }
             remove(game, speed);
-            assert_eq!(living.effect_blend_factor(game, "speed", 0.5), Some(0.0));
+            assert_eq!(
+                living.effect_blend_factor(game, effect_key("speed"), 0.5),
+                Some(0.0)
+            );
         }
         // A duration of one expires before its first blend tick can rise.
         for duration in [0, 1] {
@@ -138,25 +144,25 @@ fn ordinary_effect_infinite_partial_ticks_follow_the_blend_direction() {
         for partial in [f32::INFINITY, f32::NEG_INFINITY] {
             assert!(
                 living
-                    .effect_blend_factor(game, "speed", partial)
+                    .effect_blend_factor(game, effect_key("speed"), partial)
                     .unwrap()
                     .is_nan()
             );
         }
         game.tick_client_effects();
         assert_eq!(
-            living.effect_blend_factor(game, "speed", f32::INFINITY),
+            living.effect_blend_factor(game, effect_key("speed"), f32::INFINITY),
             Some(f32::INFINITY)
         );
         assert_eq!(
-            living.effect_blend_factor(game, "speed", f32::NEG_INFINITY),
+            living.effect_blend_factor(game, effect_key("speed"), f32::NEG_INFINITY),
             Some(f32::NEG_INFINITY)
         );
         game.tick_client_effects();
         for partial in [f32::INFINITY, f32::NEG_INFINITY] {
             assert!(
                 living
-                    .effect_blend_factor(game, "speed", partial)
+                    .effect_blend_factor(game, effect_key("speed"), partial)
                     .unwrap()
                     .is_nan()
             );
@@ -164,17 +170,17 @@ fn ordinary_effect_infinite_partial_ticks_follow_the_blend_direction() {
         update(game, speed, 1, 10);
         game.tick_client_effects();
         assert_eq!(
-            living.effect_blend_factor(game, "speed", f32::INFINITY),
+            living.effect_blend_factor(game, effect_key("speed"), f32::INFINITY),
             Some(f32::NEG_INFINITY)
         );
         assert_eq!(
-            living.effect_blend_factor(game, "speed", f32::NEG_INFINITY),
+            living.effect_blend_factor(game, effect_key("speed"), f32::NEG_INFINITY),
             Some(f32::INFINITY)
         );
         remove(game, speed);
         for partial in [f32::INFINITY, f32::NEG_INFINITY] {
             assert_eq!(
-                living.effect_blend_factor(game, "speed", partial),
+                living.effect_blend_factor(game, effect_key("speed"), partial),
                 Some(0.0)
             );
         }

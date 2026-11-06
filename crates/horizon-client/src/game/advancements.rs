@@ -722,7 +722,8 @@ impl Game<'_> {
                 .extra
                 .effects
                 .iter()
-                .map(|&(id, duration, amplifier)| {
+                .map(|effect| {
+                    let (id, duration, amplifier) = (effect.id, effect.duration, effect.amplifier);
                     let id = horizon_client::brewing::namespaced(id);
                     (id.to_owned(), amplifier, duration)
                 })
@@ -2668,7 +2669,14 @@ mod tests {
         let speed_two = serde_json::json!({"minecraft:speed": {"amplifier": 2}});
         assert!(!matches(&game, 32300, speed_two.clone()));
         game.mobs[0].add_effect_with("minecraft:speed", -1, 2, false, false);
-        assert_eq!(game.mobs[0].extra.effects, vec![("minecraft:speed", -1, 2)]);
+        assert_eq!(
+            game.mobs[0].extra.effects,
+            vec![horizon_client::mobs::StoredEffect::new(
+                "minecraft:speed",
+                -1,
+                2
+            )]
+        );
         assert_eq!(
             game.entity_view_of(Target::Mob(32300)).effects,
             vec![("minecraft:speed".to_owned(), 2, -1)]

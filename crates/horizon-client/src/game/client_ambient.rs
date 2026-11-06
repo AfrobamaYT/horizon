@@ -294,8 +294,8 @@ impl Game<'_> {
                     .extra
                     .effects
                     .iter()
-                    .filter(|e| !m.extra.hidden_effects.contains(&e.0))
-                    .filter_map(|e| effect_particle(e.0, m.extra.ambient_effects.contains(&e.0)))
+                    .filter(|e| !m.extra.hidden_effects.contains(&e.id))
+                    .filter_map(|e| effect_particle(e.id, m.extra.ambient_effects.contains(&e.id)))
                     .collect();
                 swirl(
                     &mut self.particles,

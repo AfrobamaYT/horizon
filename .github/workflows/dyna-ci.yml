@@ -88,17 +88,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/ci/dyna_ci_pool_watch.py
 
-  # Tests share verify rather than taking one runner per check. Lint runs separately on GitHub's pool.
-  #
-  # Dyna's slot shares a 40 GiB persistent cache between verify and launcher; the pool wipes it above that size.
-  # Where: Dyna when its switch and lease allow it, otherwise GitHub's runners. With the repository variable
-  # SELF_HOSTED_CI=all (for when that pool is full: their 4 CPUs
-  # are about one GitHub runner, docs/ci-runners.md), main's pushes and this repository's own pull requests run on
-  # playhorizon's checks runners (label playhorizon-ci); a fork's pull request never does (and the runners refuse it
-  # themselves). There the build folder persists (CARGO_TARGET_DIR, outside the checkout), so the apt packages,
-  # Python and the Rust cache steps are GitHub's only.
-  # Formatting, clippy and the mod API's wasm32 check on GitHub's own runners, in parallel with verify's tests on
-  # Dyna's: the fork's account has its own hosted pool, so a run's wall time is the longer of the two, not the sum.
+  # Lint and verify use separate Dyna slots when the pool is available; each slot's build folder persists.
+  # Outside contributors and pool-down runs stay on GitHub's runners with snapshot caches.
   lint:
     # Dyna's large runner for main's pushes and this repository's own pull requests (owner, 2026-11-05): its
     # build folder persists, so clippy re-checks only what changed. A fork's pull request, or a run while the
@@ -111,6 +102,8 @@ jobs:
     env:
       # Keep incremental check state too: changed workspace crates can reuse unchanged queries.
       CARGO_INCREMENTAL: 1
+      # Like verify, avoid scheduling eight large rustc processes inside a 16 GiB slot.
+      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j4' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -140,9 +133,8 @@ jobs:
             # The slot's build folder persists between jobs; point the checkout's target at it.
             mkdir -p "$CARGO_TARGET_DIR"
             ln -s "$CARGO_TARGET_DIR" target
-            # sccache can't wrap clippy-driver (`sccache clippy-driver rustc -vV` fails); the persistent
-            # build folder is the cache here, so lint runs without the runner's wrapper.
-            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+            # Keep clippy-driver direct, but reuse sccache for ordinary dependency compilations.
+            echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/tools/ci/clippy-cache.sh" >> "$GITHUB_ENV"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
       - name: Lint cache toolchain
@@ -197,14 +189,17 @@ jobs:
         id: native-lint
         run: |
           cargo +stable fmt --all -- --check
-          cargo +stable clippy --workspace --all-targets -- -D warnings
+          cargo +stable clippy $JOBS --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
         if: steps.rust.outputs.required != 'false'
         id: server-lint
-        run: cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
+        run: cargo +stable clippy $JOBS -p horizon-client --all-targets --no-default-features -- -D warnings
       - name: The mod API builds for wasm32
         if: steps.rust.outputs.required != 'false'
-        run: cargo +stable check -p horizon-mod-api --target wasm32-unknown-unknown --locked
+        run: cargo +stable check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked
+      - name: Report lint compiler cache
+        if: ${{ !cancelled() && steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
+        run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
       # Publish native work even if the independent wasm check fails. Pull requests only read
       # main's snapshots; they can never replace a cache subsequently consumed by main.
       - uses: actions/cache/save@v4
