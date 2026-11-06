@@ -23,10 +23,10 @@ fn call_context(body: &syn::Block, expr: &Expr) -> String {
             if !covers(stmt.span(), expr) {
                 continue;
             }
-            if let syn::Stmt::Expr(inner, _) = stmt {
-                if let Some(found) = nested(inner, expr, path) {
-                    return Some(found);
-                }
+            if let syn::Stmt::Expr(inner, _) = stmt
+                && let Some(found) = nested(inner, expr, path)
+            {
+                return Some(found);
             }
             return Some(format!("{path}|{}", stmt.to_token_stream()));
         }
