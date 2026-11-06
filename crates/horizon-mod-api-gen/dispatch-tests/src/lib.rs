@@ -85,6 +85,8 @@ mod tests {
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
         pub(super) struct NativeActiveEffect;
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(super) struct EffectKey(pub(super) u32);
         #[derive(Debug, PartialEq)]
         pub(super) enum ScreenOpening {
             Cancel,
@@ -242,6 +244,9 @@ mod tests {
         pub(super) struct ChannelRef;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
+        pub(super) struct CommandInvocation {
+            pub(super) amount: i32,
+        }
         #[derive(Clone, Copy)]
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
@@ -735,6 +740,40 @@ mod tests {
     }
 
     #[test]
+    fn command_dispatch_forwards_typed_input_to_player_and_console_listeners() {
+        struct Observer(Arc<Mutex<Vec<i32>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Observer {
+            fn perform_command(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut PerformCommandEvent<'_>,
+            ) -> Flow {
+                self.0.lock().unwrap().push(event.command.amount);
+                Flow::Cancel
+            }
+            fn perform_console_command(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut PerformConsoleCommandEvent<'_>,
+            ) -> Flow {
+                self.0.lock().unwrap().push(-event.command.amount);
+                Flow::Cancel
+            }
+        }
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        install(vec![ModEntry::new("commands", Box::new(Observer(calls.clone())))].into());
+        let command = CommandInvocation { amount: 37 };
+        let mut ran = false;
+        dispatch_perform_command(&mut TestHost, &NativeServerPlayer, &command, &mut ran);
+        assert!(ran);
+        ran = false;
+        dispatch_perform_console_command(&mut TestHost, &command, &mut ran);
+        assert!(ran);
+        assert_eq!(*calls.lock().unwrap(), vec![37, -37]);
+    }
+
+    #[test]
     fn advancement_progress_reports_grant_and_revoke_identity() {
         struct Observer(Arc<Mutex<Vec<NativeProgressType>>>);
         #[mod_api::__subscriptions]
@@ -894,8 +933,12 @@ mod tests {
         fn should_apply_effect_tick_this_tick(
             &self,
             _: &dyn Host,
-            event: &mut ShouldApplyEffectTickThisTickEvent<'_>,
+            event: &mut ShouldApplyEffectTickThisTickEvent,
         ) {
+            assert_eq!(
+                (event.effect, event.tick_count, event.amplifier),
+                (EffectKey(7), 19, 2)
+            );
             event.apply = !event.apply;
             self.calls.lock().unwrap().push(self.id);
         }
@@ -1279,6 +1322,46 @@ mod tests {
     }
 
     #[test]
+    fn beacon_dispatch_preserves_optional_effect_keys() {
+        struct Beacon(Arc<Mutex<Vec<[Option<EffectKey>; 2]>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Beacon {
+            fn player_change_beacon_effect(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut PlayerChangeBeaconEffectEvent<'_>,
+            ) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push([event.primary, event.secondary]);
+            }
+        }
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        install(vec![ModEntry::new("beacon", Box::new(Beacon(calls.clone())))].into());
+        dispatch_player_change_beacon_effect(
+            &mut TestHost,
+            42,
+            "player",
+            [1, 2, 3],
+            Some(EffectKey(7)),
+            None,
+        );
+        dispatch_player_change_beacon_effect(
+            &mut TestHost,
+            43,
+            "other",
+            [4, 5, 6],
+            None,
+            Some(EffectKey(11)),
+        );
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [[Some(EffectKey(7)), None], [None, Some(EffectKey(11))]],
+        );
+    }
+
+    #[test]
     fn dispatch_contracts() {
         struct Weapon;
         #[mod_api::__subscriptions]
@@ -1365,7 +1448,7 @@ mod tests {
         assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
         let mut apply = false;
         calls.lock().unwrap().clear();
-        dispatch_should_apply_effect_tick_this_tick(&host, "effect", 0, 0, &mut apply);
+        dispatch_should_apply_effect_tick_this_tick(&host, EffectKey(7), 19, 2, &mut apply);
         assert!(!apply);
         assert_eq!(*calls.lock().unwrap(), [1, 2]);
         let source = HurtSource {
