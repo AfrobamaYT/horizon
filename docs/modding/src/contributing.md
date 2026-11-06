@@ -23,6 +23,15 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
 - **A guide page:** `docs/modding/src/`. Code in a page is `{{#include}}`d from `docs/modding/examples`, which
   compiles, so a change to the API that breaks an example fails the build.
 - **A mod API change** updates its fragment `doc` and any page it affects in the same PR.
+- **Trait-mod and native-mod concepts:** edit one source in `concepts/trait-mods/` or
+  `how-to/native-mods/`. Sorted filenames set reading order; the leading `<!-- chapter: Title -->`
+  supplies the navigation title. New files are discovered automatically, without a shared list edit.
+  The old pages are assembled from these sources to preserve published links and heading anchors.
+  Do not append prose to the aggregate pages or remove an existing heading anchor.
+  Each `legacy-anchors.txt` freezes the pre-split published anchors; never extend it per new concept.
+  Optional `<!-- separator: N -->` metadata preserves original inter-section blank lines in aggregates
+  without trailing blank lines in source files; new pages default to one blank line.
+  Use relative links (inline or reference-style); root-relative links are refused.
 - `src/llms.txt` is the index for agents; keep it in step with `SUMMARY.md`.
 
 Build the book with `mdbook build docs/modding` and the reference with `cargo doc -p horizon-mod-api --no-deps`.
