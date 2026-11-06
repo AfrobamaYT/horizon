@@ -351,7 +351,11 @@ impl Game<'_> {
     /// shows; `screen_init_post` follows. With no world open nothing else can
     /// show, so a mod's `Cancel` or its own screen doesn't keep it shut (a
     /// mod's screen can't open over the title).
-    pub(super) fn show_title(&mut self, title: horizon_client::title::Title) {
+    pub(super) fn show_title(&mut self, mut title: horizon_client::title::Title) {
+        title.set_rule_registry(Arc::new(mod_api::__private::game_rule_registry()));
+        self.show_title_with_registry(title);
+    }
+    pub(super) fn show_title_with_registry(&mut self, title: horizon_client::title::Title) {
         if !self.screen_hooks_heard() {
             self.title = Some(title);
             return;
@@ -3349,8 +3353,10 @@ impl Game<'_> {
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.
     pub(super) fn list_native_mods(&mut self) {
-        let mut mods = Vec::new();
-        self.native_mods(&mut mods);
+        let registered = super::mods::collect_key_mappings(
+            self.options.execution_role,
+            mod_api::__private::key_mappings(),
+        );
         let native = self.mods.native.clone();
         // Wasm proxies are installed in the same dispatch table as native mods. Their rows
         // need the same live switch and settings page, not a frozen content-only toggle.
@@ -3383,14 +3389,19 @@ impl Game<'_> {
         for mut row in rows {
             let mut buttons = Vec::new();
             self.native_settings(&row.id, &mut buttons);
-            row.native = Some(NativePage {
-                keys: mods
-                    .iter_mut()
-                    .find(|page| page.id == row.id)
-                    .map(|page| std::mem::take(&mut page.keys))
-                    .unwrap_or_default(),
-                buttons,
-            });
+            let mappings: Vec<KeyMapping> = registered
+                .iter()
+                .filter(|(owner, _)| *owner == row.id)
+                .map(|(_, k)| KeyMapping {
+                    id: k.id.clone(),
+                    label: k.label.clone(),
+                    key: k.key.clone(),
+                    modifiers: k.modifiers.bits,
+                    context: k.context,
+                    category: k.category.clone(),
+                })
+                .collect();
+            row.native = Some(NativePage { mappings, buttons });
             self.settings.mods.installed.push(row);
         }
     }

@@ -993,7 +993,7 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
-    mod_list::{self, Installed, NativePage},
+    mod_list::{self, Installed, KeyMapping, NativePage},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
     text::Text,
@@ -1036,8 +1036,8 @@ use mod_api::{
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
-    NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
-    NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    NativeItemFished, NativeLootDrops, NativeMinimap, NativePanelEvent, NativePortalShape,
+    NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use std::{
     collections::HashMap,

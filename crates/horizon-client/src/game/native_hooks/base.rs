@@ -1091,10 +1091,6 @@ impl Game<'_> {
     ) {
         Self::fire_standalone_models(context, models);
     }
-    /// Options > Mods lists the native mods: push yours.
-    pub(in crate::game) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
-        self.fire_mods(mods);
-    }
     /// The buttons of mod `mod_id`'s settings page, under its keys: push
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
@@ -5031,22 +5027,21 @@ impl Game<'_> {
             day_time: self.world.day_time,
         })
     }
-    /// The key the player chose for a mod's key `name`, else `default`
-    /// (`key.keyboard.z`), as the WebAssembly mods' keys were kept
-    /// (`key.<mod id>.<name>` in `horizon-mods.txt`).
+    /// The saved key and modifiers for an owner-bound registration, or its declared default.
     pub(in crate::game) fn native_mod_key(
         &self,
         mod_id: &str,
         name: &str,
-        default: &str,
-    ) -> String {
-        let chosen = self
-            .settings
-            .mods
-            .keys
-            .get(mod_id)
-            .and_then(|k| k.get(name));
-        chosen.map_or(default, String::as_str).to_owned()
+    ) -> Option<(String, ClientModifiers)> {
+        let (_, registration) = mod_api::__private::key_mappings()
+            .iter()
+            .find(|(owner, mapping)| *owner == mod_id && mapping.id == name)?;
+        let (key, modifiers) = self.settings.mods.binding(
+            mod_id,
+            name,
+            (&registration.key, registration.modifiers.bits),
+        );
+        Some((key, ClientModifiers::new(modifiers)))
     }
     /// The instance (game) folder, which its players share: `saves/`,
     /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the
