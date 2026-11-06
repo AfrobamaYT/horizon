@@ -589,10 +589,12 @@ impl GameLevel<'_> {
                 self.world.block_entities.get(&key),
                 Some(BlockEntity::Mod(m)) if !m.id().is_empty()
             )
-            && let Some(BlockEntity::Mod(entity)) = self.world.block_entities.take(&key)
+            && let Some((lease, BlockEntity::Mod(entity))) = self.world.block_entities.take(&key)
         {
             self.native_pre_remove_side_effects(pos, old, &entity, &mut part_drops);
-            self.world.block_entities.put(key, BlockEntity::Mod(entity));
+            self.world
+                .block_entities
+                .put(lease, BlockEntity::Mod(entity));
         }
         let entity = self.world.block_entities.remove(&key);
         self.world.block_names.remove(&key);
