@@ -2700,6 +2700,19 @@ impl Game<'_> {
     ) {
         self.fire_item_model_property(property, stack, value);
     }
+    /// Client-side value of a numeric item model property a mod registered
+    /// (`register_range_select_item_model_property`), asked each time a `minecraft:range_dispatch`
+    /// on it picks a branch. Set value only for a property your mod owns; unanswered it stays 0.
+    /// The model's `scale` is applied afterwards. The borrowed stack is the one being resolved,
+    /// including nested bundle items.
+    pub(super) fn native_item_model_range_property(
+        &self,
+        property: &str,
+        stack: &StackView,
+        value: &mut f32,
+    ) {
+        self.fire_item_model_range_property(property, stack, value);
+    }
     /// The frame rate this window is about to be held to: Max Framerate after the
     /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
     /// window has focus, `minimized` whether it is minimised and `in_world` whether a world
@@ -3735,6 +3748,15 @@ impl Game<'_> {
         entries: &mut Vec<DebugEntry>,
     ) {
         Self::fire_register_debug_entries(context, entries);
+    }
+    /// The numeric item model properties a mod adds (NeoForge's
+    /// `RegisterRangeSelectItemModelPropertyEvent`): push each id, `<mod id>:<path>`.
+    /// Asked once at start on the client, before resources load.
+    pub(super) fn native_register_range_select_item_model_property(
+        context: &mod_api::RegistrationContext,
+        properties: &mut Vec<String>,
+    ) {
+        Self::fire_register_range_select_item_model_property(context, properties);
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
