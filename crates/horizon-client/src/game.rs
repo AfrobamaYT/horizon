@@ -2539,33 +2539,19 @@ pub struct UiResources {
     pub panorama: Arc<horizon_client::gfx::panorama::Faces>,
 }
 impl UiResources {
-    /// From a resource root layering packs over `defaults`, the game's own
-    /// resources (`root` itself when no pack is on).
-    pub fn load(root: &std::path::Path, defaults: &std::path::Path) -> Result<Self> {
+    /// The resolved resource generation, including the base layer and pack filters.
+    pub fn load(root: &horizon_assets::resource_source::ResourceSource) -> Result<Self> {
         // The title screen waits for both: the panorama's six faces decode
         // beside the atlas.
         std::thread::scope(|scope| {
             let panorama = named_scope(scope, "panorama", || {
                 startup::time("ui.panorama", || {
-                    horizon_client::gfx::panorama::Faces::load(
-                        &horizon_assets::resource_source::ResourceSource::directory(
-                            root.to_path_buf(),
-                        ),
-                        &horizon_assets::resource_source::ResourceSource::directory(
-                            defaults.to_path_buf(),
-                        ),
-                    )
+                    horizon_client::gfx::panorama::Faces::load(root, root)
                 })
             });
             let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
             let atlas = startup::time("ui.atlas", || {
-                HudAtlas::build_over_with_image(
-                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                    &horizon_assets::resource_source::ResourceSource::directory(
-                        defaults.to_path_buf(),
-                    ),
-                    mod_image,
-                )
+                HudAtlas::build_over_with_image(root, root, mod_image)
             });
             let panorama = panorama
                 .join()
@@ -2578,11 +2564,9 @@ impl UiResources {
     }
     /// What a server's game holds, since it draws nothing: the font, which books
     /// and chat measure with, and a one-pixel panorama.
-    pub fn server(root: &std::path::Path) -> Result<Self> {
+    pub fn server(root: &horizon_assets::resource_source::ResourceSource) -> Result<Self> {
         Ok(Self {
-            atlas: HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
-                root.to_path_buf(),
-            ))?,
+            atlas: HudAtlas::fonts(root)?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([0; 4])),
         })
     }
@@ -2611,7 +2595,7 @@ impl PackResources {
     /// Everything a pack overlay at `root` provides, over `assets` and `render`
     /// loaded from it.
     fn load(
-        root: &std::path::Path,
+        root: &horizon_assets::resource_source::ResourceRoot,
         assets: Arc<Assets>,
         render: Arc<RenderAssets>,
         facts: &BlockFacts,
@@ -2619,10 +2603,10 @@ impl PackResources {
         light: Arc<LightTables>,
         item_data: &horizon_world::item_defaults::ItemData,
     ) -> Result<Self> {
-        let visibility = models::load_visibility(root, assets.registry)?;
+        let visibility = models::load_visibility(root.prepared(), assets.registry)?;
         let tables = Arc::new(MeshTables::new(&assets, &render, facts, visibility)?);
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
-            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            root,
             render.model_library.clone(),
             item_data,
         )?;
@@ -2655,7 +2639,7 @@ impl PackResources {
     /// The pack tables over their parts, which `load_resources` builds on
     /// separate workers.
     fn assemble(
-        root: &std::path::Path,
+        root: &horizon_assets::resource_source::ResourceRoot,
         assets: Arc<Assets>,
         render: Arc<RenderAssets>,
         tables: Arc<MeshTables>,
@@ -2683,16 +2667,10 @@ impl PackResources {
             assets,
             render,
             item_renderer: Arc::new(item_renderer),
-            source: horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            names: Arc::new(Names::load(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            )),
-            clouds: Arc::new(load_clouds(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            )),
-            forcefield: Arc::new(load_forcefield(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            )),
+            source: root.source().clone(),
+            names: Arc::new(Names::load(root.source())),
+            clouds: Arc::new(load_clouds(root.source())),
+            forcefield: Arc::new(load_forcefield(root.source())),
         }
     }
 }
@@ -20794,9 +20772,13 @@ impl<'a> Game<'a> {
                 .join(".horizon-title"),
             horizon_client::save::LevelShape::OVERWORLD,
         ));
-        let prepared = prepared
-            .map(Ok)
-            .unwrap_or_else(|| GameCpuResources::load(&root))?;
+        let prepared = prepared.map(Ok).unwrap_or_else(|| {
+            GameCpuResources::load(&horizon_assets::resource_source::ResourceRoot::new(
+                root.clone(),
+                packs::cache_dir(),
+                pack.source.clone(),
+            ))
+        })?;
         let world = World::new(res.facts().air, 0);
         let tutorial = tutorial::Tutorial::new(tutorial::Step::from_option(
             settings.file.int("tutorialStep"),
@@ -20806,7 +20788,7 @@ impl<'a> Game<'a> {
         let now = Instant::now();
         let look = options.look;
         let particles = horizon_client::particles::ParticleEngine::new(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            &pack.source,
             &gui.atlas.sprites,
             &gui.atlas.translucent,
         );
@@ -21400,34 +21382,21 @@ impl EntityModels {
     }
 }
 impl GameCpuResources {
-    fn load(root: &std::path::Path) -> Result<Self> {
+    fn load(resources: &horizon_assets::resource_source::ResourceRoot) -> Result<Self> {
+        let root = resources.prepared();
         let document = horizon_client::mobs::EntityModelDocument::load(root).ok();
         let model = |key| document.as_ref().and_then(|document| document.model(key));
         Ok(Self {
             painting_variants: paintings::PaintingVariants::load(root),
-            frame_model: frames::bake_frame(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                "item_frame",
-            ),
-            glow_frame_model: frames::bake_frame(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                "glow_item_frame",
-            ),
-            map_frame_model: frames::bake_frame(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                "item_frame_map",
-            ),
-            glow_map_frame_model: frames::bake_frame(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                "glow_item_frame_map",
-            ),
+            frame_model: frames::bake_frame(resources.source(), "item_frame"),
+            glow_frame_model: frames::bake_frame(resources.source(), "glow_item_frame"),
+            map_frame_model: frames::bake_frame(resources.source(), "item_frame_map"),
+            glow_map_frame_model: frames::bake_frame(resources.source(), "glow_item_frame_map"),
             armor_stand_assets: armor_stands::ArmorStandAssets::load(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                resources.source(),
                 document.as_ref(),
             ),
-            waypoint_styles: horizon_client::locator_bar::WaypointStyles::load(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            ),
+            waypoint_styles: horizon_client::locator_bar::WaypointStyles::load(resources.source()),
             boat_models: boats::BoatModels::load(document.as_ref()),
             cart_models: minecarts::CartModels::load(document.as_ref()),
             crystal_model: model("minecraft:end_crystal#main"),
@@ -22125,12 +22094,13 @@ struct GameplayTables {
 /// fails the load; the inner one is the packs' (the registry or the block
 /// models), which `load_resources` rolls back from.
 fn load_core(
-    root: &std::path::Path,
+    resources: &horizon_assets::resource_source::ResourceRoot,
     role: execution_role::ExecutionRole,
     parallel: bool,
     progress: &Progress,
     launch_world: Option<&str>,
 ) -> std::result::Result<std::result::Result<CoreTables, String>, String> {
+    let root = resources.prepared();
     let headless = !role.is_client();
     // The model library reads every file under `assets/` and needs no
     // block registry, so it is parsed beside `Assets::load` rather than
@@ -22142,9 +22112,7 @@ fn load_core(
         let models = (parallel && !headless).then(|| {
             scope.spawn(|| {
                 let _step = startup::step("core.models_parse");
-                horizon_client::model_library::ParsedModels::load(
-                    &horizon_client::resource_source::ResourceSource::directory(root.to_owned()),
-                )
+                horizon_client::model_library::ParsedModels::load(resources.source())
             })
         });
         let assets = startup::time("core.assets", || Assets::load(root));
@@ -22168,22 +22136,11 @@ fn load_core(
                 let parsed_models = parsed_models;
                 let render = startup::time("core.block_models_sprites", || {
                     if headless {
-                        assets.reload_for_server(
-                            &horizon_assets::resource_source::ResourceRoot::directory(
-                                root.to_path_buf(),
-                            ),
-                        )
+                        assets.reload_for_server(resources)
                     } else if let Some(parsed) = parsed_models {
-                        assets.reload_with_models(
-                            &horizon_assets::resource_source::ResourceRoot::directory(
-                                root.to_path_buf(),
-                            ),
-                            parsed,
-                        )
+                        assets.reload_with_models(resources, parsed)
                     } else {
-                        assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
-                            root.to_path_buf(),
-                        ))
+                        assets.reload(resources)
                     }
                 })
                 .map_err(|e| e.to_string())?;
@@ -22195,19 +22152,11 @@ fn load_core(
                 let item_renderer = startup::time("core.item_models", || {
                     if headless {
                         horizon_client::item_render::ItemRenderer::load_for_server(
-                            &horizon_assets::resource_source::ResourceRoot::directory(
-                                root.to_path_buf(),
-                            ),
-                            library,
-                            item_data,
+                            resources, library, item_data,
                         )
                     } else {
                         horizon_client::item_render::ItemRenderer::load_with_library(
-                            &horizon_assets::resource_source::ResourceRoot::directory(
-                                root.to_path_buf(),
-                            ),
-                            library,
-                            item_data,
+                            resources, library, item_data,
                         )
                     }
                 })
@@ -22227,12 +22176,8 @@ fn load_core(
             });
             let biomes = Step::spawn(scope, parallel, "biomes", || {
                 let biomes = Arc::new(
-                    startup::time("core.biomes", || {
-                        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
-                            root.to_path_buf(),
-                        ))
-                    })
-                    .map_err(|e| e.to_string())?,
+                    startup::time("core.biomes", || Biomes::load(resources))
+                        .map_err(|e| e.to_string())?,
                 );
                 // A launch that names a world: its data preload needs only the
                 // block registry and the biomes, so it starts here rather than
@@ -22249,12 +22194,8 @@ fn load_core(
                 Ok::<_, String>(biomes)
             });
             let environment = Step::spawn(scope, parallel, "environment", || {
-                startup::time("core.environment", || {
-                    Environment::load(&horizon_assets::resource_source::ResourceSource::directory(
-                        root.to_path_buf(),
-                    ))
-                })
-                .map_err(|e| e.to_string())
+                startup::time("core.environment", || Environment::load(resources.source()))
+                    .map_err(|e| e.to_string())
             });
             let collision = Step::spawn(scope, parallel, "collision", || {
                 startup::time("core.collision", || collisions::load(root, registry))
@@ -22362,12 +22303,12 @@ fn load_resources(
     let mut pack_error = None;
     // A dedicated server builds only the font (UiResources::server), as the
     // integrated server's game does: the full atlas and panorama are 144 MB.
-    let load_ui = |root: &std::path::Path| {
+    let load_ui = |source: &horizon_assets::resource_source::ResourceSource| {
         let _step = startup::step("ui.load");
         if headless {
-            UiResources::server(root)
+            UiResources::server(source)
         } else {
-            UiResources::load(root, vanilla_root)
+            UiResources::load(source)
         }
     };
     // The menu bundle loads on this thread while workers build the world
@@ -22387,21 +22328,24 @@ fn load_resources(
             Some(ui)
         }
     };
-    let (core, loaded_gui) = loop {
+    let (core, loaded_gui, resolved) = loop {
+        let resolved = horizon_assets::resource_source::ResourceRoot::directory(root.clone());
         let (ui, core) = std::thread::scope(|scope| {
             let core = Step::spawn(scope, parallel, "core", || {
                 // A failed pack starts core again from the game's own
                 // resources, which the world's preload must read: with packs
                 // it waits for the core that loaded.
                 let early = launch_world.filter(|_| root == vanilla_root);
-                startup::time("core", || load_core(&root, role, parallel, progress, early))
+                startup::time("core", || {
+                    load_core(&resolved, role, parallel, progress, early)
+                })
             });
-            let ui = load_ui(&root).map(|ui| offer(ui, &root));
+            let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
             (ui, core.join())
         });
         let packs = root != vanilla_root;
         let failure = match (ui, core) {
-            (Ok(gui), Ok(Ok(core))) => break (core, gui),
+            (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved),
             (Err(e), _) if packs => e.to_string(),
             (_, Ok(Err(e))) if packs => e,
             (_, Ok(Err(e))) => {
@@ -22454,7 +22398,7 @@ fn load_resources(
     })?);
     let pack_step = startup::step("pack.assemble");
     let pack = PackResources::assemble(
-        &root,
+        &resolved,
         assets.clone(),
         render,
         tables,
@@ -22466,9 +22410,7 @@ fn load_resources(
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(4);
     if !menu {
-        horizon_client::ui::load_metadata(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-        );
+        horizon_client::ui::load_metadata(resolved.source());
         horizon_client::lang::set(horizon_client::lang::Language::load(
             &[&pack.source],
             &settings.language,
@@ -22503,7 +22445,7 @@ fn load_resources(
     let visibility = pack.context.tables.visibility.clone();
     let rest_loader = if menu {
         let resources = resources.clone();
-        let root = root.clone();
+        let resource_root = resolved.clone();
         let vanilla_root = vanilla_root.to_owned();
         let rest_progress = progress.clone();
         let progress = progress.clone();
@@ -22512,7 +22454,7 @@ fn load_resources(
             .spawn(move || {
                 let _step = startup::step("rest");
                 let rest = load_world_rest(
-                    &root,
+                    &resource_root,
                     &resources,
                     &assets,
                     &behaviour_json,
@@ -22541,7 +22483,7 @@ fn load_resources(
         })
     } else {
         let rest = load_world_rest(
-            &root,
+            &resolved,
             &resources,
             &assets,
             &behaviour_json,
@@ -22568,7 +22510,7 @@ fn load_resources(
                     prepare_renderer_textures(&pack)
                 })
             });
-            let game_cpu = startup::time("handoff.game_cpu", || GameCpuResources::load(&root));
+            let game_cpu = startup::time("handoff.game_cpu", || GameCpuResources::load(&resolved));
             (game_cpu, textures.join())
         });
         let game_cpu = match game_cpu {
@@ -22598,7 +22540,7 @@ fn load_resources(
         Vec::new()
     } else {
         match client_reload::stage_client_reload(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            resolved.source(),
             client_reload::register_startup_client_reload_listeners(),
         ) {
             Ok(steps) => steps,
@@ -22653,7 +22595,7 @@ fn write_prepared_files(root: PathBuf) {
 }
 
 fn load_world_rest(
-    root: &std::path::Path,
+    resource_root: &horizon_assets::resource_source::ResourceRoot,
     resources: &Resources,
     assets: &Assets,
     behaviour_json: &serde_json::Value,
@@ -22665,6 +22607,7 @@ fn load_world_rest(
     // renderer or animate tables (client-side display ticks).
     draws: bool,
 ) -> Result<WorldRest> {
+    let root = resource_root.prepared();
     let facts = resources.facts();
     let biomes = resources.biomes();
     let threads = resources.threads();
@@ -22714,7 +22657,7 @@ fn load_world_rest(
             return Ok(Default::default());
         }
         let mut renderer = BlockEntityRenderer::load_with_visibility(
-            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            resource_root,
             registry,
             visibility,
             resources.item_defaults(),
@@ -22742,15 +22685,9 @@ fn load_world_rest(
         .into_iter()
         .map(|(k, v)| (k, Arc::new(v)))
         .collect();
-        let mut mob_data = horizon_client::mobs::MobData::load(
-            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
-            facts,
-        );
+        let mut mob_data = horizon_client::mobs::MobData::load(resource_root, facts);
         mob_data.cem = std::sync::RwLock::new(Arc::new(if draws {
-            horizon_client::mobs::cem::CemModels::load(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                &mob_types,
-            )
+            horizon_client::mobs::cem::CemModels::load(resource_root.source(), &mob_types)
         } else {
             horizon_client::mobs::cem::CemModels::default()
         }));
@@ -22829,15 +22766,11 @@ fn load_world_rest(
         music: horizon_client::music::MusicTables::load(root),
         ambient: horizon_client::ambience::AmbientTables::load(root),
         nether_environment: Environment::load_dimension(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            resource_root.source(),
             "the_nether",
             false,
         )?,
-        end_environment: Environment::load_dimension(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            "the_end",
-            false,
-        )?,
+        end_environment: Environment::load_dimension(resource_root.source(), "the_end", false)?,
         behaviours: behaviours?,
         mob_types,
         mob_data,
@@ -23618,16 +23551,9 @@ impl Loading {
         let renderer_ms = renderer_at.elapsed().as_millis();
         // Audio is created on the main thread, after the core is ready.
         let audio = if !options.execution_role.is_client() {
-            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                options.resources.to_path_buf(),
-            ))
+            Audio::silent(&loaded.pack.source)
         } else {
-            Audio::with_device(
-                &horizon_assets::resource_source::ResourceSource::directory(
-                    options.resources.to_path_buf(),
-                ),
-                &self.settings.sound_device,
-            )
+            Audio::with_device(&loaded.pack.source, &self.settings.sound_device)
         };
         let pack_error = loaded.pack_error.or_else(|| self.pack_error.take());
         // The game borrows its shared resources for the process's lifetime,
@@ -23976,16 +23902,9 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     let gui = loaded.gui.ok_or("missing menu bundle")?;
     options.resources = loaded.root.clone();
     let audio = if !options.execution_role.is_client() || options.headless {
-        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-            options.resources.to_path_buf(),
-        ))
+        Audio::silent(&loaded.pack.source)
     } else {
-        Audio::with_device(
-            &horizon_assets::resource_source::ResourceSource::directory(
-                options.resources.to_path_buf(),
-            ),
-            &early_settings.sound_device,
-        )
+        Audio::with_device(&loaded.pack.source, &early_settings.sound_device)
     };
     let resources = loaded.resources;
     let game = start_game(
@@ -24200,7 +24119,10 @@ mod startup_cpu_tests {
         .unwrap();
         let worker_root = root.clone();
         let prepared = std::thread::spawn(move || {
-            GameCpuResources::load(&worker_root).map_err(|error| error.to_string())
+            GameCpuResources::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                worker_root,
+            ))
+            .map_err(|error| error.to_string())
         })
         .join()
         .unwrap()
@@ -24221,7 +24143,12 @@ mod startup_cpu_tests {
             "minecraft:stone"
         );
         // No documents from the old generation remain available to reload.
-        assert!(GameCpuResources::load(&root).is_err());
+        assert!(
+            GameCpuResources::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone()
+            ))
+            .is_err()
+        );
     }
 }
 

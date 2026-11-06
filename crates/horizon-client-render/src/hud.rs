@@ -3693,7 +3693,10 @@ mod tests {
             &[[9, 9, 9, 255]],
             None,
         );
-        let atlas = HudAtlas::build(&root).unwrap();
+        let atlas = HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+            root.clone(),
+        ))
+        .unwrap();
         let _ = fs::remove_dir_all(&root);
         let rect = atlas.sprites["gui/sprites/icon/music_notes"];
         // One frame, not the whole 16x64 strip squeezed into a slot.

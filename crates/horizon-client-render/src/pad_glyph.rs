@@ -205,7 +205,10 @@ mod tests {
     use super::*;
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&crate::resource_source::ResourceSource::indexed(
+            Default::default(),
+        ))
+        .unwrap()
     }
 
     fn file(button: Button, style: GlyphStyle) -> Option<&'static str> {

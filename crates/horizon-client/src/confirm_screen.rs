@@ -274,7 +274,10 @@ mod tests {
     #[test]
     fn only_the_button_declared_no_gets_its_job() {
         use crate::widgets::{self, Action, DeclaredAction};
-        let atlas = HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&crate::resource_source::ResourceSource::indexed(
+            Default::default(),
+        ))
+        .unwrap();
         let (title, message) = (Text::literal("Title"), Text::literal("Message"));
         let labels = [
             Text::literal("Yes"),

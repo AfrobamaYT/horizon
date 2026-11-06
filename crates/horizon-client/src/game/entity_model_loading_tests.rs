@@ -333,7 +333,14 @@ fn equipment_layers_read_resolved_resources_and_retain_the_source() {
         "assets/example/equipment/nested/cloth.json".into(),
         Resource::bytes(br#"{"layers":{"humanoid":[{"texture":"example:cloth"}]}}"#.to_vec()),
     )]));
-    let assets = ArmorStandAssets::load(&source, None);
+    let previous = ResourceSource::indexed(std::collections::BTreeMap::from([(
+        "assets/example/equipment/old.json".into(),
+        Resource::bytes(br#"{"layers":{"humanoid":[{"texture":"example:old"}]}}"#.to_vec()),
+    )]));
+    let mut assets = ArmorStandAssets::load(&previous, None);
+    assert!(assets.equipment.contains_key("example:old"));
+    assets.apply_resources(ArmorStandAssets::load(&source, None));
+    assert!(!assets.equipment.contains_key("example:old"));
     assert_eq!(
         assets.equipment["example:nested/cloth"]["humanoid"][0].0,
         "example:entity/equipment/humanoid/cloth"

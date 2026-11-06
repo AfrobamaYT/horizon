@@ -696,3 +696,46 @@ fn an_arm_pose_answer_replaces_the_pose_the_item_gives() {
         });
     });
 }
+
+#[test]
+fn resolved_ui_resources_do_not_restore_a_filtered_panorama_face() {
+    use horizon_assets::resource_source::{Resource, ResourceSource};
+    struct Scratch(PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let scratch = Scratch(std::env::temp_dir().join(format!(
+            "horizon-ui-filter-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )));
+    let folder = scratch
+        .0
+        .join("assets/minecraft/textures/gui/title/background");
+    std::fs::create_dir_all(&folder).unwrap();
+    let base = ResourceSource::directory(scratch.0.clone());
+    let mut files = std::collections::BTreeMap::new();
+    for face in 0..6 {
+        let name = format!("assets/minecraft/textures/gui/title/background/panorama_{face}.png");
+        let mut png =
+            png::Encoder::new(std::fs::File::create(scratch.0.join(&name)).unwrap(), 1, 1);
+        png.set_color(png::ColorType::Rgba);
+        png.set_depth(png::BitDepth::Eight);
+        png.write_header()
+            .unwrap()
+            .write_image_data(&[200, 30, 40, 255])
+            .unwrap();
+        // The resolved selection hides face 1 even though the base directory has it.
+        if face != 1 {
+            files.insert(name.clone(), Resource::file(base.clone(), name));
+        }
+    }
+    assert!(base.contains("assets/minecraft/textures/gui/title/background/panorama_1.png"));
+    let gui = crate::game::UiResources::load(&ResourceSource::indexed(files)).unwrap();
+    assert_eq!(gui.panorama.texels(), [96, 110, 111, 255].repeat(6));
+}

@@ -1285,7 +1285,9 @@ fn server_game(
     options: Options,
     settings: Settings,
 ) -> Result<Game<'_>> {
-    let gui = UiResources::server(&options.resources)?;
+    let gui = UiResources::server(&horizon_assets::resource_source::ResourceSource::directory(
+        options.resources.clone(),
+    ))?;
     let audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
         (&options.resources).to_path_buf(),
     ));

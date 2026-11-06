@@ -376,6 +376,8 @@ impl Game<'_> {
             textures,
             cem,
             block_entity_shapes,
+            waypoint_styles,
+            armor_stand_assets,
             sounds,
             ui_metadata,
             language,
@@ -420,12 +422,8 @@ impl Game<'_> {
             }
         };
         // Everything loaded: switch over.
-        self.waypoint_styles = horizon_client::locator_bar::WaypointStyles::load(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-        );
-        self.armor_stand_assets.reload_trims(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-        );
+        self.waypoint_styles = waypoint_styles;
+        self.armor_stand_assets.apply_resources(armor_stand_assets);
         self.random_tick_sections.clear();
         self.portals.sections.clear();
         self.options.resources = root.clone();
@@ -552,15 +550,18 @@ pub(super) fn stage_pack(
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
     let root = startup_root(vanilla_root, selected, server, mod_sources)?;
+    let source = horizon_assets::resource_source::ResourceSource::directory(root.clone());
+    let resource_root = horizon_assets::resource_source::ResourceRoot::new(
+        root.clone(),
+        cache_dir(),
+        source.clone(),
+    );
     progress.set(1);
     // The mod listeners prepare against the merged root before the heavy
     // staging builds run: a listener that fails aborts the reload without the
     // renderer work, keeping every listener's previous assets.
-    let client_applies = super::client_reload::stage_client_reload(
-        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-        client_listeners,
-    )
-    .map_err(|e| e.to_string())?;
+    let client_applies = super::client_reload::stage_client_reload(&source, client_listeners)
+        .map_err(|e| e.to_string())?;
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
     let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
@@ -568,43 +569,18 @@ pub(super) fn stage_pack(
     // the frame that applies the reload (about 20 ms of it).
     let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {
         let atlas = s.spawn(|| {
-            HudAtlas::build_over_with_image(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                &horizon_assets::resource_source::ResourceSource::directory(
-                    vanilla_root.to_path_buf(),
-                ),
-                mod_image,
-            )
-            .map_err(|e| e.to_string())
+            HudAtlas::build_over_with_image(&source, &source, mod_image).map_err(|e| e.to_string())
         });
-        let panorama = s.spawn(|| {
-            horizon_client::gfx::panorama::Faces::load(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                &horizon_assets::resource_source::ResourceSource::directory(
-                    vanilla_root.to_path_buf(),
-                ),
-            )
-        });
+        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&source, &source));
         let small = s.spawn(|| {
             (
-                horizon_client::sound_events::SoundRegistry::load(
-                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                ),
-                horizon_client::ui::read_metadata(
-                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                ),
-                lang::Language::load(
-                    &[&horizon_assets::resource_source::ResourceSource::directory(
-                        root.to_path_buf(),
-                    )],
-                    &lang::code(),
-                ),
+                horizon_client::sound_events::SoundRegistry::load(&source),
+                horizon_client::ui::read_metadata(&source),
+                lang::Language::load(&[&source], &lang::code()),
             )
         });
         (
-            assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
-                root.to_path_buf(),
-            )),
+            assets.reload(&resource_root),
             atlas.join(),
             panorama.join(),
             small
@@ -622,7 +598,7 @@ pub(super) fn stage_pack(
     };
     progress.set(2);
     let pack = PackResources::load(
-        &root,
+        &resource_root,
         assets.clone(),
         render,
         res.facts(),
@@ -632,12 +608,12 @@ pub(super) fn stage_pack(
     )?;
     let textures = prepare_renderer_textures(&pack);
     let cem = Arc::new(horizon_client::mobs::cem::CemModels::load(
-        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        &source,
         res.mob_types(),
     ));
-    let block_entity_shapes = res.block_entity_render().shapes_for(
-        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-    );
+    let block_entity_shapes = res.block_entity_render().shapes_for(&source);
+    let waypoint_styles = horizon_client::locator_bar::WaypointStyles::load(&source);
+    let armor_stand_assets = super::armor_stands::ArmorStandAssets::load(&source, None);
     progress.set(3);
     Ok(StagedPack {
         root,
@@ -647,6 +623,8 @@ pub(super) fn stage_pack(
         textures,
         cem,
         block_entity_shapes,
+        waypoint_styles,
+        armor_stand_assets,
         sounds,
         ui_metadata,
         language,
@@ -657,6 +635,8 @@ pub(super) fn stage_pack(
 /// it on the render thread).
 pub(super) struct StagedPack {
     pub root: PathBuf,
+    pub waypoint_styles: horizon_client::locator_bar::WaypointStyles,
+    pub armor_stand_assets: super::armor_stands::ArmorStandAssets,
     /// The mod reload listeners' prepared applies, run when the rest of the
     /// staged pack is published.
     pub client_applies: Vec<super::client_reload::PreparedClientReload>,

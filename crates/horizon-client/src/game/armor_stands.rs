@@ -183,8 +183,8 @@ impl ArmorStandAssets {
         }
     }
     /// Trim data of reloaded resources (the models stay).
-    pub fn reload_trims(&mut self, root: &ResourceSource) {
-        let fresh = Self::load(root, None);
+    pub fn apply_resources(&mut self, fresh: Self) {
+        self.equipment = fresh.equipment;
         self.trim_overrides = fresh.trim_overrides;
         self.trims = fresh.trims;
         self.root = fresh.root;
