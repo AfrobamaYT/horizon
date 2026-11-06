@@ -45,7 +45,7 @@ impl From<&VanillaRule> for Rule {
     fn from(rule: &VanillaRule) -> Self {
         Self {
             name: format!("minecraft:{}", rule.name),
-            category: rule.category.into(),
+            category: format!("minecraft:{}", rule.category),
             default: rule.default,
             min: rule.min,
             max: rule.max,
@@ -633,7 +633,7 @@ mod tests {
         let mut registry = RuleRegistry::vanilla();
         registry.rules.push(Rule {
             name: "example:later".into(),
-            category: "misc".into(),
+            category: "minecraft:misc".into(),
             default: Value::Int(4),
             min: 0,
             max: 9,
