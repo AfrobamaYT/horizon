@@ -1,0 +1,153 @@
+//! Conservative lexical facts shared by site resolution and expression rewriting.
+use proc_macro2::{Ident, Span, TokenStream, TokenTree};
+use quote::ToTokens;
+use std::collections::BTreeSet;
+use syn::{Expr, Item, spanned::Spanned, visit::Visit};
+
+#[derive(Default)]
+struct Bindings {
+    names: BTreeSet<String>,
+    identifiers: BTreeSet<String>,
+    opaque: bool,
+}
+fn tokens(stream: TokenStream, identifiers: &mut BTreeSet<String>) {
+    for token in stream {
+        match token {
+            TokenTree::Ident(id) => {
+                identifiers.insert(id.to_string());
+            }
+            TokenTree::Group(group) => tokens(group.stream(), identifiers),
+            _ => {}
+        }
+    }
+}
+impl<'a> Visit<'a> for Bindings {
+    fn visit_ident(&mut self, id: &'a Ident) {
+        self.identifiers.insert(id.to_string());
+    }
+    fn visit_pat_ident(&mut self, pattern: &'a syn::PatIdent) {
+        self.names.insert(pattern.ident.to_string());
+        syn::visit::visit_pat_ident(self, pattern);
+    }
+    fn visit_macro(&mut self, mac: &'a syn::Macro) {
+        self.opaque = true;
+        tokens(mac.to_token_stream(), &mut self.identifiers);
+    }
+    fn visit_use_name(&mut self, name: &'a syn::UseName) {
+        self.names.insert(name.ident.to_string());
+    }
+    fn visit_use_rename(&mut self, name: &'a syn::UseRename) {
+        self.names.insert(name.rename.to_string());
+    }
+    fn visit_use_glob(&mut self, _: &'a syn::UseGlob) {
+        self.opaque = true;
+    }
+    fn visit_item(&mut self, item: &'a Item) {
+        tokens(item.to_token_stream(), &mut self.identifiers);
+        let id = match item {
+            Item::Fn(i) => &i.sig.ident,
+            Item::Const(i) => &i.ident,
+            Item::Static(i) => &i.ident,
+            Item::Mod(i) => &i.ident,
+            Item::Struct(i) => &i.ident,
+            Item::Enum(i) => &i.ident,
+            Item::Union(i) => &i.ident,
+            Item::Type(i) => &i.ident,
+            Item::Trait(i) => &i.ident,
+            Item::Use(i) => {
+                self.visit_use_tree(&i.tree);
+                return;
+            }
+            Item::Macro(_) => {
+                self.opaque = true;
+                return;
+            }
+            _ => return,
+        };
+        self.names.insert(id.to_string());
+    }
+}
+
+/// Whole-function over-approximation: a binding anywhere in the body may shadow a catalog path.
+/// Unsupported macro expansions and local glob imports cannot safely supply lexical facts.
+pub(crate) struct Scope {
+    pub parameters: BTreeSet<String>,
+    pub locals: BTreeSet<String>,
+    pub opaque: bool,
+    identifiers: BTreeSet<String>,
+}
+impl Scope {
+    pub fn scan(signature: &syn::Signature, body: Option<&syn::Block>) -> Self {
+        let mut scan = Bindings::default();
+        scan.visit_signature(signature);
+        let parameters = std::mem::take(&mut scan.names);
+        if let Some(body) = body {
+            scan.visit_block(body);
+        }
+        Self {
+            parameters,
+            locals: scan.names,
+            opaque: scan.opaque,
+            identifiers: scan.identifiers,
+        }
+    }
+    pub fn fresh(&mut self, base: &str) -> Ident {
+        for index in 0.. {
+            let name = if index == 0 {
+                base.into()
+            } else {
+                format!("{base}_{index}")
+            };
+            if self.identifiers.insert(name.clone()) {
+                return Ident::new(&name, Span::call_site());
+            }
+        }
+        unreachable!()
+    }
+}
+
+/// Matching calls in source order, excluding every AST context whose expressions are constant.
+pub(crate) fn calls<'a>(body: &'a syn::Block, selector: &str) -> Vec<&'a Expr> {
+    struct Calls<'a, 's> {
+        selector: &'s str,
+        calls: Vec<&'a Expr>,
+    }
+    impl<'a> Visit<'a> for Calls<'a, '_> {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            let spelling = match expr {
+                Expr::MethodCall(call) => {
+                    format!("{}.{}", call.receiver.to_token_stream(), call.method).replace(' ', "")
+                }
+                Expr::Call(call) => call.func.to_token_stream().to_string().replace(' ', ""),
+                _ => String::new(),
+            };
+            if !spelling.is_empty()
+                && (spelling == self.selector
+                    || self.selector.starts_with('.') && spelling.ends_with(self.selector))
+            {
+                self.calls.push(expr);
+            }
+            syn::visit::visit_expr(self, expr);
+        }
+        fn visit_item(&mut self, _: &'a Item) {}
+        fn visit_type(&mut self, _: &'a syn::Type) {}
+        fn visit_generic_argument(&mut self, _: &'a syn::GenericArgument) {}
+        fn visit_expr_const(&mut self, _: &'a syn::ExprConst) {}
+        fn visit_expr_repeat(&mut self, repeat: &'a syn::ExprRepeat) {
+            self.visit_expr(&repeat.expr);
+        }
+    }
+    let mut calls = Calls {
+        selector,
+        calls: Vec::new(),
+    };
+    calls.visit_block(body);
+    calls.calls.sort_by_key(|call| match call {
+        Expr::MethodCall(call) => call.method.span().start(),
+        _ => call.span().start(),
+    });
+    calls.calls
+}
+
+#[cfg(test)]
+mod tests;
