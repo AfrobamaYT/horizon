@@ -766,6 +766,14 @@ mod tests {
                 assert!(message.contains(&format!("{phase:?}")), "{message}");
             }
         }
+        let _owner = PhaseOwner::new(ModPhase::Registration);
+        let refused = std::panic::catch_unwind(|| HostDouble.block_state_id("stone")).unwrap_err();
+        assert!(
+            refused
+                .downcast_ref::<String>()
+                .unwrap()
+                .contains("Registration")
+        );
     }
 
     #[test]
