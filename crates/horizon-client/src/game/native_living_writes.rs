@@ -26,13 +26,6 @@ impl Game<'_> {
             _ => None,
         }
     }
-    /// The mob a living handle names.
-    fn native_living_mob(&mut self, living: LivingRef) -> Option<&mut horizon_client::mobs::Mob> {
-        let Target::Mob(id) = self.native_living_target(living)? else {
-            return None;
-        };
-        self.mobs.iter_mut().find(|m| m.id == id)
-    }
 
     /// `LivingEntity.swing(hand, DEFAULT, sendToSwingingEntity)`: starts the
     /// arm swing (shortened by haste, lengthened by mining fatigue) unless
@@ -131,43 +124,6 @@ impl Game<'_> {
             .is_some()
     }
 
-    /// `Mob.isLeftHanded`: whether the mob holds things in its left hand (the
-    /// mob flags in its entity data). None for players and the other kinds.
-    pub(super) fn native_living_left_handed(&mut self, living: LivingRef) -> Option<bool> {
-        Some(self.native_living_mob(living)?.extra.left_handed)
-    }
-    /// `Mob.setLeftHanded`: sets bit 2 of the mob flags, which the players
-    /// around get with the mob's next entity data and see in its swing and
-    /// held items. Saved with the mob. False for players and the other kinds.
-    pub(super) fn native_living_set_left_handed(
-        &mut self,
-        living: LivingRef,
-        left_handed: bool,
-    ) -> bool {
-        self.native_living_mob(living)
-            .map(|m| m.extra.left_handed = left_handed)
-            .is_some()
-    }
-    /// `Mob.canPickUpLoot`, with the overrides of an allay (holding
-    /// something) and a sulfur cube (with no block). None for players and
-    /// the other kinds.
-    pub(super) fn native_living_can_pick_up_loot(&mut self, living: LivingRef) -> Option<bool> {
-        Some(self.native_living_mob(living)?.can_pick_up_loot())
-    }
-    /// `Mob.setCanPickUpLoot`: whether the mob picks up the items it sees
-    /// (saved with it; clients are not told, as in vanilla). An allay and a
-    /// sulfur cube decide for themselves. False for players and the other
-    /// kinds.
-    pub(super) fn native_living_set_can_pick_up_loot(
-        &mut self,
-        living: LivingRef,
-        can_pick_up: bool,
-    ) -> bool {
-        self.native_living_mob(living)
-            .map(|m| m.extra.pick_up_loot = can_pick_up)
-            .is_some()
-    }
-
     /// `LivingEntity.getUseItemRemainingTicks`: the ticks left of the item a
     /// player uses, 0 when they use none. None for the other kinds (a mob's
     /// item use is a counter of its goal, not this timer).
@@ -216,24 +172,13 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_mob_swings_and_keeps_its_hand_and_loot_flags() {
+    fn a_mob_swings_while_its_hand_and_loot_flags_live_on_the_mob_handle() {
         with_game(|game| {
             for (id, kind) in [(12, "minecraft:zombie"), (13, "minecraft:cow")] {
                 let kind = game.res.mob_types().get(kind).unwrap().clone();
                 game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
             }
             let zombie = game.native_living(game.native_entity(12).unwrap()).unwrap();
-            assert_eq!(game.native_living_left_handed(zombie), Some(false));
-            assert!(game.native_living_set_left_handed(zombie, true));
-            assert!(game.mobs[0].extra.left_handed && game.mobs[0].main_arm_left());
-            assert_eq!(game.native_living_left_handed(zombie), Some(true));
-            assert!(game.native_living_set_left_handed(zombie, false));
-            assert_eq!(game.native_living_left_handed(zombie), Some(false));
-            assert!(game.native_living_set_can_pick_up_loot(zombie, true));
-            assert!(game.mobs[0].extra.pick_up_loot);
-            assert_eq!(game.native_living_can_pick_up_loot(zombie), Some(true));
-            assert!(game.native_living_set_can_pick_up_loot(zombie, false));
-            assert_eq!(game.native_living_can_pick_up_loot(zombie), Some(false));
 
             assert!(game.native_living_swing(zombie, Hand::Off, false));
             assert!(game.mobs[0].ai.swinging);
@@ -257,8 +202,6 @@ mod tests {
                 EntityRef::new(NativeWorldEpoch::new(zombie.entity().epoch().get() + 1), 12);
             let stale = mod_api::LivingRef::new(stale);
             assert!(!game.native_living_swing(stale, Hand::Main, true));
-            assert!(!game.native_living_set_left_handed(stale, true));
-            assert_eq!(game.native_living_can_pick_up_loot(stale), None);
         });
     }
 
