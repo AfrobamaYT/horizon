@@ -9,6 +9,8 @@ pub struct EffectInstance {
     /// Effect id: vanilla's without namespace (`speed`, `poison`, ...), a
     /// content mod's `<ns>:<path>`.
     pub id: &'static str,
+    /// The registry index, resolved at the instance boundary; unknown internal fixtures have none.
+    pub registry_index: Option<usize>,
     /// Remaining ticks; -1 is infinite.
     pub duration: i32,
     pub amplifier: i32,
@@ -21,8 +23,26 @@ pub struct EffectInstance {
 }
 impl EffectInstance {
     pub fn new(id: &'static str, duration: i32, amplifier: i32) -> Self {
+        Self::resolved(
+            id,
+            potions::effect(id).map(|def| def.index),
+            duration,
+            amplifier,
+        )
+    }
+    /// Construct from an already resolved registry entry without another name lookup.
+    pub fn from_def(def: &potions::EffectDef, duration: i32, amplifier: i32) -> Self {
+        Self::resolved(def.id, Some(def.index), duration, amplifier)
+    }
+    fn resolved(
+        id: &'static str,
+        registry_index: Option<usize>,
+        duration: i32,
+        amplifier: i32,
+    ) -> Self {
         Self {
             id,
+            registry_index,
             duration,
             amplifier: amplifier.clamp(0, 255),
             ambient: false,
@@ -186,6 +206,13 @@ impl PlayerEffects {
     pub fn get(&self, id: &str) -> Option<&EffectInstance> {
         self.list.iter().find(|e| e.id == id)
     }
+    /// Read by the registry identity already resolved at creation, without comparing names.
+    pub fn get_registered(&self, index: usize) -> Option<&EffectInstance> {
+        self.list
+            .iter()
+            .find(|effect| effect.registry_index == Some(index))
+    }
+
     pub fn amplifier(&self, id: &str) -> Option<i32> {
         self.get(id).map(|e| e.amplifier)
     }

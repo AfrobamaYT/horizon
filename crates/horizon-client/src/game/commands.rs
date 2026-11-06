@@ -1050,8 +1050,16 @@ impl Game<'_> {
         let Some(Arg::Entity(s)) = ctx.get(name).cloned() else {
             return Ok(vec![self.implied_player()]);
         };
+        self.resolve_entity_argument(&s, players)
+    }
+    /// Resolve an already parsed entity argument against the current command source.
+    pub(super) fn resolve_entity_argument(
+        &mut self,
+        selector: &Selector,
+        players: bool,
+    ) -> R<Vec<Target>> {
         let found: Vec<Target> = self
-            .select(&s)
+            .select(selector)
             .into_iter()
             .filter(|t| !players || t.is_player())
             .collect();

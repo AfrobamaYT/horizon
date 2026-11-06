@@ -1036,6 +1036,15 @@ impl Mining {
     }
 }
 #[derive(Clone, Copy)]
+struct TransformContext<'a> {
+    world: &'a World,
+    player: Option<u32>,
+    hand: mod_api::Hand,
+    blocking: bool,
+    simulated: bool,
+}
+
+#[derive(Clone, Copy)]
 struct Hit {
     pos: [i32; 3],
     face: [i32; 3],
@@ -8041,10 +8050,8 @@ impl Game<'_> {
                     };
                     if let Some(living) = mob {
                         let effect = mod_api::NativeActiveEffect::new(
-                            mod_api::Identifier::parse_namespaced(
-                                horizon_client::brewing::namespaced(def.id),
-                            )
-                            .expect("the game's effect ids are namespaced"),
+                            mod_api::__private::effect_key(def.index)
+                                .expect("effects resolved at load"),
                             eff.duration,
                             eff.amplifier,
                             eff.ambient,
@@ -8072,9 +8079,11 @@ impl Game<'_> {
                 let mut changed = false;
                 for effect in effects {
                     changed |= match mob {
-                        Some(living) => self.native_living_remove_effect(living, effect),
-                        None => self
-                            .remove_player_effects(Some(effect.trim_start_matches("minecraft:"))),
+                        Some(living) => horizon_client::brewing::effect(effect)
+                            .and_then(|def| mod_api::__private::effect_key(def.index))
+                            .is_some_and(|key| self.native_living_remove_effect(living, key)),
+                        None => horizon_client::brewing::effect(effect)
+                            .is_some_and(|def| self.remove_player_effects(Some(def.index))),
                     };
                 }
                 changed
@@ -14480,7 +14489,38 @@ impl Game<'_> {
         stack: &ItemStack,
         hit: &Hit,
     ) -> Option<(BlockStateId, String, Option<String>, u32, String)> {
+        let blocking = self
+            .offhand
+            .as_ref()
+            .is_some_and(|s| self.blocks_attacks(s).is_some())
+            && !self.keys.held(Mapping::Sneak);
+        self.block_transform_in(
+            stack,
+            hit,
+            TransformContext {
+                world: &self.world,
+                player: self.player.is_some().then(|| self.own_entity_id() as u32),
+                hand: self.hand,
+                blocking,
+                simulated: false,
+            },
+        )
+    }
+
+    fn block_transform_in(
+        &self,
+        stack: &ItemStack,
+        hit: &Hit,
+        context: TransformContext<'_>,
+    ) -> Option<(BlockStateId, String, Option<String>, u32, String)> {
         use horizon_client::block_transform::Around;
+        let TransformContext {
+            world,
+            player,
+            hand,
+            blocking,
+            simulated,
+        } = context;
         let Hit { pos, face, .. } = *hit;
         struct Column<'w> {
             world: &'w World,
@@ -14507,11 +14547,7 @@ impl Game<'_> {
             .and_then(|i| i.block_transformer.clone())?;
         // playerHasBlockingItemUseIntent: a shield in the off hand is raised
         // instead, unless sneaking.
-        let shield = self
-            .offhand
-            .as_ref()
-            .is_some_and(|s| self.blocks_attacks(s).is_some());
-        if shield && !self.keys.held(Mapping::Sneak) {
+        if blocking {
             return None;
         }
         let face_name = match face {
@@ -14524,7 +14560,7 @@ impl Game<'_> {
         };
         let registry = self.pack.assets.registry;
         let around = Column {
-            world: &self.world,
+            world,
             registry,
             pos,
         };
@@ -14560,13 +14596,13 @@ impl Game<'_> {
             let matches_vanilla = state.is_some();
             let mut cancel = false;
             let tool = mod_api::ToolUse::from(mod_api::__private::built::ToolUse {
-                player: self.player.is_some().then(|| self.own_entity_id() as u32),
-                hand: self.hand,
+                player,
+                hand,
                 pos,
                 face,
                 click: hit.point,
                 ability,
-                simulated: false,
+                simulated,
             });
             self.native_block_tool_modification(stack, &tool, &mut state, &mut cancel);
             if cancel {
@@ -21839,6 +21875,33 @@ impl Game<'_> {
     pub(super) fn resolve_parts(&self) -> Result<()> {
         let items = self.items();
         let registry = self.pack.assets.registry;
+        mod_api::__private::resolve_blocks(|id| {
+            let default = registry.default_state(id)?;
+            let of_block = |state| {
+                registry
+                    .state(BlockStateId(state))
+                    .is_some_and(|s| s.name == id)
+            };
+            let mut first = default.0;
+            while first > 0 && of_block(first - 1) {
+                first -= 1;
+            }
+            let mut last = default.0;
+            while of_block(last + 1) {
+                last += 1;
+            }
+            Some(mod_api::__private::ResolvedBlock {
+                default,
+                states: mod_api::BlockStateRange::new(BlockStateId(first), last - first + 1),
+                block: self.res.behaviours().block(default),
+            })
+        })
+        .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
+        native_world_read::resolve_block_tags(items, |name| {
+            registry
+                .default_state(name)
+                .map(|state| self.res.behaviours().block(state))
+        });
         mod_api::__private::resolve_parts(
             &items.block_tags,
             &items.item_tags,
@@ -23626,9 +23689,9 @@ impl Loading {
         };
         drop(game_step);
         let game_ms = game_at.elapsed().as_millis();
+        game.renderer = Some(renderer);
         game.resize_state = Some(game.resize_state_of(window.inner_size()));
         game.window = Some(window);
-        game.renderer = Some(renderer);
         game.world_renderer_ready = true;
         game.fullscreen = self.fullscreen;
         game.panorama_rotation = self.panorama_rotation;
@@ -24337,6 +24400,18 @@ mod tests {
         mod_api::__private::install_parts(&mods).unwrap();
         mod_api::__private::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
+            let stone_key = mod_api::__private::part_tests::block_key("stone");
+            let name = stone_key.id(game);
+            let dir = std::env::temp_dir().join(format!("horizon-key-tags-{}", std::process::id()));
+            game.session_lock = Some(horizon_client::save::SessionLock::acquire(&dir).unwrap());
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "test:reload"),
+                Some(false)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "base_stone_overworld"),
+                Some(true)
+            );
             game.load_server_loot();
             let stack = super::functions::pack_stack(
                 &game.world_root,
@@ -24348,6 +24423,23 @@ mod tests {
                 &game.pack.additional_data,
             );
             game.reload_world_tables(&stack);
+            assert_eq!(stone_key.id(game), name);
+            assert_eq!(
+                stone_key,
+                mod_api::__private::part_tests::block_key("minecraft:stone")
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "test:reload"),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "minecraft:logs"),
+                Some(false)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "base_stone_overworld"),
+                Some(true)
+            );
             let stone = game
                 .pack
                 .assets
@@ -24361,8 +24453,55 @@ mod tests {
                     .block_state(stone)
                     .is_empty()
             );
+            game.session_lock = None;
+            let _ = std::fs::remove_dir_all(dir);
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_input_options_follow_settings() {
+        super::native_entity_refs::tests::with_client_game(|game| {
+            game.settings.sensitivity = 0.25;
+            game.settings.invert_x = true;
+            game.settings.invert_y = false;
+            game.settings.mouse_wheel_sensitivity = 0.75;
+            game.settings.discrete_scroll = true;
+            game.settings.toggle_crouch = false;
+            game.settings.toggle_sprint = true;
+            game.settings.auto_jump = false;
+            let host: &dyn mod_api::ClientHost = game;
+            let first = host.input_options();
+            assert_eq!(first.sensitivity, 0.25);
+            assert!(first.invert_x);
+            assert!(!first.invert_y);
+            assert_eq!(first.mouse_wheel_sensitivity, 0.75);
+            assert!(first.discrete_scroll);
+            assert!(!first.toggle_crouch);
+            assert!(first.toggle_sprint);
+            assert!(!first.auto_jump);
+
+            game.settings.sensitivity = 0.5;
+            game.settings.invert_x = false;
+            game.settings.invert_y = true;
+            game.settings.mouse_wheel_sensitivity = 1.5;
+            game.settings.discrete_scroll = false;
+            game.settings.toggle_crouch = true;
+            game.settings.toggle_sprint = false;
+            game.settings.auto_jump = true;
+            let host: &dyn mod_api::ClientHost = game;
+            let second = host.input_options();
+            assert_eq!(second.sensitivity, 0.5);
+            assert!(!second.invert_x);
+            assert!(second.invert_y);
+            assert_eq!(second.mouse_wheel_sensitivity, 1.5);
+            assert!(!second.discrete_scroll);
+            assert!(second.toggle_crouch);
+            assert!(!second.toggle_sprint);
+            assert!(second.auto_jump);
+            assert_eq!(first.sensitivity, 0.25);
+        });
+    }
+
     #[test]
     fn weather_follows_the_dimension_type_not_the_id() {
         use super::level_can_have_weather as w;

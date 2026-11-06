@@ -1005,6 +1005,13 @@ impl Game<'_> {
         if updated != Some(true) {
             return;
         }
+        // Menu validation accepted these registry ids; convert once at the packet boundary.
+        let [primary_key, secondary_key] = powers.each_ref().map(|power| {
+            power.as_ref().map(|(_, id)| {
+                let def = horizon_client::brewing::effect(id).expect("validated beacon effect");
+                mod_api::__private::effect_key(def.index).expect("effects resolved at load")
+            })
+        });
         let [primary, secondary] = powers.map(|p| p.map(|(_, n)| n));
         let mut select_sound = false;
         if let Some(BlockEntity::Beacon(b)) =
@@ -1014,13 +1021,7 @@ impl Game<'_> {
             b.secondary = secondary.clone();
             select_sound = !b.sections.is_empty();
         }
-        self.native_player_change_beacon_effect(
-            player,
-            &name,
-            pos,
-            primary.as_deref().unwrap_or(""),
-            secondary.as_deref().unwrap_or(""),
-        );
+        self.native_player_change_beacon_effect(player, &name, pos, primary_key, secondary_key);
         if select_sound {
             self.beacon_sound(pos, "minecraft:block.beacon.power_select");
         }

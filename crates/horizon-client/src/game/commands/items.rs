@@ -676,9 +676,18 @@ impl Game<'_> {
         self.stack_display_name(s)
     }
     fn item_from_input(&self, ctx: &Context) -> R<Option<ItemStack>> {
-        let Some(Arg::Item(ItemInput { id, components, .. })) = ctx.get("item").cloned() else {
+        let Some(Arg::Item(input)) = ctx.get("item") else {
             return Ok(None);
         };
+        let count = Self::int(ctx, "count").unwrap_or(1).max(1) as u32;
+        self.command_item_stack(input, count).map(Some)
+    }
+    /// `ItemInput.createItemStack`, shared by vanilla commands and native arguments.
+    pub(in crate::game) fn command_item_stack(
+        &self,
+        ItemInput { id, components, .. }: &ItemInput,
+        count: u32,
+    ) -> R<ItemStack> {
         let (damage, extra) = match components
             .as_deref()
             .map(horizon_client::item_data::command_components)
@@ -687,7 +696,6 @@ impl Game<'_> {
             Some(Err(e)) => return Err(CommandError::new(Text::literal(e))),
             None => (0, None),
         };
-        let count = Self::int(ctx, "count").unwrap_or(1).max(1) as u32;
         let stack = ItemStack {
             item: id.as_str().into(),
             count,
@@ -698,9 +706,9 @@ impl Game<'_> {
         // max_stack_size component, else the item's) is refused.
         let max_stack = self.stack_max_size(&stack);
         if count > max_stack {
-            return Err(err("arguments.item.overstacked", &[&id, &max_stack]));
+            return Err(err("arguments.item.overstacked", &[id, &max_stack]));
         }
-        Ok(Some(stack))
+        Ok(stack)
     }
     /// One item modifier (a typed object, a list or a datapack reference)
     /// applied to a stack; `None` when the stack ends up empty.

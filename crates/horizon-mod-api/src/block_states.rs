@@ -1,7 +1,54 @@
 //! Facts about block states that need no world (`host.block_states()`): a `BlockStateId` is a
 //! registry value, not a live object, so these are a read-only service reached from the host
-//! rather than handle methods. Both sides; each reads the game's own tables and allocates nothing.
+//! rather than handle methods. Both sides read the game's tables; definitions are copied out.
 use super::{Backend, BackendRef, BlockSoundType, BlockStateId, BlockStateRange, Host};
+
+/// One property and its legal values in a block's state definition.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BlockStateProperty {
+    /// Property name.
+    pub name: String,
+    /// Legal serialized values.
+    pub values: Vec<String>,
+}
+
+impl BlockStateProperty {
+    /// Construct a definition entry from a property name and legal values.
+    pub fn new(name: String, values: Vec<String>) -> Self {
+        Self { name, values }
+    }
+}
+
+/// A property constraint used when matching a state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BlockStateConstraint {
+    /// Property name.
+    pub name: String,
+    /// Required serialized value.
+    pub value: String,
+}
+
+impl BlockStateConstraint {
+    /// Construct a property constraint.
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+}
+
+/// An invalid constraint, identifying its index in the supplied list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BlockStateMatchError {
+    /// The block has no such property.
+    UnknownProperty(u32),
+    /// The property does not admit this value.
+    InvalidValue(u32),
+}
 
 /// The block-state facts service: `host.block_states()`.
 // exhaustive: its field is private; only `host.block_states()` builds one
@@ -43,9 +90,26 @@ impl BlockStates<'_> {
     pub fn has_block_entity(&self, state: BlockStateId) -> Option<bool> {
         self.backend?.block_state_has_block_entity(state)
     }
+    /// The block's property names and legal serialized values. None without resolved tables.
+    pub fn definition(&self, block: crate::BlockKey) -> Option<Vec<BlockStateProperty>> {
+        self.backend?.block_state_definition(block)
+    }
+
+    /// Match a state against a block and partial property constraints. Unknown properties and
+    /// values are errors even when the state belongs to a different block. None means the
+    /// owning thread has no resolved tables or the state is unknown.
+    pub fn matches(
+        &self,
+        state: BlockStateId,
+        block: crate::BlockKey,
+        constraints: &[BlockStateConstraint],
+    ) -> Option<Result<bool, BlockStateMatchError>> {
+        self.backend?.block_state_matches(state, block, constraints)
+    }
+
     /// The states of `block` (`minecraft:oak_stairs`), `StateDefinition.getPossibleStates`.
-    /// None for an unknown block, or a host without a game.
-    pub fn states_of(&self, block: &str) -> Option<BlockStateRange> {
+    /// None before the mapping is loaded, or for a host without a game.
+    pub fn states_of(&self, block: crate::BlockKey) -> Option<BlockStateRange> {
         self.backend?.block_states_of(block)
     }
 }
@@ -65,6 +129,6 @@ mod tests {
         assert_eq!(facts.destroy_speed(BlockStateId(1)), None);
         assert_eq!(facts.sound(BlockStateId(1)), None);
         assert_eq!(facts.has_block_entity(BlockStateId(1)), None);
-        assert_eq!(facts.states_of("minecraft:stone"), None);
+        assert_eq!(facts.states_of(crate::BlockKey(0)), None);
     }
 }

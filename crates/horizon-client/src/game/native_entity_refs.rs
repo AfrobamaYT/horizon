@@ -710,6 +710,18 @@ pub(super) mod tests {
         .unwrap();
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+        let registry = game.pack.assets.registry;
+        let ids: std::collections::HashSet<_> = (0..registry.len())
+            .map(|i| {
+                registry
+                    .state(mod_api::BlockStateId(i as u32))
+                    .unwrap()
+                    .name
+                    .clone()
+            })
+            .collect();
+        mod_api::__private::part_tests::register_game_keys(ids);
+
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
         game.resolve_parts().unwrap();
@@ -1384,6 +1396,7 @@ pub(super) mod tests {
             assert_eq!(game.mobs[0].equipment_stacks()[6], Some(held.clone()));
             game.mobs.clear();
             game.mobs.push(Mob::new(13, kind, Vec3::ZERO, 0.0));
+            game.creatures.ticked.insert(13);
             game.spawn_item(
                 ItemStack {
                     count: 3,
@@ -2942,6 +2955,7 @@ pub(super) mod tests {
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+
         let level = game.native_level("minecraft:overworld").unwrap();
         assert!(
             game.enter_command_level(super::super::Dim::Nether)
@@ -3107,6 +3121,7 @@ pub(super) mod tests {
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+
         let level = game.native_level("minecraft:overworld").unwrap();
         let stone = game
             .pack

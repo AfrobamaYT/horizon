@@ -267,7 +267,8 @@ fn carry_over(from: &Mob, to: &mut Mob) {
     }
     to.extra.gear = from.extra.gear.clone();
     to.retain_effects(|_| false);
-    for &(effect, ticks, amplifier) in &from.extra.effects {
+    for effect in &from.extra.effects {
+        let (effect, ticks, amplifier) = (effect.id, effect.duration, effect.amplifier);
         to.load_effect(effect, ticks, amplifier);
     }
     // VillagerData and the trades, experience and gossip.

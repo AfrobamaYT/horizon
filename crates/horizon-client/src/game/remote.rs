@@ -1395,9 +1395,15 @@ impl Game<'_> {
     }
     /// A mob effect's network id as the effect (`brewing::EFFECTS` id).
     pub(super) fn remote_effect_id(&self, effect: i32) -> Option<&'static str> {
+        self.remote_effect_def(effect).map(|def| def.id)
+    }
+    fn remote_effect_def(
+        &self,
+        effect: i32,
+    ) -> Option<&'static horizon_client::brewing::EffectDef> {
         let r = self.remote.as_ref()?;
         let name = r.builtin.get("minecraft:mob_effect")?.name(effect)?;
-        horizon_client::brewing::effect(name).map(|d| d.id)
+        horizon_client::brewing::effect(name)
     }
     /// ClientPacketListener.handleUpdateMobEffect for the player itself
     /// (`LivingEntity.forceAddEffect`): the effect replaces any of its kind.
@@ -1406,10 +1412,11 @@ impl Game<'_> {
         if self.remote.as_ref().is_none_or(|r| r.entity_id != p.id) {
             return;
         }
-        let Some(id) = self.remote_effect_id(p.effect) else {
+        let Some(def) = self.remote_effect_def(p.effect) else {
             return;
         };
-        let mut e = horizon_client::effects::EffectInstance::new(id, p.duration, p.amplifier);
+        let id = def.id;
+        let mut e = horizon_client::effects::EffectInstance::from_def(def, p.duration, p.amplifier);
         e.ambient = p.flags & 1 != 0;
         e.visible = p.flags & 2 != 0;
         let list = &mut self.potions.effects.list;
@@ -12370,7 +12377,14 @@ mod tests {
                 .id("minecraft:speed")
                 .unwrap();
             assert_eq!(living.effects(game), Some(Vec::new()));
-            assert!(living.effect(game, "minecraft:speed").is_none());
+            assert!(
+                living
+                    .effect(
+                        game,
+                        mod_api::__private::part_tests::effect_key("minecraft:speed")
+                    )
+                    .is_none()
+            );
             game.handle_packet(C::UpdateMobEffect(play::UpdateMobEffect {
                 id: 7,
                 effect: speed,
@@ -12379,7 +12393,12 @@ mod tests {
                 flags: 2,
             }))
             .unwrap();
-            let effect = living.effect(game, "minecraft:speed").unwrap();
+            let effect = living
+                .effect(
+                    game,
+                    mod_api::__private::part_tests::effect_key("minecraft:speed"),
+                )
+                .unwrap();
             assert_eq!((effect.duration, effect.amplifier), (600, 1));
             assert_eq!(living.effects(game).unwrap().len(), 1);
             let stone = Some(horizon_protocol::item::Stack::new(

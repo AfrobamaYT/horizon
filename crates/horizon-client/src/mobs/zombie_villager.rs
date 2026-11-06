@@ -64,7 +64,7 @@ pub fn start_converting(
     events: &mut Vec<MobEvent>,
 ) {
     villager::ext_mut(m).cure = Some(Cure { time, starter });
-    m.retain_effects(|e| e.0 != "minecraft:weakness");
+    m.retain_effects(|e| e.id != "minecraft:weakness");
     // Strength amplifier: min(difficulty id - 1, 0), always 0 with monsters.
     m.add_effect("minecraft:strength", time, 0);
     events.push(MobEvent::EntityEvent {
@@ -331,7 +331,11 @@ mod tests {
                 })
             );
             assert!(!m.has_effect("minecraft:weakness"));
-            assert!(m.extra.effects.contains(&("minecraft:strength", 4000, 0)));
+            assert!(m.extra.effects.contains(&crate::mobs::StoredEffect::new(
+                "minecraft:strength",
+                4000,
+                0
+            )));
             assert_eq!(events.len(), 1);
             let MobEvent::EntityEvent { mob, event, at } = events[0] else {
                 panic!("Starting a cure must broadcast an entity event");

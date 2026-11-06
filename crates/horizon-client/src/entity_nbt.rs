@@ -510,31 +510,28 @@ pub fn mob_to_nbt(
     if m.extra.effects.is_empty() {
         map.remove(&horizon_world::nbt::JavaString::from("active_effects"));
     } else {
-        let effects = m
-            .extra
-            .effects
-            .iter()
-            .map(|&(effect, duration, amplifier)| {
-                let shown = !m.extra.hidden_effects.contains(&effect);
-                let ambient = m.extra.ambient_effects.contains(&effect);
-                let mut e = vec![("id", string(crate::brewing::namespaced(effect)))];
-                // The codec leaves out an amplifier of 0 (its default).
-                if amplifier != 0 {
-                    e.push(("amplifier", Tag::Byte(amplifier.clamp(0, 255) as u8 as i8)));
-                }
-                e.push(("duration", Tag::Int(duration)));
-                if ambient {
-                    e.push(("ambient", Tag::Byte(1)));
-                }
-                if !shown {
-                    e.push(("show_particles", Tag::Byte(0)));
-                }
-                e.push(("show_icon", Tag::Byte(i8::from(shown))));
-                if let Some(hidden) = m.extra.effect_chains.iter().find(|e| e.id == effect) {
-                    e.push(("hidden_effect", hidden_effect_nbt(hidden)));
-                }
-                Tag::compound(e)
-            });
+        let effects = m.extra.effects.iter().map(|effect| {
+            let (effect, duration, amplifier) = (effect.id, effect.duration, effect.amplifier);
+            let shown = !m.extra.hidden_effects.contains(&effect);
+            let ambient = m.extra.ambient_effects.contains(&effect);
+            let mut e = vec![("id", string(crate::brewing::namespaced(effect)))];
+            // The codec leaves out an amplifier of 0 (its default).
+            if amplifier != 0 {
+                e.push(("amplifier", Tag::Byte(amplifier.clamp(0, 255) as u8 as i8)));
+            }
+            e.push(("duration", Tag::Int(duration)));
+            if ambient {
+                e.push(("ambient", Tag::Byte(1)));
+            }
+            if !shown {
+                e.push(("show_particles", Tag::Byte(0)));
+            }
+            e.push(("show_icon", Tag::Byte(i8::from(shown))));
+            if let Some(hidden) = m.extra.effect_chains.iter().find(|e| e.id == effect) {
+                e.push(("hidden_effect", hidden_effect_nbt(hidden)));
+            }
+            Tag::compound(e)
+        });
         map.insert("active_effects".into(), Tag::List(effects.collect()));
     }
     map.insert(
@@ -5354,7 +5351,10 @@ mod sheep_nbt_tests {
         };
         assert_eq!(text(saved[0].get("id")).as_deref(), Some("testfx:glow"));
         let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
-        assert_eq!(back.extra.effects, [("testfx:glow", 200, 2)]);
+        assert_eq!(
+            back.extra.effects,
+            [crate::mobs::StoredEffect::new("testfx:glow", 200, 2)]
+        );
     }
 
     #[test]
@@ -5391,8 +5391,8 @@ mod sheep_nbt_tests {
         assert!(saved[0].get("amplifier").is_none());
         assert!(saved[1].get("amplifier").is_some());
         let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
-        assert_eq!(back.extra.effects[0].2, 0);
-        assert_eq!(back.extra.effects[1].2, 3);
+        assert_eq!(back.extra.effects[0].amplifier, 0);
+        assert_eq!(back.extra.effects[1].amplifier, 3);
         assert_eq!(back.extra.effect_chains[0].amplifier, 2);
         assert_eq!(back.extra.effect_chains[0].duration, 200);
     }
