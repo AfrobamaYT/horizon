@@ -434,7 +434,7 @@ name = "cargo-horizon-mod"
 version = "0.1.0"
 dependencies = [
  "flate2",
- "horizon-mods",
+ "horizon-mod-package",
  "horizon-port-pack",
  "serde_json",
  "sha2",
@@ -1685,9 +1685,9 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
+ "horizon-mod-package",
  "horizon-mod-points",
  "horizon-mod-wasm",
- "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1770,7 +1770,7 @@ dependencies = [
  "horizon-items",
  "horizon-mcp",
  "horizon-mod-api",
- "horizon-mods",
+ "horizon-mod-package",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1826,7 +1826,7 @@ dependencies = [
  "horizon-items",
  "horizon-mod-api",
  "horizon-mod-api-macros",
- "horizon-mods",
+ "horizon-mod-package",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1922,7 +1922,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-core",
- "horizon-mods",
+ "horizon-mod-package",
  "horizon-world",
  "log",
  "serde",
@@ -1948,7 +1948,7 @@ dependencies = [
  "horizon-items",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
- "horizon-mods",
+ "horizon-mod-package",
  "horizon-world",
  "log",
  "serde",
@@ -2020,6 +2020,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-package"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+ "horizon-shader-api",
+ "log",
+ "minisign-verify",
+ "png",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+ "zip",
+]
+
+[[package]]
 name = "horizon-mod-point-shape"
 version = "0.1.0"
 dependencies = [
@@ -2048,8 +2065,8 @@ dependencies = [
  "horizon-core",
  "horizon-mod-api",
  "horizon-mod-api-gen",
+ "horizon-mod-package",
  "horizon-mod-points",
- "horizon-mods",
  "horizon-world",
  "log",
  "serde_json",
@@ -2065,23 +2082,6 @@ version = "0.0.0"
 dependencies = [
  "horizon-mod-api",
  "horizon-mod-points",
-]
-
-[[package]]
-name = "horizon-mods"
-version = "0.1.0"
-dependencies = [
- "horizon-core",
- "horizon-shader-api",
- "log",
- "minisign-verify",
- "png",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "toml",
- "zip",
 ]
 
 [[package]]
@@ -2112,7 +2112,8 @@ dependencies = [
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
- "horizon-mods",
+ "horizon-mod-api-gen",
+ "horizon-mod-package",
  "serde",
  "serde_json",
  "sha1",

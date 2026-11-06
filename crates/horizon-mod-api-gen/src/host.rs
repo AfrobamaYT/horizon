@@ -1,3 +1,7 @@
+//! The host traits: the area files under `horizon-mod-api/src/host/` are the hand-written
+//! declarations of what the game implements for mods. This reads them and writes the unions
+//! that name them (`Host`, `ServerHost`, `ClientHost` and the hidden backends), the handles'
+//! forwarding methods and the mob tick's goal view.
 use super::*;
 use heck::ToUpperCamelCase;
 
@@ -52,354 +56,422 @@ pub(super) const GOAL_VIEW_LOOKUPS: &[&str] = &[
     "block_entity",
 ];
 
-pub(super) fn generate(
-    root: &Path,
-    catalog: &Catalog,
-    code: &str,
-) -> Result<(String, String, String), String> {
-    let contexts = catalog.draw_contexts.as_slice();
+pub(super) const DIRECTORY: &str = "crates/horizon-mod-api/src/host";
+/// The generated file `horizon-mod-api/src/host.rs` includes: the area modules and the prelude.
+pub(super) const AREAS_OUTPUT: &str = "mod_api_host_areas.rs";
+
+/// The traits an area file may hold, each a part of one of the unions.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Tier {
+    Host,
+    ServerHost,
+    ClientHost,
+    Backend,
+    ClientBackend,
+    BackendMut,
+    ClientBackendMut,
+}
+
+impl Tier {
+    const ALL: [Tier; 7] = [
+        Tier::Host,
+        Tier::ServerHost,
+        Tier::ClientHost,
+        Tier::Backend,
+        Tier::ClientBackend,
+        Tier::BackendMut,
+        Tier::ClientBackendMut,
+    ];
+    fn suffix(self) -> &'static str {
+        match self {
+            Tier::Host => "Host",
+            Tier::ServerHost => "ServerHost",
+            Tier::ClientHost => "ClientHost",
+            Tier::Backend => "Backend",
+            Tier::ClientBackend => "ClientBackend",
+            Tier::BackendMut => "BackendMut",
+            Tier::ClientBackendMut => "ClientBackendMut",
+        }
+    }
+    /// The union trait this one is a part of.
+    fn union(self) -> &'static str {
+        match self {
+            Tier::ClientBackend => "Backend",
+            tier => tier.suffix(),
+        }
+    }
+    fn mutable(self) -> bool {
+        matches!(self, Tier::BackendMut | Tier::ClientBackendMut)
+    }
+    fn client(self) -> bool {
+        matches!(
+            self,
+            Tier::ClientHost | Tier::ClientBackend | Tier::ClientBackendMut
+        )
+    }
+    fn backend(self) -> bool {
+        matches!(
+            self,
+            Tier::Backend | Tier::ClientBackend | Tier::BackendMut | Tier::ClientBackendMut
+        )
+    }
+}
+
+/// A method of an area trait, as the file declares it.
+struct Entry {
+    name: String,
+    sig: syn::Signature,
+    attrs: Vec<syn::Attribute>,
+}
+
+/// One area file: its traits by tier.
+struct Area {
+    stem: String,
+    camel: String,
+    tiers: BTreeMap<Tier, Vec<Entry>>,
+}
+
+impl Area {
+    fn trait_name(&self, tier: Tier) -> String {
+        format!("{}{}", self.camel, tier.suffix())
+    }
+    fn trait_path(&self, tier: Tier) -> String {
+        format!("crate::host::{}::{}", self.stem, self.trait_name(tier))
+    }
+}
+
+/// The traits of one area file by tier. Only `<Camel><Tier>` and the explicitly listed draw
+/// contexts and services are accepted: an unknown trait would reach neither a union nor the WIT.
+/// Imports and file/item attributes are allowed, but modules, macros and other items are refused
+/// rather than hiding declarations from this scan.
+fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>, String> {
+    let mut tiers = BTreeMap::new();
+    for item in file.items {
+        let item = match item {
+            Item::Use(_) => continue,
+            Item::Trait(item) => item,
+            other => {
+                let kind = match &other {
+                    Item::Mod(_) => "module",
+                    Item::Macro(_) => "macro",
+                    _ => "item",
+                };
+                return Err(format!(
+                    "unsupported {kind} in host area `{camel}`: only imports and declared traits are allowed, found `{}`",
+                    other.to_token_stream()
+                ));
+            }
+        };
+        let name = item.ident.to_string();
+        let Some(tier) = Tier::ALL
+            .into_iter()
+            .find(|tier| name == format!("{camel}{}", tier.suffix()))
+        else {
+            if matches!(
+                (camel, name.as_str()),
+                (
+                    "Draw",
+                    "DrawContext" | "BlockEntityDrawContext" | "WorldDrawContext"
+                ) | (
+                    "Services",
+                    "ClientSession"
+                        | "Commands"
+                        | "Levels"
+                        | "Messages"
+                        | "Players"
+                        | "RenderAssets"
+                )
+            ) {
+                continue;
+            }
+            return Err(format!(
+                "unrecognised trait `{name}`: expected `{camel}<Host|ServerHost|ClientHost|Backend|ClientBackend|BackendMut|ClientBackendMut>` or an explicitly listed draw context or service"
+            ));
+        };
+        let entries = item
+            .items
+            .into_iter()
+            .filter_map(|member| match member {
+                syn::TraitItem::Fn(method) => Some(Entry {
+                    name: method.sig.ident.to_string(),
+                    sig: method.sig,
+                    attrs: method.attrs,
+                }),
+                _ => None,
+            })
+            .collect();
+        tiers.insert(tier, entries);
+    }
+    Ok(tiers)
+}
+
+/// The area files, `base` first and then by name, as the catalog's are.
+fn load(root: &Path) -> Result<Vec<Area>, String> {
+    let dir = root.join(DIRECTORY);
+    let mut areas = Vec::new();
+    for stem in catalog::Catalog::modules(&dir)? {
+        let path = dir.join(format!("{stem}.rs"));
+        println!("cargo:rerun-if-changed={}", path.display());
+        let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+        let camel = stem.to_upper_camel_case();
+        let tiers = area_tiers(&camel, file).map_err(|e| format!("{}: {e}", path.display()))?;
+        areas.push(Area { stem, camel, tiers });
+    }
+    println!("cargo:rerun-if-changed={}", dir.display());
+    Ok(areas)
+}
+
+/// The area modules, the prelude that names every trait of them, and one macro for each union of
+/// them (`impl_host_areas!`, `impl_server_host_areas!`...) that implements the area traits of that
+/// union with their defaults, except the areas a double overrides: what a test double or a startup
+/// host writes instead of an `impl` for each area.
+pub(super) fn areas_source(root: &Path) -> Result<String, String> {
+    let areas = load(root)?;
+    let dir = root.join(DIRECTORY);
+    let mut modules = String::new();
+    let mut prelude = String::new();
+    for area in &areas {
+        let path =
+            fs::canonicalize(dir.join(format!("{}.rs", area.stem))).map_err(|e| e.to_string())?;
+        modules.push_str(&format!("#[path = {path:?}] pub mod {};\n", area.stem));
+        prelude.push_str(&format!("pub use super::{}::*;\n", area.stem));
+    }
+    // One helper per area: it expands its item unless the area is in the skip list.
+    let mut macros = String::new();
+    for area in &areas {
+        macros.push_str(&format!(
+            "#[doc(hidden)]\n#[macro_export]\nmacro_rules! __skip_{stem} {{ ([] $body:item) => {{ $body }}; ([{stem} $($rest:ident)*] $body:item) => {{}}; ([$other:ident $($rest:ident)*] $body:item) => {{ $crate::__skip_{stem}!([$($rest)*] $body); }}; }}\n",
+            stem = area.stem
+        ));
+    }
+    for (name, tiers, union) in [
+        ("impl_host_areas", &[Tier::Host][..], "Host"),
+        (
+            "impl_server_host_areas",
+            &[Tier::ServerHost][..],
+            "ServerHost",
+        ),
+        (
+            "impl_client_host_areas",
+            &[Tier::ClientHost][..],
+            "ClientHost",
+        ),
+        (
+            "impl_backend_areas",
+            &[Tier::Backend, Tier::ClientBackend][..],
+            "Backend",
+        ),
+        (
+            "impl_backend_mut_areas",
+            &[Tier::BackendMut][..],
+            "BackendMut",
+        ),
+        (
+            "impl_client_backend_mut_areas",
+            &[Tier::ClientBackendMut][..],
+            "ClientBackendMut",
+        ),
+    ] {
+        let impls: String = areas
+            .iter()
+            .flat_map(|area| tiers.iter().map(move |tier| (area, *tier)))
+            .filter(|(area, tier)| area.tiers.contains_key(tier))
+            .map(|(area, tier)| {
+                format!(
+                    "$crate::__skip_{}!([$($($skip)*)?] impl $crate::prelude::{} for $host {{}});\n",
+                    area.stem,
+                    area.trait_name(tier)
+                )
+            })
+            .collect();
+        macros.push_str(&format!(
+            "/// Implements the area traits of `{union}` for `$host` with their defaults, except the areas listed in `except(...)`, which the caller implements itself. The union trait is left to the caller.\n#[macro_export]\nmacro_rules! {name} {{ ($host:ty $(, except($($skip:ident),*))?) => {{ {impls} }}; }}\n"
+        ));
+    }
+    Ok(format!(
+        "{modules}/// Every host trait of every area: bring it into scope to implement the game's side or a test double.\npub mod prelude {{\n{prelude}}}\n{macros}"
+    ))
+}
+
+fn signature_args(sig: &syn::Signature, name: &str) -> Result<String, String> {
+    Ok(sig
+        .inputs
+        .iter()
+        .skip(1)
+        .map(|arg| match arg {
+            FnArg::Typed(arg) => match &*arg.pat {
+                Pat::Ident(pat) => Ok(pat.ident.to_string()),
+                _ => Err(format!("{name}: unsupported argument")),
+            },
+            FnArg::Receiver(_) => Err(format!("{name}: unexpected receiver")),
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .join(", "))
+}
+
+/// How a read answers where there is no backend to ask: its typed refusal, or `None` where only
+/// a `String` forwards.
+fn refusal(sig: &syn::Signature, name: &str) -> Result<Option<&'static str>, String> {
+    let syn::ReturnType::Type(_, ty) = &sig.output else {
+        return Err(format!("{name}: a backend read returns a value"));
+    };
+    let syn::Type::Path(path) = &**ty else {
+        return Err(format!(
+            "{name}: the goal view cannot refuse its return type"
+        ));
+    };
+    let last = path.path.segments.last().map(|seg| seg.ident.to_string());
+    Ok(match last.as_deref() {
+        Some("Option") => Some("None"),
+        Some("bool") => Some("false"),
+        // A read that answers `Result`: its refusal is the error a host without a backend answers.
+        Some("Result") => Some("Err(mod_api::NoBackend::no_backend())"),
+        Some("u32" | "i32" | "u16" | "u8" | "usize") => Some("0"),
+        // A registry key's metadata: a read the goal view only forwards.
+        Some("String") => None,
+        _ => {
+            return Err(format!(
+                "{name}: the goal view cannot refuse its return type"
+            ));
+        }
+    })
+}
+
+/// `entity_position(entity)` on a backend is also `EntityRef::position(self, host)`: the handle
+/// a method is of, when its first argument is one and its name starts with the handle's.
+fn handle_method(
+    entry: &Entry,
+    tier: Tier,
+    handles: &BTreeMap<String, String>,
+) -> Result<Option<(String, String)>, String> {
+    let name = entry.name.as_str();
+    let mut inputs = entry.sig.inputs.iter();
+    let mutable = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
+    let Some(FnArg::Typed(first)) = inputs.next() else {
+        return Ok(None);
+    };
+    let Type::Path(first) = &*first.ty else {
+        return Ok(None);
+    };
+    let Some(handle) = first.path.get_ident().map(|ident| ident.to_string()) else {
+        return Ok(None);
+    };
+    let Some((receiver, _)) = handles.iter().find(|(_, ty)| **ty == handle) else {
+        return Ok(None);
+    };
+    let Some(short) = name
+        .strip_prefix(receiver.as_str())
+        .and_then(|rest| rest.strip_prefix('_'))
+    else {
+        return Ok(None);
+    };
+    if mutable != tier.mutable() {
+        return Err(format!("{name}: its receiver and its trait disagree"));
+    }
+    let mut sig = entry.sig.clone();
+    sig.ident =
+        syn::parse_str(short).map_err(|_| format!("{name}: {short} is not a method name"))?;
+    let host: FnArg = match (mutable, tier.client()) {
+        (true, true) => syn::parse_quote!(host: &mut dyn ClientHost),
+        (true, false) => syn::parse_quote!(host: &mut dyn ServerHost),
+        (false, true) => syn::parse_quote!(host: &dyn ClientHost),
+        (false, false) => syn::parse_quote!(host: &dyn Host),
+    };
+    let mut args = String::new();
+    let mut rest = vec![syn::parse_quote!(self), host];
+    for arg in entry.sig.inputs.iter().skip(2) {
+        let mut arg = arg.clone();
+        let FnArg::Typed(typed) = &mut arg else {
+            return Err(format!("{name}: unexpected receiver"));
+        };
+        let Pat::Ident(pat) = &mut *typed.pat else {
+            return Err(format!("{name}: unsupported argument"));
+        };
+        pat.mutability = None;
+        args.push_str(&format!(", {}", pat.ident));
+        rest.push(arg);
+    }
+    sig.inputs = rest.into_iter().collect();
+    let mut docs = doc_comments(&entry.attrs, name, true)?;
+    // The reads a mob's goal tick answers from its view carry the snapshot rule where a mod reads
+    // them (#1077).
+    if GOAL_VIEW_READS.contains(&name) {
+        docs.push_str("///\n/// In a mob's goal tick ([`GoalContext::host`](crate::GoalContext::host)) this reads\n/// the ticking mob itself directly; every other entity answers from the tick's\n/// snapshot, and a read the snapshot does not carry answers `None`.\n");
+    }
+    let backend = match (mutable, tier.client()) {
+        (true, true) => "client_backend_mut_of",
+        (true, false) => "backend_mut_of",
+        _ => "backend_of",
+    };
+    let returns = |ident: &str| {
+        matches!(&sig.output, syn::ReturnType::Type(_, ty) if matches!(&**ty, syn::Type::Path(path)
+            if path.path.segments.last().is_some_and(|seg| seg.ident == ident)))
+    };
+    let call = format!("{name}(self{args})");
+    let body = if returns("Option") {
+        format!("{backend}(host)?.{call}")
+    } else if handle.ends_with("Key") && returns("String") {
+        format!("{backend}(host).expect(\"registry key metadata requires a game host\").{call}")
+    } else if returns("bool") {
+        format!("{backend}(host).map(|backend| backend.{call}).unwrap_or(false)")
+    } else if returns("Result") {
+        format!(
+            "{backend}(host).map_or_else(|| Err(crate::NoBackend::no_backend()), |backend| backend.{call})"
+        )
+    } else {
+        return Err(format!(
+            "{name}: a {receiver} helper returns Option, bool or Result, the value a host without a backend refuses"
+        ));
+    };
+    Ok(Some((
+        handle,
+        format!("{docs}pub {} {{ {body} }}\n", sig.to_token_stream()),
+    )))
+}
+
+/// The unions, the handles' methods and the hidden backends' side of the host, and the goal view.
+pub(super) fn generate(root: &Path) -> Result<(String, String), String> {
+    let areas = load(root)?;
     let api_source = fs::read_to_string(root.join("crates/horizon-mod-api/src/lib.rs"))
         .map_err(|e| e.to_string())?;
     let api_source = super::exports::expand(root, &api_source)?;
-    let types = api_types(&api_source, code)?;
-    let mut game = Vec::new();
-    game_methods(
-        &root.join("crates/horizon-client/src/game"),
-        "horizon_client::game",
-        &mut game,
-    )?;
-    let mut host_traits = String::new();
-    let mut host_impl = String::new();
-    let mut server_traits = String::new();
-    let mut server_impl = String::new();
-    let mut client_traits = String::new();
-    let mut client_impl = String::new();
-    let mut backend_reads = String::new();
-    let mut backend_writes = String::new();
-    let mut client_backend_writes = String::new();
-    let mut backend_read_impl = String::new();
-    let mut backend_write_impl = String::new();
-    let mut client_backend_write_impl = String::new();
-    // Each backend read's name, signature, argument names, typed refusal
-    // (None where only a String forwards) and whether it reads entity data,
-    // for the goal view.
-    let mut backend_read_list: Vec<(&str, String, String, Option<&str>, bool)> = Vec::new();
-    // Each `Host` method's name, signature, argument names, return type and
-    // mutability, for the goal view's own `Host` impl.
-    let mut host_method_list: Vec<(&str, String, String, String, bool)> = Vec::new();
-    // Each draw context's trait methods and their forwarding by its game struct.
-    let mut drawing: Vec<(String, String)> = contexts.iter().map(|_| Default::default()).collect();
-    struct Service {
-        side: Side,
-        mutable: bool,
-        resource_reads_only: bool,
-        declarations: String,
-        implementations: String,
-    }
-    let mut services = BTreeMap::<&str, Service>::new();
-    let mut handles = std::collections::BTreeMap::<&str, String>::new();
-    for helper in &catalog.helpers {
-        let (name, side, target) = (helper.name.as_str(), helper.side, helper.target.as_str());
-        let method = helper_target(&game, name, target)?;
-        if let Some((index, declaration, implementation)) =
-            draw_method(method, name, contexts, &types.exports)?
-        {
-            if helper.service.is_some() || helper.resource_read {
-                return Err(format!(
-                    "{name}: a service or published resource helper cannot draw"
-                ));
-            }
-            if side != Side::Client {
-                return Err(format!("{name}: drawing is client-side"));
-            }
-            drawing[index].0.push_str(&declaration);
-            drawing[index].1.push_str(&implementation);
-            continue;
-        }
-        let receiver = helper.receiver.as_deref();
-        let is_backend = helper.backend;
-        let service_trait = helper
-            .service
-            .as_ref()
-            .map(|name| name.to_upper_camel_case());
-        let trait_name = if let Some(service) = service_trait.as_deref() {
-            service
-        } else if receiver.is_some() || is_backend {
-            if matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some())
-            {
-                if side == Side::Client {
-                    "ClientBackendMut"
-                } else {
-                    "BackendMut"
+    let types = api_types(&api_source)?;
+    let supertraits = |union: &str| -> String {
+        areas
+            .iter()
+            .flat_map(|area| {
+                Tier::ALL
+                    .into_iter()
+                    .filter(|tier| tier.union() == union && area.tiers.contains_key(tier))
+                    .map(|tier| area.trait_path(tier))
+            })
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    let mut reads: Vec<(&Area, Tier, &Entry)> = Vec::new();
+    let mut host_methods: Vec<(&Area, &Entry)> = Vec::new();
+    let mut methods = String::new();
+    let mut by_handle = BTreeMap::<String, String>::new();
+    for area in &areas {
+        for (tier, entries) in &area.tiers {
+            for entry in entries {
+                if tier.backend()
+                    && let Some((handle, code)) = handle_method(entry, *tier, &types.handles)?
+                {
+                    by_handle.entry(handle).or_default().push_str(&code);
                 }
-            } else {
-                "Backend"
-            }
-        } else {
-            match side {
-                Side::Both => "Host",
-                Side::Server => "ServerHost",
-                Side::Client => "ClientHost",
-            }
-        };
-        let (declaration, implementation) = host_method(method, name, trait_name, &types.exports)?;
-        // The catalog owns all forwarding boundaries, including services and handle backends.
-        let access = if helper.resource_read {
-            quote::quote!(mod_api::__private::LoadAccess::PublishedResources)
-        } else if side == Side::Client
-            && receiver.is_none()
-            && !matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some())
-        {
-            quote::quote!(mod_api::__private::LoadAccess::ClientSetup)
-        } else {
-            quote::quote!(mod_api::__private::LoadAccess::WorldOnly)
-        };
-        let guarded = |source: &str| -> Result<String, String> {
-            let mut method = syn::parse_str::<syn::TraitItemFn>(source)
-                .map_err(|error| format!("{name}: {error}"))?;
-            method
-                .default
-                .as_mut()
-                .expect("generated method has a body")
-                .stmts
-                .insert(
-                    0,
-                    syn::parse_quote!(mod_api::__private::check_access(#name, #access);),
-                );
-            Ok(method.to_token_stream().to_string())
-        };
-        let implementation = guarded(&implementation)?;
-        let declaration = guarded(&declaration)?;
-        let declaration = if helper.resource_read {
-            format!(
-                "/// Published asset/data read: available in Setup, Reloading and World.\n{declaration}"
-            )
-        } else {
-            declaration
-        };
-        if let Some(client_target) = &helper.client_target {
-            let client = helper_target(&game, name, client_target)?;
-            let (_, client_implementation) = host_method(client, name, trait_name, &types.exports)?;
-            matching_helper_signatures(&implementation, &client_implementation, name)?;
-        }
-        let side_doc = match side {
-            Side::Server => "/// Side: server.\n",
-            Side::Client => "/// Side: client.\n",
-            Side::Both => "/// Side: both.\n",
-        };
-        if let Some(service) = helper.service.as_deref() {
-            let group = services.entry(service).or_insert_with(|| Service {
-                side,
-                mutable: false,
-                resource_reads_only: true,
-                declarations: String::new(),
-                implementations: String::new(),
-            });
-            if group.side != side {
-                return Err(format!("{name}: all {service} methods must share a side"));
-            }
-            group.resource_reads_only &= helper.resource_read;
-            group.mutable |= matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
-            group.declarations.push_str(side_doc);
-            group.declarations.push_str(&declaration);
-            group.implementations.push_str(&implementation);
-        } else if receiver.is_some() || is_backend {
-            let mutable = matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
-            if !mutable {
-                let mut sig = method.sig.clone();
-                sig.ident = syn::parse_str(name).map_err(|e| format!("{name}: {e}"))?;
-                let args = sig
-                    .inputs
-                    .iter()
-                    .skip(1)
-                    .map(|arg| match arg {
-                        FnArg::Typed(arg) => match &*arg.pat {
-                            Pat::Ident(pat) => Ok(pat.ident.to_string()),
-                            _ => Err(format!("{name}: unsupported argument")),
-                        },
-                        FnArg::Receiver(_) => Err(format!("{name}: unexpected receiver")),
-                    })
-                    .collect::<Result<Vec<_>, String>>()?
-                    .join(", ");
-                let refusal = match &sig.output {
-                    syn::ReturnType::Default => {
-                        return Err(format!("{name}: a backend read returns a value"));
-                    }
-                    syn::ReturnType::Type(_, ty) => match &**ty {
-                        syn::Type::Path(path)
-                            if path
-                                .path
-                                .segments
-                                .last()
-                                .is_some_and(|seg| seg.ident == "Option") =>
-                        {
-                            Some("None")
-                        }
-                        syn::Type::Path(path)
-                            if path
-                                .path
-                                .segments
-                                .last()
-                                .is_some_and(|seg| seg.ident == "bool") =>
-                        {
-                            Some("false")
-                        }
-                        // A read that answers `Result`: its refusal is the
-                        // error a host without a backend answers.
-                        syn::Type::Path(path)
-                            if path
-                                .path
-                                .segments
-                                .last()
-                                .is_some_and(|seg| seg.ident == "Result") =>
-                        {
-                            Some("Err(mod_api::NoBackend::no_backend())")
-                        }
-                        syn::Type::Path(path)
-                            if path.path.segments.last().is_some_and(|seg| {
-                                matches!(
-                                    seg.ident.to_string().as_str(),
-                                    "u32" | "i32" | "u16" | "u8" | "usize"
-                                )
-                            }) =>
-                        {
-                            Some("0")
-                        }
-                        // A registry key's metadata: a read the goal view only
-                        // forwards — a host without a backend answers "".
-                        syn::Type::Path(path)
-                            if path
-                                .path
-                                .segments
-                                .last()
-                                .is_some_and(|seg| seg.ident == "String") =>
-                        {
-                            None
-                        }
-                        _ => {
-                            return Err(format!(
-                                "{name}: the goal view cannot refuse its return type"
-                            ));
-                        }
-                    },
-                };
-                backend_read_list.push((
-                    name,
-                    sig.to_token_stream().to_string(),
-                    args,
-                    refusal,
-                    // Entity data answers the tick's view; everything else
-                    // forwards to the real backend the view carries.
-                    matches!(
-                        method.sig.inputs.iter().skip(1).find_map(|arg| match arg {
-                            FnArg::Typed(arg) => Some(&*arg.ty),
-                            FnArg::Receiver(_) => None,
-                        }),
-                        Some(syn::Type::Path(ty))
-                            if ty.path.segments.len() == 1
-                                && GOAL_VIEW_ENTITY_ARGS
-                                    .contains(&ty.path.segments[0].ident.to_string().as_str())
-                    ),
-                ));
-            }
-            let (trait_methods, impl_methods) = if mutable && side == Side::Client {
-                (&mut client_backend_writes, &mut client_backend_write_impl)
-            } else if mutable {
-                (&mut backend_writes, &mut backend_write_impl)
-            } else {
-                (&mut backend_reads, &mut backend_read_impl)
-            };
-            trait_methods.push_str(side_doc);
-            trait_methods.push_str(&declaration);
-            impl_methods.push_str(&implementation);
-            if let Some(receiver) = receiver {
-                let (handle, code) = handle_method(method, name, receiver, side, &types.handles)?;
-                let methods = handles.entry(handle).or_default();
-                methods.push_str(side_doc);
-                methods.push_str(&code);
-            }
-        } else {
-            // The goal view implements every `Host` method (#1077): the
-            // entity lookups answer the tick's own rules, everything else
-            // forwards to the game host the view carries.
-            if side == Side::Both {
-                let mutable = matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
-                let mut sig = method.sig.clone();
-                sig.ident = syn::parse_str(name).map_err(|e| format!("{name}: {e}"))?;
-                // The trait's shape, as `host_method` builds it: a helper
-                // without a receiver becomes a `&self` method there.
-                if !matches!(sig.inputs.first(), Some(FnArg::Receiver(_))) {
-                    sig.inputs.insert(0, syn::parse_quote!(&self));
+                if matches!(tier, Tier::Backend | Tier::ClientBackend) {
+                    reads.push((area, *tier, entry));
+                } else if *tier == Tier::Host && area.stem != "services" {
+                    host_methods.push((area, entry));
                 }
-                let args = sig
-                    .inputs
-                    .iter()
-                    .skip(1)
-                    .map(|arg| match arg {
-                        FnArg::Typed(arg) => match &*arg.pat {
-                            Pat::Ident(pat) => Ok(pat.ident.to_string()),
-                            _ => Err(format!("{name}: unsupported argument")),
-                        },
-                        FnArg::Receiver(_) => Err(format!("{name}: unexpected receiver")),
-                    })
-                    .collect::<Result<Vec<_>, String>>()?
-                    .join(", ");
-                let ret = match &sig.output {
-                    syn::ReturnType::Default => "()".to_string(),
-                    syn::ReturnType::Type(_, ty) => ty.to_token_stream().to_string(),
-                };
-                host_method_list.push((
-                    name,
-                    sig.to_token_stream().to_string(),
-                    args,
-                    ret,
-                    mutable,
-                ));
             }
-            let (traits, implementation_out) = match side {
-                Side::Both => (&mut host_traits, &mut host_impl),
-                Side::Server => (&mut server_traits, &mut server_impl),
-                Side::Client => (&mut client_traits, &mut client_impl),
-            };
-            traits.push_str(side_doc);
-            traits.push_str(&declaration);
-            implementation_out.push_str(&implementation);
         }
     }
-    let mut service_traits = String::new();
-    let mut service_impls = String::new();
-    for (name, service) in services {
-        let trait_name = name.to_upper_camel_case();
-        let borrow = if service.mutable { "&mut" } else { "&" };
-        let access = if service.resource_reads_only {
-            "PublishedResources"
-        } else {
-            "WorldOnly"
-        };
-        let (traits, implementation) = match service.side {
-            Side::Both => (&mut host_traits, &mut host_impl),
-            Side::Server => (&mut server_traits, &mut server_impl),
-            Side::Client => (&mut client_traits, &mut client_impl),
-        };
-        traits.push_str(&format!(
-            "/// The {name} service.\n/// Not on wasm: a frame resource; its methods are the imports.\nfn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ mod_api::__private::check_access(\"{name}\", mod_api::__private::LoadAccess::{access}); unimplemented!(\"{trait_name} service\") }}\n"
-        ));
-        implementation.push_str(&format!(
-            "fn {name}({borrow} self) -> {borrow} dyn {trait_name} {{ mod_api::__private::check_access(\"{name}\", mod_api::__private::LoadAccess::{access}); self }}\n"
-        ));
-        service_traits.push_str(&format!(
-            "/// The {name} service, reached through its host.\npub trait {trait_name} {{\n{} }}\n",
-            service.declarations
-        ));
-        service_impls.push_str(&format!(
-            "impl {trait_name} for super::Game<'_> {{\n{} }}\n",
-            service.implementations
-        ));
+    for (handle, code) in &by_handle {
+        methods.push_str(&format!("impl {handle} {{\n{code}}}\n"));
     }
-    let handles = handles
-        .iter()
-        .map(|(handle, methods)| format!("impl {handle} {{\n{methods}}}\n"))
-        .collect::<String>();
     struct StdTypes {
         path_buf: bool,
         arc: bool,
@@ -413,15 +485,12 @@ pub(super) fn generate(
             syn::visit::visit_type_path(self, ty);
         }
     }
-    let host_trait: syn::ItemTrait = syn::parse_str(&format!(
-        "trait Host {{ {host_traits} {server_traits} {client_traits} {backend_reads} {backend_writes} {client_backend_writes} }}"
-    ))
-    .map_err(|e| format!("generated Host: {e}"))?;
     let mut std_types = StdTypes {
         path_buf: false,
         arc: false,
     };
-    std_types.visit_item_trait(&host_trait);
+    std_types
+        .visit_file(&syn::parse_file(&methods).map_err(|e| format!("generated handles: {e}"))?);
     let mut imports = String::new();
     if std_types.path_buf {
         imports.push_str("use std::path::PathBuf;\n");
@@ -443,183 +512,384 @@ pub(super) fn generate(
         ),
         side_enum("LevelSide", "&'a dyn LevelHost", "&'a dyn LevelHost")
     );
-    let mut draw_traits = String::new();
-    let mut draw_impls = String::new();
-    for (context, (declarations, implementations)) in contexts.iter().zip(&drawing) {
-        let (doc, trait_name, game_struct, surface) = (
-            &context.doc,
-            &context.trait_name,
-            context.game_struct(),
-            &context.surface,
-        );
-        draw_traits.push_str(&format!(
-            "/// {doc}\n/// Each method's default panics with its name, so a test double implements only what its test calls.\npub trait {trait_name} {{\n{declarations}}}\n"
-        ));
-        draw_impls.push_str(&format!(
-            "/// [`{trait_name}`] on the game's `{surface}`.\npub(crate) struct {game_struct}<'a, 'g> {{\npub(crate) game: &'a super::Game<'g>,\npub(crate) surface: &'a mut {surface},\n}}\nimpl {trait_name} for {game_struct}<'_, '_> {{\n{implementations}}}\n"
-        ));
-    }
+    let (host_supers, server_supers, client_supers) = (
+        supertraits("Host"),
+        supertraits("ServerHost"),
+        supertraits("ClientHost"),
+    );
+    let (backend_supers, backend_mut_supers, client_backend_mut_supers) = (
+        supertraits("Backend"),
+        supertraits("BackendMut"),
+        supertraits("ClientBackendMut"),
+    );
     let host = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n{imports}/// Services supplied by the game to trait mods.\n/// Each method's default panics with its name, so a test double implements only what its test calls; the game implements every one.\n/// The backend accessors are the exception: they default to None, so a double without a backend answers every handle's typed refusal.\npub trait Host {{\n#[doc(hidden)] fn backend(&self) -> Option<BackendRef<'_>> {{ None }}\n#[doc(hidden)] fn capability_providers(&self) -> &'static dyn CapabilityProviders {{ &InstalledProviders }}\n{host_traits}}}\n/// What only the server's hooks are given: writes to the world.\npub trait ServerHost: Host {{\n#[doc(hidden)] fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {{ None }}\n{server_traits}}}\n/// What only the client's hooks are given: the client's own services.\npub trait ClientHost: Host {{\n#[doc(hidden)] fn client_backend_mut(&mut self) -> Option<ClientBackendMutRef<'_>> {{ None }}\n{client_traits}}}\n{sides}#[doc(hidden)] pub trait Backend {{\n{backend_reads}}}\n#[doc(hidden)] pub trait BackendMut {{\n{backend_writes}}}\n#[doc(hidden)] pub trait ClientBackendMut {{\n{client_backend_writes}}}\n{handles}{draw_traits}{service_traits}"
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n{imports}/// Services supplied by the game to trait mods.\n/// Each method's default panics with its name, so a test double implements only what its test calls; the game implements every one.\n/// The backend accessors are the exception: they default to None, so a double without a backend answers every handle's typed refusal.\n/// Its methods are declared by area in `host/<area>.rs`; `use mod_api::prelude::*` names every area trait.\npub trait Host: {host_supers} {{\n#[doc(hidden)] fn backend(&self) -> Option<BackendRef<'_>> {{ None }}\n#[doc(hidden)] fn capability_providers(&self) -> &'static dyn CapabilityProviders {{ &InstalledProviders }}\n}}\n/// What only the server's hooks are given: writes to the world.\npub trait ServerHost: Host + {server_supers} {{\n#[doc(hidden)] fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {{ None }}\n}}\n/// What only the client's hooks are given: the client's own services.\npub trait ClientHost: Host + {client_supers} {{\n#[doc(hidden)] fn client_backend_mut(&mut self) -> Option<ClientBackendMutRef<'_>> {{ None }}\n}}\n{sides}#[doc(hidden)] pub trait Backend: {backend_supers} {{}}\n#[doc(hidden)] pub trait BackendMut: {backend_mut_supers} {{}}\n#[doc(hidden)] pub trait ClientBackendMut: {client_backend_mut_supers} {{}}\n{methods}"
     );
-    let implementation = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse mod_api::*;\nuse mod_api::__private::game::*;\n{imports}impl Host for super::Game<'_> {{\nfn backend(&self) -> Option<BackendRef<'_>> {{ Some(BackendRef::of(self)) }}\n{host_impl}}}\nimpl ServerHost for super::Game<'_> {{\nfn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {{ Some(BackendMutRef::of(self)) }}\n{server_impl}}}\nimpl ClientHost for super::Game<'_> {{\nfn client_backend_mut(&mut self) -> Option<ClientBackendMutRef<'_>> {{ Some(ClientBackendMutRef::of(self)) }}\n{client_impl}}}\nimpl Backend for super::Game<'_> {{\n{backend_read_impl}}}\nimpl BackendMut for super::Game<'_> {{\n{backend_write_impl}}}\nimpl ClientBackendMut for super::Game<'_> {{\n{client_backend_write_impl}}}\n{draw_impls}{service_impls}"
-    );
-    let goal_view = goal_view(&backend_read_list, &host_method_list)?;
-    Ok((host, implementation, goal_view))
+    syn::parse_file(&host).map_err(|e| format!("generated Host: {e}"))?;
+    let goal_view = goal_view(&areas, &reads, &host_methods)?;
+    Ok((host, goal_view))
 }
 
-/// The goal view's generated impls (#1077): the `Backend` one forwards the
-/// snapshot-backed reads to the engine context's `r_*` methods, refuses its
-/// typed refusal for entity data the tick's view does not carry, and forwards
-/// every other backend read — the level's own: blocks, loaded chunks, time,
-/// height, weather, block entities — to the real backend of the game host the
-/// view carries; the `Host` one answers the entity lookups by the tick's own
-/// rules, refuses the mutable methods, and forwards everything else to the
-/// game host the view carries. The engine includes both beside its `GoalCx`.
+/// The goal view's generated impls (#1077): the backend ones forward the snapshot-backed
+/// reads to the engine context's `r_*` methods, refuse their typed refusal for entity data the
+/// tick's view does not carry, and forward every other backend read — the level's own: blocks,
+/// loaded chunks, time, height, weather, block entities — to the real backend of the game host
+/// the view carries; the host ones answer the entity lookups by the tick's own rules, refuse the
+/// mutable methods, and forward everything else to the game host the view carries. The engine
+/// includes them beside its `GoalCx`.
 fn goal_view(
-    reads: &[(&str, String, String, Option<&str>, bool)],
-    host_methods: &[(&str, String, String, String, bool)],
+    areas: &[Area],
+    reads: &[(&Area, Tier, &Entry)],
+    host_methods: &[(&Area, &Entry)],
 ) -> Result<String, String> {
-    let mut backend = String::new();
-    for (name, sig, args, refusal, entity_data) in reads {
-        // How a forwarded read answers a host without a backend: the typed
-        // refusal, or the empty string of a metadata read.
-        let forwarded = match *refusal {
+    let mut impls = Impls::default();
+    let mut code = String::from(
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse mod_api::{prelude::*, *};\nuse std::path::PathBuf;\nuse std::sync::Arc;\n/// The mob tick's read view (#1077), as the game generates it: the snapshot-backed\n/// reads forward to the engine context's own methods, entity data the view does\n/// not carry answers its typed refusal, and every other backend read forwards\n/// to the real backend of the game host the view carries.\nimpl Backend for super::GoalCx<'_, '_> {}\n",
+    );
+    for (area, tier, entry) in reads {
+        let (name, args) = (
+            entry.name.as_str(),
+            signature_args(&entry.sig, &entry.name)?,
+        );
+        let refusal = refusal(&entry.sig, name)?;
+        let mut sig = entry.sig.clone();
+        sig.ident = syn::parse_str(name).map_err(|e| format!("{name}: {e}"))?;
+        // Entity data answers the tick's view; everything else forwards to the real backend the
+        // view carries.
+        let entity_data = matches!(
+            entry.sig.inputs.iter().skip(1).find_map(|arg| match arg {
+                FnArg::Typed(arg) => Some(&*arg.ty),
+                FnArg::Receiver(_) => None,
+            }),
+            Some(syn::Type::Path(ty))
+                if ty.path.segments.len() == 1
+                    && GOAL_VIEW_ENTITY_ARGS
+                        .contains(&ty.path.segments[0].ident.to_string().as_str())
+        );
+        // How a forwarded read answers a host without a backend: the typed refusal, or the empty
+        // string of a metadata read.
+        let forwarded = match refusal {
             Some("None") => ".flatten()".to_string(),
-            // A `Result` read's no-backend answer is its error type's own
-            // `NoBackend` value, wrapped back in the `Err`.
+            // A `Result` read's no-backend answer is its error type's own `NoBackend` value,
+            // wrapped back in the `Err`.
             Some(refusal) if refusal.starts_with("Err(") => {
                 ".unwrap_or_else(|| Err(mod_api::NoBackend::no_backend()))".to_string()
             }
             Some(refusal) => format!(".unwrap_or({refusal})"),
             None => ".unwrap_or_default()".to_string(),
         };
-        let body = if GOAL_VIEW_READS.contains(name) {
+        let body = if GOAL_VIEW_READS.contains(&name) {
             format!("self.r_{name}({args})")
-        } else if *entity_data {
+        } else if entity_data {
             let Some(refusal) = refusal else {
                 return Err(format!(
                     "{name}: the goal view cannot refuse its return type"
                 ));
             };
             if args.is_empty() {
-                (*refusal).to_string()
+                refusal.to_string()
             } else if args.contains(',') {
                 format!("let _ = ({args}); {refusal}")
             } else {
                 format!("let _ = {args}; {refusal}")
             }
         } else {
-            // The read names data the tick leaves in place, so the real
-            // backend answers it: `backend_read` holds the `None` a host
-            // without one answers.
+            // The read names data the tick leaves in place, so the real backend answers it:
+            // `backend_read` holds the `None` a host without one answers.
             format!(
                 "mod_api::__private::backend_read(self.host, |backend| backend.{name}({args})){forwarded}"
             )
         };
-        backend.push_str(&format!("{sig} {{ {body} }}\n"));
+        impls.add(
+            area.trait_name(*tier),
+            format!("{} {{ {body} }}\n", sig.to_token_stream()),
+        );
     }
-    let mut host = String::from(
-        "#[doc(hidden)]\nfn backend(&self) -> Option<BackendRef<'_>> { Some(mod_api::__private::backend_ref(self)) }\n",
+    code.push_str(&impls.take());
+    code.push_str(
+        "/// The same view as a host: the entity lookups answer the tick's own rules\n/// (the ticking mob, the player it sees, the snapshot, else None), the mutable\n/// methods stay out of reach of the shared host the view holds, and everything\n/// else - the level, its blocks, tags, recipes and settings - forwards to the\n/// game host the view carries.\nimpl Host for super::GoalCx<'_, '_> {\n#[doc(hidden)]\nfn backend(&self) -> Option<BackendRef<'_>> { Some(mod_api::__private::backend_ref(self)) }\n}\n",
     );
-    for (name, sig, args, ret, mutable) in host_methods {
-        if GOAL_VIEW_LOOKUPS.contains(name) {
-            host.push_str(&format!("{sig} {{ self.lookup_{name}({args}) }}\n"));
-        } else if *mutable {
-            // A `&mut self` Host method cannot be called on the `&dyn Host`
-            // the context hands out, so the view leaves it to the trait's
-            // panicking default: a goal cannot reach it (that is the point).
-            continue;
-        } else {
-            let _ = ret;
-            host.push_str(&format!("{sig} {{ self.host.{name}({args}) }}\n"));
-        }
+    // An area whose host methods all write has nothing to forward, but the view still implements it.
+    for area in areas
+        .iter()
+        .filter(|area| area.tiers.contains_key(&Tier::Host))
+    {
+        impls.add(area.trait_name(Tier::Host), String::new());
     }
-    Ok(format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse mod_api::*;\nuse std::path::PathBuf;\nuse std::sync::Arc;\n/// The mob tick's read view (#1077), as the game generates it: the snapshot-backed\n/// reads forward to the engine context's own methods, entity data the view does\n/// not carry answers its typed refusal, and every other backend read forwards\n/// to the real backend of the game host the view carries.\nimpl Backend for super::GoalCx<'_, '_> {{\n{backend}}}\n/// The same view as a host: the entity lookups answer the tick's own rules\n/// (the ticking mob, the player it sees, the snapshot, else None), the mutable\n/// methods stay out of reach of the shared host the view holds, and everything\n/// else - the level, its blocks, tags, recipes and settings - forwards to the\n/// game host the view carries.\nimpl Host for super::GoalCx<'_, '_> {{\n{host}}}"
-    ))
+    for (area, entry) in host_methods {
+        let name = entry.name.as_str();
+        let mut sig = entry.sig.clone();
+        sig.ident = syn::parse_str(name).map_err(|e| format!("{name}: {e}"))?;
+        // A `&mut self` Host method cannot be called on the `&dyn Host` the context hands out,
+        // so the view leaves it to the trait's panicking default: a goal cannot reach it (that
+        // is the point).
+        if matches!(sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some()) {
+            continue;
+        }
+        let args = signature_args(&sig, name)?;
+        let body = if GOAL_VIEW_LOOKUPS.contains(&name) {
+            format!("self.lookup_{name}({args})")
+        } else {
+            format!("self.host.{name}({args})")
+        };
+        impls.add(
+            area.trait_name(Tier::Host),
+            format!("{} {{ {body} }}\n", sig.to_token_stream()),
+        );
+    }
+    code.push_str(&impls.take());
+    Ok(code)
 }
 
-/// A draw helper's method on its context's trait, when one of `method`'s inputs is a draw
-/// surface: the context's index, the trait's declaration, and the game struct's forwarding.
-/// The trait method borrows itself as the helper borrows the surface; the helper borrows
-/// `Game` shared, as the struct holds it.
-fn draw_method(
-    method: &syn::ItemFn,
-    name: &str,
-    contexts: &[DrawContext],
-    exports: &HashSet<String>,
-) -> Result<Option<(usize, String, String)>, String> {
-    let Some((position, context, mutable)) =
-        method
-            .sig
-            .inputs
-            .iter()
-            .enumerate()
-            .find_map(|(position, arg)| match arg {
-                FnArg::Typed(arg) => DrawContext::of(contexts, &arg.ty)
-                    .map(|(context, mutable)| (position, context, mutable)),
-                FnArg::Receiver(_) => None,
-            })
-    else {
-        return Ok(None);
-    };
-    if !matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_none())
-    {
-        return Err(format!("{name}: a draw helper borrows Game shared (&self)"));
+/// The methods of each trait the goal view implements, in the order they were added.
+#[derive(Default)]
+struct Impls(Vec<(String, String)>);
+
+impl Impls {
+    fn add(&mut self, name: String, method: String) {
+        match self.0.iter_mut().find(|(other, _)| *other == name) {
+            Some((_, methods)) => methods.push_str(&method),
+            None => self.0.push((name, method)),
+        }
     }
-    let index = contexts
-        .iter()
-        .position(|other| std::ptr::eq(other, context))
-        .expect("context found");
-    let short = name.strip_prefix(context.prefix.as_str()).ok_or_else(|| {
-        format!(
-            "{name}: a {} helper's name starts with {}",
-            context.trait_name, context.prefix
+    fn take(&mut self) -> String {
+        std::mem::take(&mut self.0)
+            .into_iter()
+            .map(|(name, methods)| {
+                format!("impl {name} for super::GoalCx<'_, '_> {{\n{methods}}}\n")
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(source: &str) -> Entry {
+        let method: syn::TraitItemFn = syn::parse_str(source).unwrap();
+        Entry {
+            name: method.sig.ident.to_string(),
+            sig: method.sig,
+            attrs: method.attrs,
+        }
+    }
+
+    fn handles(source: &str) -> BTreeMap<String, String> {
+        api_types(source).unwrap().handles
+    }
+
+    #[test]
+    fn a_method_is_a_handles_when_it_takes_one_first_and_is_named_for_it() {
+        let handles = handles("pub struct EntityRef; pub struct LevelRef; pub struct BlockKey;");
+        let read = entry(
+            "/// Where it is.\nfn entity_position(&self, entity: EntityRef, scale: f64) -> Option<[f64; 3]>;",
+        );
+        let (handle, code) = handle_method(&read, Tier::Backend, &handles)
+            .unwrap()
+            .unwrap();
+        assert_eq!(handle, "EntityRef");
+        assert!(code.starts_with("/// Where it is.\n"));
+        assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
+        assert!(code.contains("backend_of(host)?.entity_position(self, scale)"));
+        // A client read borrows the client host, a write the mutable one of its side.
+        let (_, client) = handle_method(&read, Tier::ClientBackend, &handles)
+            .unwrap()
+            .unwrap();
+        assert!(client.contains("host : & dyn ClientHost"));
+        let write = entry("fn level_set(&mut self, level: LevelRef) -> bool;");
+        let (_, code) = handle_method(&write, Tier::BackendMut, &handles)
+            .unwrap()
+            .unwrap();
+        assert!(code.contains("host : & mut dyn ServerHost"));
+        assert!(code.contains(
+            "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"
+        ));
+        let (_, code) = handle_method(&write, Tier::ClientBackendMut, &handles)
+            .unwrap()
+            .unwrap();
+        assert!(code.contains("host : & mut dyn ClientHost"));
+        assert!(code.contains("client_backend_mut_of(host)"));
+        // A `Result` method refuses with its error's `NoBackend` value on a host without a game.
+        let tried = entry("fn level_attempt(&mut self, level: LevelRef) -> Result<u8, Refused>;");
+        let (_, code) = handle_method(&tried, Tier::BackendMut, &handles)
+            .unwrap()
+            .unwrap();
+        assert!(code.contains(
+            "backend_mut_of(host).map_or_else(|| Err(crate::NoBackend::no_backend()), |backend| backend.level_attempt(self))"
+        ));
+        // A key's name is read with an owned answer.
+        let key = entry("fn block_key_id(&self, key: BlockKey) -> String;");
+        let (handle, code) = handle_method(&key, Tier::Backend, &handles)
+            .unwrap()
+            .unwrap();
+        assert_eq!(handle, "BlockKey");
+        assert!(code.contains("backend_of(host).expect("));
+    }
+
+    #[test]
+    fn other_methods_are_the_backends_alone_and_a_wrong_shape_is_refused() {
+        let handles = handles("pub struct EntityRef; pub struct LevelRef;");
+        // Not named for its handle, or not taking one first: a backend method only.
+        for source in [
+            "fn mob_x(&self, entity: EntityRef) -> Option<()>;",
+            "fn entity_x(&self, level: LevelRef) -> Option<()>;",
+            "fn entity_x(&self, count: u32) -> Option<()>;",
+            "fn entity_x(&self) -> Option<()>;",
+        ] {
+            assert!(
+                handle_method(&entry(source), Tier::Backend, &handles)
+                    .unwrap()
+                    .is_none(),
+                "{source}"
+            );
+        }
+        for (source, tier, error) in [
+            (
+                "fn entity_type(&self, entity: EntityRef) -> Option<()>;",
+                Tier::Backend,
+                "not a method name",
+            ),
+            (
+                "fn entity_x(&self, entity: EntityRef);",
+                Tier::Backend,
+                "returns Option, bool or Result",
+            ),
+            (
+                "fn entity_x(&mut self, entity: EntityRef) -> bool;",
+                Tier::Backend,
+                "disagree",
+            ),
+        ] {
+            assert!(
+                handle_method(&entry(source), tier, &handles)
+                    .unwrap_err()
+                    .contains(error),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_ref_structs_define_receivers_without_registration() {
+        let types = api_types(
+            "pub struct BlockEntityRef; pub struct HTTPRequestRef;
+             struct HiddenRef; pub(crate) struct InternalRef;
+             pub enum EnumRef {} pub type AliasRef = BlockEntityRef; pub struct Plain;",
         )
-    })?;
-    let mut stripped = method.clone();
-    stripped.sig.inputs = stripped
-        .sig
-        .inputs
-        .into_iter()
-        .enumerate()
-        .filter(|(at, _)| *at != position)
-        .map(|(at, arg)| match at {
-            0 if mutable => syn::parse_quote!(&mut self),
-            _ => arg,
-        })
-        .collect();
-    let (declaration, _) = host_method(&stripped, short, &context.trait_name, exports)?;
-    let sig = syn::parse_str::<syn::TraitItemFn>(&declaration)
-        .map_err(|e| format!("{name}: {e}"))?
-        .sig;
-    let surface = if mutable {
-        "&mut *self.surface"
-    } else {
-        "&*self.surface"
-    };
-    let args = method
-        .sig
-        .inputs
-        .iter()
-        .enumerate()
-        .skip(1)
-        .map(|(at, arg)| match arg {
-            _ if at == position => Ok(surface.to_owned()),
-            FnArg::Typed(arg) => match &*arg.pat {
-                Pat::Ident(pat) => Ok(pat.ident.to_string()),
-                _ => Err(format!("{name}: unsupported argument")),
-            },
-            FnArg::Receiver(_) => Err(format!("{name}: unexpected receiver")),
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let implementation = format!(
-        "{} {{ self.game.{}({}) }}\n",
-        sig.to_token_stream(),
-        method.sig.ident,
-        args.join(", ")
-    );
-    Ok(Some((index, declaration, implementation)))
+        .unwrap();
+        for (receiver, ty) in [
+            ("block_entity", "BlockEntityRef"),
+            ("http_request", "HTTPRequestRef"),
+        ] {
+            let name = format!("{receiver}_kind");
+            let method = entry(&format!("fn {name}(&self, value: {ty}) -> Option<()>;"));
+            let (handle, code) = handle_method(&method, Tier::Backend, &types.handles)
+                .unwrap()
+                .unwrap();
+            assert_eq!(handle, ty);
+            assert!(code.contains(&format!("backend_of(host)?.{name}(self)")));
+        }
+        let hidden = entry("fn hidden_kind(&self, value: HiddenRef) -> Option<()>;");
+        assert!(
+            handle_method(&hidden, Tier::Backend, &types.handles)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            api_types("pub struct URLRef; pub struct UrlRef;")
+                .err()
+                .unwrap(),
+            "duplicate handle receiver url",
+        );
+    }
+
+    #[test]
+    fn an_area_file_reads_its_tier_traits() {
+        let file = syn::parse_str(
+            "pub trait ItemsHost { fn a(&self); } pub trait ItemsBackendMut { fn b(&mut self); }",
+        )
+        .unwrap();
+        let tiers = area_tiers("Items", file).unwrap();
+        assert_eq!(
+            tiers.keys().copied().collect::<Vec<_>>(),
+            [Tier::Host, Tier::BackendMut]
+        );
+        assert_eq!(tiers[&Tier::Host][0].name, "a");
+    }
+
+    #[test]
+    fn an_unrecognised_area_trait_is_refused() {
+        for wrong in [
+            "ItemHost",
+            "ItemsReadBackend",
+            "OtherServerHost",
+            "ReviewProbeHosts",
+            "Unrelated",
+        ] {
+            for recognised in ["", "pub trait ItemsHost { fn known(&self); }"] {
+                let file = syn::parse_str(&format!(
+                    "{recognised} pub trait {wrong} {{ fn a(&self) -> &std::path::Path; }}"
+                ))
+                .unwrap();
+                let error = area_tiers("Items", file).err().unwrap();
+                assert!(error.contains(wrong), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn declarations_cannot_hide_in_modules_or_macros() {
+        for (kind, source) in [
+            (
+                "module",
+                "pub mod inner { pub trait ItemsHost { fn unsupported(&self) -> &std::path::Path; } }",
+            ),
+            (
+                "macro",
+                "macro_rules! hidden { () => { pub trait ItemsHost { fn unsupported(&self) -> &std::path::Path; } }; } hidden!();",
+            ),
+            (
+                "macro",
+                "hidden! { pub trait ItemsHost { fn unsupported(&self) -> &std::path::Path; } }",
+            ),
+        ] {
+            let file = syn::parse_file(source).unwrap();
+            let error = area_tiers("Items", file).err().unwrap();
+            assert!(error.contains(&format!("unsupported {kind}")), "{error}");
+            assert!(error.contains("Items"), "{error}");
+        }
+    }
+
+    #[test]
+    fn imports_and_attributes_are_allowed() {
+        let file = syn::parse_file(
+            "#![allow(unused_variables)] use crate::*; /// An area's methods.\n #[doc(hidden)] pub trait ItemsBackend {}",
+        )
+        .unwrap();
+        let tiers = area_tiers("Items", file).unwrap();
+        assert!(tiers.contains_key(&Tier::Backend));
+    }
+
+    #[test]
+    fn non_host_traits_are_allowed_only_in_their_own_file() {
+        for (area, name) in [("Draw", "DrawContext"), ("Services", "Commands")] {
+            let file = syn::parse_file(&format!("pub trait {name} {{}}")).unwrap();
+            assert!(area_tiers(area, file.clone()).unwrap().is_empty());
+            assert!(area_tiers("Items", file).is_err());
+        }
+    }
+
+    #[test]
+    fn every_area_file_of_the_checkout_loads() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let areas = load(&root).unwrap();
+        assert!(areas.iter().any(|area| area.stem == "config"));
+        assert!(
+            areas
+                .iter()
+                .filter(|area| area.tiers.is_empty())
+                .all(|area| matches!(area.stem.as_str(), "draw" | "services"))
+        );
+    }
 }

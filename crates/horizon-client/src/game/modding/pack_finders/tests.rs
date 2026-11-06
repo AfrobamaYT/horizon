@@ -70,9 +70,9 @@ impl Fixture {
     }
     fn sources(&self) -> ModsState {
         ModsState {
-            selected: vec![horizon_mods::selection::SelectedPackage {
+            selected: vec![horizon_mod_package::selection::SelectedPackage {
                 path: self.package.clone(),
-                package: horizon_mods::Package::read(&self.package).unwrap(),
+                package: horizon_mod_package::Package::read(&self.package).unwrap(),
             }]
             .into(),
             ..Default::default()

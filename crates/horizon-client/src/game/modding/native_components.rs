@@ -46,12 +46,12 @@ impl Game<'_> {
     }
     /// The slot `stack` is equipped to (`Equippable.slot`) after its component patch, behind
     /// `ItemResource::equippable_slot`, through the opaque backend. API @API:item_components@.
-    pub(super) fn native_item_equippable_slot(&self, stack: &ItemStack) -> Option<String> {
+    pub(in crate::game) fn native_item_equippable_slot(&self, stack: &ItemStack) -> Option<String> {
         horizon_client::item_sync::equippable_slot(stack, self.items())
     }
     /// Whether enchantments `a` and `b` may share an item (`Enchantment.areCompatible`), by the
     /// world's enchantment definitions. API @API:item_components@.
-    pub(super) fn native_enchantments_compatible(&self, a: &str, b: &str) -> bool {
+    pub(in crate::game) fn native_enchantments_compatible(&self, a: &str, b: &str) -> bool {
         world_stations!(self).enchantments.compatible(a, b)
     }
     /// Whether an enchantment on `stack` has effect component `effect`, by the world's

@@ -396,18 +396,21 @@ pub mod tests {
         assert_eq!(BlockEntityTypeKey::from_slot(furnace.0), Ok(furnace));
         assert!(BlockEntityTypeKey::from_slot(u32::MAX).is_err());
         struct Table;
-        impl Backend for Table {
+        impl mod_api::prelude::KeysBackend for Table {
             fn block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
                 crate::registry_keys::block_entity_type_name(key)
                     .unwrap()
                     .to_owned()
             }
         }
+        impl Backend for Table {}
+        mod_api::impl_backend_areas!(Table, except(keys));
         impl Host for Table {
             fn backend(&self) -> Option<BackendRef<'_>> {
                 Some(BackendRef::of(self))
             }
         }
+        mod_api::impl_host_areas!(Table);
         assert_eq!(keys[0].id(&Table), "owner:press");
     }
 

@@ -837,9 +837,15 @@ pub mod tests {
     #[cfg(test)]
     impl Host for NoHost {}
     #[cfg(test)]
+    mod_api::impl_host_areas!(NoHost);
+    #[cfg(test)]
     impl ServerHost for NoHost {}
     #[cfg(test)]
+    mod_api::impl_server_host_areas!(NoHost);
+    #[cfg(test)]
     impl ClientHost for NoHost {}
+    #[cfg(test)]
+    mod_api::impl_client_host_areas!(NoHost);
 
     #[test]
     fn a_host_without_a_backend_refuses_handle_calls() {
@@ -1022,7 +1028,7 @@ pub mod tests {
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()
                     .chain(CAPABILITY_TYPES.iter().copied())
-                    .map(|id| horizon_mods::content::Block {
+                    .map(|id| horizon_mod_package::content::Block {
                         id: format!("test:{id}"),
                         template: "minecraft:stone".into(),
                         ..Default::default()
@@ -1057,9 +1063,19 @@ pub mod tests {
     /// Block entities of one type, or vanilla ones (none).
     struct TypeOf(Option<&'static str>);
     #[cfg(test)]
-    impl Backend for TypeOf {
+    impl mod_api::prelude::BlockEntitiesBackend for TypeOf {
         fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
             self.0.map(type_key)
+        }
+    }
+    #[cfg(test)]
+    impl Backend for TypeOf {}
+    #[cfg(test)]
+    mod_api::impl_backend_areas!(TypeOf, except(block_entities));
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntitiesHost for TypeOf {
+        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+            Some(BlockEntityRef { level, position })
         }
     }
     #[cfg(test)]
@@ -1067,10 +1083,9 @@ pub mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
-        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
-        }
     }
+    #[cfg(test)]
+    mod_api::impl_host_areas!(TypeOf, except(block_entities));
 
     /// How a mod tank misanswers: an extract takes and answers 100 mB more than asked
     /// (`GivesMore`), or an insert answers 100 mB more than went in (`TakesMore`).

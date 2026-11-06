@@ -517,7 +517,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_summons_join_write_survives_the_spawn() {
-        use mod_api::{EntityJoinLevelEvent, Flow, Hooks, Host, ModEntry, ServerHost};
+        use mod_api::{EntityJoinLevelEvent, Flow, Hooks, ModEntry, ServerHost};
         struct Joiner;
         #[mod_api::__subscriptions]
         impl Hooks for Joiner {
@@ -527,8 +527,8 @@ mod tests {
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 if event.kind == "minecraft:zombie"
-                    && let Some(er) = Host::entity(&*host, event.entity)
-                    && let Some(m) = Host::mob(&*host, er)
+                    && let Some(er) = mod_api::prelude::EntitiesHost::entity(&*host, event.entity)
+                    && let Some(m) = mod_api::prelude::MobsHost::mob(&*host, er)
                 {
                     let _ = m.set_persistence_required(&mut *host);
                     let _ = m.set_no_ai(&mut *host, true);

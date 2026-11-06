@@ -1,7 +1,7 @@
 //! `cargo horizon-mod check <file>`: what the registry checks of a submission,
 //! run anywhere: its kind's own checks (docs/modding/src/reference/registry-index.md), its signature
 //! when given a key, and for a `.hmod` that it is content only.
-use horizon_mods::index::{self, Facts, Kind};
+use horizon_mod_package::index::{self, Facts, Kind};
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -86,7 +86,7 @@ pub fn kind_of(path: &Path) -> Option<Kind> {
         "hmod" if index::native::holds(path) => Some(Kind::NativeMod),
         "hmod" => Some(Kind::Mod),
         "hpack" => Some(Kind::Modpack),
-        "zip" => Some(horizon_mods::index::zip_kind(path)),
+        "zip" => Some(horizon_mod_package::index::zip_kind(path)),
         "hshader" => Some(Kind::Shader),
         _ => None,
     }
@@ -131,7 +131,7 @@ mod tests {
 
     fn fixture(name: &str) -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../horizon-mods/tests/index")
+            .join("../horizon-mod-package/tests/index")
             .join(name)
     }
 

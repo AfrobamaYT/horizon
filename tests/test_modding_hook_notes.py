@@ -41,7 +41,7 @@ class HookNotes(unittest.TestCase):
         with patch.object(notes.subprocess, "run", return_value=subprocess.CompletedProcess(
                 [], 0, stdout="# Hook notes\n\nLatest.")) as run:
             result = notes.preprocess({"root": "/checkout/docs/modding"}, self.book())
-        self.assertEqual(run.call_args.kwargs["cwd"], Path("/checkout"))
+        self.assertEqual(run.call_args.kwargs["cwd"], Path("/checkout").resolve())
         self.assertTrue(run.call_args.kwargs["check"])
         self.assertIn("Latest.", result["sections"][0]["Chapter"]["sub_items"][0]["Chapter"]["content"])
 

@@ -66,6 +66,7 @@ pub mod points {
         super::execution_role::host_side(game)
     }
 }
+mod host;
 mod native_hooks;
 use event_loop::EventLoopCtl;
 // `Action` here is the title screen's buttons (`title::Action`).
@@ -120,7 +121,7 @@ use horizon_core::{
     position::BlockPos,
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
-use horizon_mods::selection::{Argument, LaunchArguments};
+use horizon_mod_package::selection::{Argument, LaunchArguments};
 pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
@@ -3342,6 +3343,9 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// A mod asked for the command trees again (`native_refresh_commands`):
+    /// the next server tick asks every mod for its commands and resends them.
+    native_commands_refresh: bool,
     /// The abilities of the server player whose turn it is (`as_guest`): their record's
     /// copy, which the turn reads and writes and `leave_guest` stores. None outside a turn.
     acting_abilities: Option<horizon_client::lan::abilities::PlayerAbilities>,
@@ -11031,6 +11035,14 @@ impl Game<'_> {
             menu.stone = state;
             menu.set_slot(&env, 1, before[1].clone());
         }
+        if anvil_open && let Some(s) = self.station.as_ref() {
+            // The same: the cost, material cost and rename flag between clicks, as
+            // the station's createResult and the mods' anvil_update left them (the
+            // result came with the slots), so a take is predicted as the server makes it.
+            menu.data[0] = s.anvil.cost;
+            menu.anvil.repair_count = s.anvil.repair_item_count_cost;
+            menu.anvil.only_renaming = s.anvil.only_renaming;
+        }
         if kind == Kind::Enchanting
             && let Some(s) = self.station.as_ref()
         {
@@ -14722,6 +14734,18 @@ impl Game<'_> {
         }
     }
     pub(super) fn damage_held(&mut self, amount: u32) {
+        self.damage_held_in_slot(
+            amount,
+            horizon_core::equipment_slot::EquipmentSlot::MainHand,
+        );
+    }
+    /// Hurt the acting hand's stack through ordinary wear/criterion/break handling,
+    /// reporting its break in the caller's explicit equipment slot.
+    pub(super) fn damage_held_in_slot(
+        &mut self,
+        amount: u32,
+        break_slot: horizon_core::equipment_slot::EquipmentSlot,
+    ) {
         let Some(stack) = self.held().cloned() else {
             return;
         };
@@ -14732,10 +14756,7 @@ impl Game<'_> {
         *self.held_mut() = updated;
         if let Some(broken) = broken {
             self.award_stat("broken", &broken.item, 1);
-            self.player_equipment_broke(
-                horizon_core::equipment_slot::EquipmentSlot::MainHand,
-                &broken,
-            );
+            self.player_equipment_broke(break_slot, &broken);
         }
     }
     /// `ItemStack.hurtWithoutBreaking`: Unbreaking applies, but the stack stops at
@@ -21450,6 +21471,7 @@ impl<'a> Game<'a> {
             lid_openers: HashMap::new(),
             lan_acting: None,
             acting_abilities: None,
+            native_commands_refresh: false,
             lan_building_boxes: Default::default(),
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
@@ -21888,7 +21910,7 @@ impl Game<'_> {
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
         let files = functions::overlay_files(stack, contributed);
-        let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+        let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
         let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
         let overlay = horizon_world::loot::PackOverlay {
             conditions: &conditions,
@@ -22575,7 +22597,7 @@ fn gameplay_tables(
             .map_err(|e| e.to_string())
         });
         let motion = startup::time("core.motion", || {
-            let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+            let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
             let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
             MotionResources::load_with_conditions(root, assets, &facts, &conditions)
         })
@@ -22943,7 +22965,7 @@ fn load_world_rest(
         .files
         .into_iter()
         .collect::<Vec<_>>();
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
     let overlay = &horizon_world::loot::PackOverlay {
         conditions: &conditions,
@@ -24161,7 +24183,10 @@ fn run_loading(
 
 pub use launch_api::{UsageError, exit_code};
 
-pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime) -> Result<()> {
+pub fn run_with(
+    launch: LaunchArguments,
+    native: horizon_mod_package::runtime::Runtime,
+) -> Result<()> {
     let Some(mut options) = Options::read(launch)? else {
         return Ok(());
     };

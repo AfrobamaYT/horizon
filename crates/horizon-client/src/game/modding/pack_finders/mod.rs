@@ -104,8 +104,11 @@ impl PackFinders for Registry {
 /// listeners, registration has no world reads; only the supplied builder is live.
 struct DiscoveryHost;
 impl Host for DiscoveryHost {}
+mod_api::impl_host_areas!(DiscoveryHost);
 impl ClientHost for DiscoveryHost {}
+mod_api::impl_client_host_areas!(DiscoveryHost);
 impl ServerHost for DiscoveryHost {}
+mod_api::impl_server_host_areas!(DiscoveryHost);
 
 pub(super) fn discover(kind: PackType, mods: &ModsState) -> Vec<Pack> {
     if !mod_api::__private::listened(HookId::AddPackFinders) {

@@ -204,7 +204,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("dispatch-tests/src");
         let source = fs::read_to_string(root.join("lib.rs")).unwrap();
         assert_eq!(
-            source.trim(),
+            source.trim().replace("\r\n", "\n"),
             "#[cfg(test)]\nmod tests {\n    #[allow(dead_code)]\n    mod stubs {\n        include!(concat!(env!(\"OUT_DIR\"), \"/dispatch_fixtures_stubs.rs\"));\n    }\n    use generated as mod_api;\n    include!(concat!(env!(\"OUT_DIR\"), \"/dispatch_fixtures_root.rs\"));\n}"
         );
         for name in ["shared", "base"] {

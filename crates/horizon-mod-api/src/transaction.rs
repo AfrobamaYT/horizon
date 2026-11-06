@@ -107,7 +107,8 @@ mod tests {
         closed: Vec<(usize, bool)>,
     }
     impl Host for Journal {}
-    impl ServerHost for Journal {
+    mod_api::impl_host_areas!(Journal);
+    impl mod_api::prelude::ModStateServerHost for Journal {
         fn transaction_open(&mut self, _: TransactionSeal) {
             self.depth += 1;
         }
@@ -116,6 +117,8 @@ mod tests {
             self.depth -= 1;
         }
     }
+    impl ServerHost for Journal {}
+    mod_api::impl_server_host_areas!(Journal, except(mod_state));
 
     #[test]
     fn a_transaction_commits_on_ok_and_aborts_on_err_and_nests() {
