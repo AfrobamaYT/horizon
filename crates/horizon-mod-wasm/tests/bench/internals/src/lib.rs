@@ -1,5 +1,6 @@
 //! Each raw call performs N accesses; the host times and verifies the committed result.
 use mod_internals::view::{Game, HandleChatInputRaw};
+mod allocations;
 
 #[derive(Default)]
 pub struct Mod;
@@ -15,6 +16,9 @@ fn access(raw: HandleChatInputRaw, game: Option<Game>) {
         game.set_copy(99).unwrap();
         panic!("discard this listener's pending write");
     }
+    let counting = mode.ends_with("-alloc");
+    let mode = mode.trim_end_matches("-alloc");
+    allocations::start(counting);
     let mut total = 0;
     for i in 0..count {
         match mode {
@@ -45,6 +49,12 @@ fn access(raw: HandleChatInputRaw, game: Option<Game>) {
             _ => unreachable!(),
         }
     }
-    raw.set_message(Box::new(total.to_string())).unwrap();
+    let counts = allocations::stop();
+    let result = if counting {
+        format!("{} {} {}", counts.0, counts.1, counts.2)
+    } else {
+        total.to_string()
+    };
+    raw.set_message(Box::new(result)).unwrap();
 }
 mod_internals::raw_listeners!(access);

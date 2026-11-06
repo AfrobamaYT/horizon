@@ -543,6 +543,7 @@ impl Game<'_> {
         self.creative_screen.forget_items();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
         self.refresh_loop_context()?;
+        self.texture_atlases_stitched();
         self.native_client_resources_reloaded();
         Ok(())
     }

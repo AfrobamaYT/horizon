@@ -659,7 +659,7 @@ impl Game<'_> {
         let sprite = well
             .sprite
             .as_deref()
-            .and_then(|s| self.native_sprite_size(batch, s).map(|size| (s, size)));
+            .and_then(|s| self.gui_sprite_pixels(s).map(|size| (s, size)));
         match sprite {
             Some((name, size)) => {
                 self.native_sprite(
