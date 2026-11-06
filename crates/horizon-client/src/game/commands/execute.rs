@@ -58,8 +58,8 @@ pub(in crate::game) struct ExecState {
     pub callback: Option<Option<(bool, i32)>>,
     /// The innermost function frame's `return`.
     pub returned: Option<Option<i32>>,
-    /// Depth of function calls.
-    pub function_depth: u32,
+    /// Function IDs in execution order, with the active frame last.
+    pub functions: Vec<String>,
 }
 
 /// A modifier that brings the sources to `max_command_forks` ends the chain
@@ -275,7 +275,7 @@ impl Game<'_> {
     /// `CommandResultCallback`s of a source's `store` chain, oldest first.
     fn deliver(&mut self, store: Option<u32>, success: bool, value: i32) {
         // The outermost source's own CommandResultCallback (harness record).
-        if self.exec.function_depth == 0
+        if self.exec.functions.is_empty()
             && let Some(results) = self.cmds.results.as_mut()
         {
             results.push((success, value));
