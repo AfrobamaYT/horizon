@@ -439,7 +439,8 @@ pub trait Hooks {
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
     /// chat box then completes them as vanilla's, within their level. A
-    /// name vanilla has is left out. Each executable usage keeps its own
+    /// name vanilla has is left out. Asked again after a mod calls
+    /// `host.commands().refresh_commands()`. Each executable usage keeps its own
     /// permission level; a lower-level child only opens traversal through a
     /// shared prefix, not execution of that prefix.
     #[hook(

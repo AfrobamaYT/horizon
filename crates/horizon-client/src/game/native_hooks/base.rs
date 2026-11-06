@@ -1633,7 +1633,8 @@ impl Game<'_> {
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
     /// chat box then completes them as vanilla's, within their level. A
-    /// name vanilla has is left out.
+    /// name vanilla has is left out. Asked again after a mod calls
+    /// `native_refresh_commands`. API 8.
     pub(in crate::game) fn native_register_commands(&mut self, commands: &mut Vec<NativeCommand>) {
         self.fire_register_commands(commands);
     }
@@ -5846,5 +5847,79 @@ mod text_tests {
             // RGB alone, as the API took before, is fully transparent now.
             assert!(drawn(0x00FF_FFFF).is_empty());
         });
+    }
+}
+
+#[cfg(test)]
+mod held_break_slot_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn held_durability_retains_the_stack_hand_and_explicit_break_slot() {
+        use crate::game::{Audio, Game, Hand, Options, Progress, Settings, load_resources};
+        use horizon_client::{items::ItemStack, motion::PlayerMotion};
+        use horizon_core::equipment_slot::EquipmentSlot;
+        use horizon_core::geometry::Vec3;
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.0, 70.0, 0.0)).unwrap());
+        game.set_mode_id(0);
+        // Stage an acting guest: break events are queued instead of rendering local crumbs.
+        game.lan_acting = Some(1);
+        game.hand = Hand::Off;
+        let main = ItemStack::new("minecraft:stick", 3);
+        game.inventory[game.selected] = Some(main.clone());
+        let max = game
+            .items()
+            .get("minecraft:flint_and_steel")
+            .unwrap()
+            .max_damage;
+        game.offhand = Some(ItemStack::new("minecraft:flint_and_steel", 1));
+        game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+        assert_eq!(game.offhand.as_ref().unwrap().damage, 1);
+        assert!(game.guest_equipment_breaks.is_empty());
+        for (explicit, event) in [(true, 48), (false, 47)] {
+            let mut tool = ItemStack::new("minecraft:flint_and_steel", 1);
+            tool.damage = max - 1;
+            game.offhand = Some(tool);
+            if explicit {
+                game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+            } else {
+                game.damage_held(1);
+            }
+            assert!(game.offhand.is_none());
+            assert_eq!(game.inventory[game.selected], Some(main.clone()));
+            assert_eq!(game.guest_equipment_breaks.last().unwrap().0, event);
+        }
+        game.set_mode_id(1);
+        game.offhand = Some(ItemStack::new("minecraft:flint_and_steel", 1));
+        game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+        assert_eq!(game.offhand.as_ref().unwrap().damage, 0);
     }
 }
