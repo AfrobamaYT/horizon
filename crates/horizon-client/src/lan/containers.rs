@@ -5,6 +5,7 @@ use super::{
     menu::{self, Menu, NativeMenuEvent, Rules, Slots, View},
 };
 use crate::{containers::BlockEntity, items::ItemStack, world::World};
+use horizon_core::nbt::Tag;
 use horizon_core::random::RandomSource;
 use horizon_protocol::{
     item::Hashed,
@@ -13,7 +14,6 @@ use horizon_protocol::{
         play::{self, Clientbound as C},
     },
 };
-use horizon_world::nbt::Tag;
 use std::collections::HashMap;
 
 /// Encode a captured level sound and its broadcast radius without a live hub.

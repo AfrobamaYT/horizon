@@ -250,7 +250,7 @@ impl Game<'_> {
             .data()
             .and_then(|d| d.other("minecraft:cushion/color"))
             .and_then(|tag| match tag {
-                horizon_world::nbt::Tag::String(s) => Some(s.to_string_lossy()),
+                horizon_core::nbt::Tag::String(s) => Some(s.to_string_lossy()),
                 _ => None,
             });
         let color = dye_index(color_override.as_deref().unwrap_or(default_color));
@@ -616,7 +616,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     /// `Cushion.getCushionItemStackWithData`: a named cushion drops named.
     #[test]

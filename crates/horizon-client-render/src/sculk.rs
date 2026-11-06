@@ -7,7 +7,7 @@ use horizon_core::{
     geometry::{Direction, Vec3, traverse_blocks},
     position::BlockPos,
 };
-use horizon_world::{level::sculk::SculkSpreader, nbt::Tag};
+use {horizon_core::nbt::Tag, horizon_world::level::sculk::SculkSpreader};
 
 /// Every `GameEvent` with its `VibrationSystem` frequency (0: none).
 const EVENTS: &[(&str, i32)] = &[

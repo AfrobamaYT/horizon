@@ -8,7 +8,7 @@ use super::{
     goals::{JUMP, LOOK, MOVE, TARGET},
 };
 use horizon_core::geometry::{Aabb, Vec3};
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 
 /// The goal flags a controlling passenger takes from its vehicle.
 const CONTROLLED: u8 = MOVE | JUMP | LOOK;

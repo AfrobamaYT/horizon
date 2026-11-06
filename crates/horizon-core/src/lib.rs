@@ -6,23 +6,31 @@
 
 pub mod arm_pose;
 pub mod biome;
+pub mod bounding_box;
 pub mod carving;
+pub mod connection_kind;
 pub mod density;
+pub mod dimension;
+pub mod equipment_slot;
 pub mod fast_hash;
 pub mod game_mode;
 pub mod geometry;
+pub mod identifier;
+pub mod java_hash_map;
 pub mod jmath;
+pub mod nbt;
+pub mod neighbour_update;
 pub mod no_ai;
 pub mod noise;
 pub mod paletted;
 pub mod position;
 pub mod prepared_files;
 pub mod random;
+pub mod release;
 pub mod storage;
 pub mod text;
 pub mod ticks;
-
-pub mod release;
+pub mod use_animation;
 pub mod version;
 
 pub use version::VANILLA_VERSION;

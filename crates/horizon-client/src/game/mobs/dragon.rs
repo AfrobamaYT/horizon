@@ -22,13 +22,13 @@ use horizon_client::{
     projectiles::{Projectile, ProjectileKind},
     text::Text,
 };
+use horizon_core::nbt::Tag;
 use horizon_core::position::BlockPos;
 use horizon_core::{
     geometry::{Aabb, Vec3, trig},
     random::{LegacyRandom, RandomSource},
 };
 use horizon_protocol::entity_data::Value;
-use horizon_world::nbt::Tag;
 use mod_api::NativeDragonPhase;
 
 /// `HealOrHarmMobEffect.applyInstantaneousEffect` at an `AreaEffectCloud`'s
@@ -5338,7 +5338,7 @@ mod tests {
     /// `!isSilent()`; `Silent` is saved only when set, as a byte.
     #[test]
     fn a_dragon_is_silent_only_with_a_set_silent_byte() {
-        use horizon_world::nbt::{Compound, Tag};
+        use horizon_core::nbt::{Compound, Tag};
         let with = |v: Option<i8>| {
             let mut map = Compound::new();
             if let Some(b) = v {

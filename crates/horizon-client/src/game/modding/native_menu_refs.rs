@@ -624,7 +624,7 @@ mod tests {
                 let value = Some(stone.clone());
                 host.hub.guests.update(0, |guest| guest.carried = value);
             }
-            let title = horizon_world::nbt::Tag::String("test".into());
+            let title = horizon_core::nbt::Tag::String("test".into());
             let window = host
                 .hub
                 .open_native_menu(1, 1, title.clone(), vec![Some(stone.clone())])
@@ -741,7 +741,7 @@ mod tests {
             game.world
                 .block_entities
                 .insert(a, BlockEntity::Chest(vec![Some(gold.clone())]));
-            let title = horizon_world::nbt::Tag::String("dimension".into());
+            let title = horizon_core::nbt::Tag::String("dimension".into());
             game.lan.as_mut().unwrap().hub.open_container(
                 1,
                 "minecraft:generic_9x1",

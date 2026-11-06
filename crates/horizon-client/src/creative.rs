@@ -986,7 +986,7 @@ pub fn click_display(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     fn stack(item: &str, count: u32) -> ItemStack {
         ItemStack {

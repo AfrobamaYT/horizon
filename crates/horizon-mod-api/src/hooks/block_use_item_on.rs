@@ -10,7 +10,8 @@ pub trait Hooks {
         contract = "replace",
         out = "answer",
         scope = "block",
-        key = "state"
+        key = "state",
+        neoforge = "none (vanilla BlockBehaviour.useItemOn; PlayerInteractEvent.RightClickBlock cancels or answers before it)"
     )]
     fn use_item_on();
 }
