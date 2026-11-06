@@ -74,11 +74,55 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
     Ok(modules.into_values().collect())
 }
 
+pub(crate) fn lan_action_modules(directory: &Path) -> Result<String, String> {
+    let mut declarations = String::new();
+    for module in Catalog::modules(directory)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .chain(std::iter::once("mod".to_owned()))
+    {
+        let path = directory.join(format!("{module}.rs"));
+        if matches!(module.as_str(), "mod" | "shared") {
+            let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
+            for item in file.items {
+                let syn::Item::Impl(item) = item else {
+                    continue;
+                };
+                let syn::Type::Path(ty) = &*item.self_ty else {
+                    continue;
+                };
+                if ty.path.segments.len() != 1 || ty.path.segments[0].ident != "Game" {
+                    continue;
+                }
+                if module == "shared"
+                    && item.items.iter().all(|member| {
+                        matches!(member, syn::ImplItem::Fn(method)
+                        if method.sig.ident == "vehicle_has_other_viewers"
+                            && method.sig.receiver().is_none())
+                    })
+                {
+                    continue;
+                }
+                return Err(format!(
+                    "{}: put Game methods in an action area",
+                    path.display()
+                ));
+            }
+            continue;
+        }
+        let absolute = path.canonicalize().map_err(|e| e.to_string())?;
+        declarations.push_str(&format!("#[path = {absolute:?}] mod {module};\n"));
+    }
+    Ok(declarations)
+}
+
 /// Expand the same directory-derived include before source traversal, without needing OUT_DIR.
 /// Other includes are left alone: source tools must not evaluate arbitrary build-time code.
 pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
     const NATIVE: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/native_hook_modules.rs\"));";
-    if !source.contains(INCLUDE) && !source.contains(NATIVE) {
+    const LAN: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));";
+    if !source.contains(INCLUDE) && !source.contains(NATIVE) && !source.contains(LAN) {
         return Ok(source.to_owned());
     }
     let file = syn::parse_file(source).map_err(|e| e.to_string())?;
@@ -90,6 +134,9 @@ pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
             let line = item.mac.path.segments[0].ident.span().start().line - 1;
             let declarations = match lines[line].trim_end_matches('\n') {
                 INCLUDE => declarations(&path.with_extension(""))?,
+                LAN => {
+                    lan_action_modules(path.parent().ok_or("LAN actions source has no parent")?)?
+                }
                 NATIVE => crate::build::native_hook_modules(
                     path.canonicalize()
                         .map_err(|e| e.to_string())?
@@ -137,6 +184,50 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<syn::File, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lan_actions_are_discovered_without_lists_and_reject_shared_methods() {
+        let directory = std::env::temp_dir().join(format!("lan-actions-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let include = "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));";
+        let root = directory.join("mod.rs");
+        fs::write(&root, include).unwrap();
+        fs::write(directory.join("shared.rs"), "struct State;").unwrap();
+        fs::write(
+            directory.join("turns.rs"),
+            "impl Game { fn turn(&self) {} }",
+        )
+        .unwrap();
+        let code = expand(&root, include).unwrap();
+        assert!(code.contains("mod turns;"));
+        assert!(!code.contains("mod shared;") && !code.contains("mod mod;"));
+        fs::write(directory.join("new_area.rs"), "").unwrap();
+        assert!(expand(&root, include).unwrap().contains("mod new_area;"));
+        fs::write(
+            directory.join("shared.rs"),
+            "impl Game<'_> { fn vehicle_has_other_viewers() {} }",
+        )
+        .unwrap();
+        assert!(lan_action_modules(&directory).is_ok());
+        for file in ["shared.rs", "mod.rs"] {
+            fs::write(
+                directory.join(file),
+                "impl Game<'_> { fn misplaced(&self) {} }",
+            )
+            .unwrap();
+            assert!(
+                lan_action_modules(&directory)
+                    .unwrap_err()
+                    .contains("action area")
+            );
+            fs::write(directory.join(file), "").unwrap();
+        }
+        fs::remove_dir_all(directory).unwrap();
+        let game = Path::new(env!("CARGO_MANIFEST_DIR")).join("../horizon-client/src/game");
+        let actual = lan_action_modules(&game.join("network/lan_actions")).unwrap();
+        assert!(!actual.contains("mod shared;"));
+        assert!(actual.contains("mod packets;"));
+    }
 
     #[test]
     fn existing_game_exports_keep_their_visibility() {
