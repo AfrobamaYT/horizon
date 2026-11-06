@@ -518,6 +518,7 @@ mod render_bounds_tests {
     #[test]
     fn item_frame_bounds_include_the_full_map_and_held_item_depth() {
         let frame = ItemFrame {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: 3,
             pos: [0, 0, 0],
@@ -2213,6 +2214,7 @@ mod set_rotation_tests {
     #[test]
     fn set_rotation_keeps_yaw_and_clamps_pitch_on_kinds_that_had_none() {
         let mut orb = ExperienceOrb {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             no_gravity: false,
             id: 0,

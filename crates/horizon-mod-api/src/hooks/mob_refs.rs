@@ -155,4 +155,16 @@ pub trait Helpers {
         target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_set_can_pick_up_loot"
     )]
     fn mob_set_can_pick_up_loot();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_no_action_time"
+    )]
+    fn mob_no_action_time();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_set_no_action_time"
+    )]
+    fn mob_set_no_action_time();
 }

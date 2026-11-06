@@ -286,6 +286,8 @@ fn potion_sprite(item: &str) -> &'static str {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
+    /// Entity-owned registration metadata; content clones are detached.
+    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
     pub join: crate::join_seq::JoinSeq,
     /// The entity id a server tracks it by (0 until it is tracked).
@@ -499,6 +501,7 @@ impl Projectile {
             0
         };
         Self {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: 0,
             kind,
@@ -2309,3 +2312,4 @@ mod render_light_tests {
     }
 }
 crate::impl_joined!(Projectile);
+horizon_world::impl_attachment_lifetime!(Projectile);
