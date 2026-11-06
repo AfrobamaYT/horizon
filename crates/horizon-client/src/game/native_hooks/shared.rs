@@ -3480,13 +3480,36 @@ impl Game<'_> {
     /// The camera native mods draw this frame from (`native_camera_pose`), starting from
     /// `view`, vanilla's position, yaw and pitch.
     pub(super) fn native_camera_pose_now(
-        &self,
+        &mut self,
         partial: f32,
         view: (glam::DVec3, f32, f32),
     ) -> (glam::DVec3, f32, f32) {
         let (mut position, mut yaw, mut pitch) = (view.0.to_array(), view.1, view.2);
         self.native_camera_pose(partial, &mut position, &mut yaw, &mut pitch);
-        posed_camera(view, position, yaw, pitch)
+        let posed = posed_camera(view, position, yaw, pitch);
+        if self.apply_requested_camera_type()
+            && let Some(refreshed) = self.camera_view(partial)
+        {
+            // Refresh vanilla components, not the listener's explicit overrides.
+            return (
+                if posed.0 == view.0 {
+                    refreshed.0
+                } else {
+                    posed.0
+                },
+                if posed.1 == view.1 {
+                    refreshed.1
+                } else {
+                    posed.1
+                },
+                if posed.2 == view.2 {
+                    refreshed.2
+                } else {
+                    posed.2
+                },
+            );
+        }
+        posed
     }
 
     /// What native mods hand shader packs in this frame (`native_shader_params`),

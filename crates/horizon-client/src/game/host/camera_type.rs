@@ -9,7 +9,7 @@ impl CameraTypeClientHost for Game<'_> {
         );
         self.native_camera_type()
     }
-    fn set_camera_type(&mut self, camera_type: CameraType) {
+    fn set_camera_type(&self, camera_type: CameraType) {
         mod_api::__private::check_access(
             "set_camera_type",
             mod_api::__private::LoadAccess::WorldOnly,
