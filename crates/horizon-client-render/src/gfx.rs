@@ -3666,13 +3666,13 @@ impl Renderer {
         );
         let entity_pipeline = |label, cull_mode, depth_write, compare, bias, blend, clouds| {
             entity_pipeline_with(EntityPipelineOptions {
-                label: label,
-                cull_mode: cull_mode,
-                depth_write: depth_write,
-                compare: compare,
-                bias: bias,
-                blend: blend,
-                clouds: clouds,
+                label,
+                cull_mode,
+                depth_write,
+                compare,
+                bias,
+                blend,
+                clouds,
                 fragment: "fs_entity",
                 write_mask: wgpu::ColorWrites::ALL,
             })
