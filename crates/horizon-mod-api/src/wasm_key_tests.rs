@@ -1,7 +1,8 @@
 //! Real generated imports against the canonical load-owned registry tables.
 use super::*;
 use crate::{
-    Backend, BackendRef, BlockEntityTypeKey, BlockKey, EffectKey, Hooks, Host, ModEntry, Registrar,
+    Backend, BackendRef, BlockEntityTypeKey, BlockKey, EffectKey, FluidKey, Hooks, Host, ModEntry,
+    Registrar,
 };
 
 #[test]
@@ -12,6 +13,9 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             let block = r.block_key("stone");
             let effect = r.effect_key("speed");
+            let fluid = r.declare_fluid("chocolate");
+            assert_eq!(FluidKey::from_slot(fluid.0), Ok(fluid));
+            assert!(FluidKey::from_slot(fluid.0 + 1).is_err());
             let block_entity = r.block_entity_type_key("test:machine");
             assert_eq!(
                 BlockEntityTypeKey::from_slot(block_entity.0),

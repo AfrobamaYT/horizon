@@ -392,6 +392,22 @@ pub(super) fn content_root(
     }
     register_mob_effects(&overlay.mods);
     mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
+    let behavior: serde_json::Value =
+        horizon_world::json_file::read(&overlay.root.join("block-behaviours.json"))?;
+    let fluids = behavior["fluids"]
+        .as_array()
+        .ok_or("missing fluid registry")?;
+    let fluids = fluids
+        .iter()
+        .map(|value| value.as_str().ok_or("invalid fluid registry entry"))
+        .collect::<Result<Vec<_>, _>>()?;
+    mod_api::__private::resolve_fluids(&fluids).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
     register_entity_types(&overlay.mods);
     register_menu_types(&overlay.mods);
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
@@ -1137,6 +1153,7 @@ mod tests {
             "{\"minecraft:block_entity_type\":{\"entries\":{}}}",
         )
         .unwrap();
+        std::fs::write(base.join("block-behaviours.json"), r#"{"fluids":[]}"#).unwrap();
         std::env::set_current_dir(&here).unwrap();
         let mut sources = ModsState {
             native: std::sync::Arc::new(native),
