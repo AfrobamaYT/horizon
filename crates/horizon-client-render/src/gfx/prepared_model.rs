@@ -303,17 +303,7 @@ impl PreparedModels {
         })
     }
 
-    /// Draw one copy. `hdr` selects the alpha mark; it is a second pass, not a different mesh.
-    pub fn draw<'a>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        hdr: bool,
-        instance: &'a wgpu::Buffer,
-        range: (u32, u32),
-    ) {
-        self.draw_at(pass, hdr, instance, range, 0);
-    }
-
+    /// Draw one copy from `instance` at `instance_index`. `hdr` is the alpha mark, not a second mesh.
     pub fn draw_at<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
@@ -336,6 +326,48 @@ impl PreparedModels {
             instance_index..instance_index + 1,
         );
     }
+
+    /// Draw the first copy. `hdr` selects the alpha mark; it is a second pass, not a different mesh.
+    pub fn draw<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        hdr: bool,
+        instance: &'a wgpu::Buffer,
+        range: (u32, u32),
+    ) {
+        self.draw_at(pass, hdr, instance, range, 0);
+    }
+}
+
+/// Slots to allocate for `count` instances. The size stays within `limit`, and `count` itself must fit.
+pub fn instance_slot_capacity(count: u64, stride: u64, limit: u64) -> Result<u64> {
+    if count == 0 {
+        return Ok(0);
+    }
+    if stride == 0 || limit < stride {
+        return Err(format!(
+            "prepared instance of {stride} bytes does not fit the {limit}-byte limit"
+        )
+        .into());
+    }
+    let max_slots = limit / stride;
+    if count > max_slots {
+        return Err(format!(
+            "prepared instances need {count} slots of {stride} bytes, above the {limit}-byte limit ({max_slots} slots)"
+        )
+        .into());
+    }
+    Ok(count.next_power_of_two().min(max_slots))
+}
+
+/// Prepared copies are drawn into the entity pass, whose target is the frame format.
+pub fn prepared_attachment(frame: wgpu::TextureFormat) -> wgpu::TextureFormat {
+    frame
+}
+
+/// Drop this frame's staged copies. The allocation stays for the next frame.
+pub fn finish_staged<T>(draws: &mut Vec<T>) {
+    draws.clear();
 }
 
 fn copy_after_scope(scope_error: Option<String>, copy: impl FnOnce() -> Result<()>) -> Result<()> {
@@ -384,6 +416,45 @@ mod tests {
         assert!((translation.z + 2.0).abs() < 1.0e-5, "{translation:?}");
         let lost = (origin.as_vec3() - camera.as_vec3()).x;
         assert_eq!(lost, 0.0, "f32 subtraction of this origin is {lost}");
+    }
+
+    #[test]
+    fn instance_growth_stays_inside_the_buffer_limit() {
+        let stride = std::mem::size_of::<PreparedModelInstance>() as u64;
+        let slots = instance_slot_capacity(65, stride, 16_384).unwrap();
+        assert!(slots >= 65 && slots * stride <= 16_384, "{slots}");
+        assert!(instance_slot_capacity(114, stride, 16_384).is_err());
+        let wide = 256 << 20;
+        let slots = instance_slot_capacity(1_048_577, stride, wide).unwrap();
+        assert!(slots >= 1_048_577 && slots * stride <= wide, "{slots}");
+    }
+
+    #[test]
+    fn prepared_attachment_is_the_frame_not_the_swapchain() {
+        let frame = wgpu::TextureFormat::Rgba8UnormSrgb.remove_srgb_suffix();
+        assert_eq!(prepared_attachment(frame), wgpu::TextureFormat::Rgba8Unorm);
+        assert_ne!(
+            prepared_attachment(frame),
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        );
+        assert_eq!(
+            prepared_attachment(wgpu::TextureFormat::Rgba16Unorm),
+            wgpu::TextureFormat::Rgba16Unorm
+        );
+    }
+
+    #[test]
+    fn finishing_a_frame_drops_staged_draws_and_keeps_capacity() {
+        let mut draws = vec![PreparedModelDraw {
+            cpu_vertices: 0,
+            generation: 1,
+            slot: 0,
+            instance: PreparedModelInstance::zeroed(),
+        }];
+        let capacity = draws.capacity();
+        finish_staged(&mut draws);
+        assert!(draws.is_empty());
+        assert!(draws.capacity() >= capacity);
     }
 
     #[test]

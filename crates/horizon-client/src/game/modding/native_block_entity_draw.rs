@@ -801,7 +801,12 @@ impl Game<'_> {
         if draw.records.is_empty() {
             return;
         }
-        if draw.kept || !draw.spins.is_empty() {
+        let count = self.prepared_model_draws.borrow().len() as u64 + draw.records.len() as u64;
+        let fits = self
+            .renderer
+            .as_ref()
+            .is_some_and(|renderer| renderer.prepared_instances_fit(count));
+        if draw.kept || !draw.spins.is_empty() || !fits {
             draw.bake_recorded(&self.standalone_geometry.slots);
         } else {
             draw.push_instances(origin, camera, &mut self.prepared_model_draws.borrow_mut());

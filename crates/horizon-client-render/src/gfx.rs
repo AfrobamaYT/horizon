@@ -2597,7 +2597,7 @@ impl Renderer {
             &self.device,
             &self.reuse,
             &self.entity_bindings,
-            self.config.format,
+            prepared_model::prepared_attachment(self.frame_format),
             generation,
             vertices,
             ranges,
@@ -2617,6 +2617,21 @@ impl Renderer {
     pub fn stage_prepared_draws(&mut self, draws: &[PreparedModelDraw]) {
         self.prepared_draws.clear();
         self.prepared_draws.extend_from_slice(draws);
+    }
+
+    /// Whether `count` copies fit in one instance buffer on this device.
+    pub fn prepared_instances_fit(&self, count: u64) -> bool {
+        prepared_model::instance_slot_capacity(
+            count,
+            std::mem::size_of::<PreparedModelInstance>() as u64,
+            self.device.limits().max_buffer_size,
+        )
+        .is_ok()
+    }
+
+    fn finish_prepared_frame(&mut self) {
+        prepared_model::finish_staged(&mut self.prepared_draws);
+        self.prepared_ranges.clear();
     }
 
     pub async fn new(
@@ -7065,6 +7080,7 @@ impl Renderer {
             Some(size) => self.draw_scaled_frame(frame, size),
             None => self.draw_frame(frame, None),
         };
+        self.finish_prepared_frame();
         // A frame that was not drawn still submits the section copies and
         // atlas patches (glyphs, skins, maps), which the caller already took.
         if self.device_lost() {
@@ -8630,15 +8646,25 @@ impl Renderer {
             self.prepared_draws.clear();
         }
         let prepared_count = self.prepared_draws.len() as u64;
-        if prepared_count > self.prepared_instance_capacity {
-            self.prepared_instance_capacity = prepared_count.next_power_of_two().max(64);
-            self.prepared_instance_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        let stride = std::mem::size_of::<PreparedModelInstance>() as u64;
+        let slots = prepared_model::instance_slot_capacity(
+            prepared_count,
+            stride,
+            self.device.limits().max_buffer_size,
+        )?;
+        if slots > self.prepared_instance_capacity {
+            let checks = GpuChecks::push(&self.device);
+            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Prepared model instances"),
-                size: self.prepared_instance_capacity
-                    * std::mem::size_of::<PreparedModelInstance>() as u64,
+                size: slots * stride,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
+            if let Some(error) = checks.pop() {
+                return Err(error.to_string().into());
+            }
+            self.prepared_instance_buffer = buffer;
+            self.prepared_instance_capacity = slots;
         }
         if prepared_count > 0 {
             self.prepared_uploaded.clear();
@@ -8655,9 +8681,10 @@ impl Renderer {
         if prepared_count > 0 {
             prepared_model::fill_ordered_ranges(
                 entity_quads * 4,
-                self.prepared_draws
-                    .iter()
-                    .map(|draw| draw.cpu_vertices.saturating_add(posed)),
+                self.prepared_draws.iter().map(|draw| {
+                    entity_batch::ordinary_vertices_before(entities, draw.cpu_vertices, oit_on)
+                        .saturating_add(posed)
+                }),
                 &mut self.prepared_ranges,
             );
         }

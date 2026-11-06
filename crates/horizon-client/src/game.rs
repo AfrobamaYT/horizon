@@ -17675,6 +17675,13 @@ impl Game<'_> {
         self.glowing_vertices.get_mut().clear();
         self.shadow_only_vertices.get_mut().clear();
         pr.lap("pr_entity_setup");
+        // The pack is chosen before entity geometry, so a pack that starts this frame
+        // keeps block-entity models in the CPU stream instead of dropping them.
+        let pack_inputs = if title {
+            Default::default()
+        } else {
+            self.shader_pack_inputs(camera, alpha as f32, &sky)
+        };
         if !title {
             let (built, static_sections, visible_static_sections, static_stats) =
                 spans::time("entity_geometry", || {
@@ -17765,11 +17772,6 @@ impl Game<'_> {
             self.gather_dynamic_lights(camera, alpha);
         }
         pr.lap("pr_lights");
-        let pack_inputs = if title {
-            Default::default()
-        } else {
-            self.shader_pack_inputs(camera, alpha as f32, &sky)
-        };
         pr.lap("pr_shader_inputs");
         // Fog hooks may clear particles too. They must run before the final clear
         // boundary, not while constructing Frame after geometry has been extracted.
