@@ -497,6 +497,7 @@ pub(crate) fn with_resource_test_world(
         registry,
         facts: &facts,
         fluid_tables: &motion.fluids,
+        attributes: &motion.attributes,
         movement: &motion.blocks,
         collision: &collision,
         suffocation: &suffocation,
