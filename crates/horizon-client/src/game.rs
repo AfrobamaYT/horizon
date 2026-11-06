@@ -1860,6 +1860,7 @@ impl LevelAccess for GameLevel<'_> {
         if let Some(change) = &mut self.command_block_transition
             && change.preserve(self.world, pos, old)
         {
+            // Returning 0 skips remove_entity's side effects once; command blocks have no contents or drops.
             return 0;
         }
         self.remove_entity(pos, old, side_effects)
