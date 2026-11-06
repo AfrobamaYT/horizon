@@ -174,6 +174,14 @@ pub mod vanilla {
     pub const RAIDS: RuleIndex = vanilla_index("raids");
     /// The `entity_drops` rule.
     pub const ENTITY_DROPS: RuleIndex = vanilla_index("entity_drops");
+    /// The `spectators_generate_chunks` rule.
+    pub const SPECTATORS_GENERATE_CHUNKS: RuleIndex = vanilla_index("spectators_generate_chunks");
+    /// The `keep_inventory` rule.
+    pub const KEEP_INVENTORY: RuleIndex = vanilla_index("keep_inventory");
+    /// The `show_death_messages` rule.
+    pub const SHOW_DEATH_MESSAGES: RuleIndex = vanilla_index("show_death_messages");
+    /// The `players_sleeping_percentage` rule.
+    pub const PLAYERS_SLEEPING_PERCENTAGE: RuleIndex = vanilla_index("players_sleeping_percentage");
     /// The `advance_time` rule.
     pub const ADVANCE_TIME: RuleIndex = vanilla_index("advance_time");
     /// The `water_source_conversion` rule.
