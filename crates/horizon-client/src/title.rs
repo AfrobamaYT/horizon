@@ -759,7 +759,7 @@ impl Title {
     /// (its id unchanged) is applied at once.
     pub fn set_mode(&mut self, mut mode: Mode) {
         if let Mode::Create { options, .. } = &mut mode {
-            options.additional_data_packs = self.additional_data_packs.clone();
+            options.set_additional_data_packs(self.additional_data_packs.clone());
         }
         if self.gated && mode.id() != self.mode.id() {
             self.requested = Some(mode);
@@ -848,7 +848,7 @@ impl Title {
     ) {
         self.additional_data_packs = packs.clone();
         if let Mode::Create { options, .. } = &mut self.mode {
-            options.additional_data_packs = packs;
+            options.set_additional_data_packs(packs);
         }
     }
     /// Vanilla bypasses the selector when there are no saves.
@@ -3742,7 +3742,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                             world.commands,
                             &self.saves.join(&world.folder),
                         );
-                        options.additional_data_packs = self.additional_data_packs.clone();
+                        options.set_additional_data_packs(self.additional_data_packs.clone());
                         options.restore_feature_packs(&self.resources, &level);
                         self.set_mode(Mode::Create {
                             name: level.name,

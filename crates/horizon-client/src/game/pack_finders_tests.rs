@@ -39,6 +39,7 @@ impl Fixture {
             root, package, archive,
             files: vec![
                 ("horizon-mod.toml".into(), b"id='packmod'\nname='Pack mod'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n".to_vec()),
+                (ASSET.into(), br#"{"packmod.optional.title":"Optional example","packmod.description":"An optional test pack"}"#.to_vec()),
                 (format!("{ASSET_PACK}/pack.mcmeta"), metadata(horizon_core::version::RESOURCE_PACK_FORMAT)),
                 (format!("{ASSET_PACK}/{ASSET}"), br#"{"packmod.optional":"first"}"#.to_vec()),
                 (format!("{DATA_PACK}/pack.mcmeta"), metadata(horizon_core::version::DATA_PACK_FORMAT)),
@@ -91,6 +92,17 @@ impl Fixture {
             .1 = br#"{"packmod.optional":"second"}"#.to_vec();
         self.publish();
     }
+    fn add_feature_flag(&mut self) {
+        let file = self
+            .files
+            .iter_mut()
+            .find(|(name, _)| name == &format!("{DATA_PACK}/pack.mcmeta"))
+            .unwrap();
+        let mut meta: serde_json::Value = serde_json::from_slice(&file.1).unwrap();
+        meta["features"] = serde_json::json!({"enabled": ["minecraft:trade_rebalance"]});
+        file.1 = serde_json::to_vec(&meta).unwrap();
+        self.publish();
+    }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -98,7 +110,11 @@ impl Drop for Fixture {
     }
 }
 
-struct Finder;
+struct Finder {
+    feature: bool,
+    required: bool,
+    position: PackPosition,
+}
 #[mod_api::__subscriptions]
 impl Hooks for Finder {
     fn add_pack_finders(&self, _host: HostSide<'_>, event: &mut AddPackFindersEvent<'_>) {
@@ -106,20 +122,34 @@ impl Hooks for Finder {
             (PackType::ClientResources, ASSET_PACK),
             (PackType::ServerData, DATA_PACK),
         ] {
-            event
-                .packs
-                .add_pack_finders(PackRegistration::new(
-                    Identifier::parse(&format!("packmod:{path}")).unwrap(),
-                    kind,
-                    Text::translate("packmod.optional.title", &[]),
-                ))
-                .unwrap();
+            let mut pack = PackRegistration::new(
+                Identifier::parse(&format!("packmod:{path}")).unwrap(),
+                kind,
+                Text::translate("packmod.optional.title", &[]),
+            );
+            pack.always_active = self.required;
+            pack.position = self.position;
+            if self.feature && kind == PackType::ServerData {
+                pack.source = PackSource::Feature;
+            }
+            event.packs.add_pack_finders(pack).unwrap();
         }
     }
 }
 fn with_finder(test: impl FnOnce()) {
+    with_finder_config(false, false, test);
+}
+fn with_finder_config(feature: bool, required: bool, test: impl FnOnce()) {
     with_mods(
-        vec![ModEntry::new("packmod", Box::new(Finder))].into(),
+        vec![ModEntry::new(
+            "packmod",
+            Box::new(Finder {
+                feature,
+                required,
+                position: PackPosition::Bottom,
+            }),
+        )]
+        .into(),
         test,
     );
 }
@@ -240,6 +270,164 @@ fn refused_registrations_leave_the_repository_unchanged() {
 }
 
 #[test]
+fn required_packs_keep_their_priority_and_cannot_be_cleared() {
+    let fixture = Fixture::new(false);
+    let sources = fixture.sources();
+    with_finder_config(false, true, || {
+        let mut all = discover(PackType::ClientResources, &sources);
+        let optional = fixture.root.join("override");
+        fs::create_dir_all(optional.join("assets/packmod/lang")).unwrap();
+        fs::write(optional.join(ASSET), br#"{"packmod.optional":"override"}"#).unwrap();
+        fs::write(
+            optional.join("pack.mcmeta"),
+            &fixture
+                .files
+                .iter()
+                .find(|(name, _)| name == &format!("{ASSET_PACK}/pack.mcmeta"))
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        all.push(
+            packs::pack_for(
+                "file/override".into(),
+                Text::translate("packmod.optional.title", &[]),
+                Source::Dir(optional),
+                packs::RESOURCE_FORMAT,
+            )
+            .unwrap(),
+        );
+        assert!(!packs::able_to_clear_any_pack(&all, &[]));
+        let empty = ResourceSource::directory(fixture.root.join("base"));
+        let required = packs::enabled(&all, &[]);
+        assert_eq!(
+            packs::resources(empty.clone(), &required)
+                .unwrap()
+                .read(ASSET)
+                .unwrap(),
+            br#"{"packmod.optional":"first"}"#
+        );
+        let selected = ["file/override".to_owned()];
+        assert!(packs::able_to_clear_any_pack(&all, &selected));
+        assert_eq!(
+            packs::resources(empty, &packs::enabled(&all, &selected))
+                .unwrap()
+                .read(ASSET)
+                .unwrap(),
+            br#"{"packmod.optional":"override"}"#
+        );
+        let info = all[0].selection.as_ref().unwrap();
+        let model = packs::SelectionModel::new(vec![info.selectable()], &[]);
+        assert!(!model.can_unselect(true, 0));
+
+        let data = data_packs(&sources);
+        let mut options = horizon_client::title::WorldOptions::default();
+        options.data_packs.push("file/already_installed".into());
+        options.set_additional_data_packs(data.clone().into());
+        assert!(options.data_packs.contains(&fixture.data_id()));
+        assert!(
+            options
+                .data_packs
+                .contains(&"file/already_installed".into())
+        );
+        assert!(options.data_packs.contains(&"vanilla".into()));
+        let world = fixture.root.join("world");
+        let repository = data_repository(&world, &fixture.root, &data);
+        assert!(
+            horizon_client::datapack::enabled_ids(&world, &repository, &[])
+                .contains(&fixture.data_id())
+        );
+    });
+}
+
+#[test]
+fn contributed_experiments_supply_the_chosen_world_flags() {
+    let mut fixture = Fixture::new(true);
+    fixture.add_feature_flag();
+    with_finder_config(true, false, || {
+        let data = data_packs(&fixture.sources());
+        let features = horizon_client::datapack::feature_repository(&fixture.root, &data);
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0].id, fixture.data_id());
+        let mut options = horizon_client::title::WorldOptions::default();
+        options.set_additional_data_packs(data.into());
+        assert_eq!(
+            options.enabled_features(&fixture.root),
+            ["minecraft:vanilla"]
+        );
+        options.data_packs.push(fixture.data_id());
+        assert_eq!(
+            options.enabled_features(&fixture.root),
+            ["minecraft:trade_rebalance", "minecraft:vanilla"]
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn registered_data_commands_respect_flags_required_packs_and_default_priority() {
+    let mut ran = 0;
+    for (feature, required) in [(false, false), (false, true), (true, false)] {
+        let mut fixture = Fixture::new(false);
+        if feature {
+            fixture.add_feature_flag();
+        }
+        with_finder_config(feature, required, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                ran += 1;
+                let world = fixture.root.join("world");
+                let user = world.join("datapacks/user");
+                fs::create_dir_all(user.join("data/packmod/function")).unwrap();
+                fs::write(user.join("pack.mcmeta"), b"{}").unwrap();
+                fs::write(
+                    user.join("data/packmod/function/probe.mcfunction"),
+                    b"say from-user\n",
+                )
+                .unwrap();
+                game.world_root = world;
+                game.mods = fixture.sources();
+                game.set_allow_commands(true);
+                game.reload_datapacks(false, &[]).unwrap();
+                assert!(game.run_command("datapack list"));
+                let enable = format!("datapack enable \"{}\"", fixture.data_id());
+                let disable = format!("datapack disable \"{}\"", fixture.data_id());
+                if feature {
+                    assert!(!game.run_command(&enable));
+                    assert!(!game.fns.enabled().contains(&fixture.data_id()));
+                    let flags = vec![
+                        "minecraft:vanilla".into(),
+                        "minecraft:trade_rebalance".into(),
+                    ];
+                    game.level.enabled_features = flags.clone().into();
+                    game.reload_datapacks(false, &flags).unwrap();
+                    assert!(game.fns.enabled().contains(&fixture.data_id()));
+                    assert!(!game.run_command(&disable));
+                    assert!(game.fns.enabled().contains(&fixture.data_id()));
+                } else if required {
+                    assert!(game.fns.enabled().contains(&fixture.data_id()));
+                    assert!(!game.run_command(&disable));
+                    assert!(game.fns.enabled().contains(&fixture.data_id()));
+                } else {
+                    assert!(!game.fns.enabled().contains(&fixture.data_id()));
+                    assert!(game.run_command(&enable));
+                    assert_eq!(
+                        game.fns.store.functions["packmod:probe"].lines,
+                        [FunctionLine::Command("say from-user".into())]
+                    );
+                    assert!(game.run_command(&disable));
+                    assert!(game.run_command(&format!("{enable} last")));
+                    assert_eq!(
+                        game.fns.store.functions["packmod:probe"].lines,
+                        [FunctionLine::Command("say from-optional".into())]
+                    );
+                }
+            });
+        });
+    }
+    assert_eq!(ran, 3, "every prepared-resource case must run");
+}
+
+#[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_mods_pack_is_on_the_screen_and_applies_through_client_reload() {
     let mut fixture = Fixture::new(true);
@@ -248,6 +436,29 @@ fn a_mods_pack_is_on_the_screen_and_applies_through_client_reload() {
         crate::game::native_entity_refs::tests::with_client_game(|game| {
             ran = true;
             game.mods = fixture.sources();
+            let staged = crate::game::packs::stage_pack(
+                &game.vanilla_root(),
+                &[],
+                &[],
+                &game.mods,
+                game.register_client_reload_listeners(),
+                &game.pack.assets,
+                &game.res,
+                &game.worker_context(),
+                false,
+                false,
+                &crate::game::Progress::new(),
+            )
+            .unwrap();
+            game.apply_staged_pack(staged).unwrap();
+            assert_eq!(
+                horizon_client::lang::get("packmod.optional.title"),
+                "Optional example"
+            );
+            assert_eq!(
+                horizon_client::lang::get("packmod.optional"),
+                "packmod.optional"
+            );
             game.refresh_pack_lists();
             assert!(
                 game.ui

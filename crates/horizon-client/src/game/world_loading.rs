@@ -103,6 +103,10 @@ impl WorldRequest {
             create,
         } = self;
         let name = name.as_deref();
+        let create = create.map(|mut create| {
+            create.set_additional_data_packs(pack.additional_data.clone());
+            create
+        });
         let create = create.as_ref();
         // openWorldLoadLevelData: level data that does not read is RecoverWorldDataScreen's to
         // handle (the title screen shows it); a world opened another way must not become a

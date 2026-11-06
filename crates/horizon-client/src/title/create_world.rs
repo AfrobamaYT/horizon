@@ -69,6 +69,30 @@ impl Default for WorldOptions {
     }
 }
 impl WorldOptions {
+    /// Refresh additional sources and insert required packs while preserving
+    /// the chosen ids, including folder packs already copied to the new world.
+    pub fn set_additional_data_packs(
+        &mut self,
+        packs: std::sync::Arc<[std::sync::Arc<crate::datapack::DataPack>]>,
+    ) {
+        let mut available: Vec<_> = packs
+            .iter()
+            .filter_map(|pack| pack.selection.as_ref())
+            .map(crate::pack_screen::PackInfo::selectable)
+            .collect();
+        for id in &self.data_packs {
+            if !available.iter().any(|pack| pack.id == *id) {
+                available.push(crate::packs::Selectable::optional(id, true));
+            }
+        }
+        self.data_packs = crate::packs::SelectionModel::new(available, &self.data_packs)
+            .selected
+            .into_iter()
+            .rev()
+            .map(|pack| pack.id)
+            .collect();
+        self.additional_data_packs = packs;
+    }
     /// Re-Create: the saved world's choices.
     pub(super) fn of_world(
         level: &crate::save::Level,

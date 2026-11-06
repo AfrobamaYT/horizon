@@ -3133,3 +3133,34 @@ It searches the world's saved templates before data packs and returns the rotate
 in vanilla placement order, with each transformed state and its saved block-entity data. It uses
 the palette selected at `at`; processors and entities are not included. Invalid or missing names
 return `None`. A builder can retain this snapshot and place its blocks over time.
+
+
+## Discoverable bundled packs
+
+`Hooks::add_pack_finders` receives a typed `HostSide` and an
+`AddPackFindersEvent`. Use `event.packs.pack_type()` to distinguish
+`PackType::ClientResources` from `PackType::ServerData`. Register a
+`PackRegistration` with `event.packs.add_pack_finders(...)`; registrations for
+the other repository type are ignored. This hook contributes whole packs, while
+resource-file hooks and reload listeners retain their separate roles.
+
+A location such as `example:assets/example/resourcepacks/high_contrast` names a
+loaded mod and a directory inside its package, containing `pack.mcmeta` and the
+usual `assets/` or `data/` tree. Folder packages and `.hmod` archives use the same
+logical paths, without extraction. Invalid locations, missing metadata and
+duplicate repository ids return `PackFinderError` without adding a partial pack.
+
+The repository id is `mod/<location>`. Packs are optional by default: resource
+packs appear in Resource Packs, and data packs appear in the world's Data Packs
+screen and `/datapack` repository. Selecting a resource pack applies it through
+client reload; data-pack selection applies through the world's data reload.
+Discovery runs again for reload, so replacing an archive opens its new contents.
+Use translated `Text` for the registration's title and pack metadata description.
+
+`always_active` makes a pack required and prevents deselection. `position`
+chooses its default insertion priority (`Top` or `Bottom`); later resource
+layers win. Required data packs also enter a new world's initial selection when
+the player does not open the Data Packs screen. `PackSource::Feature` exposes
+packs with declared feature flags in Experiments. Their flags must be enabled
+for the world before `/datapack enable` accepts them, and feature packs that
+request flags cannot be disabled through that command.
