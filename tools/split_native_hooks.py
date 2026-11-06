@@ -151,7 +151,9 @@ def main():
         before, after = payload(expected), payload(actual)
         assert before == after, f"payload lines differ: removed {before - after}; added {after - before}"
         assert actual == expected, "item contents/order differ from the deterministic move"
-        print(f"Catalog mapping: {len(manifest['areas'])} methods; {len(expected) - 2} area files")
+        moved = sum(method["name"] in manifest["areas"] for item in manifest["items"]
+                    for method in item.get("methods", []))
+        print(f"Catalog mapping: {len(manifest['areas'])} target names; {moved} methods; {len(expected) - 2} area files")
         print(f"Moved payload line multisets: equal ({sum(before.values())} nonblank lines)")
         print("Declared edits: impl/use/include wrappers; preserved visibility; game-relative paths; source-reading tests; catalog target module paths")
         print("Exact formatted output and within-area item order: identical to scripted move")
@@ -164,7 +166,7 @@ def main():
             (ROOT / DIRECTORY / name).write_text(text)
         for p in (ROOT / CATALOG).glob("*.rs"):
             p.write_text(retarget(p.read_text(), manifest["areas"]))
-        print(f"Split {len(manifest['areas'])} methods into {len(expected) - 2} areas")
+        print(f"Split {len(manifest['areas'])} catalog target names into {len(expected) - 2} areas")
 
 
 def retarget(source, areas):

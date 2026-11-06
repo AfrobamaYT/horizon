@@ -21,10 +21,10 @@ pub fn native_hook_layout(root: &Path, source: &str) -> Result<Value, String> {
         ) {
             if target.starts_with("horizon_client::game::native_hooks::") {
                 let name = target.rsplit("::").next().unwrap().to_owned();
-                if let Some(previous) = areas.insert(name.clone(), area.clone()) {
-                    if previous != area {
-                        return Err(format!("{name}: belongs to both {previous} and {area}"));
-                    }
+                if let Some(previous) = areas.insert(name.clone(), area.clone())
+                    && previous != area
+                {
+                    return Err(format!("{name}: belongs to both {previous} and {area}"));
                 }
             }
         }
@@ -34,10 +34,18 @@ pub fn native_hook_layout(root: &Path, source: &str) -> Result<Value, String> {
     for item in file.items {
         let span = item.span();
         if let Item::Impl(item) = &item {
-            let methods = item.items.iter().map(|method| {
-                let name = match method { syn::ImplItem::Fn(m) => m.sig.ident.to_string(), _ => String::new() };
-                json!({"name": name, "start": method.span().start().line, "end": method.span().end().line})
-            }).collect::<Vec<_>>();
+            let methods = item
+                .items
+                .iter()
+                .map(|method| {
+                    let name = match method {
+                        syn::ImplItem::Fn(method) => method.sig.ident.to_string(),
+                        _ => String::new(),
+                    };
+                    let span = method.span();
+                    json!({"name": name, "start": span.start().line, "end": span.end().line})
+                })
+                .collect::<Vec<_>>();
             items.push(
                 json!({"start": span.start().line, "end": span.end().line, "methods": methods}),
             );
