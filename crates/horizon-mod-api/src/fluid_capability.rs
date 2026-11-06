@@ -132,17 +132,29 @@ impl FluidIngredient {
         }
         // A custom kind is the item ingredient's hook; a fluid one fails
         // the file, as a kind outside these does.
-        let source =
-            WalkedIngredient::walk(v, &tags, &|_| None).ok_or(FluidIngredientError::Invalid)?;
-        let fluids = source
-            .order
-            .iter()
-            .map(|id| {
-                context
-                    .fluid_key(id)
-                    .ok_or_else(|| FluidIngredientError::UnknownFluid(id.clone()))
-            })
-            .collect::<Result<_, _>>()?;
+        let keys = std::cell::RefCell::new(std::collections::HashMap::new());
+        let unknown = std::cell::RefCell::new(None);
+        let source = WalkedIngredient::walk_resolved(v, &tags, &|_| None, &|id| {
+            let Some(key) = context.fluid_key(id) else {
+                *unknown.borrow_mut() = Some(id.to_owned());
+                return None;
+            };
+            let canonical = if id.contains(':') {
+                id.to_owned()
+            } else {
+                format!("minecraft:{id}")
+            };
+            keys.borrow_mut().insert(canonical.clone(), key);
+            Some(canonical)
+        });
+        let source = source.ok_or_else(|| {
+            unknown.into_inner().map_or(
+                FluidIngredientError::Invalid,
+                FluidIngredientError::UnknownFluid,
+            )
+        })?;
+        let keys = keys.into_inner();
+        let fluids = source.order.iter().map(|id| keys[id]).collect();
         Ok(Self { fluids })
     }
     /// `FluidIngredient.test`: the stack's fluid among the ones the source
@@ -428,6 +440,22 @@ mod tests {
     }
     fn stack(fluid: &str, amount: u32) -> FluidStack {
         FluidStack::new(crate::registry_keys::fluid_key(fluid).unwrap(), amount)
+    }
+
+    #[test]
+    fn every_expression_leaf_is_validated_before_set_operations() {
+        let load = load();
+        let context = OwningLoad::new(&load);
+        for json in [
+            r#"{"type":"neoforge:difference","base":"minecraft:water","subtracted":"absent:fluid"}"#,
+            r#"{"type":"neoforge:intersection","children":[["minecraft:water","absent:fluid"],"minecraft:water"]}"#,
+        ] {
+            assert!(
+                matches!(FluidIngredient::from_json(&serde_json::from_str(json).unwrap(), &context), Err(FluidIngredientError::UnknownFluid(name)) if name == "absent:fluid")
+            );
+        }
+        let water = FluidIngredient::from_json(&serde_json::json!("water"), &context).unwrap();
+        assert!(water.test(&stack("minecraft:water", 1)));
     }
 
     /// A single fluid matches itself and nothing else.
