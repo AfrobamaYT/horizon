@@ -3725,7 +3725,7 @@ mod tests {
             root.join("assets/example/textures/entity/villager/profession/nested/engineer.png");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         write_strip(&file, 16, 16, &[[12, 34, 56, 255]], None);
-        let atlas = HudAtlas::build(&root).unwrap();
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
         let rect = atlas.sprites["example:entity/villager/profession/nested/engineer"];
         assert_eq!(texel_at(&atlas, rect, 0, 0), [12, 34, 56, 255]);
         fs::remove_dir_all(root).unwrap();
