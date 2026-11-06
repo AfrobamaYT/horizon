@@ -9,8 +9,8 @@ use crate::crafting::WalkedIngredient;
 use horizon_items::item_data::StackData;
 use std::{fmt, marker::PhantomData};
 
-/// An amount of one registered fluid, as NeoForge's `FluidStack`: its `FluidKey`, how many
-/// millibuckets, and its data components, kept as an item stack's are (a potion fluid's
+/// An amount of one fluid, as NeoForge's `FluidStack`: its registered or unresolved
+/// `FluidIdentity`, millibuckets, and data components, kept as an item stack's are (a potion fluid's
 /// `minecraft:potion_contents`). Water and lava have none.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it

@@ -9,27 +9,6 @@ use horizon_world::nbt::{Compound, JavaString, Tag};
 use mod_api::{BlockSide, FluidStack, Transaction};
 use std::sync::Arc;
 
-/// A fluid a tank may hold: vanilla's water and lava, or a mod's own
-/// (`create:chocolate`), any id in a namespace other than `minecraft`, of
-/// vanilla's identifier characters. A mod's fluid lives in tanks only, the
-/// world has vanilla's alone, and its mod draws it; a cauldron takes only
-/// water and lava. Variants of one fluid (a potion's kinds) are fluids of
-/// their own (`create:potion/healing`): equal ids merge, others don't.
-#[cfg(test)]
-fn tank_fluid(fluid: &str) -> bool {
-    if matches!(fluid, "minecraft:water" | "minecraft:lava") {
-        return true;
-    }
-    let ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b);
-    fluid.split_once(':').is_some_and(|(namespace, path)| {
-        !namespace.is_empty()
-            && namespace != "minecraft"
-            && namespace.bytes().all(ok)
-            && !path.is_empty()
-            && path.bytes().all(|b| ok(b) || b == b'/')
-    })
-}
-
 /// A cauldron level's contents: level `level` holds `level * 1000 / 3`
 /// millibuckets (`LayeredCauldronBlock` has no finer unit than a bottle's
 /// third of a bucket).
@@ -133,7 +112,10 @@ fn side_tanks(tanks: &ModFluidTanks, side: Option<Direction>) -> impl Iterator<I
 /// the one place a fluid's components are dropped, and what comes out of a cauldron is plain.
 fn game_holds(fluid: &FluidStack, at: &FluidAt) -> bool {
     match at {
-        FluidAt::Mod(_) => !fluid.has_components(),
+        FluidAt::Mod(_) => {
+            !fluid.has_components()
+                && fluid.key().and_then(mod_api::__private::fluid_id) != Some("minecraft:empty")
+        }
         FluidAt::Cauldron(_) => fluid
             .key()
             .and_then(mod_api::__private::fluid_id)
@@ -494,31 +476,6 @@ mod tests {
     use super::*;
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
-
-    /// Tanks hold vanilla's two fluids and any of a mod's own; not a
-    /// made-up vanilla one, nor a name that isn't an identifier.
-    #[test]
-    fn a_tank_holds_vanilla_fluids_and_mods_own() {
-        for fluid in [
-            "minecraft:water",
-            "minecraft:lava",
-            "create:chocolate",
-            "create:potion/healing",
-        ] {
-            assert!(tank_fluid(fluid), "{fluid}");
-        }
-        for fluid in [
-            "minecraft:milk",
-            "minecraft:empty",
-            "chocolate",
-            ":x",
-            "create:",
-            "Create:honey",
-            "create:honey cake",
-        ] {
-            assert!(!tank_fluid(fluid), "{fluid}");
-        }
-    }
 
     #[test]
     fn a_cauldron_level_holds_a_third_of_a_bucket() {
@@ -898,6 +855,18 @@ mod tests {
                     1,
                 ));
                 assert_eq!(source.owner(), "the game");
+                let empty = FluidResource::of(&FluidStack::new(
+                    mod_api::__private::fluid_key("minecraft:empty").unwrap(),
+                    1000,
+                ));
+                assert_eq!(source.capacity(game, 0, &empty), 0);
+                assert_eq!(
+                    game.transaction(|host, tx| Ok::<_, ()>(
+                        source.insert(host, tx, 0, &empty, 1000)
+                    )),
+                    Ok(0)
+                );
+                assert_eq!(source.resource(game, 0), None);
                 for id in ["mystery", "minecraft:mystery"] {
                     game.set_tank_state(from, &tanks(&[(Some(id), 1000), (None, 0)]));
                     assert!(source.resource(game, 0).is_none());
