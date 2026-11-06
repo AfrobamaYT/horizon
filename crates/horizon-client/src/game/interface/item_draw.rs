@@ -650,12 +650,7 @@ impl Game<'_> {
             // EntityRenderer.shouldRender: the item's 0.25 box, grown by 0.5,
             // in the view frustum. Checked before its model is resolved.
             if entity && let Some(view) = &self.view_frustum {
-                let (lo, hi) = dropped_item_cull_box(
-                    glam::DVec3::new(item.previous.x, item.previous.y, item.previous.z),
-                    glam::DVec3::new(q.x, q.y, q.z),
-                    alpha,
-                    camera,
-                );
+                let (lo, hi) = dropped_item_cull_box(glam::DVec3::from_array(at), camera);
                 if !view.intersects(lo, hi) {
                     continue;
                 }
@@ -767,14 +762,10 @@ impl Game<'_> {
 /// `EntityRenderer.getBoundingBoxForCulling(entity, partialTick)` is
 /// `Entity.getInterpolatedBoundingBox(partialTick)` - the item's 0.25 box at
 /// the position the frame draws, `ItemEntity` overriding neither - grown by 0.5
-/// all round before the frustum test.
-fn dropped_item_cull_box(
-    previous: glam::DVec3,
-    position: glam::DVec3,
-    alpha: f64,
-    camera: glam::DVec3,
-) -> (glam::Vec3, glam::Vec3) {
-    let feet = (previous.lerp(position, alpha) - camera).as_vec3();
+/// all round before the frustum test. `position` is the already-extracted f64
+/// frame position, shared with drawing and lighting.
+fn dropped_item_cull_box(position: glam::DVec3, camera: glam::DVec3) -> (glam::Vec3, glam::Vec3) {
+    let feet = (position - camera).as_vec3();
     let half = glam::Vec3::new(0.125 + 0.5, 0.5, 0.125 + 0.5);
     (
         feet - half,
@@ -992,7 +983,7 @@ mod tests {
         let previous = glam::DVec3::new(0.0, 64.0, 0.0);
         let position = glam::DVec3::new(1.0, 64.0, 0.0);
         let bounds = |alpha: f64| {
-            let (lo, hi) = dropped_item_cull_box(previous, position, alpha, camera);
+            let (lo, hi) = dropped_item_cull_box(previous.lerp(position, alpha), camera);
             (lo.to_array(), hi.to_array())
         };
         // The frame's start: the box stands at the item's previous position.
@@ -1004,9 +995,7 @@ mod tests {
         // A falling item moves in y the same way: halfway down a 66 -> 65 drop
         // the box's floor is at 65.0, where the old code had the tick's 64.5.
         let (lo, hi) = dropped_item_cull_box(
-            glam::DVec3::new(0.0, 66.0, 0.0),
-            glam::DVec3::new(0.0, 65.0, 0.0),
-            0.5,
+            glam::DVec3::new(0.0, 66.0, 0.0).lerp(glam::DVec3::new(0.0, 65.0, 0.0), 0.5),
             camera,
         );
         assert!((lo.y - 65.0).abs() < 1e-6);
