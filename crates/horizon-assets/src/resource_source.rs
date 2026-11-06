@@ -91,7 +91,8 @@ impl Default for ResourceSource {
 
 /// A resource name cannot escape its layer. ZIP names already have separators
 /// normalized by `Zip`; reject drive/stream names and NULs on every platform.
-pub(crate) fn stays_inside(name: &str) -> bool {
+/// Whether a relative resource name cannot escape its source root.
+pub fn stays_inside(name: &str) -> bool {
     !name.contains([':', '\0', '\\'])
         && name
             .split('/')
@@ -134,6 +135,46 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>, active: &mut BTreeSet<Pa
 }
 
 impl ResourceSource {
+    /// Namespace folders beneath a resource top level, in name order.
+    pub fn namespaces(&self, top: &str) -> Vec<String> {
+        if !stays_inside(top) {
+            return Vec::new();
+        }
+        if let Storage::Directory(root) = self.0.as_ref() {
+            let mut names: Vec<_> = fs::read_dir(root.join(top))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|entry| entry.path().is_dir())
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            return names;
+        }
+        fn collect<'a>(names: impl Iterator<Item = &'a str>, top: &str) -> Vec<String> {
+            names
+                .filter_map(|name| {
+                    name.strip_prefix(top)?
+                        .strip_prefix('/')?
+                        .split_once('/')
+                        .map(|(namespace, _)| namespace)
+                })
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        }
+        match self.0.as_ref() {
+            Storage::Archive(archive) => {
+                collect(archive.names().filter(|name| stays_inside(name)), top)
+            }
+            Storage::Index(files) => collect(files.keys().map(String::as_str), top),
+            _ => collect(
+                self.list(&format!("{top}/")).iter().map(String::as_str),
+                top,
+            ),
+        }
+    }
     pub fn indexed(files: BTreeMap<String, Resource>) -> Self {
         Self(Arc::new(Storage::Index(files)))
     }
@@ -143,7 +184,8 @@ impl ResourceSource {
     pub fn archive(path: &Path) -> io::Result<Self> {
         Ok(Self::opened_archive(Zip::open(path)?))
     }
-    pub(crate) fn opened_archive(archive: Zip) -> Self {
+    /// Share an archive that was already opened while discovering its metadata.
+    pub fn opened_archive(archive: Zip) -> Self {
         Self(Arc::new(Storage::Archive(archive)))
     }
     /// Select an overlay root. Folder paths are trusted repository inputs;
@@ -186,6 +228,65 @@ impl ResourceSource {
     pub fn read_to_string(&self, name: &str) -> io::Result<String> {
         String::from_utf8(self.read(name)?)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    }
+    /// Whether a resource exists, without inflating an archive entry.
+    pub fn contains(&self, name: &str) -> bool {
+        if !stays_inside(name) {
+            return false;
+        }
+        match self.0.as_ref() {
+            Storage::Directory(root) => {
+                let path = root.join(name);
+                if horizon_core::prepared_files::find(&path).is_some() {
+                    horizon_core::prepared_files::read_head(&path, 0).is_ok()
+                } else {
+                    path.is_file()
+                }
+            }
+            Storage::Archive(archive) => archive.contains(name),
+            Storage::Prefix { source, prefix } => source.contains(&format!("{prefix}{name}")),
+            Storage::Index(files) => files.contains_key(name),
+        }
+    }
+    /// Read only when the complete resource fits the limit. Bounds actual bytes
+    /// read, including deflate output and folder files changed during the read.
+    pub fn read_limited(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
+        if !stays_inside(name) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "unsafe resource name",
+            ));
+        }
+        let bytes = match self.0.as_ref() {
+            Storage::Directory(root) => {
+                horizon_core::prepared_files::read_head(&root.join(name), max.saturating_add(1))?
+            }
+            Storage::Archive(archive) => return archive.read_limited(name, max),
+            Storage::Prefix { source, prefix } => {
+                return source.read_limited(&format!("{prefix}{name}"), max);
+            }
+            Storage::Index(files) => match &files
+                .get(name)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
+                .0
+            {
+                ResourceStorage::File { source, name } => return source.read_limited(name, max),
+                ResourceStorage::Bytes(bytes) if bytes.len() as u64 <= max => bytes.to_vec(),
+                ResourceStorage::Bytes(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "resource exceeds the size limit",
+                    ));
+                }
+            },
+        };
+        if bytes.len() as u64 > max {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "resource exceeds the size limit",
+            ));
+        }
+        Ok(bytes)
     }
     /// File names from the layer root, in name order. A directory prefix ends
     /// with `/`; partial file-name prefixes are supported for archives too.
@@ -266,18 +367,18 @@ impl ResourceSource {
         }
     }
 
-    /// The decoded-sprite cache covers textures and their companions, as it
-    /// did for folder roots. Memoization is local to one fingerprint operation:
-    /// a later reload observes folder edits even when a source is shared.
-    pub(crate) fn texture_fingerprint(&self) -> Option<u64> {
+    /// Fingerprint selected resource kinds for a derived cache. Memoization is
+    /// local to one operation: a later reload observes folder edits even when
+    /// a source is shared, while archive identities follow their open readers.
+    pub fn fingerprint_under(&self, top: &str, kinds: &[&str]) -> Option<u64> {
         if let Storage::Directory(root) = self.0.as_ref()
-            && !root.join("assets").is_dir()
+            && !root.join(top).is_dir()
         {
             return None;
         }
         let mut archives = HashMap::new();
         let mut hash = DefaultHasher::new();
-        for name in self.list_under("assets", &["textures"]) {
+        for name in self.list_under(top, kinds) {
             name.hash(&mut hash);
             self.file_fingerprint(&name, &mut archives)?.hash(&mut hash);
         }
@@ -380,9 +481,12 @@ mod tests {
                 "assets/demo/textures/one.png"
             ]
         );
-        let first = source.texture_fingerprint().unwrap();
+        let first = source.fingerprint_under("assets", &["textures"]).unwrap();
         fs::write(fixture.0.join("assets/demo/textures/one.png"), b"changed").unwrap();
-        assert_ne!(source.texture_fingerprint(), Some(first));
+        assert_ne!(
+            source.fingerprint_under("assets", &["textures"]),
+            Some(first)
+        );
     }
 
     #[test]
@@ -405,6 +509,27 @@ mod tests {
         for (name, bytes) in files {
             assert_eq!(folder.read(name).unwrap(), *bytes);
             assert_eq!(archive.read(name).unwrap(), *bytes);
+            for source in [&folder, &archive] {
+                assert!(source.contains(name));
+                assert_eq!(
+                    source.read_limited(name, bytes.len() as u64).unwrap(),
+                    *bytes
+                );
+                assert_eq!(
+                    source
+                        .read_limited(name, bytes.len() as u64 - 1)
+                        .unwrap_err()
+                        .kind(),
+                    io::ErrorKind::InvalidData
+                );
+            }
+        }
+        assert_eq!(folder.namespaces("assets"), ["demo"]);
+        assert_eq!(archive.namespaces("assets"), ["demo"]);
+        for source in [&folder, &archive] {
+            assert!(!source.contains("missing"));
+            assert!(!source.contains("../escape"));
+            assert!(source.namespaces("../assets").is_empty());
         }
         for prefix in ["", "assets/", "assets/demo/a", "missing/"] {
             assert_eq!(folder.list(prefix), archive.list(prefix));
@@ -461,6 +586,62 @@ mod tests {
         }
         assert!(!fixture.0.join("assets").exists());
         assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn bounded_indexed_and_scoped_reads_keep_source_limits() {
+        let fixture = Fixture::new();
+        let archive =
+            ResourceSource::archive(&fixture.archive("pack.jar", &[("layer/file", b"abcd")]))
+                .unwrap();
+        let scoped = archive.subdirectory("layer").unwrap();
+        let indexed = ResourceSource::indexed(BTreeMap::from([
+            ("file".into(), Resource::file(scoped.clone(), "file".into())),
+            ("derived".into(), Resource::bytes(b"abcd".to_vec())),
+        ]));
+        for (source, name) in [(&scoped, "file"), (&indexed, "file"), (&indexed, "derived")] {
+            assert!(source.contains(name));
+            assert_eq!(source.read_limited(name, 4).unwrap(), b"abcd");
+            assert_eq!(
+                source.read_limited(name, 3).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+            assert_eq!(
+                source.read_limited("missing", 4).unwrap_err().kind(),
+                io::ErrorKind::NotFound
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_resource_presence_uses_the_same_bytes_as_reads_and_keeps_disk_sounds() {
+        let fixture = Fixture::new();
+        fs::write(fixture.0.join("horizon-resources.json"), b"{}").unwrap();
+        let image = "assets/demo/textures/image.png";
+        let sound = "assets/demo/sounds/sound.ogg";
+        for (name, bytes) in [(image, b"image".as_slice()), (sound, b"sound")] {
+            let path = fixture.0.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        horizon_core::prepared_files::write(&fixture.0).unwrap();
+        fs::write(
+            fixture.0.join("assets/demo/textures/added.png"),
+            b"not prepared",
+        )
+        .unwrap();
+        let source = ResourceSource::directory(fixture.0.clone());
+        assert!(source.contains(image));
+        assert!(source.contains(sound));
+        assert_eq!(source.read_limited(image, 5).unwrap(), b"image");
+        assert_eq!(source.read_limited(sound, 5).unwrap(), b"sound");
+        assert!(!source.contains("assets/demo/textures/added.png"));
+        assert!(!source.contains("assets/demo/textures"));
+        assert!(
+            source
+                .list("assets/demo/sounds/")
+                .contains(&sound.to_owned())
+        );
     }
 
     #[test]

@@ -132,7 +132,9 @@ impl ConnectedTextures {
         sprites: &mut Sprites,
         mut face_layer: impl FnMut(BlockStateId, Face) -> Option<u32>,
     ) -> Self {
-        let mut rules = ctm::load(root);
+        let mut rules = ctm::load(&horizon_assets::resource_source::ResourceSource::directory(
+            root.to_owned(),
+        ));
         // Rules with a custom name load no tiles: section meshes see no block entity.
         rules.retain(|r| r.name.is_none());
         // Rule indices are `u16`.

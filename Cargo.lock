@@ -1573,11 +1573,14 @@ dependencies = [
 name = "horizon-assets"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "horizon-core",
  "log",
+ "miniz_oxide 0.8.9",
  "png",
  "serde",
  "serde_json",
+ "zip",
 ]
 
 [[package]]
@@ -2019,10 +2022,12 @@ dependencies = [
 name = "horizon-optifine"
 version = "0.1.0"
 dependencies = [
+ "horizon-assets",
  "horizon-bench",
  "horizon-core",
  "log",
  "regex",
+ "zip",
 ]
 
 [[package]]

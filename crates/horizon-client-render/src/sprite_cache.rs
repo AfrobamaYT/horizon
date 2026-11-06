@@ -36,7 +36,7 @@ impl SpriteCache {
     /// The cache of `root`: its stored entries when still valid, else empty.
     /// `None` when the textures cannot be fingerprinted (no caching then).
     pub fn open(root: &ResourceRoot) -> Option<Self> {
-        let fingerprint = root.source().texture_fingerprint()?;
+        let fingerprint = root.source().fingerprint_under("assets", &["textures"])?;
         fs::create_dir_all(root.cache()).ok()?;
         let path = root.cache().join(FILE);
         let entries = fs::read(&path)

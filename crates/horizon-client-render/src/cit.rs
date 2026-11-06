@@ -24,18 +24,22 @@ use std::sync::{Arc, Mutex};
 /// The pack's global `cit.properties` is not a rule.
 pub fn load_rules(root: &Path) -> Vec<Rule> {
     let tops = ["optifine", "mcpatcher", "citresewn"];
-    let mut rules: Vec<Rule> = properties_files_in(root, &tops, "cit")
-        .into_iter()
-        .filter(|path| !path.ends_with("/cit.properties"))
-        .filter_map(|path| {
-            let props = read_properties(&root.join(&path))?;
-            let rule = Rule::parse(&path, &props, |p| root.join(p).is_file());
-            if rule.is_none() {
-                log::warn!("custom item textures: {path} is not a rule Horizon can read");
-            }
-            rule
-        })
-        .collect();
+    let mut rules: Vec<Rule> = properties_files_in(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
+        &tops,
+        "cit",
+    )
+    .into_iter()
+    .filter(|path| !path.ends_with("/cit.properties"))
+    .filter_map(|path| {
+        let props = read_properties(&root.join(&path))?;
+        let rule = Rule::parse(&path, &props, |p| root.join(p).is_file());
+        if rule.is_none() {
+            log::warn!("custom item textures: {path} is not a rule Horizon can read");
+        }
+        rule
+    })
+    .collect();
     rules.sort_by(Rule::priority);
     rules
 }

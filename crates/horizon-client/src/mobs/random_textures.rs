@@ -302,7 +302,9 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, text).unwrap();
         }
-        let textures = RandomTextures::scan(&root);
+        let textures = RandomTextures::scan(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
+        );
         let _ = std::fs::remove_dir_all(&root);
         textures
     }

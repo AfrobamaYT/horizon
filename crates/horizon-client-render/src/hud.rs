@@ -559,7 +559,9 @@ fn walked_minecraft_texture(name: &str) -> bool {
 fn atlas_sprites(root: &Path, packed: &[PackedImage]) -> (Vec<PackedImage>, Vec<String>) {
     use crate::atlas_sources::{self, SpriteOrigin};
     let have: std::collections::HashSet<&str> = packed.iter().map(|i| i.0.as_str()).collect();
-    let textures = atlas_sources::list_textures(root);
+    let textures = atlas_sources::list_textures(
+        &crate::resource_source::ResourceSource::directory(root.to_owned()),
+    );
     // Each new name with its origins in the atlases' order: the first that
     // loads is the sprite. They load at once (a content pack's atlases list
     // tens of thousands of files), and come out in the order a load of one
@@ -567,7 +569,9 @@ fn atlas_sprites(root: &Path, packed: &[PackedImage]) -> (Vec<PackedImage>, Vec<
     let mut names: Vec<(String, Vec<(usize, SpriteOrigin)>)> = Vec::new();
     let mut slots = std::collections::HashMap::new();
     let mut order = 0;
-    for (atlas, sources) in atlas_sources::atlases(root) {
+    for (atlas, sources) in atlas_sources::atlases(
+        &crate::resource_source::ResourceSource::directory(root.to_owned()),
+    ) {
         // The other atlases' renamed files (GUI sprites, particles...) are
         // looked up by their texture paths here.
         let item_models = atlas == "minecraft:blocks" || atlas == "minecraft:items";
@@ -1133,18 +1137,29 @@ impl HudAtlas {
         // OptiFine random entity variants, under the names their scan gives them (those
         // outside `textures/` are `<ns>:optifine/random/...`).
         let random_textures = if folders.contains(&"entity") {
-            horizon_optifine::random_textures::RandomTextures::scan(root)
+            horizon_optifine::random_textures::RandomTextures::scan(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
+            )
         } else {
             Default::default()
         };
         let blinks = if folders.contains(&"entity") {
-            horizon_optifine::blink::Blinks::scan(root, &random_textures)
+            horizon_optifine::blink::Blinks::scan(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
+                &random_textures,
+            )
         } else {
             Default::default()
         };
         let emissive = std::sync::Arc::new(if folders.contains(&"entity") {
-            let mut e = horizon_optifine::emissive::Emissive::scan(root, &random_textures);
-            e.pair_beside(root, blinks.files());
+            let mut e = horizon_optifine::emissive::Emissive::scan(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
+                &random_textures,
+            );
+            e.pair_beside(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
+                blinks.files(),
+            );
             e
         } else {
             Default::default()

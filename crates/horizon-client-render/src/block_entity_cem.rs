@@ -161,7 +161,9 @@ fn reshape_all(
     root: &Path,
     vanilla: &HashMap<&'static str, ModelPart>,
 ) -> Option<(Reshaped, Vec<(String, String)>)> {
-    let files = jem_files(root);
+    let files = jem_files(&horizon_assets::resource_source::ResourceSource::directory(
+        root.to_owned(),
+    ));
     let named = |t: &Target| t.names.iter().any(|n| files.contains_key(*n));
     if !TARGETS.iter().any(named) {
         return None;
@@ -184,7 +186,14 @@ fn reshape_all(
             .find(|&path| {
                 parsed
                     .entry(path)
-                    .or_insert_with(|| load_jem(root, path))
+                    .or_insert_with(|| {
+                        load_jem(
+                            &horizon_assets::resource_source::ResourceSource::directory(
+                                root.to_owned(),
+                            ),
+                            path,
+                        )
+                    })
                     .is_some()
             });
         let Some(path) = found else {

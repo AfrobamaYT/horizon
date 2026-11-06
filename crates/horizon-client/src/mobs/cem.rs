@@ -53,7 +53,9 @@ const FALLBACK_STEPS: usize = 3;
 impl CemModels {
     /// The `.jem` files under `root` applied to the layers of `types`.
     pub fn load(root: &Path, types: &HashMap<String, Arc<MobType>>) -> Self {
-        let files = jem_files(root);
+        let files = jem_files(&horizon_assets::resource_source::ResourceSource::directory(
+            root.to_owned(),
+        ));
         if files.is_empty() {
             set_rule_species(Vec::new());
             return Self::default();
@@ -116,7 +118,14 @@ impl CemModels {
                 .find(|&(_, path)| {
                     parsed
                         .entry(path)
-                        .or_insert_with(|| load_jem(root, path))
+                        .or_insert_with(|| {
+                            load_jem(
+                                &horizon_assets::resource_source::ResourceSource::directory(
+                                    root.to_owned(),
+                                ),
+                                path,
+                            )
+                        })
                         .is_some()
                 });
             let Some((name, path)) = found else {
@@ -859,7 +868,13 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let (models, _) = CemModels::from_files(&root, &jem_files(&root), &vanilla);
+        let (models, _) = CemModels::from_files(
+            &root,
+            &jem_files(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_owned(),
+            )),
+            &vanilla,
+        );
         fs::remove_dir_all(&root).unwrap();
 
         let adult = models.layer("zombie#main").unwrap();
@@ -907,7 +922,13 @@ mod tests {
             .iter()
             .map(|k| (*k, (&tree, "minecraft:test")))
             .collect();
-        let (models, _) = CemModels::from_files(&root, &jem_files(&root), &vanilla);
+        let (models, _) = CemModels::from_files(
+            &root,
+            &jem_files(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_owned(),
+            )),
+            &vanilla,
+        );
         fs::remove_dir_all(&root).unwrap();
         models
     }

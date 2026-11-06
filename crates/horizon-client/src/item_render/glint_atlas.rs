@@ -11,12 +11,16 @@ pub(super) fn load(
     padding: u32,
     maximum: u32,
 ) -> crate::Result<HashMap<String, Rect>> {
-    let sources = atlas_sources::atlases(root);
+    let sources = atlas_sources::atlases(&crate::resource_source::ResourceSource::directory(
+        root.to_owned(),
+    ));
     let sources = sources
         .get("minecraft:items")
         .map(Vec::as_slice)
         .unwrap_or(&[]);
-    let textures = atlas_sources::list_textures(root);
+    let textures = atlas_sources::list_textures(
+        &crate::resource_source::ResourceSource::directory(root.to_owned()),
+    );
     let decode = |name: &str, dir: &str| {
         crate::hud::decode(&atlas_sources::texture_path(root, name, dir)).ok()
     };

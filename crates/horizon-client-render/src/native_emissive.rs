@@ -11,14 +11,16 @@ const NATIVE: usize = 32;
 
 /// Load only bounded, explicitly named emissive textures from the active pack.
 pub fn load(root: &Path, sprites: &mut Sprites) {
-    let mut names: Vec<_> = crate::atlas_sources::list_textures(root)
-        .into_iter()
-        .filter(|name| {
-            name.split_once(':')
-                .is_some_and(|(_, p)| p.starts_with("emissive/"))
-        })
-        .take(NATIVE)
-        .collect();
+    let mut names: Vec<_> = crate::atlas_sources::list_textures(
+        &crate::resource_source::ResourceSource::directory(root.to_owned()),
+    )
+    .into_iter()
+    .filter(|name| {
+        name.split_once(':')
+            .is_some_and(|(_, p)| p.starts_with("emissive/"))
+    })
+    .take(NATIVE)
+    .collect();
     names.sort();
     for name in names {
         let file = crate::atlas_sources::texture_path(root, &name, "textures");
@@ -42,7 +44,9 @@ fn tile_file(name: &str) -> Option<&str> {
 /// first, then tiles, each by name, at most [`MAX`] - [`NATIVE`] (native mods keep their share of
 /// the table). A pack without such files adds nothing.
 pub fn load_optifine(root: &Path, sprites: &mut Sprites) -> Vec<(String, String)> {
-    let suffix = horizon_optifine::emissive::suffix(root);
+    let suffix = horizon_optifine::emissive::suffix(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
+    );
     // Blocks with identical pixels share a layer (and the shader pairs by layer): a shared
     // base would glow on every block that shares it, so it gets no overlay.
     let mut sharing: BTreeMap<u32, usize> = BTreeMap::new();

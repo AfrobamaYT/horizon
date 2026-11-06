@@ -220,6 +220,12 @@ impl Zip {
         self.index(name).is_some()
     }
     pub fn read(&self, name: &str) -> io::Result<Vec<u8>> {
+        self.read_limited(name, MAX_ENTRY as u64)
+    }
+    /// Read an entry under a caller's size limit, checking actual output rather
+    /// than trusting the archive's declared uncompressed size.
+    pub fn read_limited(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
+        let max = usize::try_from(max).unwrap_or(usize::MAX).min(MAX_ENTRY);
         let index = self
             .index(name)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?;
@@ -228,10 +234,16 @@ impl Zip {
         let mut archive = self.archive.clone();
         let mut entry = archive.by_index_raw(index).map_err(invalid)?;
         let method = entry.compression();
-        let mut raw = Vec::with_capacity((entry.compressed_size() as usize).min(self.len));
-        entry.read_to_end(&mut raw)?;
+        let capacity = (entry.compressed_size() as usize).min(self.len);
+        let mut raw = Vec::with_capacity(capacity.min(max + 1));
+        if method == CompressionMethod::Stored {
+            entry.take(max as u64 + 1).read_to_end(&mut raw)?;
+        } else {
+            entry.read_to_end(&mut raw)?;
+        }
         match method {
-            CompressionMethod::Stored => Ok(raw),
+            CompressionMethod::Stored if raw.len() <= max => Ok(raw),
+            CompressionMethod::Stored => Err(invalid("entry exceeds the size limit")),
             CompressionMethod::Deflated => {
                 // Java's ZipFile trusts neither size an entry declares: it
                 // inflates the stream to its end and keeps what comes out.
@@ -242,12 +254,12 @@ impl Zip {
                 // deflate stream" and with them the whole pack. Only the
                 // size limit stands between the archive and a zip bomb.
                 let decoder = flate2::read::DeflateDecoder::new(raw.as_slice());
-                let mut decoded = Vec::with_capacity(raw.len().min(MAX_ENTRY));
+                let mut decoded = Vec::with_capacity(raw.len().min(max));
                 decoder
-                    .take(MAX_ENTRY as u64 + 1)
+                    .take(max as u64 + 1)
                     .read_to_end(&mut decoded)
                     .map_err(|_| invalid("corrupt deflate stream"))?;
-                if decoded.len() > MAX_ENTRY {
+                if decoded.len() > max {
                     return Err(invalid("entry inflates past the size limit"));
                 }
                 Ok(decoded)
@@ -366,6 +378,19 @@ mod tests {
         assert!(opened("empty", b"").is_err());
         assert!(opened("garbage", b"PK not really").is_err());
     }
+    #[test]
+    fn bounded_reads_check_actual_stored_and_inflated_bytes() {
+        for compressed in [false, true] {
+            let bytes = archive_of(&[("file", b"abcd", compressed)]);
+            let zip = Zip::from_bytes(bytes).unwrap();
+            assert_eq!(zip.read_limited("file", 4).unwrap(), b"abcd");
+            assert_eq!(
+                zip.read_limited("file", 3).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+            assert!(zip.read_limited("file", 0).is_err());
+        }
+    }
     /// A hand-built archive with one stored and one deflated entry.
     fn archive() -> Vec<u8> {
         archive_of(&[
@@ -468,6 +493,8 @@ mod tests {
 
         let zip = Zip::from_bytes(bytes).unwrap();
         assert_eq!(zip.read("large.txt").unwrap(), vec![b'x'; 4096]);
+        assert!(zip.read_limited("large.txt", 4095).is_err());
+        assert_eq!(zip.read_limited("large.txt", 4096).unwrap().len(), 4096);
     }
 
     /// Some pack writers leave an entry's compressed size longer than its
