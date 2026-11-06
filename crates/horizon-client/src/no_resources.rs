@@ -220,7 +220,7 @@ mod tests {
     fn with_ui<R>(size: [u32; 2], cursor: (f32, f32), f: impl FnOnce(&mut Ui) -> R) -> R {
         let atlas =
             HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
-        let mut batch = HudBatch::new(size);
+        let mut batch = HudBatch::scratch(size);
         let cursor = (cursor.0 / batch.scale, cursor.1 / batch.scale);
         let mut ui = Ui::new(&atlas, &mut batch, cursor);
         f(&mut ui)
