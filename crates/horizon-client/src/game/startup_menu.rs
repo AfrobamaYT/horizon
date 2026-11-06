@@ -1409,15 +1409,17 @@ mod tests {
                     panic!("creation")
                 };
                 options.rules.set("keep_inventory", Value::Bool(true));
-                let mut menu = StartupMenu::default();
-                menu.title = Some(title);
-                menu.pending = Some(PendingWorldEntry::Local {
-                    folder: "test".into(),
-                    name: None,
-                    seed: Some(1),
-                    creative: true,
-                    create: Some(Box::new(options)),
-                });
+                let mut menu = StartupMenu {
+                    title: Some(title),
+                    pending: Some(PendingWorldEntry::Local {
+                        folder: "test".into(),
+                        name: None,
+                        seed: Some(1),
+                        creative: true,
+                        create: Some(Box::new(options)),
+                    }),
+                    ..Default::default()
+                };
                 menu.handoff(game);
                 let Some(PendingWorldEntry::Local {
                     create: Some(options),
