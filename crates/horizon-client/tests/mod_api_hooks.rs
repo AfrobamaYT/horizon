@@ -130,6 +130,8 @@ mod model_layers {
 
     #[test]
     fn layer_definitions_collect_each_mods_layers_in_order() {
+        // The harness supplies the engine-owned context; the listener above uses only public API.
+        use mod_api::__private::game::RegistrationContextNew;
         mod_api::testing::with_mods(
             vec![
                 ModEntry::new("first", Box::new(Golem("first:golem#main"))),
