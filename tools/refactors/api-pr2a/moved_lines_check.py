@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).parent
@@ -41,6 +42,9 @@ def lines(source):
 
 def main():
     base = sys.argv[1]
+    manifest = tomllib.loads((ROOT / "crates/horizon-mod-runtime/Cargo.toml").read_text())
+    assert manifest["dependencies"] == {"horizon-core": {"path": "../horizon-core"}}
+    assert "target" not in manifest and "build-dependencies" not in manifest
     paths = set(subprocess.check_output(["git", "diff", "--no-renames", "--name-only", base], cwd=ROOT, text=True).splitlines())
     paths |= {str(p.relative_to(ROOT)) for p in (ROOT / "crates/horizon-mod-runtime/src").rglob("*.rs")}
     paths = sorted(p for p in paths if p.endswith(".rs") and not p.startswith("tools/") and p not in {"crates/horizon-mod-runtime/src/lib.rs", "crates/horizon-mod-runtime/tests/registry_keys.rs"})
