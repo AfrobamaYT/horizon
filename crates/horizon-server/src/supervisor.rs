@@ -119,7 +119,7 @@ fn prune_chunks(shared: &Arc<Shared>, dir: &Path, config: &Config) -> Result<(),
             &format!("Chunk prune failed; some files may already have been changed: {e}"),
         ),
     };
-    if settings.mode == horizon_server_launch::horizon_server_launch::prune::Mode::Delete {
+    if settings.mode == horizon_server_launch::prune::Mode::Delete {
         note(
             shared,
             "INFO",

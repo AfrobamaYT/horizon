@@ -2,18 +2,18 @@ use alloc::{format, string::String, vec::Vec};
 use core::ops::Index;
 
 use super::{
-    Frontend, Result,
     ast::{
         GlobalLookup, GlobalLookupKind, HirExpr, HirExprKind, ParameterInfo, ParameterQualifier,
         VariableReference,
     },
     error::{Error, ErrorKind},
     types::{scalar_components, type_power},
+    Frontend, Result,
 };
 use crate::{
-    AddressSpace, Arena, BinaryOperator, Block, Expression, FastHashMap, FunctionArgument, Handle,
-    Literal, LocalVariable, RelationalFunction, Scalar, Span, Statement, Type, TypeInner,
-    VectorSize, front::Typifier, proc::Emitter, proc::Layouter,
+    front::Typifier, proc::Emitter, proc::Layouter, AddressSpace, Arena, BinaryOperator, Block,
+    Expression, FastHashMap, FunctionArgument, Handle, Literal, LocalVariable, RelationalFunction,
+    Scalar, Span, Statement, Type, TypeInner, VectorSize,
 };
 
 /// The position at which an expression is, used while lowering
@@ -472,7 +472,7 @@ impl<'a> Context<'a> {
                 return Err(Error {
                     kind: ErrorKind::SemanticError("Expression returns void".into()),
                     meta,
-                });
+                })
             }
         };
 
@@ -1327,7 +1327,11 @@ impl<'a> Context<'a> {
 
                 self.lower_store(pointer, value, meta)?;
 
-                if postfix { left } else { value }
+                if postfix {
+                    left
+                } else {
+                    value
+                }
             }
             HirExprKind::Method {
                 expr: object,
@@ -1419,7 +1423,7 @@ impl<'a> Context<'a> {
                             .into(),
                     ),
                     meta,
-                });
+                })
             }
         };
 

@@ -1,18 +1,18 @@
 use alloc::{vec, vec::Vec};
 
-use crate::Literal;
-use crate::front::glsl::Span;
 use crate::front::glsl::context::ExprPos;
+use crate::front::glsl::Span;
+use crate::Literal;
 use crate::{
-    Block, Expression, Statement, SwitchCase, UnaryOperator,
     front::glsl::{
-        Error, ErrorKind, Frontend, Result,
         ast::ParameterQualifier,
         context::Context,
         parser::ParsingContext,
         token::{Token, TokenValue},
         variables::VarDeclaration,
+        Error, ErrorKind, Frontend, Result,
     },
+    Block, Expression, Statement, SwitchCase, UnaryOperator,
 };
 
 impl ParsingContext<'_> {
@@ -259,7 +259,7 @@ impl ParsingContext<'_> {
                         loop {
                             match self.expect_peek(frontend)?.value {
                                 TokenValue::Case | TokenValue::Default | TokenValue::RightBrace => {
-                                    break;
+                                    break
                                 }
                                 _ => {
                                     self.parse_statement(

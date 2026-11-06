@@ -2,10 +2,7 @@ use alloc::{string::String, vec, vec::Vec};
 
 use super::{DeclarationContext, ParsingContext, Result};
 use crate::{
-    AddressSpace, Expression, FunctionResult, Handle, Scalar, ScalarKind, Statement, StructMember,
-    Type, TypeInner,
     front::glsl::{
-        Error, ErrorKind, Frontend, Span,
         ast::{
             GlobalLookup, GlobalLookupKind, Precision, QualifierKey, QualifierValue,
             StorageQualifier, StructLayout, TypeQualifiers,
@@ -16,8 +13,11 @@ use crate::{
         token::{Token, TokenValue},
         types::scalar_components,
         variables::{GlobalOrConstant, VarDeclaration},
+        Error, ErrorKind, Frontend, Span,
     },
     proc::Alignment,
+    AddressSpace, Expression, FunctionResult, Handle, Scalar, ScalarKind, Statement, StructMember,
+    Type, TypeInner,
 };
 
 /// Helper method used to retrieve the child type of `ty` at
@@ -138,7 +138,7 @@ impl ParsingContext<'_> {
                                 vec![TokenValue::Comma.into(), TokenValue::RightBrace.into()],
                             ),
                             meta: token.meta,
-                        });
+                        })
                     }
                 }
             }
@@ -204,7 +204,7 @@ impl ParsingContext<'_> {
                             vec![ExpectedToken::Identifier, TokenValue::Semicolon.into()],
                         ),
                         meta: token.meta,
-                    });
+                    })
                 }
             };
             let mut meta = token.meta;
@@ -289,7 +289,7 @@ impl ParsingContext<'_> {
                             vec![TokenValue::Comma.into(), TokenValue::Semicolon.into()],
                         ),
                         meta: token.meta,
-                    });
+                    })
                 }
             }
         }
@@ -510,7 +510,7 @@ impl ParsingContext<'_> {
                                     ],
                                 ),
                                 meta: token.meta,
-                            });
+                            })
                         }
                     };
 
@@ -592,7 +592,7 @@ impl ParsingContext<'_> {
                         vec![ExpectedToken::Identifier, TokenValue::Semicolon.into()],
                     ),
                     meta: token.meta,
-                });
+                })
             }
         };
 

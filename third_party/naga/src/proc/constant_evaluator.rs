@@ -13,12 +13,12 @@ use core::iter;
 
 use arrayvec::ArrayVec;
 use half::f16;
-use num_traits::{FromPrimitive, One, ToPrimitive, Zero, real::Real};
+use num_traits::{real::Real, FromPrimitive, One, ToPrimitive, Zero};
 
 use crate::{
+    arena::{Arena, Handle, HandleVec, UniqueArena},
     ArraySize, BinaryOperator, Constant, Expression, Literal, Override, RelationalFunction,
     ScalarKind, Span, Type, TypeInner, UnaryOperator,
-    arena::{Arena, Handle, HandleVec, UniqueArena},
 };
 
 #[cfg(feature = "wgsl-in")]
@@ -943,11 +943,11 @@ pub enum ConstantEvaluatorError {
     #[error("Expected boolean vector for condition arg., got something else")]
     SelectConditionNotAVecBool,
     #[error(
-        "Expected same number of vector components between condition, accept, and reject args., got something else"
+        "Expected same number of vector components between condition, accept, and reject args., got something else",
     )]
     SelectConditionVecSizeMismatch,
     #[error(
-        "Expected reject and accept args. to be scalars of vectors of the same type, got something else"
+        "Expected reject and accept args. to be scalars of vectors of the same type, got something else",
     )]
     SelectAcceptRejectTypeMismatch,
     #[error("Cooperative operations can't be constant")]
@@ -2052,16 +2052,8 @@ impl<'a> ConstantEvaluator<'a> {
 
         let product = match (a, b) {
             (
-                [
-                    Li::AbstractInt(a0),
-                    Li::AbstractInt(a1),
-                    Li::AbstractInt(a2),
-                ],
-                [
-                    Li::AbstractInt(b0),
-                    Li::AbstractInt(b1),
-                    Li::AbstractInt(b2),
-                ],
+                [Li::AbstractInt(a0), Li::AbstractInt(a1), Li::AbstractInt(a2)],
+                [Li::AbstractInt(b0), Li::AbstractInt(b1), Li::AbstractInt(b2)],
             ) => {
                 // `cross` has no overload for AbstractInt, so AbstractInt
                 // arguments are automatically converted to AbstractFloat. Since
@@ -2078,16 +2070,8 @@ impl<'a> ConstantEvaluator<'a> {
                 ]
             }
             (
-                [
-                    Li::AbstractFloat(a0),
-                    Li::AbstractFloat(a1),
-                    Li::AbstractFloat(a2),
-                ],
-                [
-                    Li::AbstractFloat(b0),
-                    Li::AbstractFloat(b1),
-                    Li::AbstractFloat(b2),
-                ],
+                [Li::AbstractFloat(a0), Li::AbstractFloat(a1), Li::AbstractFloat(a2)],
+                [Li::AbstractFloat(b0), Li::AbstractFloat(b1), Li::AbstractFloat(b2)],
             ) => {
                 let p = cross_product([a0, a1, a2], [b0, b1, b2]);
                 [
@@ -3605,8 +3589,8 @@ impl<'a> ConstantEvaluator<'a> {
         &self,
         expr: Handle<Expression>,
     ) -> Result<crate::proc::TypeResolution, ConstantEvaluatorError> {
-        use crate::Expression as Ex;
         use crate::proc::TypeResolution as Tr;
+        use crate::Expression as Ex;
         let resolution = match self.expressions[expr] {
             Ex::Literal(ref literal) => Tr::Value(literal.ty_inner()),
             Ex::Constant(c) => Tr::Handle(self.constants[c].ty),
@@ -3642,7 +3626,11 @@ impl<'a> ConstantEvaluator<'a> {
         let select_single_component =
             |this: &mut Self, reject_scalar, reject, accept, condition| {
                 let accept = this.cast(accept, reject_scalar, span)?;
-                if condition { Ok(accept) } else { Ok(reject) }
+                if condition {
+                    Ok(accept)
+                } else {
+                    Ok(reject)
+                }
             };
 
         match (&self.expressions[reject], &self.expressions[accept]) {

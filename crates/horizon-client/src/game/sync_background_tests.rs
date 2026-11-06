@@ -1,5 +1,8 @@
 //! Regressions for the typed bindings carried by the upstream sync.
-use super::{Chunk, native_entity_refs::tests::with_game_at};
+use super::{
+    Chunk,
+    native_entity_refs::tests::{with_client_game, with_game_at},
+};
 use mod_api::{ClientHost, Flow, Hooks, ModEntry, ServerHost};
 use std::{path::PathBuf, sync::Arc};
 
@@ -24,11 +27,10 @@ impl Hooks for Background {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cancelled_background_keeps_custom_geometry_and_one_blur_request() {
-    let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     mod_api::testing::with_mods(
         vec![ModEntry::new("background", Box::new(Background))].into(),
         || {
-            with_game_at(root, |game| {
+            with_client_game(|game| {
                 let mut batch = horizon_client::hud::HudBatch::scratch([800, 600]);
                 game.render_transparent_background("inventory", &mut batch);
                 assert_eq!(

@@ -7,17 +7,17 @@ use alloc::{
 use core::iter;
 
 use super::{
-    Frontend, Result,
     ast::*,
     builtins::{inject_builtin, sampled_to_depth},
     context::{Context, ExprPos, StmtContext},
     error::{Error, ErrorKind},
     types::scalar_components,
+    Frontend, Result,
 };
 use crate::{
-    AddressSpace, Block, EntryPoint, Expression, Function, FunctionArgument, FunctionResult,
-    Handle, Literal, LocalVariable, Scalar, ScalarKind, Span, Statement, StructMember, Type,
-    TypeInner, front::glsl::types::type_power, proc::ensure_block_returns,
+    front::glsl::types::type_power, proc::ensure_block_returns, AddressSpace, Block, EntryPoint,
+    Expression, Function, FunctionArgument, FunctionResult, Handle, Literal, LocalVariable, Scalar,
+    ScalarKind, Span, Statement, StructMember, Type, TypeInner,
 };
 
 /// Struct detailing a store operation that must happen after a function call
@@ -509,7 +509,7 @@ impl Frontend {
                 None
             }
             TypeInner::Vector { size, scalar } => {
-                return self.vector_constructor(ctx, ty, size, scalar, &args, meta);
+                return self.vector_constructor(ctx, ty, size, scalar, &args, meta)
             }
             TypeInner::Array { base, .. } => {
                 for (mut arg, meta) in args.iter().copied() {
@@ -532,7 +532,7 @@ impl Frontend {
                 return Err(Error {
                     kind: ErrorKind::SemanticError("Constructor: Too many arguments".into()),
                     meta,
-                });
+                })
             }
         };
 

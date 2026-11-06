@@ -1,10 +1,10 @@
 use alloc::{format, string::String, vec::Vec};
 
 use super::{
-    Frontend, Result, Span,
     ast::*,
     context::{Context, ExprPos},
     error::{Error, ErrorKind},
+    Frontend, Result, Span,
 };
 use crate::{
     AddressSpace, Binding, BuiltIn, Constant, Expression, GlobalVariable, Handle, Interpolation,

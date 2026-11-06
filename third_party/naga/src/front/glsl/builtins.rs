@@ -1,12 +1,12 @@
 use alloc::{vec, vec::Vec};
 
 use super::{
-    Error, ErrorKind, Frontend, Result,
     ast::{
         BuiltinVariations, FunctionDeclaration, FunctionKind, Overload, ParameterInfo,
         ParameterQualifier,
     },
     context::Context,
+    Error, ErrorKind, Frontend, Result,
 };
 use crate::{
     BinaryOperator, DerivativeAxis as Axis, DerivativeControl as Ctrl, Expression, Handle,

@@ -6193,14 +6193,16 @@ mod effect_refusal_tests {
             kind: DamageKind::Generic,
             ..Damage::mob(attacker.id, [4.0, 64.0, 4.0]).with_species(Species::Cow)
         };
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // An unrelated parent's generic acceptance remains true.
         let mut cow = mob(&types, "minecraft:cow");
-        assert!(cow.damage(1.0, Damage::of(DamageKind::Generic)));
+        assert!(cow.damage(level, 1.0, Damage::of(DamageKind::Generic)));
         assert_eq!(cow.health, 9.0);
         // A parent's existing rejection never reaches the subclass aftermath.
         let mut protected = mob(&types, id);
         protected.invulnerable_flag = true;
-        assert!(!protected.damage(1.0, by_cow));
+        assert!(!protected.damage(level, 1.0, by_cow));
         assert_eq!(protected.health, 10.0);
         if protected.species() == Species::GlowSquid {
             assert_eq!(aquatic::dark_ticks(&protected), 0);
@@ -6216,7 +6218,7 @@ mod effect_refusal_tests {
                 } else {
                     Damage::of(DamageKind::Generic)
                 };
-                let accepted = victim.damage(1.0, source);
+                let accepted = victim.damage(level, 1.0, source);
                 // Check the parent's state first: false must not roll back damage.
                 assert_eq!(victim.health, 9.0);
                 assert_eq!(
