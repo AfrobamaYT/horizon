@@ -222,6 +222,40 @@ pub enum ToastKind {
     Other,
 }
 
+/// Build range and sky properties of a loaded level's dimension type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LevelDimensionShape {
+    /// Lowest buildable block Y.
+    pub min_y: i32,
+    /// Build height in blocks.
+    pub height: i32,
+    /// Height used by portals and chorus fruit.
+    pub logical_height: i32,
+    /// Whether the dimension has skylight.
+    pub sky_light: bool,
+    /// Whether the dimension has a ceiling.
+    pub has_ceiling: bool,
+}
+impl LevelDimensionShape {
+    /// Construct a dimension shape from its build and sky properties.
+    pub fn new(
+        min_y: i32,
+        height: i32,
+        logical_height: i32,
+        sky_light: bool,
+        has_ceiling: bool,
+    ) -> Self {
+        Self {
+            min_y,
+            height,
+            logical_height,
+            sky_light,
+            has_ceiling,
+        }
+    }
+}
+
 /// The registry facts a recipe viewer needs for an enchantment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
