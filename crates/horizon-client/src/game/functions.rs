@@ -26,6 +26,16 @@ pub(super) struct Scheduled {
     pub time: i64,
     pub seq: u64,
 }
+impl FnState {
+    /// The file `path` of the highest enabled pack that has it.
+    pub(super) fn pack_file(&self, path: &str) -> Option<Vec<u8>> {
+        self.enabled
+            .iter()
+            .rev()
+            .filter_map(|id| self.packs.iter().find(|p| &p.id == id))
+            .find_map(|pack| pack.read(path))
+    }
+}
 #[derive(Default)]
 pub(super) struct FnState {
     pub store: DataStore,
@@ -452,7 +462,13 @@ impl Game<'_> {
             if self.exec.returned.is_some() {
                 break;
             }
-            if self.exec.commands > self.ui.rules.int("max_command_sequence_length").max(1) as u32 {
+            if self.exec.commands
+                > self
+                    .ui
+                    .rules
+                    .int_at(horizon_client::gamerules::vanilla::MAX_COMMAND_SEQUENCE_LENGTH)
+                    .max(1) as u32
+            {
                 break;
             }
         }
@@ -1078,6 +1094,9 @@ mod tests {
         .unwrap();
         with_game(|game| {
             game.load_world(WorldRequest {
+                rule_registry: std::sync::Arc::new(
+                    horizon_client::gamerules::RuleRegistry::vanilla(),
+                ),
                 save_root: root.clone(),
                 folder: "test".into(),
                 name: Some("test".into()),

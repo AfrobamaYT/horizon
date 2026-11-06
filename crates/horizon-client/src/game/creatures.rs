@@ -204,15 +204,18 @@ impl ProjectileWorld for ProjWorld<'_, '_> {
             binding: self.w.collision,
             subject: None,
         };
+        let context = horizon_world::collision_context::CollisionContext::position(from.y);
         let r = traverse_blocks(from, to, 256, |p: BlockPos| {
             let state = self.w.world.block(p.x, p.y, p.z);
             if self.w.facts.is_air(state) {
                 return None;
             }
+            // ClipContext hands CollisionContext.of(projectile): scaffolding
+            // is open for a projectile below it.
             let shape = self
                 .w
                 .collision
-                .collision_shape(&mut scene, state, [p.x, p.y, p.z])
+                .collision_shape_with_context(&mut scene, state, p, &context)
                 .ok()?;
             shape.clip(from, to, p)
         });
@@ -907,7 +910,7 @@ impl Game<'_> {
                     "enchants": horizon_client::mobs::gear::gear(m).map(|g| g.slots.iter().map(|s| s.iter().map(|(e, l)| format!("{e}:{l}")).collect::<Vec<_>>()).collect::<Vec<_>>()),
                     "ints": m.extra.ints,
                     "pois": [m.extra.home, m.extra.bed, m.extra.meeting],
-                    "profession": m.extra.variant2,
+                    "profession": m.extra.profession.index(),
                     "targets": m.ai.targets.running_names(),
                     "path": m.ai.nav.path.as_ref().map(|p| p.nodes.len() - p.next.min(p.nodes.len())),
                     "on_ground": m.on_ground,
@@ -997,10 +1000,22 @@ impl Game<'_> {
             block_tags: &self.items().block_tags,
             landing: &self.motion.landing,
             biomes: world_biomes!(self),
-            mob_griefing: self.ui.rules.bool("mob_griefing"),
-            universal_anger: self.ui.rules.bool("universal_anger"),
-            mob_drops: self.ui.rules.bool("mob_drops"),
-            max_entity_cramming: self.ui.rules.int("max_entity_cramming"),
+            mob_griefing: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+            universal_anger: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::UNIVERSAL_ANGER),
+            mob_drops: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS),
+            max_entity_cramming: self
+                .ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::MAX_ENTITY_CRAMMING),
             end: self.dim == Dim::End,
             world_seed: self.level.seed,
             sea_level: if self.dim == Dim::Nether { 32 } else { 63 },
@@ -1160,7 +1175,11 @@ impl Game<'_> {
         let from = self.lan_synced_from();
         horizon_client::spans::time("spawn_natural", || self.spawn_natural());
         // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
-        if self.ui.rules.bool("spawn_mobs") {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+        {
             self.tick_custom_spawners();
         }
         self.tick_raids();
@@ -1986,7 +2005,10 @@ impl Game<'_> {
             player: by_player.then(player),
             luck: 0.0,
             vehicle,
-            mob_drops: self.ui.rules.bool("mob_drops"),
+            mob_drops: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS),
             world_seed: self.level.seed,
         };
         let raider = horizon_client::mobs::raider::is_raider(m.species());
@@ -2506,10 +2528,13 @@ impl Game<'_> {
                     self.particles
                         .send_particles(&options, at, spread, speed, count);
                 }
-                MobEvent::Sound(name, at, volume, pitch)
-                | MobEvent::LocalSound(name, at, volume, pitch) => {
+                MobEvent::Sound(name, at, volume, pitch) => {
                     self.audio
                         .play(&format!("minecraft:{name}"), Some(at), volume, pitch)
+                }
+                MobEvent::LocalSound(name, at, volume, pitch) => {
+                    self.audio
+                        .play_unshared(&format!("minecraft:{name}"), Some(at), volume, pitch)
                 }
                 MobEvent::BoundSound {
                     mob,
@@ -2560,7 +2585,7 @@ impl Game<'_> {
                 // A mob's own `gameEvent(..)` calls: Armadillo.rollUp/rollOut's
                 // ENTITY_ACTION, Creeper.tick's PRIME_FUSE, Mob.ate's EAT, the
                 // shulker's lid (Shulker.setRawPeekAmount), an evoker's vexes
-                // (ENTITY_PLACE).
+                // (ENTITY_PLACE), Enderman.teleport's TELEPORT where it was.
                 MobEvent::GameEvent {
                     event, at, source, ..
                 } if matches!(
@@ -2571,6 +2596,7 @@ impl Game<'_> {
                         | "minecraft:container_open"
                         | "minecraft:container_close"
                         | "minecraft:entity_place"
+                        | "minecraft:teleport"
                 ) =>
                 {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
@@ -3290,7 +3316,10 @@ impl Game<'_> {
                                 .get(old)
                                 .name
                                 .starts_with("minecraft:infested_")
-                            && self.ui.rules.bool("block_drops")
+                            && self
+                                .ui
+                                .rules
+                                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
                         {
                             let at = [
                                 f64::from(pos[0]) + 0.5,
@@ -3587,7 +3616,10 @@ impl Game<'_> {
                     if matches!(
                         table,
                         "minecraft:gameplay/turtle_grow" | "minecraft:gameplay/panda_sneeze"
-                    ) && !self.ui.rules.bool("mob_drops")
+                    ) && !self
+                        .ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS)
                     {
                         continue;
                     }
@@ -3691,7 +3723,10 @@ impl Game<'_> {
     /// `Animal.finalizeSpawnChildFromBreeding`'s single experience orb, drawn
     /// from the breeding parent after the rule check.
     fn award_breeding_experience(&mut self, parent: u32, at: [f64; 3]) {
-        let mob_drops = self.ui.rules.bool("mob_drops");
+        let mob_drops = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS);
         if let Some(amount) = self
             .mobs
             .iter_mut()
@@ -3757,7 +3792,12 @@ impl Game<'_> {
     /// host's player) hear it.
     pub(super) fn tell_neutral_mobs_player_died(&mut self, feet: [f64; 3], conn: Option<u32>) {
         // A client of someone else's world has the server's mobs only to show.
-        if self.remote.is_some() || !self.ui.rules.bool("forgive_dead_players") {
+        if self.remote.is_some()
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::FORGIVE_DEAD_PLAYERS)
+        {
             return;
         }
         let block = feet.map(f64::floor);
@@ -4514,7 +4554,10 @@ impl Game<'_> {
             let guest_entities = self.lan_guest_entities();
             // ThrownEnderpearl.tick: a dead player's pearl is discarded in
             // place of its tick while ender_pearls_vanish_on_death is on.
-            let vanish = self.ui.rules.bool("ender_pearls_vanish_on_death");
+            let vanish = self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ENDER_PEARLS_VANISH_ON_DEATH);
             let host_dead = self.player_view().is_some_and(|p| !p.alive);
             let dead_guests: Vec<u32> = self.lan.as_ref().map_or_else(Vec::new, |h| {
                 h.hub
@@ -4916,7 +4959,13 @@ impl Game<'_> {
             Some(Who::Mob(_)) => false,
             None => true,
         };
-        if !impact || !shooter_may_break || !self.ui.rules.bool("projectiles_can_break_blocks") {
+        if !impact
+            || !shooter_may_break
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::PROJECTILES_CAN_BREAK_BLOCKS)
+        {
             return;
         }
         let state = self.world.block(pos[0], pos[1], pos[2]);
@@ -4980,8 +5029,11 @@ impl Game<'_> {
                     ArrowSound::TridentHitGround => "minecraft:item.trident.hit_ground",
                     ArrowSound::TridentHit => "minecraft:item.trident.hit",
                 };
+                // Each one is the projectile's own `Entity.playSound`, on `getSoundSource()`:
+                // NEUTRAL, which neither AbstractArrow nor ThrownTrident overrides. The
+                // name-based guess would put `entity.arrow.*` and `item.*` on PLAYERS.
                 self.audio
-                    .play(name, Some([at.x, at.y, at.z]), volume, pitch);
+                    .play_on(6, name, Some([at.x, at.y, at.z]), volume, pitch);
             }
             ArrowEvent::BubbleColumnParticles { pos } => self.bubble_column_particles(pos),
             ArrowEvent::Block {
@@ -5059,8 +5111,14 @@ impl Game<'_> {
             fluids: &self.motion.fluids,
             loop_context: &self.loop_context,
             raining: rain,
-            mob_griefing: self.ui.rules.bool("mob_griefing"),
-            tnt_explodes: self.ui.rules.bool("tnt_explodes"),
+            mob_griefing: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+            tnt_explodes: self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES),
             mob_hooks: self
                 .grief_hooked()
                 .then_some(self as &dyn horizon_client::mobs::MobHooks),
@@ -5387,7 +5445,7 @@ impl Game<'_> {
                         );
                         // AbstractArrow.onHitEntity: a hit that hurt leaves a
                         // non-piercing arrow stuck in the body.
-                        if hurt && p.arrow.as_ref().is_some_and(|a| a.pierce == 0) {
+                        if hurt && p.arrow.as_ref().is_some_and(|a| (a.pierce as i8) <= 0) {
                             self.combat.stuck.add_arrow();
                         }
                         hurt
@@ -5728,7 +5786,10 @@ impl Game<'_> {
                     // ThrownEnderpearl: 5% endermite where the player was
                     // (when monsters spawn), teleport, 5 damage.
                     if self.world.random.next_float() < 0.05
-                        && self.ui.rules.bool("spawn_monsters")
+                        && self
+                            .ui
+                            .rules
+                            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS)
                         && self.ui.difficulty != 0
                         && let Some(pl) = self.player.as_ref()
                     {
@@ -7653,11 +7714,11 @@ impl Game<'_> {
             self.mark_motion(entity_start, (1 << 32) | u64::from(mob.id));
             self.mark_entity(entity_start, &mob.kind.id);
             self.rendered_mobs.set(self.rendered_mobs.get() + 1);
-            let light = self.world.light(
-                mob.position.x.floor() as i32,
-                (mob.position.y + mob.eye_height()).floor() as i32,
-                mob.position.z.floor() as i32,
-            );
+            // `EntityRenderer.getPackedLightCoords`: the block the mob's light
+            // probe (its eye) is in, at the position this frame draws rather
+            // than this tick's.
+            let probe = mob.light_probe(alpha);
+            let light = self.world.light(probe[0], probe[1], probe[2]);
             let mut packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             // EntityRenderer.getBlockLightLevel: a burning mob has 15 block
             // light, and so do the Allay, Blaze, Magma Cube, Vex and Wither
@@ -7904,11 +7965,12 @@ impl Game<'_> {
             let p = glam::DVec3::from_array(at) - camera;
             let c = p.as_vec3();
             // EntityRenderer.getPackedLightCoords: the block its light probe
-            // (the eye) is in, not the one under its feet.
+            // (the eye) is in, at the position this frame draws rather than
+            // this tick's, and not the one under its feet.
             let light = self.world.light(
-                a.position.x.floor() as i32,
-                a.light_probe_y().floor() as i32,
-                a.position.z.floor() as i32,
+                at[0].floor() as i32,
+                a.light_probe_y(alpha).floor() as i32,
+                at[2].floor() as i32,
             );
             let mut packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             // EntityRenderer.getBlockLightLevel: a shulker bullet and anything
@@ -8503,7 +8565,10 @@ impl Game<'_> {
     /// which a mod may change for `entity` (`EntityMobGriefingEvent`). No
     /// entity: the rule alone, as NeoForge.
     pub(super) fn can_entity_grief(&self, entity: Option<u32>) -> bool {
-        let rule = self.ui.rules.bool("mob_griefing");
+        let rule = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         entity.map_or(rule, |entity| self.entity_grief(entity, rule))
     }
     /// Whether a large fireball's blast lights fire (`LargeFireball.onHit`):
@@ -8583,7 +8648,11 @@ mod mob_griefing_tests {
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
                 open_to_lan(game);
-                assert!(game.ui.rules.bool("mob_griefing"));
+                assert!(
+                    game.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+                );
                 assert!(!game.can_entity_grief(Some(denied)));
                 assert!(game.can_entity_grief(Some(other)));
                 assert!(game.can_entity_grief(None));
@@ -8752,6 +8821,86 @@ mod enderman_anger_tests {
 }
 
 #[cfg(test)]
+mod local_sound_event_tests {
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use horizon_client::mobs::MobEvent;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn local_mob_events_play_without_entering_the_shared_capture() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir =
+            Some(std::env::temp_dir().join(format!("horizon-h069-unit-{}", std::process::id())));
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.audio.capture = Some(Vec::new());
+        game.handle_mob_events(vec![
+            MobEvent::Sound("entity.cow.hurt", [1.0, 100.0, 2.0], 0.5, 1.0),
+            MobEvent::LocalSound("entity.breeze.whirl", [3.0, 100.0, 4.0], 0.8, 0.7),
+            MobEvent::Sound("entity.zombie.hurt", [5.0, 100.0, 6.0], 1.0, 0.9),
+        ])
+        .unwrap();
+        // A positive LocalSound must still take the playback path. An absent
+        // producer cannot satisfy this actual Game adapter regression.
+        assert_eq!(
+            game.audio.heard.get("minecraft:entity.breeze.whirl"),
+            Some(&1)
+        );
+        assert_eq!(game.audio.heard.get("minecraft:entity.cow.hurt"), Some(&1));
+        assert_eq!(
+            game.audio.heard.get("minecraft:entity.zombie.hurt"),
+            Some(&1)
+        );
+        let shared = game.audio.capture.as_ref().unwrap();
+        assert_eq!(shared.len(), 2, "LocalSound must not become a shared sound");
+        assert_eq!(shared[0].event, "minecraft:entity.cow.hurt");
+        assert_eq!(shared[1].event, "minecraft:entity.zombie.hurt");
+        assert_eq!(
+            (
+                shared[0].position,
+                shared[0].volume,
+                shared[0].pitch,
+                shared[0].source
+            ),
+            ([1.0, 100.0, 2.0], 0.5, 1.0, 6)
+        );
+        assert_eq!(
+            (
+                shared[1].position,
+                shared[1].volume,
+                shared[1].pitch,
+                shared[1].source
+            ),
+            ([5.0, 100.0, 6.0], 1.0, 0.9, 5)
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::super::perspective::CameraType;
     use super::mob_effect_instance;
@@ -8857,19 +9006,36 @@ mod tests {
                 wolf.extra.owner = Some(horizon_client::lan::playerdata::uuid_ints(12));
                 game.mobs.push(wolf);
                 game.mobs.push(Mob::new(101, pig_type, Vec3::ZERO, 0.0));
-                game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+                {
+                    let value = false;
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.placed = value);
+                }
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
                 let credit = *game.last_hurt_by_player.get(&101).unwrap();
                 assert!(game.resolve_player_credit(credit).is_none());
-                game.lan.as_mut().unwrap().hub.guests[0].placed = true;
+                {
+                    let value = true;
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.placed = value);
+                }
                 assert_eq!(game.resolve_player_credit(credit), Some(Some(12)));
                 let victim = game.mobs[1].clone();
                 game.mob_died(&victim);
                 let stats = &game.lan.as_ref().unwrap().play.get(&12).unwrap().stats;
                 assert_eq!(stats.get("custom", "minecraft:mob_kills"), 1);
-                let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-                assert!(guest.advancements.has("test:catalyst", "kill"));
-                guest.advancements = Default::default();
+                game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                    assert!(guest.advancements.has("test:catalyst", "kill"));
+                    guest.advancements = Default::default();
+                });
                 let mut second = victim.clone();
                 second.id = 102;
                 game.last_hurt_by_player
@@ -8878,7 +9044,15 @@ mod tests {
                 let host = game.lan.as_ref().unwrap();
                 assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 2);
                 assert!(host.hub.guests[0].advancements.has("test:catalyst", "kill"));
-                game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+                {
+                    let value = "minecraft:the_nether".into();
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.dimension = value);
+                }
                 let mut third = victim.clone();
                 third.id = 103;
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
@@ -9674,6 +9848,47 @@ mod breeze_random_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn projectile_handle_pierce_level_changes_real_hits() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            for (id, x) in [(11, 1.0), (12, 2.0), (13, 3.0)] {
+                game.mobs
+                    .push(Mob::new(id, zombie.clone(), Vec3::new(x, 64.0, 0.0), 0.0));
+            }
+            let mut shot = Projectile::new(
+                ProjectileKind::Arrow {
+                    base_damage: 2.0,
+                    critical: false,
+                    effect: None,
+                },
+                Vec3::new(0.0, 64.5, 0.0),
+                None,
+            );
+            shot.velocity = Vec3::new(4.0, 0.0, 0.0);
+            game.add_projectile(shot);
+            let id = game.creatures.projectiles[0].id;
+            let handle = game
+                .native_projectile_ref(game.native_entity(id).unwrap())
+                .unwrap();
+            assert_eq!(handle.pierce_level(game), Ok(0));
+            assert_eq!(handle.set_pierce_level(game, 1), Ok(()));
+            let health: Vec<_> = game.mobs.iter().map(|m| m.health).collect();
+            game.tick_projectiles().unwrap();
+            assert!(game.mobs[0].health < health[0]);
+            game.tick_projectiles().unwrap();
+            assert!(game.mobs[1].health < health[1]);
+            assert_eq!(game.mobs[2].health, health[2]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn breeze_deflection_does_not_draw_from_level_random() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let breeze = game
@@ -10424,5 +10639,107 @@ mod armor_destroy_tests {
                     .is_none()
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod conversion_tag_tests {
+    use super::*;
+    use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
+    use horizon_world::nbt::Tag;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn converted_mobs_keep_command_tags_at_the_new_id_and_on_save() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        for (number, (from, to)) in [
+            ("husk", "zombie"),
+            ("zombie", "drowned"),
+            ("skeleton", "stray"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let uuid = [10374, 1, 0, number as i32];
+            let tags = Tag::List(vec![
+                Tag::String("subject".into()),
+                Tag::String(from.into()),
+            ]);
+            let raw = Tag::compound([
+                (
+                    "id",
+                    Tag::String(format!("minecraft:{from}").as_str().into()),
+                ),
+                ("UUID", Tag::IntArray(uuid.to_vec())),
+                (
+                    "Pos",
+                    Tag::List(vec![
+                        Tag::Double(0.5_f64.to_bits()),
+                        Tag::Double(70.0_f64.to_bits()),
+                        Tag::Double(0.5_f64.to_bits()),
+                    ]),
+                ),
+                ("NoAI", Tag::Byte(1)),
+                ("NoGravity", Tag::Byte(1)),
+                ("Tags", tags.clone()),
+                ("horizon:old_entity_only", Tag::Byte(1)),
+            ]);
+            let old_id = game.load_mob(raw, None).unwrap();
+            assert_eq!(game.tags_of(Target::Mob(old_id)), ["subject", from]);
+            let source = game.mobs.iter().find(|m| m.id == old_id).unwrap().clone();
+            let new_id = game
+                .convert_to(
+                    &source,
+                    &format!("minecraft:{to}"),
+                    horizon_client::mobs::conversion::Params::KEEP_ALL,
+                    |_, _| {},
+                )
+                .unwrap();
+            assert_ne!(old_id, new_id);
+            assert_eq!(
+                game.tags_of(Target::Mob(new_id)),
+                ["subject", from],
+                "converted ID must keep tags"
+            );
+            let index = game.mobs.iter().position(|m| m.id == new_id).unwrap();
+            let saved = game.mob_tree_nbt(index);
+            assert_eq!(saved.get("Tags"), Some(&tags));
+            assert_eq!(
+                horizon_client::entity_nbt::kind(&saved).as_deref(),
+                Some(format!("minecraft:{to}").as_str())
+            );
+            assert_ne!(horizon_client::entity_nbt::uuid(&saved), Some(uuid));
+            assert!(saved.get("horizon:old_entity_only").is_none());
+            game.mobs.remove(index);
+            let reloaded = game.load_mob(saved, None).unwrap();
+            assert_eq!(game.tags_of(Target::Mob(reloaded)), ["subject", from]);
+        }
     }
 }

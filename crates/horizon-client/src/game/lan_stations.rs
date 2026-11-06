@@ -79,6 +79,7 @@ impl Game<'_> {
             return true;
         };
         let mut menu = Box::new(Menu::new(kind));
+        menu.set_registry_id(Some(menu_type));
         // Without a mod the take runs AnvilMenu.onTake's order in the click itself.
         let hooked = !mod_api::__private::mods().is_empty();
         menu.anvil_hook = kind == Kind::Anvil && hooked;
@@ -93,15 +94,13 @@ impl Game<'_> {
                 .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
                 .is_some_and(|g| g.xp_seed == 0);
             let drawn = needs_seed.then(|| self.world.random.next_int());
-            if let Some(g) = self
-                .lan
-                .as_mut()
-                .and_then(|host| host.hub.guests.iter_mut().find(|g| g.conn == conn))
-            {
-                if let Some(drawn) = drawn {
-                    g.xp_seed = drawn;
-                }
-                menu.data[3] = g.xp_seed;
+            if let Some(host) = self.lan.as_mut() {
+                let _ = host.hub.update_guest(conn, |g| {
+                    if let Some(drawn) = drawn {
+                        g.xp_seed = drawn;
+                    }
+                    menu.data[3] = g.xp_seed;
+                });
             }
         }
         if kind == Kind::Beacon {
@@ -628,7 +627,10 @@ impl Game<'_> {
         });
         let new_seed = self.world.random.next_int();
         if let Some(host) = self.lan.as_mut() {
-            host.hub.guests[gi].xp_seed = new_seed;
+            {
+                let value = new_seed;
+                host.hub.guests.update(gi, |guest| guest.xp_seed = value);
+            }
         }
         let env = self.menu_env();
         let lapis = gs.menu.slot(1).cloned().filter(|_| !creative).map(|mut l| {
@@ -683,9 +685,9 @@ impl Game<'_> {
         }
         gs.last_sound = self.ticks;
         let at = gs.pos.map(|v| f64::from(v) + 0.5);
-        for sound in sounds {
-            self.audio.play(sound, Some(at), 1.0, 1.0);
-        }
+        // The menu's `lastSoundTime` lets one sound through per tick, however
+        // many results a shift-click took.
+        self.audio.play(sounds[0], Some(at), 1.0, 1.0);
     }
 
     /// A click on the guest's station window; false for other windows.
@@ -734,10 +736,10 @@ impl Game<'_> {
                     && host.hub.guest(conn).is_some_and(|g| g.carried != carried)
                 {
                     let net = host.hub.stack(&carried);
-                    if let Some(g) = host.hub.guest_mut(conn) {
+                    let _ = host.hub.update_guest(conn, |g| {
                         g.carried = carried;
                         g.send(&C::SetCursorItem(play::SetCursorItem { item: net }));
-                    }
+                    });
                 }
             }
             return;
@@ -828,7 +830,7 @@ impl Game<'_> {
             }));
         }
         host.hub.send_to(conn, &packet);
-        host.hub.guests[gi].inventory_told();
+        host.hub.guests.update(gi, |g| g.inventory_told());
         for packet in data {
             host.hub.send_to(conn, &packet);
         }
@@ -867,7 +869,7 @@ impl Game<'_> {
                 let carried = self
                     .lan
                     .as_mut()
-                    .and_then(|host| host.hub.guests[gi].carried.take());
+                    .and_then(|host| host.hub.guests.update(gi, |g| g.carried.take()));
                 if let Some(carried) = carried {
                     self.lan_place_back(gi, vec![carried]);
                 }
@@ -895,7 +897,7 @@ impl Game<'_> {
         let mut back: Vec<ItemStack> = self
             .lan
             .as_mut()
-            .map(|host| host.hub.guests[gi].carried.take())
+            .map(|host| host.hub.guests.update(gi, |g| g.carried.take()))
             .unwrap_or_default()
             .into_iter()
             .collect();

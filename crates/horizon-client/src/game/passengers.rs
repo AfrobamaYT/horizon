@@ -7,6 +7,9 @@ use horizon_client::mobs::{Species, riders};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use std::collections::HashMap;
 
+/// The mobs riding each vehicle, by the vehicle's id: their indices, in the mobs' order.
+pub(super) type Riders = HashMap<u32, Vec<usize>>;
+
 /// The seconds a skeleton horse trap waits for a player: 15 minutes.
 const TRAP_LIFETIME: i32 = 18000;
 /// `SkeletonTrapGoal`: a player this close springs the trap.
@@ -96,9 +99,18 @@ impl Game<'_> {
     /// its mob. A server's client places them itself too, as the server sends
     /// no passenger's position.
     pub(super) fn position_riders(&mut self) {
-        self.seat_boat_mobs();
-        self.seat_cart_mobs();
-        self.seat_tnt_mobs();
+        // Every vehicle's riders in one pass over the mobs, not one pass per
+        // boat, minecart and primed TNT. Seating moves the riders but changes
+        // no one's vehicle, so it holds for all three.
+        let mut riders = Riders::default();
+        for (j, m) in self.mobs.iter().enumerate() {
+            if let Some(v) = m.extra.mount {
+                riders.entry(v).or_default().push(j);
+            }
+        }
+        self.seat_boat_mobs(&riders);
+        self.seat_cart_mobs(&riders);
+        self.seat_tnt_mobs(&riders);
         let index: HashMap<u32, usize> = self
             .mobs
             .iter()

@@ -557,6 +557,14 @@ impl Game<'_> {
             o.server_difficulty(difficulty, locked);
         }
     }
+    #[cfg(test)]
+    pub(super) fn test_open_remote_rules(&mut self, entries: Vec<play::GameRuleEntry>) -> bool {
+        self.world_options = Some(tests::options(true, false));
+        self.world_options.as_mut().unwrap().view = View::GameRules;
+        self.remote_world_options_rules(entries);
+        self.world_options.as_ref().unwrap().rules.is_some()
+    }
+
     pub(super) fn remote_world_options_rules(&mut self, entries: Vec<play::GameRuleEntry>) {
         let Some(o) = self
             .world_options
@@ -568,14 +576,21 @@ impl Game<'_> {
         // The response itself lists the server's available rules; the client
         // may not own this world's level.dat (including on the server thread).
         let features = if entries.iter().any(|e| {
-            horizon_client::gamerules::rule(&e.name)
-                .is_some_and(|r| r.name == horizon_client::gamerules::MAX_MINECART_SPEED.name)
+            horizon_client::gamerules::rule_registry()
+                .rule(&e.name)
+                .is_some_and(|r| r.name == "minecraft:max_minecart_speed")
         }) {
             vec![horizon_client::gamerules::MINECART_IMPROVEMENTS.to_owned()]
         } else {
             Vec::new()
         };
-        let mut rules = horizon_client::gamerules::GameRules::with_features(&features);
+        let registry = self
+            .integrated
+            .as_ref()
+            .map_or_else(horizon_client::gamerules::rule_registry, |server| {
+                server.rule_registry.clone()
+            });
+        let mut rules = horizon_client::gamerules::GameRules::with_registry(registry, &features);
         for entry in entries {
             rules.set_string(&entry.name, &entry.value);
         }
@@ -673,7 +688,7 @@ impl Game<'_> {
                     entries: changes
                         .into_iter()
                         .map(|(name, value)| play::GameRuleEntry {
-                            name: format!("minecraft:{name}"),
+                            name,
                             value: value.to_string(),
                         })
                         .collect(),
@@ -685,8 +700,8 @@ impl Game<'_> {
             return;
         }
         for (name, value) in changes {
-            if self.ui.rules.set(name, value) {
-                self.game_rule_changed(name, value, None);
+            if self.ui.rules.set(&name, value) {
+                self.game_rule_changed(&name, value, None);
             }
             self.system_message(Text::tr("commands.gamerule.set", &[&name, &value]));
         }
@@ -1727,7 +1742,7 @@ mod tests {
         assert!(matches!(what(Button::Apply), What::Button { .. }));
     }
 
-    fn options(cheats: bool, hardcore: bool) -> WorldOptions {
+    pub(super) fn options(cheats: bool, hardcore: bool) -> WorldOptions {
         let mut o = WorldOptions {
             remote: false,
             gamemaster: cheats,

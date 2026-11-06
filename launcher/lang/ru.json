@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Не удалось прочитать журнал сборки: {error}",
   "Could not read the saved sign-in.": "Не удалось прочитать сохранённый вход.",
   "Could not read the saved sign-in. Sign in again.": "Не удалось прочитать сохранённый вход. Войдите снова.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Не удалось прочитать {name}: {error}",
   "Could not run {program}: {error}": "Could not run {program}: {error}",
   "Could not save the renewed sign-in.": "Не удалось сохранить обновлённый вход.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Загрузки, вход в аккаунт и обновления проходят через этот прокси (http://host:port, socks5://host:port). Пустое поле означает отсутствие: вместо этого используется HTTPS_PROXY, если лаунчер был запущен с ним.",
   "{name} was left out: made for another Horizon version": "{name} пропущен: сделан для другой версии Horizon",
   "{name} was left out: clashes with {other}": "{name} пропущен: конфликтует с {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} пропущен: ему нужен {other}, который пропущен"
+  "{name} was left out: it needs {other}, which was left out": "{name} пропущен: ему нужен {other}, который пропущен",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

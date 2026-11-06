@@ -269,6 +269,20 @@ impl Game<'_> {
                 }
             }
             Target::Item(id) => self.command_damage_item(id, amount, &ty, cause.or(by)),
+            Target::Dragon(id) => self.command_damage_dragon(
+                id,
+                amount,
+                &ty,
+                Self::damage_kind(&ty),
+                (
+                    by,
+                    cause.or(by),
+                    from.map(|[x, y, z]| horizon_core::geometry::Vec3::new(x, y, z)),
+                ),
+            ),
+            Target::Crystal(id) => {
+                self.command_damage_crystal(id, &ty, Self::damage_kind(&ty), cause.or(by))
+            }
             _ => false,
         };
         if !hurt {
@@ -311,7 +325,11 @@ impl Game<'_> {
             .get(&id)
             .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable"));
         if invulnerable && !creative && !registry.in_tag(kind, "minecraft:bypasses_invulnerability")
-            || !self.ui.rules.bool("mob_griefing") && matches!(causing, Some(Target::Mob(_)))
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+                && matches!(causing, Some(Target::Mob(_)))
             || registry.in_tag(kind, "minecraft:is_fall")
                 && self.entity_tag_matches("minecraft:fall_damage_immune", "minecraft:item")
         {

@@ -748,11 +748,12 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn client_input_options_have_a_generated_wasm_binding() {
+    /// Builds the generated wasm interface and hands its `client-host` interface and the unbound
+    /// method names to `check`.
+    fn with_client_host(check: impl FnOnce(&wit_parser::Interface, &[String]) + Send + 'static) {
         std::thread::Builder::new()
             .stack_size(64 << 20)
-            .spawn(|| {
+            .spawn(move || {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
                 let generated =
                     super::super::sources(&root, super::super::FillMode::Require).unwrap();
@@ -766,17 +767,38 @@ mod tests {
                 let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
                 let client =
                     &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
-                assert!(client.functions.contains_key("input-options"));
-                assert!(
-                    !wasm
-                        .unbound
-                        .iter()
-                        .any(|name| name == "ClientHost::input_options")
-                );
+                check(client, &wasm.unbound);
             })
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn client_gui_state_has_generated_wasm_bindings() {
+        with_client_host(|client, unbound| {
+            for method in ["window-focused", "observed-screen-id"] {
+                assert!(client.functions.contains_key(method));
+            }
+            for name in [
+                "ClientHost::window_focused",
+                "ClientHost::observed_screen_id",
+            ] {
+                assert!(!unbound.iter().any(|unbound| unbound == name));
+            }
+        });
+    }
+
+    #[test]
+    fn client_input_options_have_a_generated_wasm_binding() {
+        with_client_host(|client, unbound| {
+            assert!(client.functions.contains_key("input-options"));
+            assert!(
+                !unbound
+                    .iter()
+                    .any(|name| name == "ClientHost::input_options")
+            );
+        });
     }
 
     #[test]
@@ -832,6 +854,8 @@ mod tests {
 
     #[test]
     fn services_use_native_forwards_and_frame_resources() {
+        use quote::ToTokens;
+
         std::thread::Builder::new()
             .stack_size(64 << 20)
             .spawn(|| {
@@ -945,13 +969,28 @@ mod tests {
                                 _ => None,
                             })
                             .unwrap();
-                        assert_eq!(method.block.stmts.len(), 1);
-                        let syn::Stmt::Expr(syn::Expr::MethodCall(call), _) =
-                            &method.block.stmts[0]
-                        else {
-                            panic!("native forward")
+                        let access = if service == "ClientSession" {
+                            quote::quote!(mod_api::__private::LoadAccess::ClientSetup)
+                        } else {
+                            quote::quote!(mod_api::__private::LoadAccess::WorldOnly)
                         };
-                        assert_eq!(call.method, format!("native_{name}"));
+                        let native = quote::format_ident!("native_{name}");
+                        let args: Vec<_> = method.sig.inputs.iter().filter_map(|arg| match arg {
+                            syn::FnArg::Receiver(_) => None,
+                            syn::FnArg::Typed(arg) => match &*arg.pat {
+                                syn::Pat::Ident(pat) => Some(&pat.ident),
+                                _ => panic!("named forwarding argument"),
+                            },
+                        }).collect();
+                        let expected: syn::Block = syn::parse_quote!({
+                            mod_api::__private::check_access(#name, #access);
+                            self.#native(#(#args),*)
+                        });
+                        assert_eq!(
+                            method.block.to_token_stream().to_string(),
+                            expected.to_token_stream().to_string(),
+                            "{service}::{name} guards before forwarding its arguments"
+                        );
                     }
                 }
                 assert!(wasm.host.contains("Ok(h.commands())"));

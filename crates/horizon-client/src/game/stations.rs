@@ -1201,7 +1201,7 @@ impl Game<'_> {
         else {
             return true;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (ox, oy) = self.inventory_origin(&batch);
         let local = (self.cursor.0 - ox, self.cursor.1 - oy);
         let shift = self.has_shift_down();
@@ -1357,7 +1357,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let (_, oy) = self.inventory_origin(&HudBatch::new(size));
+        let (_, oy) = self.inventory_origin(&HudBatch::new(size, self.settings.gui_scale_inputs()));
         let y = self.cursor.1 - oy;
         // `StonecutterScreen.mouseDragged`.
         if let Some(s) = self.station.as_mut()
@@ -1583,15 +1583,7 @@ impl Game<'_> {
         // bundle contents component (including in the player's inventory).
         let mut tooltip_stack: Option<ItemStack> = None;
         {
-            let atlas = &self.gui.atlas;
-            batch.fill(
-                atlas,
-                0.0,
-                0.0,
-                batch.width,
-                batch.height,
-                rgba(16, 16, 16, 160),
-            );
+            self.render_transparent_background("station", batch);
         }
         let inventory_label = self.translate("container.inventory", "Inventory");
         if brewing {
@@ -2704,7 +2696,7 @@ impl Game<'_> {
         }
         let lines = Self::resolved(lines);
         let screen = (batch.width, batch.height);
-        let Some(at) = self.tooltip_pre(None, &lines, &[], (x, y), screen) else {
+        let Some(at) = self.tooltip_pre(batch, None, &lines, &[], (x, y), screen) else {
             return;
         };
         let atlas = &self.gui.atlas;
@@ -2716,6 +2708,7 @@ impl Game<'_> {
     /// point a mod moved it to, `None` when one cancelled it. Only built when a mod listens.
     pub(super) fn tooltip_pre(
         &self,
+        batch: &mut HudBatch,
         stack: Option<&ItemStack>,
         lines: &[(horizon_client::text::Text, u32)],
         images: &[TooltipImage],
@@ -2737,14 +2730,19 @@ impl Game<'_> {
         };
         let before = place;
         let mut cancel = false;
-        self.native_render_tooltip_pre(
+        let mut draw = super::mod_api_host::generated::GameDrawContext {
+            game: self,
+            surface: batch,
+        };
+        self.native_render_tooltip_pre(mod_api::__private::RenderTooltipPreCall {
+            draw: &mut draw,
             stack,
-            screen.0 as i32,
-            screen.1 as i32,
-            &elements,
-            &mut place,
-            &mut cancel,
-        );
+            screen_width: screen.0 as i32,
+            screen_height: screen.1 as i32,
+            elements: &elements,
+            place: &mut place,
+            cancel: &mut cancel,
+        });
         if cancel {
             return None;
         }
@@ -2903,7 +2901,7 @@ impl Game<'_> {
                 w.max(image.size[0])
             });
         let screen = (batch.width, batch.height);
-        let Some(at) = self.tooltip_pre(Some(stack), &lines, &images, (x, y), screen) else {
+        let Some(at) = self.tooltip_pre(batch, Some(stack), &lines, &images, (x, y), screen) else {
             return;
         };
         let atlas = &self.gui.atlas;
@@ -3344,7 +3342,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.item_part("minecraft:stick", Lore);
+                let item = r.item_key("minecraft:stick");
+                r.item_part(item, Lore);
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
                 let plain: Vec<String> = event.lines.iter().map(|(t, _)| t.plain()).collect();
@@ -3678,7 +3677,14 @@ mod cycling_tests {
                         event.place.x = 50;
                         event.place.y = 60;
                     }
-                    2 => return mod_api::Flow::Cancel,
+                    2 => {
+                        event.draw.gui_draw_item_with(
+                            &ItemStack::new("minecraft:diamond", 5),
+                            [16.0, 32.0],
+                            Some("7"),
+                        );
+                        return mod_api::Flow::Cancel;
+                    }
                     _ => {}
                 }
                 mod_api::Flow::Continue
@@ -3688,8 +3694,9 @@ mod cycling_tests {
         let mods: Mods = vec![ModEntry::new("pre", Box::new(Mod))].into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
-                let pre = |game: &super::Game<'_>| {
-                    game.tooltip_pre(None, &lines, &[], (10.6, 20.4), (320.0, 240.0))
+                let mut batch = HudBatch::scratch([320, 240]);
+                let mut pre = |game: &super::Game<'_>| {
+                    game.tooltip_pre(&mut batch, None, &lines, &[], (10.6, 20.4), (320.0, 240.0))
                 };
                 MODE.store(0, Ordering::Relaxed);
                 // Unmoved, the cursor's own fractional point stays.
@@ -3698,6 +3705,10 @@ mod cycling_tests {
                 assert_eq!(pre(game), Some((50.0, 60.0)));
                 MODE.store(2, Ordering::Relaxed);
                 assert_eq!(pre(game), None);
+                assert!(
+                    !batch.vertices.is_empty(),
+                    "custom drawing survives tooltip cancellation"
+                );
             });
         });
     }

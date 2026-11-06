@@ -1,5 +1,6 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
 use super::{Catalog, Target, free_function_source, sources};
+use quote::ToTokens;
 use std::{fs, path::Path};
 
 /// Generate only this crate's files, tracking every source read by the generator.
@@ -62,7 +63,13 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
         println!("cargo:rerun-if-changed={}", path.display());
     }
     let code = super::points::records(&super::points::game_points(root)?);
-    syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
+    let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
+    // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
+    let mut code = String::new();
+    for item in generated.items {
+        code.push_str(&item.to_token_stream().to_string());
+        code.push('\n');
+    }
     fs::write(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())
 }
 

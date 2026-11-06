@@ -428,7 +428,10 @@ impl Game<'_> {
         let Some(r) = self.renderer.as_ref() else {
             return false;
         };
-        let batch = HudBatch::new([r.config.width, r.config.height]);
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         let (ox, oy) = self.inventory_origin(&batch);
         let (cx, cy) = self.cursor;
         let hit = self.sort_buttons().into_iter().find(|((x, y), _)| {

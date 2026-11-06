@@ -14,10 +14,7 @@ use horizon_client::{
     Result,
     block_entity_anim::Ticker,
     items::ItemStack,
-    mobs::{
-        Species,
-        render::{PROFESSIONS, VILLAGER_TYPES},
-    },
+    mobs::{Species, render::VILLAGER_TYPES},
     widgets,
 };
 use horizon_core::geometry::Vec3;
@@ -698,7 +695,7 @@ impl Game<'_> {
             if matches!(m.species(), Species::Villager | Species::ZombieVillager) {
                 v["villager"] = json!({
                     "type": VILLAGER_TYPES[m.extra.variant as usize % VILLAGER_TYPES.len()],
-                    "profession": PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()],
+                    "profession": horizon_client::mobs::villager::profession(m.extra.profession.index().unwrap_or(0)).id,
                     "level": m.extra.villager_level,
                 });
             }
@@ -924,7 +921,13 @@ impl Game<'_> {
         let scale = self
             .renderer
             .as_ref()
-            .map(|r| horizon_client::hud::HudBatch::new([r.config.width, r.config.height]).scale)
+            .map(|r| {
+                horizon_client::hud::HudBatch::new(
+                    [r.config.width, r.config.height],
+                    self.settings.gui_scale_inputs(),
+                )
+                .scale
+            })
             .ok_or("no renderer yet")?;
         let device_id = DeviceId::dummy();
         for (i, &(x, y)) in points.iter().enumerate() {
@@ -1520,7 +1523,11 @@ impl Game<'_> {
                     .renderer
                     .as_ref()
                     .map(|r| {
-                        horizon_client::hud::HudBatch::new([r.config.width, r.config.height]).scale
+                        horizon_client::hud::HudBatch::new(
+                            [r.config.width, r.config.height],
+                            self.settings.gui_scale_inputs(),
+                        )
+                        .scale
                     })
                     .ok_or("no renderer yet")?;
                 let device_id = DeviceId::dummy();

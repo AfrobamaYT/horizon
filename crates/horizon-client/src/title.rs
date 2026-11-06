@@ -1200,6 +1200,10 @@ impl Title {
             screen.wheel(delta, cursor, size);
             return false;
         }
+        if let Mode::Realms(screen) = &mut self.mode {
+            screen.wheel(delta, cursor, size);
+            return false;
+        }
         if let Mode::CreateFlat { flat, .. } = &mut self.mode {
             flat::wheel(flat, delta, cursor, size);
             return false;
@@ -3608,7 +3612,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 }
             },
             (Mode::Main, Some(5)) => {
-                self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::friend()));
+                self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::friend(true)));
                 Action::None
             }
             (Mode::Onboarding(_), Some(onboarding::SOUNDS)) => Action::Sounds,
@@ -4609,7 +4613,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 .rules
                 .copy_with_features(&options.enabled_features(&self.resources));
             for (name, value) in changes {
-                options.rules.set(name, value);
+                options.rules.set(&name, value);
             }
         }
     }
@@ -5031,7 +5035,7 @@ mod classic_tests {
         }
         let mut title = Title::new(PathBuf::new(), root);
         title.splash = Some("Visible splash!".into());
-        let mut batch = HudBatch::new([1920, 1080]);
+        let mut batch = HudBatch::scratch([1920, 1080]);
         title.draw(&atlas, &mut batch, (0.0, 0.0), false);
         let cx = (batch.width / 2.0).floor();
         assert_eq!(batch.vertices[0].pos, [cx - 128.0, 30.0]);
@@ -5068,7 +5072,7 @@ mod classic_tests {
             (false, None),
         ] {
             title.splash = splash;
-            let mut hidden = HudBatch::new([1920, 1080]);
+            let mut hidden = HudBatch::scratch([1920, 1080]);
             title.draw(&atlas, &mut hidden, (0.0, 0.0), hide_splash);
             assert!(
                 !hidden

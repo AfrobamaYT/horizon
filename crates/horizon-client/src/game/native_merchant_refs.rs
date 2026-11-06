@@ -2,11 +2,7 @@
 use super::{Game, commands::Target};
 use horizon_client::{
     merchant::{MerchantOffer, Trader},
-    mobs::{
-        Species,
-        render::{PROFESSIONS, VILLAGER_TYPES},
-        villager,
-    },
+    mobs::{Species, render::VILLAGER_TYPES, villager},
 };
 use horizon_world::identifier::Identifier;
 use mod_api::{EntityRef, MerchantRef, PlayerRef};
@@ -62,6 +58,13 @@ impl Game<'_> {
         read: impl FnOnce(&[MerchantOffer], i32, i32) -> T,
     ) -> T {
         let mob = &self.mobs[index];
+        if mob.species() == Species::Villager && mob.extra.profession.index().is_none() {
+            return read(
+                &[],
+                mob.extra.trade.as_deref().map_or(0, |t| t.xp),
+                mob.extra.villager_level.max(1),
+            );
+        }
         if let Some(session) = self
             .lan_trade_conn(mob.id)
             .and_then(|conn| self.lan_trade_session(conn))
@@ -85,7 +88,11 @@ impl Game<'_> {
         index: usize,
         edit: impl FnOnce(&mut Vec<MerchantOffer>, &mut i32, &mut i32) -> bool,
     ) -> bool {
-        let id = self.mobs[index].id;
+        let mob = &self.mobs[index];
+        if mob.species() == Species::Villager && mob.extra.profession.index().is_none() {
+            return false;
+        }
+        let id = mob.id;
         if let Some(conn) = self.lan_trade_conn(id) {
             let mut done = false;
             let sent = self.lan_trade_edit(conn, |session| {
@@ -211,8 +218,7 @@ impl Game<'_> {
     /// `minecraft:none`). None for a wandering trader.
     pub(super) fn native_villager_profession(&self, merchant: MerchantRef) -> Option<String> {
         let mob = &self.mobs[self.native_villager_index(merchant)?];
-        let name = PROFESSIONS[mob.extra.variant2 as usize % PROFESSIONS.len()];
-        Some(format!("minecraft:{name}"))
+        Some(mob.extra.profession.id())
     }
 
     /// `Villager.setVillagerData` with a new profession: a different one
@@ -227,11 +233,18 @@ impl Game<'_> {
         let Some(index) = self.native_villager_index(merchant) else {
             return false;
         };
-        let Some(profession) = registry_index(profession, &PROFESSIONS) else {
+        let Some(profession) = Identifier::parse(profession)
+            .ok()
+            .filter(|id| id.namespace() == "minecraft")
+            .and_then(|id| villager::profession_index(id.path()))
+        else {
             return false;
         };
         let id = self.mobs[index].id;
-        if self.mobs[index].extra.flag2 || self.lan_trade_conn(id).is_some() {
+        if self.mobs[index].extra.profession.index().is_none()
+            || self.mobs[index].extra.flag2
+            || self.lan_trade_conn(id).is_some()
+        {
             return false;
         }
         villager::set_profession(&mut self.mobs[index], profession);
@@ -337,6 +350,30 @@ pub(super) mod tests {
         game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
         let entity = game.native_entity(id).unwrap();
         game.native_merchant(entity).unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn unresolved_profession_preserves_offers_but_cannot_trade_them() {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let villager = spawn(game, 40, "minecraft:villager");
+            game.mobs[0].extra.profession =
+                horizon_client::mobs::villager::ProfessionState::from_id("example:engineer");
+            game.mobs[0].extra.trade = Some(Box::new(Trader {
+                offers: vec![offer("minecraft:wheat", "minecraft:emerald")],
+                ..Trader::default()
+            }));
+            assert_eq!(villager.offers(game), Some(Vec::new()));
+            assert!(!villager.set_profession(game, "minecraft:farmer"));
+            assert!(game.interact_trader(0, "minecraft:air").unwrap());
+            assert!(game.station.is_none());
+            assert_eq!(game.mobs[0].extra.trade.as_ref().unwrap().offers.len(), 1);
+            assert_eq!(
+                villager.profession(game).as_deref(),
+                Some("example:engineer")
+            );
+        });
     }
 
     #[test]

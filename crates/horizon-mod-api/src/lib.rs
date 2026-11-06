@@ -6,6 +6,15 @@
 #![deny(missing_docs)]
 extern crate self as mod_api;
 mod registry_keys;
+mod unresolved_fluid;
+pub use unresolved_fluid::FluidIdentity;
+
+/// A saved fluid name retained for the lifetime of the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only trusted engine boundaries create handles
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct UnresolvedFluid(u64);
+pub use registry_keys::UnknownFluid;
 
 /// A block requested once through [`Registrar::block_key`]. Its load-owned slot survives reload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -13,11 +22,41 @@ mod registry_keys;
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
 
+/// Why a game rule category declaration was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GameRuleError {
+    /// The identifier is invalid.
+    InvalidId,
+    /// The namespace does not belong to the declaring mod.
+    ForeignNamespace,
+    /// The category is already declared.
+    Duplicate,
+}
+
+/// A load-owned fluid identity requested through [`Registrar::fluid_key`] or resolved through
+/// [`DataLoadContext::fluid_key`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only the registration table creates keys
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct FluidKey(u32);
+/// An item requested at registration; its load-owned slot identifies the canonical name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only registration creates a key
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct ItemKey(u32);
+
 /// An effect requested once through [`Registrar::effect_key`]. The registry is fixed until restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct EffectKey(u32);
+
+/// A block entity type requested at registration. Its slot remains stable for the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only the load-owned table creates keys
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct BlockEntityTypeKey(u32);
 
 // Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
 #[cfg(any())]
@@ -107,6 +146,11 @@ use std::sync::{Arc, OnceLock};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod __private;
+mod model_layers;
+pub use model_layers::{
+    CubeDefinition, CubeDeformation, CubeListBuilder, LayerDefinition, MeshDefinition, ModelPart,
+    ModelPolygon, ModelVertex, PartId, PartPose,
+};
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{
@@ -286,8 +330,31 @@ pub use horizon_items::item_data::StackData;
 pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
-#[horizon_mod_api_macros::wasm(via = (horizon_world::fluid::FluidKind, u8, bool))]
-pub use horizon_world::fluid::FluidState;
+/// A fluid state copied from the engine. For engine-built values, amount is zero exactly for
+/// the empty fluid. A mod may change a placement event's copy; that mod-provided data is
+/// forwarded to later Parts and is never consumed by the engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FluidState {
+    /// Registered fluid identity.
+    pub fluid: FluidKey,
+    /// Fluid amount; zero only for empty, otherwise 1 through 8.
+    pub amount: u8,
+    /// Whether the fluid is falling.
+    pub falling: bool,
+    /// Whether the engine identifies this as a source.
+    pub source: bool,
+}
+impl FluidState {
+    /// Whether this is the empty fluid.
+    pub fn is_empty(self) -> bool {
+        self.amount == 0
+    }
+    /// Whether the engine identifies this state as a source.
+    pub fn is_source(self) -> bool {
+        self.source
+    }
+}
 #[horizon_mod_api_macros::wasm(via = Tag)]
 pub use horizon_world::nbt::Compound;
 #[horizon_mod_api_macros::wasm(via = Vec<u8>)]
@@ -1019,6 +1086,14 @@ pub enum ScreenOpening {
     ModScreen,
 }
 
+/// The stable identifier reported by screen hooks for an observed screen.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ScreenId {
+    /// The same identifier as [`NativeScreenView::id`], such as `inventory` or `paused`.
+    pub id: String,
+}
+
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
 /// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
 /// `native_screen_mouse_scrolled_pre`, and the key ones
@@ -1415,6 +1490,18 @@ impl EntityRef {
     pub fn epoch(self) -> NativeWorldEpoch {
         self.epoch
     }
+}
+
+/// The resolved holder of a mob's leash, or its absence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MobLeashHolder {
+    /// The mob is not leashed.
+    Unleashed,
+    /// A player, mob or boat holds the leash.
+    Entity(EntityRef),
+    /// A fence knot holds the leash at this block.
+    Knot([i32; 3]),
 }
 
 /// A living entity of the open world: a mob, a player, an armor stand or the
@@ -2119,7 +2206,9 @@ impl ProjectileRef {
 }
 
 /// A villager or wandering trader (vanilla's `AbstractVillager`, a `Merchant`),
-/// narrowed from an entity with `host.merchant(entity)`.
+/// narrowed from an entity with `host.merchant(entity)`. If a villager's saved
+/// profession is unresolved, offers read empty and merchant mutations are
+/// refused until its profession is available again; saved offers are retained.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MerchantRef(EntityRef);
@@ -2330,6 +2419,24 @@ pub enum NativeArrowPickup {
     Allowed,
     /// Creative only.
     CreativeOnly,
+}
+
+/// Why a projectile's pierce level is unavailable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PierceLevelError {
+    /// The host is not a logical server.
+    WrongSide,
+    /// The projectile handle is stale or unavailable.
+    Stale,
+    /// The projectile has no arrow state.
+    NotArrow,
+}
+
+impl NoBackend for PierceLevelError {
+    fn no_backend() -> Self {
+        Self::Stale
+    }
 }
 
 /// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
@@ -4544,13 +4651,14 @@ pub use entity_capability::{
 };
 mod block_states;
 pub use block_states::{
-    BlockStateConstraint, BlockStateMatchError, BlockStateProperty, BlockStates, HostBlockStates,
+    BlockStates, HostBlockStates, StateConstraint, StateMatchError, StateProperty,
 };
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
 pub use fluid_capability::{
-    FLUIDS, FluidIngredient, FluidResource, FluidStack, ITEM_FLUIDS, SizedFluidIngredient,
+    FLUIDS, FluidIngredient, FluidIngredientError, FluidResource, FluidStack, ITEM_FLUIDS,
+    SizedFluidIngredient,
 };
 mod item_place;
 mod menu_slot;
@@ -4565,8 +4673,12 @@ pub use resource::{
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod custom_spawners;
 pub use custom_spawners::{CustomSpawners, SpawnerEntry, SpawnerError, SpawnerKey, SpawnerKind};
+mod block_entity_data;
+pub use block_entity_data::BlockEntityDataError;
+mod block_entity_items;
+pub use block_entity_items::BlockEntityItemError;
 mod block_entity_type;
-pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
+pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod structure_template;
@@ -4954,7 +5066,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-                r.item_part("minecraft:stick", self.0.clone());
+                let item = r.item_key("minecraft:stick");
+                r.item_part(item, self.0.clone());
             }
         }
         let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
@@ -5330,7 +5443,8 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-            r.item_part("minecraft:stick", HeardStick);
+            let item = r.item_key("minecraft:stick");
+            r.item_part(item, HeardStick);
         }
 
         fn right_click_block(&self, _: crate::HostSide, event: &mut RightClickBlockEvent) -> Flow {

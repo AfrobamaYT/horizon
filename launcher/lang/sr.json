@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Није могуће прочитати дневник изградње: {error}",
   "Could not read the saved sign-in.": "Није могуће прочитати сачувано пријављивање.",
   "Could not read the saved sign-in. Sign in again.": "Није могуће прочитати сачувано пријављивање. Пријавите се поново.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Није могуће прочитати {name}: {error}",
   "Could not run {program}: {error}": "Није могуће покренути {program}: {error}",
   "Could not save the renewed sign-in.": "Није могуће сачувати обновљено пријављивање.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Преузимања, пријаве и ажурирања иду преко овог проксија (http://хост:порт, socks5://хост:порт). Празно значи да нема: ХТТПС_ПРОКСИ се користи уместо тога када је покретач покренут са једним.",
   "{name} was left out: made for another Horizon version": "{name} је изостављен: направљен за другу верзију Horizon-а",
   "{name} was left out: clashes with {other}": "{name} је изостављен: сукобљава се са {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} је изостављен: потребан му је {other}, који је изостављен"
+  "{name} was left out: it needs {other}, which was left out": "{name} је изостављен: потребан му је {other}, који је изостављен",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

@@ -41,7 +41,15 @@ impl Game<'_> {
             return;
         }
         // ServerLevel.isSpawningMonsters.
-        if !self.ui.rules.bool("spawn_mobs") || !self.ui.rules.bool("spawn_monsters") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS)
+        {
             return;
         }
         let kind = zombie.kind.clone();

@@ -194,7 +194,12 @@ impl Game<'_> {
         let Some(index) = self.native_minecart_index(cart) else {
             return false;
         };
-        if self.carts[index].kind != CartKind::Tnt || !self.ui.rules.bool("tnt_explodes") {
+        if self.carts[index].kind != CartKind::Tnt
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return false;
         }
         let mut primed = self.carts[index].clone();
@@ -485,9 +490,19 @@ mod tests {
             assert_eq!(cart.synced_command, "gamerule mob_griefing false");
             assert_eq!(cart.synced_output, cart.command.last_output_string());
             let id = command.entity().id();
-            assert!(game.ui.rules.bool("mob_griefing"));
+            assert!(
+                game.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+            );
             assert!(game.perform_cart_command(id));
-            assert!(!game.ui.rules.bool("mob_griefing"), "the new command ran");
+            assert!(
+                !game
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+                "the new command ran"
+            );
             assert!(!rideable.set_command(game, "say hi"));
             assert_eq!(rideable.command(game), None);
 

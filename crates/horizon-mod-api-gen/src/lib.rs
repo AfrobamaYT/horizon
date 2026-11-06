@@ -973,9 +973,12 @@ enum FillMode {
 }
 
 mod build;
+pub mod crossing;
 mod dispatch;
 mod host_param;
 pub mod internals;
+pub mod internals_table;
+pub mod internals_view;
 pub mod points;
 pub mod staging;
 mod wasm;

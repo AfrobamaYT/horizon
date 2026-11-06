@@ -1855,7 +1855,7 @@ mod tests {
     #[test]
     fn an_active_icon_button_is_a_focus_target_and_a_disabled_one_is_not() {
         let atlas = atlas();
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         // Whatever this thread drew before is the last frame's, then gone.
         crate::widgets::end_frame(u64::MAX - 1);
         button(
@@ -1893,11 +1893,11 @@ mod tests {
         let atlas = atlas();
         crate::widgets::set_action_glyphs(true);
         let label = Text::literal("Done");
-        let mut plain = HudBatch::new([640, 480]);
+        let mut plain = HudBatch::scratch([640, 480]);
         button(
             &mut plain, &atlas, 10.0, 20.0, 150.0, 20.0, &label, true, false,
         );
-        let mut declared = HudBatch::new([640, 480]);
+        let mut declared = HudBatch::scratch([640, 480]);
         action_button(
             &mut declared,
             &atlas,
@@ -1918,7 +1918,7 @@ mod tests {
         let atlas = atlas();
         let label = Text::literal("Graphics API: Prefer Vulkan (Experimental)");
         assert!(atlas.font.width_text(&label.resolved()) > 96.0);
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         scrolling_text_at(
             &mut batch,
             &atlas,
@@ -1940,7 +1940,7 @@ mod tests {
             );
         }
         // A label that fits is centred and not cut: every glyph is drawn.
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         let short = Text::literal("Done");
         scrolling_text_at(
             &mut batch,
@@ -1993,7 +1993,7 @@ mod tests {
             (false, true, 10.0, u32::MAX),
             (false, false, 10.0, 0xFFA0_A0A0),
         ] {
-            let mut tab = HudBatch::new([640, 480]);
+            let mut tab = HudBatch::scratch([640, 480]);
             menu_tab_label(
                 &mut tab,
                 &atlas,
@@ -2003,7 +2003,7 @@ mod tests {
                 active,
                 0,
             );
-            let mut want = HudBatch::new([640, 480]);
+            let mut want = HudBatch::scratch([640, 480]);
             want.text_styled(&atlas, &label.resolved(), left, y, color, true);
             let glyphs = |b: &HudBatch| -> Vec<([u32; 2], u32)> {
                 b.vertices
@@ -2035,7 +2035,7 @@ mod tests {
     }
     #[test]
     fn separator_tiles_sample_both_rows_and_clip_the_last_column() {
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         tile(
             &mut batch,
             sprite(32, 2),
@@ -2067,7 +2067,7 @@ mod tests {
             r#"{"gui":{"scaling":{"type":"nine_slice","width":200,"height":20,
                 "border":{"left":20,"top":4,"right":20,"bottom":4}}}}"#,
         );
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_nine_slice(
             &mut batch,
             sprite(400, 40),
@@ -2089,7 +2089,7 @@ mod tests {
         let n = faithful(
             r#"{"gui":{"scaling":{"type":"nine_slice","width":100,"height":100,"border":12,"stretch_inner":true}}}"#,
         );
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_nine_slice(
             &mut batch,
             sprite(200, 200),
@@ -2114,7 +2114,7 @@ mod tests {
             border: [10; 4],
             stretch_inner: false,
         };
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_nine_slice(
             &mut batch,
             sprite(100, 100),
@@ -2132,7 +2132,7 @@ mod tests {
         let n = faithful(
             r#"{"gui":{"scaling":{"type":"nine_slice","width":100,"height":100,"border":10,"stretch_inner":true}}}"#,
         );
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_sprite(
             &mut batch,
             sprite(100, 100),
@@ -2148,7 +2148,7 @@ mod tests {
     }
     #[test]
     fn blit_sprite_stretches_a_sprite_without_metadata() {
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_sprite(
             &mut batch,
             sprite(9, 9),
@@ -2168,7 +2168,7 @@ mod tests {
             border: [8; 4],
             stretch_inner: true,
         };
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         // 9 wide: borders of floor(9 / 2) = 4, as vanilla's integer division.
         draw_nine_slice(
             &mut batch,
@@ -2199,7 +2199,7 @@ mod tests {
         };
         // Select All in the creative search: inverted white, then blue added,
         // from one pixel before the text to the cursor, 11 high.
-        let mut b = HudBatch::new([854, 480]);
+        let mut b = HudBatch::scratch([854, 480]);
         append_field(
             &mut b,
             &atlas,
@@ -2217,7 +2217,7 @@ mod tests {
             assert_eq!(span(&b, r), (9.0, end, 19.0, 30.0));
         }
         // The anvil keeps its text colour; 300 ms later the cursor is hidden.
-        let mut b = HudBatch::new([854, 480]);
+        let mut b = HudBatch::scratch([854, 480]);
         append_field(
             &mut b,
             &atlas,
@@ -2232,7 +2232,7 @@ mod tests {
         let blends: Vec<_> = b.blends.iter().map(|(_, blend)| *blend).collect();
         assert_eq!(blends, vec![Blend::Additive]);
         let quads = |ms| {
-            let mut b = HudBatch::new([854, 480]);
+            let mut b = HudBatch::scratch([854, 480]);
             append_field(
                 &mut b,
                 &atlas,
@@ -2248,7 +2248,7 @@ mod tests {
         };
         assert!(quads(300) < quads(600));
         // A full field shows a bar on its last pixel instead of an underscore.
-        let mut b = HudBatch::new([854, 480]);
+        let mut b = HudBatch::scratch([854, 480]);
         append_field(
             &mut b,
             &atlas,
