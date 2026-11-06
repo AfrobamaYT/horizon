@@ -107,11 +107,12 @@ impl std::error::Error for EngineCommandError {
 /// Uses the same config, install/current, PATH, resources and command builder as the supervisor.
 /// Does not launch the engine, run a preflight query, write properties, or download anything.
 pub fn engine_command(supervisor: &Path, dir: &Path) -> Result<Command, EngineCommandError> {
-    let supervisor =
-        std::fs::canonicalize(supervisor).map_err(|source| EngineCommandError::Io {
-            path: supervisor.to_owned(),
-            source,
-        })?;
+    // Not `fs::canonicalize`: its `\\?\` prefix on Windows would reach the game's program and resources
+    // paths, where a later `/` in a string no longer means a separator.
+    let supervisor = dunce::canonicalize(supervisor).map_err(|source| EngineCommandError::Io {
+        path: supervisor.to_owned(),
+        source,
+    })?;
     let config = Config::load(dir).map_err(EngineCommandError::Configuration)?;
     let install = Install::around(&supervisor);
     let program = program_near(&config, dir, install.as_ref(), Some(&supervisor))
@@ -218,8 +219,10 @@ mod tests {
 
     #[test]
     fn library_command_uses_the_given_supervisor_and_config_without_starting() {
-        let root =
-            std::env::temp_dir().join(format!("horizon-server-command-{}", std::process::id()));
+        // Canonical like the supervisor's own path: a temp folder can be a link or a short name.
+        let root = dunce::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("horizon-server-command-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("horizon-resources.json"), "{}").unwrap();
         let bin = root.join("bin");

@@ -11,6 +11,7 @@ horizon-server-files = { path = "../horizon-server-files" }
 horizon-anticheat = { path = "../horizon-anticheat" }
 horizon-chat-filter = { path = "../horizon-chat-filter" }
 horizon-core = { path = "../horizon-core" }
+dunce = "1.0.5"
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"
 toml_edit = "0.25"
