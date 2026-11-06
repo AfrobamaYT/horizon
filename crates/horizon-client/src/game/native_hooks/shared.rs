@@ -3323,7 +3323,7 @@ impl Game<'_> {
             return false;
         };
         // No menu open: the click still sounds.
-        let _ = self.native_click_menu_button(button);
+        let _ = self.remote_button_click(button);
         self.audio.play_button_click();
         true
     }
