@@ -14,6 +14,18 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             ("mod_api_fire_generated.rs", generated.fire),
         ],
         Target::Api => {
+            let modules = Catalog::modules(&root.join(super::catalog::DECLARATIONS))
+                .map_err(|e| e.to_string())?;
+            let declarations = modules
+                .iter()
+                .map(|name| {
+                    let path = root
+                        .join(super::catalog::DECLARATIONS)
+                        .join(format!("{name}.rs"));
+                    format!("#[path = {:?}] mod {name};\n", path.to_string_lossy())
+                })
+                .collect::<String>();
+            fs::write(out_dir.join("hook_modules.rs"), declarations).map_err(|e| e.to_string())?;
             let hooks = generated.hooks;
             let included = [
                 ("mod_api_generated.rs", hooks.as_str()),

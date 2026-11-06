@@ -189,6 +189,7 @@ jobs:
         id: native-lint
         run: |
           cargo +stable fmt --all -- --check
+          rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api/src/hooks/*.rs
           cargo +stable clippy $JOBS --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
         if: steps.rust.outputs.required != 'false'

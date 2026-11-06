@@ -146,40 +146,22 @@ pub struct DrawContext {
 /// Why the catalog was refused.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CatalogError {
-    Read {
-        path: String,
-        error: String,
-    },
-    Declaration {
-        path: String,
-        error: String,
-    },
+    Read { path: String, error: String },
+    Declaration { path: String, error: String },
     NamelessHook,
     DuplicateHook(String),
     DuplicateHelper(String),
-    InvalidHook {
-        hook: String,
-        error: String,
-    },
-    InvalidHelper {
-        helper: String,
-        error: String,
-    },
+    InvalidHook { hook: String, error: String },
+    InvalidHelper { helper: String, error: String },
     MissingDoc(String),
-    Counterpart {
-        hook: String,
-        key: &'static str,
-    },
+    Counterpart { hook: String, key: &'static str },
     InvalidContract(String),
     AnsweredNeedsGlobalReplace(String),
     ScopeNeedsKey(String),
     ClientTargetNeedsBoth(String),
     NoHooks,
     Retired(String),
-    ModLines {
-        listed: Vec<String>,
-        files: Vec<String>,
-    },
+    InvalidModule(String),
 }
 
 impl fmt::Display for CatalogError {
@@ -192,13 +174,7 @@ impl fmt::Display for CatalogError {
                 "{path}: hooks are declared in Rust now, in {DECLARATIONS}/<area>.rs; move the entry there as a \
                  `#[hook(...)]` declaration (the old keys are the attribute's arguments) and delete this file"
             ),
-            Self::ModLines { listed, files } => write!(
-                f,
-                "{DECLARATIONS}/mod.rs must list exactly the declaration files, in name order (so that the order is \
-                 the directory's): it lists [{}], the directory holds [{}]",
-                listed.join(", "),
-                files.join(", ")
-            ),
+            Self::InvalidModule(name) => write!(f, "invalid hook declaration filename {name}"),
             Self::NamelessHook => f.write_str("hook name missing"),
             Self::DuplicateHook(name) => write!(f, "duplicate hook {name}"),
             Self::DuplicateHelper(name) => write!(f, "duplicate helper {name}"),
@@ -403,7 +379,7 @@ impl Helper {
 /// Everything the generator reads from the catalog.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Catalog {
-    /// In declaration order: the files in the order `hooks/mod.rs` lists them, each file's declarations in order.
+    /// In declaration order: base first, then files by name, each file's declarations in order.
     pub hooks: Vec<Hook>,
     pub helpers: Vec<Helper>,
     pub draw_contexts: Vec<DrawContext>,
@@ -584,8 +560,8 @@ impl Declared {
 
 impl Catalog {
     /// The catalog of the checkout at `root`: every file of the declarations directory, `base.rs` first and
-    /// then by name, so the order never depends on a list a PR edits. `mod.rs` only lists the files for rustfmt,
-    /// and must match the directory. The retired JSON catalog is refused wherever it still exists.
+    /// then by name, so the order never depends on a list a PR edits.
+    /// The retired JSON catalog is refused wherever it still exists.
     pub fn load(root: &Path) -> Result<Self, CatalogError> {
         let read_error = |path: &Path, e: std::io::Error| CatalogError::Read {
             path: path.display().to_string(),
@@ -608,7 +584,24 @@ impl Catalog {
             }
         }
         let dir = root.join(DECLARATIONS);
-        let mut modules = fs::read_dir(&dir)
+        let modules = Self::modules(&dir)?;
+        let files = modules
+            .iter()
+            .map(|module| {
+                let path = dir.join(format!("{module}.rs"));
+                let text = fs::read_to_string(&path).map_err(|e| read_error(&path, e))?;
+                Ok((path.display().to_string(), text))
+            })
+            .collect::<Result<Vec<_>, CatalogError>>()?;
+        Self::parse(&files)
+    }
+
+    pub(crate) fn modules(dir: &Path) -> Result<Vec<String>, CatalogError> {
+        let read_error = |path: &Path, e: std::io::Error| CatalogError::Read {
+            path: path.display().to_string(),
+            error: e.to_string(),
+        };
+        let mut modules = fs::read_dir(dir)
             .map_err(|e| read_error(&dir, e))?
             .map(|entry| entry.map_err(|e| read_error(&dir, e)))
             .collect::<Result<Vec<_>, _>>()?
@@ -621,35 +614,12 @@ impl Catalog {
             })
             .collect::<Vec<_>>();
         modules.sort_by(|a, b| (a != "base", a).cmp(&(b != "base", b)));
-        let index = dir.join("mod.rs");
-        let index_source = fs::read_to_string(&index).map_err(|e| read_error(&index, e))?;
-        let listing = syn::parse_file(&index_source).map_err(|e| CatalogError::Declaration {
-            path: index.display().to_string(),
-            error: e.to_string(),
-        })?;
-        let listed = listing
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                syn::Item::Mod(module) => Some(module.ident.to_string()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        if listed != modules {
-            return Err(CatalogError::ModLines {
-                listed,
-                files: modules,
-            });
+        for module in &modules {
+            if syn::parse_str::<syn::Ident>(module).is_err() {
+                return Err(CatalogError::InvalidModule(module.clone()));
+            }
         }
-        let files = modules
-            .iter()
-            .map(|module| {
-                let path = dir.join(format!("{module}.rs"));
-                let text = fs::read_to_string(&path).map_err(|e| read_error(&path, e))?;
-                Ok((path.display().to_string(), text))
-            })
-            .collect::<Result<Vec<_>, CatalogError>>()?;
-        Self::parse(&files)
+        Ok(modules)
     }
 
     /// The catalog of declaration files given as (path, source), in the order given.
@@ -805,7 +775,7 @@ mod tests {
     }
 
     #[test]
-    fn the_order_comes_from_the_directory_and_mod_rs_must_match_it() {
+    fn the_order_comes_from_the_directory_without_a_shared_module_list() {
         let second = "pub trait Hooks { /// Doc.\n #[hook(side = \"server\", contract = \"listen\")] fn two(); }";
         let base = format!("{DECLARATIONS}/base.rs");
         let alpha = format!("{DECLARATIONS}/alpha.rs");
@@ -822,11 +792,14 @@ mod tests {
             .map(|h| h.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(names, ["one", "two"], "base.rs first, then by name");
-        fs::write(root.join(&index), "mod base;").unwrap();
-        let error = Catalog::load(&root).unwrap_err().to_string();
+        fs::remove_file(root.join(&index)).unwrap();
+        assert_eq!(Catalog::load(&root).unwrap().hooks.len(), 2);
+        fs::write(root.join(DECLARATIONS).join("not-valid.rs"), HOOK).unwrap();
         assert!(
-            error.contains("mod.rs must list exactly the declaration files"),
-            "{error}"
+            Catalog::load(&root)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid hook declaration filename")
         );
         fs::remove_dir_all(root).unwrap();
     }
