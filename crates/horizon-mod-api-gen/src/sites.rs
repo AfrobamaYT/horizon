@@ -175,20 +175,14 @@ pub fn resolve<'a>(
     entries: &'a [Internal],
     rule: &Rule,
 ) -> Result<Resolved<'a>, String> {
-    let (scope, this) = crate::internals_table::function_scope(&rule, enclosing)
+    let (scope, this) = crate::internals_table::function_scope(rule, enclosing)
         .ok_or("unresolved enclosing receiver")?;
     let (callee, recv, arguments) = match expr {
         Expr::MethodCall(call) => {
             if call.turbofish.is_some() {
                 return Err("generic callee".into());
             }
-            let owner = receiver(
-                &call.receiver,
-                &scope,
-                this.as_deref(),
-                &rule,
-                enclosing_sig,
-            )?;
+            let owner = receiver(&call.receiver, &scope, this.as_deref(), rule, enclosing_sig)?;
             let mut candidates = entries
                 .iter()
                 .filter(|e| {
@@ -197,7 +191,7 @@ pub fn resolve<'a>(
                         && e.path.ends_with(&format!("::{}", call.method))
                 })
                 .filter(|e| {
-                    crate::internals_table::function_scope(&rule, e)
+                    crate::internals_table::function_scope(rule, e)
                         .is_some_and(|(_, ty)| ty.as_deref() == Some(&owner))
                 });
             let callee = candidates
@@ -243,7 +237,7 @@ pub fn resolve<'a>(
         return Err("generic, unsafe, async or variadic callee".into());
     }
     let (callee_module, callee_this) =
-        crate::internals_table::function_scope(&rule, callee).ok_or("unresolved callee scope")?;
+        crate::internals_table::function_scope(rule, callee).ok_or("unresolved callee scope")?;
     let mut types = Vec::new();
     let mut fields = Vec::new();
     for arg in &sig.inputs {
