@@ -3763,8 +3763,9 @@ pub trait Hooks {
     /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
     /// `progress` is an owned snapshot of every criterion (including its stored grant date),
     /// the requirement groups and their completion at this exact mutation. It belongs to
-    /// this player, including first-tick and reload grants held by the server hub. A listener
-    /// may retain a clone; later grants, revokes or reloads do not change that snapshot.
+    /// this player, including first-tick and reload grants queued by the server hub and
+    /// a reload issued during an active or nested player turn. A listener may retain a
+    /// clone; later grants, revokes or reloads do not change that snapshot.
     #[hook(
         side = "server",
         contract = "listen",
