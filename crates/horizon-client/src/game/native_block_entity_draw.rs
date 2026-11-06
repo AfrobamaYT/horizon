@@ -29,31 +29,34 @@ use mod_api::{Identifier, ModelError, ModelPart, ModelRef};
 /// Geometry remains in the generation's baked catalog and is not duplicated.
 pub(super) struct StandaloneSprites {
     generation: u64,
-    slots: std::collections::HashMap<u32, Vec<Option<Rect>>>,
+    slots: Vec<Option<Vec<Option<Rect>>>>,
 }
 
 impl StandaloneSprites {
     pub(super) fn new(pack: &super::PackResources, gui: &super::UiResources) -> Self {
         let catalog = &pack.render.model_catalog;
-        let slots = catalog
-            .standalone_slots()
-            .map(|slot| {
-                let faces = &catalog
-                    .model_by_slot(slot)
-                    .expect("standalone slot exists")
-                    .faces;
-                let sprites = faces
-                    .iter()
-                    .map(|face| {
-                        pack.layer_names
-                            .get(&face.layer)
-                            .and_then(|name| gui.atlas.sprites.get(name))
-                            .copied()
-                    })
-                    .collect();
-                (slot, sprites)
-            })
-            .collect();
+        let mut slots = Vec::new();
+        for slot in catalog.standalone_slots() {
+            let index = slot as usize;
+            if slots.len() <= index {
+                slots.resize_with(index + 1, || None);
+            }
+
+            let faces = &catalog
+                .model_by_slot(slot)
+                .expect("standalone slot exists")
+                .faces;
+            let sprites = faces
+                .iter()
+                .map(|face| {
+                    pack.layer_names
+                        .get(&face.layer)
+                        .and_then(|name| gui.atlas.sprites.get(name))
+                        .copied()
+                })
+                .collect();
+            slots[index] = Some(sprites);
+        }
         Self {
             generation: pack.render.generation,
             slots,
@@ -875,7 +878,8 @@ impl Game<'_> {
         let sprites = self
             .standalone_sprites
             .slots
-            .get(&fields.slot)
+            .get(fields.slot as usize)
+            .and_then(Option::as_ref)
             .ok_or(ModelError::UnknownModel)?;
         let faces = baked
             .faces
@@ -1214,15 +1218,7 @@ mod tests {
             );
             let before = bytes(&surface.vertices);
             // Identical texture bytes still produce a new model generation.
-            let replacement = game
-                .pack
-                .assets
-                .reload(&horizon_assets::resource_source::ResourceRoot::directory(
-                    game.options.resources.clone(),
-                ))
-                .unwrap();
-            assert_ne!(replacement.generation, game.pack.render.generation);
-            let _ = replacement;
+            let old_generation = game.pack.render.generation;
             let listeners = game.register_client_reload_listeners();
             let staged = super::super::packs::stage_pack(
                 &game.options.resources,
@@ -1239,6 +1235,7 @@ mod tests {
             )
             .unwrap();
             game.apply_staged_pack(staged).unwrap();
+            assert_ne!(game.pack.render.generation, old_generation);
             assert_eq!(
                 game.native_draw_model(&mut surface, model, 0x123456),
                 Err(ModelError::StaleModel)
