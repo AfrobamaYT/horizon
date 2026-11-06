@@ -1,5 +1,5 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
-use super::{Catalog, Target, free_function_source, sources};
+use super::{Catalog, Target, free_function_source, native_hook_files, sources};
 use quote::ToTokens;
 use std::{fs, path::Path};
 
@@ -14,6 +14,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 "game_modules.rs",
                 super::game_modules::declarations(&root.join("crates/horizon-client/src/game"))?,
             ),
+            ("native_hook_modules.rs", native_hook_modules(root)?),
             ("mod_api_host_generated.rs", generated.implementation),
             ("mod_api_fire_generated.rs", generated.fire),
             // The mob tick's goal read view (#1077), included beside the
@@ -55,6 +56,23 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
+}
+
+pub(crate) fn native_hook_modules(root: &Path) -> Result<String, String> {
+    let mut modules = String::new();
+    for path in native_hook_files(root)? {
+        let module = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| format!("{}: invalid native hook module name", path.display()))?;
+        if matches!(module, "mod" | "shared") {
+            continue;
+        }
+        syn::parse_str::<syn::Ident>(module).map_err(|e| e.to_string())?;
+        let path = fs::canonicalize(&path).map_err(|e| e.to_string())?;
+        modules.push_str(&format!("#[path = {path:?}] mod {module};\n"));
+    }
+    Ok(modules)
 }
 
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and the `Points` trait,

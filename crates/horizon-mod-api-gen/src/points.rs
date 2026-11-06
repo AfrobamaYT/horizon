@@ -130,6 +130,19 @@ fn children(
     pending: &mut Vec<Pending>,
 ) {
     for item in items {
+        if let Item::Macro(included) = item
+            && included.mac.path.is_ident("include")
+            && !test_only(&included.attrs)
+            && !(every_build && gated(&included.attrs))
+            && let Ok(relative) = syn::parse2::<syn::LitStr>(included.mac.tokens.clone())
+        {
+            pending.push((
+                module.to_owned(),
+                here.join(relative.value()),
+                dir.to_owned(),
+                cfg.to_vec(),
+            ));
+        }
         let Item::Mod(declared) = item else { continue };
         if test_only(&declared.attrs) || (every_build && gated(&declared.attrs)) {
             continue;

@@ -1342,7 +1342,14 @@ mod tests {
             "struct Game;\ninclude!(concat!(env!(\"OUT_DIR\"), \"/game_modules.rs\"));",
         );
         after.put("crates/horizon-client/src/game/runtime/.game-area", "");
-        after.put("crates/horizon-client/src/game/runtime/feature.rs", module);
+        after.put(
+            "crates/horizon-client/src/game/runtime/feature.rs",
+            "include!(\"feature/shared.rs\");",
+        );
+        after.put(
+            "crates/horizon-client/src/game/runtime/feature/shared.rs",
+            module,
+        );
         fn helpers(root: &Path) -> Vec<String> {
             let mut methods = Vec::new();
             crate::game_methods(
@@ -1357,18 +1364,14 @@ mod tests {
                 .collect()
         }
         assert_eq!(helpers(&before.0), helpers(&after.0));
-        fn points(root: &Path) -> Vec<String> {
+        fn points(root: &Path) -> BTreeSet<String> {
             crate::points::game_files(&root.join("crates/horizon-client/src"), true)
                 .unwrap()
                 .into_iter()
                 .map(|file| file.module)
                 .collect()
         }
-        let mut old = points(&before.0);
-        let mut new = points(&after.0);
-        old.sort();
-        new.sort();
-        assert_eq!(old, new);
+        assert_eq!(points(&before.0), points(&after.0));
         assert_eq!(
             widen_with(&before.0, &[]).unwrap().entries,
             widen_with(&after.0, &[]).unwrap().entries

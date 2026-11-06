@@ -77,11 +77,19 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
 /// Expand the same directory-derived include before source traversal, without needing OUT_DIR.
 /// Other includes are left alone: source tools must not evaluate arbitrary build-time code.
 pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
+    let mut expanded = source.to_owned();
     if source.contains(INCLUDE) {
-        Ok(source.replace(INCLUDE, &declarations(&path.with_extension(""))?))
-    } else {
-        Ok(source.to_owned())
+        expanded = expanded.replace(INCLUDE, &declarations(&path.with_extension(""))?);
     }
+    const NATIVE: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/native_hook_modules.rs\"));";
+    if source.contains(NATIVE) {
+        let root = path
+            .ancestors()
+            .nth(6)
+            .ok_or("native hook source outside the game tree")?;
+        expanded = expanded.replace(NATIVE, &crate::build::native_hook_modules(root)?);
+    }
+    Ok(expanded)
 }
 
 pub(crate) fn parse(path: &Path, source: &str) -> Result<syn::File, String> {
