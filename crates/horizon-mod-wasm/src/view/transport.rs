@@ -1,4 +1,5 @@
 //! Stock canonical list cursors on input, and store-owned buffers retained until lowering ends.
+use super::lazy::Materialize;
 use super::*;
 use std::sync::Arc;
 use wasmtime::component::WasmList;
@@ -53,7 +54,7 @@ impl Buffers {
     fn input(
         &mut self,
         store: &mut StoreContextMut<'_, State>,
-        cells: &WasmList<wire::Cell>,
+        cells: &WasmList<lazy::Cell>,
         index: usize,
         start: usize,
         len: usize,
@@ -66,20 +67,12 @@ impl Buffers {
         }
         let input = &mut self.inputs[index];
         input.clear();
-        let mut bytes = 0usize;
+        let mut source = lazy::Input::new(store);
         for offset in start..start + len {
-            let cell = cells.get(store.as_context_mut(), offset).unwrap()?;
-            if let wire::Cell::Str(value) = &cell {
-                let next = bytes.saturating_add(value.len());
-                charge(
-                    store.as_context_mut(),
-                    next.div_ceil(64) - bytes.div_ceil(64),
-                )?;
-                bytes = next;
-                if bytes > 1_048_576 {
-                    return Ok(false);
-                }
-            }
+            let cell = cells.get(&mut *source.store, offset).unwrap()?;
+            let Some(cell) = cell.materialize(&mut source)? else {
+                return Ok(false);
+            };
             input.push(cell);
         }
         Ok(true)
@@ -122,7 +115,7 @@ fn get_many(
 fn set_many(
     store: StoreContextMut<'_, State>,
     writes: WasmList<Write>,
-    cells: WasmList<wire::Cell>,
+    cells: WasmList<lazy::Cell>,
 ) -> wasmtime::Result<Arc<Vec<Result<(), wire::Refusal>>>> {
     bounded_batch(writes.len())?;
     State::with_buffer::<Buffers, _>(store, |buffers, mut store| {
