@@ -24039,6 +24039,9 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     let mut early_settings = Settings::load(&Game::options_path());
     options
         .mods
+        .capture_code_switches(&early_settings.mods.disabled);
+    options
+        .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);

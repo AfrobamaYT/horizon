@@ -19,8 +19,17 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[derive(Default)]
+pub(super) struct CodeSwitches {
+    disabled: std::collections::BTreeSet<String>,
+    applied: std::sync::atomic::AtomicBool,
+}
+
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
+    /// Saved switches gate the first data inventory while registration keeps
+    /// its existing startup ordering. Runtime dispatch owns later switches.
+    pub(super) code_switches: Option<Arc<CodeSwitches>>,
     /// The original prepared input is fixed for this engine load, shared by
     /// the window and its server. A later data reload must not overlay an
     /// already generated root recursively.
@@ -48,6 +57,24 @@ pub(super) struct ModsState {
 }
 
 impl ModsState {
+    pub(super) fn capture_code_switches(&mut self, disabled: &std::collections::BTreeSet<String>) {
+        self.code_switches = Some(Arc::new(CodeSwitches {
+            disabled: disabled.clone(),
+            applied: Default::default(),
+        }));
+    }
+
+    fn apply_code_switches(&self, disabled: &std::collections::BTreeSet<String>) {
+        for id in mod_api::__private::installed_code_ids() {
+            mod_api::__private::set_mod_enabled(id, !disabled.contains(id));
+        }
+        if let Some(switches) = &self.code_switches {
+            switches
+                .applied
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
     /// One admission rule for initial composition and later code-only toggles.
     /// Content acceptance belongs to the generation; code admission belongs to
     /// the installed dispatch entries, including their live enabled switches.
@@ -69,8 +96,13 @@ impl ModsState {
         horizon_mods::enabled::EnabledMods::new(native.chain(selected).filter_map(
             |(manifest, code)| {
                 let enabled = if code {
-                    mod_api::__private::mod_index(&manifest.id)
-                        .is_some_and(mod_api::__private::mod_index_on)
+                    let initially_disabled = self.code_switches.as_ref().is_some_and(|switches| {
+                        !switches.applied.load(std::sync::atomic::Ordering::Acquire)
+                            && switches.disabled.contains(&manifest.id)
+                    });
+                    !initially_disabled
+                        && mod_api::__private::mod_index(&manifest.id)
+                            .is_some_and(mod_api::__private::mod_index_on)
                 } else {
                     accepted_content(&manifest.id)
                 };
@@ -850,9 +882,7 @@ impl Game<'_> {
     }
     /// Apply the player's switches at the canonical native and wasm dispatch boundary.
     pub(super) fn sync_native_switches(&self) {
-        for id in mod_api::__private::loaded_mods().ids() {
-            mod_api::__private::set_mod_enabled(id, !self.settings.mods.disabled.contains(id));
-        }
+        self.mods.apply_code_switches(&self.settings.mods.disabled);
     }
 }
 

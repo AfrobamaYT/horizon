@@ -51,6 +51,15 @@ fn admission_uses_active_native_and_wasm_entries_and_accepted_content_not_startu
     ].into(), || {
         mod_api::__private::with_test_packages(&["refused_code", "shared_space"], || {
             assert!(mod_api::__private::loaded_mods().get("refused_code").is_some());
+            let mut startup = sources.clone();
+            let disabled = std::collections::BTreeSet::from(["machine_sample".into(), "wasm_mod".into()]);
+            startup.capture_code_switches(&disabled);
+            assert!(mod_api::__private::mod_index_on(mod_api::__private::mod_index("machine_sample").unwrap()));
+            assert_eq!(startup.enabled_inventory(|id| id == "plain").server_ids().collect::<Vec<_>>(), ["plain"]);
+            startup.apply_code_switches(&disabled);
+            assert!(mod_api::__private::set_mod_enabled("machine_sample", true));
+            assert!(mod_api::__private::set_mod_enabled("wasm_mod", true));
+            assert_eq!(startup.enabled_inventory(|id| id == "plain").server_ids().collect::<Vec<_>>(), ["machine_sample", "plain", "wasm_mod"]);
             let initial = sources.enabled_inventory(|id| id == "plain");
             assert_eq!(initial.client_ids().collect::<Vec<_>>(), ["client_code", "machine_sample", "plain", "wasm_mod"]);
             assert_eq!(initial.server_ids().collect::<Vec<_>>(), ["machine_sample", "plain", "wasm_mod"]);
