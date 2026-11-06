@@ -81,7 +81,7 @@ impl Game<'_> {
     /// `Camera.tick`: the eye height and the field-of-view modifier ease
     /// halfway toward the player's each tick.
     pub(super) fn tick_fov(&mut self) {
-        let first_person = self.camera_type.first_person();
+        let first_person = self.camera_type.is_first_person();
         let effect = self.fov_effect_scale();
         let target = self.fov_player().map_or(1.0, |player| {
             let base = field_of_view_modifier(&player, first_person, effect);
@@ -251,7 +251,7 @@ impl Game<'_> {
     /// not scoping in first person.
     pub(super) fn draw_spyglass(&mut self, batch: &mut HudBatch) {
         self.scope_scale += 0.5 * self.frame_ticks * (1.125 - self.scope_scale);
-        if !self.camera_type.first_person() {
+        if !self.camera_type.is_first_person() {
             return;
         }
         if !self.scoping() {

@@ -746,7 +746,7 @@ impl Game<'_> {
         } else {
             -1.0
         };
-        if self.camera_type.first_person() {
+        if self.camera_type.is_first_person() {
             let (yaw, pitch) =
                 rope_hold_angles((self.yaw, self.pitch), self.rope_rot_old, alpha as f32);
             let v = glam::DVec3::new(0.39 * hand_dir, -0.6, 0.3);

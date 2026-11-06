@@ -76,7 +76,7 @@ impl Game<'_> {
     /// camera entity (`LivingEntityRenderer.shouldShowName`).
     fn own_name_tag(&self) -> Option<(&Mob, String)> {
         if !self.settings.extras.own_name_tag
-            || self.camera_type.first_person()
+            || self.camera_type.is_first_person()
             || self.sleeping.is_some()
             || self.spectator()
             || self.own_invisible()
@@ -509,7 +509,7 @@ impl Game<'_> {
         let (view_yaw, view_pitch) = match self.posed_rotation {
             // The frame's camera, already turned round in front view.
             Some(rotation) => rotation,
-            None if self.camera_type == super::perspective::CameraType::ThirdPersonFront => {
+            None if self.camera_type == horizon_client::camera::CameraType::ThirdPersonFront => {
                 (self.yaw + 180.0, -self.pitch)
             }
             None => (self.yaw, self.pitch),

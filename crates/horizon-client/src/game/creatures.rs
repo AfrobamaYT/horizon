@@ -7551,9 +7551,9 @@ impl Game<'_> {
             }),
             player_rot: [self.pitch, self.yaw],
             paused: self.pause,
-            first_person: self.camera_type.first_person(),
+            first_person: self.camera_type.is_first_person(),
             third_person_reversed: self.camera_type
-                == super::perspective::CameraType::ThirdPersonFront,
+                == horizon_client::camera::CameraType::ThirdPersonFront,
             ..Default::default()
         });
         for mob in &self.mobs {
@@ -8110,7 +8110,7 @@ impl Game<'_> {
 /// They stay continuous at pitch ±90, and in third-person front view they are
 /// the turned-round camera's, not the player's.
 fn thrown_item_axes(
-    camera_type: super::perspective::CameraType,
+    camera_type: horizon_client::camera::CameraType,
     yaw: f32,
     pitch: f32,
 ) -> (glam::Vec3, glam::Vec3) {
@@ -8715,11 +8715,11 @@ mod enderman_anger_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::super::perspective::CameraType;
     use super::mob_effect_instance;
     use super::thrown_item_axes;
     use super::thrown_item_quad;
     use super::{ProjectileKind, is_item_billboard};
+    use horizon_client::camera::CameraType;
 
     #[test]
     #[ignore = "needs prepared resources"]

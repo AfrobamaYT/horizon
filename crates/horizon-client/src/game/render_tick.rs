@@ -334,7 +334,7 @@ impl Game<'_> {
                 fx.vignette_brightness,
                 self.border.warning_strength(p.position.x, p.position.z),
             )),
-            first_person: self.camera_type.first_person(),
+            first_person: self.camera_type.is_first_person(),
             scoping: self.scoping(),
             game_time_delta: 0.0,
             equipment: match &self.armor[0] {
@@ -360,7 +360,7 @@ impl Game<'_> {
             partial,
             block_overlay,
             water,
-            on_fire: self.camera_type.first_person()
+            on_fire: self.camera_type.is_first_person()
                 && !self.spectator()
                 && self.player.as_ref().is_some_and(|p| p.fire_ticks > 0),
             fire_lower: f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0,
@@ -591,7 +591,7 @@ impl Game<'_> {
         let scope_eye = self
             .player
             .as_ref()
-            .filter(|_| self.camera_type.first_person() && self.scoping())
+            .filter(|_| self.camera_type.is_first_person() && self.scoping())
             .map(|p| {
                 [
                     p.position.x,

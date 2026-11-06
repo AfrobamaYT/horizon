@@ -70,6 +70,7 @@ mod boss_bar_refs;
 mod calculate_player_turn;
 mod camera_pose;
 mod camera_read;
+mod camera_type;
 mod can_continue_sleeping;
 mod can_player_sleep;
 mod chunk_forced;
