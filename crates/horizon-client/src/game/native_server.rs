@@ -2478,11 +2478,16 @@ mod tests {
                     Some(&mod_api::CommandArgumentValue::Integer(7))
                 );
                 assert_eq!(heard[3].literals, ["choice"]);
+                assert!(heard[3].argument("a").is_none());
                 assert_eq!(
-                    heard[3].argument("a"),
-                    Some(&mod_api::CommandArgumentValue::Integer(7))
+                    heard[3].argument("b"),
+                    Some(&mod_api::CommandArgumentValue::String("7".into()))
                 );
                 assert_eq!(heard[4].literals, ["choice", "bar"]);
+                assert_eq!(
+                    heard[4].argument("a"),
+                    Some(&mod_api::CommandArgumentValue::Integer(7))
+                );
                 assert_eq!(heard[5].literals, ["choice"]);
                 assert_eq!(
                     heard[5].argument("b"),
