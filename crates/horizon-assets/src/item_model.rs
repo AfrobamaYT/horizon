@@ -20,7 +20,9 @@ mod component_predicate;
 mod foreign;
 mod mod_properties;
 mod special;
-pub use mod_properties::{is_range_property, register_range_properties};
+pub use mod_properties::{
+    is_range_property, is_select_property, register_range_properties, register_select_properties,
+};
 pub use special::{SpecialKind, SpecialModel};
 
 type Result<T> = std::result::Result<T, DecodeError>;
@@ -475,7 +477,11 @@ impl ItemModelNode {
                 on_true: Box::new(Self::decode(required(m, "on_true")?)?),
                 on_false: Box::new(Self::decode(required(m, "on_false")?)?),
             },
-            "minecraft:select" if foreign::property_is_foreign(m)? => {
+            // A mod's registered property is read per stack; no case matches any other foreign one.
+            "minecraft:select"
+                if foreign::property_is_foreign(m)?
+                    && !is_select_property(&ident(required(m, "property")?)?) =>
+            {
                 // No case can match a property Horizon cannot read.
                 let fallback = get(m, "fallback").map(Self::decode).transpose()?;
                 foreign::wrap(fallback.unwrap_or(Self::Empty), optional_transformation(m)?)
@@ -710,6 +716,9 @@ impl ConditionProperty {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SelectProperty {
+    /// A property a native mod registered (`register_select_properties`), read through
+    /// [`ItemEnv::item_model_select_property`]; its `when` values are strings.
+    Custom(String),
     CustomModelData(i32),
     MainHand,
     ChargeType,
@@ -727,7 +736,11 @@ pub enum SelectProperty {
 }
 impl SelectProperty {
     fn decode(m: &Map<String, Value>) -> Result<Self> {
-        Ok(match ident(required(m, "property")?)?.as_str() {
+        let property = ident(required(m, "property")?)?;
+        if is_select_property(&property) {
+            return Ok(Self::Custom(property));
+        }
+        Ok(match property.as_str() {
             "minecraft:custom_model_data" => {
                 Self::CustomModelData(get(m, "index").map_or(Ok(0), non_negative)?)
             }
@@ -752,9 +765,10 @@ impl SelectProperty {
     /// A `when` value in canonical form (identifiers normalised).
     fn decode_value(&self, v: &Value) -> Result<Value> {
         Ok(match self {
-            Self::CustomModelData(_) | Self::BlockState(_) | Self::LocalTime { .. } => {
-                Value::String(string(v)?)
-            }
+            Self::Custom(_)
+            | Self::CustomModelData(_)
+            | Self::BlockState(_)
+            | Self::LocalTime { .. } => Value::String(string(v)?),
             Self::MainHand => match string(v)?.as_str() {
                 s @ ("left" | "right") => Value::String(s.to_owned()),
                 _ => return Err(err("invalid arm")),
@@ -1010,6 +1024,11 @@ pub trait ItemEnv {
     /// A mod's registered numeric `range_dispatch` property, 0 when no mod answers.
     fn item_model_range_property(&self, _property: &str, _stack: &StackView) -> f32 {
         0.0
+    }
+    /// A mod's registered categorical `select` property, `None` (the fallback) when no
+    /// mod answers.
+    fn item_model_select_property(&self, _property: &str, _stack: &StackView) -> Option<String> {
+        None
     }
     /// `PotionContents.getColorOr` for the potion/effects part: the mixed
     /// effect colour, or `None` when the contents have no visible effects.
@@ -1410,6 +1429,10 @@ impl Resolve<'_> {
     fn select_value(&self, property: &SelectProperty) -> Option<Value> {
         let owner = self.ctx.owner;
         match property {
+            SelectProperty::Custom(property) => self
+                .env
+                .item_model_select_property(property, self.stack)
+                .map(Value::String),
             SelectProperty::CustomModelData(i) => self
                 .component("minecraft:custom_model_data")
                 .and_then(|d| custom_data_at(d, "strings", *i))

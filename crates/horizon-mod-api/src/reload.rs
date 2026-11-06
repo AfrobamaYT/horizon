@@ -54,7 +54,8 @@ impl std::error::Error for ReloadResourceError {
 }
 
 /// Infallible publication, run once, only after every listener prepared successfully: what a
-/// listener's `prepare` hands back. One per listener per reload, never per tick;
+/// listener's `prepare` hands back. A later server table refusal leaves the old engine
+/// generation in place, but cannot undo this callback's own effects. One per listener per reload, never per tick;
 /// `<dyn ReloadApply>::new(move || ...)` makes one from a closure.
 pub trait ReloadApply: Send + Sync {
     /// Publish the prepared state.

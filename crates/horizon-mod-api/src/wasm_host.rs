@@ -197,6 +197,22 @@ impl State {
     }
 }
 
+/// Reusable converted list storage. Large guest inputs are not retained across calls.
+struct FlatInput<T>(Vec<T>);
+impl<T> Default for FlatInput<T> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+struct FlatInputGuard<'a, T>(&'a mut Vec<T>);
+impl<T> Drop for FlatInputGuard<'_, T> {
+    fn drop(&mut self) {
+        self.0.clear();
+        let keep = 65_536 / std::mem::size_of::<T>().max(1);
+        self.0.shrink_to(keep);
+    }
+}
+
 thread_local! {
     /// The frame of the innermost call into a mod on this thread.
     static CURRENT: Cell<*mut Frame> = const { Cell::new(std::ptr::null_mut()) };
@@ -857,6 +873,7 @@ pub fn instantiate(
     let mut linker = Linker::<State>::new(engine);
     glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(&mut linker, |s| s)
         .expect("the game's own imports are defined once");
+    glue::add_flat_lists(&mut linker).expect("the flat list imports are defined once");
     imports(&mut linker);
     let limits = wasmtime::StoreLimitsBuilder::new()
         .memory_size(budgets.memory)
@@ -1032,6 +1049,18 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(CURRENT.get(), previous);
         assert!(CALLER.take().is_none());
+    }
+
+    #[test]
+    fn world_line_array_tuple_roundtrip() {
+        let line = crate::WorldLine::new(
+            [1.25, -2.5, 3.75],
+            [4.0, 5.5, -6.25],
+            0x12345678,
+            2.5,
+            crate::WorldDepth::ThroughWalls,
+        );
+        assert_eq!(glue::world_line_roundtrip(&line).unwrap(), line);
     }
 
     #[test]

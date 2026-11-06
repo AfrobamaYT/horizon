@@ -12,7 +12,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "BlockEvent.CreateFluidSourceEvent",
+        neoforge = "CreateFluidSourceEvent",
         target = "horizon_client::game::native_hooks::create_fluid_source::GameLevel<'_>::native_create_fluid_source"
     )]
     fn create_fluid_source();

@@ -63,6 +63,7 @@ class SourceMtimesTests(unittest.TestCase):
         restore_and_snapshot(self.root, self.snapshot)
         self.assertGreater(source.parent.stat().st_mtime_ns, before)
 
+    @unittest.skipIf(os.name == "nt", "creating a symlink needs a privilege on Windows")
     def test_modified_checkout_is_refused_and_symlinks_are_not_followed(self):
         external = self.root / "untracked.txt"
         external.write_text("not a source\n")

@@ -98,7 +98,7 @@ fn client_packet_hands_a_mod_the_type_and_custom_payload() {
 
 // Fluid acceptance is scoped to a FLUIDS provider, not a global Hooks method.
 // Its default/refused/accepted writes are covered with a real Game backend in
-// game/machines/native_fluids.rs::tests::a_scoped_tank_can_refuse_a_fluid.
+// game/blocks/machines/native_fluids.rs::tests::a_scoped_tank_can_refuse_a_fluid.
 
 mod model_layers {
     use mod_api::{

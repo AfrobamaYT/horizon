@@ -5,7 +5,7 @@ use super::{
     Capability, Compound, Host, HostTransaction, ItemStack, ServerHost, Tag, Transaction,
     backend_of,
 };
-use horizon_world::nbt::JavaString;
+use horizon_core::nbt::JavaString;
 use std::fmt;
 
 /// A data component's id, `namespace:path` (`minecraft:damage`, `mymod:charge`), checked once
@@ -20,7 +20,7 @@ impl ComponentId {
     /// (`Identifier.parse`'s characters, a namespace and a path): `Damage`, `!minecraft:food`
     /// and `my mod:charge` aren't.
     pub fn new(id: &str) -> Option<Self> {
-        horizon_world::identifier::Identifier::parse_namespaced(id)?;
+        horizon_core::identifier::Identifier::parse_namespaced(id)?;
         Some(Self(id.into()))
     }
     /// The id, as saved (`minecraft:damage`).
@@ -39,7 +39,7 @@ impl EnchantmentEffect {
     /// `id` as an effect type (a mod's own, as `mymod:soulbound`), or None where it isn't a
     /// namespaced identifier.
     pub fn new(id: &'static str) -> Option<Self> {
-        horizon_world::identifier::Identifier::parse_namespaced(id)?;
+        horizon_core::identifier::Identifier::parse_namespaced(id)?;
         Some(Self(id))
     }
     /// The id (`minecraft:prevent_armor_change`).

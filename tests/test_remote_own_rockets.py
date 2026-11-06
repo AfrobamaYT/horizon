@@ -23,11 +23,11 @@ def lift(path, start, end):
 class RemoteOwnRocketTests(unittest.TestCase):
     def test_the_spark_follows_the_moved_player_at_the_rocket_hand(self):
         methods = lift(
-            GAME / "fireworks.rs",
+            GAME / "entities/fireworks.rs",
             "    /// `Entity.getHandHoldingItemAngle",
             "    /// `FireworkRocketItem.use` while gliding",
         ) + lift(
-            GAME / "remote_projectiles.rs",
+            GAME / "network/remote_projectiles.rs",
             "    /// This client's own player's entity id",
             "    /// One tick of interpolation",
         )

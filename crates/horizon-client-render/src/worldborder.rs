@@ -172,8 +172,8 @@ impl WorldBorder {
             z.clamp(min_z + half, (max_z - half).max(min_z + half)),
         ]
     }
-    pub fn pack(&self) -> horizon_world::nbt::Tag {
-        use horizon_world::nbt::Tag;
+    pub fn pack(&self) -> horizon_core::nbt::Tag {
+        use horizon_core::nbt::Tag;
         Tag::compound([
             ("center_x", Tag::Double(self.center()[0].to_bits())),
             ("center_z", Tag::Double(self.center()[1].to_bits())),
@@ -189,8 +189,8 @@ impl WorldBorder {
             ("lerp_time", Tag::Long(self.remaining_ticks())),
         ])
     }
-    pub fn unpack(tag: &horizon_world::nbt::Tag) -> Self {
-        use horizon_world::nbt::Tag;
+    pub fn unpack(tag: &horizon_core::nbt::Tag) -> Self {
+        use horizon_core::nbt::Tag;
         let d = |k: &str, default: f64| match tag.get(k) {
             Some(Tag::Double(b)) => f64::from_bits(*b),
             _ => default,

@@ -3,8 +3,6 @@ use super::*;
 use crate::{internals::Internal, points};
 use quote::{format_ident, quote};
 
-const DIRECTORY: &str = "crates/horizon-mod-api-gen/sites";
-
 /// The list directory and each listed crate's source: build-script inputs.
 pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, Error> {
     let mut paths = vec![root.join(DIRECTORY)];
@@ -15,7 +13,8 @@ pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, Error> {
 fn files(root: &Path) -> Result<Vec<points::GameFile>, Error> {
     let mut files =
         points::game_files(&root.join("crates/horizon-client/src"), true).map_err(Cause::Source)?;
-    let crates: std::collections::BTreeSet<_> = listed(&root.join(DIRECTORY))?
+    let crates: std::collections::BTreeSet<_> = slots(&root.join(DIRECTORY))?
+        .calls
         .into_iter()
         .filter_map(|d| d.target.split("::").next().map(str::to_owned))
         .collect();
@@ -24,7 +23,8 @@ fn files(root: &Path) -> Result<Vec<points::GameFile>, Error> {
             .map_err(Cause::Source)?
             .contains(&krate)
         {
-            let declaration = listed(&root.join(DIRECTORY))?
+            let declaration = slots(&root.join(DIRECTORY))?
+                .calls
                 .into_iter()
                 .find(|d| d.target.starts_with(&format!("{krate}::")))
                 .expect("listed crate");
@@ -42,7 +42,7 @@ fn files(root: &Path) -> Result<Vec<points::GameFile>, Error> {
 
 /// Generate site IDs independently of the raw types, keeping the points crate below gameplay.
 pub fn ids(root: &Path) -> Result<String, Error> {
-    let declarations = listed(&root.join(DIRECTORY))?;
+    let declarations = slots(&root.join(DIRECTORY))?.calls;
     let names = declarations
         .iter()
         .map(|d| format_ident!("{}", super::rewrite::name(d, d.ordinal.unwrap_or(0))))
@@ -57,7 +57,7 @@ pub fn ids(root: &Path) -> Result<String, Error> {
 
 /// Validate the entire union before writing any expression rewrite. Widening precedes this pass.
 pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, Error> {
-    let declarations = listed(&root.join(DIRECTORY))?;
+    let declarations = slots(&root.join(DIRECTORY))?.calls;
     if declarations.is_empty() {
         return Ok(Vec::new());
     }
@@ -98,10 +98,35 @@ pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, Error> {
             .at(format!("{}: {}", d.origin, d.target)));
         }
     }
-    for (path, text) in changes {
-        fs::write(path, text)?;
+    let mut temps = Vec::new();
+    for (path, text) in &changes {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("site");
+        let temp = path.with_file_name(format!(".{name}.site-tmp"));
+        if let Err(error) = fs::write(&temp, text) {
+            for (temp, _) in &temps {
+                let _ = fs::remove_file(temp);
+            }
+            return Err(error.into());
+        }
+        temps.push((temp, path));
     }
-    points::dependencies(root, packages).map_err(Cause::Source)?;
+    if let Err(error) = points::dependencies(root, packages) {
+        for (temp, _) in &temps {
+            let _ = fs::remove_file(temp);
+        }
+        return Err(Cause::Source(error).into());
+    }
+    for index in 0..temps.len() {
+        if let Err(error) = fs::rename(&temps[index].0, temps[index].1) {
+            for (temp, _) in &temps[index..] {
+                let _ = fs::remove_file(temp);
+            }
+            return Err(error.into());
+        }
+    }
     sites.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(sites)
 }
@@ -133,7 +158,7 @@ mod tests {
         let list = directory.join("test.txt");
         fs::write(
             &list,
-            "horizon_client::game::run | add | 0\nhorizon_client::game::Game::run | Self::helper | 0\n",
+            "horizon_client::game::run | add | 0 |\nhorizon_client::game::Game::run | Self::helper | 0 |\n",
         )
         .unwrap();
         let error = stage(&root, &entries).unwrap_err();
@@ -143,7 +168,7 @@ mod tests {
             "{error}"
         );
         assert_eq!(fs::read_to_string(&file).unwrap(), source);
-        fs::write(&list, "horizon_client::game::run | add | 0\n").unwrap();
+        fs::write(&list, "horizon_client::game::run | add | 0 |\n").unwrap();
         let sites = stage(&root, &entries).unwrap();
         assert_eq!(sites.len(), 1);
         assert!(ids(&root).unwrap().contains(&sites[0].name));

@@ -31,8 +31,8 @@ pub mod schema;
 mod text;
 pub mod world_upgrader;
 
-use crate::nbt::Tag;
 use dynamic::{as_str, string};
+use horizon_core::nbt::Tag;
 use schema::{Key, Ty, key, walk};
 
 /// The DataVersion of the game.

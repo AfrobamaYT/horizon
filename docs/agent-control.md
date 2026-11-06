@@ -19,12 +19,12 @@ The command lists are generated, so they can't drift:
 
 | Surface | Where | Transport |
 | --- | --- | --- |
-| Game control socket | `horizon-client --control` / `--control-socket PATH`, or Agent Control on in Horizon Settings > AI Agent (`crates/horizon-client/src/control.rs`; commands in `src/game/control.rs`, `agent.rs`, `ui_control.rs`, `saves_control.rs` and friends) | text line in, one JSON line out; Unix socket, or localhost TCP and a token where there is none |
+| Game control socket | `horizon-client --control` / `--control-socket PATH`, or Agent Control on in Horizon Settings > AI Agent (`crates/horizon-client/src/control.rs`; commands in `src/game/runtime/control.rs`, `agent.rs`, `ui_control.rs`, `saves_control.rs` and friends) | text line in, one JSON line out; Unix socket, or localhost TCP and a token where there is none |
 | `horizon-ctl` | `crates/horizon-client/src/bin/horizon-ctl/` | CLI over the socket; one table of commands (`commands.rs`) gives the help, the argument checks, the MCP tools and the reference |
 | `horizon-ctl mcp` | same | MCP over stdio, one tool per command of the table |
 | Launcher CLI | `launcher/src/cli.rs` | `horizon-launcher <command> [--json]` |
 | Launcher MCP | `launcher/src/mcp.rs`, `cli_tools.rs`, `game_tools.rs` | `horizon-launcher mcp` (stdio): every CLI command as a tool, the session tools, and the game's tools as `game_*` |
-| Connecting | `launcher/src/agents.rs`, `agents_page.rs`; `src/game/agent_settings.rs` | `horizon-launcher agent-config`; Settings > AI in the launcher; Horizon Settings > AI Agent in the game |
+| Connecting | `launcher/src/agents.rs`, `agents_page.rs`; `src/game/runtime/agent_settings.rs` | `horizon-launcher agent-config`; Settings > AI in the launcher; Horizon Settings > AI Agent in the game |
 | No AI | `crates/horizon-core/src/no_ai.rs` | `noAi:true` in `<game home>/horizon-extras.txt`, read by every surface |
 
 ## One MCP server for everything
@@ -208,7 +208,7 @@ turn the switch off.
   asked for the game, or when the player chose it.
 - **Headless:** `horizon-ctl launch --headless` (`horizon-client --headless --control`) starts a
   game with no display, no window and no GPU: it runs where no display server is (an SSH session,
-  a server) and runs its own loop instead of winit's (`game/headless.rs`), one frame a tick. It
+  a server) and runs its own loop instead of winit's (`game/runtime/headless.rs`), one frame a tick. It
   plays through these commands only; commands that need the screen's pixels (`screenshot`, clicks
   at GUI points) answer with an error ([#4951](https://github.com/horizon-rust/horizon/issues/4951)).
 

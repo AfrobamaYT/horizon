@@ -6,6 +6,22 @@ pub trait Hooks {
     /// on the client. An id in vanilla's namespace, not of that form, or registered already is logged
     /// and left out. Each entry is listed and switched on or off with vanilla's, and `debug_entry_lines`
     /// fills it while it is on.
+    #[notes = r#"## Debug screen entries
+
+`Hooks::register_debug_entries` is the client registration-phase counterpart of NeoForge
+26.3's `RegisterDebugEntriesEvent`. It receives a `RegistrationContext`, once at client
+startup, and collects a `DebugEntry` per entry: an id `<mod id>:<path>` and the `DebugGroup`
+whose vanilla group its lines join (`Position`, `Light`, `Memory`, `LookingAtBlock`,
+`LookingAtEntity`, `LookingAtFluid` or `ChunkGeneration`). An id in vanilla's namespace, not
+of that form, or registered already is logged and left out.
+
+An entry is listed in the debug options' text section, sorted by its id with vanilla's, and
+is switched like them (`alwaysOn`, `inOverlay`, `never`), saved in `debug-profile.json` under
+its full id. On the overlay, its group comes after vanilla's groups.
+Its lines are asked for each frame the overlay draws it, and only while it is on:
+`Hooks::debug_entry_lines` receives the entry's id and a `&mut Vec<String>` to push lines to,
+with legacy colour codes (§) working. A disabled entry, or one with no lines, costs nothing.
+Nothing is uploaded or recorded: the lines are drawn on the local screen only."#]
     #[hook(
         side = "client",
         contract = "collect",

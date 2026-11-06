@@ -1,7 +1,7 @@
 //! `StringTagVisitor` (compact SNBT, `Tag.toString`) and Java's number
 //! formatting, below the text-component layer so that the protocol can hash
 //! a tag's string form.
-use crate::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `Double.toString`.
 pub fn java_double(v: f64) -> String {
@@ -94,7 +94,7 @@ fn unquoted_key(key: &str) -> bool {
     // `[A-Za-z._]+[A-Za-z0-9._+-]*`
     first_ok && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
 }
-pub fn string_of(t: &crate::nbt::JavaString) -> String {
+pub fn string_of(t: &horizon_core::nbt::JavaString) -> String {
     t.to_string_lossy()
 }
 

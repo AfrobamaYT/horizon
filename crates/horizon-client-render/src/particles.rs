@@ -4853,11 +4853,13 @@ mod tests {
     use super::*;
 
     fn with_empty_particle_level(test: impl FnOnce(&ParticleLevel<'_>)) {
-        use horizon_world::{
-            DATA_VERSION,
-            collision::CachedCollisionRegistry,
-            nbt::Tag,
-            registry::{BlockRegistry, BlockStateId},
+        use {
+            horizon_core::nbt::Tag,
+            horizon_world::{
+                DATA_VERSION,
+                collision::CachedCollisionRegistry,
+                registry::{BlockRegistry, BlockStateId},
+            },
         };
         let states = || Tag::List(vec![Tag::String("minecraft:air".into())]);
         let registry = BlockRegistry::from_nbt(&Tag::compound([
@@ -5482,11 +5484,13 @@ mod tests {
 
     #[test]
     fn mod_animation_advances_in_the_tick_with_and_without_curves() {
-        use horizon_world::{
-            DATA_VERSION,
-            collision::CachedCollisionRegistry,
-            nbt::Tag,
-            registry::{BlockRegistry, BlockStateId},
+        use {
+            horizon_core::nbt::Tag,
+            horizon_world::{
+                DATA_VERSION,
+                collision::CachedCollisionRegistry,
+                registry::{BlockRegistry, BlockStateId},
+            },
         };
         let registry = BlockRegistry::from_nbt(&Tag::compound([
             ("DataVersion", Tag::Int(DATA_VERSION)),
@@ -5578,11 +5582,13 @@ mod tests {
 
     #[test]
     fn mod_particle_ticks_motion_curves_and_removal() {
-        use horizon_world::{
-            DATA_VERSION,
-            collision::CachedCollisionRegistry,
-            nbt::Tag,
-            registry::{BlockRegistry, BlockStateId},
+        use {
+            horizon_core::nbt::Tag,
+            horizon_world::{
+                DATA_VERSION,
+                collision::CachedCollisionRegistry,
+                registry::{BlockRegistry, BlockStateId},
+            },
         };
         let registry = BlockRegistry::from_nbt(&Tag::compound([
             ("DataVersion", Tag::Int(DATA_VERSION)),

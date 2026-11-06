@@ -27,7 +27,7 @@ use super::{
     playerdata,
 };
 use crate::save::Level;
-use horizon_world::nbt::{Limits, Tag, read_named};
+use horizon_core::nbt::{Limits, Tag, read_named};
 use serde_json::Value;
 
 /// The parts of a record, in the order the replies list them.

@@ -133,8 +133,23 @@ struct NodeDef {
     hash: String,
     function: TokenStream,
     raw_fields: Vec<u32>,
+    raw_gets: Vec<u32>,
     raw_index: bool,
     refused_key: Option<String>,
+}
+
+fn raw_scalar(shape: &Shape) -> bool {
+    matches!(
+        shape,
+        Shape::Scalar(
+            Scalar::Bool
+                | Scalar::Char
+                | Scalar::Signed(_)
+                | Scalar::Unsigned(_)
+                | Scalar::Float(_)
+                | Scalar::Wide(_)
+        )
+    )
 }
 
 struct Gen<'r> {
@@ -588,7 +603,29 @@ impl<'r> Gen<'r> {
             self.nodes[id as usize].refused_key =
                 Some(spell(&args[0]).map_or_else(|| format!("{:?}", args[0]), |ty| ty.to_string()));
         }
+        let raw_gets = match shape {
+            Shape::Named(path, _) => {
+                let named = self.rule.named(path).expect("listed");
+                self.rule
+                    .fields(path)
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, field)| {
+                        (field.case.is_none()
+                            && raw_scalar(&self.rule.shape(&named.module, Some(path), field.ty)))
+                        .then_some(i as u32)
+                    })
+                    .collect()
+            }
+            Shape::Tuple(parts) => parts
+                .iter()
+                .enumerate()
+                .filter_map(|(i, part)| raw_scalar(part).then_some(i as u32))
+                .collect(),
+            _ => Vec::new(),
+        };
         self.nodes[id as usize].raw_fields = fields;
+        self.nodes[id as usize].raw_gets = raw_gets;
         self.nodes[id as usize].raw_index = match shape {
             Shape::Array(elem, _) | Shape::Slice(elem) => raw(elem),
             Shape::Collection(Collection::Vec, args) => raw(&args[0]),
@@ -658,11 +695,18 @@ impl<'r> Gen<'r> {
         get: TokenStream,
         set: TokenStream,
         ptr: TokenStream,
+        raw_get: bool,
     ) -> TokenStream {
         match self.rule.crossing_of(shape) {
             Crossing::Opaque => quote!(),
             Crossing::Copy(_) => {
                 let read = self.encode(shape, quote!(r));
+                let get = if raw_get {
+                    let ty = spell(shape).expect("scalar");
+                    quote!({ let value = ::std::ptr::read_unaligned((#ptr).cast::<#ty>()); let r = &value; Ok(I::Reply::Value(#read)) })
+                } else {
+                    quote!({ let r = #get; Ok(I::Reply::Value(#read)) })
+                };
                 let write = if buildable(shape, self.rule) {
                     let value = self.decode(shape, quote!(value));
                     let shape_rust = spell(shape).expect("copy");
@@ -681,7 +725,7 @@ impl<'r> Gen<'r> {
                     quote!()
                 };
                 quote! {
-                    I::Op::Get(#i) => { let r = #get; Ok(I::Reply::Value(#read)) }
+                    I::Op::Get(#i) => #get
                     #write
                 }
             }
@@ -750,7 +794,14 @@ impl<'r> Gen<'r> {
                             Self::matched(&rust, quote!(#path_ty::#case { #member: field, .. }))
                         }
                     };
-                    arms.push(self.part(i as u32, &part_shape, get, set, ptr));
+                    arms.push(self.part(
+                        i as u32,
+                        &part_shape,
+                        get,
+                        set,
+                        ptr,
+                        field.case.is_none() && raw_scalar(&part_shape),
+                    ));
                 }
                 let case = match &named.item {
                     syn::Item::Enum(item) => {
@@ -775,6 +826,7 @@ impl<'r> Gen<'r> {
                         quote!(&(*(p as *const #rust)).#index),
                         quote!(&mut (*(p as *mut #rust)).#index),
                         quote!(if w { &raw mut (*(p as *mut #rust)).#index as *mut () } else { &raw const (*(p as *const #rust)).#index as *mut () }),
+                        raw_scalar(part),
                     ));
                 }
                 quote!(#(#arms)*)
@@ -782,7 +834,7 @@ impl<'r> Gen<'r> {
             Shape::Option(inner) => {
                 let (get, set, ptr) =
                     Self::matched(&rust, quote!(::std::option::Option::Some(field)));
-                let some = self.part(0, inner, get, set, ptr);
+                let some = self.part(0, inner, get, set, ptr, false);
                 quote! {
                     I::Op::Case => Ok(I::Reply::Value(V::U((&*(p as *const #rust)).is_some() as u64))),
                     #some
@@ -982,6 +1034,7 @@ impl<'r> Gen<'r> {
                     quote!(&*(*(p as *const #rust)).#member),
                     quote!(&mut *(*(p as *mut #rust)).#member),
                     quote!(&raw mut *(*(p as *mut #rust)).#member as *mut ()),
+                    false,
                 )
             })
             .collect();
@@ -1022,6 +1075,7 @@ impl<'r> Gen<'r> {
                 quote!(&*(p as *const #rust)),
                 quote!(&mut *(p as *mut #rust)),
                 quote!(p),
+                false,
             );
             self.items.push(quote! {
                 #[allow(unused_variables, unused_unsafe, clippy::all)]
@@ -1724,7 +1778,7 @@ pub fn table_with_points(
     let types = generator
         .nodes
         .iter()
-        .map(|NodeDef { path, hash, function, raw_fields, raw_index, .. }| quote!(I::Type { path: #path, hash: #hash, node: #function, raw_fields: &[#(#raw_fields),*], raw_index: #raw_index },));
+        .map(|NodeDef { path, hash, function, raw_fields, raw_gets, raw_index, .. }| quote!(I::Type { path: #path, hash: #hash, node: #function, raw_fields: &[#(#raw_fields),*], raw_gets: &[#(#raw_gets),*], raw_index: #raw_index },));
     let items = &generator.items;
     let code = quote! {
         #![allow(unsafe_code, unused_unsafe, unused_parens, non_snake_case, dead_code)]
@@ -2086,6 +2140,7 @@ pub(crate) mod tests {
                     let Reply::Node(left, ty, _) = (collection.node)(p, true, Op::Index(0)).unwrap() else { panic!("left") };
                     let Reply::Node(right, _, _) = (collection.node)(p, true, Op::Index(1)).unwrap() else { panic!("right") };
                     let pair = &table.types[ty as usize];
+                    assert_eq!(pair.raw_gets, &[0]);
                     assert!((pair.node)(left, true, Op::Check(0, &Value::B(true))).is_err());
                     assert_eq!((pair.node)(left, true, Op::Check(0, &Value::U(7))), Ok(Reply::Done));
                     assert_eq!((pair.node)(left, true, Op::Set(0, Value::U(7))), Ok(Reply::Done));

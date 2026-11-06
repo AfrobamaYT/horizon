@@ -281,11 +281,11 @@ impl crate::light::LightWorld for ChunkMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_core::nbt::Tag;
     use horizon_world::attachments::{
         AttachmentCodec, AttachmentType, index::AttachmentIndex,
         observer::IndexedAttachmentObserver,
     };
-    use horizon_world::nbt::Tag;
     use mod_api::{AttachmentHolder, ChunkRef, LevelRef, NativeWorldEpoch};
     use std::sync::{Mutex, Weak, atomic::AtomicUsize};
 

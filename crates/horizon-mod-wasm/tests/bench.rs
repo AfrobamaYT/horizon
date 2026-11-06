@@ -11,6 +11,8 @@ use mod_api::__private::game::Fields;
 use mod_api::__private::wasm_host::{Budgets, Fuel};
 use mod_api::{Hooks, Host, LevelRef, NativeWorldEpoch, ServerChatEvent, ServerHost, Text};
 
+#[path = "bench/internals/src/allocations.rs"]
+mod allocations;
 #[path = "bench/hook/src/lib.rs"]
 mod bench_mod;
 #[path = "bench/internals.rs"]

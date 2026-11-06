@@ -83,6 +83,8 @@ pub struct Hook {
     pub name: String,
     /// The rustdoc of its trait method.
     pub doc: String,
+    /// The prose of `docs/modding/src/reference/hook-notes.md` for this hook, heading included.
+    pub notes: Option<String>,
     pub side: Side,
     /// The game function that fires it.
     pub target: String,
@@ -112,6 +114,8 @@ pub struct Helper {
     pub name: String,
     pub target: String,
     pub side: Side,
+    /// The prose of `docs/modding/src/reference/hook-notes.md` for this helper, heading included.
+    pub notes: Option<String>,
     /// The both-side helper's client implementation, when it differs from `target`.
     pub client_target: Option<String>,
     /// The handle the helper is also a method of.
@@ -241,6 +245,7 @@ struct HookEntry {
     #[serde(rename = "name")]
     _name: String,
     doc: Option<String>,
+    notes: Option<String>,
     side: Side,
     target: String,
     mod_api: ModApiEntry,
@@ -315,6 +320,7 @@ impl Hook {
         Ok(Self {
             name,
             doc,
+            notes: entry.notes,
             side: entry.side,
             target: entry.target,
             contract: api.contract,
@@ -381,6 +387,8 @@ pub struct Catalog {
     pub hooks: Vec<Hook>,
     pub helpers: Vec<Helper>,
     pub draw_contexts: Vec<DrawContext>,
+    /// Prose that belongs to no one hook or helper, from the `Notes` trait's `#[notes]`.
+    pub general_notes: Option<String>,
 }
 
 /// Where the declarations live, relative to the checkout root.
@@ -436,6 +444,26 @@ fn arguments(
     Ok(Some(map))
 }
 
+/// The `#[name = "..."]` string attributes on a declaration, in order, joined by a blank line.
+fn string_attribute(attrs: &[syn::Attribute], name: &str) -> Result<Option<String>, String> {
+    let mut values = Vec::new();
+    for attr in attrs.iter().filter(|a| a.path().is_ident(name)) {
+        let syn::Meta::NameValue(syn::MetaNameValue {
+            value:
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(text),
+                    ..
+                }),
+            ..
+        }) = &attr.meta
+        else {
+            return Err(format!("#[{name}] takes a string"));
+        };
+        values.push(text.value());
+    }
+    Ok((!values.is_empty()).then(|| values.join("\n\n")))
+}
+
 /// The rustdoc of a declaration: its `///` lines, one leading space off each, joined by newlines.
 fn doc(attrs: &[syn::Attribute]) -> Option<String> {
     let lines: Vec<String> = attrs
@@ -465,6 +493,7 @@ struct Declared {
     hooks: Vec<serde_json::Value>,
     helpers: Vec<serde_json::Value>,
     draw_contexts: Vec<serde_json::Value>,
+    general_notes: Vec<String>,
 }
 
 impl Declared {
@@ -491,6 +520,14 @@ impl Declared {
                     )));
                 };
                 let name = function.sig.ident.to_string();
+                if kind == "Notes" {
+                    if let Some(notes) = string_attribute(&function.attrs, "notes")
+                        .map_err(|e| invalid(format!("{name}: {e}")))?
+                    {
+                        self.general_notes.push(notes);
+                    }
+                    continue;
+                }
                 let attribute = match kind.as_str() {
                     "Hooks" => "hook",
                     "Helpers" => "helper",
@@ -505,6 +542,11 @@ impl Declared {
                 entry
                     .entry("target")
                     .or_insert_with(|| default_target(&name, area).into());
+                if let Some(notes) = string_attribute(&function.attrs, "notes")
+                    .map_err(|e| invalid(format!("{name}: {e}")))?
+                {
+                    entry.insert("notes".into(), notes.into());
+                }
                 match kind.as_str() {
                     "Hooks" => {
                         entry.insert("name".into(), name.clone().into());
@@ -670,6 +712,8 @@ impl Catalog {
             hooks,
             helpers,
             draw_contexts,
+            general_notes: (!declared.general_notes.is_empty())
+                .then(|| declared.general_notes.join("\n\n")),
         })
     }
 }
@@ -681,6 +725,7 @@ impl Hook {
         Self {
             name: "test".into(),
             doc: "Test.".into(),
+            notes: None,
             side,
             target: target.into(),
             contract: Contract::Listen,

@@ -355,7 +355,8 @@ impl Game<'_> {
         title.set_rule_registry(Arc::new(mod_api::__private::game_rule_registry()));
         self.show_title_with_registry(title);
     }
-    pub(super) fn show_title_with_registry(&mut self, title: horizon_client::title::Title) {
+    pub(super) fn show_title_with_registry(&mut self, mut title: horizon_client::title::Title) {
+        title.set_additional_data_packs(self.pack.additional_data.clone());
         if !self.screen_hooks_heard() {
             self.title = Some(title);
             return;
@@ -3814,10 +3815,7 @@ mod tests {
                 surface: &mut batch,
             };
             // A server's HUD atlas is metrics-only (upstream 2e5a2629a): no sprite sheets,
-            // so sprite sizes answer None there, while an upper-case A still advances
-            // 6 GUI pixels.
-            assert_eq!(draw.sprite_size("font/ascii"), None);
-            assert_eq!(draw.sprite_size("mymod:no_such_sprite"), None);
+            // while an upper-case A still advances 6 GUI pixels.
             assert_eq!(draw.text_width("AA"), 12.0);
             assert_eq!(draw.text_width(""), 0.0);
         });
@@ -4274,6 +4272,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -4376,6 +4375,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -4485,6 +4485,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -4900,7 +4901,7 @@ mod tests {
 
     #[test]
     fn lifecycle_source_stays_hookable() {
-        let source = include_str!("../native_lifecycle.rs");
+        let source = include_str!("../modding/native_lifecycle.rs");
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
             assert!(!line.contains("cfg"), "a cfg in lifecycle source: {line}");

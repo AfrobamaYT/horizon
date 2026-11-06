@@ -116,6 +116,7 @@ pub fn table() -> &'static Table {
                 hash: "6957fb66139038f6ab07ec4121dc6253b9f31532f1f3e45450b5439e695da605",
                 node: game,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
             Type {
@@ -123,6 +124,7 @@ pub fn table() -> &'static Table {
                 hash: "",
                 node: record,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
             Type {
@@ -130,6 +132,7 @@ pub fn table() -> &'static Table {
                 hash: "small-hash",
                 node: small,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             },
         ],

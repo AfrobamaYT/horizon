@@ -22,4 +22,18 @@ pub trait Helpers {
         target = "horizon_client::game::native_components::Game<'_>::native_item_has_enchantment_effect"
     )]
     fn item_has_enchantment_effect();
+    /// Whether enchantments `a` and `b` (ids, `minecraft:sharpness`) may be on one item
+    /// (`Enchantment.areCompatible`), by the world's enchantment definitions, data packs' included:
+    /// false for the same enchantment twice or where either lists the other as exclusive; an id
+    /// that names no enchantment excludes nothing.
+    #[notes = r#"## Enchantment conflicts
+
+`Host::enchantments_compatible(a, b)` answers `Enchantment.areCompatible` from the world's
+enchantment definitions, so a data pack's `exclusive_set` counts. A mod that adds an enchantment
+to a stack asks it for each enchantment already on it, as the enchanting table and the anvil do."#]
+    #[helper(
+        side = "both",
+        target = "horizon_client::game::native_components::Game<'_>::native_enchantments_compatible"
+    )]
+    fn enchantments_compatible();
 }

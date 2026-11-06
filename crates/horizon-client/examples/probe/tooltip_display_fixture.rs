@@ -1,6 +1,6 @@
 //! Tooltip display visibility oracle companion for tools/test_tooltip_display_parity.py.
 use horizon_client::{item_tooltip::TooltipDisplay, items::ItemStack};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::{error::Error, fmt::Write};
 
 pub fn main() -> Result<(), Box<dyn Error>> {

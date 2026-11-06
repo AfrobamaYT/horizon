@@ -948,8 +948,8 @@ pub fn can_breed(m: &Mob) -> bool {
 
 /// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`,
 /// `LivingEntity`'s `sleeping_pos` and the sleep and golem memories).
-pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn write_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     if let Some(p) = sleeping_pos(m) {
         map.insert("sleeping_pos".into(), Tag::IntArray(p.to_vec()));
     } else {
@@ -969,8 +969,8 @@ pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
     );
 }
 /// The memories of `Brain.memories` the villager keeps besides positions.
-pub fn write_memories(m: &Mob, memories: &mut Vec<(&'static str, horizon_world::nbt::Tag)>) {
-    use horizon_world::nbt::Tag;
+pub fn write_memories(m: &Mob, memories: &mut Vec<(&'static str, horizon_core::nbt::Tag)>) {
+    use horizon_core::nbt::Tag;
     let Some(e) = ext(m) else { return };
     if let Some(t) = e.last_slept {
         memories.push((
@@ -979,8 +979,8 @@ pub fn write_memories(m: &Mob, memories: &mut Vec<(&'static str, horizon_world::
         ));
     }
 }
-pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
-    use horizon_world::nbt::Tag;
+pub fn read_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
     let int = |t: Option<&Tag>| match t {
         Some(Tag::Int(v)) => Some(i64::from(*v)),
         Some(Tag::Byte(v)) => Some(i64::from(*v)),
@@ -1161,22 +1161,22 @@ mod tests {
         let mut m = villager();
         m.extra.ints[1] = bed_facing_code(Some("north"));
         ext_mut(&mut m).sleeping_pos = Some([3, 64, -7]);
-        let mut map = horizon_world::nbt::Compound::new();
+        let mut map = horizon_core::nbt::Compound::new();
         write_nbt(&m, &mut map);
         let mut loaded = villager();
-        read_nbt(&mut loaded, &horizon_world::nbt::Tag::Compound(map));
+        read_nbt(&mut loaded, &horizon_core::nbt::Tag::Compound(map));
         assert!(sleeping(&loaded));
         assert_eq!(sleeping_pos(&loaded), Some([3, 64, -7]));
         let mut awake = villager();
-        let mut map = horizon_world::nbt::Compound::new();
+        let mut map = horizon_core::nbt::Compound::new();
         write_nbt(&awake, &mut map);
         assert!(!map.contains_key(&"sleeping_pos".into()));
-        read_nbt(&mut awake, &horizon_world::nbt::Tag::Compound(map));
+        read_nbt(&mut awake, &horizon_core::nbt::Tag::Compound(map));
         assert!(!sleeping(&awake));
     }
     #[test]
     fn saved_sleeping_position_follows_live_state_over_stale_input() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         for asleep in [false, true] {
             let mut m = villager();
             if asleep {
@@ -1185,7 +1185,7 @@ mod tests {
             }
             let expected = asleep.then_some(Tag::IntArray(vec![3, 64, -7]));
             for stale in [false, true] {
-                let mut map = horizon_world::nbt::Compound::new();
+                let mut map = horizon_core::nbt::Compound::new();
                 map.insert("h232_control".into(), Tag::Int(42));
                 if stale {
                     map.insert("sleeping_pos".into(), Tag::IntArray(vec![9, 90, 9]));

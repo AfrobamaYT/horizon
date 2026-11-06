@@ -16,7 +16,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
-use crate::nbt::{Compound, JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 
 /// An attachment operation could not be completed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,9 +61,24 @@ pub enum Holder {
     Level,
 }
 
+/// Whether borrowing a map may create publication authority for a new value.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AttachmentAccess {
+    /// Inspection, removal or sync: never create a registration.
+    Existing,
+    /// A validated value is about to be stored, including an inserted default.
+    Store,
+}
+
 /// The game's access to each holder's map: every [`AttachmentStore`] answers through it.
 pub trait AttachmentHost {
-    fn attachments(&mut self, holder: Holder) -> Result<&mut Attachments, AttachmentError>;
+    fn attachments(
+        &mut self,
+        holder: Holder,
+        access: AttachmentAccess,
+    ) -> Result<&mut Attachments, AttachmentError>;
 }
 
 /// A value of a mod's own type, as the holder keeps it: shared, so a copy of the holder's map
@@ -157,7 +172,7 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         name: &str,
     ) -> Result<bool, AttachmentError> {
         Ok(Attachments::holds(
-            self.attachments(holder)?,
+            self.attachments(holder, AttachmentAccess::Existing)?,
             namespace,
             name,
         ))
@@ -168,7 +183,11 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         namespace: &str,
         name: &str,
     ) -> Result<Option<AttachmentValue>, AttachmentError> {
-        Attachments::decoded(self.attachments(holder)?, namespace, name)
+        Attachments::decoded(
+            self.attachments(holder, AttachmentAccess::Existing)?,
+            namespace,
+            name,
+        )
     }
     fn saved(
         &mut self,
@@ -176,7 +195,11 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         namespace: &str,
         name: &str,
     ) -> Result<Option<Compound>, AttachmentError> {
-        Attachments::saved(self.attachments(holder)?, namespace, name)
+        Attachments::saved(
+            self.attachments(holder, AttachmentAccess::Existing)?,
+            namespace,
+            name,
+        )
     }
     fn store(
         &mut self,
@@ -192,7 +215,7 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
             write,
         } = form;
         Attachments::store(
-            self.attachments(holder)?,
+            self.attachments(holder, AttachmentAccess::Store)?,
             namespace,
             name,
             Decoded {
@@ -211,7 +234,12 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         name: &str,
         sync: bool,
     ) -> Result<(), AttachmentError> {
-        Attachments::discard(self.attachments(holder)?, namespace, name, sync);
+        Attachments::discard(
+            self.attachments(holder, AttachmentAccess::Existing)?,
+            namespace,
+            name,
+            sync,
+        );
         Ok(())
     }
     fn queue_sync(
@@ -220,7 +248,11 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         namespace: &str,
         name: &str,
     ) -> Result<(), AttachmentError> {
-        Attachments::queue_sync(self.attachments(holder)?, namespace, name);
+        Attachments::queue_sync(
+            self.attachments(holder, AttachmentAccess::Existing)?,
+            namespace,
+            name,
+        );
         Ok(())
     }
 }
@@ -581,7 +613,11 @@ impl fmt::Debug for Attachments {
 
 /// A lone map answers for any holder.
 impl AttachmentHost for Attachments {
-    fn attachments(&mut self, _: Holder) -> Result<&mut Attachments, AttachmentError> {
+    fn attachments(
+        &mut self,
+        _: Holder,
+        _: AttachmentAccess,
+    ) -> Result<&mut Attachments, AttachmentError> {
         Ok(self)
     }
 }
@@ -599,6 +635,14 @@ impl Attachments {
     #[doc(hidden)]
     pub fn has_index_binding(&self) -> bool {
         self.registration.is_some()
+    }
+
+    /// Detach and retire a publisher when its owning boundary rolls back a binding.
+    #[doc(hidden)]
+    pub fn unbind_index(&mut self) {
+        if let Some(registration) = self.registration.take() {
+            registration.unregister();
+        }
     }
 
     /// Install this authoritative map in key order, invalidating any prior binding
@@ -1547,7 +1591,11 @@ mod tests {
     fn sync_data_reports_the_current_value() {
         struct One(Attachments);
         impl AttachmentHost for One {
-            fn attachments(&mut self, _: Holder) -> Result<&mut Attachments, AttachmentError> {
+            fn attachments(
+                &mut self,
+                _: Holder,
+                _: AttachmentAccess,
+            ) -> Result<&mut Attachments, AttachmentError> {
                 Ok(&mut self.0)
             }
         }

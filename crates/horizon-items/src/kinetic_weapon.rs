@@ -1,7 +1,7 @@
 //! The pose timing projected once from a kinetic component at its load boundary.
 use crate::items::ItemStack;
-use horizon_world::{datafix::dynamic::as_number, nbt::Tag};
 use serde_json::Value;
+use {horizon_core::nbt::Tag, horizon_world::datafix::dynamic::as_number};
 
 /// The fields read by `SpearAnimations.UseParams`, not combat or sound data.
 #[derive(Clone, Copy, Debug, PartialEq)]

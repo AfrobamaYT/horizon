@@ -8,13 +8,8 @@ impl Game<'_> {
     pub(in crate::game) fn native_text_width(&self, _draw: &HudBatch, text: &str) -> f32 {
         HudBatch::text_width(&self.gui.atlas, text)
     }
-    /// The size of sprite `name` in its own pixels, as `native_sprite` draws it on `draw`, if
-    /// there is one.
-    pub(in crate::game) fn native_sprite_size(
-        &self,
-        _draw: &HudBatch,
-        name: &str,
-    ) -> Option<[f32; 2]> {
+    /// The size of a GUI atlas sprite in its own pixels, if present.
+    pub(in crate::game) fn gui_sprite_pixels(&self, name: &str) -> Option<[f32; 2]> {
         let r = self.gui.atlas.sprites.get(name)?;
         Some([r.w as f32, r.h as f32])
     }

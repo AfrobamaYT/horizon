@@ -6,7 +6,7 @@ pub trait Hooks {
         side = "server",
         contract = "replace",
         out = "applicable",
-        neoforge = "MobEffectEvent.Applicable (result: ALLOW forces, DENY refuses, DEFAULT defers to the vanilla tag check)",
+        neoforge = "MobEffectEvent.Applicable",
         cancellable = false
     )]
     fn mob_effect_applicable();
@@ -16,7 +16,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         host = "read",
-        neoforge = "MobEffectEvent.Expired (cancellable)",
+        neoforge = "MobEffectEvent.Expired",
         cancellable = true
     )]
     fn mob_effect_expired();
@@ -25,7 +25,7 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "MobEffectEvent.Remove (cancellable)",
+        neoforge = "MobEffectEvent.Remove",
         cancellable = true
     )]
     fn mob_effect_remove();

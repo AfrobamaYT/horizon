@@ -505,7 +505,7 @@ impl StructureState {
                     name: start.name,
                     chunk,
                     pieces: Vec::new(),
-                    bounding_box: crate::worldgen::structure::BoundingBox::new(
+                    bounding_box: horizon_core::bounding_box::BoundingBox::new(
                         [x0, y0, z0],
                         [x1, y1, z1],
                     ),
@@ -515,12 +515,13 @@ impl StructureState {
         Arc::new(starts)
     }
     /// A saved `minecraft:jigsaw` piece, or `None` for any other piece or one that does not decode.
-    fn saved_pool_piece(&self, piece: &crate::nbt::Tag) -> Option<Piece> {
-        let crate::nbt::Tag::Compound(map) = piece else {
+    fn saved_pool_piece(&self, piece: &horizon_core::nbt::Tag) -> Option<Piece> {
+        let horizon_core::nbt::Tag::Compound(map) = piece else {
             return None;
         };
         let id = map.get(&"id".into())?;
-        if !matches!(id, crate::nbt::Tag::String(s) if s.to_string_lossy() == "minecraft:jigsaw") {
+        if !matches!(id, horizon_core::nbt::Tag::String(s) if s.to_string_lossy() == "minecraft:jigsaw")
+        {
             return None;
         }
         PoolPiece::from_saved(&tag_json(piece), &self.resources, &self.bindings)
@@ -530,15 +531,15 @@ impl StructureState {
     /// A saved piece, as `StructureStart.loadStaticStart` loads it: a jigsaw
     /// piece from `PoolPiece::from_saved`, a mod type's piece from its
     /// `load_piece` (the `StructurePieceType` is the loader), none otherwise.
-    fn saved_piece(&self, piece: &crate::nbt::Tag) -> Option<Piece> {
+    fn saved_piece(&self, piece: &horizon_core::nbt::Tag) -> Option<Piece> {
         if let Some(pool) = self.saved_pool_piece(piece) {
             return Some(pool);
         }
-        let crate::nbt::Tag::Compound(map) = piece else {
+        let horizon_core::nbt::Tag::Compound(map) = piece else {
             return None;
         };
         let id = match map.get(&"id".into()) {
-            Some(crate::nbt::Tag::String(s)) => s.to_string_lossy(),
+            Some(horizon_core::nbt::Tag::String(s)) => s.to_string_lossy(),
             _ => return None,
         };
         let types = super::structure::mod_types::mod_structure_types();
@@ -828,7 +829,7 @@ impl StructureState {
 
 /// The union of the pieces' boxes as `[min x, min y, min z, max x, max y, max z]`.
 fn pieces_box(pieces: &[Piece]) -> Option<[i32; 6]> {
-    let mut union: Option<crate::worldgen::structure::BoundingBox> = None;
+    let mut union: Option<horizon_core::bounding_box::BoundingBox> = None;
     for piece in pieces {
         let b = piece.bounding_box();
         match union.as_mut() {
@@ -840,8 +841,8 @@ fn pieces_box(pieces: &[Piece]) -> Option<[i32; 6]> {
 }
 /// A saved piece's tag as the JSON `PoolPiece::from_saved` reads: compounds and lists as they
 /// are, numbers as numbers.
-fn tag_json(tag: &crate::nbt::Tag) -> Value {
-    use crate::nbt::Tag;
+fn tag_json(tag: &horizon_core::nbt::Tag) -> Value {
+    use horizon_core::nbt::Tag;
     match tag {
         Tag::Byte(v) => Value::from(i64::from(*v)),
         Tag::Short(v) => Value::from(i64::from(*v)),

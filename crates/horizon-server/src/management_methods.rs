@@ -1,7 +1,7 @@
 //! The methods of vanilla's management protocol (`management.rs`), as vanilla 26.3's `methods/*Service` answer
 //! them: the players, the server's state, and the lists. Kicks, saves and messages go through the game's
 //! console, so they log and save as an operator's command would; the lists change through the game's
-//! `management` request (game/dedicated/management.rs), which finds the players and sends the shut-out away as
+//! `management` request (game/interface/dedicated/management.rs), which finds the players and sends the shut-out away as
 //! vanilla's services do.
 
 use crate::{

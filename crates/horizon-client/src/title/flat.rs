@@ -10,7 +10,7 @@ use crate::{
     ui,
 };
 use horizon_assets::item_model::{DisplayContext, ItemEnv};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use serde_json::Value;
 use std::{collections::BTreeSet, path::Path};
 

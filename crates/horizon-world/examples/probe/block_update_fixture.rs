@@ -7,20 +7,23 @@ use horizon_core::{
     position::{BlockPos, ChunkPos},
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::{
-    level::{
-        Behaviours, Dimension, EntityQuery, GameRules, LevelAccess, LevelEvent, Ticks,
-        data::load_registry,
-        removal::{PreRemove, drop_item_stack, pre_remove},
-    },
-    registry::BlockStateId,
-};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Write as _,
     io::{BufRead, Write},
     path::Path,
+};
+use {
+    horizon_core::dimension::Dimension,
+    horizon_world::{
+        level::{
+            Behaviours, EntityQuery, GameRules, LevelAccess, LevelEvent, Ticks,
+            data::load_registry,
+            removal::{PreRemove, drop_item_stack, pre_remove},
+        },
+        registry::BlockStateId,
+    },
 };
 
 struct Cells {
@@ -435,7 +438,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // `BrushableBlockEntity.checkReset` has nothing to reset. A
                 // fresh structure block has no structure name, so its trigger
                 // neither saves nor loads. A test block's trigger and reset
-                // live on its block entity: `game/test_blocks.rs` runs them.
+                // live on its block entity: `game/administration/test_blocks.rs` runs them.
                 // `Block.pushEntitiesUp` lifts only the entities in the new
                 // block's box, and these cases have none: nothing moves.
                 LevelEvent::BlockEvent {

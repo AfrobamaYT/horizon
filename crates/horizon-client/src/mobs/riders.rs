@@ -2,13 +2,13 @@
 //! vehicle (`EntityAttachments`), the rider steering the vehicle toward its
 //! target (`Mob.getControllingPassenger`, whose navigation and move control
 //! the rider's goals use), and the saved jockey fields. The game links the
-//! two (`game/passengers.rs`) and spawns the jockeys.
+//! two (`game/entities/passengers.rs`) and spawns the jockeys.
 use super::{
     Mob, MobWorld, Seen, Species,
     goals::{JUMP, LOOK, MOVE, TARGET},
 };
 use horizon_core::geometry::{Aabb, Vec3};
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 
 /// The goal flags a controlling passenger takes from its vehicle.
 const CONTROLLED: u8 = MOVE | JUMP | LOOK;

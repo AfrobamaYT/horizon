@@ -5,7 +5,7 @@
 //! slot (`getItemBySlot`), with the sound and the crumbs.
 use super::Mob;
 use crate::items::ItemStack;
-use horizon_world::player_inventory::EquipmentSlot;
+use horizon_core::equipment_slot::EquipmentSlot;
 
 /// `LivingEntity.handleEntityEvent` 47 to 52, 65 and 68: the slot whose
 /// item broke (the inverse of `entityEventForEquipmentBreak`).

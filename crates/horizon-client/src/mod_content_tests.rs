@@ -431,6 +431,30 @@ fn block_items_patch_their_template_item() {
 }
 
 #[test]
+fn conditional_base_tag_does_not_gate_later_accepted_layers() {
+    let base = r#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"code_only"}],"values":["minecraft:stone"]}"#;
+    let more = [J::Str("minecraft:dirt".into())];
+    for enabled in [false, true] {
+        let merged: serde_json::Value = serde_json::from_str(
+            &merge_tag(Some(base), &more, "conditional", &|id| {
+                enabled && id == "code_only"
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            merged["values"],
+            if enabled {
+                serde_json::json!(["minecraft:stone", "minecraft:dirt"])
+            } else {
+                serde_json::json!(["minecraft:dirt"])
+            }
+        );
+        assert!(merged.get("neoforge:conditions").is_none());
+    }
+}
+
+#[test]
 fn tags_merge_without_repeats() {
     let vanilla = r#"{"values": ["minecraft:stone"]}"#;
     let more = [
@@ -438,7 +462,7 @@ fn tags_merge_without_repeats() {
         J::Str("minecraft:stone".into()),
     ];
     let merged: serde_json::Value =
-        serde_json::from_str(&merge_tag(Some(vanilla), &more, "t").unwrap()).unwrap();
+        serde_json::from_str(&merge_tag(Some(vanilla), &more, "t", &|_| false).unwrap()).unwrap();
     assert_eq!(
         merged["values"],
         serde_json::json!(["minecraft:stone", "ruby:ruby_block"])
@@ -833,7 +857,7 @@ fn content_root_loads_with_every_table() {
     .unwrap();
 
     let files = content_files(&resources);
-    let overlay = PackOverlay { files: &files };
+    let overlay = PackOverlay::new(&files);
     let vanilla = Assets::load(&base).unwrap();
     let assets = Assets::load(&root).unwrap();
     let (old, new) = (vanilla.registry, assets.registry);
@@ -2452,6 +2476,84 @@ fn mods_sharing_a_namespace_are_refused() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn conditional_tag_layers_replace_only_when_server_inventory_accepts_them() {
+    let Some(base) = prepared() else { return };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-tag-conditions-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let file = "data/minecraft/tags/block/conditional_probe.json";
+    let packages = [
+        ("lower", r#"{"values":["minecraft:stone"]}"#),
+        (
+            "conditional",
+            r#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"code_only"}],"replace":true,"values":["minecraft:dirt"]}"#,
+        ),
+        (
+            "unsupported",
+            r#"{"neoforge:conditions":[{"type":"unknown:condition"}],"replace":true}"#,
+        ),
+        ("tail", r#"{"values":["minecraft:gold_block"]}"#),
+    ];
+    let mods: Vec<_> = packages
+        .into_iter()
+        .map(|(id, tag)| {
+            folder_mod(
+                &scratch.join(id),
+                &[("horizon-mod.toml", &manifest(id, "")), (file, tag)],
+            )
+        })
+        .collect();
+    let inventory = |side: Option<horizon_mods::Side>| {
+        horizon_mods::enabled::EnabledMods::new(
+            mods.iter()
+                .map(|m| (m.id.clone(), horizon_mods::Side::Both))
+                .chain(side.map(|side| ("code_only".into(), side))),
+        )
+    };
+    let cache = scratch.join("cache");
+    let read = |root: &Path| -> serde_json::Value {
+        serde_json::from_slice(&fs::read(root.join(file)).unwrap()).unwrap()
+    };
+    let off = super::resource_root(&base, Path::new(""), &mods, &cache, &inventory(None)).unwrap();
+    assert_eq!(
+        read(&off)["values"],
+        serde_json::json!(["minecraft:stone", "minecraft:gold_block"])
+    );
+    let on = super::resource_root(
+        &base,
+        Path::new(""),
+        &mods,
+        &cache,
+        &inventory(Some(horizon_mods::Side::Both)),
+    )
+    .unwrap();
+    assert_ne!(on, off, "code-only IDs invalidate the flattened tag cache");
+    assert_eq!(
+        read(&on)["values"],
+        serde_json::json!(["minecraft:dirt", "minecraft:gold_block"])
+    );
+    assert!(read(&on).get("neoforge:conditions").is_none());
+    let client = super::resource_root(
+        &base,
+        Path::new(""),
+        &mods,
+        &cache,
+        &inventory(Some(horizon_mods::Side::Client)),
+    )
+    .unwrap();
+    assert_eq!(read(&client)["values"], read(&off)["values"]);
+    let again =
+        super::resource_root(&base, Path::new(""), &mods, &cache, &inventory(None)).unwrap();
+    assert_eq!(again, off);
+    assert_eq!(
+        read(&off)["values"],
+        serde_json::json!(["minecraft:stone", "minecraft:gold_block"])
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
 /// Mods merge into a tag in load order, as data packs do: each adds its
 /// values, and one that replaces drops what came before it, with a warning
 /// naming what it dropped.
@@ -3046,9 +3148,9 @@ fn connecting_blocks_join_themselves_and_their_tag() {
 #[ignore = "full content root: CI and pr_ready run it"]
 fn an_old_chunks_saved_village_comes_back_with_its_pieces() {
     use horizon_core::position::ChunkPos;
-    use horizon_world::{
-        nbt::Tag,
-        worldgen::blending::{OldWorld, SavedStart},
+    use {
+        horizon_core::nbt::Tag,
+        horizon_world::worldgen::blending::{OldWorld, SavedStart},
     };
     let Some(base) = prepared() else {
         return;
@@ -3278,7 +3380,7 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
     )
     .unwrap();
     let files = content_files(&resources);
-    let overlay = PackOverlay { files: &files };
+    let overlay = PackOverlay::new(&files);
     let assets = Assets::load(&root).unwrap();
     let new = assets.registry;
     let facts = BlockFacts::load(&root, new).unwrap();
@@ -6006,7 +6108,7 @@ fn a_data_mod_loads_unloads_and_loads_again() {
         )
         .unwrap();
         let files = content_files(&resources);
-        let overlay = PackOverlay { files: &files };
+        let overlay = PackOverlay::new(&files);
         let assets = Assets::load(root).unwrap();
         let facts = BlockFacts::load(root, assets.registry).unwrap();
         let defaults = horizon_world::item_defaults::read(root).unwrap();

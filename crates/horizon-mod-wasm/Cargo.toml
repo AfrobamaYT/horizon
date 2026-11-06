@@ -14,6 +14,11 @@ wasmtime = { version = "50", default-features = false, features = ["anyhow", "cr
 wit-component = "0.261"
 log = "0.4"
 
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+heck = "0.5"
+wit-parser = "0.261"
+
 [dev-dependencies]
 # A component built in the test, importing a function this game doesn't have.
 wasm-encoder = "0.261"

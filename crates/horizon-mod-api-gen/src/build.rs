@@ -9,33 +9,30 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     track(root)?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
-        Target::Client => {
-            let mut modules = String::new();
-            for path in native_hook_files(root)? {
-                let module = path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .ok_or_else(|| {
-                        format!("{}: invalid native hook module name", path.display())
-                    })?;
-                if matches!(module, "mod" | "shared") {
-                    continue;
-                }
-                syn::parse_str::<syn::Ident>(module).map_err(|e| e.to_string())?;
-                let path = fs::canonicalize(&path).map_err(|e| e.to_string())?;
-                modules.push_str(&format!("#[path = {path:?}] mod {module};\n"));
-            }
-            fs::write(out_dir.join("native_hook_modules.rs"), modules)
-                .map_err(|e| e.to_string())?;
-            vec![
-                ("mod_api_host_generated.rs", generated.implementation),
-                ("mod_api_fire_generated.rs", generated.fire),
-                // The mob tick's goal read view (#1077), included beside the
-                // engine's `GoalCx` in `mobs/part_goals.rs`.
-                ("mod_api_goal_view_generated.rs", generated.goal_view),
-            ]
-        }
+        Target::Client => vec![
+            (
+                "game_modules.rs",
+                super::game_modules::declarations(&root.join("crates/horizon-client/src/game"))?,
+            ),
+            ("native_hook_modules.rs", native_hook_modules(root)?),
+            (
+                "lan_action_modules.rs",
+                super::game_modules::lan_action_modules(
+                    &root.join("crates/horizon-client/src/game/network/lan_actions"),
+                )?,
+            ),
+            ("mod_api_host_generated.rs", generated.implementation),
+            ("mod_api_fire_generated.rs", generated.fire),
+            // The mob tick's goal read view (#1077), included beside the
+            // engine's `GoalCx` in `mobs/part_goals.rs`.
+            ("mod_api_goal_view_generated.rs", generated.goal_view),
+        ],
         Target::Api => {
+            fs::write(
+                out_dir.join(super::part_table::OUTPUT),
+                super::part_table::source(root)?,
+            )
+            .map_err(|e| e.to_string())?;
             for (name, code) in super::exports::sources(root)? {
                 fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
             }
@@ -73,6 +70,23 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
+}
+
+pub(crate) fn native_hook_modules(root: &Path) -> Result<String, String> {
+    let mut modules = String::new();
+    for path in native_hook_files(root)? {
+        let module = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| format!("{}: invalid native hook module name", path.display()))?;
+        if matches!(module, "mod" | "shared") {
+            continue;
+        }
+        syn::parse_str::<syn::Ident>(module).map_err(|e| e.to_string())?;
+        let path = fs::canonicalize(&path).map_err(|e| e.to_string())?;
+        modules.push_str(&format!("#[path = {path:?}] mod {module};\n"));
+    }
+    Ok(modules)
 }
 
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and the `Points` trait,
@@ -127,6 +141,7 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join(super::exports::DIRECTORY), "rs", false)?;
+    directory(&root.join(super::part_table::DIRECTORY), "rs", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
     println!(
         "cargo:rerun-if-changed={}",

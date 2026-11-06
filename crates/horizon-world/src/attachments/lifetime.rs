@@ -39,6 +39,11 @@ macro_rules! impl_attachment_lifetime {
 }
 
 impl AttachmentLifetime {
+    /// Whether this entity owns a registration.
+    pub fn is_bound(&self) -> bool {
+        self.registration.is_some()
+    }
+
     /// Take lifetime ownership of an authoritative map's registration. Rebinding
     /// the map creates a new generation before replacing an old slot, so destruction
     /// of that old slot cannot retire the replacement.

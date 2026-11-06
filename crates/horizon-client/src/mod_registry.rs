@@ -9,7 +9,7 @@
 //!
 //! The launcher is a separate workspace, so this is the small part of it the
 //! game needs. Everything here blocks: the game runs it on a worker
-//! (`game/mod_browser.rs`).
+//! (`game/interface/mod_browser.rs`).
 use crate::mod_browser::Listing;
 use horizon_mods::index::{self, Index, Kind, Project, Trust, Version};
 use std::fs;

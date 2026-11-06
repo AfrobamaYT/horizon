@@ -21,8 +21,6 @@ pub trait Helpers {
     fn draw_model();
     #[helper(side = "client")]
     fn text_width();
-    #[helper(side = "client")]
-    fn sprite_size();
     /// Draws `text` under `draw`'s pose as a sign draws its lines
     /// (`Font.drawInBatch` in a `BlockEntityRenderer`): in the pose's x-y
     /// plane, one unit a font pixel, y down, its left end at `at`, facing

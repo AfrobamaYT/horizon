@@ -122,6 +122,16 @@ pub trait Helpers {
         target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_ticks_frozen"
     )]
     fn entity_ticks_frozen();
+    /// Ticks the entity has lived (`Entity.tickCount`) for mobs, item entities,
+    /// experience orbs and minecarts. Returns `None` for other kinds and
+    /// unavailable or stale handles. This is not an ageable mob's growth age or an
+    /// item's despawn age.
+    #[helper(
+        side = "server",
+        receiver = "entity",
+        target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_tick_count"
+    )]
+    fn entity_tick_count();
     #[helper(
         side = "server",
         receiver = "entity",

@@ -8,7 +8,7 @@ use crate::{
     buf::{Codec, Reader, Writer},
     item::{Slot, Stack, Template},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {

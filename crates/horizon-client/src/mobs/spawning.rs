@@ -106,41 +106,6 @@ impl LocalDifficulty {
         }
     }
 }
-/// The armour and toughness each vanilla armour piece adds.
-pub fn armor_stats(item: &str) -> (f32, f32) {
-    let Some(name) = item.strip_prefix("minecraft:") else {
-        return (0.0, 0.0);
-    };
-    let slot = ["helmet", "chestplate", "leggings", "boots"]
-        .iter()
-        .position(|p| name.ends_with(p));
-    let Some(slot) = slot else { return (0.0, 0.0) };
-    let (points, toughness): ([f32; 4], f32) = match name.split('_').next() {
-        Some("leather") => ([1.0, 3.0, 2.0, 1.0], 0.0),
-        Some("copper") => ([2.0, 4.0, 3.0, 1.0], 0.0),
-        Some("golden") => ([2.0, 5.0, 3.0, 1.0], 0.0),
-        Some("chainmail") => ([2.0, 5.0, 4.0, 1.0], 0.0),
-        Some("iron") => ([2.0, 6.0, 5.0, 2.0], 0.0),
-        Some("turtle") => ([2.0, 0.0, 0.0, 0.0], 0.0),
-        Some("diamond") => ([3.0, 8.0, 6.0, 3.0], 2.0),
-        Some("netherite") => ([3.0, 8.0, 6.0, 3.0], 3.0),
-        _ => return (0.0, 0.0),
-    };
-    (points[slot], toughness)
-}
-/// The armour and toughness a horse armor item adds in the body slot
-/// (`ArmorMaterial.createAttributes(ArmorType.BODY)`).
-pub fn horse_armor_stats(item: &str) -> (f32, f32) {
-    match item.strip_prefix("minecraft:") {
-        Some("leather_horse_armor") => (3.0, 0.0),
-        Some("copper_horse_armor") => (4.0, 0.0),
-        Some("iron_horse_armor") => (5.0, 0.0),
-        Some("golden_horse_armor") => (7.0, 0.0),
-        Some("diamond_horse_armor") => (11.0, 2.0),
-        Some("netherite_horse_armor") => (19.0, 3.0),
-        _ => (0.0, 0.0),
-    }
-}
 /// `Mob.populateDefaultEquipmentSlots`: sometimes a set of armour, from the
 /// head down, of one random material.
 /// A baby from `Animal.spawnChildFromBreeding`: `getBreedOffspring` creates

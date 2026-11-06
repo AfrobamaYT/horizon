@@ -503,8 +503,11 @@ pub(super) fn compile(
         .map(|&i| &projects[i].bundle.manifest)
         .collect();
     let main = out.join("main.rs");
-    fs::write(&main, api::main_rs(&template, &manifests, &catalog.points))
-        .map_err(|e| e.to_string())?;
+    fs::write(
+        &main,
+        api::main_rs(&template, &manifests, &catalog.points, &catalog.sites),
+    )
+    .map_err(|e| e.to_string())?;
     let binary = out.join(crate::backend::CLIENT);
     let mut cmd = rustc(rust, game, out, "2024");
     cmd.args(["--crate-type", "bin", "--crate-name", "horizon_native_game"])

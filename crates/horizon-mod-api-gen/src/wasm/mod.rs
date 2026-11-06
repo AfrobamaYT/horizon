@@ -46,6 +46,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "AttachmentStore",
     "ServerReloadListeners",
     "ClientReloadListeners",
+    "PackFinders",
     "ServerReloadResources",
     "CriterionContext",
 ];
@@ -507,6 +508,10 @@ pub struct Wasm {
     pub host: String,
     /// `Owner::method: why` for each method that doesn't cross.
     pub unbound: Vec<String>,
+    /// Imports eligible for reusable flat-list transport, before transport is enabled.
+    pub flat_list_imports: Vec<String>,
+    /// List-bearing positions left on the owned route by the initial flat-list rule.
+    pub other_list_imports: Vec<String>,
     /// The source files read.
     pub sources: Vec<std::path::PathBuf>,
 }
@@ -533,6 +538,19 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
         providers: providers.clone(),
         guest: sides::guest(&surface.types, &methods, &wit, &hooks)?,
         host: sides::host(&surface.types, &imports, &wit, &hooks, &servers)?,
+        flat_list_imports: imports
+            .iter()
+            .filter(|m| {
+                (!exports().contains(&m.owner) || held(m.owner))
+                    && glue::flat_method(&surface.types, m)
+            })
+            .map(|m| format!("{}::{}", m.owner, m.name))
+            .collect(),
+        other_list_imports: imports
+            .iter()
+            .filter(|m| !exports().contains(&m.owner) || held(m.owner))
+            .flat_map(|m| glue::list_inventory(&surface.types, m))
+            .collect(),
         wit,
         sources: surface.types.index.read.take(),
         unbound: surface
@@ -780,6 +798,77 @@ mod tests {
     }
 
     #[test]
+    fn flat_list_rule_selects_world_draw_slices() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(move || {
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                assert!(
+                    wasm.flat_list_imports
+                        .iter()
+                        .any(|name| name == "WorldDrawContext::lines")
+                );
+                assert!(
+                    wasm.flat_list_imports
+                        .iter()
+                        .any(|name| name == "WorldDrawContext::quads")
+                );
+                for name in &wasm.flat_list_imports {
+                    let (owner, method) = name.rsplit_once("::").unwrap();
+                    let interface = if super::exports().contains(&owner) {
+                        format!("held-{}", super::wit::interface(owner))
+                    } else {
+                        super::wit::interface(owner)
+                    };
+                    let registration = format!(
+                        "linker.instance(\"horizon:mod-api/{interface}@0.1.0\")?.func_wrap(\"{}\"",
+                        super::ty::wit_ident(method)
+                    );
+                    assert!(
+                        wasm.host.contains(&registration),
+                        "missing flat-list shadow: {name}"
+                    );
+                }
+                println!(
+                    "{} eligible imports:\n{}\n{} owned list positions:\n{}",
+                    wasm.flat_list_imports.len(),
+                    wasm.flat_list_imports.join("\n"),
+                    wasm.other_list_imports.len(),
+                    wasm.other_list_imports.join("\n")
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn world_line_coordinates_are_wit_tuples() {
+        with_interface("types", |types, _| {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let generated = super::super::sources(&root, super::super::FillMode::Require).unwrap();
+            let included = [
+                ("mod_api_generated.rs", generated.hooks.as_str()),
+                ("mod_api_generated_host.rs", generated.host.as_str()),
+                ("native_render_generated.rs", generated.render.as_str()),
+            ];
+            let wasm = super::generate(&root, &included).unwrap();
+            assert!(types.types.contains_key("world-line"));
+            assert!(wasm.wit.contains(
+                "record world-line { %from: tuple<f64, f64, f64>, to: tuple<f64, f64, f64>"
+            ));
+        });
+    }
+
+    #[test]
     fn world_geometry_has_generated_wasm_bindings() {
         with_interface("world-draw-context", |draw, _| {
             for method in ["lines", "quads", "usage"] {
@@ -815,6 +904,22 @@ mod tests {
                     .iter()
                     .any(|name| name == "ClientHost::input_options")
             );
+        });
+    }
+
+    #[test]
+    fn client_option_snapshots_have_generated_wasm_bindings() {
+        with_interface("client-host", |client, unbound| {
+            for (function, name) in [
+                ("graphics-options", "graphics_options"),
+                ("gui-options", "gui_options"),
+                ("chat-options", "chat_options"),
+                ("audio-options", "audio_options"),
+            ] {
+                assert!(client.functions.contains_key(function), "{function}");
+                let unbound_name = format!("ClientHost::{name}");
+                assert!(!unbound.contains(&unbound_name), "{name}");
+            }
         });
     }
 
@@ -1058,6 +1163,40 @@ mod tests {
     }
 
     #[test]
+    fn pack_finders_bind_the_scoped_mutable_repository() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let finder =
+                    &resolve.interfaces[resolve.packages[package].interfaces["pack-finders"]];
+                assert!(finder.functions.contains_key("pack-type"));
+                assert!(finder.functions.contains_key("add-pack-finders"));
+                assert!(wasm.host.contains("frame::pack_finders_mut()?"));
+                assert!(wasm.host.contains("frame.pack_finders_mut(&mut *p1.packs)"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name.starts_with("PackFinders::"))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn client_modifiers_have_a_generated_wasm_binding() {
         std::thread::Builder::new()
             .stack_size(64 << 20)
@@ -1081,6 +1220,37 @@ mod tests {
                         .unbound
                         .iter()
                         .any(|name| name == "ClientHost::modifiers")
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn client_camera_entity_has_a_generated_wasm_binding() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let client =
+                    &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
+                assert!(client.functions.contains_key("camera-entity"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name == "ClientHost::camera_entity")
                 );
             })
             .unwrap()

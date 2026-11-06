@@ -21,6 +21,10 @@ pub(super) fn wit(types: &Types<'_>, ty: &Ty) -> Result<Option<String>, String> 
         // A name the game keeps: its index in the group's name table.
         Ty::Str(super::ty::Str::Static) => "u32".into(),
         Ty::Str(_) => "string".into(),
+        // Rust only implements Debug for tuples through arity 12; bindgen derives Debug.
+        Ty::Array(item, n) if (1..=12).contains(n) => {
+            format!("tuple<{}>", vec![value(types, item)?; *n].join(", "))
+        }
         Ty::List(item, _) | Ty::Array(item, _) => format!("list<{}>", value(types, item)?),
         Ty::Option(item) => format!("option<{}>", value(types, item)?),
         Ty::Result(ok, err) => match (wit(types, ok)?, wit(types, err)?) {

@@ -35,7 +35,7 @@ KINDS = [
 KIND_LABELS = {label for _, label, _ in KINDS}
 
 _G = r"crates/horizon-client(?:-render|-core|-input)?/src/"  # the client's crates
-_GAME = _G + r"(?:game/)?"
+_GAME = _G + r"(?:game/(?:[^/]+/)?)?"
 # Area: (label, description, the paths). First match wins for each file.
 AREAS = [
     ("launcher", "Changes the launcher", r"^launcher/"),

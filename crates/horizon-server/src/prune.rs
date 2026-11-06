@@ -12,10 +12,6 @@
 //! copied as they were) and a file left empty is deleted. Nothing else in the world is touched: not
 //! level.dat, player data, stats or advancements.
 
-use horizon_world::{
-    nbt::{self, Limits, Tag},
-    region::{ChunkRecord, RegionFile, RegionWriter, position_from_path},
-};
 use std::{
     collections::{BTreeMap, HashSet},
     fmt::Write as _,
@@ -23,6 +19,13 @@ use std::{
     io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
+};
+use {
+    horizon_core::{
+        nbt,
+        nbt::{Limits, Tag},
+    },
+    horizon_world::region::{ChunkRecord, RegionFile, RegionWriter, position_from_path},
 };
 
 mod transaction;
@@ -814,7 +817,7 @@ pub fn write_report(dir: &Path, outcome: &Outcome) -> io::Result<PathBuf> {
 pub(crate) mod tests {
     use super::*;
     use horizon_core::position::ChunkPos;
-    use horizon_world::{compression::Compression, nbt::NamedTag};
+    use {horizon_core::nbt::NamedTag, horizon_world::compression::Compression};
 
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("horizon-prune-{name}-{}", std::process::id()));

@@ -107,7 +107,7 @@ class ModBlockEntityAnyTemplateTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_removal_piston_and_render_list(self):
         game = (CLIENT / "game.rs").read_text(encoding="utf-8")
-        draw = (CLIENT / "game/native_block_entity_draw.rs").read_text(encoding="utf-8")
+        draw = (next(CLIENT.glob('game/*/native_block_entity_draw.rs'))).read_text(encoding="utf-8")
         update = (LEVEL / "update.rs").read_text(encoding="utf-8")
         pistons = (LEVEL / "pistons.rs").read_text(encoding="utf-8")
         removal = between(update, "} else if block_changed\n", "        {\n            // BlockEntity.preRemoveSideEffects")

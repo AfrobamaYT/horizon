@@ -1,7 +1,7 @@
 //! `Mob.equipItemIfPossible` and the comparisons behind it: `compareArmor`,
 //! `compareWeapons`, `canReplaceEqualItem` and the per-species gates that
 //! decide whether a mob takes an item off the ground at all (`wantsToPickUp`,
-//! `canHoldItem`). `game/mob_looting.rs` reads the item data and calls these.
+//! `canHoldItem`). `game/mobs/mob_looting.rs` reads the item data and calls these.
 use super::Species;
 
 /// An `EquipmentSlot`, in the order `finalize::item` and `drops::SLOTS` keep

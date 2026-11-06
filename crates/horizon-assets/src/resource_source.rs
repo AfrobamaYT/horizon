@@ -542,6 +542,7 @@ mod tests {
         assert!(!first.same_generation(&reload));
     }
 
+    #[cfg(unix)]
     #[test]
     fn directory_aliases_are_listed_but_cycles_are_not_followed() {
         let fixture = Fixture::new();

@@ -4,7 +4,7 @@
 //! while the rope is slack).
 use super::{Mob, MobEvent, MobWorld, Species, Who};
 use horizon_core::geometry::Vec3;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `Leashable.LEASH_ELASTIC_DIST`.
 pub const ELASTIC: f64 = 6.0;

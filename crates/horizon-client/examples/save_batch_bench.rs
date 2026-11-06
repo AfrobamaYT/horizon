@@ -11,12 +11,14 @@ use horizon_client::{
     save::{self, ChunkExtras},
 };
 use horizon_core::paletted::PalettedContainer;
-use horizon_world::{
-    DATA_VERSION,
-    nbt::{self, Limits, Tag},
-    registry::BlockRegistry,
-};
 use std::{collections::HashMap, hint::black_box, sync::Arc, time::Instant};
+use {
+    horizon_core::{
+        nbt,
+        nbt::{Limits, Tag},
+    },
+    horizon_world::{DATA_VERSION, registry::BlockRegistry},
+};
 
 type Entities = HashMap<(i32, i32, i32), BlockEntity>;
 type Names = HashMap<(i32, i32, i32), String>;
