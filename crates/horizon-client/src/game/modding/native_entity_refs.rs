@@ -77,9 +77,6 @@ impl Game<'_> {
         }
         match self.level_entity(id)? {
             Target::Mob(id) if !self.mobs.iter().any(|m| m.id == id && !m.removed) => None,
-            // Removed by a mod and waiting for the sweep: `isRemoved` is
-            // true from the call on.
-            t if self.persist.removals.contains(&t) => None,
             t => Some(t),
         }
     }

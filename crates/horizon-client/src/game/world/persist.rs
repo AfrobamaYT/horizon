@@ -56,8 +56,9 @@ pub struct EntityMemory {
     /// increasing order), type, and whether the last leave sweep saw it.
     /// Only filled while a mod is loaded.
     pub(super) live: Vec<(u32, String, bool)>,
-    /// Entities a native mod removed (`entity_discard`), taken out at
-    /// the next sweep of departed entities. Mobs go at once and never wait here.
+    /// Entities a native mod removed (`entity_discard`): gone for every
+    /// lookup from the call on, taken out of their lists at the next sweep of
+    /// departed entities. Mobs go at once and never wait here.
     pub(super) removals: Vec<super::commands::Target>,
 }
 
