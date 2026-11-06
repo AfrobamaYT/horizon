@@ -1222,7 +1222,7 @@ mod tests {
                 &game.mods,
                 listeners,
                 &game.pack.assets,
-                game.res,
+                &game.res,
                 &game.pack.context,
                 false,
                 false,
