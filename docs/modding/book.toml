@@ -7,6 +7,20 @@ src = "src"
 [build]
 build-dir = "../../target/modding-book"
 
+# Resolve from mdBook's context, not the caller's working directory. Python 3 only.
+[preprocessor.concept-pages]
+command = """python3 -c '
+import json, pathlib, sys
+if sys.argv[1:2] == ["supports"]:
+    sys.exit(0)
+context, book = json.load(sys.stdin)
+root = pathlib.Path(context["root"])
+sys.path.insert(0, str(root.parents[1] / "tools"))
+import modding_concept_pages as pages
+print(json.dumps(pages.expand(book, root / context["config"]["book"]["src"])))
+'"""
+before = ["links"]
+
 [output.html]
 git-repository-url = "https://github.com/arismoko/horizon"
 edit-url-template = "https://github.com/arismoko/horizon/edit/main/docs/modding/{path}"

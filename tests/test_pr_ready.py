@@ -47,7 +47,7 @@ class PrReadyTests(unittest.TestCase):
                      "examples/probe/main.rs", "tests/lan_bot.rs"]:
             self.assertEqual(pr_ready.touched_crates({f"crates/horizon-client/{path}"}, packages),
                              ["horizon-client-lib"])
-        for path in ["src/lib.rs", "src/main.rs", "src/entry.rs", "src/game.rs", "src/game/combat.rs",
+        for path in ["src/lib.rs", "src/main.rs", "src/entry.rs", "src/game.rs", "src/game/items/combat.rs",
                      "tests/launch_api.rs", "Cargo.toml", "build.rs"]:
             self.assertEqual(pr_ready.touched_crates({f"crates/horizon-client/{path}"}, packages),
                              ["horizon-client"])
