@@ -97,6 +97,8 @@ pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, OwningLoad, OwningLoop,
     PackageInfo, PackageKind, RegistrationContext,
 };
+mod advancement_progress;
+pub use advancement_progress::{AdvancementProgress, CriterionProgress};
 mod criteria;
 pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
 mod packets;
@@ -1168,13 +1170,17 @@ pub struct NativeServerPlayer {
 /// `eco give <player:player> <amount:integer>`. Kinds: `word`, `text` (the
 /// rest of the line, last), `integer`, `number`, `boolean`, `player`,
 /// `item`, `block_pos`. Usages of one command share their words; the
-/// server merges them into one tree.
+/// server merges them into one tree. Each executable usage keeps its own level:
+/// a public `foo bar` lets everyone traverse `foo`, but does not make an
+/// operator-only `foo` executable. Optional arguments also allow execution at
+/// their preceding prefixes, at that usage's level.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeCommand {
     /// The usage.
     pub usage: String,
-    /// The operator level a player needs to see and run it (0: everyone).
+    /// The operator level a player needs to run this usage (0: everyone).
+    /// Shared prefixes stay visible when needed to reach a lower-level usage.
     pub level: u8,
 }
 

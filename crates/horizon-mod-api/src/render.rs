@@ -290,6 +290,8 @@ mod tests {
 
     #[test]
     fn shared_renderer_identity_does_not_merge_mod_owners() {
+        use crate as mod_api;
+
         struct Owner;
         #[crate::__subscriptions]
         impl crate::Hooks for Owner {}

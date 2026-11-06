@@ -247,7 +247,12 @@
   "E_INTERNAL_AMBIGUOUS: {mod} uses {path}, which has multiple kinds; choose a kind from: {kinds}.": "E_INTERNAL_AMBIGUOUS: {mod} uses {path}, which has multiple kinds; choose a kind from: {kinds}.",
   "E_INTERNAL_CHANGED: {mod} uses {path}, whose signature is now {signature}; run cargo horizon-mod update to see what changed.": "E_INTERNAL_CHANGED: {mod} uses {path}, whose signature is now {signature}; run cargo horizon-mod update to see what changed.",
   "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.": "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.",
-  "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have.": "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have.",
+  "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.": "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
+  "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code and raw listeners, not source-spliced helpers or modules. Use cargo horizon-mod internals add for this mod.": "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code and raw listeners, not source-spliced helpers or modules. Use cargo horizon-mod internals add for this mod.",
+  "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}": "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}",
+  "{path} is not a native mod project.": "{path} is not a native mod project.",
+  "Internals discovery failed; the manifest was not changed. {error}": "Internals discovery failed; the manifest was not changed. {error}",
+  "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",
   "E_INTERNAL_PATH: {path} cannot be re-exported as a declared internal; declare its types or free functions instead.": "E_INTERNAL_PATH: {path} cannot be re-exported as a declared internal; declare its types or free functions instead.",
   "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.": "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.",
   "Easy": "ಸುಲಭ",
@@ -1148,6 +1153,5 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "ಡೌನ್‌ಲೋಡ್‌ಗಳು, ಸೈನ್-ಇನ್‌ಗಳು ಮತ್ತು ನವೀಕರಣಗಳು ಈ ಪ್ರಾಕ್ಸಿ (http://host:port, socks5://host:port) ಮೂಲಕ ಹೋಗುತ್ತವೆ. ಖಾಲಿ ಎಂದರೆ ಯಾವುದೂ ಇಲ್ಲ: ಲಾಂಚರ್ ಒಂದನ್ನು ಪ್ರಾರಂಭಿಸಿದಾಗ HTTPS_PROXY ಅನ್ನು ಬಳಸಲಾಗುತ್ತದೆ.",
   "{name} was left out: made for another Horizon version": "{name} ಅನ್ನು ಬಿಡಲಾಗಿದೆ: Horizon ನ ಬೇರೆ ಆವೃತ್ತಿಗಾಗಿ ಮಾಡಲಾಗಿದೆ",
   "{name} was left out: clashes with {other}": "{name} ಅನ್ನು ಬಿಡಲಾಗಿದೆ: {other} ಜೊತೆ ಘರ್ಷಿಸುತ್ತದೆ",
-  "{name} was left out: it needs {other}, which was left out": "{name} ಅನ್ನು ಬಿಡಲಾಗಿದೆ: ಇದಕ್ಕೆ {other} ಬೇಕು, ಅದನ್ನು ಬಿಡಲಾಗಿದೆ",
-  "Doesn't build on the Horizon you play ({code}): a build leaves it out until its author updates it": "ನೀವು ಆಡುವ Horizon ನಲ್ಲಿ ಬಿಲ್ಡ್ ಆಗುವುದಿಲ್ಲ ({code}): ಅದರ ಲೇಖಕರು ನವೀಕರಿಸುವವರೆಗೆ ಬಿಲ್ಡ್ ಅದನ್ನು ಬಿಡುತ್ತದೆ"
+  "{name} was left out: it needs {other}, which was left out": "{name} ಅನ್ನು ಬಿಡಲಾಗಿದೆ: ಇದಕ್ಕೆ {other} ಬೇಕು, ಅದನ್ನು ಬಿಡಲಾಗಿದೆ"
 }
