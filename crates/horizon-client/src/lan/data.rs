@@ -382,6 +382,11 @@ impl SyncData {
                 }
                 let mut decoded = Vec::new();
                 for (id, bytes) in files {
+                    let value: Value = serde_json::from_slice(&bytes)
+                        .map_err(|e| format!("damage type {id}: {e}"))?;
+                    if !overlay.conditions.allows(&value) {
+                        continue;
+                    }
                     let definition =
                         horizon_world::damage_source::Definition::from_json(&id, &bytes)
                             .map_err(|e| format!("damage type {id}: {e}"))?;
@@ -396,6 +401,7 @@ impl SyncData {
             } else if PACK_REGISTRIES.contains(key) {
                 pack_entries(path, overlay, &mut entries);
             }
+            entries.retain(|(_, value, _)| overlay.conditions.allows(value));
             if *key == BIOME_REGISTRY
                 && let Some(table) = biomes.filter(|b| b.has_packs())
             {
@@ -441,7 +447,7 @@ impl SyncData {
         // registry's a pack has tag files for (a block made climbable).
         drop(registries_step);
         let tags_step = startup::step("sync.tags");
-        let mut tags = Self::load_tags(&root, &builtin, &dynamic);
+        let mut tags = Self::load_tags(&root, &builtin, &dynamic, overlay.conditions);
         Self::merge_pack_tags(&mut tags, &root, overlay, &builtin, &dynamic);
         Self::merge_damage_tags(&mut tags, resources, overlay, &builtin, &dynamic)?;
         drop(tags_step);
@@ -503,7 +509,7 @@ impl SyncData {
         self.dynamic = kept.dynamic.clone();
         self.registries = kept.registries.clone();
         let root = resources.join("data/minecraft");
-        self.tags = Self::load_tags(&root, &self.builtin, &self.dynamic);
+        self.tags = Self::load_tags(&root, &self.builtin, &self.dynamic, overlay.conditions);
         Self::merge_pack_tags(&mut self.tags, &root, overlay, &self.builtin, &self.dynamic);
     }
 
@@ -647,11 +653,17 @@ impl SyncData {
         let mut own = BTreeMap::new();
         walk(&root.join("tags").join(kind), &mut own);
         for (name, value) in own {
+            if !overlay.conditions.allows(&value) {
+                continue;
+            }
             Self::add_tag_values(files.entry(qualified(&name)).or_default(), &value);
         }
         for (id, packs) in overlay.tag_kind(kind) {
             for bytes in packs {
                 if let Ok(value) = serde_json::from_slice::<Value>(bytes) {
+                    if !overlay.conditions.allows(&value) {
+                        continue;
+                    }
                     Self::add_tag_values(files.entry(id.clone()).or_default(), &value);
                 }
             }
@@ -737,7 +749,12 @@ impl SyncData {
     }
 
     /// TagNetworkSerialization.serializeTagsToNetwork from the tag files.
-    fn load_tags(root: &Path, builtin: &Builtin, dynamic: &Dynamic) -> UpdateTags {
+    fn load_tags(
+        root: &Path,
+        builtin: &Builtin,
+        dynamic: &Dynamic,
+        conditions: &horizon_world::conditions::LoadConditions,
+    ) -> UpdateTags {
         let tag_root = root.join("tags");
         let mut registries = Vec::new();
         let mut keys: Vec<String> = builtin
@@ -754,6 +771,7 @@ impl SyncData {
             }
             let mut files = BTreeMap::new();
             walk(&dir, &mut files);
+            files.retain(|_, value| conditions.allows(value));
             if files.is_empty() {
                 continue;
             }
@@ -851,7 +869,7 @@ mod tests {
         ];
         let open = SyncData::load(
             &root,
-            &PackOverlay { files: &files },
+            &PackOverlay::new(&files),
             &horizon_world::item_defaults::read(&root).unwrap(),
             &crate::crafting::ResolvedSources::default(),
         )
@@ -892,7 +910,7 @@ mod tests {
         ];
         let reloaded = SyncData::reload(
             &root,
-            &PackOverlay { files: &changed },
+            &PackOverlay::new(&changed),
             &open,
             &horizon_world::item_defaults::read(&root).unwrap(),
             &crate::crafting::ResolvedSources::default(),
@@ -934,7 +952,7 @@ mod tests {
         assert!(
             SyncData::load(
                 &root,
-                &PackOverlay { files: &changed },
+                &PackOverlay::new(&changed),
                 &horizon_world::item_defaults::read(&root).unwrap(),
                 &crate::crafting::ResolvedSources::default()
             )
@@ -979,7 +997,7 @@ mod tests {
                 vec![br#"{"values":["minecraft:server_links"]}"#.to_vec()],
             ),
         ];
-        let overlay = PackOverlay { files: &files };
+        let overlay = PackOverlay::new(&files);
         pack_entries("dialog", &overlay, &mut found);
         file_order(&mut found);
         let names: Vec<String> = found
@@ -1065,7 +1083,12 @@ mod tests {
             ]),
         };
         let dynamic = Dynamic::default();
-        let mut tags = SyncData::load_tags(&root, &builtin, &dynamic);
+        let mut tags = SyncData::load_tags(
+            &root,
+            &builtin,
+            &dynamic,
+            &horizon_world::conditions::LoadConditions::vanilla(),
+        );
         let item_tags = RegistryTags {
             registry: "minecraft:item".into(),
             tags: vec![TagEntry {
@@ -1085,10 +1108,13 @@ mod tests {
             ),
             (
                 "tags/minecraft:block/mineable/pickaxe".to_owned(),
-                vec![br#"{"replace":true,"values":["minecraft:dirt"]}"#.to_vec()],
+                vec![
+                    br#"{"replace":true,"values":["minecraft:dirt"]}"#.to_vec(),
+                    br#"{"neoforge:conditions":[{"type":"unsupported"}],"replace":true,"values":["minecraft:stone"]}"#.to_vec(),
+                ],
             ),
         ];
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let overlay = horizon_world::loot::PackOverlay::new(&files);
         SyncData::merge_pack_tags(&mut tags, &root, &overlay, &builtin, &dynamic);
         let _ = std::fs::remove_dir_all(&root);
         let sent = |registry: &str, tag: &str| -> Vec<i32> {
