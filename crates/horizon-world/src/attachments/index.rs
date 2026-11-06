@@ -32,7 +32,7 @@ pub struct AttachmentOwner<H> {
 
 struct Owner {
     generation: Arc<()>,
-    keys: HashSet<AttachmentKey>,
+    keys: HashSet<Arc<AttachmentKey>>,
 }
 
 struct Bucket<H> {
@@ -42,9 +42,13 @@ struct Bucket<H> {
 
 impl<H: Copy + Eq + Hash> Bucket<H> {
     fn set(&mut self, holder: H, entry: Arc<AttachmentEntry>) {
+        let slot = self.slots.get(&holder).copied();
+        if slot.is_some_and(|slot| Arc::ptr_eq(&self.rows[slot].entry, &entry)) {
+            return;
+        }
         let rows = Arc::make_mut(&mut self.rows);
         let row = AttachmentRow { holder, entry };
-        if let Some(&slot) = self.slots.get(&holder) {
+        if let Some(slot) = slot {
             rows[slot] = row;
         } else {
             self.slots.insert(holder, rows.len());
@@ -70,7 +74,8 @@ impl<H: Copy + Eq + Hash> Bucket<H> {
 /// Mutation copies a bucket's row vector only when a snapshot retains that version;
 /// entries themselves remain shared. With no retained version, updates are in place.
 /// All key/holder lookups are expected O(1). Unregistration visits only that holder's
-/// keys, not all types. The owner registration is an explicit lifecycle operation,
+/// keys, not all types. Key strings are shared across every membership in a bucket.
+/// The owner registration is an explicit lifecycle operation,
 /// never an effect of dropping a map or a token.
 ///
 /// Rows append on first insertion. Replacement preserves the slot; removal fills it
@@ -79,7 +84,7 @@ impl<H: Copy + Eq + Hash> Bucket<H> {
 /// holders must supply a defined registration order rather than HashMap iteration.
 #[non_exhaustive]
 pub struct AttachmentIndex<H> {
-    buckets: HashMap<AttachmentKey, Bucket<H>>,
+    buckets: HashMap<Arc<AttachmentKey>, Bucket<H>>,
     owners: HashMap<H, Owner>,
     empty: Arc<Vec<AttachmentRow<H>>>,
 }
@@ -98,14 +103,16 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     /// Install the authoritative map, replacing the holder's previous membership.
     /// Only lifecycle code may register; a bound map publishes through its token.
     /// Rebinding invalidates stale save/COW bindings, even when their keys match.
+    /// Shared keys keep their dense slots; unchanged entries do not copy row vectors.
     pub fn register(
         &mut self,
         holder: H,
         entries: impl IntoIterator<Item = (AttachmentKey, Arc<AttachmentEntry>)>,
     ) -> AttachmentOwner<H> {
-        if let Some(previous) = self.owners.remove(&holder) {
-            self.remove_memberships(holder, previous.keys);
-        }
+        let mut omitted = self
+            .owners
+            .remove(&holder)
+            .map_or_else(HashSet::new, |owner| owner.keys);
         // A live stale token retains its identity, so generations cannot wrap or be
         // reused, including across distinct indexes.
         let generation = Arc::new(());
@@ -114,11 +121,15 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
             holder,
             Owner {
                 generation: token.generation.clone(),
-                keys: HashSet::new(),
+                keys: omitted.clone(),
             },
         );
         for (key, entry) in entries {
+            omitted.remove(&key);
             self.set(&token, &key, entry);
+        }
+        for key in omitted {
+            self.remove(&token, &key);
         }
         token
     }
@@ -147,19 +158,17 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
             return false;
         }
         if !owner.keys.contains(key) {
-            owner.keys.insert(key.clone());
+            let shared_key = self
+                .buckets
+                .get_key_value(key)
+                .map_or_else(|| Arc::new(key.clone()), |(key, _)| key.clone());
+            owner.keys.insert(shared_key.clone());
+            self.buckets.entry(shared_key).or_insert_with(|| Bucket {
+                rows: Arc::new(Vec::new()),
+                slots: HashMap::new(),
+            });
         }
-        match self.buckets.get_mut(key) {
-            Some(bucket) => bucket.set(token.holder, entry),
-            None => {
-                let mut bucket = Bucket {
-                    rows: Arc::new(Vec::new()),
-                    slots: HashMap::new(),
-                };
-                bucket.set(token.holder, entry);
-                self.buckets.insert(key.clone(), bucket);
-            }
-        }
+        self.buckets.get_mut(key).unwrap().set(token.holder, entry);
         true
     }
 
@@ -186,15 +195,21 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         if !Arc::ptr_eq(&owner.generation, &token.generation) {
             return false;
         }
-        let owner = self.owners.remove(&token.holder).unwrap();
-        self.remove_memberships(token.holder, owner.keys);
-        true
+        self.unload(token.holder)
     }
 
-    fn remove_memberships(&mut self, holder: H, keys: HashSet<AttachmentKey>) {
-        for key in keys {
+    /// Remove the current registration at an authoritative storage boundary, even
+    /// when the live payload has detached from its original map binding through COW.
+    /// Unlike token-checked unregistration, this is only for trusted holder unload,
+    /// never for a map observer or Drop. Return false if the holder was not registered.
+    pub fn unload(&mut self, holder: H) -> bool {
+        let Some(owner) = self.owners.remove(&holder) else {
+            return false;
+        };
+        for key in owner.keys {
             self.remove_membership(holder, &key);
         }
+        true
     }
 
     fn remove_membership(&mut self, holder: H, key: &AttachmentKey) {
@@ -329,7 +344,7 @@ mod tests {
         assert!(!index.unregister(&old));
         assert_eq!(values(&retained), [(1, 1)]);
         assert!(index.snapshot(&key("a")).is_empty());
-        assert_eq!(values(&index.snapshot(&key("b"))), [(2, 20), (1, 22)]);
+        assert_eq!(values(&index.snapshot(&key("b"))), [(1, 22), (2, 20)]);
         assert_eq!(values(&index.snapshot(&key("c"))), [(1, 3)]);
         let clone = current.clone();
         drop(current);
@@ -337,6 +352,42 @@ mod tests {
         assert!(index.unregister(&clone));
         assert!(!index.set(&clone, &key("a"), entry(9)));
         assert_eq!(values(&index.snapshot(&key("b"))), [(2, 20)]);
+    }
+
+    #[test]
+    fn same_key_rebind_preserves_slots_and_only_changed_entries_copy_rows() {
+        let mut index = AttachmentIndex::default();
+        let original = entry(1);
+        let old = index.register(1, [(key("value"), original.clone())]);
+        index.register(2, [(key("value"), entry(2))]);
+        let retained = index.snapshot(&key("value"));
+        let refreshed = index.register(1, [(key("value"), original)]);
+        assert!(Arc::ptr_eq(&retained, &index.snapshot(&key("value"))));
+        assert!(!index.set(&old, &key("value"), entry(99)));
+        let current = index.register(1, [(key("value"), entry(10))]);
+        assert!(!index.unregister(&refreshed));
+        assert_eq!(values(&retained), [(1, 1), (2, 2)]);
+        assert_eq!(values(&index.snapshot(&key("value"))), [(1, 10), (2, 2)]);
+        assert!(index.unregister(&current));
+    }
+
+    #[test]
+    fn trusted_unload_removes_detached_registration_but_preserves_snapshots() {
+        let mut index = AttachmentIndex::default();
+        let binding = index.register(1, [(key("value"), entry(7))]);
+        let stale = binding.clone();
+        let retained = index.snapshot(&key("value"));
+        drop(binding);
+        assert!(index.unload(1));
+        assert!(!index.unload(1));
+        assert!(index.snapshot(&key("value")).is_empty());
+        assert_eq!(values(&retained), [(1, 7)]);
+        assert!(!index.set(&stale, &key("value"), entry(99)));
+        assert!(!index.unregister(&stale));
+        index.register(1, [(key("value"), entry(8))]);
+        assert!(!index.set(&stale, &key("value"), entry(99)));
+        assert!(!index.unregister(&stale));
+        assert_eq!(values(&index.snapshot(&key("value"))), [(1, 8)]);
     }
 
     #[test]
