@@ -155,7 +155,14 @@ fn sync(dir: &Path) -> Result<(), String> {
     if fs::read_to_string(&path).map_err(|e| e.to_string())? != original {
         return Err("horizon-mod.toml changed during discovery; run cargo horizon-mod internals sync again.".into());
     }
-    fs::write(&path, candidate).map_err(|e| e.to_string())?;
+    // Replace by rename so a failed write leaves the old manifest whole.
+    let temporary = path.with_extension("toml.sync");
+    fs::write(&temporary, candidate)
+        .and_then(|()| fs::rename(&temporary, &path))
+        .map_err(|e| {
+            let _ = fs::remove_file(&temporary);
+            format!("{}: {e}", path.display())
+        })?;
     print!("{report}");
     Ok(())
 }
@@ -167,16 +174,33 @@ fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), S
         .as_ref()
         .ok_or("internals sync needs a [native] mod")?;
     let mut doc: DocumentMut = text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
-    let used: BTreeSet<_> = entries
+    // Each used access keeps at most one old row: an exact typed row first, then an untyped
+    // row for its path. Every other row is dropped, so no stale duplicate survives the sync.
+    let mut unclaimed: BTreeSet<_> = entries
         .iter()
         .map(|entry| (entry.path.as_str(), entry.kind.as_str()))
         .collect();
+    let mut keep = vec![false; native.internals.len()];
+    for typed in [true, false] {
+        for (index, old) in native.internals.iter().enumerate() {
+            if old.kind.is_some() != typed {
+                continue;
+            }
+            let claim = unclaimed
+                .iter()
+                .find(|(path, kind)| {
+                    *path == old.path && old.kind.as_deref().is_none_or(|k| k == *kind)
+                })
+                .copied();
+            if let Some(claim) = claim {
+                unclaimed.remove(&claim);
+                keep[index] = true;
+            }
+        }
+    }
     let mut report = String::new();
     for (index, old) in native.internals.iter().enumerate().rev() {
-        if !used
-            .iter()
-            .any(|(path, kind)| *path == old.path && old.kind.as_deref().is_none_or(|k| k == *kind))
-        {
+        if !keep[index] {
             let item = &mut doc["native"]["internals"];
             if let Some(array) = item.as_array_mut() {
                 // TOML stores a trailing comment after the previous comma as this
@@ -206,12 +230,8 @@ fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), S
         }
     }
     let retained = Manifest::parse(&doc.to_string())?;
-    for entry in entries {
-        if !native.internals.iter().any(|old| {
-            old.path == entry.path && old.kind.as_deref().is_none_or(|kind| kind == entry.kind)
-        }) {
-            report.push_str(&format!("added: {} ({})\n", entry.path, entry.kind));
-        }
+    for (path, kind) in &unclaimed {
+        report.push_str(&format!("added: {path} ({kind})\n"));
     }
     let entries: Vec<_> = entries.iter().collect();
     upsert(
@@ -472,6 +492,13 @@ mod tests {
             );
             assert!(report.contains("removed: Used"));
         }
+        // An untyped and a typed row for one access leave one current declaration.
+        let body = "internals = [{ path = 'Used', hash = 'stale' }, { path = 'Used', kind = 'struct', hash = 'stale' }]\n";
+        let (candidate, _) = replace(&(header.clone() + body), &entries[..1]).unwrap();
+        let native = Manifest::parse(&candidate).unwrap().native.unwrap();
+        assert_eq!(native.internals.len(), 1);
+        assert_eq!(native.internals[0].hash, "new");
+        assert_eq!(native.internals[0].kind.as_deref(), Some("struct"));
     }
 
     #[test]

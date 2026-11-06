@@ -143,9 +143,15 @@ fn discover(folder: &Path) -> Result<Vec<ListedInternal>, Error> {
 // The pinned game never changes in this cache. Keep Cargo.lock after the first check:
 // horizon-world watches it, so restoring the pristine lock would rebuild the entire game
 // every time. Reset only the workspace membership and the generated mod source copies.
+// The first copy is published by a rename, so an interrupted copy is never taken as warm.
 fn prepare_stage(game: &Path, stage: &Path) -> Result<(), String> {
-    if !stage.join("Cargo.toml").is_file() {
-        super::sync(game, stage)?;
+    if !stage.is_dir() {
+        let fresh = stage.with_extension("new");
+        if fresh.exists() {
+            fs::remove_dir_all(&fresh).map_err(|e| e.to_string())?;
+        }
+        super::sync(game, &fresh)?;
+        fs::rename(&fresh, stage).map_err(|e| e.to_string())?;
     } else {
         fs::copy(game.join("Cargo.toml"), stage.join("Cargo.toml")).map_err(|e| e.to_string())?;
     }
@@ -302,6 +308,26 @@ mod tests {
             fs::read(game.join("Cargo.toml")).unwrap()
         );
         assert!(!stage.join("native-api").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn discovery_cache_discards_an_interrupted_first_copy() {
+        let root = super::super::tests::dir("discovery-interrupted");
+        let game = root.join("game");
+        let stage = root.join("stage");
+        fs::create_dir_all(game.join("crates")).unwrap();
+        fs::write(game.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
+        fs::write(game.join("internals.json"), "[]").unwrap();
+        fs::write(game.join("crates/lib.rs"), "struct Game;").unwrap();
+        // A copy cut off after its first file.
+        let partial = root.join("stage.new");
+        fs::create_dir_all(&partial).unwrap();
+        fs::write(partial.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
+        prepare_stage(&game, &stage).unwrap();
+        assert_eq!(fs::read(stage.join("internals.json")).unwrap(), b"[]");
+        assert!(stage.join("crates/lib.rs").is_file());
+        assert!(!partial.exists());
         fs::remove_dir_all(root).unwrap();
     }
 
