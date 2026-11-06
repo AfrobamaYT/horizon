@@ -59,11 +59,14 @@ fn generated_draw_list_reuses_transport() {
     let source = r#"(component
       (import "horizon:mod-api/world-draw-context@0.1.0" (instance $api
         (type $depth (enum "tested" "through-walls"))
+        (export "world-depth" (type $depth-export (eq $depth)))
         (type $point (tuple float64 float64 float64))
-        (type $line (record (field "from" $point) (field "to" $point) (field "color" u32) (field "width" float32) (field "depth" $depth)))
-        (type $lines (list $line))
+        (type $line (record (field "from" $point) (field "to" $point) (field "color" u32) (field "width" float32) (field "depth" $depth-export)))
+        (export "world-line" (type $line-export (eq $line)))
+        (type $lines (list $line-export))
         (type $error (enum "non-finite" "invalid-width" "capacity-exceeded"))
-        (export "lines" (func (param "lines" $lines) (result (result (error $error)))))))
+        (export "draw-error" (type $error-export (eq $error)))
+        (export "lines" (func (param "lines" $lines) (result (result (error $error-export)))))))
       (alias export $api "lines" (func $lines))
       (core module $memory (memory (export "memory") 1)
         (func (export "realloc") (param i32 i32 i32 i32) (result i32) i32.const 8192))
@@ -78,11 +81,14 @@ fn generated_draw_list_reuses_transport() {
       (core instance $run (instantiate $runner (with "imports" (instance $imports))))
       (alias core export $run "run" (core func $run))
       (type $depth (enum "tested" "through-walls"))
+      (export $depth-export "world-depth" (type $depth))
       (type $point (tuple float64 float64 float64))
-      (type $line (record (field "from" $point) (field "to" $point) (field "color" u32) (field "width" float32) (field "depth" $depth)))
-      (type $lines (list $line))
+      (type $line (record (field "from" $point) (field "to" $point) (field "color" u32) (field "width" float32) (field "depth" $depth-export)))
+      (export $line-export "world-line" (type $line))
+      (type $lines (list $line-export))
       (type $error (enum "non-finite" "invalid-width" "capacity-exceeded"))
-      (func (export "run") (param "lines" $lines) (result (result (error $error)))
+      (export $error-export "draw-error" (type $error))
+      (func (export "run") (param "lines" $lines) (result (result (error $error-export)))
         (canon lift (core func $run) (memory $memory) (realloc $realloc))))"#;
     let component = Component::new(&engine, wat::parse_str(source).unwrap()).unwrap();
     let mut linker = Linker::<State>::new(&engine);
