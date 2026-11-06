@@ -2873,6 +2873,7 @@ pub fn build(
     jar_store: &Path,
     mods: &[ContentMod],
     out: &Path,
+    inventory: &horizon_mods::enabled::EnabledMods,
 ) -> Result<Vec<String>> {
     // Two mods owning one namespace would mix their files.
     for (i, a) in mods.iter().enumerate() {
@@ -3121,10 +3122,9 @@ pub fn build(
     let requirements =
         collect_jar_requirements(mods.iter().map(|m| (m.id.as_str(), m.jars.as_slice())))?;
     overlay.write(JAR_INPUTS, &serde_json::to_vec(&requirements)?)?;
-    let mod_ids: Vec<&str> = mods.iter().map(|m| m.id.as_str()).collect();
     overlay.write(
-        horizon_items::content_namespaces::MOD_IDS_MARKER,
-        &serde_json::to_vec(&mod_ids)?,
+        horizon_mods::enabled::MARKER,
+        &serde_json::to_vec(inventory)?,
     )?;
     let remainders: BTreeMap<&str, &str> = plan
         .items
@@ -3294,20 +3294,27 @@ pub fn resource_root(
     jar_store: &Path,
     mods: &[ContentMod],
     cache: &Path,
+    inventory: &horizon_mods::enabled::EnabledMods,
 ) -> Result<PathBuf> {
-    if mods.iter().all(|m| {
-        m.jars.is_empty()
-            && m.content.is_empty()
-            && m.content.blocks.is_empty()
-            && m.content.items.is_empty()
-            && m.content.block_entity_types.is_empty()
-    }) {
+    let has_content = mods.iter().any(|m| {
+        !m.jars.is_empty()
+            || !m.content.is_empty()
+            || !m.content.blocks.is_empty()
+            || !m.content.items.is_empty()
+            || !m.content.block_entity_types.is_empty()
+    });
+    if inventory.is_empty() && !has_content {
         return Ok(base.to_owned());
     }
-    let stamp = stamp(base, jar_store, mods)?;
+    let stamp = stamp(base, jar_store, mods, inventory)?;
     let roots = cache.join("mod-content");
     let out = roots.join(&stamp[..ROOT_NAME]);
-    if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes()) {
+    if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes())
+        && fs::read(out.join(horizon_mods::enabled::MARKER)).is_ok_and(|bytes| {
+            serde_json::from_slice::<horizon_mods::enabled::EnabledMods>(&bytes)
+                .is_ok_and(|loaded| &loaded == inventory)
+        })
+    {
         // A reused root warns as the build did.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
         warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
@@ -3315,8 +3322,20 @@ pub fn resource_root(
         let _ = fs::write(out.join(STAMP), &stamp);
         return Ok(out);
     }
-    for warning in build(base, jar_store, mods, &out)? {
-        log::warn!("Horizon: {warning}");
+    if has_content {
+        for warning in build(base, jar_store, mods, &out, inventory)? {
+            log::warn!("Horizon: {warning}");
+        }
+    } else {
+        // Code-only packages still own an inventory generation, but need no
+        // registry-table rewrite or content scan. Existing tables stay linked.
+        let base = std::path::absolute(base)?;
+        let overlay = Overlay::new(&base, &out)?;
+        overlay.write(
+            horizon_mods::enabled::MARKER,
+            &serde_json::to_vec(inventory)?,
+        )?;
+        overlay.write(GENERATED_FILES, b"[]")?;
     }
     fs::write(out.join(STAMP), stamp)?;
     prune_roots(&roots, &out, KEEP_ROOTS);
@@ -3445,7 +3464,12 @@ pub fn check_jars(root: &Path, jar_store: &Path) -> std::result::Result<(), JarI
 /// What a content root is built from: this build of the game, the base's
 /// manifest and the tables [`build`] rewrites, and every file of every mod
 /// in order. Files count by size and modification time, as build tools do.
-fn stamp(base: &Path, jar_store: &Path, mods: &[ContentMod]) -> Result<String> {
+fn stamp(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    inventory: &horizon_mods::enabled::EnabledMods,
+) -> Result<String> {
     use sha2::{Digest, Sha256};
     let meta = |path: &Path| -> Result<String> {
         let m = fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -3460,7 +3484,10 @@ fn stamp(base: &Path, jar_store: &Path, mods: &[ContentMod]) -> Result<String> {
             modified.as_nanos()
         ))
     };
-    let mut parts = vec!["horizon mod content 5".to_owned()];
+    let mut parts = vec![
+        "horizon mod content 6".to_owned(),
+        serde_json::to_string(inventory)?,
+    ];
     parts.push(meta(&std::env::current_exe()?)?);
     let base = std::path::absolute(base)?;
     parts.push(

@@ -19,6 +19,14 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Custom world geometry
+
+`Hooks::submit_custom_geometry` runs on the client after particles, before rendering. Its
+`WorldRenderView` holds camera, partial tick and game time; `WorldDrawContext::lines` and `quads`
+accept unlit world-space ARGB geometry with depth testing or through walls. Batches fail atomically
+for invalid inputs or overflow. `usage()` reports shared limits (4,096 of each by default);
+output clears every view. Submit extracted state, without world writes or resource loading.
+
 ## Transparent screen backgrounds and landing changes
 
 `Hooks::screen_transparent_background` runs immediately before an in-game screen's
@@ -141,6 +149,34 @@ item draws as its `base` model, and the log says so once per type. A mod gets th
 JSON: a `minecraft:model` leaf naming a model file with `elements` and `display` draws cuboids with a
 transformation per display context, `tints` colours them, and `minecraft:select`, `condition` and
 `range_dispatch` on a property the mod answers through `item_model_property` pick between variants.
+
+## Numeric item model properties
+
+A client mod adds a numeric `minecraft:range_dispatch` property (NeoForge's
+`RegisterRangeSelectItemModelPropertyEvent`) in two steps. `Hooks::register_range_select_item_model_property`
+pushes its id once at start, before resources load; `Hooks::item_model_range_property` answers the number
+for each stack while a model picks a branch.
+
+```rust,ignore
+fn register_range_select_item_model_property(
+    &self,
+    _context: &RegistrationContext,
+    event: &mut RegisterRangeSelectItemModelPropertyEvent<'_>,
+) {
+    event.properties.push("example:fill".into());
+}
+
+fn item_model_range_property(&self, _host: &dyn ClientHost, event: &mut ItemModelRangePropertyEvent<'_>) {
+    if event.property == "example:fill" {
+        event.value = event.stack.count as f32 / 64.0;
+    }
+}
+```
+
+Use `"property": "example:fill"` in the item's `minecraft:range_dispatch`: the model's `scale` multiplies the
+number, then the highest threshold at or below it wins, else `fallback`, as for vanilla's properties. A
+resource reload keeps reading the mod's number. An id in vanilla's namespace, not `<namespace>:<path>`, or
+registered twice is logged and left out. A property no mod registers reads 0, decided once at load.
 
 ## Item frame rendering
 
@@ -303,11 +339,11 @@ requires a farmer at work and `mob_griefing` enabled.
   (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `LevelRef::block`,
   `LevelRef::block_property` and `native_cursor`. A mod inserts items through the block's item capability,
   `level.capability(host, &ITEMS, pos, side)`.
-- `click_menu_button(button)`, a client helper, presses button `button` of the open menu as a click on one of its buttons does
+- `menu.click_button(host, button)`, on a client `MenuRef`, presses button `button` of the open menu as a click on one of its buttons does
   (`MultiPlayerGameMode.handleInventoryButtonClick`, `ServerboundContainerButtonClickPacket`); the server's menu decides what it does
   (`clickMenuButton`, and `menu_button` for a mod's menu). It is for a client mod's own input on a menu's screen where `screen_click`
-  doesn't come, such as a key or the wheel (`screen_key_pressed_pre`, `screen_mouse_scrolled_pre`). It is refused while no menu the
-  server opened is open.
+  doesn't come, such as a key or the wheel (`screen_key_pressed_pre`, `screen_mouse_scrolled_pre`). It returns `false` for a stale
+  handle and for the inventory menu, which no server opened.
 
 - What a server mod needs to guard land and move players. `native_right_click_block` hears a player's right
   click on a block before the block's own use (a chest, a door, a lever) and the item's, and may cancel it
@@ -1352,6 +1388,13 @@ registration path.
 
 - The in-world HUD's two moments, as NeoForge's `RenderGuiEvent.Pre` and `.Post`: `render_gui_pre(host, event)` runs once a frame in a world, before any vanilla HUD layer, and a mod that returns `Flow::Cancel` hides the whole HUD as F1 does (no layer, no `gui_layer_pre` or `gui_layer_post`, no `render_gui_post`, no chat or toasts); it is not heard under F1 or while a server dialog or the connection screen covers the window. `render_gui_post(host, draw, corners)` is the old `hud` hook, unchanged: it draws after the minimap, so a mod that implemented `hud` implements `render_gui_post`. Client side; a frame with no listener costs one branch each.
 - Lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1.
+- The camera type F5 cycles to: `camera_type_cycle(host, event)` runs when `key.togglePerspective` cycles the window's
+  camera type (`Minecraft.handleKeybinds`), with `previous` and vanilla's `next` (first person, third person behind, third
+  person in front); a mod may set `next` to skip or keep a type, and the camera entity's post effect follows the answer.
+  `camera_type()` reads the type and `set_camera_type(type)` sets it as F5 does, without a cycle, for a freelook mod that
+  switches to third person and back; with `camera_pose` moving the drawn camera, that is a camera independent of the
+  player. The game's two copies of `CameraType` are now one, `mod_api::CameraType`. Client side.
+
 - A client tick's two moments, as NeoForge's `ClientTickEvent.Pre` and `.Post`: `client_tick_pre(host, event)` runs at the start of every client tick (`Minecraft.tick`), paused or not and on the title screen too, and `client_tick_post` at its end. They replace the single `tick` hook, which also fired on a server's own `Game`: the server's tick is `server_tick` (`ServerTickEvent`), so a mod that implemented `tick` implements `client_tick_pre` and, for a server, `server_tick`. Window only, client side; a tick with no listener costs one branch.
 - How long a client tick lasts, a "timer": `tick_target_millis(host, event)` gets the milliseconds the window's
   `DeltaTracker.Timer` divides each frame's time by (`Minecraft.getTickTargetMillis`), vanilla's 50 at 20 ticks a
@@ -2688,8 +2731,12 @@ to a complete gesture. All actions are validated before the first is predicted o
 normal `ContainerClick` path. A stale handle, invalid slot/hotbar index, creative-only action in survival,
 spectator, non-client host or creative inventory screen returns `false` without side effects.
 `true` is submission, not server acceptance; authoritative slot/cursor corrections still win.
+`menu.close(host)` closes the menu's open screen as Escape does (`AbstractContainerScreen.onClose`,
+`LocalPlayer.closeContainer`, which sends `ServerboundContainerClosePacket`), and `menu.click_button(host, button)`
+sends `ServerboundContainerButtonClickPacket`. Both return `false` for a stale handle or a non-client host; `close` also
+while the menu's screen is not open, and `click_button` for the inventory menu.
 See [A menu's slots](../concepts/trait-mods.md#a-menus-slots) for actions and an example.
-Diverges from upstream: new helper.
+Diverges from upstream: new helpers.
 
 ### Mob AI goals
 

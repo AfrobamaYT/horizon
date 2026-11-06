@@ -5397,6 +5397,67 @@ mod tests {
     }
 
     #[test]
+    fn registered_bool_rule_reaches_guest_commands() {
+        let mut sync = SyncData::empty();
+        sync.commands = Some(crate::lan::commands::CommandTree {
+            root: serde_json::json!({"type":"root","children":{"gamerule":{"type":"literal","permissions":{"permission":{"level":"gamemasters"}}}}}),
+        });
+        sync.builtin.registries.insert(
+            "minecraft:command_argument_type".into(),
+            horizon_protocol::registry::Ids::from_names(
+                play::ARGUMENT_TYPES
+                    .iter()
+                    .map(|s| (*s).to_owned())
+                    .collect(),
+            ),
+        );
+        let (mut hub, rx) = hub_with_sync(sync);
+        let rule = crate::gamerules::Rule {
+            name: "example:enabled".into(),
+            category: "example:machines".into(),
+            default: crate::gamerules::Value::Bool(true),
+            min: 0,
+            max: 0,
+        };
+        hub.rule_registry = Arc::new(
+            crate::gamerules::RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule])
+                .unwrap(),
+        );
+        hub.guests.update(0, |guest| guest.permission = 2);
+        hub.send_commands(0);
+        let crate::lan::Out::Packet(body) = rx.try_recv().unwrap() else {
+            panic!("packet")
+        };
+        let mut reader = horizon_protocol::buf::Reader::new(&body);
+        let id = reader.varint().unwrap();
+        let play::Clientbound::Commands(packet) =
+            play::Clientbound::decode(id, &body[reader.position()..]).unwrap()
+        else {
+            panic!("commands")
+        };
+        let client =
+            crate::command::network::from_packet(&packet, &crate::command::Dispatcher::new());
+        let regs = crate::command::Registries {
+            permission: 2,
+            ..Default::default()
+        };
+        let line = "gamerule example:enabled ";
+        let suggestions = client
+            .client_suggestions(&client.parse(line, &regs), line.len(), &regs)
+            .1
+            .into_iter()
+            .map(|s| s.text)
+            .collect::<Vec<_>>();
+        assert_eq!(suggestions, ["false", "true"]);
+        assert!(
+            client
+                .parse("gamerule example:enabled false", &regs)
+                .executable()
+                .is_ok()
+        );
+    }
+
+    #[test]
     fn guest_rule_tree_comes_from_session_registry() {
         let mut sync = SyncData::empty();
         sync.commands = Some(crate::lan::commands::CommandTree {

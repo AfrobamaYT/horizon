@@ -84,9 +84,26 @@ pub enum Arg {
     Node(*mut ()),
 }
 
+/// A function's result and the final values of its mutable copy arguments, in parameter order.
+#[derive(Debug, PartialEq)]
+pub struct CallReply<T = Reply> {
+    pub result: T,
+    pub updates: Vec<Value>,
+}
+
+impl<T> CallReply<T> {
+    /// A call without mutable copy arguments.
+    pub fn new(result: T) -> Self {
+        Self {
+            result,
+            updates: Vec::new(),
+        }
+    }
+}
+
 /// A declared function's call: its receiver's node (none for a free function) and its arguments.
 /// A reference it returns comes back as a node, valid until the next call.
-pub type ThunkFn = unsafe fn(Option<*mut ()>, Vec<Arg>) -> Result<Reply, Refusal>;
+pub type ThunkFn = unsafe fn(Option<*mut ()>, Vec<Arg>) -> Result<CallReply, Refusal>;
 
 /// A declared function.
 pub struct Thunk {

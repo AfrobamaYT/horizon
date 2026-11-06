@@ -69,14 +69,14 @@ fn native_add(game: &mut Game, delta: i64) -> i64 {
     game.copy += delta;
     game.copy
 }
-unsafe fn add(receiver: Option<*mut ()>, args: Vec<Arg>) -> Result<Reply, Refusal> {
+unsafe fn add(receiver: Option<*mut ()>, args: Vec<Arg>) -> Result<I::CallReply, Refusal> {
     // SAFETY: Frame checked the receiver's type and exclusive write access.
     let game = unsafe { &mut *receiver.unwrap().cast::<Game>() };
     let [arg] = I::fields::<_, 1>(args)?;
-    Ok(Reply::Value(Value::S(native_add(
+    Ok(I::CallReply::new(Reply::Value(Value::S(native_add(
         game,
         I::int(I::value(arg)?)?,
-    ))))
+    )))))
 }
 
 fn table() -> &'static Table {

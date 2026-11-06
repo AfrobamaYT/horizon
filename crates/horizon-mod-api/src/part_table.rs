@@ -403,6 +403,8 @@ struct TagParts {
 #[derive(Default)]
 struct Installed {
     game_rule_categories: Vec<String>,
+    game_rules: Vec<horizon_client_core::gamerules::Rule>,
+    game_rule_slots: Vec<u32>,
     keys: Parts,
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
@@ -1029,6 +1031,14 @@ pub trait Registrar {
     /// Categories appear in the host's game rules screen; remote clients do not
     /// receive them in this version.
     fn game_rule_category(&mut self, id: &str) -> Result<(), super::GameRuleError>;
+    /// Declare a boolean game rule in this mod's namespace. Category references are
+    /// resolved after all mods register; an unknown category refuses installation then.
+    fn game_rule_bool(
+        &mut self,
+        id: &str,
+        category: &str,
+        default: bool,
+    ) -> Result<super::BoolGameRuleKey, super::GameRuleError>;
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey;
     /// Request a block by canonical registry id. All mods' declarations are checked at load.
@@ -1299,6 +1309,7 @@ impl dyn Registrar + '_ {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
     game_rule_categories: Vec<String>,
+    game_rules: Vec<horizon_client_core::gamerules::Rule>,
     mod_id: &'static str,
     mod_index: usize,
     /// Parts registered so far, by every mod: the next part's `order`.
@@ -1317,6 +1328,7 @@ impl PartRegistrar {
     fn new(mod_id: &'static str) -> Self {
         Self {
             game_rule_categories: Vec::new(),
+            game_rules: Vec::new(),
             mod_id,
             mod_index: 0,
             registered: 0,
@@ -1329,6 +1341,21 @@ impl PartRegistrar {
             structure_types: Vec::new(),
             refused: Vec::new(),
         }
+    }
+
+    fn game_rule_id(&self, id: &str) -> Result<String, super::GameRuleError> {
+        let id = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("{}:{id}", self.mod_id)
+        };
+        if !horizon_mods::content::namespaced_id(&id) {
+            return Err(super::GameRuleError::InvalidId);
+        }
+        if id.split_once(':').unwrap().0 != self.mod_id {
+            return Err(super::GameRuleError::ForeignNamespace);
+        }
+        Ok(id)
     }
 
     fn expand_block_entity_parts(&mut self) {
@@ -1510,17 +1537,7 @@ impl PartRegistrar {
 impl Registrar for PartRegistrar {
     fn game_rule_category(&mut self, id: &str) -> Result<(), super::GameRuleError> {
         let result = (|| {
-            let id = if id.contains(':') {
-                id.to_owned()
-            } else {
-                format!("{}:{id}", self.mod_id)
-            };
-            if !horizon_mods::content::namespaced_id(&id) {
-                return Err(super::GameRuleError::InvalidId);
-            }
-            if id.split_once(':').unwrap().0 != self.mod_id {
-                return Err(super::GameRuleError::ForeignNamespace);
-            }
+            let id = self.game_rule_id(id)?;
             if self.game_rule_categories.contains(&id) {
                 return Err(super::GameRuleError::Duplicate);
             }
@@ -1534,6 +1551,38 @@ impl Registrar for PartRegistrar {
         result
     }
 
+    fn game_rule_bool(
+        &mut self,
+        id: &str,
+        category: &str,
+        default: bool,
+    ) -> Result<super::BoolGameRuleKey, super::GameRuleError> {
+        let result = (|| {
+            let id = self.game_rule_id(id)?;
+            if self.game_rules.iter().any(|r| r.name == id) {
+                return Err(super::GameRuleError::Duplicate);
+            }
+            let slot = self
+                .registry_keys
+                .borrow_mut()
+                .game_rules
+                .request(self.mod_id, &id)
+                .map_err(|_| super::GameRuleError::InvalidId)?;
+            self.game_rules.push(horizon_client_core::gamerules::Rule {
+                name: id,
+                category: category.into(),
+                default: horizon_client_core::gamerules::Value::Bool(default),
+                min: 0,
+                max: 0,
+            });
+            Ok(super::BoolGameRuleKey(slot))
+        })();
+        if let Err(error) = &result {
+            self.refused
+                .push(format!("mod {} rule {id:?}: {error:?}", self.mod_id));
+        }
+        result
+    }
     fn add_structure_type(&mut self, name: &str, ty: Arc<dyn super::StructureType>) {
         let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
         let id = format!("{}:{}", self.mod_id, path);
@@ -1936,11 +1985,42 @@ pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     install_registrar(register_all(mods))
 }
 
-fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
+fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<String>> {
+    let registry = horizon_client_core::gamerules::RuleRegistry::with_bool_rules(
+        &registrar.game_rule_categories,
+        &registrar.game_rules,
+    )
+    .map_err(|errors| {
+        registrar.refused.extend(
+            errors
+                .into_iter()
+                .map(|error| {
+                    let owner = match &error {
+                        horizon_client_core::gamerules::RuleRegistryError::UnknownCategory {
+                            rule,
+                            ..
+                        }
+                        | horizon_client_core::gamerules::RuleRegistryError::Duplicate(rule) => {
+                            rule.split_once(':').map_or("unknown", |(owner, _)| owner)
+                        }
+                    };
+                    format!("mod {owner}: {error:?}")
+                })
+                .collect::<Vec<_>>(),
+        );
+        registrar.refused.clone()
+    })?;
     if !registrar.refused.is_empty() {
         return Err(registrar.refused);
     }
+    let game_rule_slots = registrar
+        .game_rules
+        .iter()
+        .map(|rule| registry.position(&rule.name).unwrap())
+        .collect();
     let mut installed = Installed {
+        game_rule_slots,
+        game_rules: registrar.game_rules,
         game_rule_categories: registrar.game_rule_categories,
         keys: registrar.parts,
         tags: registrar.tags,
@@ -1980,15 +2060,112 @@ fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
 // hidden: the game owns session registry construction.
 #[doc(hidden)]
 pub fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {
-    horizon_client_core::gamerules::RuleRegistry::with_categories(
-        installed().map_or(&[], |parts| &parts.game_rule_categories),
+    let Some(parts) = installed() else {
+        return horizon_client_core::gamerules::RuleRegistry::vanilla();
+    };
+    horizon_client_core::gamerules::RuleRegistry::with_bool_rules(
+        &parts.game_rule_categories,
+        &parts.game_rules,
     )
+    .expect("validated at registration")
+}
+/// Dense position for a validated rule key.
+// hidden: the game resolves load-owned keys to dense positions.
+#[doc(hidden)]
+pub fn game_rule_bool_slot(key: super::BoolGameRuleKey) -> Option<u32> {
+    installed()?.game_rule_slots.get(key.0 as usize).copied()
 }
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
     use super::super::*;
     use super::mark_game_thread;
+    #[test]
+    fn cross_mod_categories_resolve_after_all_registration() {
+        use super::Registrar;
+        struct Rule;
+        #[mod_api::__subscriptions]
+        impl Hooks for Rule {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.game_rule_bool("active", "later:machines", true).unwrap();
+            }
+        }
+        struct Category;
+        #[mod_api::__subscriptions]
+        impl Hooks for Category {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.game_rule_category("machines").unwrap();
+            }
+        }
+        let mods = [
+            ModEntry::new("first", Box::new(Rule)),
+            ModEntry::new("later", Box::new(Category)),
+        ];
+        super::install_parts(&mods).unwrap();
+        assert!(super::game_rule_registry().rule("first:active").is_some());
+    }
+    #[test]
+    fn unknown_category_reports_rule_category_and_owner_without_installing() {
+        use super::Registrar;
+        struct Rule;
+        #[mod_api::__subscriptions]
+        impl Hooks for Rule {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.game_rule_bool("active", "missing:machines", true)
+                    .unwrap();
+            }
+        }
+        let mods = [
+            ModEntry::new("first", Box::new(Rule)),
+            ModEntry::new("second", Box::new(Rule)),
+        ];
+        let errors = super::install_parts(&mods).unwrap_err();
+        assert_eq!(errors.len(), 2);
+        assert!(errors[0].contains("first:active"));
+        assert!(errors[1].contains("second:active"));
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.contains("missing:machines"))
+        );
+        assert!(super::game_rule_registry().rule("first:active").is_none());
+    }
+
+    #[test]
+    fn bool_rule_declarations_validate_slots_and_fail_atomically() {
+        use super::Registrar;
+        let mut refused = super::PartRegistrar::new("example");
+        refused
+            .game_rule_bool("active", "missing:machines", true)
+            .unwrap();
+        let _ = refused.game_rule_bool("foreign:bad", "example:machines", true);
+        let errors = super::install_registrar(refused).unwrap_err().join(" ");
+        assert!(
+            errors.contains("ForeignNamespace")
+                && errors.contains("example:active")
+                && errors.contains("missing:machines")
+        );
+        let mut good = super::PartRegistrar::new("example");
+        let _key = good
+            .game_rule_bool("active", "example:machines", true)
+            .unwrap();
+        good.game_rule_category("machines").unwrap();
+        assert_eq!(
+            good.game_rule_bool("active", "example:machines", true),
+            Err(crate::GameRuleError::Duplicate)
+        );
+        assert!(super::install_registrar(good).is_err());
+        let mut good = super::PartRegistrar::new("example");
+        let key = good
+            .game_rule_bool("active", "example:machines", true)
+            .unwrap();
+        good.game_rule_category("machines").unwrap();
+        super::install_registrar(good).unwrap();
+        assert!(crate::BoolGameRuleKey::from_slot(key.0).is_ok());
+        assert!(crate::BoolGameRuleKey::from_slot(key.0 + 1).is_err());
+        assert!(super::game_rule_bool_slot(key).is_some());
+    }
+
     #[test]
     fn category_registration_refuses_ignored_errors_and_installs_snapshot() {
         use super::Registrar;
@@ -6287,10 +6464,8 @@ pub mod tests {
 
     #[cfg(test)]
     fn potion(amount: u32, potion: &str) -> FluidStack {
-        let components = horizon_items::item_data::StackData {
-            potion: Some(Arc::from(potion)),
-            ..Default::default()
-        };
+        let mut components = horizon_items::item_data::StackData::default();
+        components.potion = Some(Arc::from(potion));
         FluidStack {
             components: Some(Box::new(components)),
             ..FluidStack::new(
