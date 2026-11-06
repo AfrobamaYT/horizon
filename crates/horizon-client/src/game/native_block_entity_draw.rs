@@ -1124,7 +1124,9 @@ mod tests {
                 return;
             };
             let coverage = rendered
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|p| p[0] != 0 || p[1] != 0 || p[2] != 0)
                 .count();
             let pixel = |x: usize, y: usize| &rendered[(y * 64 + x) * 4..(y * 64 + x + 1) * 4];
