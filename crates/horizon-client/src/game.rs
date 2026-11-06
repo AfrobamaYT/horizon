@@ -22585,7 +22585,9 @@ fn gameplay_tables(
             .map_err(|e| e.to_string())
         });
         let motion = startup::time("core.motion", || {
-            MotionResources::load_with_facts(root, assets, &facts)
+            let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+            let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+            MotionResources::load_with_conditions(root, assets, &facts, &conditions)
         })
         .map_err(|e| e.to_string());
         (light.join(), motion)
