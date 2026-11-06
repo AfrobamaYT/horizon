@@ -569,4 +569,18 @@ impl LevelsBackendMut for Game<'_> {
         );
         self.native_level_set_random(level, random)
     }
+    fn level_bone_meal(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
+        mod_api::__private::check_access(
+            "level_bone_meal",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_bone_meal(level, pos)
+    }
+    fn level_set_biome(&mut self, level: LevelRef, pos: [i32; 3], biome: &str) -> bool {
+        mod_api::__private::check_access(
+            "level_set_biome",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_set_biome(level, pos, biome)
+    }
 }

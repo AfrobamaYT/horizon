@@ -719,3 +719,5 @@ local_sounds	sound_fade	effects
 local_sounds	sound_events	effects
 local_sounds	audio_devices	effects
 local_sounds	audio_device	effects
+level_block_writes	level_bone_meal	levels
+level_block_writes	level_set_biome	levels
