@@ -1,5 +1,5 @@
 use super::*;
-use crate::nbt::parse_snbt;
+use horizon_core::nbt::parse_snbt;
 
 fn snbt(s: &str) -> Tag {
     parse_snbt(s).unwrap().0

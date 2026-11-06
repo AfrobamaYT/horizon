@@ -14,16 +14,15 @@ use horizon_client::{
 };
 use horizon_core::position::BlockPos;
 use horizon_core::random::RandomSource;
-use horizon_world::{
-    level::{
-        LevelEvent,
-        removal::{self, PreRemove},
-    },
-    nbt::{Compound, JavaString, Tag},
-    registry::BlockStateId,
-};
 use mod_api::NativeItemDrop;
 use std::collections::HashMap;
+use {
+    horizon_core::nbt::{Compound, JavaString, Tag},
+    horizon_world::{
+        level::{LevelEvent, removal, removal::PreRemove},
+        registry::BlockStateId,
+    },
+};
 
 /// What a broken block's entity gives its own dropped item (`copy_components`
 /// in the block loot tables): a shulker box's contents, a banner's layers, a
@@ -107,7 +106,7 @@ impl Pending {
             && let Some((_, name)) = self.names.remove(&pos)
         {
             stack.data_mut().custom_name =
-                Some(horizon_world::nbt::Tag::String(name.as_str().into()));
+                Some(horizon_core::nbt::Tag::String(name.as_str().into()));
         }
         if self
             .copied
@@ -162,8 +161,8 @@ impl Pending {
         }
     }
     /// Remember a decorated pot's sherds from its saved block entity.
-    pub(super) fn record_saved(&mut self, pos: [i32; 3], tag: &horizon_world::nbt::Tag) {
-        use horizon_world::nbt::Tag;
+    pub(super) fn record_saved(&mut self, pos: [i32; 3], tag: &horizon_core::nbt::Tag) {
+        use horizon_core::nbt::Tag;
         if tag.get("id") != Some(&Tag::String("minecraft:decorated_pot".into())) {
             return;
         }
@@ -304,8 +303,8 @@ pub(super) fn pop_position(
 pub(super) fn saved_entity(
     world: &horizon_client::world::World,
     pos: [i32; 3],
-) -> Option<horizon_world::nbt::Tag> {
-    use horizon_world::nbt::Tag;
+) -> Option<horizon_core::nbt::Tag> {
+    use horizon_core::nbt::Tag;
     let saved = world
         .chunks
         .get(&(pos[0] >> 4, pos[2] >> 4))?
@@ -327,9 +326,9 @@ pub(super) fn saved_entity(
 pub(super) fn put_saved_entity(
     world: &mut horizon_client::world::World,
     pos: [i32; 3],
-    tag: horizon_world::nbt::Tag,
+    tag: horizon_core::nbt::Tag,
 ) {
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     let Some(chunk) = world.chunks.get_mut(&(pos[0] >> 4, pos[2] >> 4)) else {
         return;
     };
@@ -743,7 +742,7 @@ impl GameLevel<'_> {
         old: BlockStateId,
         side_effects: bool,
     ) -> bool {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let chunk_key = (pos.x >> 4, pos.z >> 4);
         let at = |t: &Tag| {
             let int = |k: &str| match t.get(k) {
@@ -1103,7 +1102,7 @@ mod tests {
         });
     }
     use horizon_client::{block_entity_item, item_data, mobs::raider, save};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     #[test]
     fn a_used_run_is_retold_in_place() {

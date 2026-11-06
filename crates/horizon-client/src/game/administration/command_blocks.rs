@@ -15,15 +15,17 @@ use horizon_client::{
 };
 use horizon_core::position::BlockPos;
 use horizon_protocol::packets::play::{self, Clientbound as C, Serverbound as S};
-use horizon_world::{
-    chunk::BlockState,
-    level::flags,
-    nbt::Tag,
-    registry::{BlockRegistry, BlockStateId},
-};
 use winit::{
     event::{ElementState, KeyEvent},
     keyboard::{KeyCode, PhysicalKey},
+};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        chunk::BlockState,
+        level::flags,
+        registry::{BlockRegistry, BlockStateId},
+    },
 };
 
 type Pos = (i32, i32, i32);

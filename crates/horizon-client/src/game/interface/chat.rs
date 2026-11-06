@@ -1631,13 +1631,13 @@ impl Game<'_> {
         if let Ok(bytes) = std::fs::read(self.world_root.join("data/minecraft/world_clocks.dat"))
             && let Ok(raw) = horizon_world::compression::Compression::Gzip.decode(&bytes, 1 << 20)
             && let Ok((root, _)) =
-                horizon_world::nbt::read_named(&raw, horizon_world::nbt::Limits::default())
+                horizon_core::nbt::read_named(&raw, horizon_core::nbt::Limits::default())
             && let Some(c) = root
                 .tag
                 .get("data")
                 .and_then(|d| d.get("minecraft:overworld"))
         {
-            use horizon_world::nbt::Tag;
+            use horizon_core::nbt::Tag;
             if let Some(Tag::Float(r)) = c.get("rate") {
                 self.ui.clock.rate = f32::from_bits(*r);
             }
@@ -1659,7 +1659,7 @@ impl Game<'_> {
         if self.world_root.as_os_str().is_empty() {
             return;
         }
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let c = self.ui.clock;
         // The other clocks stay as saved; the overworld one keeps the fields Horizon
         // does not model, and (like vanilla's codec) omits rate, partial tick and
@@ -1920,9 +1920,9 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 item.data().and_then(|data| data.other("example:marker")),
-                Some(&horizon_world::nbt::Tag::compound([(
+                Some(&horizon_core::nbt::Tag::compound([(
                     "probe",
-                    horizon_world::nbt::Tag::Int(1)
+                    horizon_core::nbt::Tag::Int(1)
                 )]))
             );
             assert!(!game.run_command("give @s minecraft:apple[minecraft:creative_slot_lock={}]"));

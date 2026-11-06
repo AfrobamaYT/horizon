@@ -52,7 +52,7 @@ struct Level {
     events: Vec<LevelEvent>,
     biome: &'static str,
     day: i64,
-    block_entities: Vec<(BlockPos, crate::nbt::Compound)>,
+    block_entities: Vec<(BlockPos, horizon_core::nbt::Compound)>,
     /// What a mod's `BlockGrowFeatureEvent` grows when vanilla has no feature.
     supplied: Option<&'static str>,
     /// A mod's `CropGrowEvent.Pre` answer (`None`: `DEFAULT`).
@@ -87,7 +87,7 @@ impl LevelAccess for Level {
     fn biome_name(&self, _pos: BlockPos) -> Option<&str> {
         Some(self.biome)
     }
-    fn load_block_entity(&mut self, pos: BlockPos, nbt: crate::nbt::Compound) {
+    fn load_block_entity(&mut self, pos: BlockPos, nbt: horizon_core::nbt::Compound) {
         self.block_entities.push((pos, nbt));
     }
     fn block_grow_feature<'a>(
@@ -236,7 +236,7 @@ fn a_tree_with_bees_fills_its_nest() {
         panic!("one block entity: {:?}", w.level.block_entities);
     };
     assert_eq!(w.name(*at), "minecraft:bee_nest");
-    let Some(crate::nbt::Tag::List(bees)) = nbt.get(&"bees".into()) else {
+    let Some(horizon_core::nbt::Tag::List(bees)) = nbt.get(&"bees".into()) else {
         panic!("bees: {nbt:?}");
     };
     assert!(
@@ -723,9 +723,9 @@ fn snowy_biomes_freeze_and_snow() {
 
 #[test]
 fn a_template_with_entities_and_no_blocks_places_them() {
-    use crate::{
-        nbt::{Compound, JavaString, Tag},
-        worldgen::structure::{EntityInfo, Mirror, Rotation, StructureTemplate, save_nbt},
+    use {
+        crate::worldgen::structure::{EntityInfo, Mirror, Rotation, StructureTemplate, save_nbt},
+        horizon_core::nbt::{Compound, JavaString, Tag},
     };
     let Some(f) = fixture() else { return };
     let resources = f

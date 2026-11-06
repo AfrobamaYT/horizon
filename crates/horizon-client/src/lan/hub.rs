@@ -30,16 +30,15 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C, Serverbound as S},
     text::{literal, translatable},
 };
-use horizon_world::{
-    attachments::Holder,
-    block_collision::BlockCollisionRegistry,
-    block_collision_scan::BlockCollisionScan,
-    collision_context::CollisionContext,
-    native_load_context::LoopContext,
-    nbt::{JavaString, Tag},
-    world_movement::in_range_of_ground,
-};
 use std::sync::{Arc, Mutex, atomic::Ordering};
+use {
+    horizon_core::nbt::{JavaString, Tag},
+    horizon_world::{
+        attachments::Holder, block_collision::BlockCollisionRegistry,
+        block_collision_scan::BlockCollisionScan, collision_context::CollisionContext,
+        native_load_context::LoopContext, world_movement::in_range_of_ground,
+    },
+};
 
 /// GameEvent types (ClientboundGameEventPacket).
 pub mod advancements;
@@ -6145,7 +6144,7 @@ mod tests {
             }),
             bound: Box::new(play::ChatTypeBound {
                 chat_type: 0,
-                name: horizon_world::nbt::Tag::String("Bob".into()),
+                name: horizon_core::nbt::Tag::String("Bob".into()),
                 target: None,
             }),
             name: "Bob".into(),

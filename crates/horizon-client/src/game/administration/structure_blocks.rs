@@ -14,13 +14,18 @@ use horizon_client::{
 };
 use horizon_core::position::BlockPos;
 use horizon_protocol::packets::play;
-use horizon_world::{
-    compression::Compression,
-    level::{TemplateSettings, flags},
-    nbt::{self, Compound, Limits, NamedTag, Tag},
-    worldgen::structure::{BlockInfo, EntityInfo, StructureTemplate, save_nbt},
-};
 use std::collections::HashSet;
+use {
+    horizon_core::{
+        nbt,
+        nbt::{Compound, Limits, NamedTag, Tag},
+    },
+    horizon_world::{
+        compression::Compression,
+        level::{TemplateSettings, flags},
+        worldgen::structure::{BlockInfo, EntityInfo, StructureTemplate, save_nbt},
+    },
+};
 
 type Pos = (i32, i32, i32);
 

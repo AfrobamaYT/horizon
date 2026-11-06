@@ -74,7 +74,7 @@ pub struct World {
     /// incrementally by streaming.
     pub light_edits: Vec<((i32, i32, i32), u32, u32)>,
     /// Saved entities of chunks that just loaded, spawned by the game.
-    pub loaded_entities: Vec<((i32, i32), Vec<horizon_world::nbt::Tag>)>,
+    pub loaded_entities: Vec<((i32, i32), Vec<horizon_core::nbt::Tag>)>,
     /// Chunks that just came into this level from a worker, and whether each
     /// was generated rather than read from the save: the game tells native mods.
     pub loaded_chunks: Vec<(i32, i32, bool)>,
@@ -505,7 +505,7 @@ impl World {
     /// `LockCode`: the `lock` a container block entity refuses to open
     /// without, as the tag it was loaded or set with carries it (Horizon's
     /// model holds no field for it).
-    pub fn block_lock(&self, key: (i32, i32, i32)) -> Option<&horizon_world::nbt::Tag> {
+    pub fn block_lock(&self, key: (i32, i32, i32)) -> Option<&horizon_core::nbt::Tag> {
         self.chunks
             .get(&(key.0 >> 4, key.2 >> 4))?
             .saved
@@ -519,8 +519,8 @@ impl World {
     /// `LockCode.addToTag` for a tag a command gives a container (`setblock`,
     /// `data merge`): the tag it was set with keeps the lock, so `data get`
     /// shows it, a player's open checks it and the save writes it.
-    pub fn set_block_lock(&mut self, key: (i32, i32, i32), tag: &horizon_world::nbt::Tag) {
-        use horizon_world::nbt::Tag;
+    pub fn set_block_lock(&mut self, key: (i32, i32, i32), tag: &horizon_core::nbt::Tag) {
+        use horizon_core::nbt::Tag;
         let lock = tag.get("lock").and_then(|lock| match lock {
             Tag::Compound(_) => Some(lock.clone()),
             _ => None,
@@ -716,6 +716,6 @@ mod tests {
 /// A block entity's fields kept beside its model ([`World::block_entity_extras`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockEntityExtras {
-    source: Option<horizon_world::nbt::Tag>,
+    source: Option<horizon_core::nbt::Tag>,
     rolled_loot: Option<crate::chunk::RolledLoot>,
 }

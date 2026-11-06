@@ -1808,7 +1808,7 @@ mod tests {
         let mut dirt = ItemStack::new("minecraft:dirt", 8);
         dirt.data_mut().set_other(
             "minecraft:max_stack_size",
-            Some(horizon_world::nbt::Tag::Int(16)),
+            Some(horizon_core::nbt::Tag::Int(16)),
         );
         let mut partial = dirt.clone();
         partial.count = 15;

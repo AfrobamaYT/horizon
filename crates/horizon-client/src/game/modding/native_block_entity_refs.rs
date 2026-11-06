@@ -9,7 +9,7 @@ use horizon_client::{
     save,
     world::World,
 };
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 use mod_api::__private::game::*;
 use mod_api::{
     BlockEntityDataError, BlockEntityItemError, BlockEntityRef, BlockEntityTypeKey, ItemStack,
@@ -648,7 +648,7 @@ mod tests {
     }
 
     fn compound(snbt: &str) -> Compound {
-        match horizon_world::nbt::parse_snbt(snbt).unwrap().0 {
+        match horizon_core::nbt::parse_snbt(snbt).unwrap().0 {
             Tag::Compound(c) => c,
             _ => panic!("not a compound"),
         }

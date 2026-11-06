@@ -3,12 +3,12 @@
 //! messages checked link by link, the acknowledged window, and messages
 //! relayed with each connection's numbering and signature cache.
 use super::{HostEvent, Hub};
+use horizon_core::nbt::{JavaString, Tag};
 use horizon_protocol::{
     packets::play::{self, Clientbound as C},
     secure_chat::{self, Body, Chain, ChatSession, DecodeError, ProfileKey, Signature, Unpacked},
     text::{literal, translatable},
 };
-use horizon_world::nbt::{JavaString, Tag};
 
 /// Now, in epoch milliseconds (Instant.now()).
 pub fn now_millis() -> i64 {

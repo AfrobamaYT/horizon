@@ -2,6 +2,7 @@
 //!
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
+pub mod inject;
 mod jar;
 mod wasm;
 pub use jar::{
@@ -63,6 +64,9 @@ pub struct Manifest {
     pub native: Option<Native>,
     /// A wasm mod's `mod.wasm`, its toolchain and what it was linked against.
     pub wasm: Option<Wasm>,
+    /// Unified listeners; routing and staging are separate from manifest parsing.
+    #[serde(default)]
+    pub inject: Vec<inject::Inject>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -163,6 +167,8 @@ pub enum InjectionKind {
     ModifyArg,
     ModifyConstant,
     WrapOperation,
+    /// A native raw site listener that skips a unit-returning call when it returns false.
+    WrapWithCondition,
     ModifyArgs,
     ModifyVariable,
     ModifyExpressionValue,
@@ -283,20 +289,47 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
             ));
         }
     }
+    let source_options = injection.cancellable
+        || !injection.bindings.is_empty()
+        || injection.argument.is_some()
+        || injection.require.is_some()
+        || injection.slice.is_some()
+        || injection.variable.is_some()
+        || injection.result.is_some();
+    let site = injection.raw.is_some() && injection.selector.is_some();
+    if site {
+        if injection.target.is_none()
+            || !matches!(
+                injection.kind,
+                InjectionKind::BeforeCall
+                    | InjectionKind::AfterCall
+                    | InjectionKind::ModifyArg
+                    | InjectionKind::ModifyExpressionValue
+                    | InjectionKind::WrapOperation
+                    | InjectionKind::WrapWithCondition
+            )
+            || source_options
+        {
+            return Err(format!(
+                "{MANIFEST}: injection {}: a raw call-site listener needs target, selector and a call-site kind; no non-local cancellation, bindings, argument, require, slice, variable or result",
+                injection.id
+            ));
+        }
+        return Ok(());
+    }
+    if matches!(injection.kind, InjectionKind::WrapWithCondition) {
+        return Err(format!(
+            "{MANIFEST}: WRAP_WITH_CONDITION needs a raw call-site listener"
+        ));
+    }
     // Point listeners run at the head or return with the point's own types, so nothing
     // else of a mixin applies.
     if (injection.trait_method.is_some() || injection.raw.is_some())
         && (injection.hook.is_some()
             || !matches!(injection.kind, InjectionKind::Head | InjectionKind::Return)
-            || injection.cancellable
-            || !injection.bindings.is_empty()
-            || injection.argument.is_some()
+            || source_options
             || injection.selector.is_some()
-            || injection.ordinal.is_some()
-            || injection.require.is_some()
-            || injection.slice.is_some()
-            || injection.variable.is_some()
-            || injection.result.is_some())
+            || injection.ordinal.is_some())
     {
         return Err(format!(
             "{MANIFEST}: injection {}: a trait_method or raw listener listens at the HEAD or RETURN of the point its `target` names, and takes the point's record: no `hook` (a hook is its own Hooks method), bindings, cancellable, argument, selector, ordinal, require, slice, variable or result (cancel through the record's `cancel`); use a helper for the rest",
@@ -361,6 +394,7 @@ impl Manifest {
                 }
                 if (injection.trait_method.is_none() && injection.raw.is_none())
                     || injection.target.is_none()
+                    || injection.selector.is_some()
                 {
                     return Err(format!(
                         "{MANIFEST}: injection {}: a wasm mod listens at points (a trait_method or raw at a point's target); a mod that changes game code is a native mod",
@@ -397,6 +431,8 @@ impl Manifest {
                 m.id
             ));
         }
+        inject::Inject::check_all(&m.inject, m.native.is_some() || m.wasm.is_some())
+            .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
             Internal::check_all(&native.internals)?;
             let mut ids = std::collections::HashSet::new();

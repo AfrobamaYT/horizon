@@ -3,7 +3,7 @@
 //! providers, dialogs), reproducing the codec error messages vanilla reports.
 use super::args::{Registries, is_id_char, parse_identifier};
 use super::{CmdResult, CommandError, Reader};
-use horizon_world::nbt::{Compound, JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 
 pub fn snbt(t: &Tag) -> String {
     horizon_client_core::snbt::to_snbt(t)
@@ -265,7 +265,7 @@ mod predicate_tests {
     fn inline_constant_combinators_require_decodable_children() {
         let reg = Registries::default();
         let decode_text = |text| {
-            let (tag, _) = horizon_world::nbt::parse_snbt(text).unwrap();
+            let (tag, _) = horizon_core::nbt::parse_snbt(text).unwrap();
             decode("minecraft:predicate", &tag, &reg)
         };
         assert!(decode_text(r#"{type:"minecraft:all_of",terms:[{type:"minecraft:inverted",term:{type:"minecraft:any_of",terms:[]}}]}"#).is_ok());

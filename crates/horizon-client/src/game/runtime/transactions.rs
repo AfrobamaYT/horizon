@@ -50,9 +50,14 @@ pub(super) struct Level {
     menus: HashMap<u32, KeptMenus>,
     /// Each entity's, player's, chunk's and the level's attachment map before this transaction
     /// first reached it (a block entity's is kept with it).
-    attachments: HashMap<Holder, Attachments>,
+    attachments: HashMap<Holder, KeptAttachments>,
     /// What the root commit does, in order.
     after: Vec<After>,
+}
+
+struct KeptAttachments {
+    contents: Attachments,
+    indexed: bool,
 }
 
 struct Kept {
@@ -238,7 +243,21 @@ impl Game<'_> {
         if level.attachments.contains_key(&holder) {
             return;
         }
-        let Ok(kept) = self.attachment_slot(holder).map(|map| map.clone()) else {
+        let painting_bound = if let Holder::Entity(id) = holder {
+            self.paintings
+                .iter()
+                .find(|painting| painting.id == id)
+                .map(|painting| painting.attachment_lifetime.is_bound())
+        } else {
+            None
+        };
+        let Ok(kept) = self
+            .attachment_slot(holder, mod_api::AttachmentAccess::Existing)
+            .map(|map| KeptAttachments {
+                contents: map.clone(),
+                indexed: painting_bound.unwrap_or_else(|| map.has_index_binding()),
+            })
+        else {
             return;
         };
         if let Some(level) = self.transactions.last_mut() {
@@ -492,8 +511,17 @@ impl Game<'_> {
             });
         }
         for (holder, kept) in level.attachments {
-            if let Ok(map) = self.attachment_slot(holder) {
-                map.replace_contents(kept);
+            if let Ok(map) = self.attachment_slot(holder, mod_api::AttachmentAccess::Existing) {
+                map.replace_contents(kept.contents);
+                if !kept.indexed {
+                    map.unbind_index();
+                }
+            }
+            if !kept.indexed
+                && let Holder::Entity(id) = holder
+                && let Some(painting) = self.paintings.iter_mut().find(|painting| painting.id == id)
+            {
+                painting.attachment_lifetime = Default::default();
             }
         }
         for (uuid, kept) in level.players {
@@ -873,6 +901,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -994,7 +1023,10 @@ mod tests {
         let chest_holder = mod_api::Holder::BlockEntity([0, 64, 0]);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
         game.transaction_open();
-        assert!(game.attachment_map_quiet(chest_holder).is_ok());
+        assert!(
+            game.attachment_map_quiet(chest_holder, mod_api::AttachmentAccess::Existing)
+                .is_ok()
+        );
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_some());
         game.transaction_close(false);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
@@ -1116,16 +1148,16 @@ mod tests {
         // A chest minecart's, a chest boat's and a chested donkey's slots: an abort puts back
         // what an insert changed; a commit keeps an exchange, whose new item goes into the next
         // free slot.
-        let mut chested = horizon_world::nbt::Compound::new();
-        chested.insert("ChestedHorse".into(), horizon_world::nbt::Tag::Byte(1));
+        let mut chested = horizon_core::nbt::Compound::new();
+        chested.insert("ChestedHorse".into(), horizon_core::nbt::Tag::Byte(1));
         let vehicles = [
             (
                 "minecraft:chest_minecart",
-                horizon_world::nbt::Compound::new(),
+                horizon_core::nbt::Compound::new(),
             ),
             (
                 "minecraft:oak_chest_boat",
-                horizon_world::nbt::Compound::new(),
+                horizon_core::nbt::Compound::new(),
             ),
             ("minecraft:donkey", chested),
         ];
@@ -1136,8 +1168,8 @@ mod tests {
                 "minecraft:donkey",
                 [8.5, 70.0, 8.5],
                 {
-                    let mut chested = horizon_world::nbt::Compound::new();
-                    chested.insert("ChestedHorse".into(), horizon_world::nbt::Tag::Byte(1));
+                    let mut chested = horizon_core::nbt::Compound::new();
+                    chested.insert("ChestedHorse".into(), horizon_core::nbt::Tag::Byte(1));
                     chested
                 },
             )
@@ -1288,7 +1320,7 @@ mod mod_capability_tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
-    use horizon_world::nbt::{Compound, Tag};
+    use horizon_core::nbt::{Compound, Tag};
     use mod_api::__private::part_tests::{CHEMICALS, ChemTank, Chemical};
     use mod_api::ServerHost;
     use mod_api::{BlockSide, HostTransaction, ResourceHandler, move_resources};

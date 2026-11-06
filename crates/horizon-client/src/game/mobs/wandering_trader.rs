@@ -6,8 +6,8 @@ use horizon_client::{
     mobs::{Species, leash::Holder, spawning, trader},
     save::{read_dat, write_dat},
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{geometry::Vec3, random::RandomSource};
-use horizon_world::nbt::Tag;
 
 const TICK_DELAY: i32 = 1200;
 const SPAWN_DELAY: i32 = 24000;

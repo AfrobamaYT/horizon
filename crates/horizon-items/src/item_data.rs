@@ -2,7 +2,7 @@
 //! (book) enchantments, `repair_cost`, `custom_name`, `potion_contents` and
 //! `trim`, with their NBT form in vanilla's `components` compound.
 use crate::items::{ItemInfo, ItemStack};
-use horizon_world::nbt::{JavaString, Tag};
+use horizon_core::nbt::{JavaString, Tag};
 
 /// One item attribute modifier, as `ItemAttributeModifiers.Entry` holds it.
 #[derive(Clone, Debug, PartialEq)]
@@ -509,7 +509,7 @@ impl ItemStack {
         self.data().map_or(&[], |d| &d.container)
     }
     /// The `minecraft:custom_data` compound if present.
-    pub fn custom_data(&self) -> Option<&horizon_world::nbt::Compound> {
+    pub fn custom_data(&self) -> Option<&horizon_core::nbt::Compound> {
         match self.data()?.other("minecraft:custom_data")? {
             Tag::Compound(map) => Some(map),
             _ => None,
@@ -887,7 +887,7 @@ pub fn parse_stack(snbt: &str) -> Result<Option<ItemStack>, String> {
     if snbt == "-" {
         return Ok(None);
     }
-    let (tag, _) = horizon_world::nbt::parse_snbt(snbt)?;
+    let (tag, _) = horizon_core::nbt::parse_snbt(snbt)?;
     Ok(crate::item_nbt::item_from_nbt(&tag))
 }
 /// `MapDecorations.Entry.CODEC`: a bare type ID uses the default resource namespace.
@@ -902,7 +902,7 @@ fn canonical_other_component(id: &str, tag: &Tag) -> Tag {
                 let text = kind.to_string_lossy();
                 if !text.is_empty()
                     && !text.contains(':')
-                    && let Ok(id) = horizon_world::identifier::Identifier::parse(&text)
+                    && let Ok(id) = horizon_core::identifier::Identifier::parse(&text)
                 {
                     *kind = id.to_string().as_str().into();
                 }
@@ -1146,7 +1146,7 @@ pub fn components_tag(damage: u32, data: Option<&StackData>) -> Option<Tag> {
             entries.push(("minecraft:container", Tag::List(slots)));
         }
     }
-    let mut out: horizon_world::nbt::Compound = entries
+    let mut out: horizon_core::nbt::Compound = entries
         .into_iter()
         .map(|(k, v)| (JavaString::from(k), v))
         .collect();
@@ -1353,14 +1353,14 @@ pub fn command_components(text: &str) -> Result<Tag, String> {
         .strip_prefix('[')
         .and_then(|t| t.strip_suffix(']'))
         .ok_or("expected '['")?;
-    let mut entries = horizon_world::nbt::Compound::new();
+    let mut entries = horizon_core::nbt::Compound::new();
     let mut rest = inner.trim_start();
     while !rest.is_empty() {
         let end = rest.find(['=', ',']).unwrap_or(rest.len());
         let key = rest[..end].trim();
         rest = &rest[end..];
         if let Some(value) = rest.strip_prefix('=') {
-            let (tag, used) = horizon_world::nbt::parse_snbt(value)?;
+            let (tag, used) = horizon_core::nbt::parse_snbt(value)?;
             let id = if key.contains(':') {
                 key.to_owned()
             } else {
@@ -1587,7 +1587,7 @@ mod tests {
 
     #[test]
     fn map_decoration_types_round_trip_with_default_namespaces() {
-        let parse = |text| horizon_world::nbt::parse_snbt(text).unwrap().0;
+        let parse = |text| horizon_core::nbt::parse_snbt(text).unwrap().0;
         let source = parse(
             r#"{"minecraft:map_decorations":{a:{type:"minecraft:mansion",x:10.5d,z:-20.0d,rotation:90.0f},"a+b":{type:"red_x",x:-1.25d,z:2.75d,rotation:-45.5f}},"minecraft:custom_data":{keep:7}}"#,
         );
@@ -1620,7 +1620,7 @@ mod tests {
 
     #[test]
     fn empty_map_decoration_patch_uses_filled_map_prototype() {
-        let parse = |text| horizon_world::nbt::parse_snbt(text).unwrap().0;
+        let parse = |text| horizon_core::nbt::parse_snbt(text).unwrap().0;
         let empty = parse(r#"{"minecraft:map_decorations":{}}"#);
         assert!(decode_components(None).1.is_none());
         assert!(encode_components(&ItemStack::new("minecraft:filled_map", 1)).is_none());
@@ -1657,7 +1657,7 @@ mod tests {
 
     #[test]
     fn nondefault_map_decoration_patches_round_trip() {
-        let parse = |text| horizon_world::nbt::parse_snbt(text).unwrap().0;
+        let parse = |text| horizon_core::nbt::parse_snbt(text).unwrap().0;
         let nonempty = parse(
             r#"{"minecraft:map_decorations":{"a+b":{type:"minecraft:red_x",x:-1.25d,z:2.75d,rotation:-45.5f}},"minecraft:custom_data":{keep:7}}"#,
         );
@@ -1689,7 +1689,7 @@ mod tests {
     }
 
     fn check_hive_saved_patch(decoded: bool) {
-        let parse = |text| horizon_world::nbt::parse_snbt(text).unwrap().0;
+        let parse = |text| horizon_core::nbt::parse_snbt(text).unwrap().0;
         let zero = parse(r#"{"minecraft:block_state":{honey_level:"0"}}"#);
         let keep = parse(
             r#"{"minecraft:block_state":{honey_level:"0"},"minecraft:custom_data":{keep:34}}"#,
