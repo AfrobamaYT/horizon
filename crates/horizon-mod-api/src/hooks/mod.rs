@@ -293,6 +293,7 @@ mod teleport_command;
 mod tick_target_millis;
 mod toast_add;
 mod tooltip_color;
+mod tooltip_render;
 mod transactions;
 mod translate;
 mod use_item_on_block;

@@ -2505,10 +2505,13 @@ impl Game<'_> {
                     self.particles
                         .send_particles(&options, at, spread, speed, count);
                 }
-                MobEvent::Sound(name, at, volume, pitch)
-                | MobEvent::LocalSound(name, at, volume, pitch) => {
+                MobEvent::Sound(name, at, volume, pitch) => {
                     self.audio
                         .play(&format!("minecraft:{name}"), Some(at), volume, pitch)
+                }
+                MobEvent::LocalSound(name, at, volume, pitch) => {
+                    self.audio
+                        .play_unshared(&format!("minecraft:{name}"), Some(at), volume, pitch)
                 }
                 MobEvent::BoundSound {
                     mob,
@@ -2559,7 +2562,7 @@ impl Game<'_> {
                 // A mob's own `gameEvent(..)` calls: Armadillo.rollUp/rollOut's
                 // ENTITY_ACTION, Creeper.tick's PRIME_FUSE, Mob.ate's EAT, the
                 // shulker's lid (Shulker.setRawPeekAmount), an evoker's vexes
-                // (ENTITY_PLACE).
+                // (ENTITY_PLACE), Enderman.teleport's TELEPORT where it was.
                 MobEvent::GameEvent {
                     event, at, source, ..
                 } if matches!(
@@ -2570,6 +2573,7 @@ impl Game<'_> {
                         | "minecraft:container_open"
                         | "minecraft:container_close"
                         | "minecraft:entity_place"
+                        | "minecraft:teleport"
                 ) =>
                 {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
@@ -7684,11 +7688,11 @@ impl Game<'_> {
             self.mark_motion(entity_start, (1 << 32) | u64::from(mob.id));
             self.mark_entity(entity_start, &mob.kind.id);
             self.rendered_mobs.set(self.rendered_mobs.get() + 1);
-            let light = self.world.light(
-                mob.position.x.floor() as i32,
-                (mob.position.y + mob.eye_height()).floor() as i32,
-                mob.position.z.floor() as i32,
-            );
+            // `EntityRenderer.getPackedLightCoords`: the block the mob's light
+            // probe (its eye) is in, at the position this frame draws rather
+            // than this tick's.
+            let probe = mob.light_probe(alpha);
+            let light = self.world.light(probe[0], probe[1], probe[2]);
             let mut packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             // EntityRenderer.getBlockLightLevel: a burning mob has 15 block
             // light, and so do the Allay, Blaze, Magma Cube, Vex and Wither
@@ -7935,11 +7939,12 @@ impl Game<'_> {
             let p = glam::DVec3::from_array(at) - camera;
             let c = p.as_vec3();
             // EntityRenderer.getPackedLightCoords: the block its light probe
-            // (the eye) is in, not the one under its feet.
+            // (the eye) is in, at the position this frame draws rather than
+            // this tick's, and not the one under its feet.
             let light = self.world.light(
-                a.position.x.floor() as i32,
-                a.light_probe_y().floor() as i32,
-                a.position.z.floor() as i32,
+                at[0].floor() as i32,
+                a.light_probe_y(alpha).floor() as i32,
+                at[2].floor() as i32,
             );
             let mut packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             // EntityRenderer.getBlockLightLevel: a shulker bullet and anything
@@ -8786,6 +8791,86 @@ mod enderman_anger_tests {
                 assert_eq!(*heard.lock().unwrap(), [(calm, 127), (angry, 127)]);
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod local_sound_event_tests {
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use horizon_client::mobs::MobEvent;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn local_mob_events_play_without_entering_the_shared_capture() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir =
+            Some(std::env::temp_dir().join(format!("horizon-h069-unit-{}", std::process::id())));
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.audio.capture = Some(Vec::new());
+        game.handle_mob_events(vec![
+            MobEvent::Sound("entity.cow.hurt", [1.0, 100.0, 2.0], 0.5, 1.0),
+            MobEvent::LocalSound("entity.breeze.whirl", [3.0, 100.0, 4.0], 0.8, 0.7),
+            MobEvent::Sound("entity.zombie.hurt", [5.0, 100.0, 6.0], 1.0, 0.9),
+        ])
+        .unwrap();
+        // A positive LocalSound must still take the playback path. An absent
+        // producer cannot satisfy this actual Game adapter regression.
+        assert_eq!(
+            game.audio.heard.get("minecraft:entity.breeze.whirl"),
+            Some(&1)
+        );
+        assert_eq!(game.audio.heard.get("minecraft:entity.cow.hurt"), Some(&1));
+        assert_eq!(
+            game.audio.heard.get("minecraft:entity.zombie.hurt"),
+            Some(&1)
+        );
+        let shared = game.audio.capture.as_ref().unwrap();
+        assert_eq!(shared.len(), 2, "LocalSound must not become a shared sound");
+        assert_eq!(shared[0].event, "minecraft:entity.cow.hurt");
+        assert_eq!(shared[1].event, "minecraft:entity.zombie.hurt");
+        assert_eq!(
+            (
+                shared[0].position,
+                shared[0].volume,
+                shared[0].pitch,
+                shared[0].source
+            ),
+            ([1.0, 100.0, 2.0], 0.5, 1.0, 6)
+        );
+        assert_eq!(
+            (
+                shared[1].position,
+                shared[1].volume,
+                shared[1].pitch,
+                shared[1].source
+            ),
+            ([5.0, 100.0, 6.0], 1.0, 0.9, 5)
+        );
     }
 }
 
