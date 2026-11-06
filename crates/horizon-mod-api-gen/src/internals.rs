@@ -23,6 +23,9 @@ pub struct Internal {
     /// A reachable lower-crate type's layout, without exposing it to native mods.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub shape_only: bool,
+    /// Why this reachable layout cannot be accessed by the generated game table.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opaque_reason: Option<&'static str>,
     /// Type paths resolved through imports, keyed by their spelling in this signature.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub refs: BTreeMap<String, String>,
@@ -144,15 +147,27 @@ struct Pass {
     uses: BTreeMap<EntryKey, (String, TypeUses)>,
     /// The conditions of the module being visited.
     cfg: Vec<String>,
+    /// Widening only: the items and fields visited are made public and listed nowhere, for a
+    /// lower-crate shape the wasm internals table walks (#589 W).
+    reaching: bool,
     discovery: bool,
 }
+
+/// Crates whose types are the mod API's own: their fields stay private in every build.
+const API_CRATES: &[&str] = &["mod_api", "mod_points", "point_shape"];
 
 // Only test-only declarations are excluded. Other cfgs keep their spelling and visibility, and
 // each entry records them: changing visibility doesn't select an OS or feature for the build.
 use crate::points::{conditions, test_only};
 
+/// The attributes a layout's signature keeps: which fields exist, and whether another crate may
+/// build it.
 fn clean_attrs(attrs: &mut Vec<syn::Attribute>) {
-    attrs.retain(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
+    attrs.retain(|attr| {
+        attr.path().is_ident("cfg")
+            || attr.path().is_ident("cfg_attr")
+            || attr.path().is_ident("non_exhaustive")
+    });
 }
 
 fn clean_fields(fields: &Fields) -> Fields {
@@ -187,14 +202,18 @@ fn shape_signature(item: &Item) -> Option<Item> {
     match item {
         Item::Struct(value) => {
             let mut value = value.clone();
-            value.attrs.clear();
+            value
+                .attrs
+                .retain(|attr| attr.path().is_ident("non_exhaustive"));
             value.vis = Visibility::Inherited;
             value.fields = clean_fields(&value.fields);
             Some(Item::Struct(value))
         }
         Item::Enum(value) => {
             let mut value = value.clone();
-            value.attrs.clear();
+            value
+                .attrs
+                .retain(|attr| attr.path().is_ident("non_exhaustive"));
             value.vis = Visibility::Inherited;
             value.variants = value
                 .variants
@@ -555,6 +574,9 @@ impl Pass {
         tokens: impl ToTokens,
         uses: TypeUses,
     ) {
+        if self.reaching {
+            return;
+        }
         let cfg = configuration(&self.cfg, attrs);
         let signature = tokens.to_token_stream().to_string();
         let digest = Sha256::digest(signature.as_bytes());
@@ -573,6 +595,7 @@ impl Pass {
                 signature,
                 hash,
                 shape_only: false,
+                opaque_reason: None,
                 refs: BTreeMap::new(),
             },
         );
@@ -760,7 +783,7 @@ impl Pass {
                 let (ident, generics) = (&value.ident, &value.generics);
                 let signature = shape_signature(item).expect("a struct");
                 expose!(value, "struct", value.struct_token.span(), signature);
-                if children {
+                if children || self.reaching {
                     self.fields(
                         file,
                         module,
@@ -781,7 +804,7 @@ impl Pass {
                 };
                 signature.fields = fields;
                 expose!(value, "struct", value.union_token.span(), signature);
-                if children {
+                if children || self.reaching {
                     self.fields(
                         file,
                         module,
@@ -1081,6 +1104,50 @@ impl Pass {
             }
         }
         self.cfg.clear();
+        // Each shape's module path, item and fields, public in the staged copy, so the wasm
+        // internals table at the game's root can walk it. The mod API's own types keep theirs.
+        let reached: Vec<String> = self
+            .entries
+            .values()
+            .filter(|entry| {
+                matches!(entry.kind, "struct" | "enum")
+                    && !entry.path.starts_with("horizon_client::")
+                    && !API_CRATES.contains(&entry.path.split("::").next().unwrap_or_default())
+            })
+            .map(|entry| entry.path.clone())
+            .collect();
+        let manifest = root.join("crates/horizon-client/Cargo.toml");
+        let text = fs::read_to_string(&manifest).map_err(|e| e.to_string())?;
+        let manifest: toml::Value = toml::from_str(&text).map_err(|e| e.to_string())?;
+        // The table lives in the game crate. A transitive or optional dependency's name is
+        // not available in every game build, even if an unconditional layout was discovered.
+        let dependencies: BTreeSet<String> = manifest
+            .get("dependencies")
+            .and_then(toml::Value::as_table)
+            .into_iter()
+            .flatten()
+            .filter(|(_, dep)| dep.get("optional").and_then(toml::Value::as_bool) != Some(true))
+            .map(|(name, _)| name.replace('-', "_"))
+            .collect();
+        self.reaching = true;
+        for path in reached {
+            let krate = path.split("::").next().expect("shape path");
+            let reason = if !dependencies.contains(krate) {
+                Some("not an unconditional game dependency")
+            } else if self.lower(root, &path).is_err() {
+                // A declaration can be discovered through a re-export that lower() cannot
+                // walk. Keep its metadata, but never emit code against an unproven layout.
+                Some("shape module walk failed")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                for entry in self.entries.values_mut().filter(|entry| entry.path == path) {
+                    entry.opaque_reason = Some(reason);
+                }
+            }
+        }
+        self.reaching = false;
         Ok(())
     }
 
@@ -1265,6 +1332,10 @@ mod tests {
 
     fn shapes_fixture(game: &str) -> Fixture {
         let fixture = Fixture::new(game);
+        fixture.put(
+            "crates/horizon-client/Cargo.toml",
+            "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[dependencies]\nhorizon-items = { path = '../horizon-items' }\n",
+        );
         fixture.put(
             "crates/horizon-items/Cargo.toml",
             "[package]\nname = 'horizon-items'\nversion = '0.1.0'\n[lib]\npath = 'src/items.rs'\n",
@@ -1457,15 +1528,10 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
     }
 
     #[test]
-    fn reachable_lower_shapes_are_transitive_and_do_not_widen_sources() {
+    fn reachable_lower_shapes_are_transitive_and_widened_for_the_wasm_table() {
         let fixture = shapes_fixture(
             "use std::time::Duration; struct Game { stack: horizon_items::ItemStack, external: Duration }\n",
         );
-        let paths = ["items.rs", "item_stack.rs", "kinds.rs"];
-        let before: Vec<_> = paths
-            .iter()
-            .map(|path| fs::read(fixture.0.join("crates/horizon-items/src").join(path)).unwrap())
-            .collect();
         let result = widen_with(&fixture.0, &[]).unwrap();
         let shapes: Vec<_> = result
             .entries
@@ -1503,16 +1569,160 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             .find(|entry| entry.path == "horizon_client::game::Game::external")
             .unwrap();
         assert_eq!(external.refs["Duration"], "std::time::Duration");
-        for (path, original) in paths.into_iter().zip(before) {
-            assert_eq!(
-                fs::read(fixture.0.join("crates/horizon-items/src").join(path)).unwrap(),
-                original
-            );
-        }
-        assert_eq!(result.files, 2); // Only game.rs and entry.rs were widened.
+        // Each shape's module path, item and fields are public in the staged copy, and listed as
+        // nothing more than the one shape entry.
+        let source = |path: &str| {
+            fs::read_to_string(fixture.0.join("crates/horizon-items/src").join(path)).unwrap()
+        };
+        assert!(source("items.rs").starts_with("pub mod item_stack; pub mod kinds;"));
+        assert!(
+            source("item_stack.rs")
+                .contains("pub struct ItemStack { #[allow(dead_code)] pub kind: StackKind }")
+        );
+        assert!(source("kinds.rs").contains("pub enum Kind"));
+        assert!(
+            result
+                .entries
+                .iter()
+                .all(|entry| !entry.path.starts_with("horizon_items::") || entry.shape_only)
+        );
+        assert_eq!(result.files, 5);
         let again = widen_with(&fixture.0, &[]).unwrap();
         assert_eq!(result.entries, again.entries);
         assert!(again.changed.is_empty());
+    }
+
+    #[test]
+    fn explicitly_listed_lower_layouts_are_widened_and_walked() {
+        let fixture = shapes_fixture("struct Game {}\n");
+        fixture.put(
+            "crates/horizon-items/src/item_stack.rs",
+            "pub(crate) struct ItemStack { count: u8 }\n",
+        );
+        let result = widen_with(
+            &fixture.0,
+            &[(
+                "internals.txt",
+                "horizon_items::item_stack::ItemStack\n".into(),
+            )],
+        )
+        .unwrap();
+        let path = "horizon_items::item_stack::ItemStack";
+        let entry = result
+            .entries
+            .iter()
+            .find(|entry| entry.path == path)
+            .unwrap();
+        assert!(!entry.shape_only);
+        assert_eq!(entry.opaque_reason, None);
+        let text =
+            fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs")).unwrap();
+        assert!(
+            text.contains("pub struct ItemStack { pub count: u8 }"),
+            "{text}"
+        );
+        let (code, counts) = crate::internals_table::table(&result.entries, &[path.into()]);
+        assert_eq!(counts.types, 1, "{code}");
+        assert_eq!(counts.skipped, 0);
+    }
+
+    #[test]
+    fn shapes_from_optional_or_transitive_dependencies_stay_opaque() {
+        for dependencies in [
+            "horizon-items = { path = '../horizon-items', optional = true }",
+            "",
+        ] {
+            let fixture = shapes_fixture("struct Game { stack: horizon_items::ItemStack }\n");
+            fixture.put(
+                "crates/horizon-client/Cargo.toml",
+                &format!("[package]\nname = 'horizon-client'\n[dependencies]\n{dependencies}\n"),
+            );
+            let widened = widen_with(&fixture.0, &[]).unwrap();
+            let stack = widened
+                .entries
+                .iter()
+                .find(|entry| entry.path == "horizon_items::item_stack::ItemStack")
+                .unwrap();
+            assert_eq!(
+                stack.opaque_reason,
+                Some("not an unconditional game dependency")
+            );
+            let (_, counts) = crate::internals_table::table(
+                &widened.entries,
+                &widened
+                    .entries
+                    .iter()
+                    .map(|i| i.path.clone())
+                    .collect::<Vec<_>>(),
+            );
+            assert_eq!(
+                counts.skipped_types["not an unconditional game dependency"],
+                1
+            );
+            let source =
+                fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs"))
+                    .unwrap();
+            assert!(source.contains("pub(crate) struct ItemStack"));
+        }
+    }
+
+    #[test]
+    fn an_unwalkable_shape_stays_opaque_instead_of_failing_staging() {
+        let fixture = shapes_fixture("");
+        let mut pass = Pass::default();
+        pass.entry(
+            "horizon_items::missing",
+            "horizon_items::missing::Stack",
+            "struct",
+            &[],
+            quote!(
+                struct Stack {
+                    count: u8,
+                }
+            ),
+            TypeUses::default(),
+        );
+        pass.entries.values_mut().next().unwrap().shape_only = true;
+        pass.shapes(&fixture.0).unwrap();
+        let widened = pass.finish().unwrap();
+        assert_eq!(
+            widened.entries[0].opaque_reason,
+            Some("shape module walk failed")
+        );
+        let (_, counts) = crate::internals_table::table(
+            &widened.entries,
+            &widened
+                .entries
+                .iter()
+                .map(|i| i.path.clone())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(counts.types, 0);
+        assert_eq!(counts.skipped_types["shape module walk failed"], 1);
+    }
+
+    #[test]
+    fn non_exhaustive_stays_in_layout_signatures() {
+        let fixture = Fixture::new(
+            "#[non_exhaustive] #[derive(Clone)] struct Open { value: u8 }\nenum Cases { #[non_exhaustive] One { value: u8 } }\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let signature = |name: &str| {
+            entries
+                .iter()
+                .find(|e| e.path == format!("horizon_client::game::{name}"))
+                .unwrap()
+                .signature
+                .clone()
+        };
+        assert_eq!(
+            signature("Open"),
+            "# [non_exhaustive] struct Open { value : u8 }"
+        );
+        assert_eq!(
+            signature("Cases"),
+            "enum Cases { # [non_exhaustive] One { value : u8 } }"
+        );
     }
 
     #[test]
@@ -1653,6 +1863,24 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
         assert!(!declared.shape_only);
         assert_eq!(declared.cfg, first.cfg);
         assert_eq!(declared.hash, first.hash);
+    }
+
+    #[test]
+    fn conditional_layouts_remain_unwalkable_after_staging() {
+        let fixture = Fixture::new(
+            "struct Guarded { #[cfg(feature = \"audio\")] sound: u8 }\nenum Cases { #[cfg_attr(feature = \"audio\", cfg(unix))] Audio, Normal }\n",
+        );
+        let widened = widen_with(&fixture.0, &[]).unwrap();
+        let (_, counts) = crate::internals_table::table(
+            &widened.entries,
+            &widened
+                .entries
+                .iter()
+                .map(|i| i.path.clone())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(counts.types, 0);
+        assert_eq!(counts.skipped_types["conditional field or variant"], 2);
     }
 
     #[test]

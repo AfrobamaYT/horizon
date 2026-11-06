@@ -36,6 +36,7 @@ mod internals_sync;
 mod isolate;
 mod package;
 mod prebuilt;
+mod wasm_internals;
 
 pub use isolate::LeftOut;
 
@@ -637,12 +638,13 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
         }
         count += 1;
     }
-    if count == 0 {
+    if count == 0 && wasm_internals::installed(Some(home))?.is_empty() {
         return Err(format!(
             "No native mod is turned on in {}: install one from the Mods page first.",
             home.join(INSTALLED).display()
         ));
     }
+    fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -796,6 +798,20 @@ impl Injection {
 
 /// The flat native project in `folder`, or the native projects directly inside it.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    let found = scan_bundles(folder)?;
+    if found.is_empty() {
+        return Err(format!(
+            "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
+            folder.display()
+        ));
+    }
+    Ok(found)
+}
+
+fn scan_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    if !folder.exists() {
+        return Ok(Vec::new());
+    }
     if let Some(found) = bundle_in(folder)? {
         return Ok(vec![found]);
     }
@@ -809,12 +825,6 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     let mut found = Vec::new();
     for dir in dirs {
         found.extend(bundle_in(&dir)?);
-    }
-    if found.is_empty() {
-        return Err(format!(
-            "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
-            folder.display()
-        ));
     }
     Ok(found)
 }
@@ -1983,6 +1993,27 @@ struct BuildOptions<'a> {
     allow_jar_downloads: bool,
     skip: &'a [LeftOut],
     isolate: bool,
+    /// The instance whose installed wasm mods choose the game's internals table; none leaves the
+    /// committed empty table.
+    home: Option<&'a Path>,
+}
+
+/// Whether an instance needs a source table even without any native code mods.
+pub fn has_wasm_internals(home: &Path) -> bool {
+    wasm_internals::installed(Some(home)).is_ok_and(|declared| !declared.is_empty())
+}
+
+/// Resolve the two inputs to the source pipeline before preparing or building the game.
+fn build_inputs(
+    folder: &Path,
+    home: Option<&Path>,
+) -> Result<(Vec<Bundle>, wasm_internals::Declarations), Failed> {
+    let mods = scan_bundles(folder)?;
+    let declared = wasm_internals::installed(home)?;
+    if mods.is_empty() && declared.is_empty() {
+        return Err(Failed::Nothing);
+    }
+    Ok((mods, declared))
 }
 
 /// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
@@ -2020,7 +2051,7 @@ fn pipeline(
     // folder meanwhile.
     let incoming = root().join("mods.incoming");
     let _ = fs::remove_dir_all(&incoming);
-    let found = bundles(folder)?;
+    let (found, wasm_internals) = build_inputs(folder, options.home)?;
     // #6490: said before anything runs, so a build that fails later still
     // shows them.
     for warning in warn_conflicts(&found) {
@@ -2064,7 +2095,7 @@ fn pipeline(
         .zip(declared)
         .filter(|(b, _)| !left_out.iter().any(|l| l.id == b.manifest.id))
         .unzip();
-    if mods.is_empty() {
+    if mods.is_empty() && wasm_internals.is_empty() {
         return Err(Failed::Nothing);
     }
     let inputs: Vec<_> = mods
@@ -2145,14 +2176,17 @@ fn pipeline(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
-    let version = version_for(
-        &revision,
-        &mixins,
-        profile,
-        target,
-        platform.cache_key(),
-        &requested,
-    )?;
+    let version = wasm_internals::version(
+        version_for(
+            &revision,
+            &mixins,
+            profile,
+            target,
+            platform.cache_key(),
+            &requested,
+        )?,
+        &wasm_internals,
+    );
     let now = Record {
         horizon: revision.clone(),
         mixins: mixins.clone(),
@@ -2163,7 +2197,7 @@ fn pipeline(
     };
     let exists = target.directory(&version).join(".installed").is_file();
     // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
-    let prebuilt = if exists {
+    let prebuilt = if exists || !wasm_internals.is_empty() {
         None
     } else {
         let game = match prebuilt::refusal(&projects, profile) {
@@ -2338,6 +2372,7 @@ fn pipeline(
         .arg(&listed)
         .arg(real.join("internals.json"))
         .env("CARGO_TARGET_DIR", real.join("target"));
+        wasm_internals::stage(&fresh, &wasm_internals, &mut pass)?;
         run(pass, "Marking the game's injection points", |_| {})?;
         inject::check(&point_injections, &inject::listed(&listed)?).map_err(|e| e.to_string())?;
         if !mods.is_empty() {
@@ -2568,6 +2603,7 @@ pub fn build(
                     BuildOptions {
                         skip,
                         isolate: true,
+                        home: Some(&instance.home),
                         ..BuildOptions::default()
                     },
                     &progress,
