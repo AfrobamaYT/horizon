@@ -138,6 +138,7 @@ mod tests {
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct LayerDefinition;
+        pub(super) struct DebugEntry;
         pub(super) struct ModelPart;
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
