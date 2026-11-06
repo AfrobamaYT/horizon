@@ -1020,7 +1020,7 @@ mod tests {
 
         horizon_client::models::register_standalone(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
-            let id = Identifier::new("minecraft:block/grass_block").unwrap();
+            let id = Identifier::parse("minecraft:block/grass_block").unwrap();
             let model = game.render_assets().model(&id).unwrap();
             for phase in [
                 mod_api::__private::ModPhase::Setup,
@@ -1031,7 +1031,7 @@ mod tests {
             }
             assert_eq!(
                 game.render_assets()
-                    .model(&Identifier::new("mymod:block/absent").unwrap()),
+                    .model(&Identifier::parse("mymod:block/absent").unwrap()),
                 Err(ModelError::UnknownModel)
             );
             let mut surface = draw();
@@ -1044,7 +1044,7 @@ mod tests {
                     .pack
                     .render
                     .model_catalog
-                    .standalone(id.as_str())
+                    .standalone("minecraft:block/grass_block")
                     .unwrap()],
                 surface.pose(),
                 |_| surface.light,

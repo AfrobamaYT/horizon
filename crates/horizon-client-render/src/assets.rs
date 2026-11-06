@@ -115,7 +115,7 @@ impl RenderAssets {
     ) -> std::result::Result<mod_api::ModelRef, mod_api::ModelError> {
         let slot = self
             .model_catalog
-            .standalone_slot(id.as_str())
+            .standalone_slot(&id.to_string())
             .ok_or(mod_api::ModelError::UnknownModel)?;
         Ok(mod_api::__private::built::model_ref(self.generation, slot))
     }
