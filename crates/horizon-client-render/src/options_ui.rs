@@ -6179,7 +6179,7 @@ mod tests {
         let mut ui = OptionsUi::default();
         ui.show(Page::KeyBinds);
         for (key, bound) in [("key.keyboard.z", true), ("key.keyboard.unknown", false)] {
-            settings.mods.set_binding("zoom", "zoom", key, 0);
+            settings.mods.set_binding("sample", "zoom", key, 0);
             for act in [Act::ModKey(0, 0), Act::ResetModKey(0, 0)] {
                 let reset = matches!(act, Act::ResetModKey(..));
                 let widget = button(0.0, 0.0, 75.0, Text::literal("Z"), act);
