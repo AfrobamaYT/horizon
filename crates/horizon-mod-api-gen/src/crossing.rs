@@ -410,14 +410,14 @@ impl Rule {
             return this.map_or(opaque, |this| self.named_shape(this));
         }
         let resolved = self.resolve(module, path);
-        if let Some(found) = &resolved {
-            if self.named.contains_key(found) {
-                return if args.is_empty() {
-                    self.named_shape(found)
-                } else {
-                    opaque
-                };
-            }
+        if let Some(found) = &resolved
+            && self.named.contains_key(found)
+        {
+            return if args.is_empty() {
+                self.named_shape(found)
+            } else {
+                opaque
+            };
         }
         let spelled = path
             .segments
