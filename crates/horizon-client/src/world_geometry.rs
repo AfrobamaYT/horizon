@@ -1,10 +1,8 @@
 //! Fixed-capacity output for a view's custom geometry; the GPU consumer owns drawing.
-use crate::{gfx::world_primitives::Batch, gizmos, mesher::Vertex};
+use crate::gfx::world_primitives::{Batch, DEFAULT_CAPACITY as CAPACITY};
+use crate::{gizmos, mesher::Vertex};
 use glam::Mat4;
 use mod_api::{DrawError, WorldDepth, WorldDrawUsage, WorldLine, WorldQuad};
-
-/// Default setup-time limits, shared by the CPU collector and renderer reservation.
-pub const CAPACITY: u32 = 4096;
 
 /// Reused between views, including frames with no subscribers or output.
 pub struct WorldGeometry {

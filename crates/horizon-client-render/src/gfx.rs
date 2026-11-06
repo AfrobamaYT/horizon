@@ -4496,7 +4496,13 @@ impl Renderer {
                 on_off(gpu_timer.is_some()),
             ));
         }
-        let world_primitives = world_primitives::WorldPrimitives::new(&device, frame_format);
+        let mut world_primitives = world_primitives::WorldPrimitives::new(&device, frame_format);
+        world_primitives.reserve(
+            &device,
+            &mut |buffer, bytes| queue.write_buffer(buffer, 0, bytes),
+            world_primitives::DEFAULT_CAPACITY,
+            world_primitives::DEFAULT_CAPACITY,
+        );
         Ok(Self {
             display: DisplayWatch::default(),
             display_fresh: false,

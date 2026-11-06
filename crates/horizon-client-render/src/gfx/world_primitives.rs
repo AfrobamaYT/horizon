@@ -7,6 +7,9 @@
 use super::Vertex;
 use glam::Mat4;
 
+/// Initial per-view line and quad limits, shared by CPU submission and GPU setup.
+pub const DEFAULT_CAPACITY: u32 = 4096;
+
 /// A frame's primitives, camera-relative, as the game tessellated them: quads of 4 vertices
 /// from the shared atlas (plain colours on its white texel, text on its glyphs, beams on the
 /// beacon beam sprite) and lines as `gizmos::camera_relative` gives them. `*_through` ones are
