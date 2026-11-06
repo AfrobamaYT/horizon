@@ -811,7 +811,7 @@ mod tests {
     fn every_area_file_of_the_checkout_loads() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let areas = load(&root).unwrap();
-        assert!(areas.iter().any(|area| area.stem == "base"));
+        assert!(areas.iter().any(|area| area.stem == "config"));
         assert!(
             areas
                 .iter()
