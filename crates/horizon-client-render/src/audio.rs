@@ -1334,6 +1334,10 @@ impl Audio {
         self.backend.decoder = None;
         self.backend.cache = Arc::new(Mutex::new(SoundCache::default()));
     }
+    /// Reserve the seed of a local level request before its cancellable hooks run.
+    pub fn next_sound_seed(&mut self) -> i64 {
+        self.random.next_long()
+    }
     /// Play a sound event at a world position, as `ClientLevel.playLocalSound`
     /// (a `SimpleSoundInstance` seeded from the level random), or relative to
     /// the listener without attenuation (`None`).
@@ -1750,6 +1754,18 @@ mod tests {
         assert_eq!(capture[0].position, [1.0; 3]);
         assert_eq!((capture[0].volume, capture[0].pitch), (0.5, 1.5));
         assert!(audio.source_override.is_none());
+        // A local request reserves one draw before dispatch, and playback reuses it.
+        let seed = audio.next_sound_seed();
+        assert_eq!(seed, expected.next_long());
+        audio.play_on_seeded(
+            7,
+            "minecraft:entity.player.swim",
+            Some([0.0; 3]),
+            1.0,
+            1.0,
+            seed,
+        );
+        assert_eq!(audio.random.next_long(), expected.next_long());
     }
 
     #[test]

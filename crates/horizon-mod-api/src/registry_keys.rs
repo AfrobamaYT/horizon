@@ -1,8 +1,10 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
 use crate::{
-    BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, EffectKey, FluidKey, ItemKey,
+    BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, DimensionKey, EffectKey, FluidKey,
+    ItemKey,
 };
 use std::collections::HashMap;
+use std::sync::{LazyLock, RwLock};
 
 #[derive(Clone, Default)]
 pub(crate) struct Requests {
@@ -155,6 +157,67 @@ impl BlockEntityTypeKey {
             Ok(Self(slot))
         })
     }
+}
+
+/// The vanilla dimensions, at the slots of `DimensionKey`'s constants.
+const VANILLA_DIMENSIONS: [&str; 3] = [
+    "minecraft:overworld",
+    "minecraft:the_nether",
+    "minecraft:the_end",
+];
+
+/// The dimensions past vanilla's the game has met, in slot order. Only grows: a key handed out
+/// stays valid until exit, and both of a process's `Game`s number a dimension alike.
+#[derive(Default)]
+struct ExtraDimensions {
+    names: Vec<&'static str>,
+    slots: HashMap<&'static str, u32>,
+}
+
+static EXTRA_DIMENSIONS: LazyLock<RwLock<ExtraDimensions>> = LazyLock::new(RwLock::default);
+
+impl DimensionKey {
+    /// `minecraft:overworld`.
+    pub const OVERWORLD: Self = Self(0);
+    /// `minecraft:the_nether`.
+    pub const NETHER: Self = Self(1);
+    /// `minecraft:the_end`.
+    pub const END: Self = Self(2);
+
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        let key = Self(slot);
+        dimension_id(key).ok_or("unknown DimensionKey slot")?;
+        Ok(key)
+    }
+}
+
+/// The key of dimension `id`, numbering it when the game meets it for the first time.
+pub fn dimension_key(id: &str) -> DimensionKey {
+    if let Some(slot) = VANILLA_DIMENSIONS.iter().position(|name| *name == id) {
+        return DimensionKey(slot as u32);
+    }
+    let first = VANILLA_DIMENSIONS.len() as u32;
+    if let Some(slot) = EXTRA_DIMENSIONS.read().unwrap().slots.get(id) {
+        return DimensionKey(first + slot);
+    }
+    let mut extra = EXTRA_DIMENSIONS.write().unwrap();
+    if let Some(slot) = extra.slots.get(id) {
+        return DimensionKey(first + slot);
+    }
+    let slot = extra.names.len() as u32;
+    let name: &'static str = Box::leak(id.to_owned().into_boxed_str());
+    extra.names.push(name);
+    extra.slots.insert(name, slot);
+    DimensionKey(first + slot)
+}
+
+/// The name of a dimension's key, None for a slot the game never gave out.
+pub fn dimension_id(key: DimensionKey) -> Option<&'static str> {
+    let slot = key.0 as usize;
+    VANILLA_DIMENSIONS.get(slot).copied().or_else(|| {
+        let extra = EXTRA_DIMENSIONS.read().unwrap();
+        extra.names.get(slot - VANILLA_DIMENSIONS.len()).copied()
+    })
 }
 
 /// A fluid requested by a mod but absent from the completed registry.

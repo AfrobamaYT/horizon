@@ -29,7 +29,7 @@ impl Game<'_> {
     /// queued in it.
     fn native_entity_here(&self, entity: EntityRef) -> bool {
         self.native_entity_level(entity)
-            .is_some_and(|level| level.dimension() == self.dim.id())
+            .is_some_and(|level| level.dimension() == self.native_level_key())
     }
     /// `Entity.getSoundSource`: the group an entity's sounds play under.
     /// Players are `Players`; `Monster`s, the dragon, hoglins, ghasts,
