@@ -7,7 +7,7 @@ use std::borrow::Cow;
 #[cfg(target_arch = "wasm32")]
 pub mod bindings {
     wit_bindgen::generate!({
-        path: "wit",
+        path: "wit/points.wit",
         world: "points",
         runtime_path: "mod_points::__private::wire::rt",
         pub_export_macro: true,
@@ -22,7 +22,7 @@ pub use wit_bindgen::rt;
 
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 mod bindings {
-    wasmtime::component::bindgen!({ path: "wit", world: "points" });
+    wasmtime::component::bindgen!({ path: "wit/points.wit", world: "points" });
 }
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub use bindings::exports::horizon::mod_points::listeners::{HostKind, Value};

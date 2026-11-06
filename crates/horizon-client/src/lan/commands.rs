@@ -161,8 +161,10 @@ impl CommandTree {
                         serde_json::json!({"type": "argument", "parser": "brigadier:integer", "properties": bounds, "executable": true})
                     }
                 };
-                for name in [rule.name.to_owned(), format!("minecraft:{}", rule.name)] {
-                    rules.insert(name, serde_json::json!({"type":"literal", "executable": true, "children": {"value": value}}));
+                for name in
+                    std::iter::once(rule.name.as_str()).chain(rule.name.strip_prefix("minecraft:"))
+                {
+                    rules.insert(name.to_owned(), serde_json::json!({"type":"literal", "executable": true, "children": {"value": value}}));
                 }
             }
             gamerule["children"] = Value::Object(rules);

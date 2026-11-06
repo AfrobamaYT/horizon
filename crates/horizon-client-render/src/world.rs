@@ -116,7 +116,7 @@ pub struct World {
     /// (`ChunkHolder.sectionLightChanged`).
     pub light_log: Option<crate::fast_hash::FxHashMap<(i32, i32), SectionMask>>,
     /// The villager POIs of each section (`PoiManager`'s sections).
-    pub pois: crate::poi_sections::PoiSections<crate::poi_sections::Poi>,
+    pub pois: crate::poi_sections::PoiSections<horizon_world::poi::PoiType>,
     /// Moving-piston states removed during the last tick; retained until the
     /// final block mesh is visible.
     pub moving_piston_fallback: Vec<([i32; 3], horizon_world::piston_shape::MovingPistonState)>,

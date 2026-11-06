@@ -36,7 +36,7 @@ fn typed_rule(rule: &gamerules::Rule, value: GameRuleValue) -> Value {
         GameRuleValue::Bool(b) => ("boolean", json!(b)),
         GameRuleValue::Int(i) => ("integer", json!(i)),
     };
-    json!({ "key": format!("minecraft:{}", rule.name), "type": kind, "value": value })
+    json!({ "key": rule.name.clone(), "type": kind, "value": value })
 }
 
 /// `NameAndId`'s record `toString`, as vanilla's log lines show it.

@@ -11521,7 +11521,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.item_part("minecraft:bow", Part(self.0.clone()));
+                let item = r.item_key("minecraft:bow");
+                r.item_part(item, Part(self.0.clone()));
             }
         }
         let calls = Arc::new(AtomicUsize::new(0));
@@ -14350,9 +14351,10 @@ mod player_tick_tests {
                 heard.lock().unwrap().clear();
                 // A real zero-health death-screen tick still gets both endpoints,
                 // without use/cooldown/pickup work re-enabled.
-                let g = &mut game.lan.as_mut().unwrap().hub.guests[0];
-                g.dead = true;
-                g.health = 0.0;
+                game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                    g.dead = true;
+                    g.health = 0.0;
+                });
                 game.spawn_item(diamond, [0.0; 3], [0.0; 3], 0);
                 assert!(game.native_level_award_experience(level, 0.0, 0.0, 0.0, 7));
                 game.tick_guests();

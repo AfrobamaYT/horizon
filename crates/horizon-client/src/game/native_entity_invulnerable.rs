@@ -24,13 +24,7 @@ impl Game<'_> {
     ) -> Option<&mut horizon_client::motion::PlayerMotion> {
         match t {
             Target::Player => self.player.as_mut(),
-            Target::Guest(conn) => self
-                .lan
-                .as_mut()?
-                .hub
-                .guest_mut(conn)?
-                .motion
-                .as_deref_mut(),
+            Target::Guest(conn) => self.lan.as_mut()?.hub.guests.motion_mut(conn),
             _ => None,
         }
     }
