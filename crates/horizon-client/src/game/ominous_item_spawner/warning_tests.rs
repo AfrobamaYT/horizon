@@ -9,6 +9,7 @@ fn warning_dispatch_uses_neutral_at_tick_four() {
     let settings = Settings::default();
     let loaded = load_resources(
         horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,

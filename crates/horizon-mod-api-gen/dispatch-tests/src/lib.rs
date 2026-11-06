@@ -138,6 +138,7 @@ mod tests {
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct LayerDefinition;
+        pub(super) struct DebugEntry;
         pub(super) struct ModelPart;
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
@@ -352,6 +353,7 @@ mod tests {
             }
         }
         pub(super) mod mod_api {
+            pub trait PackFinders {}
             pub mod camera {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
@@ -495,6 +497,12 @@ mod tests {
         }
     }
     trait Registrar {}
+    /// The goal registrar of the generated `EntityPart`, as the fixture sees
+    /// it: no methods, its type is all the generated trait asks of the scope.
+    #[expect(dead_code)]
+    struct GoalRegistrar<'a> {
+        _lifetime: std::marker::PhantomData<&'a ()>,
+    }
     /// The parts every thing in a scope has, whatever its key: a test's own, or none.
     #[derive(Default)]
     struct Parts {

@@ -270,6 +270,7 @@ mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
+mod native_goal_ticks;
 #[cfg(test)]
 mod native_guest_turn_tests;
 #[cfg(test)]
@@ -342,6 +343,7 @@ mod occlusion_culling;
 mod ominous_item_spawner;
 mod options;
 mod ordered_tick;
+mod pack_finders;
 mod packs;
 mod pad;
 mod pad_actions;
@@ -2602,6 +2604,7 @@ pub struct PackResources {
     source: horizon_assets::resource_source::ResourceSource,
     data_source: horizon_assets::resource_source::ResourceSource,
     data_changes: horizon_assets::resource_source::ResourceSource,
+    additional_data: Arc<[Arc<horizon_client::datapack::DataPack>]>,
     assets: Arc<Assets>,
     block_registries: Arc<horizon_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -2694,6 +2697,7 @@ impl PackResources {
             source: root.source().clone(),
             data_source: root.data().clone(),
             data_changes: root.data_changes().clone(),
+            additional_data: Arc::from([]),
             names: Arc::new(Names::load(root.source())),
             clouds: Arc::new(load_clouds(root.source())),
             forcefield: Arc::new(load_forcefield(root.source())),
@@ -2956,6 +2960,8 @@ struct Game<'a> {
     keys: horizon_client::held::HeldKeys,
     // Physical input is separate from remapped and toggled movement keys.
     physical_keys: HashSet<KeyCode>,
+    /// Keys whose first press a mod cancelled (`key_mapping_pre`): their repeats are never held.
+    rejected_keys: HashSet<KeyCode>,
     physical_buttons: HashSet<MouseButton>,
     drag_button: Option<MouseButton>,
     /// Control + left click as a right click (macOS).
@@ -9096,6 +9102,47 @@ impl Game<'_> {
             }
         }
     }
+    /// Asks the mods about each gameplay mapping a physical input (a key's or a mouse button's
+    /// name) is bound to, before the game acts on it: true when one cancels a press. Only while
+    /// playing, and nothing is asked with no mod listening.
+    fn key_mapping_canceled(&mut self, input: Option<&str>, pressed: bool) -> bool {
+        let Some(input) = input else {
+            return false;
+        };
+        if !mod_api::__private::listened(mod_api::HookId::KeyMappingPre)
+            || !gameplay_has_keyboard(self.screen, self.title.is_some(), self.dialog_open())
+        {
+            return false;
+        }
+        let names: Vec<&'static str> = self.settings.keys.translated_mappings(input).collect();
+        let mut canceled = false;
+        for name in names {
+            let mut this = false;
+            self.native_key_mapping_pre(name, pressed, &mut this);
+            canceled |= this;
+        }
+        canceled && pressed
+    }
+    /// `key_mapping_canceled` for a key event, and what a cancel leaves of the key's hold: a first
+    /// press that is cancelled never happened, so `restore_held_keys` must not hold it (nor its
+    /// repeats); a cancelled repeat only drops its own action and keeps the hold an accepted
+    /// press made.
+    fn key_press_canceled(&mut self, key: KeyCode, pressed: bool, repeat: bool) -> bool {
+        if !repeat {
+            self.rejected_keys.remove(&key);
+        }
+        let name = horizon_client::keybinds::key_name(key);
+        if !self.key_mapping_canceled(name, pressed) {
+            return false;
+        }
+        if !repeat {
+            self.rejected_keys.insert(key);
+        }
+        if self.rejected_keys.contains(&key) {
+            self.physical_keys.remove(&key);
+        }
+        true
+    }
     /// Apply a physical key to every mapping bound to it.
     fn mapped_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) -> Result<()> {
         for mapped in self.settings.keys.translate_all(key) {
@@ -13779,7 +13826,14 @@ impl Game<'_> {
                 self.set_screen(Screen::Options);
                 self.options_from_title = true;
                 let resources = self.vanilla_root();
-                self.ui.options.open_data_packs(dir, selected, resources);
+                let additional = self
+                    .discover_mod_packs(mod_api::PackType::ServerData)
+                    .into_iter()
+                    .filter_map(|pack| pack.selection)
+                    .collect();
+                self.ui
+                    .options
+                    .open_data_packs(dir, selected, resources, additional);
             }
             Action::None => {}
         }
@@ -20255,6 +20309,11 @@ impl Game<'_> {
                                 self.capture(true);
                                 return Ok(());
                             }
+                            let input = horizon_client::keybinds::mouse_name(button);
+                            if self.key_mapping_canceled(Some(input.as_str()), pressed) {
+                                self.physical_buttons.remove(&button);
+                                return Ok(());
+                            }
                             self.extras_mouse(button, pressed);
                             if pressed
                                 && self.settings.keys.get("key.smoothCamera")
@@ -20262,7 +20321,6 @@ impl Game<'_> {
                             {
                                 self.smooth_camera_action();
                             }
-                            let input = horizon_client::keybinds::mouse_name(button);
                             for mapped in self.settings.keys.translate_mouse_all(button) {
                                 match mapped {
                                     Err(b)
@@ -20668,6 +20726,10 @@ impl Game<'_> {
                     let PhysicalKey::Code(key) = event.physical_key else {
                         return Ok(());
                     };
+                    let pressed = event.state == ElementState::Pressed;
+                    if self.key_press_canceled(key, pressed, event.repeat) {
+                        return Ok(());
+                    }
                     self.native_panel_key_event(
                         key,
                         event.state == ElementState::Pressed,
@@ -21259,6 +21321,7 @@ impl<'a> Game<'a> {
             },
             keys: Default::default(),
             physical_keys: HashSet::new(),
+            rejected_keys: HashSet::new(),
             physical_buttons: HashSet::new(),
             drag_button: None,
             right_click_emulation: Default::default(),
@@ -21964,6 +22027,7 @@ impl Game<'_> {
                         &self.options.resources,
                         &packs,
                         self.res.biomes(),
+                        &self.pack.additional_data,
                     )
                 })
                 .unwrap_or_default();
@@ -22069,6 +22133,7 @@ impl Game<'_> {
             &self.options.resources,
             self.res.biomes(),
             &self.level.enabled_features,
+            &self.pack.additional_data,
         );
         (!Arc::ptr_eq(&table, self.res.biomes())).then_some(table)
     }
@@ -22577,6 +22642,7 @@ struct GameplayTables {
 /// models), which `load_resources` rolls back from.
 fn load_core(
     resources: &horizon_assets::resource_source::ResourceRoot,
+    additional_data: &[Arc<horizon_client::datapack::DataPack>],
     role: execution_role::ExecutionRole,
     parallel: bool,
     progress: &Progress,
@@ -22672,6 +22738,7 @@ fn load_core(
                         registry,
                         biomes.clone(),
                         item_data.clone(),
+                        additional_data,
                     );
                 }
                 Ok::<_, String>(biomes)
@@ -22764,6 +22831,7 @@ fn gameplay_tables(
 #[allow(clippy::too_many_arguments)]
 fn load_resources(
     mut resolved: horizon_assets::resource_source::ResourceRoot,
+    additional_data: Vec<Arc<horizon_client::datapack::DataPack>>,
     launch_world: Option<&str>,
     vanilla_root: &std::path::Path,
     settings: &Settings,
@@ -22821,7 +22889,7 @@ fn load_resources(
                 // it waits for the core that loaded.
                 let early = launch_world.filter(|_| root == vanilla_root);
                 startup::time("core", || {
-                    load_core(&resolved, role, parallel, progress, early)
+                    load_core(&resolved, &additional_data, role, parallel, progress, early)
                 })
             });
             let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
@@ -22877,13 +22945,14 @@ fn load_resources(
             assets.registry,
             biomes.clone(),
             item_data.clone(),
+            &additional_data,
         );
     }
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
         MeshTables::new(&assets, &render, &facts, visibility)
     })?);
     let pack_step = startup::step("pack.assemble");
-    let pack = PackResources::assemble(
+    let mut pack = PackResources::assemble(
         &resolved,
         assets.clone(),
         render,
@@ -22892,6 +22961,7 @@ fn load_resources(
         biomes.clone(),
         Arc::new(light),
     );
+    pack.additional_data = additional_data.into();
     drop(pack_step);
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(4);
@@ -23921,7 +23991,11 @@ impl Loading {
             "Horizon: loading the title artwork after {} ms",
             self.started.elapsed().as_millis()
         );
-        self.menu.set_root(root, &self.settings);
+        let additional = self
+            .options
+            .as_ref()
+            .map_or_else(Vec::new, |options| pack_finders::data_packs(&options.mods));
+        self.menu.set_root(root, &self.settings, additional.into());
         self.gui = Some(gui);
         self.title_drawn = false;
         horizon_client::ui_theme::reset_atlas();
@@ -24388,6 +24462,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role);
+    mods::register_debug_entries(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not
@@ -24428,6 +24503,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     })?;
     let mut loaded = load_resources(
         selected_root,
+        pack_finders::data_packs(&options.mods),
         launch_world(&options),
         &vanilla_root,
         &early_settings,
@@ -24861,6 +24937,7 @@ mod tests {
                 &game.pack.data_changes,
                 game.cmds.vanilla_disabled,
                 &game.level.enabled_features,
+                &game.pack.additional_data,
             );
             game.reload_world_tables(&stack);
             assert_eq!(stone_key.id(game), name);

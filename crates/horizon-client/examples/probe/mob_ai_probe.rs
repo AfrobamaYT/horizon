@@ -1127,6 +1127,7 @@ pub fn main() -> horizon_client::Result<()> {
                 ),
                 eye: [p[0], p[1] + f64::from(1.62_f32), p[2]],
                 alive: true,
+                invulnerable: false,
                 creative: s.creative,
                 sneaking: false,
                 swimming: false,
@@ -1176,6 +1177,7 @@ pub fn main() -> horizon_client::Result<()> {
             };
             ($snapshot:expr, $grid:expr) => {
                 MobWorld {
+                    goal_host: None,
                     teams: Default::default(),
                     loop_context: crate::test_resources::server_loop_context(),
                     world: &world,
@@ -1187,6 +1189,8 @@ pub fn main() -> horizon_client::Result<()> {
                     suffocation: &suffocation,
                     data: &data,
                     player: player.clone(),
+                    // The probe lends no goal view: no identity to capture.
+                    player_identity: None,
                     controlling_player_movement: None,
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,

@@ -89,7 +89,12 @@ impl StartupMenu {
         Ok(menu)
     }
 
-    pub(super) fn set_root(&mut self, root: PathBuf, settings: &Settings) {
+    pub(super) fn set_root(
+        &mut self,
+        root: PathBuf,
+        settings: &Settings,
+        additional_data: Arc<[Arc<horizon_client::datapack::DataPack>]>,
+    ) {
         horizon_client::ui::load_metadata(
             &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
         );
@@ -112,6 +117,9 @@ impl StartupMenu {
                 title.start_onboarding();
             }
             self.title = Some(title);
+        }
+        if let Some(title) = &mut self.title {
+            title.set_additional_data_packs(additional_data);
         }
     }
 
@@ -384,6 +392,7 @@ pub(super) fn spawn_loader(
                 .and_then(|root| {
                     load_resources(
                         root,
+                        super::pack_finders::data_packs(&mod_sources),
                         world.as_deref(),
                         &vanilla_root,
                         &settings,
@@ -529,7 +538,10 @@ impl Loading {
         self.menu.options.languages = horizon_client::lang::available(&[
             &horizon_assets::resource_source::ResourceSource::directory(self.menu.root.clone()),
         ]);
-        self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[]);
+        let additional = self.options.as_ref().map_or_else(Vec::new, |options| {
+            super::pack_finders::discover(mod_api::PackType::ClientResources, &options.mods)
+        });
+        self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[], &additional);
         self.menu.options.pack_selection = self.settings.resource_packs.clone();
         self.menu.options.pack_screen = None;
         self.menu.options_open = true;
@@ -766,7 +778,15 @@ impl Loading {
             }
             Action::DataPacks { dir, selected } => {
                 let resources = self.vanilla_root.clone();
-                self.menu.options.open_data_packs(dir, selected, resources);
+                let additional = self.options.as_ref().map_or_else(Vec::new, |options| {
+                    super::pack_finders::discover(mod_api::PackType::ServerData, &options.mods)
+                        .into_iter()
+                        .filter_map(|pack| pack.selection)
+                        .collect()
+                });
+                self.menu
+                    .options
+                    .open_data_packs(dir, selected, resources, additional);
                 self.menu.options_open = true;
             }
             action => {
