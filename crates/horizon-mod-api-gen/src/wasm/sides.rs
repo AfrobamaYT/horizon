@@ -471,6 +471,9 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
         Ty::Handler(..) => format!("{}::Handler", super::glue::WIRE),
         Ty::Str(Str::Static) => "u32".into(),
         Ty::Str(_) => "String".into(),
+        Ty::Array(item, n) if (1..=12).contains(n) => {
+            format!("({},)", vec![wire_type(types, item); *n].join(", "))
+        }
         Ty::List(item, _) | Ty::Array(item, _) => format!("Vec<{}>", wire_type(types, item)),
         Ty::Option(item) => format!("Option<{}>", wire_type(types, item)),
         Ty::Result(a, b) => format!("Result<{}, {}>", wire_type(types, a), wire_type(types, b)),
@@ -867,9 +870,11 @@ fn results_type(
 fn wire_is_list(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
         Ty::Str(Str::Static) => false,
+        Ty::Array(item, n) if (1..=12).contains(n) => heap(types, item),
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) => true,
         Ty::Named(def) => {
-            matches!(&types.defs[*def].kind, Kind::Via(form) if wire_is_list(types, form))
+            matches!(&types.defs[*def].kind, Kind::Chain { .. })
+                || matches!(&types.defs[*def].kind, Kind::Via(form) if wire_is_list(types, form))
         }
         _ => false,
     }
@@ -879,9 +884,24 @@ fn wire_is_list(types: &Types<'_>, ty: &Ty) -> bool {
 fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
         Ty::Str(Str::Static) => e.into(),
+        Ty::Array(item, n) if (1..=12).contains(n) => format!(
+            "({},)",
+            (0..*n)
+                .map(|i| arg(types, item, &format!("{e}.{i}")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) => format!("&{e}"),
+        Ty::Named(_) if wire_is_list(types, ty) => format!("&{e}"),
         Ty::Option(item) => match &**item {
             Ty::Str(Str::Static) => e.into(),
+            Ty::Array(item, n) if (1..=12).contains(n) => format!(
+                "{e}.as_ref().map(|v| ({},))",
+                (0..*n)
+                    .map(|i| arg(types, item, &format!("v.{i}")))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Ty::Str(_) | Ty::List(..) | Ty::Array(..) => format!("{e}.as_deref()"),
             Ty::Ref(inner, _) | Ty::Boxed(inner) | Ty::Shared(inner) => {
                 arg(types, &Ty::Option(inner.clone()), e)
@@ -915,6 +935,7 @@ fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 fn heap(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
         Ty::Str(Str::Static) => false,
+        Ty::Array(item, n) if (1..=12).contains(n) => heap(types, item),
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) | Ty::Handler(..) => true,
         Ty::Option(item) | Ty::Ref(item, _) | Ty::Boxed(item) | Ty::Shared(item) => {
             heap(types, item)
