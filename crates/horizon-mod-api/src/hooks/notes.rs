@@ -1192,6 +1192,8 @@ computed at the call:
 `stop` and `fade` answer false, changing nothing, once the sound is over. Once it ends, is stopped or faded out, or is
 cleared (leaving or changing levels stops every sound), the handle reads `Stopped` and its writes do nothing. It stays
 valid across a change of output device, which reopens the output on the same mixer and keeps the sounds playing.
+Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while it plays (stop it before
+starting another in its place), or nothing can stop it until the player leaves the level.
 
 `ClientHost::sound_events()` lists every sound event the client's resources have (`SoundManager.getAvailableSounds`).
 `audio_devices()` lists the output devices by name (`SoundEngine.getAvailableSoundDevices`), and `audio_device()` names

@@ -813,6 +813,10 @@ impl SoundPlay {
 /// stopped or been cleared (leaving or changing levels stops every sound), the handle is stale: it
 /// reads [`SoundState::Stopped`] and its writes do nothing. It stays valid across a change of
 /// output device, which keeps the sounds playing.
+///
+/// Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while
+/// it plays (stop it before starting another in its place), or nothing can stop it until the
+/// player leaves the level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct SoundRef {
