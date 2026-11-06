@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "ไม่สามารถอ่านบันทึกการสร้าง: {error}",
   "Could not read the saved sign-in.": "ไม่สามารถอ่านการลงชื่อเข้าใช้ที่บันทึกไว้ได้",
   "Could not read the saved sign-in. Sign in again.": "ไม่สามารถอ่านการลงชื่อเข้าใช้ที่บันทึกไว้ได้ ลงชื่อเข้าใช้อีกครั้ง",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "ไม่สามารถอ่าน {name}: {error}",
   "Could not run {program}: {error}": "ไม่สามารถเรียกใช้ {program}: {error}",
   "Could not save the renewed sign-in.": "ไม่สามารถบันทึกการลงชื่อเข้าใช้ที่ต่ออายุได้",

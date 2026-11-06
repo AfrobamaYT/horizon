@@ -112,6 +112,8 @@ pub(super) struct Mods {
     pub(super) native_state: std::cell::RefCell<Option<(String, native_status::State)>>,
     /// Each native mod's route under the chosen build mode, and what it was read for.
     pub(super) native_routes: std::cell::RefCell<Option<(String, native_mods::Routes)>>,
+    /// Installed wasm declarations, reread only when the instance's files or enable list change.
+    wasm_internals: std::cell::RefCell<Option<(String, bool)>>,
     /// The mod whose route menu is open.
     pub(super) route_open: Option<String>,
     native_files: std::cell::RefCell<Option<(String, Vec<native_status::Installed>)>>,
@@ -196,6 +198,7 @@ impl Mods {
             native_notice: None,
             native_state: Default::default(),
             native_routes: Default::default(),
+            wasm_internals: Default::default(),
             route_open: None,
             native_files: Default::default(),
             updates: HashMap::new(),
@@ -1363,7 +1366,19 @@ impl Launcher {
             return None;
         }
         let busy = self.mods.busy.is_some();
-        let native = !native_entries.is_empty()
+        let wasm_internals = if self.mods.java.is_none() && kind == PackKind::Mod {
+            let home = self.mods.home();
+            let key = native_status::fingerprint(&home, None);
+            let mut cached = self.mods.wasm_internals.borrow_mut();
+            if cached.as_ref().is_none_or(|(old, _)| *old != key) {
+                *cached = Some((key, native_mods::has_wasm_internals(&home)));
+            }
+            cached.as_ref().is_some_and(|(_, declares)| *declares)
+        } else {
+            false
+        };
+        let native = wasm_internals
+            || !native_entries.is_empty()
             || self.mods.java.is_none()
                 && entries
                     .iter()

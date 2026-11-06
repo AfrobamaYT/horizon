@@ -118,6 +118,33 @@ mod tests {
     }
 
     #[test]
+    fn wasm_only_pipeline_reaches_installed_table_selection() {
+        let root = super::super::tests::dir("wasm-only-pipeline");
+        let native = root.join("native");
+        fs::create_dir_all(&native).unwrap();
+        install(
+            &root,
+            "wasm_only",
+            "\n[[native.internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n",
+        );
+        fs::write(root.join(mod_list::FILE), "mod.wasm_only:true\n").unwrap();
+        let native = super::super::stage_installed(&root, native).unwrap();
+        let (bundles, declared) = super::super::build_inputs(&native, Some(&root))
+            .map_err(String::from)
+            .unwrap();
+        assert!(bundles.is_empty());
+        assert!(super::super::has_wasm_internals(&root));
+        let mut pass = Command::new("horizon-stage");
+        stage(&root, &declared, &mut pass).unwrap();
+        assert_eq!(pass.get_args().next().unwrap(), "--wasm-internals");
+        assert_eq!(
+            fs::read_to_string(root.join("wasm-internals.installed/wasm_only.txt")).unwrap(),
+            "horizon_client::game::Game\n"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn from_source_table_is_gated_by_enabled_wasm_declarations() {
         let root = super::super::tests::dir("wasm-internals-gate");
         let stage = root.join("stage");
