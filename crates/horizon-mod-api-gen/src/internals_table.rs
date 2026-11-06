@@ -128,7 +128,7 @@ struct Gen<'r> {
 }
 
 /// A type's Rust spelling, from the game crate's root.
-pub(crate) fn spell(shape: &Shape) -> Option<TokenStream> {
+fn spell(shape: &Shape) -> Option<TokenStream> {
     Some(match shape {
         Shape::Scalar(scalar) => match scalar {
             Scalar::Bool => quote!(bool),
