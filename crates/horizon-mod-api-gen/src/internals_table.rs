@@ -2483,7 +2483,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn foreign_keys_and_flags_round_trip_through_the_generated_table() {
+    fn foreign_keys_read_and_flags_round_trip_through_the_generated_table() {
         let shape = |path: &str, kind: &'static str, signature: &str| {
             let mut entry = internal(path, kind, signature);
             entry.shape_only = true;
@@ -2537,7 +2537,7 @@ pub(crate) mod tests {
             struct Held { key: winit::keyboard::PhysicalKey, mods: winit::keyboard::ModifiersState }
             "#,
             r#"
-            use winit::keyboard::{KeyCode, ModifiersState, NativeKeyCode, PhysicalKey};
+            use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
             let mut held = Held {
                 key: PhysicalKey::Code(KeyCode::KeyB),
                 mods: ModifiersState::from_bits_retain(0b100_100),
@@ -2555,16 +2555,34 @@ pub(crate) mod tests {
             unsafe {
                 assert_eq!(walk(ptr, false, Op::Get(0)), Ok(Reply::Value(key_b)));
                 assert_eq!(walk(ptr, false, Op::Get(1)), Ok(Reply::Value(control_shift)));
-                assert_eq!(walk(ptr, true, Op::Set(0, xkb)), Ok(Reply::Done));
+                // A key holds a sealed `KeyCode`: read-only.
+                assert!(walk(ptr, true, Op::Set(0, xkb)).is_err());
                 assert_eq!(
                     walk(ptr, true, Op::Set(1, Value::Rec(vec![Value::U(0b100)]))),
                     Ok(Reply::Done)
                 );
             }
-            assert!(matches!(held.key, PhysicalKey::Unidentified(NativeKeyCode::Xkb(38))));
+            assert!(matches!(held.key, PhysicalKey::Code(KeyCode::KeyB)));
             assert_eq!(held.mods.bits(), 0b100);
         "#,
         );
+    }
+
+    #[test]
+    fn winit_keys_are_read_only_and_the_other_listed_winit_types_are_built() {
+        let (code, _) = all_table(&crate::crossing::foreign_internals());
+        for (path, built) in [
+            ("winit__keyboard__KeyCode", false),
+            ("winit__keyboard__PhysicalKey", false),
+            ("winit__keyboard__NativeKeyCode", true),
+            ("winit__keyboard__KeyLocation", true),
+            ("winit__keyboard__ModifiersState", true),
+            ("winit__event__ElementState", true),
+            ("winit__event__MouseButton", true),
+        ] {
+            assert!(code.contains(&format!("fn enc__{path}")), "{path}");
+            assert_eq!(code.contains(&format!("fn dec__{path}")), built, "{path}");
+        }
     }
 
     #[test]

@@ -179,9 +179,59 @@ pub fn foreign(path: &str) -> Option<Foreign> {
         .map(|(_, foreign)| *foreign)
 }
 
-/// The [`CROSSING_FOREIGN`] entries of `internals.json`, read from the source of each crate
-/// as the game crate resolves it in `root`'s lock file.
-pub fn foreign_internals(root: &Path) -> Result<Vec<Internal>, String> {
+/// The checked-in [`CROSSING_FOREIGN`] layouts, written by `cargo run -p xtask -- mod-api` from
+/// the locked source. Staging also runs where Cargo may not be yet, so it reads this file.
+const CROSSING_FOREIGN_FILE: &str = "crates/horizon-mod-api-gen/crossing-foreign.json";
+
+/// One [`CROSSING_FOREIGN`] type's layout, as its crate's source declares it.
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct ForeignLayout {
+    path: String,
+    kind: String,
+    signature: String,
+}
+
+/// The [`CROSSING_FOREIGN`] entries of `internals.json`, from the checked-in layouts.
+pub fn foreign_internals() -> Vec<Internal> {
+    let layouts: Vec<ForeignLayout> =
+        serde_json::from_str(include_str!("../crossing-foreign.json")).expect("foreign layouts");
+    layouts
+        .into_iter()
+        .map(|layout| Internal {
+            path: layout.path,
+            kind: if layout.kind == "enum" {
+                "enum"
+            } else {
+                "struct"
+            },
+            cfg: String::new(),
+            hash: crate::internals::signature_hash(&layout.signature),
+            signature: layout.signature,
+            shape_only: true,
+            opaque_reason: None,
+            refs: BTreeMap::new(),
+        })
+        .collect()
+}
+
+/// Write the [`CROSSING_FOREIGN`] layouts of `root`'s checkout, read from the source of each
+/// crate as the game crate resolves it in the lock file.
+pub fn write_foreign_layouts(root: &Path) -> Result<(), String> {
+    let path = root.join(CROSSING_FOREIGN_FILE);
+    std::fs::write(&path, locked_foreign_layouts(root)?)
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The text of [`CROSSING_FOREIGN_FILE`] that `root`'s locked source gives.
+fn locked_foreign_layouts(root: &Path) -> Result<String, String> {
+    let metadata = cargo_metadata(root)?;
+    let layouts = read_foreign(CROSSING_FOREIGN, |krate| locked_lib(&metadata, krate))?;
+    serde_json::to_string_pretty(&layouts)
+        .map(|text| text + "\n")
+        .map_err(|e| e.to_string())
+}
+
+fn cargo_metadata(root: &Path) -> Result<serde_json::Value, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let output = std::process::Command::new(cargo)
         .current_dir(root)
@@ -200,9 +250,7 @@ pub fn foreign_internals(root: &Path) -> Result<Vec<Internal>, String> {
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    let metadata: serde_json::Value =
-        serde_json::from_slice(&output.stdout).map_err(|e| format!("cargo metadata: {e}"))?;
-    read_foreign(CROSSING_FOREIGN, |krate| locked_lib(&metadata, krate))
+    serde_json::from_slice(&output.stdout).map_err(|e| format!("cargo metadata: {e}"))
 }
 
 /// The library root of the game crate's dependency `krate`, from `cargo metadata`.
@@ -236,14 +284,14 @@ fn locked_lib(metadata: &serde_json::Value, krate: &str) -> Result<PathBuf, Stri
         .ok_or_else(|| format!("{krate}: no library in the locked package"))
 }
 
-/// The `listed` types' entries, each read from its crate's library root at `lib(crate)`. A
+/// The `listed` types' layouts, each read from its crate's library root at `lib(crate)`. A
 /// listed path its source no longer has is an error naming it.
 fn read_foreign(
     listed: &[(&str, Foreign)],
     lib: impl Fn(&str) -> Result<PathBuf, String>,
-) -> Result<Vec<Internal>, String> {
+) -> Result<Vec<ForeignLayout>, String> {
     let mut libs = BTreeMap::new();
-    let mut entries = Vec::new();
+    let mut layouts = Vec::new();
     for (path, foreign) in listed {
         let mut segments: Vec<&str> = path.split("::").collect();
         let name = segments.pop().expect("a listed path");
@@ -272,22 +320,16 @@ fn read_foreign(
         } else {
             "struct"
         };
-        let signature = crate::internals::shape_signature(&item)
-            .expect("a struct or an enum")
-            .to_token_stream()
-            .to_string();
-        entries.push(Internal {
+        layouts.push(ForeignLayout {
             path: (*path).to_owned(),
-            kind,
-            cfg: String::new(),
-            hash: crate::internals::signature_hash(&signature),
-            signature,
-            shape_only: true,
-            opaque_reason: None,
-            refs: BTreeMap::new(),
+            kind: kind.to_owned(),
+            signature: crate::internals::shape_signature(&item)
+                .expect("a struct or an enum")
+                .to_token_stream()
+                .to_string(),
         });
     }
-    Ok(entries)
+    Ok(layouts)
 }
 
 /// The items of module `modules` (from the crate root) of the crate whose root is `lib`.
@@ -356,7 +398,7 @@ pub struct Named {
     pub opaque_reason: Option<&'static str>,
     /// Declared in another crate than the game's, where the table reads it.
     pub foreign: bool,
-    /// `#[non_exhaustive]` on it (a struct) or a case of it: another crate can't build it.
+    /// `#[non_exhaustive]` on it or a case of it: another crate can't build it.
     pub sealed: bool,
 }
 
@@ -412,8 +454,7 @@ impl Rule {
             };
             let sealed = match &item {
                 syn::Item::Struct(s) => open(&s.attrs),
-                // Another crate may still build each case of a `#[non_exhaustive]` enum.
-                syn::Item::Enum(e) => e.variants.iter().any(|v| open(&v.attrs)),
+                syn::Item::Enum(e) => open(&e.attrs) || e.variants.iter().any(|v| open(&v.attrs)),
                 _ => false,
             };
             let conditional = |attrs: &[syn::Attribute]| {
@@ -1040,15 +1081,24 @@ pub(crate) mod tests {
         );
     }
 
-    /// The workspace's own `internals.json` entries for [`CROSSING_FOREIGN`].
-    fn locked_foreign() -> Vec<Internal> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        foreign_internals(&root).unwrap()
+    fn checkout() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    #[test]
+    fn checked_in_foreign_layouts_match_the_locked_source() {
+        let root = checkout();
+        assert_eq!(
+            locked_foreign_layouts(&root).unwrap(),
+            std::fs::read_to_string(root.join(CROSSING_FOREIGN_FILE)).unwrap(),
+            "{CROSSING_FOREIGN_FILE} is stale: run `cargo run -p xtask -- mod-api`"
+        );
     }
 
     #[test]
     fn listed_winit_types_cross_by_copy_and_the_rest_of_winit_stays_opaque() {
-        let mut internals = locked_foreign();
+        let mut internals = foreign_internals();
+        assert_eq!(internals.len(), CROSSING_FOREIGN.len());
         internals.push(internal(
             "horizon_client::Held",
             "struct",
@@ -1071,8 +1121,13 @@ pub(crate) mod tests {
                 Crossing::Copy(leaves),
                 "{path}"
             );
-            // Another crate may build each of them: a write decodes like any copy's.
-            assert!(!rule.named(path).unwrap().sealed, "{path}");
+            // Only winit's `#[non_exhaustive]` `KeyCode` is sealed: another crate never builds
+            // it, so it and what holds it are read-only.
+            assert_eq!(
+                rule.named(path).unwrap().sealed,
+                path == "winit::keyboard::KeyCode",
+                "{path}"
+            );
         }
         assert_eq!(
             rule.fields("winit::keyboard::ModifiersState")[0]
@@ -1096,18 +1151,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_stale_crossing_foreign_path_fails_with_its_name() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let output = std::process::Command::new(env!("CARGO"))
-            .args([
-                "metadata",
-                "--format-version=1",
-                "--locked",
-                "--manifest-path",
-            ])
-            .arg(root.join("Cargo.toml"))
-            .output()
-            .unwrap();
-        let metadata = serde_json::from_slice(&output.stdout).unwrap();
+        let metadata = cargo_metadata(&checkout()).unwrap();
         for (stale, foreign) in [
             ("winit::keyboard::Gone", Foreign::Layout),
             ("winit::gone::KeyCode", Foreign::Layout),

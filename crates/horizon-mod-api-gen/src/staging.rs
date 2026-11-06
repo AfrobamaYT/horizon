@@ -33,7 +33,7 @@ pub fn stage(
     };
     internals
         .entries
-        .extend(crate::crossing::foreign_internals(root)?);
+        .extend(crate::crossing::foreign_internals());
     write(internals_json, &internals.entries)?;
     let sites = sites::stage(root, &internals.entries).map_err(|e| e.to_string())?;
     let points = points::stage(root)?;
