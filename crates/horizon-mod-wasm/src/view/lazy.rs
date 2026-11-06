@@ -229,7 +229,9 @@ fn utf8_size(
     if utf16 {
         char::decode_utf16(
             bytes
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|b| u16::from_le_bytes([b[0], b[1]])),
         )
         .try_fold(0usize, |size, c| Ok(size + c?.len_utf8()))
