@@ -9,7 +9,7 @@ use crate::crafting::WalkedIngredient;
 use horizon_items::item_data::StackData;
 use std::{fmt, marker::PhantomData};
 
-/// An amount of one fluid, as NeoForge's `FluidStack`: its id (`minecraft:water`), how many
+/// An amount of one registered fluid, as NeoForge's `FluidStack`: its `FluidKey`, how many
 /// millibuckets, and its data components, kept as an item stack's are (a potion fluid's
 /// `minecraft:potion_contents`). Water and lava have none.
 #[derive(Clone, Debug, PartialEq)]
@@ -32,11 +32,6 @@ impl FluidStack {
             components: None,
         }
     }
-    /// The registered fluid key, or none for an unresolved saved fluid.
-    pub fn key(&self) -> Option<FluidKey> {
-        Some(self.fluid)
-    }
-
     /// The same fluid with the same components, `amount` of it.
     pub fn with_amount(&self, amount: u32) -> Self {
         Self {
@@ -155,7 +150,7 @@ impl FluidIngredient {
     /// `compound`, all for `intersection`, base-but-not-subtracted for
     /// `difference`).
     pub fn test(&self, stack: &FluidStack) -> bool {
-        stack.key().is_some_and(|key| self.fluids.contains(&key))
+        self.fluids.contains(&stack.fluid)
     }
     /// The fluids it accepts, in the sources' order (`HolderSet`) — what a
     /// recipe book shows.
@@ -280,7 +275,7 @@ pub const ITEM_FLUIDS: ItemCapabilityKey<dyn ResourceHandler<FluidResource>> = I
     default: Some(|host, place, stack| {
         BUCKETS
             .iter()
-            .any(|&(bucket, _)| *stack.item == *bucket)
+            .any(|bucket| *stack.item == **bucket)
             .then(|| {
                 let water = host.fluid_key("minecraft:water")?;
                 let lava = host.fluid_key("minecraft:lava")?;
@@ -292,11 +287,11 @@ pub const ITEM_FLUIDS: ItemCapabilityKey<dyn ResourceHandler<FluidResource>> = I
     handler: PhantomData,
 };
 
-/// The buckets and the fluid each holds: the empty one none.
-const BUCKETS: [(&str, Option<&str>); 3] = [
-    ("minecraft:bucket", None),
-    ("minecraft:water_bucket", Some("minecraft:water")),
-    ("minecraft:lava_bucket", Some("minecraft:lava")),
+/// The vanilla buckets supported by this handler.
+const BUCKETS: [&str; 3] = [
+    "minecraft:bucket",
+    "minecraft:water_bucket",
+    "minecraft:lava_bucket",
 ];
 
 /// A bucket holds this much, all or nothing.
@@ -368,7 +363,7 @@ impl ResourceHandler<FluidResource> for GameBucket {
         let empty = self
             .0
             .stack(host)
-            .is_some_and(|stack| *stack.item == *BUCKETS[0].0);
+            .is_some_and(|stack| *stack.item == *BUCKETS[0]);
         match self.bucket_of(resource) {
             Some(full) if index == 0 && empty && amount >= BUCKET => self.exchange(host, tx, full),
             _ => 0,
@@ -385,7 +380,7 @@ impl ResourceHandler<FluidResource> for GameBucket {
         let held = self.resource(host, index);
         match held {
             Some(held) if held == *resource && amount >= BUCKET => {
-                self.exchange(host, tx, BUCKETS[0].0)
+                self.exchange(host, tx, BUCKETS[0])
             }
             _ => 0,
         }
@@ -441,10 +436,7 @@ mod tests {
         let single = parse(r#""minecraft:water""#).unwrap();
         assert!(single.test(&stack("minecraft:water", 100)));
         assert!(!single.test(&stack("minecraft:lava", 100)));
-        assert_eq!(
-            single.fluids(),
-            [stack("minecraft:water", 1).key().unwrap()]
-        );
+        assert_eq!(single.fluids(), [stack("minecraft:water", 1).fluid]);
     }
 
     /// A `#tag` resolves through the fluid tags, keeping their order; a
@@ -455,8 +447,8 @@ mod tests {
         assert_eq!(
             tag.fluids(),
             [
-                stack("minecraft:water", 1).key().unwrap(),
-                stack("minecraft:flowing_water", 1).key().unwrap()
+                stack("minecraft:water", 1).fluid,
+                stack("minecraft:flowing_water", 1).fluid
             ]
         );
         assert!(tag.test(&stack("minecraft:flowing_water", 1)));
@@ -471,9 +463,9 @@ mod tests {
         assert_eq!(
             list.fluids(),
             [
-                stack("minecraft:water", 1).key().unwrap(),
-                stack("minecraft:flowing_water", 1).key().unwrap(),
-                stack("minecraft:lava", 1).key().unwrap()
+                stack("minecraft:water", 1).fluid,
+                stack("minecraft:flowing_water", 1).fluid,
+                stack("minecraft:lava", 1).fluid
             ]
         );
         assert!(parse(r#"[]"#).is_none());
@@ -501,10 +493,7 @@ mod tests {
             r##"{"type":"neoforge:difference","base":"#minecraft:water","subtracted":"minecraft:flowing_water"}"##,
         )
         .unwrap();
-        assert_eq!(
-            difference.fluids(),
-            [stack("minecraft:water", 1).key().unwrap()]
-        );
+        assert_eq!(difference.fluids(), [stack("minecraft:water", 1).fluid]);
         assert!(!difference.test(&stack("minecraft:flowing_water", 1)));
         // A mod's own kind, an unknown minecraft kind and a kindless
         // object all fail the file.
