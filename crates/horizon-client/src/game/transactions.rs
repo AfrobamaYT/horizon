@@ -524,7 +524,9 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn cauldron_stat_listener_observes_committed_state_and_can_cancel() {
         use super::super::native_entity_refs::tests::run_fresh_cases;
-        use mod_api::{Flow, Hooks, ModEntry, Mods, PlayerStatAwardEvent};
+        use mod_api::{
+            Flow, Hooks, ItemSpawnEvent, ItemTossEvent, ModEntry, Mods, PlayerStatAwardEvent,
+        };
         use std::sync::Mutex;
         if run_fresh_cases(
             "game::transactions::tests::cauldron_stat_listener_observes_committed_state_and_can_cancel",
@@ -533,7 +535,10 @@ mod tests {
         ) {
             return;
         }
-        struct Listener(Arc<Mutex<Vec<(Option<mod_api::BlockStateId>, Option<String>)>>>);
+        struct Listener {
+            seen: Arc<Mutex<Vec<(Option<mod_api::BlockStateId>, Option<String>)>>>,
+            drops: Arc<Mutex<Vec<(&'static str, Option<mod_api::BlockStateId>)>>>,
+        }
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
             fn player_stat_award(
@@ -549,15 +554,42 @@ mod tests {
                     player: event.player,
                     hand: mod_api::first_person::Hand::Main,
                 };
-                self.0.lock().unwrap().push((
+                self.seen.lock().unwrap().push((
                     level.block_state(host, [2, 64, 2]),
                     hand.stack(host).map(|s| s.item.to_string()),
                 ));
                 Flow::Cancel
             }
+            fn item_toss(&self, host: &mut dyn ServerHost, event: &mut ItemTossEvent<'_>) -> Flow {
+                if event.item == "minecraft:potion" {
+                    let level = host.level("minecraft:overworld").unwrap();
+                    self.drops
+                        .lock()
+                        .unwrap()
+                        .push(("toss", level.block_state(host, [2, 64, 2])));
+                }
+                Flow::Continue
+            }
+            fn item_spawn(&self, host: &mut dyn ServerHost, event: &mut ItemSpawnEvent<'_>) {
+                if event.item == "minecraft:potion" {
+                    let level = host.level("minecraft:overworld").unwrap();
+                    self.drops
+                        .lock()
+                        .unwrap()
+                        .push(("spawn", level.block_state(host, [2, 64, 2])));
+                }
+            }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods: Mods = vec![ModEntry::new("observer", Box::new(Listener(seen.clone())))].into();
+        let drops = Arc::new(Mutex::new(Vec::new()));
+        let mods: Mods = vec![ModEntry::new(
+            "observer",
+            Box::new(Listener {
+                seen: seen.clone(),
+                drops: drops.clone(),
+            }),
+        )]
+        .into();
         mod_api::__private::install(mods);
         super::super::native_guest_turn_tests::with_guests(|game| {
             let pos = [2, 64, 2];
@@ -590,12 +622,65 @@ mod tests {
                 game.transaction_close(false);
                 assert!(seen.lock().unwrap().is_empty());
                 assert!(game.use_on_cauldron(pos).unwrap());
+                assert_eq!(
+                    seen.lock().unwrap().as_slice(),
+                    &[(Some(empty), Some("minecraft:bucket".into()))]
+                );
+                game.world.set(pos[0], pos[1], pos[2], empty).unwrap();
+                game.inventory[0] = Some(ItemStack::new("minecraft:water_bucket", 1));
+                game.transaction_open();
+                assert!(game.use_on_cauldron(pos).unwrap());
+                assert_eq!(seen.lock().unwrap().len(), 1);
+                game.transaction_close(true);
             })
             .unwrap();
             assert_eq!(
                 *seen.lock().unwrap(),
-                vec![(Some(full), Some("minecraft:bucket".into()))]
+                vec![
+                    (Some(empty), Some("minecraft:bucket".into())),
+                    (Some(full), Some("minecraft:bucket".into()))
+                ]
             );
+            let level2 = game
+                .pack
+                .assets
+                .registry
+                .resolve(&horizon_world::chunk::BlockState {
+                    name: "minecraft:water_cauldron".into(),
+                    properties: [("level".into(), "2".into())].into_iter().collect(),
+                })
+                .unwrap();
+            game.as_guest(12, |game| {
+                let setup = |game: &mut Game<'_>| {
+                    game.world.set(pos[0], pos[1], pos[2], full).unwrap();
+                    game.inventory
+                        .iter_mut()
+                        .for_each(|s| *s = Some(ItemStack::new("minecraft:stone", 64)));
+                    game.offhand = Some(ItemStack::new("minecraft:stone", 64));
+                    game.inventory[0] = Some(ItemStack::new("minecraft:glass_bottle", 2));
+                };
+                setup(game);
+                assert!(game.use_on_cauldron(pos).unwrap());
+                assert_eq!(
+                    drops.lock().unwrap().as_slice(),
+                    &[("toss", Some(full)), ("spawn", Some(full))]
+                );
+                drops.lock().unwrap().clear();
+                setup(game);
+                game.transaction_open();
+                assert!(game.use_on_cauldron(pos).unwrap());
+                assert!(drops.lock().unwrap().is_empty());
+                game.transaction_close(false);
+                assert!(drops.lock().unwrap().is_empty());
+                game.transaction_open();
+                assert!(game.use_on_cauldron(pos).unwrap());
+                game.transaction_close(true);
+                assert_eq!(
+                    drops.lock().unwrap().as_slice(),
+                    &[("toss", Some(level2)), ("spawn", Some(level2))]
+                );
+            })
+            .unwrap();
             assert_eq!(
                 game.lan.as_ref().unwrap().play[&12]
                     .stats

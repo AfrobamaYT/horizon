@@ -473,6 +473,10 @@ host.transaction(|host, tx| {
 })
 ```
 
+Cauldron interactions outside a transaction keep vanilla's effect order. Inside an open
+transaction, their statistic award (including `player_stat_award`), sound and overflow
+item toss/spawn wait until the outermost successful commit; an abort emits none of them.
+
 #### Entity energy and fluids
 
 `entity.capability(host, &ENTITY_ENERGY, side)` and `entity.capability(host, &ENTITY_FLUIDS, side)` reach a mod's

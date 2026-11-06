@@ -4089,7 +4089,9 @@ pub trait Hooks {
     fn player_shield_disable();
     /// A statistic is about to be awarded to a server player, before its count and scoreboard criteria
     /// change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, and
-    /// `value` the amount. Set `cancel` to award nothing. Server-side.
+    /// `value` the amount. Set `cancel` to award nothing. Server-side. Ordinary interactions
+    /// fire at vanilla's award point; inside a transaction, the award and this hook wait until
+    /// the outermost successful commit, after tentative world and inventory writes.
     #[hook(
         side = "server",
         contract = "cancel",

@@ -14574,6 +14574,39 @@ impl Game<'_> {
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
         let slot = self.held_slot();
         let player = self.native_acting_id();
+        if self.transactions.is_empty() {
+            use transactions::DeferredEffect;
+            let mut hand = powder_snow::HeldSlot {
+                game: self,
+                slot,
+                dropper: None,
+            };
+            let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
+            if result.outcome == Outcome::Pass {
+                return Ok(false);
+            }
+            if let Some(stat) = result.stat {
+                self.defer_effect(DeferredEffect::CustomStat {
+                    player,
+                    key: stat,
+                    amount: 1,
+                });
+            }
+            if let Some(block) = result.block
+                && let Ok(new) = registry.resolve(&block)
+            {
+                self.level_set(pos, new)?;
+            }
+            if let Some(sound) = result.sound {
+                self.defer_effect(DeferredEffect::Sound {
+                    sound,
+                    at: pos.map(|v| f64::from(v) + 0.5),
+                    volume: 1.0,
+                    pitch: 1.0,
+                });
+            }
+            return Ok(true);
+        }
         let outcome = mod_api::run_transaction(self, |game, _| {
             use transactions::DeferredEffect;
             game.journal_player(player);
