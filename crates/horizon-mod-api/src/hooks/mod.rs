@@ -200,6 +200,7 @@ mod living_get_projectile;
 mod living_health;
 mod living_health_writes;
 mod living_motion_values;
+mod living_position;
 mod living_refs;
 mod living_shield_block;
 mod living_use_totem;

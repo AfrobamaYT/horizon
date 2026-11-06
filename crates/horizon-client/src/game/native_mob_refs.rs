@@ -399,6 +399,38 @@ impl Game<'_> {
             .is_some()
     }
 
+    /// `LivingEntity.getNoActionTime`: the ticks since the mob last had a
+    /// reason to stay (a player near, a hit). Despawning and a raid's
+    /// recruiting read it. None for a stale or unavailable mob, the dragon,
+    /// or on a client.
+    pub(super) fn native_mob_no_action_time(&self, mob: MobRef) -> Option<i32> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(
+            self.mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)?
+                .ai
+                .no_action_time,
+        )
+    }
+
+    /// `LivingEntity.setNoActionTime`: the count the mob's own tick carries
+    /// on from (a far-away mob's despawn chance starts past 600). Not saved,
+    /// as in vanilla. False for a stale or unavailable mob, the dragon, or
+    /// on a client.
+    pub(super) fn native_mob_set_no_action_time(&mut self, mob: MobRef, ticks: i32) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.ai.no_action_time = ticks)
+            .is_some()
+    }
+
     /// `Mob.setBaby` through the species' setter: ageable mobs use their
     /// baby start age (`-48000` for sniffers, otherwise `-24000`) or `0`,
     /// including age-boundary attribute and AI setup changes. Non-ageable

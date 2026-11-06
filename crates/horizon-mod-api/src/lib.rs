@@ -266,7 +266,7 @@ pub use crate::item_tooltip::TooltipDisplay;
 pub use crate::menu::{DragKind, LogicalSide, MenuClick, MouseButton, StackedOnOther, SwapWith};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
-pub use crate::mobs::PathComputationType;
+pub use crate::mobs::{PathComputationType, PathType};
 pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
 pub use crate::mod_chunk_tickets::{TicketSet, TicketValidation};
 pub use crate::music::{Music, MusicLayer};
