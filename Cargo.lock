@@ -1966,6 +1966,7 @@ version = "0.1.0"
 dependencies = [
  "heck",
  "horizon-mod-point-shape",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "serde",
