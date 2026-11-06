@@ -798,7 +798,7 @@ fn tick_advancement_notice_precedes_recipe_reward() {
             guest.advancements_loaded = reload;
         }
         host.hub.mods_loaded = reload;
-        host.hub.reload_resources(Arc::new(sync));
+        game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners));
         if reload {
             game.run_native_advancement_grants();
         } else {

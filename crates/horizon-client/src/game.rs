@@ -192,6 +192,7 @@ mod lan_chat;
 mod lan_crafting;
 mod lan_entities;
 mod lan_far;
+mod lan_idle;
 mod lan_mobs;
 mod lan_mount_menu;
 mod lan_particles;
@@ -19120,6 +19121,7 @@ impl Game<'_> {
     /// screen's own raw keys, text and mods' key hooks stay raw on purpose.
     fn handle_window_event_inner(&mut self, event_loop: &dyn EventLoopCtl, mut event: WindowEvent) {
         if let WindowEvent::Focused(false) = &event {
+            self.modifiers = winit::keyboard::ModifiersState::empty();
             self.physical_keys.clear();
             self.physical_buttons.clear();
             self.drag_button = None;
@@ -21896,9 +21898,7 @@ impl Game<'_> {
             Some(kept) => {
                 match lan::reload_sync_data(&self.res.core.item_data, &self.pack_files(), &kept) {
                     Ok(sync) => {
-                        if let Some(host) = self.lan.as_mut() {
-                            host.hub.reload_resources(sync);
-                        }
+                        self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
                         self.run_native_advancement_grants();
                     }
                     Err(e) => {
@@ -24368,6 +24368,29 @@ mod tests {
 
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_modifier_snapshot_tracks_focus_loss() {
+        use mod_api::ClientHost;
+        use winit::{event_loop::ControlFlow, keyboard::ModifiersState};
+        struct TestLoop;
+        impl EventLoopCtl for TestLoop {
+            fn exit(&self) {}
+            fn set_control_flow(&self, _: ControlFlow) {}
+        }
+        super::native_entity_refs::tests::with_client_game(|game| {
+            game.modifiers = ModifiersState::SHIFT | ModifiersState::ALT;
+            let snapshot = (game as &dyn ClientHost).modifiers();
+            assert!(snapshot.shift());
+            assert!(snapshot.alt());
+            assert!(!snapshot.control());
+            assert!(!snapshot.super_key());
+            game.handle_window_event_inner(&TestLoop, WindowEvent::Focused(false));
+            assert_eq!((game as &dyn ClientHost).modifiers().bits, 0);
+            assert_eq!(snapshot.bits, 5);
+        });
+    }
 
     /// `ClipContext.Block.OUTLINE` for the SOURCE_ONLY ray (#8180): a ray
     /// through the empty part of a torch's cell is not stopped by it.

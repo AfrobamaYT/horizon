@@ -346,6 +346,39 @@ pub struct NativeArmorHurt {
     pub new_damage: f32,
 }
 
+/// A snapshot of the client window's modifier keys.
+///
+/// The bits use GLFW's input-event encoding: shift 1, control 2, alt 4 and super 8.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ClientModifiers {
+    /// Modifier bits in GLFW's input-event encoding.
+    pub bits: u32,
+}
+
+impl ClientModifiers {
+    /// Construct a snapshot from GLFW modifier bits.
+    pub fn new(bits: u32) -> Self {
+        Self { bits }
+    }
+    /// Whether shift is held.
+    pub fn shift(self) -> bool {
+        self.bits & 1 != 0
+    }
+    /// Whether control is held.
+    pub fn control(self) -> bool {
+        self.bits & 2 != 0
+    }
+    /// Whether alt is held.
+    pub fn alt(self) -> bool {
+        self.bits & 4 != 0
+    }
+    /// Whether super is held.
+    pub fn super_key(self) -> bool {
+        self.bits & 8 != 0
+    }
+}
+
 /// A vanilla key mapping as the client holds it (`ClientHost::mapping`).
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it

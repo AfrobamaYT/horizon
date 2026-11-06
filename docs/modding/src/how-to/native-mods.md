@@ -95,8 +95,10 @@ Subscribe to `player_advancement_progress` to inspect the whole advancement imme
 one criterion is granted or revoked, before its completion rewards. `event.progress.criteria`
 includes obtained and unobtained criteria; `obtained_at` is the original saved grant date or
 `None`. `requirements` lists the OR groups, `completed_requirements` counts satisfied groups,
-and `done` is the game's completion result. This also describes first-tick and reload grants
-for the event's player, even when another player's state is in place.
+and `done` is the game's completion result. A player-issued `/reload` mutates and snapshots
+the acting player's live progress, including during a nested turn. For a suspended outer
+player, reload grants still use the displaced hub record; full owner-correct reload awards
+for suspended and inactive players remain tracked in #1240.
 
 Keep `event.progress.clone()` if it is needed later: the owned `AdvancementProgress` snapshot
 cannot change the player's progress and is not updated by subsequent events. No-op grants and
@@ -314,6 +316,14 @@ must already be in Horizon's lock file in a matching version. The launcher check
 package in the staged lock against Horizon's: name, version, source and checksum. Only the staged
 workspace packages are added. A missing crate or a feature that introduces an unlocked dependency
 stops the build; the game still builds with `--locked`.
+
+Crates included only for mods are listed as optional dependencies in
+`crates/horizon-mod-deps/Cargo.toml`: `mysql` 27 (blocking MariaDB/MySQL, with
+`minimal-rust` and `rustls-tls-ring`, no default features), `redis` 1 (blocking,
+no default features), `tungstenite` 0.30 (websockets over a stream the mod opens,
+no default features), and `rusty-opus` 1 (Opus encoder and decoder). These entries
+add their dependencies to the lock without building them into the game. A feature
+that introduces a dependency not listed there is refused.
 
 ### Conditional data
 
