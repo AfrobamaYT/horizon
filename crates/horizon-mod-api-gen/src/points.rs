@@ -1,5 +1,5 @@
 //! Injection points (#589): every function of the game module that [`point_shape::eligible`]
-//! admits is a point, and so is each function `points.txt` lists in the crates below it. The staging
+//! admits is a point, and so is each function `slots/*.txt` lists in the crates below it. The staging
 //! pass ([`stage`]) puts `#[point]` on each in a staged copy of the game's source, the copy the
 //! prebuilt game and the launcher's source builds compile, with each raw form's types beside it;
 //! the generator lists the same points from any copy, staged or not, as `mod_points` (each point's
@@ -258,23 +258,15 @@ pub(crate) fn below_points(root: &Path) -> Result<std::collections::BTreeSet<Str
     Ok(seen)
 }
 
-/// The crates below the game whose listed functions are points, from `points.txt`: each line a
-/// function's path in its own crate (`horizon_client_render::mesher::Mesher::mesh`).
-fn listed(root: &Path) -> Result<Vec<(usize, String)>, String> {
-    let list = root.join(LIST);
-    let text = fs::read_to_string(&list).map_err(|e| format!("{}: {e}", list.display()))?;
-    Ok(text
-        .lines()
-        .enumerate()
-        .filter_map(|(line, text)| {
-            let path = text.split('#').next().unwrap_or_default().trim();
-            (!path.is_empty()).then(|| (line + 1, plain_path(path)))
-        })
+/// Listed lower-crate functions and their diagnostic locations.
+fn listed(root: &Path) -> Result<Vec<(String, String)>, String> {
+    Ok(crate::sites::slots(&root.join(crate::sites::DIRECTORY))
+        .map_err(|e| e.to_string())?
+        .functions
+        .into_iter()
+        .map(|(path, origin)| (origin, path))
         .collect())
 }
-
-/// The list of lower-crate points, in the repository.
-const LIST: &str = "crates/horizon-mod-api-gen/points.txt";
 
 /// A path without generic arguments or spaces, as listed paths and found ones are compared.
 pub(crate) fn plain_path(path: &str) -> String {
@@ -291,13 +283,23 @@ pub(crate) fn plain_path(path: &str) -> String {
     out
 }
 
-/// The game module's files, `points.txt` and the listed crates' files, for a build script to track.
+/// The game module's files, slot lists and listed crates' files, for a build script to track.
 pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files: Vec<_> = game_files(&root.join("crates/horizon-client/src"), true)?
         .into_iter()
         .map(|file| file.path)
         .collect();
-    files.push(root.join(LIST));
+    let directory = root.join(crate::sites::DIRECTORY);
+    files.push(directory.clone());
+    if directory.exists() {
+        files.extend(
+            fs::read_dir(directory)
+                .map_err(|e| e.to_string())?
+                .map(|e| e.map(|e| e.path()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?,
+        );
+    }
     let crates: std::collections::BTreeSet<_> = listed(root)?
         .into_iter()
         .filter_map(|(_, path)| path.split("::").next().map(str::to_owned))
@@ -511,7 +513,7 @@ struct Scanned {
 
 /// Every file with points: the game module's, then each listed lower crate's. Fails on a listed
 /// path that names no point function, or a crate the points' own crate is built on.
-fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(usize, String)>), String> {
+fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let mut files = Vec::new();
     for file in game_files(&root.join("crates/horizon-client/src"), true)? {
         files.push((file, None));
@@ -519,11 +521,11 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(usize, String)>), String> {
     let list = listed(root)?;
     let below = below_points(root)?;
     let mut crates = std::collections::BTreeSet::new();
-    for (line, path) in &list {
+    for (origin, path) in &list {
         let krate = path.split("::").next().unwrap_or_default();
         if below.contains(krate) || krate == "horizon_client" {
             return Err(format!(
-                "{LIST}:{line}: {path}: {krate} is built under the points' own crate (or is the game's): its functions can't be listed points"
+                "{origin}: {path}: {krate} is built under the points' own crate (or is the game's): its functions can't be listed points"
             ));
         }
         crates.insert(krate.to_owned());
@@ -552,7 +554,7 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(usize, String)>), String> {
 
 impl Scanned {
     /// This file's points: all of a game-module file's, or the listed ones of a lower crate's.
-    fn points<'a>(&'a self, list: &[(usize, String)], used: &mut Vec<bool>) -> Vec<Found<'a>> {
+    fn points<'a>(&'a self, list: &[(String, String)], used: &mut Vec<bool>) -> Vec<Found<'a>> {
         let mut out = Vec::new();
         let used = std::cell::RefCell::new(used);
         let keep = |found: &Found<'_>| {
@@ -576,7 +578,7 @@ impl Scanned {
 /// Every point, scanned once: each with its file's index.
 fn all_points<'a>(
     scanned: &'a [Scanned],
-    list: &[(usize, String)],
+    list: &[(String, String)],
 ) -> Result<Vec<(usize, Found<'a>)>, String> {
     let mut used = vec![false; list.len()];
     let mut points = Vec::new();
@@ -587,9 +589,9 @@ fn all_points<'a>(
                 .map(|found| (index, found)),
         );
     }
-    if let Some(((line, path), _)) = list.iter().zip(&used).find(|(_, used)| !**used) {
+    if let Some(((origin, path), _)) = list.iter().zip(&used).find(|(_, used)| !**used) {
         return Err(format!(
-            "{LIST}:{line}: {path}: no function every build compiles that can be a point"
+            "{origin}: {path}: no function every build compiles that can be a point"
         ));
     }
     let mut names = std::collections::BTreeMap::new();
@@ -1198,7 +1200,7 @@ mod tests {
             "pub struct Mesher<'a>(&'a u8);\nimpl Mesher<'_> { pub fn mesh(&mut self, chunk: &Chunk) -> usize { 0 } fn face(&self) {} }\n",
         );
         put(
-            "crates/horizon-mod-api-gen/points.txt",
+            "crates/horizon-mod-api-gen/slots/horizon.txt",
             "# lower points\nhorizon_client_render::mesher::Mesher<'_>::mesh\n",
         );
         let points = game_points(&root).unwrap();
@@ -1321,7 +1323,7 @@ mod tests {
         assert!(stage(&root).unwrap_err().contains("already has"));
         // A crate the points' own crate is built on can't be listed.
         put(
-            "crates/horizon-mod-api-gen/points.txt",
+            "crates/horizon-mod-api-gen/slots/horizon.txt",
             "horizon_world::level::tick\n",
         );
         assert!(game_points(&root).unwrap_err().contains("built under"));
@@ -1330,7 +1332,7 @@ mod tests {
             "horizon_mod_api_gen::points::stage\n",
             "horizon_mod_points::register\n",
         ] {
-            put("crates/horizon-mod-api-gen/points.txt", listed);
+            put("crates/horizon-mod-api-gen/slots/horizon.txt", listed);
             assert!(
                 game_points(&root).unwrap_err().contains("built under"),
                 "{listed}"

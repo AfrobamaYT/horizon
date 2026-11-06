@@ -857,7 +857,7 @@ pub mod tests {
         }
         fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
             Some(match entity.id() {
-                4 => LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether"),
+                4 => LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER),
                 _ => here(),
             })
         }

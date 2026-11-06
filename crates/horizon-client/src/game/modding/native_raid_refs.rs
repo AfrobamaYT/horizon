@@ -14,22 +14,22 @@ impl Game<'_> {
     // swapping it into place, including during hooks for another level.
     fn native_level_raid_collections(&self, level: LevelRef) -> Option<(&Raids, &[Mob])> {
         self.native_level_world(level)?;
-        if level.dimension() == self.dim.id() {
+        if level.dimension() == self.dim.key() {
             Some((self.raids_in_place()?, &self.mobs))
         } else {
-            let parked = self.levels.parked_of(level.dimension())?;
-            Some((parked.raiding.raids(level.dimension())?, &parked.mobs))
+            let parked = self.levels.parked_of(level.dimension_id())?;
+            Some((parked.raiding.raids(level.dimension_id())?, &parked.mobs))
         }
     }
     fn native_level_raids_mut(&mut self, level: LevelRef) -> Option<&mut Raids> {
         self.native_level_world(level)?;
-        if level.dimension() == self.dim.id() {
-            self.raiding.raids_mut(level.dimension())
+        if level.dimension() == self.dim.key() {
+            self.raiding.raids_mut(level.dimension_id())
         } else {
             self.levels
-                .parked_mut_of(level.dimension())?
+                .parked_mut_of(level.dimension_id())?
                 .raiding
-                .raids_mut(level.dimension())
+                .raids_mut(level.dimension_id())
         }
     }
     fn native_raid_members(&self, raid: RaidRef) -> Option<impl Iterator<Item = &Mob>> {
@@ -263,7 +263,7 @@ mod tests {
                 let current = game.native_level(game.dim.id()).unwrap();
                 let (id, _) = game
                     .raiding
-                    .raids_mut(current.dimension())
+                    .raids_mut(current.dimension_id())
                     .unwrap()
                     .create_or_extend([100, 70, 100], 2, None, 7);
                 assert_eq!(id, raid.id());
@@ -276,7 +276,7 @@ mod tests {
                 game.raid_command_stop(id);
                 let tick_id = game
                     .raiding
-                    .raids_mut(current.dimension())
+                    .raids_mut(current.dimension_id())
                     .unwrap()
                     .create_or_extend([200, 70, 200], 2, None, 7)
                     .0;
@@ -458,7 +458,7 @@ mod tests {
             let current = game.native_level(game.dim.id()).unwrap();
             let (other_id, _) = game
                 .raiding
-                .raids_mut(current.dimension())
+                .raids_mut(current.dimension_id())
                 .unwrap()
                 .create_or_extend([100, 70, 100], 2, None, 7);
             assert_eq!(other_id, raid.id()); // Raid ids are local to a level.
@@ -501,10 +501,10 @@ mod tests {
             assert_eq!(level.raid(game, raid.id()), Some(raid));
             assert!(
                 game.levels
-                    .parked_of(level.dimension())
+                    .parked_of(level.dimension_id())
                     .unwrap()
                     .raiding
-                    .raids(level.dimension())
+                    .raids(level.dimension_id())
                     .unwrap()
                     .dirty
             );
@@ -547,7 +547,7 @@ mod tests {
             assert!(!game.native_raid_set_omen_level(stale, 2));
             assert_eq!(game.native_level_raids(later), None);
             assert_eq!(game.native_level_raid_at(later, [10, 70, 10]), None);
-            let parked = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            let parked = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(
                 game.native_raid_status(RaidRef::new(parked, raid.id())),
                 None

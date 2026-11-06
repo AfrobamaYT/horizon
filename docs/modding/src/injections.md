@@ -235,7 +235,7 @@ that the API lacks is a hook request in #44's row form, not a reason to grow the
 
 Every function of the game module is a point: `Game` methods, methods of its other types (`GameLevel`,
 `Levels`…), associated functions and free functions. A crate below the game adds the functions
-`crates/horizon-mod-api-gen/points.txt` lists, one path per line (`horizon_client_render::chunk::Chunk::get`);
+`crates/horizon-mod-api-gen/slots/<mod_id>.txt` lists, one path per line (`horizon_client_render::chunk::Chunk::get`);
 each one there is measured first, since a slot on a hot function costs on every call. Left out:
 
 - the hook functions themselves (`native_*`), which are hooks;
@@ -372,13 +372,16 @@ The build log lists each mod's internals and raw places. The same information is
 
 A `raw` listener with `selector` wraps a compiled-in call, not the enclosing function. Both native
 build routes use the same `points.json` object: `points` lists function points and `sites` lists
-call sites. Only reviewed entries in `crates/horizon-mod-api-gen/sites/<mod_id>.txt` become sites:
+call sites. Only reviewed call entries in `crates/horizon-mod-api-gen/slots/<mod_id>.txt` become sites:
 
 ```text
-horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0
+horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 |
 ```
 
-List files support `#` comments. The stage reads their sorted union, evaluates the receiver once,
+Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (reserved for extension
+fields; not consumed yet). `ctx` is carried but may be empty until context identity is implemented.
+Files support `#` comments; identical declarations merge, and conflicting contexts name both files.
+The stage reads their sorted union, evaluates the receiver once,
 and rewrites only the selected call expression in its copy of the game. Ordinals count matching
 runtime calls in source order; constant contexts and nested item bodies are not selected.
 
@@ -411,7 +414,7 @@ A wrap may call `original` zero, one or several times. `cancellable` is refused:
 caller is not a call-site operation. Borrowing results, non-record arguments, ambiguous targets
 and alias-dependent receiver arguments are refused with the declaration's file, line and reason.
 
-An unlisted raw site raises `E_NOT_SITE`, naming the exact line and `sites/<mod_id>.txt` to add;
+An unlisted raw site raises `E_NOT_SITE`, naming the exact line and `slots/<mod_id>.txt` to add;
 there is no fallback. A source-spliced `helper` remains a separate, rebuild-only form. A stale
 `fingerprint` raises `E_INTERNAL_CHANGED` with the current site hash. `WRAP_WITH_CONDITION` on a
 non-unit site raises `E_SITE_KIND`. These raw sites are not available to wasm mods.

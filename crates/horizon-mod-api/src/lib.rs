@@ -44,6 +44,13 @@ pub enum ModelError {
     StaleModel,
 }
 
+/// A dimension (`minecraft:the_nether`), as the game's table numbers it: a `LevelRef`'s identity.
+/// A key stays the same dimension until the game exits; `key.id(host)` gives the name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so only the game's table creates a key
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct DimensionKey(u32);
+
 /// Why a game rule category declaration was refused.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -459,7 +466,8 @@ pub struct ClientChatOptions {
     pub colors: bool,
     /// Whether links in chat are clickable.
     pub links: bool,
-    /// Opacity of the chat background, 0 to 1.
+    /// Raw `chatOpacity` preference, 0 to 1; text opacity is `value * 0.9 + 0.1`.
+    /// Background opacity is [`ClientGuiOptions::text_background_opacity`].
     pub opacity: f32,
     /// Chat scale.
     pub scale: f32,
@@ -2404,19 +2412,25 @@ impl std::hash::Hash for GlobalPos {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LevelRef {
     epoch: NativeWorldEpoch,
-    dimension: &'static str,
+    dimension: DimensionKey,
 }
 
 impl LevelRef {
     /// Create a handle for the game.
     // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
-    pub fn new(epoch: NativeWorldEpoch, dimension: &'static str) -> Self {
+    pub fn new(epoch: NativeWorldEpoch, dimension: DimensionKey) -> Self {
         Self { epoch, dimension }
     }
-    /// The level's dimension (`minecraft:overworld`).
-    pub fn dimension(self) -> &'static str {
+    /// The level's dimension. `level.dimension().id(host)` gives its name.
+    pub fn dimension(self) -> DimensionKey {
         self.dimension
+    }
+    /// The name of the level's dimension, for the game's own tables.
+    // hidden: a game-side helper; mods ask the host
+    #[doc(hidden)]
+    pub fn dimension_id(self) -> &'static str {
+        registry_keys::dimension_id(self.dimension).expect("the game's table made the key")
     }
     /// Draw from the level's own random stream (vanilla's `Level.random`), in vanilla's order:
     /// `draw` gets the stream and the level keeps it after. None where `random` is None.
@@ -4536,6 +4550,21 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
+    fn dimension_keys_name_one_dimension_each() {
+        use crate::registry_keys::{dimension_id, dimension_key};
+        assert_eq!(dimension_key("minecraft:the_nether"), DimensionKey::NETHER);
+        assert_eq!(dimension_id(DimensionKey::END), Some("minecraft:the_end"));
+        let first = dimension_key("test:first");
+        let second = dimension_key("test:second");
+        assert_ne!(first, second);
+        assert_eq!(dimension_key("test:first"), first);
+        assert_eq!(dimension_id(second), Some("test:second"));
+        assert_eq!(DimensionKey::from_slot(first.0), Ok(first));
+        assert!(DimensionKey::from_slot(u32::MAX).is_err());
+        assert_eq!(dimension_id(DimensionKey(u32::MAX)), None);
+    }
+
+    #[test]
     fn native_host_returns_typed_recipe_rules() {
         struct Recipes(Arc<[Recipe]>);
         impl Host for Recipes {
@@ -4656,7 +4685,7 @@ mod tests {
         }
         fn level(&self, dimension: &str) -> Option<LevelRef> {
             (dimension == "minecraft:overworld")
-                .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+                .then(|| LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD))
         }
     }
     impl ClientHost for Reader {}
