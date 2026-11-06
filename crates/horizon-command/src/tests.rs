@@ -281,6 +281,31 @@ fn parses_vanilla_commands() {
     assert!(ctx.has("strict") && ctx.has("filtered") && ctx.has("force") && !ctx.has("move"));
 }
 #[test]
+fn gamemode_parses_the_shared_game_type() {
+    use horizon_core::game_mode::GameMode;
+
+    let dispatcher = vanilla::dispatcher();
+    let registry = reg();
+    for (name, expected) in [
+        ("survival", GameMode::Survival),
+        ("creative", GameMode::Creative),
+        ("adventure", GameMode::Adventure),
+        ("spectator", GameMode::Spectator),
+    ] {
+        let parse = dispatcher.parse(&format!("gamemode {name}"), &registry);
+        let (ctx, _) = parse.executable().unwrap();
+        assert_eq!(ctx.get("gamemode"), Some(&Arg::GameMode(expected)));
+    }
+    for name in ["Creative", "1", "unknown"] {
+        let parse = dispatcher.parse(&format!("gamemode {name}"), &registry);
+        assert_eq!(
+            parse.executable().unwrap_err().message.plain(),
+            "argument.gamemode.invalid"
+        );
+    }
+}
+
+#[test]
 fn vanilla_error_messages() {
     let e = run("foo").unwrap_err();
     assert_eq!(e.message.plain(), "command.unknown.command");

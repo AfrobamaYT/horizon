@@ -893,7 +893,10 @@ impl Game<'_> {
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
     /// None for stale, offline or unavailable players (including displaced outer players).
     pub(super) fn native_player_game_mode(&self, player: PlayerRef) -> Option<GameMode> {
-        GameMode::from_id(self.player_read_both(player)?.mode())
+        match self.player_read_both(player)? {
+            PlayerRead::Acting { .. } => Some(self.mode),
+            PlayerRead::Guest(guest) => GameMode::from_id(guest.game_mode),
+        }
     }
 
     /// Changes a player's game mode as `ServerPlayer.setGameMode` and
@@ -910,7 +913,7 @@ impl Game<'_> {
         }
         let mut changed = false;
         self.native_as_player_handle(player, |game| {
-            changed = game.set_game_mode(super::game_mode::mode_from_id(mode.id()));
+            changed = game.set_game_mode(mode);
         }) && changed
     }
 

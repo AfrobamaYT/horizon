@@ -3487,13 +3487,13 @@ pub trait Hooks {
     )]
     fn player_flower_pot_manipulate();
     /// A server player's game mode is about to change (NeoForge's
-    /// `PlayerChangeGameModeEvent`): from `from` to `to` (0 survival, 1
-    /// creative, 2 adventure, 3 spectator, as `NativeServerPlayer`'s
-    /// `game_mode`), `player` being the UUID and `name` the name. Heard for
+    /// `PlayerChangeGameModeEvent`): from `from` to `to`, both the shared
+    /// `GameMode` used by commands and `PlayerRef`. `player` is the UUID and
+    /// `name` the name. Heard for
     /// the `/gamemode` command, the F3+F4 switcher's packet and a hardcore
     /// world's respawn into spectator, once for each change to a different
-    /// mode; not for the world's default mode a player joins with. Set
-    /// `cancel` and the player keeps their mode (nothing is sent, the
+    /// mode; not for the world's default mode a player joins with. Return
+    /// `Flow::Cancel` and the player keeps their mode (nothing is sent, the
     /// command counts it as no change). For a change the game makes inside
     /// a player's turn their state is swapped in; for the hardcore respawn
     /// it is not.
@@ -3763,15 +3763,25 @@ pub trait Hooks {
     fn player_advancement_done();
     /// A criterion of a server player's advancement was granted or revoked, after its progress changed
     /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
-    /// The full advancement progress is
-    /// not yet exposed (tracked on #29).
+    /// `progress` is an owned snapshot of every criterion (including its stored grant date),
+    /// the requirement groups and their completion at this exact mutation. It belongs to
+    /// this player, including first-tick and reload grants held by the server hub. A listener
+    /// may retain a clone; later grants, revokes or reloads do not change that snapshot.
     #[hook(
         side = "server",
         contract = "listen",
         neoforge = "AdvancementEvent.AdvancementProgressEvent",
         cancellable = false
     )]
-    fn player_advancement_progress();
+    fn player_advancement_progress(
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        advancement: &str,
+        criterion: &str,
+        progress_type: NativeProgressType,
+        progress: &AdvancementProgress,
+    );
     /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side.
     #[hook(
         side = "server",

@@ -51,8 +51,8 @@ namespaces = []              # optional: more namespaces the mod's files use (be
 Unknown keys are refused, so a typo is an error, not a silently ignored permission. The shared manifest
 uses exactly `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default) or `"both"`.
 Code mods add `[native]` for exact build pins and optional raw injections ([Injections](../injections.md)); their id and version still come only
-from this manifest, not Cargo metadata ([Native mods](native-mods.md#a-bundle)). Nonempty `[dependencies]`
-is supported only for code mods. Both kinds may include a fixed-name `icon.png` at the top level, with no
+from this manifest, not Cargo metadata ([Native mods](native-mods.md#a-bundle)). Both content and code mods support `[dependencies]`: use `base = "^1.2"` for a required dependency or
+`extra = { version = "^2", optional = true }` for an optional one. Missing required dependencies, incompatible installed versions and cycles refuse startup. Content layers load after their dependencies; an absent optional dependency is ignored. Both kinds may include a fixed-name `icon.png` at the top level, with no
 manifest key: a valid square PNG, at most 512 × 512 pixels and 256 KiB encoded ([Mod files](../reference/manifest.md)).
 Executable `mod.wasm` files are unsupported: a folder or archive containing one is refused, including when
 installed through a modpack. Code is never silently skipped.

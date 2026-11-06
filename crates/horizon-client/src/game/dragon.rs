@@ -4340,8 +4340,8 @@ impl Game<'_> {
         true
     }
 
-    /// `EntityType.create` for an Ender Dragon from a spawn egg, by hand or from a dispenser
-    /// (`SpawnEggItem.spawnMob`, `SpawnEggItemBehavior`). Unlike the End fight's dragon, this
+    /// `EntityType.create` for an egg dragon, or `SummonCommand.createEntity` without NBT.
+    /// Unlike the End fight's dragon, this
     /// one is not the fight's (`EnderDragon.aiStep` adopts it only when its UUID is the fight's),
     /// so it can be spawned in any dimension. Horizon keeps one dragon per level, as `/summon`
     /// and loading do: with one already there, nothing spawns and the egg stays.
@@ -4350,8 +4350,13 @@ impl Game<'_> {
             return None;
         }
         let position = Vec3::new(at[0], at[1], at[2]);
-        // EntityType.create: `snapTo(.., Mth.wrapDegrees(level.getRandom().nextFloat() * 360))`.
-        let yaw = horizon_client::camera::wrap_degrees(self.world.random.next_float() * 360.0);
+        // SummonCommand loads absent Rotation as zero before finalization. Only
+        // EntityType.create's egg placement draws a random snapTo yaw.
+        // Diverges from upstream: shared mod finalization also admits command dragons.
+        let yaw = match site {
+            SpawnSite::Finalizing(horizon_client::mobs::spawn_rules::Reason::Command) => 0.0,
+            _ => horizon_client::camera::wrap_degrees(self.world.random.next_float() * 360.0),
+        };
         let finalized = match site {
             SpawnSite::Finalizing(reason) => {
                 self.finalize_spawn_at("minecraft:ender_dragon", at, reason, None)
@@ -4902,8 +4907,132 @@ mod tests {
                     // snapTo always draws yaw; only completed Mob.finalizeSpawn
                     // draws the follow-range triangle and handedness roll.
                     let mut expected = LegacyRandom::new(42);
-                    expected.next_float();
+                    let yaw = horizon_client::camera::wrap_degrees(expected.next_float() * 360.0);
+                    if let Some(dragon) = &game.dragon {
+                        assert_eq!(dragon.yaw, yaw);
+                        assert_eq!(dragon.previous_yaw, yaw);
+                    }
                     if answer == Answer::Keep {
+                        expected.triangle(0.0, 0.114_850_000_000_000_01);
+                        expected.next_float();
+                    }
+                    assert_eq!(game.world.random.next_long(), expected.next_long());
+                }
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn dragon_summon_command_finalizes_only_without_nbt() {
+        use horizon_client::mobs::spawn_rules::Reason;
+        use mod_api::{
+            EntityJoinLevelEvent, FinalizeSpawnEvent, Flow, Hooks, Host, ModEntry, ServerHost,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Clone, Copy, PartialEq)]
+        enum Answer {
+            Keep,
+            Skip,
+            Refuse,
+            RefuseJoin,
+        }
+        struct Listener {
+            answer: Answer,
+            reason: Reason,
+            calls: Arc<AtomicUsize>,
+            joins: Arc<AtomicUsize>,
+        }
+        #[mod_api::__subscriptions]
+        impl Hooks for Listener {
+            fn entity_join_level(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut EntityJoinLevelEvent<'_>,
+            ) -> Flow {
+                assert_eq!(event.kind, "minecraft:ender_dragon");
+                assert!(!event.loaded_from_disk);
+                self.joins.fetch_add(1, Ordering::Relaxed);
+                if self.answer == Answer::RefuseJoin {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+            fn finalize_spawn(&self, _: &dyn Host, event: &mut FinalizeSpawnEvent<'_>) -> Flow {
+                assert_eq!(event.kind, "minecraft:ender_dragon");
+                assert_eq!(event.reason, self.reason);
+                assert!(event.spawner.is_none());
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                match self.answer {
+                    Answer::Keep | Answer::RefuseJoin => Flow::Continue,
+                    Answer::Skip => Flow::Cancel,
+                    Answer::Refuse => {
+                        event.spawn_cancelled = true;
+                        Flow::Continue
+                    }
+                }
+            }
+        }
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for nbt in [None, Some("{}"), Some("{Silent:1b}")] {
+                let reason = Reason::Command;
+                for answer in [
+                    Answer::Keep,
+                    Answer::Skip,
+                    Answer::Refuse,
+                    Answer::RefuseJoin,
+                ] {
+                    game.dragon = None;
+                    game.world.random = LegacyRandom::new(42);
+                    let calls = Arc::new(AtomicUsize::new(0));
+                    let joins = Arc::new(AtomicUsize::new(0));
+                    let mods: mod_api::Mods = vec![ModEntry::new(
+                        "dragon-finalize",
+                        Box::new(Listener {
+                            answer,
+                            reason,
+                            calls: calls.clone(),
+                            joins: joins.clone(),
+                        }),
+                    )]
+                    .into();
+                    let result = mod_api::testing::with_mods(mods, || {
+                        game.build_registries();
+                        game.set_allow_commands(true);
+                        let suffix = nbt.map(|tag| format!(" {tag}")).unwrap_or_default();
+                        game.run_command(&format!(
+                            "summon minecraft:ender_dragon 4.5 200 4.5{suffix}"
+                        ))
+                    });
+                    assert_eq!(calls.load(Ordering::Relaxed), usize::from(nbt.is_none()));
+                    let refused_finalization = nbt.is_none() && answer == Answer::Refuse;
+                    assert_eq!(
+                        joins.load(Ordering::Relaxed),
+                        usize::from(!refused_finalization)
+                    );
+                    let refused = refused_finalization || answer == Answer::RefuseJoin;
+                    assert_eq!(result, !refused);
+                    assert_eq!(game.dragon.is_none(), refused);
+                    if !refused {
+                        assert_eq!(game.dragon_silent(), nbt == Some("{Silent:1b}"));
+                        let dragon = game.dragon.as_ref().unwrap();
+                        assert_eq!(dragon.position, Vec3::new(4.5, 200.0, 4.5));
+                        assert_eq!(dragon.yaw, 0.0);
+                        assert_eq!(dragon.previous_yaw, 0.0);
+                    }
+                    // Command construction consumes no placement yaw. Mob.finalizeSpawn
+                    // draws follow range and handedness unless skipped. The NBT
+                    // loader instead draws the dragon seed from the level RNG.
+                    let mut expected = LegacyRandom::new(42);
+                    if nbt.is_some() {
+                        expected.next_long();
+                    }
+                    if nbt.is_none() && matches!(answer, Answer::Keep | Answer::RefuseJoin) {
                         expected.triangle(0.0, 0.114_850_000_000_000_01);
                         expected.next_float();
                     }

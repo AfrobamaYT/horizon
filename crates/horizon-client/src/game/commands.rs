@@ -1244,13 +1244,7 @@ impl Game<'_> {
         if let Some(uuid) = self.lan_acting_uuid {
             let name = self.acting_player_name().to_owned();
             let mut cancel = false;
-            self.native_player_game_mode_changed(
-                uuid,
-                &name,
-                self.mode_id(),
-                super::game_mode::mode_id_of(mode),
-                &mut cancel,
-            );
+            self.native_player_game_mode_changed(uuid, &name, self.mode, mode, &mut cancel);
             if cancel {
                 return false;
             }
@@ -2497,7 +2491,7 @@ impl Game<'_> {
             return Ok(1);
         }
         let name;
-        if self.res.mob_types().contains_key(&kind) {
+        if kind == "minecraft:ender_dragon" || self.res.mob_types().contains_key(&kind) {
             self.spawn_mob_spawned(
                 &short,
                 pos,

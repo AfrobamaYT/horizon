@@ -2,7 +2,10 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
 use super::{Game, execution_role::ExecutionRole};
-use horizon_client::mod_list::{self, Installed};
+use horizon_client::{
+    lang,
+    mod_list::{self, Installed},
+};
 use horizon_mods::manifest::{MissingJar, collect_jar_requirements, missing_jars};
 use horizon_world::{
     item_defaults::ItemData,
@@ -22,6 +25,20 @@ pub(super) struct ModsState {
     pub(super) dev: Vec<PathBuf>,
     pub(super) native: std::sync::Arc<horizon_mods::runtime::Runtime>,
     pub(super) selected: std::sync::Arc<[horizon_mods::selection::SelectedPackage]>,
+    /// The content mods the loaded resources were built with: a switch the
+    /// game can apply live moves it to the player's choice (`switch_mods`).
+    pub(super) applied: Option<std::collections::BTreeSet<String>>,
+    /// A live switch's resource reload is running: when it applied, the server
+    /// reloads its data from the new root. Its start, for the log.
+    pub(super) live: Option<std::time::Instant>,
+    /// The content mods installed, and those of them with only assets and
+    /// data (`mod_content::live_switch`): they switch with a world open.
+    pub(super) content_ids: std::collections::BTreeSet<String>,
+    pub(super) live_ids: std::collections::BTreeSet<String>,
+    /// The server's data comes from a root a live switch built, not the one
+    /// `res` was loaded from: the world tables are built from it even with no
+    /// data pack (`build_world_tables`).
+    pub(super) data_switched: bool,
     /// Structured load refusals, rendered only at the existing Mods-page boundary.
     pub(super) refused: Arc<Mutex<Vec<MissingJar>>>,
 }
@@ -222,15 +239,36 @@ pub(super) fn content_overlay(
         manifest: &p.package.manifest,
         content_only: true,
     });
-    for source in native.chain(content) {
+    let mut seen = std::collections::HashSet::new();
+    let packages: Vec<_> = native
+        .chain(content)
+        .filter(|source| {
+            !refused
+                .iter()
+                .any(|missing| missing.owners.contains(&source.manifest.id))
+        })
+        .filter(|source| seen.insert(source.manifest.id.as_str()))
+        .collect();
+    let dependencies: Vec<_> = packages
+        .iter()
+        .map(|source| horizon_mods::dependencies::from_manifest(&source.manifest.dependencies))
+        .collect();
+    let inputs: Vec<_> = packages
+        .iter()
+        .zip(&dependencies)
+        .map(|(source, dependencies)| horizon_mods::dependencies::Mod {
+            id: &source.manifest.id,
+            version: &source.manifest.version,
+            has_api: false,
+            dependencies,
+        })
+        .collect();
+    let order = horizon_mods::dependencies::resolve_content(&inputs)
+        .map_err(|error| error.to_string())?
+        .order;
+    for index in order {
+        let source = &packages[index];
         let m = source.manifest;
-        // Only content packages can be omitted independently: none has code.
-        if refused.iter().any(|missing| missing.owners.contains(&m.id)) {
-            continue;
-        }
-        if mods.iter().any(|c| c.id == m.id) {
-            continue;
-        }
         // The items this mod's native code declares may be a file item's crafting remainder.
         let declared: Vec<String> = native_declared()
             .items
@@ -288,6 +326,20 @@ pub(super) fn content_overlay(
             log::warn!("Horizon: {e}");
         }
     }
+    // Content validation may refuse a package. Revalidate against what really
+    // loaded so dependents cannot start with a missing required content mod.
+    let loaded: Vec<_> = inputs
+        .into_iter()
+        .filter(|package| {
+            mods.iter().any(|content| content.id == package.id)
+                || sources
+                    .native
+                    .built()
+                    .iter()
+                    .any(|native| native.id == package.id)
+        })
+        .collect();
+    horizon_mods::dependencies::resolve_content(&loaded).map_err(|error| error.to_string())?;
     let root = mod_content::resource_root(root, jar_store, &mods, &here.join(".horizon-cache"))?;
     Ok(ContentOverlay {
         root,
@@ -451,6 +503,33 @@ fn native_mods_detail(built: &[horizon_mods::runtime::BuiltMod]) -> Option<Strin
     (!list.is_empty()).then_some(list)
 }
 
+/// Notes a content mod's id, and whether its files can switch with a world
+/// open (`mod_content::live_switch`).
+fn live_switch_of(
+    path: &std::path::Path,
+    package: &horizon_mods::Package,
+    content_ids: &mut std::collections::BTreeSet<String>,
+    live_ids: &mut std::collections::BTreeSet<String>,
+) {
+    if package.is_native() || package.manifest.wasm.is_some() {
+        return;
+    }
+    let id = &package.manifest.id;
+    content_ids.insert(id.clone());
+    let content = horizon_mods::Content::read(path, &package.manifest);
+    match content
+        .as_ref()
+        .map(horizon_client::mod_content::live_switch)
+    {
+        // Jar layers can declare worldgen that Content.files does not list.
+        Ok(Ok(())) if package.manifest.jar.is_empty() => {
+            live_ids.insert(id.clone());
+        }
+        Ok(Err(why)) => log::debug!("Horizon: mod {id} switches on a restart: {why}"),
+        _ => {}
+    }
+}
+
 /// Installed native mods not compiled into this executable get an explanatory row.
 fn not_built(
     dir: &std::path::Path,
@@ -512,6 +591,7 @@ impl Game<'_> {
         let mut paths = horizon_mods::find(&dir);
         paths.retain(|p| !self.mods.dev.contains(p));
         paths.extend(self.mods.dev.iter().cloned());
+        let (mut content_ids, mut live_ids) = Default::default();
         self.settings.mods.installed = paths
             .iter()
             .map(|path| {
@@ -533,6 +613,7 @@ impl Game<'_> {
                 let refused = horizon_mod_wasm::refused()
                     .iter()
                     .find(|(id, _)| *id == m.id);
+                live_switch_of(path, &package, &mut content_ids, &mut live_ids);
                 Installed {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
@@ -543,8 +624,14 @@ impl Game<'_> {
                 }
             })
             .collect();
-        // A mod with a native version built in says so instead.
+        (self.mods.content_ids, self.mods.live_ids) = (content_ids, live_ids);
+        self.ui.options.mods_live = self.mods_live_now();
+        if self.mods.applied.is_none() {
+            self.mods.applied = Some(self.settings.mods.enabled.clone());
+        }
+        // A mod with a native version built in says so instead, and isn't news.
         self.list_native_mods();
+        self.sync_native_switches();
         let built = self.mods.native.built();
         let built_mods = native_mods_detail(built);
         if let Some(list) = built_mods {
@@ -555,6 +642,120 @@ impl Game<'_> {
         let unbuilt = not_built(&native_dir, built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
         self.mods.report_refusals(&mut self.settings.mods.installed);
+    }
+    /// The content mods the Mods page lets the player switch with a world
+    /// open: in single player and on an open LAN world, those with only
+    /// assets and data; none on another server, which owns its data.
+    pub(super) fn mods_live_now(&self) -> std::collections::BTreeSet<String> {
+        match self.integrated.is_some() || self.remote.is_none() {
+            true => self.mods.live_ids.clone(),
+            false => Default::default(),
+        }
+    }
+    /// The content mods the resources load with: the ones applied, which a
+    /// switch that needs a restart doesn't change.
+    pub(super) fn applied_mods(&self) -> std::collections::BTreeSet<String> {
+        self.mods
+            .applied
+            .clone()
+            .unwrap_or_else(|| self.settings.mods.enabled.clone())
+    }
+    /// The player turned content mods on or off (Options > Mods, or an
+    /// install from Browse Mods): those with only assets and data apply now
+    /// (docs/design/mod-hotload.md), through the resource reload and then the
+    /// server's data reload (`mods_reloaded`); those that add blocks, items or
+    /// worldgen wait for a restart, and the Mods page says so.
+    pub(super) fn switch_mods(&mut self) {
+        let Some(applied) = self.mods.applied.clone() else {
+            return;
+        };
+        let wanted = self.settings.mods.enabled.clone();
+        if applied == wanted {
+            return;
+        }
+        // Native mods' `mod.<id>` lines follow the player's choice as they are
+        // (`sync_native_switches`); a content mod with blocks, items or
+        // worldgen keeps the state it loaded with until a restart.
+        let content = &self.mods.content_ids;
+        let mut next = wanted.clone();
+        let mut waiting = Vec::new();
+        for id in applied.symmetric_difference(&wanted) {
+            if !content.contains(id) || self.mods.live_ids.contains(id) {
+                continue;
+            }
+            log::info!("Horizon: mod {id} needs a restart to switch");
+            waiting.push(id.clone());
+            if applied.contains(id) {
+                next.insert(id.clone());
+            } else {
+                next.remove(id);
+            }
+        }
+        self.ui.options.mods_note = (!waiting.is_empty())
+            .then(|| lang::tr("horizon.mods.switch.restart", &[&waiting.join(", ")]));
+        let changed = applied
+            .symmetric_difference(&next)
+            .any(|id| content.contains(id));
+        if !changed {
+            self.mods.applied = Some(next);
+            return;
+        }
+        log::info!(
+            "Horizon: content mods switched live: {:?} -> {:?}",
+            applied,
+            next
+        );
+        self.mods.applied = Some(next);
+        self.mods.live = Some(std::time::Instant::now());
+        self.reload_packs();
+    }
+    /// A live switch's resources applied: the server reloads its data packs
+    /// from the new root, as `/reload` does (recipes, tags, loot tables,
+    /// advancements, functions), and sends them to its players.
+    pub(super) fn mods_reloaded(&mut self, applied: bool) {
+        let Some(started) = self.mods.live.take() else {
+            return;
+        };
+        let resources_ms = started.elapsed().as_millis();
+        if !applied {
+            return;
+        }
+        let root = self.options.resources.clone();
+        let enabled = self.applied_mods();
+        let selected = self.mods.selected.clone();
+        let refused = self.mods.refused.clone();
+        let reload = move |g: &mut Game<'_>| {
+            let at = std::time::Instant::now();
+            g.options.resources = root;
+            g.settings.mods.enabled = enabled.clone();
+            g.mods.applied = Some(enabled);
+            g.mods.selected = selected;
+            g.mods.refused = refused;
+            g.mods.data_switched = true;
+            if g.world_root.as_os_str().is_empty() {
+                return;
+            }
+            if let Err(error) = g.reload_datapacks(true, &g.level.enabled_features.clone()) {
+                log::warn!("Horizon: content mods data reload failed: {error}");
+                return;
+            }
+            log::info!(
+                "Horizon: content mods switched live: server data reloaded in {} ms",
+                at.elapsed().as_millis()
+            );
+        };
+        log::info!("Horizon: content mods switched live: resources reloaded in {resources_ms} ms");
+        if let Some(server) = &self.integrated {
+            server.post(reload);
+        } else if self.remote.is_none() {
+            reload(self);
+        }
+    }
+    /// Apply the player's switches at the canonical native and wasm dispatch boundary.
+    pub(super) fn sync_native_switches(&self) {
+        for id in mod_api::__private::loaded_mods().ids() {
+            mod_api::__private::set_mod_enabled(id, !self.settings.mods.disabled.contains(id));
+        }
     }
 }
 
@@ -799,6 +1000,83 @@ mod tests {
         ];
         let bytes = horizon_mods::Package::write_files(&manifest, files).unwrap();
         std::fs::write(dir.join(format!("{id}.hmod")), bytes).unwrap();
+    }
+
+    #[test]
+    fn content_overlay_validates_dependencies_and_orders_layers() {
+        const MODE: &str = "HORIZON_CONTENT_DEPENDENCY_TEST";
+        if std::env::var_os(MODE).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
+                    "--nocapture",
+                ])
+                .env(MODE, "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        let f = Fixture::new("content-dependencies");
+        let write = |id: &str, version: &str, dependencies: &str| {
+            let dir = f.0.join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("horizon-mod.toml"), format!(
+                "id='{id}'\nname='{id}'\nversion='{version}'\napi='0.2'\nside='both'\ncapabilities=['registries']\n{dependencies}"
+            )).unwrap();
+            dir
+        };
+        let addon = write("alpha", "1", "[dependencies]\nzbase='^1'");
+        let base_mod = write("zbase", "1", "");
+        let base = f.0.join("resources");
+        std::fs::create_dir_all(&base).unwrap();
+        let mut sources = ModsState {
+            dev: vec![addon.clone(), base_mod.clone()],
+            ..Default::default()
+        };
+        let enabled = Default::default();
+        sources.select(&f.0, &enabled);
+        let overlay = content_overlay(&base, &sources, &f.0.join("jars")).unwrap();
+        assert_eq!(
+            overlay
+                .mods
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            ["zbase", "alpha"]
+        );
+        sources.dev = vec![addon.clone()];
+        sources.select(&f.0, &enabled);
+        let error = content_overlay(&base, &sources, &f.0.join("jars"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("alpha") && error.contains("zbase"));
+        write(
+            "alpha",
+            "1",
+            "[dependencies]\nzbase={version='^1', optional=true}",
+        );
+        sources.select(&f.0, &enabled);
+        assert!(content_overlay(&base, &sources, &f.0.join("jars")).is_ok());
+        write("zbase", "2", "");
+        sources.dev.push(base_mod.clone());
+        sources.select(&f.0, &enabled);
+        let error = content_overlay(&base, &sources, &f.0.join("jars"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("installed version is 2"));
+        write("zbase", "1", "[dependencies]\nalpha='^1'");
+        sources.select(&f.0, &enabled);
+        assert!(
+            content_overlay(&base, &sources, &f.0.join("jars"))
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("cycle")
+        );
     }
 
     #[test]
