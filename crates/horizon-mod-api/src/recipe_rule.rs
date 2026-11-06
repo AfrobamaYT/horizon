@@ -1,0 +1,210 @@
+//! Typed rules for recipes whose result is not a fixed crafting stack.
+
+use crate::{Ingredient, ItemStack, Tag};
+pub use horizon_items::firework::FireworkShape;
+
+/// An `ItemStackTemplate` in a crafting rule, not an assembled result.
+/// The rule decides which input supplies inherited components and, when
+/// `item` is absent, the result item. Use [`crate::LevelRef::craft`] for an
+/// actual grid's output and remainders.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct RecipeTemplate {
+    /// Replacement item, or `None` to keep the rule's input item.
+    pub item: Option<String>,
+    /// Template count, before any material-count addition.
+    pub count: u32,
+    /// Component patch applied after inherited components, including explicit
+    /// removals (`!component`) and zero values; `None` for no patch.
+    pub components: Option<Tag>,
+}
+impl RecipeTemplate {
+    /// A template with its parsed replacement item, count and component patch.
+    pub fn new(item: Option<String>, count: u32, components: Option<Tag>) -> Self {
+        Self {
+            item,
+            count,
+            components,
+        }
+    }
+}
+
+/// An ingredient that chooses a firework star's explosion shape.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct FireworkShapeIngredient {
+    /// Shape selected by this ingredient.
+    pub shape: FireworkShape,
+    /// Items which select the shape.
+    pub ingredient: Ingredient,
+}
+impl FireworkShapeIngredient {
+    /// A parsed shape and its ingredient.
+    pub fn new(shape: FireworkShape, ingredient: Ingredient) -> Self {
+        Self { shape, ingredient }
+    }
+}
+
+/// The parsed rule of a stonecutting, smithing or special crafting recipe.
+/// These are the same resolved ingredients and rules the game uses, not a
+/// second recipe implementation. Only `Stonecutting` has a fixed output;
+/// every other variant depends on the grid or smithing inputs (components,
+/// counts, dyes, trim material, damage or map state). Special crafting
+/// results are assembled by [`crate::LevelRef::craft`], not by treating the
+/// template as a fixed stack. A mod-defined recipe type keeps its raw JSON
+/// instead of inventing a vanilla rule.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum RecipeRule {
+    /// A stonecutter input and fixed result.
+    Stonecutting {
+        /// Accepted input.
+        input: Ingredient,
+        /// Exact output stack.
+        result: ItemStack,
+    },
+    /// Replace the base item, retaining its components and setting count to one.
+    SmithingTransform {
+        /// Template slot.
+        template: Ingredient,
+        /// Base slot; supplies the output components.
+        base: Ingredient,
+        /// Addition slot.
+        addition: Ingredient,
+        /// Replacement item, not a fixed output stack.
+        result: String,
+    },
+    /// Apply the pattern using the addition's trim material to the base.
+    SmithingTrim {
+        /// Template slot.
+        template: Ingredient,
+        /// Base slot; supplies the output item and components.
+        base: Ingredient,
+        /// Addition slot; selects the trim material.
+        addition: Ingredient,
+        /// Trim pattern registry id.
+        pattern: String,
+    },
+    /// Copy a patterned banner onto a blank banner of the same colour.
+    BannerDuplicate {
+        /// Banner ingredient.
+        banner: Ingredient,
+        /// Result item; patterns come from the grid.
+        result: String,
+    },
+    /// Apply a banner's patterns to an undecorated shield.
+    ShieldDecoration {
+        /// Banner supplying patterns and colour.
+        banner: Ingredient,
+        /// Shield to decorate.
+        target: Ingredient,
+        /// Result item; components come from the grid.
+        result: String,
+    },
+    /// One input and a bounded number of materials, retaining input components.
+    Transmute {
+        /// Input supplying the inherited item and components.
+        input: Ingredient,
+        /// Material ingredient.
+        material: Ingredient,
+        /// Minimum number of occupied material slots.
+        min: usize,
+        /// Maximum number of occupied material slots.
+        max: usize,
+        /// Add the number of materials to the template's result count.
+        add_count: bool,
+        /// Patch applied after the input's components.
+        result: RecipeTemplate,
+    },
+    /// Dye a target using the grid's dye colours.
+    Dye {
+        /// Target item.
+        target: Ingredient,
+        /// Dye items.
+        dye: Ingredient,
+        /// Template; the resulting colour depends on the grid.
+        result: RecipeTemplate,
+    },
+    /// Imbue materials with the source's potion contents.
+    Imbue {
+        /// Source of potion contents.
+        source: Ingredient,
+        /// Material around the source.
+        material: Ingredient,
+        /// Template receiving the potion contents.
+        result: RecipeTemplate,
+    },
+    /// Copy a written book within the allowed generation range.
+    BookCloning {
+        /// Written book supplying contents and generation.
+        source: Ingredient,
+        /// Blank books.
+        material: Ingredient,
+        /// Minimum allowed source generation.
+        min: i32,
+        /// Maximum allowed source generation.
+        max: i32,
+        /// Template; count and book contents depend on the grid.
+        result: RecipeTemplate,
+    },
+    /// Build rockets with flight duration and explosions from the grid.
+    FireworkRocket {
+        /// Rocket shell.
+        shell: Ingredient,
+        /// Fuel, whose occupied slots choose flight duration.
+        fuel: Ingredient,
+        /// Optional stars supplying explosions.
+        star: Ingredient,
+        /// Rocket template.
+        result: RecipeTemplate,
+    },
+    /// Build a star with colours, shape and effects from the grid.
+    FireworkStar {
+        /// Colour ingredients.
+        dye: Ingredient,
+        /// Fuel ingredient.
+        fuel: Ingredient,
+        /// Optional trail ingredient.
+        trail: Ingredient,
+        /// Optional twinkle ingredient.
+        twinkle: Ingredient,
+        /// Shape ingredients, in the parsed rule's order.
+        shapes: Vec<FireworkShapeIngredient>,
+        /// Star template.
+        result: RecipeTemplate,
+    },
+    /// Add fade colours to an existing star.
+    FireworkStarFade {
+        /// Fade colour ingredients.
+        dye: Ingredient,
+        /// Star whose other explosion properties are retained.
+        target: Ingredient,
+        /// Star template.
+        result: RecipeTemplate,
+    },
+    /// Extend a map when its live map state permits it.
+    MapExtending {
+        /// Map input.
+        map: Ingredient,
+        /// Surrounding material.
+        material: Ingredient,
+        /// Template; map identity and postprocessing depend on the input.
+        result: RecipeTemplate,
+    },
+    /// Build a pot with decorations from the four sides of the grid.
+    DecoratedPot {
+        /// Back decoration.
+        back: Ingredient,
+        /// Left decoration.
+        left: Ingredient,
+        /// Right decoration.
+        right: Ingredient,
+        /// Front decoration.
+        front: Ingredient,
+        /// Pot template.
+        result: RecipeTemplate,
+    },
+    /// Repair two damaged items of the same kind; eligibility, damage and
+    /// retained curses depend on the input stacks, not a fixed ingredient list.
+    RepairItem,
+}

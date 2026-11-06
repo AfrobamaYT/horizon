@@ -518,6 +518,76 @@ pub struct Stonecutting {
     pub input: Ingredient,
     pub result: ItemStack,
 }
+/// One canonical parse shared by the station tables and the mod recipe view.
+#[derive(Clone, Debug)]
+pub(crate) enum ParsedStationRecipe {
+    Smithing(Smithing),
+    Stonecutting(Stonecutting),
+}
+impl ParsedStationRecipe {
+    pub(crate) fn parse(id: String, v: &Value, items: &Items) -> Option<Self> {
+        match v["type"].as_str().unwrap_or("") {
+            "minecraft:smithing_transform" => Some(Self::Smithing(Smithing::Transform {
+                id,
+                template: ingredient(&v["template"], items),
+                base: ingredient(&v["base"], items),
+                addition: ingredient(&v["addition"], items),
+                result: horizon_world::loot::recipe_result_id(&v["result"])
+                    .unwrap_or("minecraft:air")
+                    .to_owned(),
+            })),
+            "minecraft:smithing_trim" => Some(Self::Smithing(Smithing::Trim {
+                id,
+                template: ingredient(&v["template"], items),
+                base: ingredient(&v["base"], items),
+                addition: ingredient(&v["addition"], items),
+                pattern: v["pattern"].as_str().unwrap_or("").to_owned(),
+            })),
+            "minecraft:stonecutting" => Some(Self::Stonecutting(Stonecutting {
+                id,
+                input: ingredient(&v["ingredient"], items),
+                result: ItemStack::new(
+                    horizon_world::loot::recipe_result_id(&v["result"]).unwrap_or("minecraft:air"),
+                    crate::crafting::template_count(&v["result"])?,
+                ),
+            })),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn rule(&self) -> mod_api::RecipeRule {
+        match self {
+            Self::Stonecutting(recipe) => mod_api::RecipeRule::Stonecutting {
+                input: recipe.input.clone(),
+                result: recipe.result.clone(),
+            },
+            Self::Smithing(Smithing::Transform {
+                template,
+                base,
+                addition,
+                result,
+                ..
+            }) => mod_api::RecipeRule::SmithingTransform {
+                template: template.clone(),
+                base: base.clone(),
+                addition: addition.clone(),
+                result: result.clone(),
+            },
+            Self::Smithing(Smithing::Trim {
+                template,
+                base,
+                addition,
+                pattern,
+                ..
+            }) => mod_api::RecipeRule::SmithingTrim {
+                template: template.clone(),
+                base: base.clone(),
+                addition: addition.clone(),
+                pattern: pattern.clone(),
+            },
+        }
+    }
+}
 #[derive(Default)]
 pub struct StationRecipes {
     pub smithing: Vec<Smithing>,
@@ -550,41 +620,10 @@ impl StationRecipes {
     ) -> Self {
         let mut smithing = Vec::new();
         let mut stonecutting = Vec::new();
-        for recipe in &sources.recipes {
-            let id = crate::crafting::qualified(&recipe.name);
-            let v = &*recipe.resolved;
-            match v["type"].as_str().unwrap_or("") {
-                "minecraft:smithing_transform" => smithing.push(Smithing::Transform {
-                    id,
-                    template: ingredient(&v["template"], items),
-                    base: ingredient(&v["base"], items),
-                    addition: ingredient(&v["addition"], items),
-                    result: horizon_world::loot::recipe_result_id(&v["result"])
-                        .unwrap_or("minecraft:air")
-                        .to_owned(),
-                }),
-                "minecraft:smithing_trim" => smithing.push(Smithing::Trim {
-                    id,
-                    template: ingredient(&v["template"], items),
-                    base: ingredient(&v["base"], items),
-                    addition: ingredient(&v["addition"], items),
-                    pattern: v["pattern"].as_str().unwrap_or("").to_owned(),
-                }),
-                "minecraft:stonecutting" => {
-                    // A result count outside 1..=99 fails vanilla's codec: no recipe.
-                    if let Some(count) = crate::crafting::template_count(&v["result"]) {
-                        stonecutting.push(Stonecutting {
-                            id,
-                            input: ingredient(&v["ingredient"], items),
-                            result: ItemStack::new(
-                                horizon_world::loot::recipe_result_id(&v["result"])
-                                    .unwrap_or("minecraft:air"),
-                                count,
-                            ),
-                        });
-                    }
-                }
-                _ => {}
+        for recipe in sources.station_recipes(items).iter().flatten() {
+            match recipe {
+                ParsedStationRecipe::Smithing(recipe) => smithing.push(recipe.clone()),
+                ParsedStationRecipe::Stonecutting(recipe) => stonecutting.push(recipe.clone()),
             }
         }
         let mut trim_materials = Vec::new();

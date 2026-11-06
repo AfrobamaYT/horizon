@@ -90,6 +90,13 @@ impl Template {
             components,
         })
     }
+    fn view(&self) -> mod_api::RecipeTemplate {
+        mod_api::RecipeTemplate::new(
+            self.item.as_deref().map(str::to_owned),
+            self.count,
+            self.components.clone(),
+        )
+    }
     /// `ItemStackTemplate.create`.
     pub fn create(&self) -> ItemStack {
         ItemStack {
@@ -281,6 +288,134 @@ pub enum Special {
     RepairItem,
 }
 impl Special {
+    /// A data projection of this parse; concrete outputs still use `craft`.
+    fn rule(&self) -> mod_api::RecipeRule {
+        use mod_api::RecipeRule as Rule;
+        match self {
+            Self::BannerDuplicate { banner, result } => Rule::BannerDuplicate {
+                banner: banner.clone(),
+                result: result.clone(),
+            },
+            Self::ShieldDecoration {
+                banner,
+                target,
+                result,
+            } => Rule::ShieldDecoration {
+                banner: banner.clone(),
+                target: target.clone(),
+                result: result.clone(),
+            },
+            Self::Transmute {
+                input,
+                material,
+                min,
+                max,
+                add_count,
+                result,
+            } => Rule::Transmute {
+                input: input.clone(),
+                material: material.clone(),
+                min: *min,
+                max: *max,
+                add_count: *add_count,
+                result: result.view(),
+            },
+            Self::Dye {
+                target,
+                dye,
+                result,
+            } => Rule::Dye {
+                target: target.clone(),
+                dye: dye.clone(),
+                result: result.view(),
+            },
+            Self::Imbue {
+                source,
+                material,
+                result,
+            } => Rule::Imbue {
+                source: source.clone(),
+                material: material.clone(),
+                result: result.view(),
+            },
+            Self::BookCloning {
+                source,
+                material,
+                min,
+                max,
+                result,
+            } => Rule::BookCloning {
+                source: source.clone(),
+                material: material.clone(),
+                min: *min,
+                max: *max,
+                result: result.view(),
+            },
+            Self::FireworkRocket {
+                shell,
+                fuel,
+                star,
+                result,
+            } => Rule::FireworkRocket {
+                shell: shell.clone(),
+                fuel: fuel.clone(),
+                star: star.clone(),
+                result: result.view(),
+            },
+            Self::FireworkStar {
+                dye,
+                fuel,
+                trail,
+                twinkle,
+                shapes,
+                result,
+            } => Rule::FireworkStar {
+                dye: dye.clone(),
+                fuel: fuel.clone(),
+                trail: trail.clone(),
+                twinkle: twinkle.clone(),
+                shapes: shapes
+                    .iter()
+                    .map(|(shape, ingredient)| {
+                        mod_api::FireworkShapeIngredient::new(*shape, ingredient.clone())
+                    })
+                    .collect(),
+                result: result.view(),
+            },
+            Self::FireworkStarFade {
+                dye,
+                target,
+                result,
+            } => Rule::FireworkStarFade {
+                dye: dye.clone(),
+                target: target.clone(),
+                result: result.view(),
+            },
+            Self::MapExtending {
+                map,
+                material,
+                result,
+            } => Rule::MapExtending {
+                map: map.clone(),
+                material: material.clone(),
+                result: result.view(),
+            },
+            Self::DecoratedPot {
+                back,
+                left,
+                right,
+                front,
+                result,
+            } => Rule::DecoratedPot {
+                back: back.clone(),
+                left: left.clone(),
+                right: right.clone(),
+                front: front.clone(),
+                result: result.view(),
+            },
+            Self::RepairItem => Rule::RepairItem,
+        }
+    }
     /// The recipe-book displays of a learnable (non-custom) crafting recipe:
     /// its layout, its result as the button shows it, and every stack the
     /// result display cycles through when it is more than that one
@@ -1287,6 +1422,9 @@ pub struct ResolvedRecipe {
 #[derive(Default)]
 pub struct ResolvedSources {
     pub recipes: Vec<ResolvedRecipe>,
+    // Both tables use the items of this owning load. Parse station rules once,
+    // whether the crafting projection or the station tables are built first.
+    stations: std::sync::OnceLock<Vec<Option<crate::stations::ParsedStationRecipe>>>,
     /// What mods added to the recipe property sets, asked once per load.
     pub property_additions: PropertyAdditions,
 }
@@ -1337,6 +1475,23 @@ impl PropertyAdditions {
     }
 }
 impl ResolvedSources {
+    pub(crate) fn station_recipes(
+        &self,
+        items: &Items,
+    ) -> &[Option<crate::stations::ParsedStationRecipe>] {
+        self.stations.get_or_init(|| {
+            self.recipes
+                .iter()
+                .map(|recipe| {
+                    crate::stations::ParsedStationRecipe::parse(
+                        qualified(&recipe.name),
+                        &recipe.resolved,
+                        items,
+                    )
+                })
+                .collect()
+        })
+    }
     /// The recipes under `root` and `overlay`, resolved for `context`'s load.
     /// The pass's context carries the same resources' fluid tags, for the
     /// ingredient hooks' fluid ingredients.
@@ -1414,6 +1569,7 @@ impl ResolvedSources {
         Self {
             recipes,
             property_additions: PropertyAdditions::ask(context),
+            ..Self::default()
         }
     }
 }
@@ -1478,11 +1634,14 @@ impl Recipes {
         let mut cooking = Vec::new();
         let mut by_type: HashMap<String, Vec<mod_api::Recipe>> = HashMap::new();
         let mut meta = HashMap::new();
-        for ResolvedRecipe {
-            name,
-            file: json,
-            resolved,
-        } in &sources.recipes
+        for (
+            ResolvedRecipe {
+                name,
+                file: json,
+                resolved,
+            },
+            station,
+        ) in sources.recipes.iter().zip(sources.station_recipes(items))
         {
             let mut entry = None;
             if let Some(kind) = json["type"]
@@ -1680,6 +1839,9 @@ impl Recipes {
                     }
                     None
                 }
+                "minecraft:stonecutting"
+                | "minecraft:smithing_transform"
+                | "minecraft:smithing_trim" => None,
                 _ => {
                     parsed_by_game = false;
                     None
@@ -1705,15 +1867,26 @@ impl Recipes {
                         entry.ingredients = ingredients.clone();
                         entry.results = vec![result.create()];
                     }
+                    (Some(Recipe::Special(special)), _) => {
+                        entry.rule = Some(special.rule());
+                    }
                     (_, Some(cook)) => {
                         entry.ingredients = vec![cook.ingredient.clone()];
                         entry.results = vec![cook.result.clone()];
                         entry.cooking_time = Some(cook.time);
                         entry.experience = Some(cook.experience);
                     }
-                    _ => {}
+                    _ => {
+                        entry.rule = station
+                            .as_ref()
+                            .map(crate::stations::ParsedStationRecipe::rule)
+                    }
                 }
-                if parsed.is_some() || cooking.len() > cooked || !parsed_by_game {
+                if parsed.is_some()
+                    || cooking.len() > cooked
+                    || entry.rule.is_some()
+                    || !parsed_by_game
+                {
                     by_type.entry(entry.kind.clone()).or_default().push(entry);
                 }
             }

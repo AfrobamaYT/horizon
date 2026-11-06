@@ -97,6 +97,8 @@ pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, OwningLoad, OwningLoop,
     PackageInfo, PackageKind, RegistrationContext,
 };
+mod recipe_rule;
+pub use recipe_rule::{FireworkShape, FireworkShapeIngredient, RecipeRule, RecipeTemplate};
 mod criteria;
 pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
 mod packets;
