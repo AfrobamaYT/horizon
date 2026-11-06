@@ -81,6 +81,8 @@ pub mod crafting;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod crash;
+mod debug_entries;
+pub use debug_entries::{DebugEntry, DebugGroup};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod extras;
