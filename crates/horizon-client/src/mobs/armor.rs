@@ -45,9 +45,11 @@ fn effective(
 /// `/attribute` and the save left, a mod's modifiers, and every worn or held
 /// stack's own `attribute_modifiers`, components included — the same map a
 /// `LivingRef` reads, which the tick's equipment pass keeps current. The
-/// shulker's covered shell adds its flat 20 on top, clamped to the range.
-/// Without a map yet (nothing equipped, nothing written) the type's own armor
-/// fields and the `/attribute` armor map answer, as before.
+/// shulker's covered shell is vanilla's `minecraft:covered` modifier
+/// (`Shulker`): its flat 20 joins the base in the `ADD_VALUE` phase, before
+/// the multiplicative modifiers and the range clamp, as `effective` adds its
+/// own bonus. Without a map yet (nothing equipped, nothing written) the
+/// type's own armor fields and the `/attribute` armor map answer, as before.
 pub fn values(mob: &Mob) -> (f32, f32) {
     let covered = if mob.species() == Species::Shulker && mob.extra.counter == 0 {
         20.0
@@ -55,18 +57,35 @@ pub fn values(mob: &Mob) -> (f32, f32) {
         0.0
     };
     if let Some(live) = mob.extra.live.built() {
-        let computed = |name: &str| {
-            live.key(name).and_then(|key| {
-                live.value(Some(key), horizon_world::attribute_map::ValueKind::Computed)
-                    .ok()
-            })
-        };
-        if let (Some(armor), Some(toughness)) = (
-            computed("minecraft:armor"),
-            computed("minecraft:armor_toughness"),
-        ) {
+        let toughness = live.key("minecraft:armor_toughness").and_then(|key| {
+            live.value(Some(key), horizon_world::attribute_map::ValueKind::Computed)
+                .ok()
+        });
+        let armor = live.key("minecraft:armor").and_then(|key| {
+            let base = live
+                .value(
+                    Some(key.clone()),
+                    horizon_world::attribute_map::ValueKind::Base,
+                )
+                .ok()?;
+            Some(
+                live.lookup(Some(&key))
+                    .and_then(|handle| live.instance(&handle).ok())
+                    .map_or(base + covered, |instance| {
+                        // The covered shell in the `ADD_VALUE` phase: the base
+                        // grows before the instance's modifiers, whose formula
+                        // (`Instance.value`) stays the one copy.
+                        let mut value = instance.clone();
+                        value
+                            .set_base_value(base + covered, &mut Calculation)
+                            .unwrap();
+                        value.value()
+                    }),
+            )
+        });
+        if let (Some(armor), Some(toughness)) = (armor, toughness) {
             return (
-                (armor + covered).clamp(0.0, 30.0).floor() as i32 as f32,
+                armor.clamp(0.0, 30.0).floor() as i32 as f32,
                 toughness.clamp(0.0, 20.0) as f32,
             );
         }
@@ -177,17 +196,27 @@ mod tests {
         let (mut mob, catalog) = pig(20.0, 8.0);
         wear(&mut mob, &catalog, 3.0, Operation::AddValue);
         assert_eq!(values(&mob), (23.0, 8.0));
-        // The covered shell adds its flat 20 after the map's modifiers.
+        // The covered shell joins the base in the ADD_VALUE phase.
         Arc::make_mut(&mut mob.kind).species = Species::Shulker;
         mob.extra.counter = 0;
         assert_eq!(values(&mob), (30.0, 8.0));
         mob.extra.counter = 1;
         assert_eq!(values(&mob), (23.0, 8.0));
+        // Vanilla's `minecraft:covered` is an ADD_VALUE modifier: the +20 is
+        // multiplied with the base, not added after (floor((5 + 20) * 1.1),
+        // not 5 * 1.1 + 20), and the clamp takes the product.
+        let (mut mob, catalog) = pig(5.0, 8.0);
+        wear(&mut mob, &catalog, 0.1, Operation::AddMultipliedTotal);
+        Arc::make_mut(&mut mob.kind).species = Species::Shulker;
+        mob.extra.counter = 0;
+        assert_eq!(values(&mob), (27.0, 8.0));
+        mob.extra.counter = 1;
+        assert_eq!(values(&mob), (5.0, 8.0));
         let (mut mob, catalog) = pig(10.0, 8.0);
         wear(&mut mob, &catalog, 0.5, Operation::AddMultipliedTotal);
         Arc::make_mut(&mut mob.kind).species = Species::Shulker;
         mob.extra.counter = 0;
-        // (10 * 1.5) + 20, clamped to 30.
+        // (10 + 20) * 1.5, clamped to 30.
         assert_eq!(values(&mob), (30.0, 8.0));
         mob.extra.counter = 1;
         assert_eq!(values(&mob), (15.0, 8.0));
