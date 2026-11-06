@@ -20,7 +20,7 @@ mkdir -p .local "$shared/prepared"
 
 # HORIZON_PREPARE_KEY: the same key, computed where the Git history is (tools/pr_ready.py on another machine).
 sha256() { if command -v shasum > /dev/null; then shasum -a 256; else sha256sum; fi; }
-key=${HORIZON_PREPARE_KEY:-$(git ls-files -s crates/horizon-prepare mods/horizon/src/test/java research-lock.json | sha256 | cut -c1-16)}
+key=${HORIZON_PREPARE_KEY:-$(git ls-files -s crates/horizon-prepare mods/horizon/src/test/java research-lock.json tools/ci/vanilla-data.sh tools/ci/seed_prepared_extras.py tools/prepare_output.py | sha256 | cut -c1-16)}
 prepared="$shared/prepared/$key"
 report_prepared() {
   echo "prepared cache footprint KiB: $(du -sk "$prepared" | cut -f1)"
@@ -109,8 +109,8 @@ if [ ! -f "$prepared/.entries" ]; then
     if [ -n "${HORIZON_PREPARE_EXPORT_DIGEST:-}" ]; then
       python3 tools/prepare_output.py digest "$prepared/horizon-client/$version" > "$HORIZON_PREPARE_EXPORT_DIGEST" 2> "$RUNNER_TEMP/export-digest.log" || { echo "::error::export digest unavailable"; exit 1; }
     fi
-    # Preserve launcher-provided extras without overwriting this checkout's generated files.
-    cp -Rn --reflink=auto "$source/horizon-client/$version/." "$prepared/horizon-client/$version/"
+    # Only sounds, languages and their metadata may come from the shared preparation.
+    python3 -m tools.ci.seed_prepared_extras "$source/horizon-client/$version" "$prepared/horizon-client/$version/" > "$RUNNER_TEMP/seed-extras.log" 2>&1 || { echo "::error::seeding launcher extras failed"; exit 1; }
   fi
   mv "$RUNNER_TEMP/prepared-entries" "$prepared/.entries"
   if [ "$dyna" != true ]; then echo "Prepared in $((SECONDS - started)) s: $(tr '\n' ' ' < "$prepared/.entries")"; fi

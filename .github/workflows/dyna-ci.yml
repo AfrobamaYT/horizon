@@ -484,7 +484,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 -m unittest discover -s tests -v
-          python3 -m unittest discover -s tools/ci -p test_prepared_cache.py -v
+          python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
