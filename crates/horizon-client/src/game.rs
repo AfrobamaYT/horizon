@@ -7046,7 +7046,7 @@ impl Game<'_> {
                 self.use_item_on_block(hit, self.hand, held.as_ref(), mod_api::UsePhase::Block);
             if block_answer.is_none()
                 && mod_api::__private::has_part_hook(mod_api::HookId::UseItemOn)
-                && mod_api::__private::parts("use_item_on")
+                && mod_api::__private::parts(mod_api::HookId::UseItemOn, "use_item_on")
                     .for_hook(mod_api::HookId::UseItemOn)
                     .is_some_and(|parts| !parts.block_state(state).is_empty())
             {
@@ -13926,6 +13926,7 @@ impl Game<'_> {
         self.server_loot.set(None);
         self.server_items = None;
         self.session_lock = None;
+        mod_api::__private::clear_game_parts();
         self.world_adopted = false;
         self.world_icon = None;
         horizon_client::crash::clear_detail("World");
@@ -24650,7 +24651,7 @@ mod tests {
                 .default_state("minecraft:stone")
                 .unwrap();
             assert!(
-                !mod_api::__private::parts("test")
+                !mod_api::__private::parts(mod_api::HookId::AnalogOutput, "test")
                     .for_hook(mod_api::HookId::AnalogOutput)
                     .unwrap()
                     .block_state(stone)
