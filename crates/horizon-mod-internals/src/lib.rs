@@ -77,13 +77,13 @@ pub mod runtime {
         type Results;
         fn set(self) -> Self::Results;
     }
-    /// Read several declared fields in one crossing, with one result per entry.
+    /// Read up to twelve declared fields in one crossing, with one result per entry.
     pub fn get_many<R: ReadFields>(fields: R) -> R::Results {
         fields.get()
     }
-    /// Journal several writes in one crossing, with one result per entry.
-    /// Writes join the listener's journal like single writes and are applied when the
-    /// listener returns, not immediately (or before a declared thunk call).
+    /// Journal up to twelve writes in one crossing, with one result per entry.
+    /// Writes join the listener's journal like single writes and are applied on listener return
+    /// or before a declared thunk call, not immediately at this call.
     pub fn set_many<W: WriteFields>(writes: W) -> W::Results {
         writes.set()
     }
