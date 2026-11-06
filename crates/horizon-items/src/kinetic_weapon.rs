@@ -81,7 +81,7 @@ impl UseTiming {
     /// stack view or decoding any unrelated components in animation updates.
     pub fn of_stack(stack: &ItemStack, prototype: Option<Self>) -> Option<Self> {
         if let Some(data) = stack.data() {
-            if let Some(kinetic) = &data.kinetic_weapon {
+            if let Some(kinetic) = data.kinetic_weapon() {
                 return kinetic.timing;
             }
             if data.other("!minecraft:kinetic_weapon").is_some() {
@@ -95,6 +95,7 @@ impl UseTiming {
 /// A modelled kinetic component: retain all fields for saving and transmission,
 /// with a typed projection for rendering. They can only be replaced together.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct KineticComponent {
     raw: Tag,
     timing: Option<UseTiming>,

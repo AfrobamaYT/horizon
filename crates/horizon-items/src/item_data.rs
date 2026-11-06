@@ -67,7 +67,7 @@ pub struct StackData {
     /// when gameplay needs it, so styled names have one source of truth.
     pub custom_name: Option<Tag>,
     /// Full kinetic component with its typed rendering timing, decoded together.
-    pub kinetic_weapon: Option<crate::kinetic_weapon::KineticComponent>,
+    kinetic_weapon: Option<crate::kinetic_weapon::KineticComponent>,
     /// `minecraft:potion_contents.potion`.
     pub potion: Option<Arc<str>>,
     /// The rest of `minecraft:potion_contents` (`custom_color`, `custom_effects`,
@@ -182,6 +182,10 @@ impl StackData {
         self.custom_name.as_ref().and_then(read_text)
     }
 
+    /// The saved kinetic component and its decoded rendering timing.
+    pub fn kinetic_weapon(&self) -> Option<&crate::kinetic_weapon::KineticComponent> {
+        self.kinetic_weapon.as_ref()
+    }
     /// A preserved component's saved value.
     pub fn other(&self, id: &str) -> Option<&Tag> {
         if id == "minecraft:custom_name" {
