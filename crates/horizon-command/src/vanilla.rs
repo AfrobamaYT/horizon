@@ -607,26 +607,6 @@ pub fn session_dispatcher(registry: &RuleRegistry, features: &[String]) -> Dispa
     }
     tree
 }
-/// The server's tree for this world's enabled features. Cache entries are
-/// separate from vanilla-only worlds and from each server/command selection.
-pub fn game_dispatcher_with_features(features: &[String]) -> &'static Dispatcher {
-    if !features.iter().any(|f| f == MINECART_IMPROVEMENTS) {
-        return game_dispatcher();
-    }
-    static TREES: [std::sync::OnceLock<Dispatcher>; 8] = [const { std::sync::OnceLock::new() }; 8];
-    let dev = std::env::var_os("HORIZON_DEV_COMMANDS").is_some();
-    let horizon = HORIZON_COMMANDS.load(std::sync::atomic::Ordering::Relaxed);
-    let dedicated = DEDICATED_COMMANDS.load(std::sync::atomic::Ordering::Relaxed);
-    TREES[usize::from(dev) | usize::from(horizon) << 1 | usize::from(dedicated) << 2].get_or_init(
-        || {
-            let mut d = build_for_features(dev, dedicated, true, &rule_registry());
-            if horizon {
-                horizon_commands(&mut d, 0);
-            }
-            d
-        },
-    )
-}
 /// Whether this process is a dedicated server, whose tree has the dedicated
 /// commands (`/op`, `/ban`, `/whitelist`...). Single player's server thread
 /// and a LAN world are integrated servers: vanilla registers none of them.
