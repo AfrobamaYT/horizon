@@ -956,7 +956,7 @@ impl Behaviours {
     }
 }
 
-impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     pub(crate) fn moving_piston(&self, pos: BlockPos) -> Option<MovingPiston> {
         self.ticks
             .moving_pistons

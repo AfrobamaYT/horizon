@@ -19,6 +19,34 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Client session and local-player status
+
+`ClientHost::client_session()` supplies read-only `client_server()`,
+`client_language()` and `client_frame_stats()`. All return `None` outside a
+logged-in client world. These reads use existing local state and send nothing.
+`ClientServer` keeps missing names and addresses explicit: its `name` is the
+integrated world's display name, or `None` for an external connection (the game
+retains the player name, not a server display name). Its `address` is absent for
+memory connections; friend-invite secrets are redacted. `integrated_local`
+means this window actually owns that integrated server, not that the address
+looks like localhost. A splitscreen guest does not own the server.
+
+`client_language()` reads the applied language, not a pending options choice.
+Use the existing `ClientHost::is_paused()` for the applied pause state.
+`ClientFrameStats` reports the game's most recently computed `fps`, lifetime
+`rendered_frames` (menus included), and the newest completed frame's wall
+interval as `frame_time_ns` (including waits). The interval is `None` until a
+sample exists or after the chart is reset. Reading it starts no new recording.
+
+`PlayerRef::block_breaking(&dyn ClientHost)` and `ambient_mood(&dyn ClientHost)`
+only accept the current local player's handle. Stale, fake and nonlocal handles
+return `None`, as does a disconnected client. `BlockBreakingState::Idle` is
+instead a valid local player who is not breaking a block. `Breaking` gives the
+target position, accumulated predicted progress and optional visible crack
+stage (0 through 9; absent at zero progress). The stage uses the same
+calculation as the world overlay. Mood is the existing cave ambience value,
+normally 0 through 1, not a server-side measurement.
+
 ## Sending a map image
 
 `PlayerRef::send_map` sends a complete 128-by-128 map image through a
@@ -799,7 +827,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - Any command a player types: `native_player_command(player, name, command, cancel, replies)` is heard before the command is looked at (NeoForge's `CommandEvent`), without its slash, for vanilla's commands, the mods' own and commands the player may not run, once for each command a player sends, on a server. Also each line of a quiet command batch. A mod sets `canceled` to stop it: nothing runs and nothing is answered but the lines it pushes to `replies`, which reach the player as system chat.
 
-- Redstone signals as a block reads them, on a level handle (`LevelRef`) on a server, through the game's own `SignalGetter`, mods' `block_signal` and `should_check_weak_power` parts included: `level.signal(host, pos, direction)` (`getSignal`, how strongly the block at `pos` powers its neighbour on the `direction` side, conducted power included), `level.direct_signal(host, pos, direction)` (`getDirectSignal`, the strong power alone), `level.direct_signal_to(host, pos)` (`getDirectSignalTo`), `level.best_neighbor_signal(host, pos)` (`getBestNeighborSignal`, the strongest power reaching `pos`, as a dispenser or a piston reads it) and `level.has_neighbor_signal(host, pos)` (`hasNeighborSignal`, stopping at the first powered side). Each costs what the game's own call does. They take `&mut dyn ServerHost`, not `&dyn Host`: the signal path asks mods' parts, which get the level as their host, and only a write borrow of the game builds it. They read the level in place: None (or false) for another level, a stale handle or a client.
+- Redstone signals as a block reads them, on a level handle (`LevelRef`) on a server, through the game's own `SignalGetter`, mods' `block_signal` and `should_check_weak_power` parts included: `level.signal(host, pos, direction)` (`getSignal`, how strongly the block at `pos` powers its neighbour on the `direction` side, conducted power included), `level.direct_signal(host, pos, direction)` (`getDirectSignal`, the strong power alone), `level.direct_signal_to(host, pos)` (`getDirectSignalTo`), `level.best_neighbor_signal(host, pos)` (`getBestNeighborSignal`, the strongest power reaching `pos`, as a dispenser or a piston reads it) and `level.has_neighbor_signal(host, pos)` (`hasNeighborSignal`, stopping at the first powered side). Each costs what the game's own call does. They take `&dyn Host` and read the live signal state without a transaction or mutable level borrow. Block signal and weak-power Part callbacks receive the restricted `LevelHost`, so they cannot recursively invoke these signal helpers, just as on the write path. They read the level in place: None (or false) for another level, a stale handle or a client.
 
 - `level.weather(host)` (rain and thunder levels, 0 in the Nether and the End), `level.day_time(host)` (the time of day), `level.height(host)` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light and `level.is_raining_at(host, pos)` for rain at a position: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
 
@@ -1692,8 +1720,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   even if `foo bar` is public. Players can traverse the shared `foo` prefix to reach `bar`, but cannot execute
   `foo` itself. Optional arguments make their preceding prefixes executable at that usage's level; if several
   usages execute at the same prefix, its lowest executable usage level wins. A rejected usage does not change
-  the permissions of accepted usages. A name vanilla has, or a usage that doesn't parse, is left out with a
-  warning in the log.
+  the permissions of accepted usages. When argument alternatives consume the same input without errors, an
+  executable alternative takes precedence over a denied one; equally valid alternatives keep registration order.
+  A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
 - **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
   `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's
