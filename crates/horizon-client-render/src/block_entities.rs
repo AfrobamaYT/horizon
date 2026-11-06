@@ -32,15 +32,15 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-static NEXT_LEASE: AtomicU64 = AtomicU64::new(1);
+static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
-fn next_lease() -> u64 {
-    let mut token = NEXT_LEASE.load(Ordering::Relaxed);
+fn next_token() -> u64 {
+    let mut token = NEXT_TOKEN.load(Ordering::Relaxed);
     loop {
         let next = token
             .checked_add(1)
-            .expect("block entity lease space exhausted");
-        match NEXT_LEASE.compare_exchange_weak(token, next, Ordering::Relaxed, Ordering::Relaxed) {
+            .expect("block entity token space exhausted");
+        match NEXT_TOKEN.compare_exchange_weak(token, next, Ordering::Relaxed, Ordering::Relaxed) {
             Ok(_) => return token,
             Err(current) => token = current,
         }
@@ -268,11 +268,7 @@ impl BlockEntities {
         }
     }
     fn new_generation(&mut self, pos: Pos) {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        let generation = NEXT
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
-            .expect("block entity generations exhausted");
-        self.generations.insert(pos, generation);
+        self.generations.insert(pos, next_token());
     }
     /// Bind this dimension's authoritative maps, including saved entries not yet read.
     pub fn observe_attachments(
@@ -561,7 +557,7 @@ impl BlockEntities {
     pub fn take(&mut self, pos: &Pos) -> Option<(BlockEntityLease, BlockEntity)> {
         self.asleep.remove(pos);
         let entity = self.map.remove(pos)?;
-        let token = next_lease();
+        let token = next_token();
         self.out.insert(*pos, token);
         let generation = self.generations[pos];
         Some((
@@ -582,7 +578,7 @@ impl BlockEntities {
         {
             return false;
         }
-        lease.token = next_lease();
+        lease.token = next_token();
         self.out.insert(*pos, lease.token);
         true
     }
