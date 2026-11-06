@@ -1700,6 +1700,18 @@ impl Game<'_> {
             host.hub.guest(conn).is_some_and(|g| g.spectator())
                 && self.boat_loot_pending(self.boats[i].id)
         });
+        if spectator_pending {
+            // ServerPlayer.openMenu: the refused spectator's action bar, red.
+            let message = horizon_client::text::Text::translate("container.spectatorCantOpen", &[])
+                .with_color(horizon_client::text::RED);
+            host.hub.send_to(
+                conn,
+                &C::SystemChat(play::SystemChat {
+                    content: horizon_client::lan::data::component_nbt(&message.component()),
+                    overlay: true,
+                }),
+            );
+        }
         if spectator_pending || !self.guest_may_open(conn, menu, None) {
             let viewed = self.lan.as_ref().is_some_and(|host| {
                 host.hub
@@ -5768,8 +5780,10 @@ impl Game<'_> {
             let mut events = std::mem::take(&mut w.player.events);
             // LayeredCauldronBlock.handleEntityOnFireInside along those moves.
             for event in &events {
-                if let MotionEvent::CauldronExtinguish { pos } = event {
-                    game.cauldron_extinguish(*pos);
+                match event {
+                    MotionEvent::CauldronExtinguish { pos } => game.cauldron_extinguish(*pos),
+                    MotionEvent::PowderSnowMelt { pos } => game.powder_snow_melt(*pos),
+                    _ => {}
                 }
             }
             // Entity.baseTick: rain puts out a burning player.

@@ -436,6 +436,8 @@ impl Game<'_> {
                         let old = old.clone();
                         self.remove_framed_map(&old);
                     }
+                    let item = new.item.take();
+                    new.set_item(item);
                     self.item_frames[i] = new;
                 }
             }
