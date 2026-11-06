@@ -26,6 +26,7 @@ pub mod entity;
 pub mod far;
 pub mod forwarding;
 pub mod guest;
+pub mod guest_list;
 pub mod handoff;
 pub mod hub;
 pub mod import;

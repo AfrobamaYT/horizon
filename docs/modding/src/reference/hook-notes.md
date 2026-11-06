@@ -19,6 +19,14 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Client window and screen state
+
+`ClientHost::window_focused()` reports the last focus state from the window
+system. `ClientHost::observed_screen_id()` returns the same ID screen hooks see,
+including overlays. `None` means no view is available: there may be no open
+screen or no renderer yet. It does not mean the client is outside a world.
+Read again after a screen or focus change.
+
 ## Input preferences
 
 `ClientHost::input_options()` returns a copy of the current mouse and movement
@@ -2488,8 +2496,10 @@ handle, an entity the client doesn't track and a level it doesn't show:
   change and no draw. `set_owner` on an arrow also allows pickup for a player owner (`AbstractArrow.setOwner`);
   `deflect` does not (vanilla's `EntityReference` overload). Arrows (and a mob's trident for
   `pickup`) also have `pickup`/`set_pickup` (`NativeArrowPickup`), `base_damage`/`set_base_damage` and
-  `critical`/`set_critical`; the critical flag reaches clients through the entity data, and the others are
-  server-only as in vanilla.
+  `critical`/`set_critical` and `pierce_level`/`set_pierce_level`. The pierce level is a signed byte:
+  vanilla stores all values from -128 through 127 unchanged, and nonpositive values do not pierce. The
+  typed result distinguishes a stale handle, a non-arrow projectile and a wrong-side host. The critical
+  flag reaches clients through entity data; these handle methods operate on the server.
 - `living.drop(host, stack, throw_randomly, include_thrower_name)` throws a stack the mod holds from the eyes
   (`LivingEntity.drop`) and gives the item entity; it never touches a slot. `is_tamed(host)` and `owner(host)` read a
   tamable mob or a horse (`TamableAnimal.isTame`, its owner's UUID).
