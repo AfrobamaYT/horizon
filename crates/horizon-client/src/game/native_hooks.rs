@@ -1015,9 +1015,9 @@ use mod_api::__private::game::IngredientTest;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientReloadListeners, CommandInvocation, EnchantmentInfo,
-    EntityRef, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
+    self, Answered, BlockPlacement, ClientModifiers, ClientReloadListeners, CommandInvocation,
+    EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
     NativeNoteBlockChange, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
     RecipeBookCategory, ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase,
     TicketController, ToolUse, WorldPhase,
@@ -10636,6 +10636,11 @@ impl Game<'_> {
     /// Attack and use clicks in the last second.
     pub(super) fn native_clicks(&mut self) -> (u32, u32) {
         self.click_reading()
+    }
+    /// The current window modifier keys in the same GLFW encoding as input hooks.
+    /// Cleared when the window loses focus; available even outside a world.
+    pub(super) fn native_modifiers(&self) -> ClientModifiers {
+        ClientModifiers::new(super::glfw_modifiers(self.modifiers))
     }
     /// A vanilla mapping (`key.forward`, `key.jump`, `key.attack`…): whether
     /// it is held (`KeyMapping.isDown`), and its key's name as Controls shows
