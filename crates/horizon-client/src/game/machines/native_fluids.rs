@@ -869,6 +869,16 @@ mod tests {
                     1,
                 ));
                 assert_eq!(source.owner(), "the game");
+                game.set_tank_state(from, &tanks(&[(Some("water"), 1000), (None, 0)]));
+                assert_eq!(source.resource(game, 0), Some(water.clone()));
+                assert_eq!(source.amount(game, 0), 1000);
+                assert_eq!(
+                    game.transaction(|host, tx| Ok::<_, ()>(
+                        source.extract(host, tx, 0, &water, 1000)
+                    )),
+                    Ok(1000)
+                );
+                assert_eq!(source.resource(game, 0), None);
                 assert!(source.is_valid(game, 0, &chocolate));
                 assert_eq!(
                     game.transaction(|host, tx| Ok::<_, ()>(

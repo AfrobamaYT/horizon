@@ -180,12 +180,16 @@ pub fn resolve_fluids(ids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
             .request("horizon", id)
             .expect("registry owns valid ids");
     }
-    names.utf16_slots = names
-        .entries
-        .iter()
-        .enumerate()
-        .map(|(slot, entry)| (entry.id.encode_utf16().collect(), slot as u32))
-        .collect();
+    for (slot, entry) in names.entries.iter().enumerate() {
+        names
+            .utf16_slots
+            .insert(entry.id.encode_utf16().collect(), slot as u32);
+        if let Some(path) = entry.id.strip_prefix("minecraft:") {
+            names
+                .utf16_slots
+                .insert(path.encode_utf16().collect(), slot as u32);
+        }
+    }
     let _ = crate::part_table::resolved_fluids().set(names);
     Ok(())
 }
