@@ -213,6 +213,13 @@ and code mods; the scaffold does not create one.
 Raw injections belong in the same manifest as `[[native.injection]]` tables. The decision ladder, the fields and the
 forms are in the modding book: [Injections](../injections.md).
 
+### Dimension shape
+
+`LevelRef::dimension_shape` reads the loaded server level's build range, logical height,
+skylight and ceiling from its dimension shape. It accepts `&dyn Host`, including when the
+level is parked, and returns `None` for a stale or unavailable level or on a client. It does
+not load a level or allocate.
+
 ### Raid handles
 
 Raid handles returned by `LevelRef::raid`, `raid_at` and `raids` resolve their
