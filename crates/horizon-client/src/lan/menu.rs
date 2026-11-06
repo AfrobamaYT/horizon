@@ -478,6 +478,32 @@ fn move_to(
         if let Some(mut existing) = view.get(i)
             && existing.same_item_same_components(&stack)
         {
+            if let Some(menu) = view
+                .guest
+                .menu
+                .as_ref()
+                .filter(|_| view.container.is_some())
+            {
+                let c = view.container.as_ref().unwrap();
+                let index = if i < c.len() {
+                    i
+                } else {
+                    player_slot(i - c.len())
+                };
+                if !crate::menu::apply_menu_slot_rules(
+                    view.loop_context,
+                    &menu.registry_id,
+                    index,
+                    &stack,
+                    true,
+                    u32::MAX,
+                    rules.max_stack(&stack.item).max(1),
+                )
+                .0
+                {
+                    continue;
+                }
+            }
             let max = view.slot_max(i, &existing, rules);
             if existing.count < max {
                 let moved = (max - existing.count).min(stack.count);

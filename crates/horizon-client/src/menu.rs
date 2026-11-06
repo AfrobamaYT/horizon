@@ -555,18 +555,10 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
-/// with the game's): container slot `slot` of the content mod menu type `menu`
-/// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
-/// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
-/// `may_place` and `max_stack` hold the type's own answer (false on one of its
-/// `results`, true elsewhere, and 99): change them for your own menu types.
-/// `max_stack` is kept to 1 to 99,
-/// and the item's own stack size still caps it. Asked on the server, for each
-/// click, drag and shift-click that puts an item in a slot, several times for
-/// one shift-click: answer from `stack` and `context` alone, and fast. `context`
-/// holds the side, the registries and the settings of the resource generation;
-/// a `/reload` builds the next one.
+/// Dispatch the registered menu's slot placement and maximum stack rules.
+/// The slot is its backing container index. Mount menus use
+/// `horizon:mount_inventory`; player inventory and creative picker have no
+/// registered type. The shared application bounds the final maximum.
 #[inline(always)]
 pub fn native_menu_slot_rules(
     context: &LoopContext,
@@ -2426,10 +2418,21 @@ impl Menu {
                 // A mod menu's result (unless a mod's hook opens it) and a
                 // hidden slot get no top-up either, as a furnace's quick move
                 // never aims at its result.
-                let refuses = match self.slots[dest].role {
-                    Role::Hidden => true,
-                    Role::ModResult => !self.may_place(env, dest, stack),
-                    _ => false,
+                let refuses = if self.slots[dest].role == Role::Hidden {
+                    true
+                } else if let Some(id) = self.registry_id() {
+                    !apply_menu_slot_rules(
+                        env.loop_context,
+                        id,
+                        self.slots[dest].index,
+                        stack,
+                        self.slots[dest].role != Role::ModResult,
+                        CONTAINER_MAX,
+                        Self::max_stack(env, stack),
+                    )
+                    .0
+                } else {
+                    false
                 };
                 let max = match self.slot(dest) {
                     Some(target) if !refuses && target.same_item_same_components(stack) => {

@@ -225,6 +225,39 @@ pub fn main_with(
     {
         log::warn!("The enchantment level hook is already installed; keeping the first");
     }
+    install_client_hooks();
+    raise_open_file_limit();
+    if let Err(error) = game::run_with(launch, native) {
+        // A bad command line is the caller's mistake, not a crash: no report.
+        let usage = error.is::<game::UsageError>();
+        log::error!("Horizon: {error}");
+        logging::flush();
+        // The report's path is the last line on stderr (crash::SAVED_LINE).
+        if !help && !usage {
+            crash::report_error(&home, side, &*error);
+        }
+        // Started from Explorer, the console window closes with the game:
+        // keep the message on screen until it is read.
+        #[cfg(windows)]
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            eprintln!("Press Enter to close.");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
+        std::process::exit(if usage {
+            game::exit_code::USAGE
+        } else {
+            game::exit_code::ERROR
+        });
+    }
+    logging::flush();
+}
+
+/// The JVM raises its open-file limit to the hard limit as it starts
+/// (`-XX:+MaxFDLimit`, on by default), so a vanilla server may hold as many
+/// sockets and region files as the host allows, not the soft default (often
+/// 1024 in a container). The same here; macOS caps it at `OPEN_MAX`, as the
+/// JVM does there.
+pub(crate) fn install_client_hooks() {
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |context, menu, slot, stack, may_place, max_stack| {
             let context = mod_api::OwningLoop::new(context);
@@ -310,37 +343,8 @@ pub fn main_with(
     }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }
-    raise_open_file_limit();
-    if let Err(error) = game::run_with(launch, native) {
-        // A bad command line is the caller's mistake, not a crash: no report.
-        let usage = error.is::<game::UsageError>();
-        log::error!("Horizon: {error}");
-        logging::flush();
-        // The report's path is the last line on stderr (crash::SAVED_LINE).
-        if !help && !usage {
-            crash::report_error(&home, side, &*error);
-        }
-        // Started from Explorer, the console window closes with the game:
-        // keep the message on screen until it is read.
-        #[cfg(windows)]
-        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-            eprintln!("Press Enter to close.");
-            let _ = std::io::stdin().read_line(&mut String::new());
-        }
-        std::process::exit(if usage {
-            game::exit_code::USAGE
-        } else {
-            game::exit_code::ERROR
-        });
-    }
-    logging::flush();
 }
 
-/// The JVM raises its open-file limit to the hard limit as it starts
-/// (`-XX:+MaxFDLimit`, on by default), so a vanilla server may hold as many
-/// sockets and region files as the host allows, not the soft default (often
-/// 1024 in a container). The same here; macOS caps it at `OPEN_MAX`, as the
-/// JVM does there.
 fn raise_open_file_limit() {
     #[cfg(unix)]
     {

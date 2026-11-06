@@ -6939,6 +6939,187 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
+    fn menu_rules_match_guest_packets_and_prediction() {
+        use horizon_client::{
+            chunk::Chunk,
+            containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields, ModMenuType},
+            items::ItemStack,
+            lan::menu::Slots,
+            menu::{Input, Kind, Menu},
+        };
+        use horizon_protocol::packets::play::{ContainerClick, Serverbound};
+        use mod_api::{Hooks, MenuPart, MenuSlotRulesEvent, ModEntry, Mods, Registrar};
+        use std::sync::Arc;
+
+        struct Part;
+        #[mod_api::horizon_part]
+        impl MenuPart for Part {
+            fn menu_slot_rules(
+                &self,
+                _: &dyn mod_api::LoopContext,
+                event: &mut MenuSlotRulesEvent<'_>,
+            ) {
+                if event.slot == 0 {
+                    if &*event.stack.item == "minecraft:dirt" {
+                        event.may_place = false;
+                    }
+                    if &*event.stack.item == "minecraft:stone" {
+                        event.max_stack = 3;
+                    }
+                }
+            }
+        }
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.menu_part("minecraft:generic_9x3", Part);
+                r.menu_part("test:menu", Part);
+            }
+        }
+        let mods: Mods = vec![ModEntry::new("menu_rules", Box::new(Mod))].into();
+        mod_api::__private::install_parts(&mods).unwrap();
+        crate::entry::install_client_hooks();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_guest_turn_tests::with_guests(|game| {
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let pos = (1, 64, 1);
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(pos.0, pos.1, pos.2, stone).unwrap();
+                let menu_type = Box::leak(Box::new(ModMenuType {
+                    id: "test:menu",
+                    slots: 27,
+                    data_slots: 0,
+                    results: Vec::new(),
+                }));
+                for is_mod in [false, true] {
+                    game.world.block_entities.insert(
+                        pos,
+                        if is_mod {
+                            BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                                "test:block".into(),
+                                ModBlockEntityFields {
+                                    items: vec![None; 27],
+                                    ..Default::default()
+                                },
+                            )))
+                        } else {
+                            BlockEntity::Chest(vec![None; 27])
+                        },
+                    );
+                    let host = game.lan.as_mut().unwrap();
+                    host.hub.open_container(
+                        12,
+                        "minecraft:generic_9x3",
+                        horizon_world::nbt::Tag::String("test".into()),
+                        pos,
+                        Slots::Block(pos),
+                        vec![None; 27],
+                        None,
+                    );
+                    let opened = host.hub.guests[0].menu.as_mut().unwrap();
+                    if is_mod {
+                        opened.registry_id = "test:menu".into();
+                        opened.mod_type = Some(menu_type);
+                    }
+                    let window = opened.window;
+                    for (item, expected) in [("minecraft:dirt", 0), ("minecraft:stone", 3)] {
+                        let stack = ItemStack::new(item, 8);
+                        let mut prediction = Menu::new(if is_mod {
+                            Kind::Mod(menu_type)
+                        } else {
+                            Kind::Chest(3)
+                        });
+                        prediction.set_registry_id(Some(if is_mod {
+                            "test:menu"
+                        } else {
+                            "minecraft:generic_9x3"
+                        }));
+                        prediction.carried = Some(stack.clone());
+                        prediction
+                            .click(&game.menu_env(), 0, 0, Input::Pickup)
+                            .unwrap();
+                        game.lan.as_mut().unwrap().hub.guests[0].carried = Some(stack);
+                        game.lan_guest_packet(
+                            12,
+                            Serverbound::ContainerClick(ContainerClick {
+                                container: window,
+                                state: 0,
+                                slot: 0,
+                                button: 0,
+                                input: 0,
+                                changed: Vec::new(),
+                                carried: None,
+                            }),
+                        );
+                        let actual = game.world.block_entities.get(&pos).unwrap().slots()[0]
+                            .as_ref()
+                            .map_or(0, |s| s.count);
+                        assert_eq!(actual, expected, "{item} mod={is_mod}");
+                        assert_eq!(prediction.slot(0).map_or(0, |s| s.count), actual);
+                        assert_eq!(
+                            prediction.carried.as_ref().map_or(0, |s| s.count),
+                            game.lan.as_ref().unwrap().hub.guests[0]
+                                .carried
+                                .as_ref()
+                                .map_or(0, |s| s.count)
+                        );
+                    }
+                    // Vanilla moveItemStackTo tops up an existing stack before empty slots.
+                    game.world.block_entities.get_mut(&pos).unwrap().slots_mut()[0] =
+                        Some(ItemStack::new("minecraft:dirt", 2));
+                    let mut prediction = Menu::new(if is_mod {
+                        Kind::Mod(menu_type)
+                    } else {
+                        Kind::Chest(3)
+                    });
+                    prediction.set_registry_id(Some(if is_mod {
+                        "test:menu"
+                    } else {
+                        "minecraft:generic_9x3"
+                    }));
+                    prediction.load_slot(0, Some(ItemStack::new("minecraft:dirt", 2)));
+                    prediction.set_player_item(9, Some(ItemStack::new("minecraft:dirt", 4)));
+                    prediction
+                        .click(&game.menu_env(), 27, 0, Input::QuickMove)
+                        .unwrap();
+                    game.lan.as_mut().unwrap().hub.guests[0].inventory[9] =
+                        Some(ItemStack::new("minecraft:dirt", 4));
+                    game.lan_guest_packet(
+                        12,
+                        Serverbound::ContainerClick(ContainerClick {
+                            container: window,
+                            state: 0,
+                            slot: 27,
+                            button: 0,
+                            input: 1,
+                            changed: Vec::new(),
+                            carried: None,
+                        }),
+                    );
+                    assert_eq!(
+                        game.world.block_entities.get(&pos).unwrap().slots()[0]
+                            .as_ref()
+                            .unwrap()
+                            .count,
+                        2
+                    );
+                    assert_eq!(prediction.slot(0).unwrap().count, 2);
+                    game.guest_close_all(12);
+                }
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
     fn block_menu_handle_and_use_each_count_the_guest_once() {
         use horizon_client::chunk::Chunk;
         use mod_api::NativeBlockUpdateFlags;

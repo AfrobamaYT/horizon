@@ -1826,18 +1826,15 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/*.rs`
-    /// with the game's): container slot `slot` of the content mod menu type `menu`
-    /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
-    /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
-    /// `may_place` and `max_stack` hold the type's own answer (false on one of its
-    /// `results`, true elsewhere, and 99): change them for your own menu types.
-    /// `max_stack` is kept to 1 to 99,
-    /// and the item's own stack size still caps it. Asked on the server, for each
-    /// click, drag and shift-click that puts an item in a slot, several times for
-    /// one shift-click: answer from `stack` and `context` alone, and fast. `context`
-    /// holds the side, the registries and the settings of the resource generation;
-    /// a `/reload` builds the next one.
+    /// Slot placement and stack limits for the registered vanilla or mod menu
+    /// `menu`; mounts use `horizon:mount_inventory`. Player inventory and the
+    /// creative picker have no registered menu type and do not dispatch. `slot`
+    /// is the backing container index, including player inventory slots.
+    /// `may_place` and `max_stack` begin with the slot's own answers. The final
+    /// maximum is bounded to 1–99 and the item's stack limit. Asked during click,
+    /// drag and quick-move decisions, including top-ups. Answer from `stack` and
+    /// the restricted `context` alone, and fast. Context holds the resource
+    /// generation's side, registries and settings; `/reload` builds the next one.
     #[hook(
         side = "server",
         contract = "listen",

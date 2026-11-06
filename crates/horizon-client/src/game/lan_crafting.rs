@@ -356,12 +356,9 @@ impl Game<'_> {
             .as_ref()
             .filter(|m| p.container != 0 && m.window == p.container)
             .and_then(|m| match m.slots {
-                Slots::Block(pos) => Some((
-                    pos,
-                    m.mod_type,
-                    m.hidden.clone(),
-                    host.hub.registry_name("minecraft:menu", m.kind)?.to_owned(),
-                )),
+                Slots::Block(pos) => {
+                    Some((pos, m.mod_type, m.hidden.clone(), m.registry_id.to_string()))
+                }
                 _ => None,
             })
         else {
