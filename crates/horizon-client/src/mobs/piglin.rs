@@ -2296,7 +2296,8 @@ mod crossbow_tests {
             std::env::temp_dir().join(format!("horizon-piglin-drop-test-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
-        let loot = LootData::load(&root, &PackOverlay::default(), &Default::default()).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::default(), &defaults).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         let death = Death {
             loot: &loot,

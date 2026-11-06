@@ -1574,7 +1574,7 @@ impl Game<'_> {
             self.lan_entity_event(id as i32, 60, at);
             self.death_poof(at, width, height);
             if let Some(m) = split {
-                self.split_dead_cube(&m);
+                self.split_dead_cube(m);
             }
         }
         laps.lap("creature_retain");
@@ -1791,12 +1791,11 @@ impl Game<'_> {
         }
     }
     /// `AbstractCubeMob.remove`: split only as the dead body is removed.
-    fn split_dead_cube(&mut self, m: &Mob) {
-        let mut dying = m.clone();
+    fn split_dead_cube(&mut self, mut dying: Mob) {
         if matches!(
-            m.species(),
+            dying.species(),
             Species::Slime | Species::MagmaCube | Species::SulfurCube
-        ) && m.extra.size > 1
+        ) && dying.extra.size > 1
         {
             // AbstractCubeMob.remove: convert without spawn finalization.
             let drawn = horizon_client::mobs::cube::split_count(&mut dying);
@@ -1804,7 +1803,8 @@ impl Game<'_> {
                 let count = self.mob_split_count(&dying, drawn);
                 for i in 0..count {
                     self.next_entity += 1;
-                    let mut child = Mob::new(self.next_entity, m.kind.clone(), m.position, 0.0);
+                    let mut child =
+                        Mob::new(self.next_entity, dying.kind.clone(), dying.position, 0.0);
                     horizon_client::mobs::cube::split_child(&mut dying, &mut child, i);
                     self.mobs.push(child);
                     self.native_mobs_joined(self.mobs.len() - 1, false);
