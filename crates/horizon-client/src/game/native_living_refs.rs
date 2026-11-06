@@ -1250,9 +1250,25 @@ mod tests {
             // A tame wolf's hit also records its owner's reference.
             game.resolve_player_responsible(100, Damage::mob(101, [0.0; 3]));
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
-            game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+            {
+                let value = false;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.placed = value);
+            }
             assert_eq!(living.kill_credit(game), None);
 
             // Once the player reference expires, the mob can be credited.

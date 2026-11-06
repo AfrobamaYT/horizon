@@ -55,10 +55,10 @@ pub struct RulesScreen {
 }
 
 fn name_key(r: &Rule) -> String {
-    format!("gamerule.minecraft.{}", r.name)
+    format!("gamerule.{}", r.name.replace(':', "."))
 }
 fn category_key(category: &str) -> String {
-    format!("gamerule.category.minecraft.{category}")
+    format!("gamerule.category.{}", category.replace(':', "."))
 }
 /// GameRule.deserialize of an integer rule: Brigadier's readInt (digits,
 /// '.' and '-' only, nothing after), then the rule's range.
@@ -726,7 +726,7 @@ mod tests {
             rows.len(),
             gamerules::rule_registry().available_rules(false).count() + 7
         );
-        assert_eq!(rows[0], Row::Category("chat".to_owned()));
+        assert_eq!(rows[0], Row::Category("minecraft:chat".to_owned()));
         let categories: Vec<_> = rows
             .iter()
             .filter_map(|r| match r {
@@ -737,8 +737,26 @@ mod tests {
         assert_eq!(
             categories,
             [
-                "chat", "drops", "misc", "mobs", "player", "spawning", "updates"
+                "minecraft:chat",
+                "minecraft:drops",
+                "minecraft:misc",
+                "minecraft:mobs",
+                "minecraft:player",
+                "minecraft:spawning",
+                "minecraft:updates"
             ]
+        );
+    }
+
+    #[test]
+    fn category_translation_uses_its_namespace() {
+        assert_eq!(
+            category_key("minecraft:updates"),
+            "gamerule.category.minecraft.updates"
+        );
+        assert_eq!(
+            category_key("example:machines"),
+            "gamerule.category.example.machines"
         );
     }
 
@@ -749,8 +767,8 @@ mod tests {
         assert_eq!(
             screen.rows(),
             vec![
-                Row::Category("updates".into()),
-                Row::Rule("random_tick_speed".into())
+                Row::Category("minecraft:updates".into()),
+                Row::Rule("minecraft:random_tick_speed".into())
             ]
         );
     }
@@ -783,18 +801,18 @@ mod tests {
         let mut s = RulesScreen::new(&GameRules::default());
         assert!(s.changes().is_empty());
         s.unfocus();
-        s.number("random_tick_speed").unwrap().focused = true;
+        s.number("minecraft:random_tick_speed").unwrap().focused = true;
         s.edit(|b| b.set_value("10"));
         assert_eq!(
             s.changes(),
-            vec![("random_tick_speed".to_owned(), Value::Int(10))]
+            vec![("minecraft:random_tick_speed".to_owned(), Value::Int(10))]
         );
         s.edit(|b| b.set_value("ten"));
         assert!(s.invalid());
         // The last valid value stays, as the responder left it.
         assert_eq!(
             s.changes(),
-            vec![("random_tick_speed".to_owned(), Value::Int(10))]
+            vec![("minecraft:random_tick_speed".to_owned(), Value::Int(10))]
         );
         // Leaving with changes asks; No returns, Yes discards.
         assert_eq!(s.escape(), None);

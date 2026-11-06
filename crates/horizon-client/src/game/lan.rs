@@ -935,7 +935,8 @@ pub(super) fn mob_meta(
                 defaults.push((19, serializer::BOOLEAN, Value::Bool(false)));
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
-            let profession = horizon_client::mobs::villager::profession(e.variant2).id;
+            let profession =
+                horizon_client::mobs::villager::profession(e.profession.index().unwrap_or(0)).id;
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),
@@ -1852,15 +1853,16 @@ impl Game<'_> {
             };
             host.hub.seat_order += 1;
             let order = host.hub.seat_order;
-            let g = &mut host.hub.guests[i];
-            if let Some(horizon_world::nbt::Tag::Compound(p)) = &mut g.saved {
-                p.remove(&"RootVehicle".into());
-            }
-            g.vehicle = Some(id);
-            g.vehicle_order = order;
-            g.saved_vehicle = None;
-            // Pair the stationary restored entities before their passenger packet.
-            g.moved = true;
+            host.hub.guests.update(i, |g| {
+                if let Some(horizon_world::nbt::Tag::Compound(p)) = &mut g.saved {
+                    p.remove(&"RootVehicle".into());
+                }
+                g.vehicle = Some(id);
+                g.vehicle_order = order;
+                g.saved_vehicle = None;
+                // Pair the stationary restored entities before their passenger packet.
+                g.moved = true;
+            });
         }
     }
     /// The file name of a player's advancements and statistics: an
@@ -1956,16 +1958,16 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        if let Some(g) = host.hub.guest_mut(conn)
-            && let Some(json) = saved
-        {
-            let mut progress = horizon_client::advancements::Progress::from_json(&json);
-            // PlayerAdvancements.applyFrom: advancements this server lacks are dropped.
-            progress
-                .criteria
-                .retain(|id, _| tree.by_id.contains_key(id));
-            g.advancements = progress;
-            g.advancements_loaded = true;
+        if let Some(json) = saved {
+            let _ = host.hub.update_guest(conn, |g| {
+                let mut progress = horizon_client::advancements::Progress::from_json(&json);
+                // PlayerAdvancements.applyFrom: advancements this server lacks are dropped.
+                progress
+                    .criteria
+                    .retain(|id, _| tree.by_id.contains_key(id));
+                g.advancements = progress;
+                g.advancements_loaded = true;
+            });
         }
         let mut stats =
             super::stats::Stats::read(&super::stats::player_json(&self.world_root, "stats", uuid));
@@ -3158,34 +3160,40 @@ impl Game<'_> {
         let root = self.world_root.clone();
         let in_place = host.hub.config.dimension.clone();
         let owner = host.owner.as_mut();
-        let Some(g) = host.hub.guest_mut(conn) else {
+        let Some((known, uuid, name)) = host.hub.update_guest(conn, |g| {
+            // PlayerList.loadPlayerData: the owner gets the world's player file,
+            // everyone else their own.
+            let known = match owner.filter(|o| o.uuid == g.uuid) {
+                Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
+                None => playerdata::load(g, &root),
+            };
+            self.guest_attachments
+                .insert(g.conn, std::mem::take(&mut g.attachments));
+            // PlayerEvent.LoadFromFile: the player's data is read and applied,
+            // the player not yet placed.
+            (known, g.uuid, g.name.clone())
+        }) else {
             return;
         };
-        // PlayerList.loadPlayerData: the owner gets the world's player file,
-        // everyone else their own.
-        let known = match owner.filter(|o| o.uuid == g.uuid) {
-            Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
-            None => playerdata::load(g, &root),
-        };
-        self.guest_attachments
-            .insert(g.conn, std::mem::take(&mut g.attachments));
-        // PlayerEvent.LoadFromFile: the player's data is read and applied,
-        // the player not yet placed.
-        let (uuid, name) = (g.uuid, g.name.clone());
         self.native_player_load_from_file(uuid, &name, &playerdata::directory(&root));
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some(g) = host.hub.guest_mut(conn) else {
+        if host
+            .hub
+            .update_guest(conn, |g| {
+                // PrepareSpawnTask: with no saved rotation the player faces the world
+                // spawn's angle (`/setworldspawn ... <angle>`).
+                playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
+                if !known || force {
+                    g.game_mode = default_mode;
+                    // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
+                    g.abilities.update_for_mode(default_mode);
+                }
+            })
+            .is_none()
+        {
             return;
-        };
-        // PrepareSpawnTask: with no saved rotation the player faces the world
-        // spawn's angle (`/setworldspawn ... <angle>`).
-        playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
-        if !known || force {
-            g.game_mode = default_mode;
-            // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
-            g.abilities.update_for_mode(default_mode);
         }
         if !known {
             // ServerPlayer.adjustSpawnLocation: a player new to the world
@@ -3200,31 +3208,38 @@ impl Game<'_> {
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            let Some(g) = host.hub.guest_mut(conn) else {
+            if host
+                .hub
+                .update_guest(conn, |g| {
+                    g.position = feet;
+                    g.previous_position = feet;
+                    // Ready.spawn uses the world spawn's yaw and pitch.
+                    [g.yaw, g.pitch] = self.level.world_spawn_angle;
+                    g.head_yaw = g.yaw;
+                    g.health = 20.0;
+                    g.food = 20;
+                    g.dimension = super::Dim::Overworld.id().to_owned();
+                })
+                .is_none()
+            {
                 return;
-            };
-            g.position = feet;
-            g.previous_position = feet;
-            // Ready.spawn uses the world spawn's yaw and pitch.
-            [g.yaw, g.pitch] = self.level.world_spawn_angle;
-            g.head_yaw = g.yaw;
-            g.health = 20.0;
-            g.food = 20;
-            g.dimension = super::Dim::Overworld.id().to_owned();
+            }
         }
         // A server places each player in their own level (`PlayerList.placeNewPlayer`).
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some(g) = host.hub.guest_mut(conn) else {
+        let back = self.dim;
+        let Some((level, elsewhere)) = host.hub.update_guest(conn, |g| {
+            let level = super::Dim::from_id(&g.dimension);
+            let elsewhere = level != back;
+            if !elsewhere {
+                g.dimension = in_place;
+            }
+            (level, elsewhere)
+        }) else {
             return;
         };
-        let back = self.dim;
-        let level = super::Dim::from_id(&g.dimension);
-        let elsewhere = level != back;
-        if !elsewhere {
-            g.dimension = in_place;
-        }
         self.load_guest_records(conn);
         // The mods say which commands the newcomer's tree keeps.
         self.native_filter_commands(Some(conn));
@@ -4360,6 +4375,31 @@ mod tests {
         });
     }
 
+    #[test]
+    fn unresolved_profession_sends_none_without_changing_saved_identity() {
+        let types = super::super::mods::living_mod_types();
+        let hub = meta_hub("MissingProfessionMeta");
+        let mut mob = Mob::new(
+            1,
+            types["minecraft:villager"].clone(),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        let metadata = |mob: &Mob| {
+            let (mut entries, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(mob, &hub, None, 0, &mut entries, &mut defaults);
+            entries
+                .into_iter()
+                .find(|(_, serializer, _)| *serializer == serializer::VILLAGER_DATA)
+        };
+        let expected = metadata(&mob);
+        assert!(expected.is_some());
+        mob.extra.profession =
+            horizon_client::mobs::villager::ProfessionState::from_id("example:engineer");
+        assert_eq!(metadata(&mob), expected);
+        assert_eq!(mob.extra.profession.id(), "example:engineer");
+    }
+
     /// A content mod's living type sends the entity data of its template's
     /// class (`Zombie.DATA_BABY_ID`, the villager's unhappy counter), entry
     /// for entry what its template sends.
@@ -4393,7 +4433,17 @@ mod tests {
     /// A hub with no players and empty registries, for `mob_meta`.
     fn meta_hub(name: &str) -> horizon_client::lan::hub::Hub {
         use horizon_client::lan::{Lan, NetConfig, chunks::ChunkEncoder, data, hub};
-        let sync = std::sync::Arc::new(data::SyncData::empty());
+        let mut sync = data::SyncData::empty();
+        for (registry, id) in [
+            ("minecraft:villager_type", "minecraft:plains"),
+            ("minecraft:villager_profession", "minecraft:none"),
+        ] {
+            sync.builtin.registries.insert(
+                registry.into(),
+                horizon_protocol::registry::Ids::from_names(vec![id.into()]),
+            );
+        }
+        let sync = std::sync::Arc::new(sync);
         let config = NetConfig {
             announce: false,
             ..NetConfig::loopback(0, name.into(), 2)

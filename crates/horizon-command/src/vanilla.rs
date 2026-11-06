@@ -308,8 +308,9 @@ fn registered_with_features(
     let gr = d.literal(root, "gamerule");
     d.requires(gr, GAMEMASTERS);
     for rule in registry.available_rules(minecart_improvements) {
-        for name in [rule.name.to_owned(), format!("minecraft:{}", rule.name)] {
-            let r = d.literal(gr, &name);
+        for name in std::iter::once(rule.name.as_str()).chain(rule.name.strip_prefix("minecraft:"))
+        {
+            let r = d.literal(gr, name);
             d.executes(r, "gamerule");
             let ty = match rule.default {
                 Value::Bool(_) => ArgType::Bool,

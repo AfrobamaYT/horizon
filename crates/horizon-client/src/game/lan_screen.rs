@@ -570,7 +570,7 @@ impl Game<'_> {
         let features = if entries.iter().any(|e| {
             horizon_client::gamerules::rule_registry()
                 .rule(&e.name)
-                .is_some_and(|r| r.name == "max_minecart_speed")
+                .is_some_and(|r| r.name == "minecraft:max_minecart_speed")
         }) {
             vec![horizon_client::gamerules::MINECART_IMPROVEMENTS.to_owned()]
         } else {
@@ -674,7 +674,7 @@ impl Game<'_> {
                     entries: changes
                         .into_iter()
                         .map(|(name, value)| play::GameRuleEntry {
-                            name: format!("minecraft:{name}"),
+                            name,
                             value: value.to_string(),
                         })
                         .collect(),
