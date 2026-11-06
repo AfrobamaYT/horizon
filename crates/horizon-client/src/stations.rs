@@ -499,17 +499,17 @@ pub fn grindstone_experience(
 pub enum Smithing {
     Transform {
         id: String,
-        template: Ingredient,
+        template: Option<Ingredient>,
         base: Ingredient,
-        addition: Ingredient,
-        result: String,
+        addition: Option<Ingredient>,
+        result: crate::crafting::Template,
     },
     Trim {
         id: String,
         template: Ingredient,
         base: Ingredient,
         addition: Ingredient,
-        pattern: String,
+        pattern: mod_api::RecipeTrimPattern,
     },
 }
 #[derive(Clone, Debug)]
@@ -529,27 +529,30 @@ impl ParsedStationRecipe {
         match v["type"].as_str().unwrap_or("") {
             "minecraft:smithing_transform" => Some(Self::Smithing(Smithing::Transform {
                 id,
-                template: ingredient(&v["template"], items),
+                template: v.get("template").map(|v| ingredient(v, items)),
                 base: ingredient(&v["base"], items),
-                addition: ingredient(&v["addition"], items),
-                result: horizon_world::loot::recipe_result_id(&v["result"])
-                    .unwrap_or("minecraft:air")
-                    .to_owned(),
+                addition: v.get("addition").map(|v| ingredient(v, items)),
+                result: crate::crafting::Template::parse(&v["result"])?,
             })),
             "minecraft:smithing_trim" => Some(Self::Smithing(Smithing::Trim {
                 id,
                 template: ingredient(&v["template"], items),
                 base: ingredient(&v["base"], items),
                 addition: ingredient(&v["addition"], items),
-                pattern: v["pattern"].as_str().unwrap_or("").to_owned(),
+                pattern: if let Some(id) = v["pattern"].as_str() {
+                    mod_api::RecipeTrimPattern::Reference(id.to_owned())
+                } else {
+                    mod_api::RecipeTrimPattern::Inline {
+                        asset_id: v["pattern"]["asset_id"].as_str()?.to_owned(),
+                        description: crate::crafting::json_tag(v["pattern"].get("description")?),
+                        decal: v["pattern"]["decal"].as_bool().unwrap_or(false),
+                    }
+                },
             })),
             "minecraft:stonecutting" => Some(Self::Stonecutting(Stonecutting {
                 id,
                 input: ingredient(&v["ingredient"], items),
-                result: ItemStack::new(
-                    horizon_world::loot::recipe_result_id(&v["result"]).unwrap_or("minecraft:air"),
-                    crate::crafting::template_count(&v["result"])?,
-                ),
+                result: crate::crafting::Template::parse(&v["result"])?.create(),
             })),
             _ => None,
         }
@@ -571,7 +574,7 @@ impl ParsedStationRecipe {
                 template: template.clone(),
                 base: base.clone(),
                 addition: addition.clone(),
-                result: result.clone(),
+                result: result.view(),
             },
             Self::Smithing(Smithing::Trim {
                 template,
@@ -678,22 +681,20 @@ impl StationRecipes {
     }
     fn slot_ok(&self, context: &LoopContext, slot: usize, stack: &ItemStack) -> bool {
         self.smithing_additions[slot].contains(&*stack.item)
-            || self.smithing.iter().any(|r| {
-                let (t, b, a) = match r {
-                    Smithing::Transform {
-                        template,
-                        base,
-                        addition,
-                        ..
-                    }
-                    | Smithing::Trim {
-                        template,
-                        base,
-                        addition,
-                        ..
-                    } => (template, base, addition),
-                };
-                [t, b, a][slot].test_in(context, stack)
+            || self.smithing.iter().any(|r| match r {
+                Smithing::Transform {
+                    template,
+                    base,
+                    addition,
+                    ..
+                } => [template.as_ref(), Some(base), addition.as_ref()][slot]
+                    .is_some_and(|i| i.test_in(context, stack)),
+                Smithing::Trim {
+                    template,
+                    base,
+                    addition,
+                    ..
+                } => [template, base, addition][slot].test_in(context, stack),
             })
     }
     /// `RecipePropertySet` SMITHING_TEMPLATE / BASE / ADDITION.
@@ -721,7 +722,7 @@ impl StationRecipes {
         base: Option<&ItemStack>,
         addition: Option<&ItemStack>,
     ) -> Option<(&str, ItemStack)> {
-        let (template, base, addition) = (template?, base?, addition?);
+        let base = base?;
         for r in &self.smithing {
             match r {
                 Smithing::Transform {
@@ -731,12 +732,14 @@ impl StationRecipes {
                     addition: a,
                     result,
                 } => {
-                    if t.test_in(context, template)
-                        && b.test_in(context, base)
-                        && a.test_in(context, addition)
+                    if t.as_ref().map_or(template.is_none(), |i| {
+                        template.is_some_and(|s| i.test_in(context, s))
+                    }) && b.test_in(context, base)
+                        && a.as_ref().map_or(addition.is_none(), |i| {
+                            addition.is_some_and(|s| i.test_in(context, s))
+                        })
                     {
-                        // SmithingTransformRecipe: transmute the base keeping its components.
-                        return Some((id.as_str(), base.transmute(result, 1)));
+                        return Some((id.as_str(), result.over(base, 0)));
                     }
                 }
                 Smithing::Trim {
@@ -747,11 +750,11 @@ impl StationRecipes {
                     pattern,
                     ..
                 } => {
-                    if t.test_in(context, template)
+                    if template.is_some_and(|s| t.test_in(context, s))
                         && b.test_in(context, base)
-                        && a.test_in(context, addition)
+                        && addition.is_some_and(|s| a.test_in(context, s))
                     {
-                        return apply_trim(e, base, addition, pattern).map(|r| (id.as_str(), r));
+                        return apply_trim(e, base, addition?, pattern).map(|r| (id.as_str(), r));
                     }
                 }
             }
@@ -793,8 +796,13 @@ fn apply_trim(
     e: &Enchantments,
     base: &ItemStack,
     material: &ItemStack,
-    pattern: &str,
+    pattern: &mod_api::RecipeTrimPattern,
 ) -> Option<ItemStack> {
+    let pattern = match pattern {
+        mod_api::RecipeTrimPattern::Reference(id) => id.as_str(),
+        mod_api::RecipeTrimPattern::Inline { asset_id, .. } => asset_id.as_str(),
+        _ => return None,
+    };
     let material = e.props(&material.item)?.trim_material.clone()?;
     let trim = (Arc::from(material.as_str()), Arc::from(pattern));
     if base.data().and_then(|d| d.trim.as_ref()) == Some(&trim) {
@@ -1142,6 +1150,83 @@ mod tests {
         let xp = grindstone_experience(&e, &mut r, Some(&s), None);
         assert!((12..24).contains(&xp));
     }
+    #[test]
+    fn stonecutting_component_result_is_retained() {
+        let items = Items::for_tests(Default::default());
+        let json = serde_json::json!({"type":"minecraft:stonecutting","ingredient":"minecraft:stone","result":{"id":"minecraft:diamond","count":2,"components":{"minecraft:damage":7}}});
+        let rule = ParsedStationRecipe::parse("test:cut".into(), &json, &items)
+            .unwrap()
+            .rule();
+        let mod_api::RecipeRule::Stonecutting { result, .. } = rule else {
+            panic!("wrong rule")
+        };
+        assert_eq!(result.item.as_ref(), "minecraft:diamond");
+        assert_eq!(result.count, 2);
+        assert_eq!(result.damage, 7);
+    }
+
+    #[test]
+    fn smithing_transform_omitted_slots_match_empty() {
+        let items = Items::for_tests(Default::default());
+        let json = serde_json::json!({"type":"minecraft:smithing_transform","base":"minecraft:stone","result":"minecraft:diamond"});
+        let parsed = ParsedStationRecipe::parse("test:smith".into(), &json, &items).unwrap();
+        assert!(matches!(
+            parsed.rule(),
+            mod_api::RecipeRule::SmithingTransform {
+                template: None,
+                addition: None,
+                ..
+            }
+        ));
+        let ParsedStationRecipe::Smithing(recipe) = parsed else {
+            panic!("wrong rule")
+        };
+        let stations = StationRecipes {
+            smithing: vec![recipe],
+            ..Default::default()
+        };
+        let base = ItemStack::new("minecraft:stone", 1);
+        let ench = Enchantments::default();
+        let ctx = crate::test_resources::server_loop_context();
+        assert!(
+            stations
+                .smithing_result(ctx, &ench, None, Some(&base), None)
+                .is_some()
+        );
+        assert!(
+            stations
+                .smithing_result(ctx, &ench, Some(&base), Some(&base), None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn smithing_inline_trim_pattern_is_retained() {
+        let items = Items::for_tests(Default::default());
+        let json = serde_json::json!({"type":"minecraft:smithing_trim","template":"minecraft:stick","base":"minecraft:stone","addition":"minecraft:iron_ingot","pattern":{"asset_id":"example:wave","description":{"translate":"trim.example.wave"},"decal":true}});
+        let rule = ParsedStationRecipe::parse("test:trim".into(), &json, &items)
+            .unwrap()
+            .rule();
+        let mod_api::RecipeRule::SmithingTrim {
+            pattern:
+                mod_api::RecipeTrimPattern::Inline {
+                    asset_id,
+                    description,
+                    decal,
+                },
+            ..
+        } = rule
+        else {
+            panic!("wrong rule")
+        };
+        assert_eq!(asset_id, "example:wave");
+        assert_eq!(
+            description.get("translate"),
+            Some(&horizon_world::nbt::Tag::String("trim.example.wave".into()))
+        );
+        assert!(decal);
+    }
+
     #[test]
     fn smithing_ingredient_parses_holders() {
         let items = sample_items();

@@ -79,7 +79,7 @@ pub(crate) fn template_count(v: &Value) -> Option<u32> {
     }
 }
 impl Template {
-    fn parse(v: &Value) -> Option<Self> {
+    pub(crate) fn parse(v: &Value) -> Option<Self> {
         let components = v.get("components").map(json_tag);
         let (damage, extra) = crate::item_data::decode_components(components.as_ref());
         Some(Self {
@@ -90,7 +90,7 @@ impl Template {
             components,
         })
     }
-    fn view(&self) -> mod_api::RecipeTemplate {
+    pub(crate) fn view(&self) -> mod_api::RecipeTemplate {
         mod_api::RecipeTemplate::new(
             self.item.as_deref().map(str::to_owned),
             self.count,
@@ -111,7 +111,7 @@ impl Template {
     }
     /// `TransmuteRecipe.createWithOriginalComponents`: the input's component
     /// patch on the result item, then the template's own components over it.
-    fn over(&self, input: &ItemStack, extra_count: u32) -> ItemStack {
+    pub(crate) fn over(&self, input: &ItemStack, extra_count: u32) -> ItemStack {
         let original = assembly_components(input);
         let result = self
             .components
@@ -173,7 +173,7 @@ fn assembly_components(stack: &ItemStack) -> Tag {
     Tag::Compound(components)
 }
 /// A JSON recipe value as the NBT a component codec reads.
-fn json_tag(v: &Value) -> Tag {
+pub(crate) fn json_tag(v: &Value) -> Tag {
     match v {
         Value::Null => Tag::End,
         Value::Bool(b) => Tag::Byte(i8::from(*b)),
@@ -211,12 +211,15 @@ impl Recipe {
 #[derive(Clone, Debug)]
 pub enum Special {
     /// A patterned banner and a blank one of the same colour copy the patterns.
-    BannerDuplicate { banner: Ingredient, result: String },
+    BannerDuplicate {
+        banner: Ingredient,
+        result: Template,
+    },
     /// A banner decorates an undecorated shield.
     ShieldDecoration {
         banner: Ingredient,
         target: Ingredient,
-        result: String,
+        result: Template,
     },
     /// `TransmuteRecipe`: one input, 1..8 materials; shulker box and bundle
     /// dyeing, map cloning.
@@ -294,7 +297,7 @@ impl Special {
         match self {
             Self::BannerDuplicate { banner, result } => Rule::BannerDuplicate {
                 banner: banner.clone(),
-                result: result.clone(),
+                result: result.view(),
             },
             Self::ShieldDecoration {
                 banner,
@@ -303,7 +306,7 @@ impl Special {
             } => Rule::ShieldDecoration {
                 banner: banner.clone(),
                 target: target.clone(),
-                result: result.clone(),
+                result: result.view(),
             },
             Self::Transmute {
                 input,
@@ -938,11 +941,7 @@ impl Special {
                     .iter()
                     .find(|s| (1..=banner::MAX_LAYERS).contains(&banner::layers(s).len()))?;
                 // TransmuteRecipe.createWithOriginalComponents: the source's components.
-                ItemStack {
-                    item: Arc::from(result.as_str()),
-                    count: 1,
-                    ..(**source).clone()
-                }
+                result.over(source, 0)
             }
             Self::ShieldDecoration {
                 banner: ing,
@@ -958,11 +957,7 @@ impl Special {
                     }
                 }
                 let (banner_stack, shield) = (banner_stack?, shield?);
-                let mut out = ItemStack {
-                    item: Arc::from(result.as_str()),
-                    count: 1,
-                    ..shield.clone()
-                };
+                let mut out = result.over(shield, 0);
                 let data = out.data_mut();
                 data.banner_patterns = banner::layers(banner_stack).to_vec();
                 data.base_color = banner::banner_color(&banner_stack.item).map(Arc::from);
@@ -1721,22 +1716,18 @@ impl Recipes {
                 }
                 "minecraft:crafting_special_bannerduplicate" => special(
                     ing("banner")
-                        .zip(horizon_world::loot::recipe_result_id(&v["result"]))
-                        .map(|(banner, id)| Special::BannerDuplicate {
-                            banner,
-                            result: id.to_owned(),
-                        }),
+                        .zip(result())
+                        .map(|(banner, result)| Special::BannerDuplicate { banner, result }),
                 ),
-                "minecraft:crafting_special_shielddecoration" => special(
-                    ing("banner")
-                        .zip(ing("target"))
-                        .zip(horizon_world::loot::recipe_result_id(&v["result"]))
-                        .map(|((banner, target), id)| Special::ShieldDecoration {
+                "minecraft:crafting_special_shielddecoration" => {
+                    special(ing("banner").zip(ing("target")).zip(result()).map(
+                        |((banner, target), result)| Special::ShieldDecoration {
                             banner,
                             target,
-                            result: id.to_owned(),
-                        }),
-                ),
+                            result,
+                        },
+                    ))
+                }
                 "minecraft:crafting_transmute" => special((|| {
                     let (min, max) = bounds(v.get("material_count"), (1, 1), (1, 8));
                     Some(Special::Transmute {
@@ -2418,7 +2409,7 @@ mod tests {
             panic!("missing smithing rule")
         };
         assert_eq!(base.order, ["minecraft:stone"]);
-        assert_eq!(result, "minecraft:diamond");
+        assert_eq!(result.item.as_deref(), Some("minecraft:diamond"));
         assert!(
             smith.results.is_empty(),
             "smithing output inherits components"
@@ -2449,7 +2440,9 @@ mod tests {
         else {
             panic!("missing smithing trim rule")
         };
-        assert_eq!(pattern, "minecraft:coast");
+        assert!(
+            matches!(pattern, mod_api::RecipeTrimPattern::Reference(id) if id == "minecraft:coast")
+        );
         assert_eq!(addition.order, ["minecraft:iron_ingot"]);
         assert!(trim.results.is_empty());
         assert!(
@@ -2468,6 +2461,70 @@ mod tests {
         let custom = &recipes.by_type["example:machine"][0];
         assert!(custom.rule.is_none());
         assert_eq!(custom.json["value"], 42);
+    }
+
+    #[test]
+    fn recipe_template_patch_survives_special_and_smithing_parse() {
+        let items = Items::for_tests(HashMap::new());
+        let template = r#"{"id":"minecraft:diamond","count":2,"components":{"minecraft:custom_data":{"rule":1}}}"#;
+        let named = |name: &str, json: String| {
+            let file = Arc::new(serde_json::from_str::<Value>(&json).unwrap());
+            ResolvedRecipe {
+                name: name.into(),
+                resolved: file.clone(),
+                file,
+            }
+        };
+        let sources = ResolvedSources {
+            recipes: vec![
+                named(
+                    "banner",
+                    format!(
+                        r#"{{"type":"minecraft:crafting_special_bannerduplicate","banner":"minecraft:white_banner","result":{template}}}"#
+                    ),
+                ),
+                named(
+                    "shield",
+                    format!(
+                        r#"{{"type":"minecraft:crafting_special_shielddecoration","banner":"minecraft:white_banner","target":"minecraft:shield","result":{template}}}"#
+                    ),
+                ),
+                named(
+                    "smith",
+                    format!(
+                        r#"{{"type":"minecraft:smithing_transform","base":"minecraft:stone","result":{template}}}"#
+                    ),
+                ),
+            ],
+            ..ResolvedSources::default()
+        };
+        let recipes =
+            Recipes::from_resolved(&std::env::temp_dir(), &items, &PackOverlay::NONE, &sources)
+                .unwrap();
+        for kind in [
+            "minecraft:crafting_special_bannerduplicate",
+            "minecraft:crafting_special_shielddecoration",
+            "minecraft:smithing_transform",
+        ] {
+            let result = match recipes.by_type[kind][0].rule.as_ref().unwrap() {
+                mod_api::RecipeRule::BannerDuplicate { result, .. }
+                | mod_api::RecipeRule::ShieldDecoration { result, .. }
+                | mod_api::RecipeRule::SmithingTransform { result, .. } => result,
+                _ => panic!("wrong rule"),
+            };
+            assert_eq!(result.item.as_deref(), Some("minecraft:diamond"));
+            assert_eq!(result.count, 2);
+            assert_eq!(
+                result
+                    .components
+                    .as_ref()
+                    .unwrap()
+                    .get("minecraft:custom_data")
+                    .unwrap()
+                    .get("rule"),
+                Some(&Tag::Int(1))
+            );
+        }
     }
 
     #[test]
@@ -3147,7 +3204,7 @@ mod tests {
     fn banner_duplicate_copies_the_patterns_of_the_same_colour() {
         let recipe = Special::BannerDuplicate {
             banner: ingredient(&["minecraft:white_banner"]),
-            result: "minecraft:white_banner".into(),
+            result: Template::parse(&serde_json::json!("minecraft:white_banner")).unwrap(),
         };
         let source = patterned("minecraft:white_banner");
         let blank = ItemStack::new("minecraft:white_banner", 1);
@@ -3165,7 +3222,7 @@ mod tests {
         let recipe = Special::ShieldDecoration {
             banner: ingredient(&["minecraft:red_banner"]),
             target: ingredient(&["minecraft:shield"]),
-            result: "minecraft:shield".into(),
+            result: Template::parse(&serde_json::json!("minecraft:shield")).unwrap(),
         };
         let banner = patterned("minecraft:red_banner");
         let shield = ItemStack::new("minecraft:shield", 1);

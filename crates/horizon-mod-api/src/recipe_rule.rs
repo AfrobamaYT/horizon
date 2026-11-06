@@ -45,6 +45,23 @@ impl FireworkShapeIngredient {
     }
 }
 
+/// A trim pattern registry reference or an inline pattern definition.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum RecipeTrimPattern {
+    /// Registry identifier.
+    Reference(String),
+    /// Inline registry value, including its text component.
+    Inline {
+        /// Asset identifier.
+        asset_id: String,
+        /// Description text component in its JSON data form.
+        description: Tag,
+        /// Whether the pattern is a decal.
+        decal: bool,
+    },
+}
+
 /// The parsed rule of a stonecutting, smithing or special crafting recipe.
 /// These are the same resolved ingredients and rules the game uses, not a
 /// second recipe implementation. Only `Stonecutting` has a fixed output;
@@ -63,16 +80,16 @@ pub enum RecipeRule {
         /// Exact output stack.
         result: ItemStack,
     },
-    /// Replace the base item, retaining its components and setting count to one.
+    /// Apply a result template over the base item and its components.
     SmithingTransform {
-        /// Template slot.
-        template: Ingredient,
+        /// Optional template slot; absent requires an empty slot.
+        template: Option<Ingredient>,
         /// Base slot; supplies the output components.
         base: Ingredient,
-        /// Addition slot.
-        addition: Ingredient,
-        /// Replacement item, not a fixed output stack.
-        result: String,
+        /// Optional addition slot; absent requires an empty slot.
+        addition: Option<Ingredient>,
+        /// Result template applied to inherited components.
+        result: RecipeTemplate,
     },
     /// Apply the pattern using the addition's trim material to the base.
     SmithingTrim {
@@ -82,15 +99,15 @@ pub enum RecipeRule {
         base: Ingredient,
         /// Addition slot; selects the trim material.
         addition: Ingredient,
-        /// Trim pattern registry id.
-        pattern: String,
+        /// Registry reference or inline trim pattern.
+        pattern: RecipeTrimPattern,
     },
     /// Copy a patterned banner onto a blank banner of the same colour.
     BannerDuplicate {
         /// Banner ingredient.
         banner: Ingredient,
-        /// Result item; patterns come from the grid.
-        result: String,
+        /// Result template; patterns come from the grid.
+        result: RecipeTemplate,
     },
     /// Apply a banner's patterns to an undecorated shield.
     ShieldDecoration {
@@ -98,8 +115,8 @@ pub enum RecipeRule {
         banner: Ingredient,
         /// Shield to decorate.
         target: Ingredient,
-        /// Result item; components come from the grid.
-        result: String,
+        /// Result template; components come from the grid.
+        result: RecipeTemplate,
     },
     /// One input and a bounded number of materials, retaining input components.
     Transmute {

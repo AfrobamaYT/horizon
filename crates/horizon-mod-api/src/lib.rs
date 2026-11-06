@@ -100,7 +100,9 @@ pub use phase::{
 mod advancement_progress;
 pub use advancement_progress::{AdvancementProgress, CriterionProgress};
 mod recipe_rule;
-pub use recipe_rule::{FireworkShape, FireworkShapeIngredient, RecipeRule, RecipeTemplate};
+pub use recipe_rule::{
+    FireworkShape, FireworkShapeIngredient, RecipeRule, RecipeTemplate, RecipeTrimPattern,
+};
 mod criteria;
 pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
 mod packets;

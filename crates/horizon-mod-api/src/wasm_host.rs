@@ -992,6 +992,66 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn smithing_rule_generated_wire_roundtrip() {
+        use crate::{Ingredient, Recipe, RecipeRule, RecipeTemplate, RecipeTrimPattern, Tag};
+        let mut recipe = Recipe::new(
+            "test:smith",
+            "minecraft:smithing_transform",
+            Arc::new(serde_json::json!({})),
+        );
+        recipe.rule = Some(RecipeRule::SmithingTransform {
+            template: None,
+            base: Ingredient::of(vec!["test:base".into()]),
+            addition: None,
+            result: RecipeTemplate::new(
+                Some("test:result".into()),
+                2,
+                Some(Tag::compound([("test:patch", Tag::Int(7))])),
+            ),
+        });
+        let Some(RecipeRule::SmithingTransform {
+            template,
+            addition,
+            result,
+            ..
+        }) = glue::recipe_roundtrip(&recipe).unwrap().rule
+        else {
+            panic!("wrong rule")
+        };
+        assert!(template.is_none() && addition.is_none());
+        assert_eq!(result.count, 2);
+        assert_eq!(
+            result.components.unwrap().get("test:patch"),
+            Some(&Tag::Int(7))
+        );
+        recipe.rule = Some(RecipeRule::SmithingTrim {
+            template: Ingredient::of(vec![]),
+            base: Ingredient::of(vec![]),
+            addition: Ingredient::of(vec![]),
+            pattern: RecipeTrimPattern::Inline {
+                asset_id: "test:pattern".into(),
+                description: Tag::String("description".into()),
+                decal: true,
+            },
+        });
+        let Some(RecipeRule::SmithingTrim {
+            pattern:
+                RecipeTrimPattern::Inline {
+                    asset_id,
+                    description,
+                    decal,
+                },
+            ..
+        }) = glue::recipe_roundtrip(&recipe).unwrap().rule
+        else {
+            panic!("wrong rule")
+        };
+        assert_eq!(asset_id, "test:pattern");
+        assert_eq!(description, Tag::String("description".into()));
+        assert!(decal);
+    }
+
     fn group(wait: Duration) -> Arc<Group> {
         let engine = wasmtime::Engine::default();
         let limits = wasmtime::StoreLimitsBuilder::new().build();
