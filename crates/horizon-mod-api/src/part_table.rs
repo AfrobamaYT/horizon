@@ -148,6 +148,7 @@ struct PlaceProviderPart {
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TooltipAppenderPart {
+    mod_id: &'static str,
     mod_index: usize,
     component: Box<str>,
     placement: super::TooltipPlacement,
@@ -165,11 +166,28 @@ impl TooltipAppenderPart {
     }
     /// The appender that adds the lines.
     pub fn appender(&self) -> &dyn super::TooltipAppender {
-        &*self.appender
+        self
     }
     /// Whether its mod is enabled.
     pub fn enabled(&self) -> bool {
         super::mod_index_on(self.mod_index)
+    }
+}
+
+impl super::TooltipAppender for TooltipAppenderPart {
+    fn append(
+        &self,
+        host: &dyn super::ClientHost,
+        stack: &super::ItemStack,
+        context: &super::TooltipAppendContext,
+        lines: &mut Vec<(super::Text, u32)>,
+    ) {
+        let _guard = super::crash::enter_native_mod(super::crash::NativeModCall {
+            id: self.mod_id,
+            hook: "tooltip_appender",
+            part: Some(std::any::type_name_of_val(&*self.appender)),
+        });
+        self.appender.append(host, stack, context, lines);
     }
 }
 
@@ -1792,6 +1810,7 @@ impl Registrar for PartRegistrar {
             return;
         }
         self.parts.tooltip_appenders.push(TooltipAppenderPart {
+            mod_id: self.mod_id,
             mod_index: self.mod_index,
             component: component.into(),
             placement,
@@ -2584,6 +2603,53 @@ pub mod tests {
     impl ServerHost for NoHost {}
     #[cfg(test)]
     impl ClientHost for NoHost {}
+
+    #[test]
+    fn tooltip_appender_restores_owner_even_on_panic() {
+        struct Check(bool);
+        impl TooltipAppender for Check {
+            fn append(
+                &self,
+                _: &dyn ClientHost,
+                _: &ItemStack,
+                _: &TooltipAppendContext,
+                _: &mut Vec<(Text, u32)>,
+            ) {
+                assert_eq!(crate::crash::current_native_mod(), Some("inner"));
+                assert!(!self.0, "test unwind");
+            }
+        }
+        let context = TooltipAppendContext {
+            player: 0,
+            player_entity_id: 0,
+            advanced: false,
+            creative: false,
+            nested: false,
+        };
+        let stack = ItemStack::new("minecraft:stick", 1);
+        let outer = crate::crash::enter_native_mod(crate::crash::NativeModCall {
+            id: "outer",
+            hook: "outer",
+            part: None,
+        });
+        for panic in [false, true] {
+            let part = super::TooltipAppenderPart {
+                mod_id: "inner",
+                mod_index: 0,
+                component: "test:item".into(),
+                placement: TooltipPlacement::AfterAll,
+                appender: std::sync::Arc::new(Check(panic)),
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                part.appender()
+                    .append(&NoHost, &stack, &context, &mut Vec::new())
+            }));
+            assert_eq!(result.is_err(), panic);
+            assert_eq!(crate::crash::current_native_mod(), Some("outer"));
+        }
+        drop(outer);
+        assert_eq!(crate::crash::current_native_mod(), None);
+    }
 
     #[test]
     fn a_host_without_a_backend_refuses_handle_calls() {

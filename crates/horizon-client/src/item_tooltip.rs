@@ -805,18 +805,24 @@ impl DetailMarks {
     }
 }
 
-/// The line `placement` puts lines before (or after, at `end`) among the details, and their rank
-/// there: a component's lines that end at a line come before the lines that start at it.
-fn anchor(placement: &TooltipPlacement, starts: &[(&str, usize)], end: usize) -> (usize, u8) {
+/// The line and logical component boundary for a placement, with a rank at the same boundary.
+fn anchor(
+    placement: &TooltipPlacement,
+    starts: &[(&str, usize)],
+    end: usize,
+) -> (usize, usize, u8) {
     let start_of = |id: &str| starts.iter().position(|(component, _)| *component == id);
     match placement {
-        TooltipPlacement::BeforeAll => (starts.first().map_or(end, |s| s.1), 0),
-        TooltipPlacement::Before(id) => (start_of(id.as_str()).map_or(end, |i| starts[i].1), 1),
-        TooltipPlacement::After(id) => (
-            start_of(id.as_str()).map_or(end, |i| starts.get(i + 1).map_or(end, |s| s.1)),
-            0,
-        ),
-        TooltipPlacement::AfterAll => (end, 2),
+        TooltipPlacement::BeforeAll => (starts.first().map_or(end, |s| s.1), 0, 0),
+        TooltipPlacement::Before(id) => {
+            let i = start_of(id.as_str()).unwrap_or(starts.len());
+            (starts.get(i).map_or(end, |s| s.1), i, 1)
+        }
+        TooltipPlacement::After(id) => {
+            let i = start_of(id.as_str()).map_or(starts.len(), |i| i + 1);
+            (starts.get(i).map_or(end, |s| s.1), i, 0)
+        }
+        TooltipPlacement::AfterAll => (end, starts.len(), 2),
     }
 }
 
@@ -842,17 +848,17 @@ pub fn add_appender_lines<'a>(
         }
         let mut out = Vec::new();
         appender.append(host, stack, context, &mut out);
-        let (at, rank) = anchor(placement, starts, marks.finish);
-        added.push((at, rank, seq, out));
+        let (at, boundary, rank) = anchor(placement, starts, marks.finish);
+        added.push((at, boundary, rank, seq, out));
     }
     if added.is_empty() {
         return;
     }
-    added.sort_by_key(|(at, rank, seq, _)| (*at, *rank, *seq));
+    added.sort_by_key(|(at, boundary, rank, seq, _)| (*at, *boundary, *rank, *seq));
     let mut added = added.into_iter().peekable();
     let mut merged = Vec::with_capacity(lines.len());
     for (index, line) in std::mem::take(lines).into_iter().enumerate() {
-        while let Some((_, _, _, out)) = added.next_if(|(at, ..)| *at <= index) {
+        while let Some((_, _, _, _, out)) = added.next_if(|(at, ..)| *at <= index) {
             merged.extend(out);
         }
         merged.push(line);
@@ -1895,6 +1901,90 @@ mod tests {
     struct NoHost;
     impl mod_api::Host for NoHost {}
     impl ClientHost for NoHost {}
+
+    #[test]
+    fn empty_component_boundaries_keep_builder_order() {
+        let mut marks = DetailMarks::new(true);
+        for id in [
+            "minecraft:tropical_fish/pattern",
+            "minecraft:instrument",
+            "minecraft:map_id",
+            "minecraft:bees",
+            "minecraft:container",
+            "minecraft:banner_patterns",
+            "minecraft:written_book_content",
+            "minecraft:charged_projectiles",
+            "minecraft:fireworks",
+            "minecraft:potion_contents",
+            "minecraft:jukebox_playable",
+            "minecraft:trim",
+            "minecraft:stored_enchantments",
+            "minecraft:enchantments",
+            "minecraft:dyed_color",
+            "minecraft:lore",
+            "minecraft:attribute_modifiers",
+            "minecraft:unbreakable",
+            "minecraft:ominous_bottle_amplifier",
+            "minecraft:suspicious_stew_effects",
+            "minecraft:block_state",
+            "minecraft:entity_data",
+            "minecraft:block_entity_data",
+        ] {
+            marks.start(id, 1);
+        }
+        marks.end(1);
+        let before = TooltipPlacement::Before("minecraft:bees".into());
+        let after = TooltipPlacement::After("minecraft:enchantments".into());
+        let starts = marks.starts.as_deref().unwrap();
+        assert!(anchor(&TooltipPlacement::BeforeAll, starts, 1) < anchor(&before, starts, 1));
+        assert!(anchor(&before, starts, 1) < anchor(&after, starts, 1));
+        assert!(anchor(&after, starts, 1) < anchor(&TooltipPlacement::AfterAll, starts, 1));
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack
+            .data_mut()
+            .set_other("test:component", Some(Tag::Int(1)));
+        let names = [
+            Named("after"),
+            Named("before 1"),
+            Named("first"),
+            Named("before 2"),
+            Named("last"),
+        ];
+        let placements = [
+            &after,
+            &before,
+            &TooltipPlacement::BeforeAll,
+            &before,
+            &TooltipPlacement::AfterAll,
+        ];
+        let mut lines = vec![(Text::literal("name"), u32::MAX)];
+        add_appender_lines(
+            &mut lines,
+            &marks,
+            &stack,
+            None,
+            &NoHost,
+            &no_context(),
+            placements
+                .into_iter()
+                .zip(&names)
+                .map(|(placement, appender)| {
+                    (
+                        "test:component",
+                        placement,
+                        true,
+                        appender as &dyn TooltipAppender,
+                    )
+                }),
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .map(|(text, _)| text.plain())
+                .collect::<Vec<_>>(),
+            ["name", "first", "before 1", "before 2", "after", "last"]
+        );
+    }
 
     fn no_context() -> TooltipAppendContext {
         TooltipAppendContext {

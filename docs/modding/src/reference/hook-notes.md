@@ -205,6 +205,10 @@ requires a farmer at work and `mob_griefing` enabled.
   the stack and a `TooltipAppendContext` (the local player, `advanced`, `creative`, and `nested` for a crossbow's projectile),
   and adds its lines after the item's own lines and before the durability and advanced lines. The creative search doesn't read
   these lines, as it doesn't `item_tooltip`. A mod that reacts to every item keeps `item_tooltip`.
+  `Before`/`After` accept only the 23 vanilla anchors listed in `tooltip_appender.rs`, not other registered
+  components. The `registerAppender(TooltipLocation, ...)` overload is not represented. Several appenders may register
+  for one component; all run in registration order at an equal placement. The player is always the local player,
+  including for nested crossbow projectiles where vanilla passes no player; use `nested` to distinguish those calls.
 
 - An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
   block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the

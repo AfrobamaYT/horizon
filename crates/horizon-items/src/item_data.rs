@@ -190,6 +190,9 @@ impl StackData {
     /// components `components_tag` saves, plus the transient ones it leaves out
     /// (`map_post_processing`), without encoding anything.
     pub fn sets_component(&self, id: &str) -> bool {
+        if self.other.iter().any(|(key, _)| key == id) {
+            return true;
+        }
         match id {
             "minecraft:enchantments" => !self.enchantments.is_empty(),
             "minecraft:stored_enchantments" => !self.stored_enchantments.is_empty(),
@@ -369,7 +372,7 @@ impl ItemStack {
     pub fn carries_component(&self, info: Option<&ItemInfo>, id: &str) -> bool {
         let data = self.data();
         let own = if id == "minecraft:damage" {
-            self.damage > 0
+            self.damage > 0 || data.is_some_and(|d| d.sets_component(id))
         } else {
             data.is_some_and(|d| d.sets_component(id))
         };
@@ -1298,6 +1301,13 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
     if let Tag::Compound(map) = c {
         for (k, v) in map {
             let key = k.to_string_lossy();
+            if MODELLED.contains(&key.as_str())
+                && (key != "minecraft:damage" || damage == 0)
+                && !data.sets_component(&key)
+            {
+                data.other
+                    .push((key.clone(), canonical_other_component(&key, v)));
+            }
             let ominous_part = data.ominous_banner
                 && (matches!(key.as_str(), "minecraft:item_name" | "minecraft:rarity")
                     || (key == "minecraft:tooltip_display" && v == &ominous_tooltip_display()));
@@ -2053,6 +2063,49 @@ mod tests {
 #[cfg(test)]
 mod carried_component_tests {
     use super::*;
+
+    #[test]
+    fn explicit_empty_and_preserved_values_are_carried() {
+        let original = Tag::compound([("minecraft:potion_contents", Tag::compound([]))]);
+        let (_, extra) = decode_components(Some(&original));
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack.extra = extra;
+        assert!(stack.carries_component(None, "minecraft:potion_contents"));
+        assert_eq!(components_tag(0, stack.data()), Some(original));
+        stack
+            .data_mut()
+            .set_other("minecraft:potion_contents", None);
+        assert!(!stack.carries_component(None, "minecraft:potion_contents"));
+        stack
+            .data_mut()
+            .set_other("minecraft:repair_cost", Some(Tag::Int(5)));
+        assert!(stack.carries_component(None, "minecraft:repair_cost"));
+        assert_eq!(
+            components_tag(0, stack.data())
+                .unwrap()
+                .get("minecraft:repair_cost"),
+            Some(&Tag::Int(5))
+        );
+        stack
+            .data_mut()
+            .set_loot_component("minecraft:repair_cost", &serde_json::json!(5));
+        assert!(stack.carries_component(None, "minecraft:repair_cost"));
+    }
+
+    #[test]
+    #[ignore = "needs prepared item resources"]
+    fn default_component_presence_and_removal() {
+        let items = crate::items::prepared_items().expect("prepared item resources");
+        let info = items.get("minecraft:stick").expect("stick");
+        let component = info.components.first().expect("default component");
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        assert!(stack.carries_component(Some(info), component));
+        stack.data_mut().set_other(
+            &format!("!{component}"),
+            Some(Tag::Compound(Default::default())),
+        );
+        assert!(!stack.carries_component(Some(info), component));
+    }
 
     /// `map_post_processing` is transient: a stack carries it while `components_tag` saves
     /// nothing for it, so a presence check reads the live field.
