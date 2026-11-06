@@ -1591,13 +1591,14 @@ mod mob_equipment_command_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -1615,7 +1616,9 @@ mod mob_equipment_command_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -1696,7 +1699,7 @@ mod mob_equipment_command_tests {
                         .get("head")
                         .unwrap()
                         .get("id"),
-                    Some(&horizon_world::nbt::Tag::String("minecraft:stone".into()))
+                    Some(&horizon_core::nbt::Tag::String("minecraft:stone".into()))
                 );
             }
         });
@@ -1706,7 +1709,7 @@ mod mob_equipment_command_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn saddle_commands_round_trip_existing_model_and_saved_equipment() {
         use super::Slot;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             // Pig is the existing species saver; Husk needs the common projection.
             for (n, kind) in [(6, "pig"), (7, "husk")] {

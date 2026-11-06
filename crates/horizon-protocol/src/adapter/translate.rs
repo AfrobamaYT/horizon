@@ -1128,7 +1128,7 @@ mod tests {
             let packet = play::Clientbound::BlockEntityData(play::BlockEntityData {
                 pos: [1, 2, 3],
                 kind,
-                tag: horizon_world::nbt::Tag::Compound(Default::default()),
+                tag: horizon_core::nbt::Tag::Compound(Default::default()),
             });
             let body = strip_id(packet.encode());
             let translated = clientbound(

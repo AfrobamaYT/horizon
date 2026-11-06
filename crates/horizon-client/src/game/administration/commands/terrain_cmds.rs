@@ -861,7 +861,7 @@ mod loot_mine_component_tests {
     use super::*;
     use crate::game::{Audio, Options, Progress, Settings, load_resources};
     use horizon_client::{chunk::Chunk, containers::BlockEntity, save};
-    use horizon_world::nbt::{Compound, Tag};
+    use horizon_core::nbt::{Compound, Tag};
     use std::sync::Arc;
 
     fn slot(game: &Game<'_>, index: usize) -> ItemStack {
@@ -888,13 +888,14 @@ mod loot_mine_component_tests {
         );
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -908,7 +909,9 @@ mod loot_mine_component_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

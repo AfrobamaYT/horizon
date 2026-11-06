@@ -2634,13 +2634,14 @@ mod command_damage_listener_tests {
         );
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2654,7 +2655,9 @@ mod command_damage_listener_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -2715,7 +2718,10 @@ mod command_damage_listener_tests {
                     selected(&game, origin).expect("accepted command hit must already be heard");
                 assert_eq!(event.event, "minecraft:entity_damage");
                 assert_eq!(event.pos, [4.5, 200.0, 4.5]);
-                assert_eq!(event.source, Some(Who::Mob(id)));
+                assert_eq!(
+                    event.source,
+                    Some(horizon_client_core::who::EventSource::Mob(id))
+                );
                 assert_eq!(tick, before);
                 assert_eq!(
                     game.sculk.damaged.get(&id).copied(),

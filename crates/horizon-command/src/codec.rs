@@ -353,7 +353,7 @@ mod slot_range_tests {
                 resource_or_id(&mut reader, &reg, "minecraft:slot_source").is_err(),
                 "{name} crossed argument parsing"
             );
-            let (raw, _) = horizon_world::nbt::parse_snbt(&input).unwrap();
+            let (raw, _) = horizon_core::nbt::parse_snbt(&input).unwrap();
             let message = format!("Unknown element name:{name}");
             assert_eq!(
                 decode("minecraft:slot_source", &raw, &reg),
