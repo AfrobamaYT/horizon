@@ -317,18 +317,32 @@ pub fn render(
     readback(&frame, encoder)
 }
 
+/// Inputs for one offscreen prepared instance. Fields stay named so the draw is not a long argument list.
+pub struct PreparedInstanceDraw<'a> {
+    pub vertices: &'a [super::prepared_model::PreparedModelVertex],
+    pub ranges: Vec<Option<(u32, u32)>>,
+    pub uploaded: u64,
+    pub requested: u64,
+    pub slot: u32,
+    pub instance: &'a super::prepared_model::PreparedModelInstance,
+    pub atlas_size: [u32; 2],
+    pub atlas: &'a [u8],
+    pub view_proj: Mat4,
+}
+
 /// One prepared instance plus its HDR mark. The geometry is dropped before submit.
-pub fn render_instance(
-    vertices: &[super::prepared_model::PreparedModelVertex],
-    ranges: Vec<Option<(u32, u32)>>,
-    uploaded: u64,
-    requested: u64,
-    slot: u32,
-    instance: &super::prepared_model::PreparedModelInstance,
-    atlas_size: [u32; 2],
-    atlas: &[u8],
-    view_proj: Mat4,
-) -> std::result::Result<Vec<u8>, String> {
+pub fn render_instance(draw: PreparedInstanceDraw<'_>) -> std::result::Result<Vec<u8>, String> {
+    let PreparedInstanceDraw {
+        vertices,
+        ranges,
+        uploaded,
+        requested,
+        slot,
+        instance,
+        atlas_size,
+        atlas,
+        view_proj,
+    } = draw;
     let frame = software_frame(atlas_size, atlas, view_proj)?;
     let models = super::prepared_model::PreparedModels::create(
         &frame.device,

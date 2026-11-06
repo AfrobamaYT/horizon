@@ -1314,18 +1314,23 @@ mod tests {
                 true,
             )
             .expect("software Vulkan entity pixels");
-            let gpu = horizon_client::gfx::entity_pixel_test::render_instance(
-                &vertices,
-                ranges,
-                game.standalone_geometry.generation(),
-                game.standalone_geometry.generation(),
-                slot,
-                &instance,
-                [atlas.width, atlas.height],
-                &pixels,
-                view,
-            )
-            .expect("software Vulkan prepared instance");
+            let uploaded = game.standalone_geometry.generation();
+            let instance_pixels = |ranges, requested| {
+                horizon_client::gfx::entity_pixel_test::render_instance(
+                    horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
+                        vertices: &vertices,
+                        ranges,
+                        uploaded,
+                        requested,
+                        slot,
+                        instance: &instance,
+                        atlas_size: [atlas.width, atlas.height],
+                        atlas: &pixels,
+                        view_proj: view,
+                    },
+                )
+            };
+            let gpu = instance_pixels(ranges, uploaded).expect("software Vulkan prepared instance");
             let mut worst = 0u8;
             for (cpu, gpu) in cpu.iter().zip(gpu.iter()) {
                 worst = worst.max(cpu.abs_diff(*gpu));
@@ -1339,31 +1344,13 @@ mod tests {
             );
             fail_next_prepared_upload();
             assert!(
-                horizon_client::gfx::entity_pixel_test::render_instance(
-                    &vertices,
-                    game.standalone_geometry.prepared_upload().1,
-                    game.standalone_geometry.generation(),
-                    game.standalone_geometry.generation(),
-                    slot,
-                    &instance,
-                    [atlas.width, atlas.height],
-                    &pixels,
-                    view,
-                )
-                .is_err(),
+                instance_pixels(game.standalone_geometry.prepared_upload().1, uploaded).is_err(),
                 "a forced upload failure must not draw"
             );
             assert!(
-                horizon_client::gfx::entity_pixel_test::render_instance(
-                    &vertices,
+                instance_pixels(
                     game.standalone_geometry.prepared_upload().1,
-                    game.standalone_geometry.generation(),
-                    game.standalone_geometry.generation().wrapping_add(1),
-                    slot,
-                    &instance,
-                    [atlas.width, atlas.height],
-                    &pixels,
-                    view,
+                    uploaded.wrapping_add(1),
                 )
                 .is_err(),
                 "a stale generation must not draw"
