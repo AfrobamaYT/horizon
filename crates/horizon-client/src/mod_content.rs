@@ -2582,12 +2582,28 @@ fn link_file(
     fs::copy(target, at).map(|_| ())
 }
 
-/// A tag file's JSON text with `more` appended to its values (no repeats).
-fn merge_tag(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
+/// Evaluate a tag layer before its values or replace flag participate in a merge.
+fn tag_conditions_hold(doc: &J, loaded: &horizon_world::conditions::ModLoaded<'_>) -> Result<bool> {
+    Ok(doc.get("neoforge:conditions").is_none()
+        || horizon_world::conditions::conditions_hold(&serde_json::to_value(doc)?, loaded))
+}
+
+/// A tag file's accepted values with `more` appended (no repeats).
+fn merge_tag(
+    text: Option<&str>,
+    more: &[J],
+    what: &str,
+    loaded: &horizon_world::conditions::ModLoaded<'_>,
+) -> Result<String> {
     let mut doc = match text {
         Some(t) => serde_json::from_str(t).map_err(|e| format!("{what}: {e}"))?,
         None => J::Obj(vec![("values".into(), J::Arr(Vec::new()))]),
     };
+    if !tag_conditions_hold(&doc, loaded)? {
+        doc = J::Obj(vec![("values".into(), J::Arr(Vec::new()))]);
+    }
+    // These conditions selected one source layer, not the flattened result.
+    doc.remove("neoforge:conditions");
     let Some(J::Arr(values)) = doc.get_mut("values") else {
         return Err(format!("{what}: no values").into());
     };
@@ -2890,6 +2906,8 @@ pub fn build(
     // The overlay links to the base: a relative base would leave them dangling.
     let base = &std::path::absolute(base)?;
     let loaded = load_layers(jar_store, mods)?;
+    let mod_loaded =
+        |id: &str| id == "minecraft" || inventory.server_ids().any(|enabled| enabled == id);
     let plan = Plan::new(base, mods)?;
     // Publish the completed tables as one generation. Passive asset layers
     // retain their original sources instead of being written into this tree.
@@ -2947,6 +2965,9 @@ pub fn build(
                 if is_tag {
                     let doc: J =
                         serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
+                    if !tag_conditions_hold(&doc, &mod_loaded)? {
+                        continue;
+                    }
                     let Some(J::Arr(values)) = doc.get("values") else {
                         return Err(format!("{}: {file}: no values", m.id).into());
                     };
@@ -2995,7 +3016,7 @@ pub fn build(
             .filter(|_| !merge.replaced);
         overlay.write(
             file,
-            merge_tag(vanilla.as_deref(), &merge.values, file)?.as_bytes(),
+            merge_tag(vanilla.as_deref(), &merge.values, file, &mod_loaded)?.as_bytes(),
         )?;
         // data/<ns>/tags/block/<path>.json is the block tag <ns>:<path>.
         let Some((ns, path)) = file
@@ -3011,7 +3032,7 @@ pub fn build(
                 Some(J::Str(t)) if !merge.replaced => Some(t.clone()),
                 _ => None,
             };
-            let merged = merge_tag(text.as_deref(), &merge.values, name)?;
+            let merged = merge_tag(text.as_deref(), &merge.values, name, &mod_loaded)?;
             doc.set(&id, J::Str(merged));
         }
     }
@@ -3036,7 +3057,7 @@ pub fn build(
                 Some(J::Str(t)) if !merge.replaced => Some(t.clone()),
                 _ => None,
             };
-            let merged = merge_tag(text.as_deref(), &merge.values, BIOME_TAGS)?;
+            let merged = merge_tag(text.as_deref(), &merge.values, BIOME_TAGS, &mod_loaded)?;
             doc.set(&id, J::Str(merged));
         }
         overlay.write(BIOME_TAGS, &serde_json::to_vec(&doc)?)?;
@@ -3485,7 +3506,7 @@ fn stamp(
         ))
     };
     let mut parts = vec![
-        "horizon mod content 6".to_owned(),
+        "horizon mod content 7".to_owned(),
         serde_json::to_string(inventory)?,
     ];
     parts.push(meta(&std::env::current_exe()?)?);

@@ -122,13 +122,22 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
                 "pack": {"description":"inventory fixture", "min_format":horizon_core::version::DATA_PACK_FORMAT, "max_format":horizon_core::version::DATA_PACK_FORMAT}
             })).unwrap()).unwrap();
             std::fs::write(recipes.join("requires_code.json"), br#"{"type":"inventorytest:probe","neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"machine_sample"}]}"#).unwrap();
+            let tags = pack.join("data/inventorytest/tags/item");
+            std::fs::create_dir_all(&tags).unwrap();
+            std::fs::write(tags.join("requires_code.json"), br#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"machine_sample"}],"values":["minecraft:diamond"]}"#).unwrap();
             game.reload_datapacks(true, &[]).unwrap();
+            let read_tags = |game: &Game<'_>| {
+                let files = game.pack_files();
+                horizon_client::items::load_tags(&game.options.resources, "item", &horizon_world::loot::PackOverlay { files: &files }).unwrap()
+            };
             let read = |game: &Game<'_>| {
                 crate::game::lan::server_sources(&game.options.resources, &game.res.core.item_data, &game.pack_files()).unwrap()
             };
             let has_recipe = |sources: &horizon_client::crafting::ResolvedSources| sources.recipes.iter().any(|recipe| recipe.name == "inventorytest:requires_code");
             let old = read(game);
             assert!(has_recipe(&old));
+            let old_tags = read_tags(game);
+            assert!(old_tags["inventorytest:requires_code"].contains("minecraft:diamond"));
             let old_root = game.options.resources.clone();
             let old_data = game.pack.data_source.clone();
             assert!(mod_api::__private::set_mod_enabled("machine_sample", false));
@@ -136,15 +145,19 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
             assert!(game.reload_datapacks(true, &[]).is_err());
             assert_eq!(game.options.resources, old_root);
             assert!(game.pack.data_source.same_generation(&old_data));
+            assert!(read_tags(game)["inventorytest:requires_code"].contains("minecraft:diamond"));
             assert_eq!(EnabledMods::read(&old_root).unwrap().server_ids().collect::<Vec<_>>(), ["machine_sample"]);
             reject.store(false, Ordering::Relaxed);
             game.reload_datapacks(true, &[]).unwrap();
             assert_eq!(game.options.resources, original);
             assert!(!has_recipe(&read(game)));
+            assert!(!read_tags(game).contains_key("inventorytest:requires_code"));
+            assert!(old_tags["inventorytest:requires_code"].contains("minecraft:diamond"));
             assert!(has_recipe(&old));
             assert!(mod_api::__private::set_mod_enabled("machine_sample", true));
             game.reload_datapacks(true, &[]).unwrap();
             assert!(has_recipe(&read(game)));
+            assert!(read_tags(game)["inventorytest:requires_code"].contains("minecraft:diamond"));
             assert_eq!(game.options.resources, old_root);
         });
     });
