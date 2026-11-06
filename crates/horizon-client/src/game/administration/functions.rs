@@ -1197,6 +1197,7 @@ mod tests {
             )
             .unwrap();
             game.world_root = root.clone();
+            game.set_allow_commands(true);
             mod_api::__private::install_parts(&[ModEntry::new(
                 "reload_test",
                 Box::new(MissingItem),
