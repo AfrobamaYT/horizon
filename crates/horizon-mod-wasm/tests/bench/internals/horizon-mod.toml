@@ -1,0 +1,19 @@
+id = "internals_bench"
+name = "Internals access benchmark"
+version = "1.0.0"
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+
+[native]
+internals = [
+  { path = "horizon_client::game::Game::copy", kind = "field", hash = "0b896961744e53dfcddbec9c832954712f0070f38ad7a2e9859f81fbf41d8bfd" },
+  { path = "horizon_client::game::Game::child", kind = "field", hash = "95cc2037765def3756ce9258f493bfdedbb94b29f018186748866d9e556a4c8f" },
+  { path = "horizon_client::game::Game::add", kind = "method", hash = "638665cf01d552d5765711831232b653f7b98d9c7bdddb54a58182e433e5cd0e" },
+]
+
+[[native.injection]]
+id = "access"
+target = "horizon_client::game::chat::Game<'_>::handle_chat_input"
+kind = "HEAD"
+raw = "access"
