@@ -2,8 +2,8 @@
 //! `Capabilities.Fluid.BLOCK`, a [`ResourceHandler`] of [`FluidResource`]s as
 //! [`ITEMS`](super::ITEMS) is of items. Amounts are millibuckets: a bucket is 1000.
 use super::{
-    BlockSide, CapabilityKey, DataLoadContext, FluidKey, ItemCapabilityKey, ItemPlace,
-    ItemResource, ItemStack, ResourceHandler, ServerHost, Transaction,
+    BlockSide, CapabilityKey, DataLoadContext, FluidIdentity, FluidKey, ItemCapabilityKey,
+    ItemPlace, ItemResource, ItemStack, ResourceHandler, ServerHost, Transaction,
 };
 use crate::crafting::WalkedIngredient;
 use horizon_items::item_data::StackData;
@@ -16,7 +16,7 @@ use std::{fmt, marker::PhantomData};
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct FluidStack {
     /// The fluid.
-    pub fluid: FluidKey,
+    pub fluid: FluidIdentity,
     /// The amount.
     pub amount: u32,
     /// The components.
@@ -27,10 +27,14 @@ impl FluidStack {
     /// `amount` of `fluid`, with no components.
     pub fn new(fluid: FluidKey, amount: u32) -> Self {
         Self {
-            fluid,
+            fluid: FluidIdentity::Resolved(fluid),
             amount,
             components: None,
         }
+    }
+    /// The registered key, or none for an unresolved saved fluid.
+    pub fn key(&self) -> Option<FluidKey> {
+        self.fluid.key()
     }
     /// The same fluid with the same components, `amount` of it.
     pub fn with_amount(&self, amount: u32) -> Self {
@@ -66,8 +70,8 @@ impl FluidResource {
     pub fn of(stack: &FluidStack) -> Self {
         Self(stack.with_amount(1))
     }
-    /// The resolved fluid key.
-    pub fn fluid(&self) -> &FluidKey {
+    /// The resolved key or unresolved saved identity.
+    pub fn fluid(&self) -> &FluidIdentity {
         &self.0.fluid
     }
     /// `amount` millibuckets of it as a stack.
@@ -162,7 +166,7 @@ impl FluidIngredient {
     /// `compound`, all for `intersection`, base-but-not-subtracted for
     /// `difference`).
     pub fn test(&self, stack: &FluidStack) -> bool {
-        self.fluids.contains(&stack.fluid)
+        stack.key().is_some_and(|key| self.fluids.contains(&key))
     }
     /// The fluids it accepts, in the sources' order (`HolderSet`) — what a
     /// recipe book shows.
@@ -326,7 +330,7 @@ impl GameBucket {
         if fluid.0.has_components() {
             return None;
         }
-        let key = *fluid.fluid();
+        let key = fluid.fluid().key()?;
         if key == self.1 {
             Some("minecraft:water_bucket")
         } else if key == self.2 {
@@ -464,7 +468,10 @@ mod tests {
         let single = parse(r#""minecraft:water""#).unwrap();
         assert!(single.test(&stack("minecraft:water", 100)));
         assert!(!single.test(&stack("minecraft:lava", 100)));
-        assert_eq!(single.fluids(), [stack("minecraft:water", 1).fluid]);
+        assert_eq!(
+            single.fluids(),
+            [stack("minecraft:water", 1).key().unwrap()]
+        );
     }
 
     /// A `#tag` resolves through the fluid tags, keeping their order; a
@@ -475,8 +482,8 @@ mod tests {
         assert_eq!(
             tag.fluids(),
             [
-                stack("minecraft:water", 1).fluid,
-                stack("minecraft:flowing_water", 1).fluid
+                stack("minecraft:water", 1).key().unwrap(),
+                stack("minecraft:flowing_water", 1).key().unwrap()
             ]
         );
         assert!(tag.test(&stack("minecraft:flowing_water", 1)));
@@ -491,9 +498,9 @@ mod tests {
         assert_eq!(
             list.fluids(),
             [
-                stack("minecraft:water", 1).fluid,
-                stack("minecraft:flowing_water", 1).fluid,
-                stack("minecraft:lava", 1).fluid
+                stack("minecraft:water", 1).key().unwrap(),
+                stack("minecraft:flowing_water", 1).key().unwrap(),
+                stack("minecraft:lava", 1).key().unwrap()
             ]
         );
         assert!(parse(r#"[]"#).is_none());
@@ -521,7 +528,10 @@ mod tests {
             r##"{"type":"neoforge:difference","base":"#minecraft:water","subtracted":"minecraft:flowing_water"}"##,
         )
         .unwrap();
-        assert_eq!(difference.fluids(), [stack("minecraft:water", 1).fluid]);
+        assert_eq!(
+            difference.fluids(),
+            [stack("minecraft:water", 1).key().unwrap()]
+        );
         assert!(!difference.test(&stack("minecraft:flowing_water", 1)));
         // A mod's own kind, an unknown minecraft kind and a kindless
         // object all fail the file.
