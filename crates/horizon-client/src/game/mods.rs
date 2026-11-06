@@ -189,6 +189,20 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
 }
+/// The native mods' numeric item model properties
+/// (`native_register_range_select_item_model_property`), kept once at start, before
+/// resources load, so `range_dispatch` models on them read the mod's number.
+pub(super) fn register_range_select_item_model_properties(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut properties = Vec::new();
+    Game::native_register_range_select_item_model_property(
+        &RegistrationContext::new(),
+        &mut properties,
+    );
+    horizon_assets::item_model::register_range_properties(properties);
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
