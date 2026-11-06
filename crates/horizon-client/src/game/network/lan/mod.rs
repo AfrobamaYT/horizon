@@ -85,6 +85,33 @@ pub(super) fn server_sources(
     Ok(sources)
 }
 
+/// Build server recipes privately so a refused reload leaves the current cache intact.
+pub(super) fn prepare_server_sources(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> std::io::Result<Arc<ResolvedSources>> {
+    Ok(Arc::new(ResolvedSources::load_or_empty(
+        root,
+        overlay,
+        &server_data_load(root, item_data)?,
+    )))
+}
+
+pub(super) fn install_server_sources(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+    sources: Arc<ResolvedSources>,
+) {
+    *SOURCES.lock().unwrap_or_else(|e| e.into_inner()) = Some(ServerSources {
+        root: root.to_owned(),
+        generation: item_data.defaults().generation(),
+        overlay: overlay_key(overlay),
+        sources,
+    });
+}
+
 /// The recipes of a load of `origin`: a server's are shared, a client's own.
 pub(super) fn load_sources(
     root: &std::path::Path,

@@ -233,7 +233,7 @@ pub fn node(arg: Arg) -> Result<*mut (), Refusal> {
 /// The generic internals interface, generated from the same WIT on host and guest.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub mod bindings {
-    wasmtime::component::bindgen!({ path: "wit/internals.wit", world: "internals", imports: { default: store | trappable } });
+    wasmtime::component::bindgen!({ path: "wit/internals.wit", world: "internals", imports: { default: trappable } });
 }
 #[cfg(target_arch = "wasm32")]
 pub mod bindings {

@@ -3090,7 +3090,9 @@ mod structure_tag_tests {
             &[],
             &[],
         );
-        let (tables, _) = game.build_world_tables(&stack, false).unwrap();
+        let (tables, _) = game
+            .build_world_tables(&stack, false, &root, false)
+            .unwrap();
         game.world_tables = tables;
         assert!(game.world_tables.is_some());
         assert!(holds(&game, "#mypack:village", "minecraft:igloo"));

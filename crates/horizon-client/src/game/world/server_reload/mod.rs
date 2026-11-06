@@ -93,6 +93,23 @@ impl Game<'_> {
         )?;
         Ok(PreparedServerReload { steps, resources })
     }
+    pub(super) fn apply_server_reload_callbacks(
+        &mut self,
+        prepared: PreparedServerReload,
+    ) -> PreparedServerReload {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("server apply on its owning thread");
+        let mut vanilla = Vec::new();
+        apply_listeners(prepared.steps, "server_reload_apply", |store| {
+            vanilla.push(PreparedStep::Vanilla(store))
+        });
+        PreparedServerReload {
+            steps: vanilla,
+            resources: prepared.resources,
+        }
+    }
     pub(super) fn apply_server_reload(
         &mut self,
         prepared: PreparedServerReload,
