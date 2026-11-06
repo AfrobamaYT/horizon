@@ -510,8 +510,8 @@ mod tests {
             ));
             assert_eq!(slot3(game), Some(3));
             assert_eq!(
-                chest.kind(game).as_ref().map(|kind| kind.id()),
-                Some("minecraft:chest")
+                chest.kind(game).map(|kind| kind.id(game)),
+                Some("minecraft:chest".to_owned())
             );
             assert_eq!(chest.position(game), Some([0, 64, 0]));
             assert!(!chest.merge_data(game, compound(stick)), "no change");
