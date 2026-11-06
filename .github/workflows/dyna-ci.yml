@@ -39,7 +39,7 @@ jobs:
   # Dyna's image enforces the event and repository check again in job-started.sh.
   # GitHub's external-contributor approval is the third lock.
   changes:
-    if: github.event_name != 'schedule'
+    if: github.event_name != 'schedule' && !inputs.prepare-output-check
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -620,7 +620,6 @@ jobs:
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   prepared-output-check:
     if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'
-    needs: changes
     runs-on: dyna-large
     timeout-minutes: 60
     permissions:
@@ -662,7 +661,7 @@ jobs:
           exit "$result"
 
   vanilla-parity:
-    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch'
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check
     runs-on: dyna-large
     permissions:
       contents: read
