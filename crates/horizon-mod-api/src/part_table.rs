@@ -984,11 +984,10 @@ pub trait Registrar {
     ///
     /// Not on wasm: the goal surface a part's `register_goals` hands the game
     /// does not cross yet (#1077); entity parts are a native mod's for now.
-    /// The default stands in for the wasm guest's registrar, which the
-    /// generator keeps this method off of; the game's registrars override it.
-    fn attach_entity_part(&mut self, entity: &str, kind: &'static str, _part: Arc<dyn EntityPart>) {
-        unreachable!("entity parts are a native mod's (#1077): {entity} ({kind})")
-    }
+    /// The gate keeps a wasm mod's call a compile error, not a runtime one;
+    /// the generator still keeps the method off the wasm world by this doc.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>);
     /// Attach `part`, of kind `kind`, to the mod menu type `menu`.
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>);
     /// Attach `part`, of kind `kind`, to every block in tag `tag`.
@@ -1081,6 +1080,7 @@ impl dyn Registrar + '_ {
     /// [`EntityPart::register_goals`] runs at every `Mob` construction of that
     /// type, spawning or loading, and its goals join the mob's selectors
     /// beside vanilla's (#1077).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn entity_part<P: EntityPart>(&mut self, entity: &str, part: P) {
         self.attach_entity_part(entity, type_name::<P>(), Arc::new(part));
     }
@@ -1529,6 +1529,7 @@ impl Registrar for PartRegistrar {
         self.attach(|p| &mut p.items, kind, item, part);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>) {
         self.attach(|p| &mut p.entities, kind, entity, part);
     }

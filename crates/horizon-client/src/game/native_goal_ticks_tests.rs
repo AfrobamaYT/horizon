@@ -546,6 +546,7 @@ fn view_player(at: [f64; 3]) -> horizon_client::mobs::PlayerView {
         ),
         eye: [at[0], at[1] + 1.62, at[2]],
         alive: true,
+        invulnerable: false,
         creative: false,
         sneaking: false,
         swimming: false,
@@ -741,6 +742,40 @@ fn set_target_refuses_what_the_write_handle_refuses() {
                 );
             }
         }
+        // The player the tick sees, through the same rule set: a fighting
+        // difficulty stores her, Peaceful refuses, and a golem a player
+        // built never targets a player.
+        let epoch = game.native_entity(91).unwrap().epoch();
+        let player = EntityRef::new(epoch, 5000);
+        *TARGET.lock().unwrap() = Some(player);
+        let view = view_player([9.5, 65.0, 9.5]);
+        tick_goals_as(game, 0, Some(view.clone()), Some(([1, 2, 3, 4], 5000)));
+        assert_eq!(
+            ANSWERS.lock().unwrap().last().copied(),
+            Some(true),
+            "a survival player on a fighting difficulty stores"
+        );
+        assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
+        game.world.health_rules.difficulty = horizon_world::food::Difficulty::Peaceful;
+        tick_goals_as(game, 0, Some(view.clone()), Some(([1, 2, 3, 4], 5000)));
+        assert_eq!(
+            ANSWERS.lock().unwrap().last().copied(),
+            Some(false),
+            "Peaceful refuses a player target"
+        );
+        game.world.health_rules.difficulty = horizon_world::food::Difficulty::Normal;
+        game.mobs[0].extra.player_created = true;
+        tick_goals_as(game, 0, Some(view), Some(([1, 2, 3, 4], 5000)));
+        assert_eq!(
+            ANSWERS.lock().unwrap().last().copied(),
+            Some(false),
+            "a player-built golem never targets a player"
+        );
+        assert_eq!(
+            game.mobs[0].ai.target,
+            Some(Who::Player),
+            "a refused player target does not replace the stored one"
+        );
     });
 }
 

@@ -482,6 +482,7 @@ mod tests {
             bounds: Aabb::new(Vec3::new(x, 64.0, 0.0), Vec3::new(x, 65.8, 0.0)),
             eye: [x, 65.62, 0.0],
             alive: true,
+            invulnerable: false,
             creative,
             sneaking: false,
             swimming: false,

@@ -2490,6 +2490,9 @@ pub struct Seen {
     pub bounds: Aabb,
     pub eye_y: f64,
     pub alive: bool,
+    /// `invulnerable_flag`, which `asValidTarget` refuses a target by
+    /// (#1175): a valid-target rule the tick's view asks.
+    pub invulnerable: bool,
     pub baby: bool,
     pub in_love: bool,
     pub tame: bool,
@@ -2710,6 +2713,7 @@ impl Mob {
             bounds: m.bounds(),
             eye_y: m.eye_y(),
             alive: m.alive(),
+            invulnerable: m.invulnerable_flag,
             baby: m.is_baby(),
             // A villager is "in love" when it is willing to breed (`canBreed`).
             in_love: if villager {
@@ -3021,6 +3025,9 @@ pub struct PlayerView {
     pub bounds: Aabb,
     pub eye: [f64; 3],
     pub alive: bool,
+    /// The `invulnerable` ability, which `asValidTarget` refuses a target
+    /// by (#1175): a valid-target rule a goal tick's view asks.
+    pub invulnerable: bool,
     pub creative: bool,
     pub sneaking: bool,
     /// `Entity.isSwimming`.

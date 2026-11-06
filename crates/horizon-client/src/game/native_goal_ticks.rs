@@ -10,7 +10,7 @@
 //! (`nav_move_to`, `ai.target`), behind the same input boundaries the mob
 //! handles take, and the write handles a `ServerHost` takes do not exist here.
 use super::Game;
-use crate::mobs::{self, Mob, MobWorld, Seen, Species, TargetInfo, Who, part_goals::GoalOp};
+use crate::mobs::{self, Mob, MobWorld, Seen, TargetInfo, Who, part_goals::GoalOp};
 use horizon_core::geometry::Axis;
 use mod_api::{
     EntityRef, GoalCxBackend, Host, LegacyRandom, LivingRef, MobRef, PlayerRef,
@@ -299,60 +299,66 @@ impl GoalCxBackend for GoalCx<'_, '_> {
     }
 
     fn set_target(&mut self, target: Option<LivingRef>) -> bool {
-        // The write handle's rules, as far as the tick sees them: the
-        // brain-backed species and the three whose setter side effects are
-        // not modeled refuse, an unresolvable target refuses.
-        if mobs::ai::brain_target(self.m).is_some()
-            || matches!(
-                self.m.species(),
-                Species::Fox | Species::Enderman | Species::ZombifiedPiglin
-            )
-        {
+        // The write handle's own setter refusals, the one rule it asks too
+        // (#1175): the brain-backed species and the three whose setter side
+        // effects are not modeled.
+        if self.m.refuses_set_target() {
             return false;
         }
         let who = match target {
             None => None,
             Some(living) => match self.resolve(living.entity()) {
-                Some(Resolved::Own) => Some(Who::Mob(self.m.id)),
+                Some(Resolved::Own) => {
+                    // The write handle applies its rules to any target, the
+                    // mob itself included: the same facts, from the mob in
+                    // hand.
+                    if !self.m.valid_target(
+                        self.w,
+                        &mobs::goals::TargetFacts::Mob {
+                            id: self.m.id,
+                            species: self.m.species(),
+                            alive: self.m.alive(),
+                            invulnerable: self.m.invulnerable_flag,
+                            baby: self.m.is_baby(),
+                        },
+                    ) {
+                        return false;
+                    }
+                    Some(Who::Mob(self.m.id))
+                }
                 Some(Resolved::Player) => {
-                    // The write handle's player rules over the tick's view:
-                    // its own refusals (`spares_target`, the difficulty and
-                    // tame rules), and a player that cannot fight.
+                    // The write handle's player rules over the tick's view,
+                    // through the same valid-target rule set (#1175).
                     let Some(p) = self.w.player.as_ref() else {
                         return false;
                     };
-                    if !p.alive
-                        || p.creative
-                        || p.spectator
-                        || self.m.spares_target(self.w, Who::Player)
-                    {
+                    if !self.m.valid_target(
+                        self.w,
+                        &mobs::goals::TargetFacts::Player {
+                            alive: p.alive,
+                            invulnerable: p.invulnerable,
+                            creative: p.creative,
+                            spectator: p.spectator,
+                            uuid: p.uuid,
+                        },
+                    ) {
                         return false;
                     }
                     Some(Who::Player)
                 }
                 Some(Resolved::Seen(seen)) => {
-                    // `asValidTarget` over the tick-readable facts: a dead
-                    // or ghast target never stores, a breeze names only an
-                    // iron golem, an illager spares a baby villager, and the
-                    // species' own `canAttack` refusals (`spares_target`,
-                    // the golem's creeper among them) read the tick's world.
-                    if !seen.alive
-                        || seen.species == Species::Ghast
-                        || (self.m.species() == Species::Breeze
-                            && seen.species != Species::IronGolem)
-                        || (matches!(
-                            self.m.species(),
-                            Species::Evoker
-                                | Species::Vindicator
-                                | Species::Illusioner
-                                | Species::Pillager
-                        ) && matches!(
-                            seen.species,
-                            Species::Villager | Species::WanderingTrader
-                        ) && seen.baby)
-                        || (self.m.species() == Species::Creeper && seen.species == Species::Goat)
-                        || self.m.spares_target(self.w, Who::Mob(seen.id))
-                    {
+                    // `asValidTarget` over the snapshot's facts of the target,
+                    // the same rule set the write handle asks.
+                    if !self.m.valid_target(
+                        self.w,
+                        &mobs::goals::TargetFacts::Mob {
+                            id: seen.id,
+                            species: seen.species,
+                            alive: seen.alive,
+                            invulnerable: seen.invulnerable,
+                            baby: seen.baby,
+                        },
+                    ) {
                         return false;
                     }
                     Some(Who::Mob(seen.id))
