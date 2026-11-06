@@ -158,8 +158,14 @@ impl Game<'_> {
             };
             let before = result_slot.map(|r| {
                 let slots: Vec<_> = (0..=r).map(|s| gs.menu.slot(s).cloned()).collect();
-                // Only the anvil has a data slot (its cost); grindstone and smithing menus have none.
-                (slots, gs.menu.data.first().copied())
+                // Only the anvil has a data slot (its cost) and a name; grindstone and
+                // smithing menus have neither. A rename runs createResult even when the
+                // result comes out the same (AnvilMenu.setItemName).
+                (
+                    slots,
+                    gs.menu.data.first().copied(),
+                    gs.menu.anvil.name.clone(),
+                )
             });
             let mut undo = None;
             let hook = gs.menu.anvil_hook;
@@ -210,8 +216,9 @@ impl Game<'_> {
             }
             // A cancelled take runs no createResult: the inputs are untouched.
             let recomputed = !cancelled
-                && before.is_some_and(|(slots, cost)| {
+                && before.is_some_and(|(slots, cost, item_name)| {
                     cost != gs.menu.data.first().copied()
+                        || item_name != gs.menu.anvil.name
                         || slots
                             .iter()
                             .enumerate()
