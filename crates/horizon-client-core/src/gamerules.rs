@@ -412,10 +412,6 @@ impl GameRules {
         }
         rules
     }
-    /// The categories in this rule set's registry.
-    pub fn categories(&self) -> &[String] {
-        self.registry.categories()
-    }
     pub fn available_rules(&self) -> impl Iterator<Item = &Rule> {
         self.registry.available_rules(self.minecart_improvements)
     }
