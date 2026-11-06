@@ -2379,30 +2379,33 @@ fn pipeline(
         .arg(catalog_dir.join(internals::INTERNALS))
         .env("CARGO_TARGET_DIR", real.join("target"));
         wasm_internals::stage(&fresh, &wasm_internals, &mut pass)?;
-        let discard = |error: String| {
-            let _ = fs::remove_dir_all(&pending);
-            let _ = fs::remove_dir_all(&catalog_dir);
-            error
-        };
-        run(pass, "Marking the game's injection points", |_| {}).map_err(&discard)?;
-        let catalog = internals::Catalog::read(&catalog_dir).map_err(&discard)?;
+        fn discard(pending: &Path, catalog: &Path, error: impl std::fmt::Display) -> String {
+            let _ = fs::remove_dir_all(pending);
+            let _ = fs::remove_dir_all(catalog);
+            error.to_string()
+        }
+        run(pass, "Marking the game's injection points", |_| {})
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let catalog = internals::Catalog::read(&catalog_dir)
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
-            .map_err(|error| discard(error.to_string()))?;
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         inject::check(
             &point_injections,
-            &inject::listed(&catalog_dir.join(inject::POINTS)).map_err(&discard)?,
+            &inject::listed(&catalog_dir.join(inject::POINTS))
+                .map_err(|error| discard(&pending, &catalog_dir, error))?,
         )
-        .map_err(|error| discard(error.to_string()))?;
+        .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let _ = fs::remove_dir_all(&fresh);
+        fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
         fs::rename(catalog_dir.join(inject::POINTS), &listed)
-            .map_err(|e| discard(e.to_string()))?;
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         fs::rename(
             catalog_dir.join(internals::INTERNALS),
             real.join(internals::INTERNALS),
         )
-        .map_err(|error| discard(error.to_string()))?;
-        let _ = fs::remove_dir_all(&fresh);
-        fs::rename(&pending, &fresh).map_err(|error| discard(error.to_string()))?;
+        .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
             // Offline metadata resolves all targets, including packages not fetched for this host.
