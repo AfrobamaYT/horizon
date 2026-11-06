@@ -401,6 +401,22 @@ mod tests {
                     UseAnimation::None
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 6);
+                game.player = Some(
+                    horizon_client::motion::PlayerMotion::new(
+                        game.motion,
+                        horizon_core::geometry::Vec3::ZERO,
+                    )
+                    .unwrap(),
+                );
+                game.inventory[game.selected] =
+                    Some(horizon_client::items::ItemStack::new("minecraft:bow", 1));
+                game.using = Some((game.selected, 0));
+                game.tick_player_model();
+                assert_eq!(
+                    game.player_model.as_ref().unwrap().extra.use_animation,
+                    UseAnimation::Drink
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 7);
             });
         });
     }
