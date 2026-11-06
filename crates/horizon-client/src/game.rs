@@ -17763,20 +17763,7 @@ impl Game<'_> {
             self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
         }
         let mut world_geometry = self.world_geometry.take().expect("view storage");
-        let white = self.gui.atlas.sprites["horizon/white"];
-        world_geometry.reset(
-            camera.to_array(),
-            view,
-            [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5],
-        );
-        if !title {
-            let view = mod_api::WorldRenderView::new(
-                camera.to_array(),
-                alpha as f32,
-                self.world.game_time,
-            );
-            self.native_submit_custom_geometry(&view, &mut world_geometry);
-        }
+        self.fill_world_geometry(title, camera.to_array(), view, alpha, &mut world_geometry);
         let colored_lights = if self.title.is_none() {
             visuals.finish(self, camera)
         } else {
@@ -24216,6 +24203,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role);
     mods::register_debug_entries(options.execution_role);
+    mods::register_debug_renderers(options.execution_role);
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
     mods::freeze_declarations();

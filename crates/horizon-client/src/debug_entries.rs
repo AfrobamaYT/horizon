@@ -2,7 +2,7 @@
 //! what each F3 line block and debug renderer is, whether it shows always,
 //! only in the overlay or never, the two built-in profiles, and
 //! `debug-profile.json` beside `options.txt`, which keeps them.
-use mod_api::{DebugEntry, DebugGroup, Identifier};
+use mod_api::{DebugEntry, DebugGroup, DebugRenderer, Identifier};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -181,7 +181,10 @@ static REGISTERED: OnceLock<Vec<DebugEntry>> = OnceLock::new();
 /// `<namespace>:<path>` in a namespace other than vanilla's, or that another entry has
 /// already, is logged and left out.
 pub fn register(entries: Vec<DebugEntry>) {
-    if REGISTERED.set(checked(entries)).is_err() {
+    if REGISTERED
+        .set(checked(entries, |e| &e.id, |_| false))
+        .is_err()
+    {
         log::warn!("debug entries were registered already; these are left out");
     }
 }
@@ -194,21 +197,40 @@ pub fn registered() -> &'static [DebugEntry] {
     }
 }
 
-fn checked(entries: Vec<DebugEntry>) -> Vec<DebugEntry> {
-    let mut kept: Vec<DebugEntry> = Vec::new();
+/// The renderers native mods registered (`register_debug_renderers`), kept once at start.
+static REGISTERED_RENDERERS: OnceLock<Vec<DebugRenderer>> = OnceLock::new();
+
+/// Keeps the renderers native mods registered, once at start, after the entries: both are
+/// switched by id. One whose id is not `<namespace>:<path>` in a namespace other than vanilla's,
+/// or that another entry or renderer has already, is logged and left out.
+pub fn register_renderers(renderers: Vec<DebugRenderer>) {
+    let taken = |id: &str| registered().iter().any(|e| e.id == id);
+    if REGISTERED_RENDERERS
+        .set(checked(renderers, |r| &r.id, taken))
+        .is_err()
+    {
+        log::warn!("debug renderers were registered already; these are left out");
+    }
+}
+
+/// The renderers native mods registered, in registration order.
+pub fn registered_renderers() -> &'static [DebugRenderer] {
+    match REGISTERED_RENDERERS.get() {
+        Some(renderers) => renderers.as_slice(),
+        None => &[],
+    }
+}
+
+fn checked<T>(entries: Vec<T>, id: impl Fn(&T) -> &str, taken: impl Fn(&str) -> bool) -> Vec<T> {
+    let mut kept: Vec<T> = Vec::new();
     for entry in entries {
+        let name = id(&entry);
         let own =
-            Identifier::parse_namespaced(&entry.id).is_some_and(|id| id.namespace() != "minecraft");
+            Identifier::parse_namespaced(name).is_some_and(|id| id.namespace() != "minecraft");
         if !own {
-            log::warn!(
-                "debug entry {:?} is not <namespace>:<path> in a mod's namespace",
-                entry.id
-            );
-        } else if kept.iter().any(|k| k.id == entry.id) {
-            log::warn!(
-                "debug entry {} is registered twice; the first is kept",
-                entry.id
-            );
+            log::warn!("debug id {name:?} is not <namespace>:<path> in a mod's namespace");
+        } else if taken(name) || kept.iter().any(|k| id(k) == name) {
+            log::warn!("debug id {name} is registered twice; the first is kept");
         } else {
             kept.push(entry);
         }
@@ -226,9 +248,22 @@ fn as_entry(entry: &'static DebugEntry) -> Entry {
     }
 }
 
-/// Every entry: vanilla's, then the native mods' (`registered`).
+/// A native mod's renderer as the list shows it: like vanilla's, hidden while debug info is
+/// reduced.
+fn as_renderer(renderer: &'static DebugRenderer) -> Entry {
+    Entry {
+        path: renderer.id.as_str(),
+        category: Category::Renderer,
+        reduced: false,
+    }
+}
+
+/// Every entry: vanilla's, then the native mods' (`registered`, `registered_renderers`).
 pub fn all() -> impl Iterator<Item = Entry> {
-    ENTRIES.into_iter().chain(registered().iter().map(as_entry))
+    ENTRIES
+        .into_iter()
+        .chain(registered().iter().map(as_entry))
+        .chain(registered_renderers().iter().map(as_renderer))
 }
 
 /// `DebugScreenEntries.getEntry` by path.
@@ -608,31 +643,50 @@ mod tests {
 
     #[test]
     fn a_native_mods_entries_need_their_own_namespace_and_a_free_id() {
-        let kept = checked(vec![
-            DebugEntry {
-                id: "mymod:tick_cost".into(),
-                group: DebugGroup::Memory,
-            },
-            DebugEntry {
-                id: "minecraft:fps".into(),
-                group: DebugGroup::Memory,
-            },
-            DebugEntry {
-                id: "tick_cost".into(),
-                group: DebugGroup::Memory,
-            },
-            DebugEntry {
-                id: "mymod:tick_cost".into(),
-                group: DebugGroup::Light,
-            },
-            DebugEntry {
-                id: "other:queue".into(),
-                group: DebugGroup::Position,
-            },
-        ]);
+        let kept = checked(
+            vec![
+                DebugEntry {
+                    id: "mymod:tick_cost".into(),
+                    group: DebugGroup::Memory,
+                },
+                DebugEntry {
+                    id: "minecraft:fps".into(),
+                    group: DebugGroup::Memory,
+                },
+                DebugEntry {
+                    id: "tick_cost".into(),
+                    group: DebugGroup::Memory,
+                },
+                DebugEntry {
+                    id: "mymod:tick_cost".into(),
+                    group: DebugGroup::Light,
+                },
+                DebugEntry {
+                    id: "other:queue".into(),
+                    group: DebugGroup::Position,
+                },
+            ],
+            |e| &e.id,
+            |_| false,
+        );
         let ids: Vec<&str> = kept.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, ["mymod:tick_cost", "other:queue"]);
         assert_eq!(kept[0].group, DebugGroup::Memory);
+    }
+
+    #[test]
+    fn a_native_mods_renderer_cannot_take_an_entrys_id() {
+        let renderer = |id: &str| DebugRenderer { id: id.into() };
+        let kept = checked(
+            vec![
+                renderer("mymod:tick_cost"),
+                renderer("mymod:pipes"),
+                renderer("mymod:pipes"),
+            ],
+            |r| &r.id,
+            |id| id == "mymod:tick_cost",
+        );
+        assert_eq!(kept, [renderer("mymod:pipes")]);
     }
 
     #[test]

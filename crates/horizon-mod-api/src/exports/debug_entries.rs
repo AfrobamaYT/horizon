@@ -1,2 +1,2 @@
 mod debug_entries;
-pub use debug_entries::{DebugEntry, DebugGroup};
+pub use debug_entries::{DebugEntry, DebugGroup, DebugRenderer};

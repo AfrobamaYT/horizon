@@ -546,7 +546,9 @@ mod tests {
     #[test]
     fn rows_put_a_category_before_each_section() {
         let all = rows("");
-        assert_eq!(all.len(), 48);
+        // The renderers `debug_renderer_tests` registers stay for the whole test process.
+        let native = |r: &&Row| matches!(r, Row::Option(e) if e.path.contains(':'));
+        assert_eq!(all.iter().filter(|r| !native(r)).count(), 48);
         assert!(matches!(all[0], Row::Category(Category::Text)));
         let renderer = all
             .iter()

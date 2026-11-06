@@ -1,4 +1,5 @@
-//! Named entries a native mod adds to the F3 debug screen (NeoForge's `RegisterDebugEntriesEvent`).
+//! Named entries and world-space renderers a native mod adds to the debug screen (NeoForge's
+//! `RegisterDebugEntriesEvent`, `RegisterDebugRenderersEvent`).
 
 /// A debug entry a native mod registers: its id and the vanilla group its lines are drawn in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8,6 +9,14 @@ pub struct DebugEntry {
     pub id: String,
     /// The group its lines join, with vanilla's lines of that group.
     pub group: DebugGroup,
+}
+
+/// A world-space debug renderer a native mod registers, switched on and off with vanilla's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: a mod builds it with a literal, an id
+pub struct DebugRenderer {
+    /// `<namespace>:<path>` in a namespace other than vanilla's, like `mymod:pipe_network`.
+    pub id: String,
 }
 
 /// The vanilla groups a debug entry's lines can join (`DebugScreenDisplayer.addToGroup`).
