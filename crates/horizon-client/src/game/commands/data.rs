@@ -112,7 +112,22 @@ impl Game<'_> {
                 // `saveWithoutId` writes the entity as saved, riders under
                 // `Passengers`: `/data get` reads the same tree persistence does (#1519).
                 let i = self.mobs.iter().position(|m| m.id == id)?;
-                self.mob_tree_nbt(i)
+                let mut tag = self.mob_tree_nbt(i);
+                let session = self
+                    .lan_trade_conn(id)
+                    .and_then(|conn| self.lan_trade_session(conn))
+                    .or_else(|| {
+                        self.station
+                            .as_ref()
+                            .and_then(|s| s.merchant.as_ref())
+                            .filter(|m| m.mob == Some(id))
+                            .map(|m| &*m.session)
+                    });
+                if let (Some(session), Tag::Compound(data)) = (session, &mut tag) {
+                    data.insert("Offers".into(), entity_nbt::offers_to_nbt(&session.offers));
+                    data.insert("Xp".into(), Tag::Int(session.xp));
+                }
+                tag
             }
             Target::Item(id) => {
                 let uuid = self.uuid_for(id);
@@ -339,6 +354,8 @@ impl Game<'_> {
                     Some(self.pack.assets.registry),
                 )
                 .ok_or_else(stale)?;
+                self.warn_missing_profession(&new);
+                let unresolved = new.extra.profession.index().is_none();
                 if let Some(slot) = self.mobs.iter_mut().find(|m| m.id == id) {
                     // LivingEntity.readAdditionalSaveData only replaces a decoded
                     // Brain. Keep the Allay's modeled LIKED_PLAYER when the
@@ -373,6 +390,9 @@ impl Game<'_> {
                             self.world.game_time,
                         );
                     }
+                }
+                if unresolved {
+                    self.close_opaque_merchant(id);
                 }
             }
             Target::Other(id) => {

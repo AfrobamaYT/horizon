@@ -1,5 +1,7 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
-use crate::{BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, EffectKey, FluidKey};
+use crate::{
+    BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, EffectKey, FluidKey, ItemKey,
+};
 use std::collections::HashMap;
 
 #[derive(Clone, Default)]
@@ -7,6 +9,7 @@ pub(crate) struct Requests {
     pub(crate) blocks: Names,
     pub(crate) fluids: Names,
     pub(crate) declared_fluids: HashMap<String, &'static str>,
+    pub(crate) items: Names,
     pub(crate) effects: Names,
     pub(crate) block_entity_types: Names,
 }
@@ -56,21 +59,17 @@ impl Names {
             .map(|entry| entry.id.as_str())
     }
 
-    fn resolve<T>(
+    pub(crate) fn resolve<T, E>(
         &self,
-        kind: &str,
         mut resolve: impl FnMut(&str) -> Option<T>,
-    ) -> Result<Vec<T>, Vec<String>> {
+        mut unknown: impl FnMut(&'static str, &str) -> E,
+    ) -> Result<Vec<T>, Vec<E>> {
         let mut values = Vec::with_capacity(self.entries.len());
         let mut errors = Vec::new();
         for entry in &self.entries {
             match resolve(&entry.id) {
                 Some(value) => values.push(value),
-                None => {
-                    errors.extend(entry.mods.iter().map(|mod_id| {
-                        format!("mod {mod_id} requested unknown {kind} {}", entry.id)
-                    }))
-                }
+                None => errors.extend(entry.mods.iter().map(|mod_id| unknown(mod_id, &entry.id))),
             }
         }
         if errors.is_empty() {
@@ -105,6 +104,19 @@ impl FluidKey {
                     .unwrap_or(&crate::part_table::requested_keys().fluids),
             };
             names.id(slot).ok_or("unknown FluidKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
+impl ItemKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::part_table::with_registering_keys(|registering| {
+            registering
+                .unwrap_or(crate::part_table::requested_keys())
+                .items
+                .id(slot)
+                .ok_or("unknown ItemKey slot")?;
             Ok(Self(slot))
         })
     }
@@ -227,7 +239,10 @@ pub fn resolve_block_entity_types(
     let mut names = crate::part_table::requested_keys()
         .block_entity_types
         .clone();
-    names.resolve("block entity type", |id| types.key(id))?;
+    names.resolve(
+        |id| types.key(id),
+        |mod_id, id| format!("mod {mod_id} requested unknown block entity type {id}"),
+    )?;
     for id in types.names() {
         names
             .request("horizon", id)
@@ -288,7 +303,9 @@ pub fn resolve_blocks(
 ) -> Result<(), Vec<String>> {
     let result = crate::part_table::requested_keys()
         .blocks
-        .resolve("block", &mut resolve);
+        .resolve(&mut resolve, |mod_id, id| {
+            format!("mod {mod_id} requested unknown block {id}")
+        });
     BLOCKS.with(|blocks| {
         *blocks.borrow_mut() = None;
         match result {
@@ -332,9 +349,10 @@ pub fn resolve_effects() -> Result<(), Vec<String>> {
             .request("horizon", potions::namespaced(def.id))
             .expect("registry owns valid ids");
     }
-    let indices = names.resolve("effect", |id| {
-        all.iter().position(|def| potions::namespaced(def.id) == id)
-    })?;
+    let indices = names.resolve(
+        |id| all.iter().position(|def| potions::namespaced(def.id) == id),
+        |mod_id, id| format!("mod {mod_id} requested unknown effect {id}"),
+    )?;
     let mut keys = vec![EffectKey(u32::MAX); all.len()];
     for (slot, &index) in indices.iter().enumerate() {
         keys[index] = EffectKey(slot as u32);
@@ -366,6 +384,11 @@ pub fn effect_id(key: EffectKey) -> Option<&'static str> {
 /// Canonical diagnostic name of a trusted, load-owned slot, independent of world resolution.
 pub fn block_id(key: BlockKey) -> Option<&'static str> {
     Some(&crate::part_table::requested_keys().blocks.entries[key.0 as usize].id)
+}
+
+/// Canonical diagnostic name retained by an item registration slot.
+pub fn item_id(key: ItemKey) -> Option<&'static str> {
+    crate::part_table::requested_keys().items.id(key.0)
 }
 
 /// The API key for an engine registry index, also for entries not explicitly requested by mods.

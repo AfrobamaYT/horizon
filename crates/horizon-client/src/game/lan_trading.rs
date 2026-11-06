@@ -310,7 +310,19 @@ impl Game<'_> {
             g.carried = menu.carried.take();
         }
         self.register_exploration_maps(made);
-        let (mut session, traded) = self.merchant_apply(session, gm.merchant.mob);
+        let opaque = gm
+            .merchant
+            .mob
+            .and_then(|id| self.mobs.iter().find(|m| m.id == id))
+            .is_some_and(|m| {
+                m.species() == horizon_client::mobs::Species::Villager
+                    && m.extra.profession.index().is_none()
+            });
+        let (mut session, traded) = if opaque {
+            (session, Vec::new())
+        } else {
+            self.merchant_apply(session, gm.merchant.mob)
+        };
         if !traded.is_empty() {
             // The guest's own statistic and advancements.
             if let Some((uuid, name)) = self
@@ -336,6 +348,37 @@ impl Game<'_> {
         }
         true
     }
+    /// Close an open merchant whose profession became unresolved, returning inputs.
+    pub(super) fn close_opaque_merchant(&mut self, id: u32) {
+        if self
+            .station
+            .as_ref()
+            .and_then(|s| s.merchant.as_ref())
+            .is_some_and(|m| m.mob == Some(id))
+        {
+            self.close_container();
+            self.set_screen(super::Screen::Playing);
+            self.capture(true);
+        }
+        if let Some(conn) = self.lan_trade_conn(id) {
+            let window = self
+                .lan
+                .as_ref()
+                .and_then(|h| h.play.get(&conn))
+                .and_then(|p| p.merchant.as_ref())
+                .map(|m| m.window);
+            if let Some(window) = window
+                && self.lan_merchant_closed(conn, Some(window))
+                && let Some(host) = self.lan.as_mut()
+            {
+                host.hub.send_to(
+                    conn,
+                    &C::ContainerClose(play::ContainerClose { container: window }),
+                );
+            }
+        }
+    }
+
     /// A container click on the guest's trading window.
     pub(super) fn lan_merchant_click(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
         let input = match p.input {
@@ -409,10 +452,12 @@ impl Game<'_> {
         g: &horizon_client::lan::guest::Guest,
         id: u32,
     ) -> bool {
-        self.mobs
-            .iter()
-            .find(|m| m.id == id)
-            .is_some_and(|m| m.alive() && guest_within_entity_range(g, &m.bounds(), 4.0))
+        self.mobs.iter().find(|m| m.id == id).is_some_and(|m| {
+            m.alive()
+                && (m.species() != horizon_client::mobs::Species::Villager
+                    || m.extra.profession.index().is_some())
+                && guest_within_entity_range(g, &m.bounds(), 4.0)
+        })
     }
     /// `Villager.customServerAiStep` for the guests' trading villagers: the
     /// TRADE reputation event, then the prices follow.
@@ -727,6 +772,194 @@ mod tests {
             .or_default()
             .merchant = Some(gm);
         (villager, rx, first)
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn changing_an_open_merchant_to_an_unknown_profession_closes_without_trading() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            let (_villager, rx, mut offer) = open_trade(game, 1);
+            offer.uses = 3;
+            {
+                let gm = game
+                    .lan
+                    .as_mut()
+                    .unwrap()
+                    .play
+                    .get_mut(&12)
+                    .unwrap()
+                    .merchant
+                    .as_mut()
+                    .unwrap();
+                gm.merchant.session.offers[0] = offer.clone();
+                gm.merchant.session.xp = 17;
+                gm.slots[1] = Some(ItemStack::new("minecraft:coal", 2));
+            }
+            game.lan.as_mut().unwrap().hub.guests[0].carried =
+                Some(ItemStack::new("minecraft:apple", 3));
+            let wheat = ItemStack::new("minecraft:wheat", 1);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .play
+                .get_mut(&12)
+                .unwrap()
+                .merchant
+                .as_mut()
+                .unwrap()
+                .slots[0] = Some(wheat);
+            let mut tag = game
+                .entity_nbt(super::super::commands::Target::Mob(40))
+                .unwrap();
+            if let Tag::Compound(data) = &mut tag {
+                data.insert(
+                    "VillagerData".into(),
+                    Tag::compound([
+                        ("type", Tag::String("minecraft:plains".into())),
+                        ("profession", Tag::String("example:engineer".into())),
+                        ("level", Tag::Int(4)),
+                    ]),
+                );
+            }
+            game.apply_entity_nbt(super::super::commands::Target::Mob(40), tag)
+                .unwrap();
+            assert!(game.lan.as_ref().unwrap().play[&12].merchant.is_none());
+            game.lan_guest_packet(
+                12,
+                play::Serverbound::SelectTrade(play::SelectTrade { item: 0 }),
+            );
+            for input in [0, 1] {
+                game.lan_guest_packet(
+                    12,
+                    play::Serverbound::ContainerClick(play::ContainerClick {
+                        container: 3,
+                        state: 0,
+                        slot: 2,
+                        button: 0,
+                        input,
+                        changed: vec![],
+                        carried: None,
+                    }),
+                );
+            }
+            assert_eq!(game.mobs[0].extra.profession.id(), "example:engineer");
+            assert_eq!(game.mobs[0].extra.villager_level, 4);
+            assert_eq!(game.mobs[0].extra.trade.as_ref().unwrap().xp, 17);
+            assert!(rx.try_iter().any(|out| match out {
+                horizon_client::lan::Out::Packet(body) => matches!(
+                    play::Clientbound::decode(body[0] as i32, &body[1..]),
+                    Ok(play::Clientbound::ContainerClose(_))
+                ),
+                _ => false,
+            }));
+            assert_eq!(game.missing_professions.len(), 1);
+            let tag = horizon_client::entity_nbt::mob_to_nbt(
+                &game.mobs[0],
+                [0; 4],
+                None,
+                Some(game.pack.assets.registry),
+            );
+            game.apply_entity_nbt(super::super::commands::Target::Mob(40), tag)
+                .unwrap();
+            assert_eq!(game.missing_professions.len(), 1);
+            let second = spawn(game, 41, "minecraft:villager");
+            let mut tag = horizon_client::entity_nbt::mob_to_nbt(
+                &game.mobs[1],
+                [0; 4],
+                None,
+                Some(game.pack.assets.registry),
+            );
+            if let Tag::Compound(data) = &mut tag {
+                data.insert(
+                    "VillagerData".into(),
+                    Tag::compound([
+                        ("type", Tag::String("minecraft:plains".into())),
+                        ("profession", Tag::String("example:engineer".into())),
+                        ("level", Tag::Int(1)),
+                    ]),
+                );
+            }
+            game.apply_entity_nbt(
+                super::super::commands::Target::Mob(second.entity().id()),
+                tag.clone(),
+            )
+            .unwrap();
+            assert_eq!(game.missing_professions.len(), 1);
+            game.missing_professions.clear();
+            game.apply_entity_nbt(
+                super::super::commands::Target::Mob(second.entity().id()),
+                tag,
+            )
+            .unwrap();
+            assert_eq!(game.missing_professions.len(), 1);
+            assert_eq!(
+                game.mobs[0].extra.trade.as_ref().unwrap().offers,
+                vec![offer]
+            );
+            let inventory = &game.lan.as_ref().unwrap().hub.guests[0].inventory;
+            for (id, count) in [
+                ("minecraft:wheat", 1),
+                ("minecraft:coal", 2),
+                ("minecraft:apple", 3),
+            ] {
+                assert_eq!(
+                    inventory
+                        .iter()
+                        .flatten()
+                        .filter(|s| &*s.item == id)
+                        .map(|s| s.count)
+                        .sum::<u32>(),
+                    count
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn explicit_nbt_offers_and_xp_override_the_live_trade() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            let (_, _, _) = open_trade(game, 1);
+            let session = &mut game
+                .lan
+                .as_mut()
+                .unwrap()
+                .play
+                .get_mut(&12)
+                .unwrap()
+                .merchant
+                .as_mut()
+                .unwrap()
+                .merchant
+                .session;
+            session.offers[0].uses = 3;
+            session.xp = 17;
+            let target = super::super::commands::Target::Mob(40);
+            let old = game.entity_nbt(target).unwrap();
+            let replacement = offer("minecraft:coal", "minecraft:diamond");
+            let patch = Tag::compound([
+                (
+                    "VillagerData",
+                    Tag::compound([
+                        ("profession", Tag::String("example:engineer".into())),
+                        ("level", Tag::Int(4)),
+                    ]),
+                ),
+                (
+                    "Offers",
+                    horizon_client::entity_nbt::offers_to_nbt(std::slice::from_ref(&replacement)),
+                ),
+                ("Xp", Tag::Int(9)),
+            ]);
+            game.apply_entity_nbt(target, horizon_client::data_cmd::merged(&old, &patch))
+                .unwrap();
+            let trade = game.mobs[0].extra.trade.as_ref().unwrap();
+            assert_eq!(trade.offers, vec![replacement]);
+            assert_eq!(trade.xp, 9);
+            assert_eq!(game.mobs[0].extra.villager_level, 4);
+        });
     }
 
     #[test]
