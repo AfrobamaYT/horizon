@@ -382,9 +382,19 @@ impl SyncData {
                 }
                 let mut decoded = Vec::new();
                 for (id, bytes) in files {
-                    let value: Value = serde_json::from_slice(&bytes)
+                    // Only the load conditions are decoded as a `Value`: the definition's own
+                    // parser accepts numbers `Value` refuses (an exhaustion of `1e400` is
+                    // infinity, as in vanilla), so the whole file must not go through it.
+                    let top: BTreeMap<String, &serde_json::value::RawValue> =
+                        serde_json::from_slice(&bytes)
+                            .map_err(|e| format!("damage type {id}: {e}"))?;
+                    let conditions = top
+                        .get("neoforge:conditions")
+                        .map(|raw| serde_json::from_str::<Value>(raw.get()))
+                        .transpose()
                         .map_err(|e| format!("damage type {id}: {e}"))?;
-                    if !overlay.conditions.allows(&value) {
+                    let conditions = serde_json::json!({ "neoforge:conditions": conditions.unwrap_or(Value::Null) });
+                    if !overlay.conditions.allows(&conditions) {
                         continue;
                     }
                     let definition =

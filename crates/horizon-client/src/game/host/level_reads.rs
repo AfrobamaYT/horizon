@@ -1,6 +1,5 @@
 //! The game's side of the `level_reads` area (`horizon-mod-api/src/host/level_reads.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelReadsBackend for Game<'_> {
     fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockStateId> {

@@ -4,7 +4,7 @@ use crate::*;
 /// The client host's methods of the `client_options` area, implemented by the game and reached through [`ClientHost`].
 pub trait ClientOptionsClientHost {
     /// Side: client.
-    /// Returns the current graphics preferences.
+    /// A snapshot of the current graphics preferences.
     fn graphics_options(&self) -> ClientGraphicsOptions {
         crate::phase::unprovided(
             "ClientHost::graphics_options",
@@ -13,7 +13,7 @@ pub trait ClientOptionsClientHost {
         )
     }
     /// Side: client.
-    /// Returns the current GUI and accessibility preferences.
+    /// A snapshot of the current GUI and accessibility preferences.
     fn gui_options(&self) -> ClientGuiOptions {
         crate::phase::unprovided(
             "ClientHost::gui_options",
@@ -22,7 +22,7 @@ pub trait ClientOptionsClientHost {
         )
     }
     /// Side: client.
-    /// Returns the current chat preferences.
+    /// A snapshot of the current chat preferences.
     fn chat_options(&self) -> ClientChatOptions {
         crate::phase::unprovided(
             "ClientHost::chat_options",
@@ -31,7 +31,7 @@ pub trait ClientOptionsClientHost {
         )
     }
     /// Side: client.
-    /// Returns the current audio preferences.
+    /// A snapshot of the current audio preferences.
     fn audio_options(&self) -> ClientAudioOptions {
         crate::phase::unprovided(
             "ClientHost::audio_options",

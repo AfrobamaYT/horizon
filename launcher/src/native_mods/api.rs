@@ -96,11 +96,25 @@ pub(super) fn main_rs(
                 })
             })
             .collect::<String>();
+    let markers = [
+        ("/* MOD_RAW */", &raw),
+        ("/* MOD_ENTRIES */", &entries),
+        ("/* MOD_POINTS */", &points),
+        ("/* BUILT_MODS */", &inventory),
+    ];
     template
-        .replace("/* MOD_RAW */", &raw)
-        .replace("/* MOD_ENTRIES */", &entries)
-        .replace("/* MOD_POINTS */", &points)
-        .replace("/* BUILT_MODS */", &inventory)
+        .split_inclusive("*/")
+        .map(|chunk| {
+            markers
+                .iter()
+                .find_map(|(marker, value)| {
+                    chunk
+                        .strip_suffix(*marker)
+                        .map(|prefix| prefix.to_owned() + value)
+                })
+                .unwrap_or_else(|| chunk.to_owned())
+        })
+        .collect::<String>()
         + &checks
 }
 

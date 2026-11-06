@@ -38,10 +38,8 @@ pub trait ItemComponentsHost {
         )
     }
     /// Side: both.
-    /// Whether enchantments `a` and `b` (ids, `minecraft:sharpness`) may be on one item
-    /// (`Enchantment.areCompatible`), by the world's enchantment definitions, data packs' included:
-    /// false for the same enchantment twice or where either lists the other as exclusive; an id
-    /// that names no enchantment excludes nothing.
+    /// Whether enchantments `a` and `b` may share an item (`Enchantment.areCompatible`), by the
+    /// world's enchantment definitions. API @API:item_components@.
     fn enchantments_compatible(&self, a: &str, b: &str) -> bool {
         crate::phase::unprovided(
             "Host::enchantments_compatible",
@@ -51,6 +49,7 @@ pub trait ItemComponentsHost {
     }
 }
 /// The handles' reads of the `item_components` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait ItemComponentsBackend {
     /// Side: both.
@@ -66,9 +65,8 @@ pub trait ItemComponentsBackend {
         )
     }
     /// Side: both.
-    /// The slot `stack` is equipped to (`Equippable.slot`): the item's `equippable` component
-    /// after the stack's own patch, which may add, change or remove it. `head`, `chest`, `legs`,
-    /// `feet`, `body`, `mainhand`, `offhand` or `saddle`; none where the stack is not equippable.
+    /// The slot `stack` is equipped to (`Equippable.slot`) after its component patch, behind
+    /// `ItemResource::equippable_slot`, through the opaque backend. API @API:item_components@.
     fn item_equippable_slot(&self, stack: &ItemStack) -> Option<String> {
         crate::phase::unprovided(
             "Backend::item_equippable_slot",

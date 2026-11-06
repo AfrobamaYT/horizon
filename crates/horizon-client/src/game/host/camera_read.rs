@@ -1,6 +1,5 @@
 //! The game's side of the `camera_read` area (`horizon-mod-api/src/host/camera_read.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl CameraReadHost for Game<'_> {
     fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {

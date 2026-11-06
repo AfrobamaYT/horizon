@@ -9,7 +9,6 @@ use horizon_core::{
     position::{BlockPos, ChunkPos},
 };
 use mod_api::mod_chunk_tickets::ModTicket;
-use mod_api::prelude::*;
 use mod_api::{
     BlockHit, BlockStateId, BlockTransformPreview, ChunkRef, ChunkStatus, Hand, ItemStack,
     LevelRef, LightLayer, NativeTicketOwner, PlayerRef, TicketController, Vec3,
@@ -690,8 +689,6 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn bounds_reads_follow_the_level_without_loading_chunks() {
-        use mod_api::Host;
-
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
             let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);

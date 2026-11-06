@@ -1,6 +1,5 @@
 //! The game's side of the `player_criteria` area (`horizon-mod-api/src/host/player_criteria.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 use std::sync::Arc;
 impl PlayerCriteriaBackendMut for Game<'_> {

@@ -87,6 +87,7 @@ pub trait BlockStateIdsHost {
     }
 }
 /// The handles' reads of the `block_state_ids` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait BlockStateIdsBackend {
     /// Side: both.

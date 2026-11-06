@@ -6243,3 +6243,18 @@ fn resource_root_fixture(
 ) -> Result<PathBuf> {
     super::resource_root(base, jars, mods, cache, &fixture_inventory(mods))
 }
+
+/// Only 26.3's canonical worldgen feature folder is admitted.
+#[test]
+fn worldgen_entry_reads_the_feature_folder() {
+    assert_eq!(
+        worldgen_entry("data/zinc/worldgen/feature/ore_zinc.json"),
+        Some(("worldgen/features.json", "zinc:ore_zinc".to_owned()))
+    );
+    for folder in ["configured_feature", "nope"] {
+        assert_eq!(
+            worldgen_entry(&format!("data/zinc/worldgen/{folder}/ore_zinc.json")),
+            None
+        );
+    }
+}

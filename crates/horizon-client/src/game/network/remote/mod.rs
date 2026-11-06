@@ -4027,6 +4027,15 @@ impl Game<'_> {
                                     pl.air = *air;
                                 }
                             }
+                            // Entity.DATA_TICKS_FROZEN: the server's count of the
+                            // powder snow freeze, which the client's own copy reads
+                            // for the frost overlay, the frozen hearts and the
+                            // shiver of its third-person model (#11217).
+                            (7, Value::Int(ticks)) => {
+                                if let Some(pl) = self.player.as_mut() {
+                                    pl.ticks_frozen = *ticks;
+                                }
+                            }
                             // LivingEntity.DATA_ARROW_COUNT_ID and DATA_STINGER_COUNT_ID.
                             (12, Value::Int(count)) => {
                                 if let Some(r) = self.remote.as_mut() {
@@ -12012,7 +12021,6 @@ mod tests {
     fn mod_chat_needs_a_joined_player_and_what_the_chat_option_allows() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_protocol::connection::Pipe;
-        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;

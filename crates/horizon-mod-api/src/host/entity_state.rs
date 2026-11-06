@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `entity_state` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntityStateBackend {
     /// Side: both.
@@ -176,6 +177,7 @@ pub trait EntityStateBackend {
     }
 }
 /// The handles' server writes of the `entity_state` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait EntityStateBackendMut {
     /// Side: server.

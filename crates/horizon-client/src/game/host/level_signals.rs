@@ -1,6 +1,5 @@
 //! The game's side of the `level_signals` area (`horizon-mod-api/src/host/level_signals.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelSignalsBackend for Game<'_> {
     fn level_signal(&self, level: LevelRef, pos: [i32; 3], direction: Direction) -> Option<i32> {

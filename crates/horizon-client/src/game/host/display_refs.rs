@@ -1,6 +1,5 @@
 //! The game's side of the `display_refs` area (`horizon-mod-api/src/host/display_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl DisplayRefsServerHost for Game<'_> {
     fn display(&self, entity: EntityRef) -> Option<DisplayRef> {

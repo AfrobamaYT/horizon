@@ -8,7 +8,6 @@ use horizon_client::world::World;
 use horizon_core::position::BlockPos;
 use horizon_core::random::LegacyRandom;
 use horizon_world::registry::BlockStateId;
-use mod_api::prelude::*;
 use mod_api::{BoolGameRuleKey, FeatureFlags, GameRuleValue, LevelDimensionShape, LevelRef};
 use std::sync::Arc;
 use {horizon_core::dimension::Dimension as LevelDimension, horizon_world::level::LevelAccess};

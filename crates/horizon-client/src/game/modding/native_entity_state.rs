@@ -11,6 +11,7 @@ use horizon_client::mobs::{Mob, Species, sync};
 use horizon_client::motion::PlayerMotion;
 use horizon_client::pose::Pose;
 use mod_api::EntityRef;
+#[cfg(test)]
 use mod_api::prelude::*;
 
 /// `Pose`'s serialized names by id (`Pose.STANDING` is 0).
@@ -840,7 +841,7 @@ mod tests {
         use super::super::execution_role::ExecutionRole;
         use horizon_core::geometry::Vec3;
         use horizon_protocol::connection::Pipe;
-        use mod_api::{ClientHost, Host};
+
         use winit::keyboard::KeyCode;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;

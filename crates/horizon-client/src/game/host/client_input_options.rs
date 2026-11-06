@@ -1,6 +1,5 @@
 //! The game's side of the `client_input_options` area (`horizon-mod-api/src/host/client_input_options.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ClientInputOptionsClientHost for Game<'_> {
     fn input_options(&self) -> ClientInputOptions {

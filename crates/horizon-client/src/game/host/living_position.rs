@@ -1,6 +1,5 @@
 //! The game's side of the `living_position` area (`horizon-mod-api/src/host/living_position.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LivingPositionBackend for Game<'_> {
     fn living_has_line_of_sight(&self, living: LivingRef, target: EntityRef) -> Option<bool> {
