@@ -7,7 +7,7 @@
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
-use super::{Dim, Game, Mining, Screen};
+use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};
 use horizon_client::actions::Action;
 use horizon_client::first_person::{Hand, SwingAnimation};
 use horizon_client::{
@@ -3602,36 +3602,27 @@ impl Game<'_> {
                         f64::from(p.y) / 8.0,
                         f64::from(p.z) / 8.0,
                     ];
-                    // ClientPacketListener.handleSoundEvent plays with packet.getSource().
-                    match usize::try_from(p.source)
-                        .ok()
-                        .filter(|s| *s < horizon_client::settings::SOUND_SOURCES.len())
+                    let mut sound = LevelSound::new(&name, at, p.volume, p.pitch);
+                    if let Ok(source) = usize::try_from(p.source)
+                        && let Some(source) = mod_api::SoundSource::ALL.get(source)
                     {
-                        Some(source) => {
-                            self.audio
-                                .play_on(source, &name, Some(at), p.volume, p.pitch)
-                        }
-                        None => self.audio.play(&name, Some(at), p.volume, p.pitch),
+                        sound.source = *source;
                     }
+                    self.play_client_level_sound(sound, p.seed);
                 }
             }
             C::SoundEntity(p) => {
                 if let Some(name) = self.remote_sound_name(&p.sound)
                     && !self.settings.extras.pvp.combat.mutes_sound(&name)
-                    && let Some(state) = self.remote_sound_entity_state(p.id)
                 {
-                    let source = usize::try_from(p.source)
-                        .ok()
-                        .filter(|s| *s < horizon_client::settings::SOUND_SOURCES.len())
-                        .unwrap_or_else(|| horizon_client::settings::sound_source(&name));
-                    let entity = horizon_client::sound_engine::SoundEntity::new(
-                        p.id as u32,
-                        state.position,
-                        state.silent,
-                    );
-                    entity.update(state);
-                    self.audio
-                        .play_entity_seeded(&name, source, p.volume, p.pitch, p.seed, entity);
+                    let mut sound = LevelSound::new(&name, [0.0; 3], p.volume, p.pitch);
+                    sound.emitter = Some(p.id as u32);
+                    if let Ok(source) = usize::try_from(p.source)
+                        && let Some(source) = mod_api::SoundSource::ALL.get(source)
+                    {
+                        sound.source = *source;
+                    }
+                    self.play_client_level_sound(sound, p.seed);
                 }
             }
             C::StopSound(p) => self
@@ -11586,6 +11577,8 @@ mod native_entity_tests;
 
 #[cfg(test)]
 mod effect_blend_tests;
+#[cfg(test)]
+mod level_sound_tests;
 
 #[cfg(test)]
 mod tests {
