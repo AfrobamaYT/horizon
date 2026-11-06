@@ -65,7 +65,13 @@ fn frame_adoption(glow_first: bool) {
             ("block_pos", Tag::IntArray(vec![10 + n, 101, 5])),
             ("Facing", Tag::Byte(5)),
             ("ItemRotation", Tag::Byte(3)),
-            ("Item", horizon_client::save::item_to_nbt(&stack)),
+            (
+                "Item",
+                horizon_client::save::item_to_nbt(&ItemStack {
+                    count: 2,
+                    ..stack.clone()
+                }),
+            ),
         ]);
         game.load_item_frame(tag, Some([317, 1, 0, n]));
     }
@@ -80,6 +86,7 @@ fn frame_adoption(glow_first: bool) {
             .find(|f| f.id == id)
             .unwrap()
             .clone();
+        assert_eq!(frame.item.as_ref().unwrap().count, 1);
         game.map(0).unwrap().tick_framed(
             1,
             0,
@@ -130,10 +137,16 @@ fn frame_adoption(glow_first: bool) {
                 _ => {}
             }
             game.apply_entity_nbt(Target::Frame(id), tag).unwrap();
+            let adopted = game.item_frames.iter().find(|f| f.id == id).unwrap();
             assert_eq!(
-                game.item_frames.iter().find(|f| f.id == id).unwrap().kind(),
+                adopted.kind(),
                 frame.kind(),
                 "{change}: immutable frame type"
+            );
+            assert_eq!(
+                adopted.item.as_ref().map(|s| s.count),
+                (change != "empty").then_some(1),
+                "{change}: an adopted frame stack holds one item"
             );
             let retained = matches!(change, "unchanged" | "rotation");
             let map = game.map(0).unwrap();

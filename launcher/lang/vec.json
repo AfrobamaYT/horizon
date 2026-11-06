@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "No se pol lèxare el registro deła costrusión: {error}",
   "Could not read the saved sign-in.": "No se pol lèxare el sign-in salvà.",
   "Could not read the saved sign-in. Sign in again.": "No se pol lèxare el sign-in salvà. Entrate ancora.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "No se pol lèxare {name}: {error}",
   "Could not run {program}: {error}": "No se pol far funsionar {program}: {error}",
   "Could not save the renewed sign-in.": "No se pol salvar el login rinnovà.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "I scaricamenti, i sign-in e i ajornamenti i va atraverso sto proxy (http://host:port, socks5://host:port). Vodo vol dir gnente: HTTPS_PROXY el vien doparà invese quando el lansador el xe stà scominsià co uno.",
   "{name} was left out: made for another Horizon version": "{name} el xe stà lasà fora: fato par n'altra version de Horizon",
   "{name} was left out: clashes with {other}": "{name} el xe stà lasà fora: el va in conflito co {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} el xe stà lasà fora: el ga bisogno de {other}, che el xe stà lasà fora"
+  "{name} was left out: it needs {other}, which was left out": "{name} el xe stà lasà fora: el ga bisogno de {other}, che el xe stà lasà fora",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

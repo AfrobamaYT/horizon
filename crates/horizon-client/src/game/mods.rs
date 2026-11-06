@@ -79,6 +79,12 @@ impl ModsState {
 
 /// Capture load inputs at the resource-generation boundary, before workers share them.
 pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client::Result<ItemData> {
+    let phase = mod_api::__private::PhaseOwner::scope(if role.is_client() {
+        mod_api::__private::ModPhase::Setup
+    } else {
+        mod_api::__private::ModPhase::World
+    });
+    let _reload = phase.reloading()?;
     let mut registries: BTreeMap<_, _> = builtin_registries(root)?
         .registries
         .into_iter()
@@ -122,6 +128,11 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
     Ok(())
 }
 
+/// Finish every once-only content declaration on the registration thread.
+pub(super) fn freeze_declarations() {
+    let _ = native_declared();
+}
+
 struct NativeDeclared {
     blocks: Vec<horizon_mods::content::Block>,
     items: Vec<horizon_mods::content::Item>,
@@ -158,6 +169,25 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
     let mut names = Vec::new();
     Game::native_standalone_models(&RegistrationContext::new(), &mut names);
     Some(names)
+}
+/// The native mods' entity model layers (`native_layer_definitions`), kept
+/// once at start for `native_bake_layer`.
+pub(super) fn register_layer_definitions(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut layers = Vec::new();
+    Game::native_layer_definitions(&RegistrationContext::new(), &mut layers);
+    horizon_client::mobs::model_layers::register(layers);
+}
+/// The native mods' F3 debug entries (`native_register_debug_entries`), kept once at start.
+pub(super) fn register_debug_entries(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut entries = Vec::new();
+    Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
+    horizon_client::debug_entries::register(entries);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -371,6 +401,22 @@ pub(super) fn content_root(
     }
     register_mob_effects(&overlay.mods);
     mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
+    let behavior: serde_json::Value =
+        horizon_world::json_file::read(&overlay.root.join("block-behaviours.json"))?;
+    let fluids = behavior["fluids"]
+        .as_array()
+        .ok_or("missing fluid registry")?;
+    let fluids = fluids
+        .iter()
+        .map(|value| value.as_str().ok_or("invalid fluid registry entry"))
+        .collect::<Result<Vec<_>, _>>()?;
+    mod_api::__private::resolve_fluids(&fluids).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
     register_entity_types(&overlay.mods);
     register_menu_types(&overlay.mods);
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
@@ -399,7 +445,7 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    mod_api::__private::validate_block_entity_type_keys(&types)?;
+    mod_api::__private::resolve_block_entity_types(&types).map_err(|errors| errors.join("\n"))?;
     block_entity_types::install(types)?;
     Ok(())
 }
@@ -864,7 +910,8 @@ mod tests {
             Mob::new(2, ghoul.clone(), at, 0.0),
         );
         assert_eq!(ghoul.health, 40.0);
-        let saved = |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None);
+        let saved =
+            |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
         let keys = |tag: &horizon_world::nbt::Tag| -> Vec<String> {
             let horizon_world::nbt::Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -915,7 +962,8 @@ mod tests {
         let trader = Mob::new(1, types["minecraft:wandering_trader"].clone(), at, 0.0);
         let merchant = Mob::new(2, merchant.clone(), at, 0.0);
         assert!(merchant.ai.goals.has("Float") && trader.ai.goals.has("Float"));
-        let saved = |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None);
+        let saved =
+            |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
         let keys = |tag: &Tag| -> Vec<String> {
             let Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -1116,6 +1164,7 @@ mod tests {
             "{\"minecraft:block_entity_type\":{\"entries\":{}}}",
         )
         .unwrap();
+        std::fs::write(base.join("block-behaviours.json"), r#"{"fluids":[]}"#).unwrap();
         std::env::set_current_dir(&here).unwrap();
         let mut sources = ModsState {
             native: std::sync::Arc::new(native),

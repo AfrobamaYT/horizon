@@ -2,8 +2,9 @@
 //! native mod too.
 // ANCHOR: mod
 use mod_api::{
-    BlockKey, EffectKey, Flow, Hooks, HostSide, ItemPart, Registrar, RegistrationContext,
-    ServerChatEvent, ServerHost, Text, UseItemEvent,
+    BlockKey, DataLoadContext, EffectKey, Flow, FluidIngredient, FluidStack, Hooks, HostSide,
+    ItemPart, LootTableLoadEvent, Registrar, RegistrationContext, ServerChatEvent, ServerHost,
+    Text, UseItemEvent,
 };
 use mod_points::{Points, TickArgs};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -30,9 +31,22 @@ impl ItemPart for Stick {
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
     fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext) {
-        registrar.item_part("minecraft:stick", Stick);
+        let item = registrar.item_key("minecraft:stick");
+        registrar.item_part(item, Stick);
         let _ = self.stone.set(registrar.block_key("minecraft:stone"));
         let _ = self.speed.set(registrar.effect_key("minecraft:speed"));
+    }
+
+    fn loot_table_load(&self, context: &dyn DataLoadContext, event: &mut LootTableLoadEvent<'_>) {
+        if event.id != "test:loot" {
+            return;
+        }
+        let water = context.fluid_key("minecraft:water").expect("water");
+        let ingredient =
+            FluidIngredient::from_json(&mod_api::serde_json::json!("minecraft:water"), context)
+                .expect("ingredient");
+        assert!(ingredient.test(&FluidStack::new(water, 1)));
+        *event.table = mod_api::serde_json::json!({"fluid_guest_ok": true});
     }
 
     fn server_chat(&self, host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
@@ -40,7 +54,17 @@ impl Hooks for Mod {
         let speed = *self.speed.get().expect("registered effect key");
         assert_eq!(stone.id(host), "minecraft:stone");
         assert_eq!(speed.id(host), "minecraft:speed");
-        assert!(host.block_state_default(stone).is_some());
+        let state = host.block_state_default(stone).expect("stone state");
+        let fluid = host.state_fluid_state(state).expect("fluid state");
+        assert_eq!(
+            (
+                fluid.amount,
+                fluid.falling,
+                fluid.is_source(),
+                fluid.is_empty()
+            ),
+            (0, false, false, true)
+        );
         *event.message = Text::literal(format!("{} (via mod.wasm)", event.raw_text));
         Flow::Continue
     }

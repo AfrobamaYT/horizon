@@ -214,7 +214,10 @@ impl Game<'_> {
             // !leashHolder.canInteractWithLevel(): dropLeash with entity_drops
             // on, else removeLeash.
             Held::Gone => {
-                let drops = self.ui.rules.bool("entity_drops");
+                let drops = self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS);
                 self.release_boat_leash(b, drops);
                 return;
             }

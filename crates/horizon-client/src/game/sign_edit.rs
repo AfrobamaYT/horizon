@@ -694,7 +694,7 @@ impl Game<'_> {
     /// Done button (`this.width / 2 - 100, this.height / 4 + 144`, 200x20),
     /// or a click on a line (`EditBox.onClick`).
     pub(super) fn sign_edit_click(&mut self, size: [u32; 2]) {
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (x, y) = done_button(b.width, b.height);
         let (mx, my) = self.cursor;
         if mx >= x && mx < x + 200.0 && my >= y && my < y + 20.0 {
@@ -756,9 +756,9 @@ impl Game<'_> {
         let Some(BlockEntity::Sign(sign)) = self.world.block_entities.get(&edit.pos) else {
             return;
         };
+        self.render_transparent_background("sign_editor", batch);
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
-        batch.fill(atlas, 0.0, 0.0, w, h, rgba(16, 16, 16, 160));
         let (key, fallback) = if sign.hanging {
             ("hanging_sign.edit", "Edit Hanging Sign Message")
         } else {

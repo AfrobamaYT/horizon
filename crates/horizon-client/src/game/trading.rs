@@ -6,13 +6,9 @@ use super::{
     Game,
     stations::{INPUT, Kind, RESULT, Station},
 };
-use horizon_client::mobs::{
-    Species,
-    render::{PROFESSIONS, VILLAGER_TYPES},
-    villager,
-};
+use horizon_client::mobs::{Species, render::VILLAGER_TYPES, villager};
 use horizon_client::{
-    hud::{HudBatch, rgba},
+    hud::HudBatch,
     items::ItemStack,
     merchant::{self, MerchantOffer, TradeContext},
 };
@@ -185,6 +181,9 @@ impl Game<'_> {
     /// `AbstractVillager.getOffers`: generated on first use.
     pub(super) fn ensure_offers(&mut self, index: usize) {
         let species = self.mobs[index].species();
+        if species == Species::Villager && self.mobs[index].extra.profession.index().is_none() {
+            return;
+        }
         let unset = self.mobs[index]
             .extra
             .trade
@@ -208,7 +207,10 @@ impl Game<'_> {
                 }
                 v
             } else {
-                let profession = PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()];
+                let profession = horizon_client::mobs::villager::profession(
+                    m.extra.profession.index().unwrap_or(0),
+                )
+                .id;
                 let level = m.extra.villager_level.max(1);
                 let set = merchant::Trades::set_for(profession, level);
                 if self.stations().trades.sets.contains_key(&set) {
@@ -251,7 +253,14 @@ impl Game<'_> {
             self.handle_mob_events(events)?;
             return Ok(true);
         }
+        let unresolved = species == Species::Villager && m.extra.profession.index().is_none();
         self.award_custom_stat("talked_to_villager", 1);
+        if unresolved {
+            let mut events = Vec::new();
+            villager::set_unhappy(&mut self.mobs[index], &mut events);
+            self.handle_mob_events(events)?;
+            return Ok(true);
+        }
         self.ensure_offers(index);
         let m = &self.mobs[index];
         let trade = m.extra.trade.as_deref().cloned().unwrap_or_default();
@@ -265,7 +274,7 @@ impl Game<'_> {
         }
         let villager = species == Species::Villager;
         let profession = if villager {
-            PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()]
+            horizon_client::mobs::villager::profession(m.extra.profession.index().unwrap_or(0)).id
         } else {
             "wandering_trader"
         };
@@ -326,10 +335,13 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
+        m.extra.flag2 = false;
+        if session.villager && m.extra.profession.index().is_none() {
+            return;
+        }
         if session.villager {
             m.extra.villager_level = session.level.max(1);
         }
-        m.extra.flag2 = false;
         m.random = session.random.clone();
         m.ambient_timer = session.ambient_sound_time;
         let trade = m.extra.trade.get_or_insert_default();
@@ -407,6 +419,17 @@ impl Game<'_> {
             .as_ref()
             .and_then(|s| s.merchant.as_ref())
             .and_then(|m| m.mob);
+        if mob
+            .and_then(|id| self.mobs.iter().find(|m| m.id == id))
+            .is_some_and(|m| {
+                m.species() == Species::Villager && m.extra.profession.index().is_none()
+            })
+        {
+            if let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) {
+                m.session = session;
+            }
+            return;
+        }
         let (mut session, traded) = self.merchant_apply(session, mob);
         self.merchant_traded(mob, &mut session.offers, &traded);
         if let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) {
@@ -584,7 +607,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let (_, oy) = self.inventory_origin(&HudBatch::new(size));
+        let (_, oy) = self.inventory_origin(&HudBatch::new(size, self.settings.gui_scale_inputs()));
         let y = self.cursor.1 - oy;
         if let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut())
             && m.dragging
@@ -623,15 +646,8 @@ impl Game<'_> {
         );
         let offers = m.session.offers.clone();
         let costs: Vec<ItemStack> = offers.iter().map(|o| o.cost_a(self.items())).collect();
+        self.render_transparent_background("merchant", batch);
         let atlas = &self.gui.atlas;
-        batch.fill(
-            atlas,
-            0.0,
-            0.0,
-            batch.width,
-            batch.height,
-            rgba(16, 16, 16, 160),
-        );
         if let Some(mut r) = atlas.sprites.get("gui/container/villager").copied() {
             let (du, dv) = ((r.u1 - r.u0) / r.w as f32, (r.v1 - r.v0) / r.h as f32);
             r.u1 = r.u0 + 276.0 * du;

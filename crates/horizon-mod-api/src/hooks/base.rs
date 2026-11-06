@@ -1153,7 +1153,8 @@ pub trait Hooks {
     /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
     /// survival and entity obstruction checks. A trait mod returns
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
-    /// `None` to leave the answer to the next mod or vanilla.
+    /// `None` to leave the answer to the next mod or vanilla. Changes to the event's fluid
+    /// copy are mod-provided data forwarded to later Parts, never consumed by the engine.
     /// Authoritative servers only.
     #[hook(
         side = "server",
@@ -1298,7 +1299,9 @@ pub trait Hooks {
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
     /// Selection/F3+T and server-pack reloads share this point; initial startup does not
-    /// (`client_setup` is the once-only moment after the initial load).
+    /// (`client_setup` is the once-only moment after the initial load). Runs in
+    /// Reloading: published asset/data queries may refresh caches, but world
+    /// handles and transactions remain unavailable.
     #[hook(side = "client", contract = "listen")]
     fn client_resources_reloaded();
     /// Append an item's custom decorations after its default bar, cooldown and count.
@@ -1333,13 +1336,11 @@ pub trait Hooks {
         host = "read"
     )]
     fn use_duration();
-    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
-    /// `animation` arrives with its consumable's (`eat`, `drink`), else
-    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
-    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
-    /// Asked each frame the hand draws an item in use, for an item with no
-    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
-    /// theirs). Client-side.
+    /// `Item.getUseAnimation` of `stack` in use, for first- and third-person
+    /// rendering. `animation` arrives with the item's vanilla answer; mods may
+    /// change it. A `Spear` override on an item without kinetic data is refused
+    /// as `None`. Asked on the client when each render consumer updates; answer
+    /// from the stack alone.
     #[hook(side = "client", contract = "listen", scope = "item", key = "stack")]
     fn use_animation();
     /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
@@ -1543,7 +1544,9 @@ pub trait Hooks {
     /// players were sent the new data. The place to
     /// drop caches derived from the data and to rebind what depends on it.
     /// Server-side (the single player's integrated server included); a client
-    /// connected to a server never fires it.
+    /// connected to a server never fires it. Runs in Reloading: published
+    /// asset/data queries can rebind caches, including on first open; world
+    /// handles and transactions remain unavailable.
     #[hook(side = "server", contract = "listen")]
     fn server_data_loaded();
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
@@ -1824,20 +1827,13 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/*.rs`
-    /// with the game's): container slot `slot` of the content mod menu type `menu`
-    /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
-    /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
-    /// `may_place` and `max_stack` hold the type's own answer (false on one of its
-    /// `results`, true elsewhere, and 99): change them for your own menu types.
-    /// `max_stack` is kept to 1 to 99,
-    /// and the item's own stack size still caps it. Asked on the server, for each
-    /// click, drag and shift-click that puts an item in a slot, several times for
-    /// one shift-click: answer from `stack` and `context` alone, and fast. `context`
-    /// holds the side, the registries and the settings of the resource generation;
-    /// a `/reload` builds the next one.
+    /// Slot placement and stack limits for a content mod menu. `slot` is the
+    /// backing container index, including player inventory slots. The slot's
+    /// own answers arrive first; the maximum is bounded to 1–99 and the item
+    /// limit. Runs in the restricted context during server clicks and client
+    /// prediction. Answer from the stack and context alone, and fast.
     #[hook(
-        side = "server",
+        side = "both",
         contract = "listen",
         scope = "menu",
         key = "menu",
@@ -4094,7 +4090,9 @@ pub trait Hooks {
     fn player_shield_disable();
     /// A statistic is about to be awarded to a server player, before its count and scoreboard criteria
     /// change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, and
-    /// `value` the amount. Set `cancel` to award nothing. Server-side.
+    /// `value` the amount. Set `cancel` to award nothing. Server-side. Ordinary interactions
+    /// fire at vanilla's award point; inside a transaction, the award and this hook wait until
+    /// the outermost successful commit, after tentative world and inventory writes.
     #[hook(
         side = "server",
         contract = "cancel",
@@ -4243,8 +4241,9 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn raid_spawn_wave();
-    /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`).
+    /// A server raid at `pos` changed to `state` (`triggered`, `victory`,
+    /// `loss` or `stopped`). `raid` identifies its owning level, including a
+    /// parked level. A terminal raid already removed from storage cannot be read.
     #[hook(
         side = "server",
         contract = "listen",
@@ -4784,11 +4783,11 @@ pub trait Helpers {
     fn config_files();
     #[helper(side = "client")]
     fn panel_items();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipes_of_type();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_ingredient();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_result();
     #[helper(side = "both")]
     fn known_recipes();

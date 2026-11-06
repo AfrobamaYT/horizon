@@ -66,6 +66,22 @@ struct Kept {
     extras: BlockEntityExtras,
 }
 
+impl Kept {
+    fn capture(
+        world: &horizon_client::world::World,
+        hoppers: &HashMap<Pos, HopperState>,
+        pos: Pos,
+    ) -> Self {
+        Self {
+            entity: world.block_entities.get(&pos).cloned(),
+            attachments: world.block_entities.attachments(pos).cloned(),
+            hopper: hoppers.get(&pos).copied(),
+            name: world.block_names.get(&pos).cloned(),
+            extras: world.block_entity_extras(pos),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct KeptPlayer {
     inventory: Vec<Option<ItemStack>>,
@@ -90,6 +106,8 @@ pub(super) enum After {
     Updated(Pos),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
+    /// Deferred interaction effects, replayed in the same root-commit order.
+    Effect(DeferredEffect),
     /// `Block.popResource`.
     Drop([i32; 3], ItemStack),
     /// `Player.drop(stack, false)` by the player with this UUID: what no longer fits.
@@ -98,6 +116,21 @@ pub(super) enum After {
     Spawn([f64; 3], ItemStack),
     /// The item entity with this id was emptied: removed, unless it holds items again.
     Emptied(u32),
+}
+
+/// Effects shared by transactional interaction contexts.
+pub(super) enum DeferredEffect {
+    CustomStat {
+        player: u128,
+        key: &'static str,
+        amount: i32,
+    },
+    Sound {
+        sound: &'static str,
+        at: [f64; 3],
+        volume: f32,
+        pitch: f32,
+    },
 }
 
 impl Level {
@@ -188,13 +221,10 @@ impl Game<'_> {
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
-        level.block_entities.entry(pos).or_insert_with(|| Kept {
-            entity: self.world.block_entities.get(&pos).cloned(),
-            attachments: self.world.block_entities.attachments(pos).cloned(),
-            hopper: self.hoppers.get(&pos).copied(),
-            name: self.world.block_names.get(&pos).cloned(),
-            extras: self.world.block_entity_extras(pos),
-        });
+        level
+            .block_entities
+            .entry(pos)
+            .or_insert_with(|| Kept::capture(&self.world, &self.hoppers, pos));
     }
     /// Keeps `holder`'s attachment map as it is, if a transaction is open and hasn't yet: a
     /// block entity's with the rest of it, any other's alone.
@@ -308,6 +338,10 @@ impl Game<'_> {
         level.after.push(After::Block(key));
         self.world.set_stored(pos[0], pos[1], pos[2], state)
     }
+    /// Queue a reusable interaction effect for the outermost successful commit.
+    pub(super) fn defer_effect(&mut self, effect: DeferredEffect) {
+        self.after_commit(After::Effect(effect));
+    }
     /// Runs `after` at once, or at the root commit inside a transaction.
     pub(super) fn after_commit(&mut self, after: After) {
         match self.transactions.last_mut() {
@@ -319,6 +353,21 @@ impl Game<'_> {
         match after {
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
+            After::Effect(effect) => match effect {
+                DeferredEffect::CustomStat {
+                    player,
+                    key,
+                    amount,
+                } => {
+                    self.native_as_player(player, |g| g.award_custom_stat(key, amount));
+                }
+                DeferredEffect::Sound {
+                    sound,
+                    at,
+                    volume,
+                    pitch,
+                } => self.audio.play(sound, Some(at), volume, pitch),
+            },
             // Only reached through a root commit, which sets the block itself.
             After::Block(_) => {}
             After::Drop(pos, stack) => {
@@ -433,16 +482,14 @@ impl Game<'_> {
                 e.stack = kept;
             }
         }
-        let guests = self
-            .lan
-            .iter_mut()
-            .flat_map(|host| host.hub.guests.iter_mut());
-        for g in guests {
-            if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
-                g.ender_items.clone_from(&kept.ender_items);
-                g.craft_grid.clone_from(&kept.craft_grid);
-                g.native_menu.clone_from(&kept.native_menu);
-            }
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.guests.update_all(|g| {
+                if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
+                    g.ender_items.clone_from(&kept.ender_items);
+                    g.craft_grid.clone_from(&kept.craft_grid);
+                    g.native_menu.clone_from(&kept.native_menu);
+                }
+            });
         }
         for (holder, kept) in level.attachments {
             if let Ok(map) = self.attachment_slot(holder) {
@@ -472,6 +519,250 @@ mod tests {
         NativeBlockUpdateFlags, Transaction,
     };
     use std::{sync::Arc, time::Instant};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn cauldron_stat_listener_observes_committed_state_and_can_cancel() {
+        use super::super::native_entity_refs::tests::run_fresh_cases;
+        use mod_api::{
+            Flow, Hooks, ItemSpawnEvent, ItemTossEvent, ModEntry, Mods, PlayerStatAwardEvent,
+        };
+        use std::sync::Mutex;
+        if run_fresh_cases(
+            "game::transactions::tests::cauldron_stat_listener_observes_committed_state_and_can_cancel",
+            "HORIZON_CAULDRON_STAT_CHILD",
+            &["run"],
+        ) {
+            return;
+        }
+        struct Listener {
+            seen: Arc<Mutex<Vec<(Option<mod_api::BlockStateId>, Option<String>)>>>,
+            drops: Arc<Mutex<Vec<(&'static str, Option<mod_api::BlockStateId>)>>>,
+        }
+        #[mod_api::__subscriptions]
+        impl Hooks for Listener {
+            fn player_stat_award(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut PlayerStatAwardEvent<'_>,
+            ) -> Flow {
+                if event.stat != "minecraft:fill_cauldron" {
+                    return Flow::Continue;
+                }
+                let level = host.level("minecraft:overworld").unwrap();
+                let hand = mod_api::ItemPlace::PlayerHand {
+                    player: event.player,
+                    hand: mod_api::first_person::Hand::Main,
+                };
+                self.seen.lock().unwrap().push((
+                    level.block_state(host, [2, 64, 2]),
+                    hand.stack(host).map(|s| s.item.to_string()),
+                ));
+                Flow::Cancel
+            }
+            fn item_toss(&self, host: &mut dyn ServerHost, event: &mut ItemTossEvent<'_>) -> Flow {
+                if event.item == "minecraft:potion" {
+                    let level = host.level("minecraft:overworld").unwrap();
+                    self.drops
+                        .lock()
+                        .unwrap()
+                        .push(("toss", level.block_state(host, [2, 64, 2])));
+                }
+                Flow::Continue
+            }
+            fn item_spawn(&self, host: &mut dyn ServerHost, event: &mut ItemSpawnEvent<'_>) {
+                if event.item == "minecraft:potion" {
+                    let level = host.level("minecraft:overworld").unwrap();
+                    self.drops
+                        .lock()
+                        .unwrap()
+                        .push(("spawn", level.block_state(host, [2, 64, 2])));
+                }
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let drops = Arc::new(Mutex::new(Vec::new()));
+        let mods: Mods = vec![ModEntry::new(
+            "observer",
+            Box::new(Listener {
+                seen: seen.clone(),
+                drops: drops.clone(),
+            }),
+        )]
+        .into();
+        mod_api::__private::install(mods);
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let pos = [2, 64, 2];
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let empty = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:cauldron")
+                .unwrap();
+            let full = game
+                .pack
+                .assets
+                .registry
+                .resolve(&horizon_world::chunk::BlockState {
+                    name: "minecraft:water_cauldron".into(),
+                    properties: [("level".into(), "3".into())].into_iter().collect(),
+                })
+                .unwrap();
+            game.world.set(pos[0], pos[1], pos[2], empty).unwrap();
+            game.as_guest(12, |game| {
+                game.selected = 0;
+                game.creative = false;
+                game.inventory[0] = Some(ItemStack::new("minecraft:water_bucket", 1));
+                game.transaction_open();
+                assert!(game.use_on_cauldron(pos).unwrap());
+                assert!(seen.lock().unwrap().is_empty());
+                game.transaction_close(false);
+                assert!(seen.lock().unwrap().is_empty());
+                assert!(game.use_on_cauldron(pos).unwrap());
+                assert_eq!(
+                    seen.lock().unwrap().as_slice(),
+                    &[(Some(empty), Some("minecraft:bucket".into()))]
+                );
+                game.world.set(pos[0], pos[1], pos[2], empty).unwrap();
+                game.inventory[0] = Some(ItemStack::new("minecraft:water_bucket", 1));
+                game.transaction_open();
+                assert!(game.use_on_cauldron(pos).unwrap());
+                assert_eq!(seen.lock().unwrap().len(), 1);
+                game.transaction_close(true);
+            })
+            .unwrap();
+            assert_eq!(
+                *seen.lock().unwrap(),
+                vec![
+                    (Some(empty), Some("minecraft:bucket".into())),
+                    (Some(full), Some("minecraft:bucket".into()))
+                ]
+            );
+            let level2 = game
+                .pack
+                .assets
+                .registry
+                .resolve(&horizon_world::chunk::BlockState {
+                    name: "minecraft:water_cauldron".into(),
+                    properties: [("level".into(), "2".into())].into_iter().collect(),
+                })
+                .unwrap();
+            game.as_guest(12, |game| {
+                let setup = |game: &mut Game<'_>| {
+                    game.world.set(pos[0], pos[1], pos[2], full).unwrap();
+                    game.inventory
+                        .iter_mut()
+                        .for_each(|s| *s = Some(ItemStack::new("minecraft:stone", 64)));
+                    game.offhand = Some(ItemStack::new("minecraft:stone", 64));
+                    game.inventory[0] = Some(ItemStack::new("minecraft:glass_bottle", 2));
+                };
+                setup(game);
+                assert!(game.use_on_cauldron(pos).unwrap());
+                assert_eq!(
+                    drops.lock().unwrap().as_slice(),
+                    &[("toss", Some(full)), ("spawn", Some(full))]
+                );
+                drops.lock().unwrap().clear();
+                setup(game);
+                game.transaction_open();
+                assert!(game.use_on_cauldron(pos).unwrap());
+                assert!(drops.lock().unwrap().is_empty());
+                game.transaction_close(false);
+                assert!(drops.lock().unwrap().is_empty());
+                game.transaction_open();
+                assert!(game.use_on_cauldron(pos).unwrap());
+                game.transaction_close(true);
+                assert_eq!(
+                    drops.lock().unwrap().as_slice(),
+                    &[("toss", Some(level2)), ("spawn", Some(level2))]
+                );
+            })
+            .unwrap();
+            assert_eq!(
+                game.lan.as_ref().unwrap().play[&12]
+                    .stats
+                    .get("custom", "minecraft:fill_cauldron"),
+                0
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn cauldron_effects_wait_for_root_and_abort_with_inventory() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let pos = [2, 64, 2];
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let empty = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:cauldron")
+                .unwrap();
+            game.world.set(pos[0], pos[1], pos[2], empty).unwrap();
+            game.player = Some(
+                super::super::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::new(0.5, 65.0, 3.5),
+                )
+                .unwrap(),
+            );
+            game.selected = 0;
+            game.creative = false;
+            game.inventory[0] = Some(ItemStack::new("minecraft:water_bucket", 1));
+            let before = game.stats.get("custom", "minecraft:fill_cauldron");
+            game.audio.capture = Some(Vec::new());
+            game.transaction_open();
+            assert!(game.use_on_cauldron(pos).unwrap());
+            assert_eq!(game.stats.get("custom", "minecraft:fill_cauldron"), before);
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            game.transaction_close(false);
+            assert_eq!(game.world.block(pos[0], pos[1], pos[2]), empty);
+            assert_eq!(
+                &*game.inventory[0].as_ref().unwrap().item,
+                "minecraft:water_bucket"
+            );
+            assert_eq!(game.stats.get("custom", "minecraft:fill_cauldron"), before);
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            game.transaction_open();
+            game.transaction_open();
+            assert!(game.use_on_cauldron(pos).unwrap());
+            game.transaction_close(false);
+            assert_eq!(game.world.block(pos[0], pos[1], pos[2]), empty);
+            assert_eq!(
+                &*game.inventory[0].as_ref().unwrap().item,
+                "minecraft:water_bucket"
+            );
+            game.transaction_close(true);
+            assert_eq!(game.stats.get("custom", "minecraft:fill_cauldron"), before);
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            assert!(game.use_on_cauldron(pos).unwrap());
+            assert_ne!(game.world.block(pos[0], pos[1], pos[2]), empty);
+            assert_eq!(
+                &*game.inventory[0].as_ref().unwrap().item,
+                "minecraft:bucket"
+            );
+            assert_eq!(
+                game.stats.get("custom", "minecraft:fill_cauldron"),
+                before + 1
+            );
+            assert_eq!(
+                game.audio
+                    .capture
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(|s| s.event.as_str())
+                    .collect::<Vec<_>>(),
+                ["minecraft:item.bucket.empty"]
+            );
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

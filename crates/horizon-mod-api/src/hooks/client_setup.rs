@@ -13,7 +13,8 @@ pub trait Hooks {
     /// runs on that thread, so there is no counterpart, and work a mod wants done in
     /// parallel is its own. The dedicated server has no client and never fires it
     /// (see `server_about_to_start` for its `FMLDedicatedServerSetupEvent`). A
-    /// listener is a pure function of its `ClientHost` reads and its own state.
+    /// Setup permits client resource reads, not world handles or transactions.
+    /// The listener is a pure function of its `ClientHost` reads and its own state.
     #[hook(
         side = "client",
         contract = "listen",

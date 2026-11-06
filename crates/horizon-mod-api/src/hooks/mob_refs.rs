@@ -24,6 +24,14 @@ pub trait Helpers {
         target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_can_use_portal"
     )]
     fn mob_can_use_portal();
+    /// The live leash holder, or `Unleashed` when no leash exists. `None` means the mob,
+    /// holder or saved holder is unavailable, stale or in a parked level.
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_leash_holder"
+    )]
+    fn mob_leash_holder();
     #[helper(
         side = "server",
         receiver = "mob",

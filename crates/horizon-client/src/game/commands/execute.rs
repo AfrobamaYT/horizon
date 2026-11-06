@@ -2,11 +2,7 @@
 //! filtering command sources, then run the final command once per source,
 //! reporting each result to the `store` callbacks of its source.
 use super::{Arg, Context, Dim, Game, R, Target, data::DataRef, err};
-use horizon_client::{
-    command::{CommandError, vanilla},
-    nbt_path::NbtPath,
-    text::Text,
-};
+use horizon_client::{command::CommandError, nbt_path::NbtPath, text::Text};
 use horizon_world::nbt::Tag;
 
 /// `CommandSourceStack` fields Horizon models: the executing entity (None for
@@ -232,7 +228,7 @@ impl Game<'_> {
     /// Run one command line with `source` (no error reporting): the entry
     /// for functions and `execute run`.
     pub(in crate::game) fn execute_line(&mut self, line: &str, source: Source) -> R<i32> {
-        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
+        let d = self.ui.dispatcher.0.clone();
         let parse = d.parse(line, &self.ui.registries);
         let (ctx, _) = parse.executable()?;
         let ctx = ctx.clone();
@@ -243,7 +239,11 @@ impl Game<'_> {
     /// the executable node): `execute` and `return` walk their own chains.
     pub(in crate::game) fn run_chain(&mut self, root: &Context, ctx: &Context) -> R<i32> {
         self.exec.commands += 1;
-        let limit = self.ui.rules.int("max_command_sequence_length").max(1) as u32;
+        let limit = self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::MAX_COMMAND_SEQUENCE_LENGTH)
+            .max(1) as u32;
         if self.exec.commands > limit {
             return Err(err("command.failed", &[]));
         }
@@ -325,7 +325,10 @@ impl Game<'_> {
     /// ExecuteCommand: `ctx` is the context holding the `execute` literal.
     pub(in crate::game) fn run_execute(&mut self, ctx: &Context) -> R<i32> {
         // BuildContexts: a modifier may not bring the sources to this many.
-        let fork_limit = self.ui.rules.int("max_command_forks") as usize;
+        let fork_limit =
+            self.ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::MAX_COMMAND_FORKS) as usize;
         let mut sources = vec![self.command_source.unwrap_or_else(|| self.player_source())];
         let mut c = ctx;
         // A fork modifier (as, at, positioned as, rotated as, facing entity,

@@ -299,7 +299,7 @@ impl Game<'_> {
             let Some(held) = self.held().cloned() else {
                 return false;
             };
-            self.item_frames[i].item = Some(ItemStack { count: 1, ..held });
+            self.item_frames[i].set_item(Some(held));
             action = "put";
             self.audio
                 .play(&sound(&self.item_frames[i], "add_item"), Some(at), 1.0, 1.0);
@@ -390,6 +390,21 @@ impl Game<'_> {
         }
         true
     }
+    /// `ItemFrame.setItem(stack, true)`: keeps one item, plays the add sound
+    /// for a non-empty stack and updates the comparators.
+    pub(super) fn set_frame_item(&mut self, i: usize, stack: Option<ItemStack>) {
+        let f = &mut self.item_frames[i];
+        f.set_item(stack);
+        let (pos, filled) = (f.pos, f.item.is_some());
+        if filled {
+            let (name, at) = (
+                sound(&self.item_frames[i], "add_item"),
+                center(&self.item_frames[i]),
+            );
+            self.audio.play(&name, Some(at), 1.0, 1.0);
+        }
+        self.frame_output_changed(pos);
+    }
     /// `ItemFrame.setItem` / `setRotation`: `updateNeighbourForOutputSignal`, so
     /// the comparators reading the frame take its new signal.
     fn frame_output_changed(&mut self, pos: [i32; 3]) {
@@ -401,10 +416,20 @@ impl Game<'_> {
         // The framed map forgets the frame, except when the drops are off and
         // something caused the break (`removeFramedMap` runs only for a null
         // `causedBy` then).
-        if self.ui.rules.bool("entity_drops") || !by_player {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            || !by_player
+        {
             self.remove_framed_map(f);
         }
-        if !self.ui.rules.bool("entity_drops") || (by_player && self.creative) {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            || (by_player && self.creative)
+        {
             return;
         }
         let c = center(f);

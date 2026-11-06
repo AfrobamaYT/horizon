@@ -94,6 +94,7 @@ fn write(path: &Path, bytes: impl AsRef<[u8]>) {
 }
 fn request(root: &Path) -> WorldRequest {
     WorldRequest {
+        rule_registry: std::sync::Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         save_root: root.to_owned(),
         folder: "test".into(),
         name: Some("test".into()),
@@ -675,4 +676,47 @@ fn server_reload_retains_listeners_for_other_hooks() {
         })
     });
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn server_completion_reads_published_data_without_world_access_on_first_open() {
+    use mod_api::__private::{ModPhase, PhaseOwner};
+    use mod_api::{ServerDataLoadedEvent, ServerHost};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    struct Probe(Arc<Mutex<Vec<bool>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Probe {
+        fn server_data_loaded(&self, host: &mut dyn ServerHost, event: &mut ServerDataLoadedEvent) {
+            assert!(!host.recipes_of_type("minecraft:smelting").is_empty());
+            let refused =
+                catch_unwind(AssertUnwindSafe(|| host.level("minecraft:overworld"))).unwrap_err();
+            let text = refused
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| refused.downcast_ref::<&str>().copied())
+                .unwrap();
+            assert!(text.contains("Reloading"), "{text}");
+            self.0.lock().unwrap().push(event.reload);
+        }
+    }
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "published_server",
+        Box::new(Probe(seen.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_game(|game| {
+            game.mod_phase = PhaseOwner::new(ModPhase::Setup);
+            let root = std::env::current_dir().unwrap().join("published-world");
+            game.load_world(request(&root)).unwrap();
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::Setup);
+            game.mod_phase = PhaseOwner::new(ModPhase::World);
+            game.native_server_data_loaded(true);
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::World);
+            assert_eq!(*seen.lock().unwrap(), [false, true]);
+        })
+    });
 }

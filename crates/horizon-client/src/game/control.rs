@@ -294,6 +294,11 @@ impl Game<'_> {
             // The anvil's rename box, while it has an input to name.
             Screen::Inventory if self.station_typing() => self.station_text(Some(text), false),
             Screen::Creative if self.creative_screen.tab().search => {
+                // CreativeModeInventoryScreen.charTyped: the chat key that
+                // opened the tab does not type its letter.
+                if std::mem::take(&mut self.creative_ignore_text) {
+                    return Ok(());
+                }
                 // As typed: replaces a selected query, keeps the length limit.
                 self.creative_search_edit(Some(text))
             }
@@ -443,6 +448,27 @@ impl Game<'_> {
                 }
                 Ok(Some(json!({ "ok": true, "gpu_passes": self.gpu_passes })))
             }
+            // Every thread's spans as a timeline Perfetto opens (`spans::trace`).
+            "trace" => match words.get(1).copied() {
+                None => Ok(Some(
+                    json!({ "ok": true, "tracing": horizon_client::spans::trace::on() }),
+                )),
+                Some("stop") => Ok(Some(
+                    json!({ "ok": true, "events": horizon_client::spans::trace::stop() }),
+                )),
+                Some(file) => {
+                    let seconds = match words.get(2) {
+                        None => None,
+                        Some(s) => Some(
+                            s.parse::<u32>()
+                                .map_err(|_| "trace [FILE [SECONDS] | stop]")?,
+                        ),
+                    };
+                    horizon_client::spans::trace::start(std::path::Path::new(file), seconds)
+                        .map_err(|e| format!("trace {file}: {e}"))?;
+                    Ok(Some(json!({ "ok": true, "tracing": true, "file": file })))
+                }
+            },
             "render-capture" => match words.get(1).copied() {
                 None => {
                     let r = self.renderer.as_ref().ok_or("no renderer")?;
@@ -1038,6 +1064,7 @@ impl Game<'_> {
                 if page == Page::ShaderPacks {
                     self.settings.shader_packs =
                         horizon_client::shader_pack_list::scan(&Self::shader_packs_dir());
+                    self.open_shader_options();
                 }
                 ok()
             }
@@ -1323,7 +1350,7 @@ impl Game<'_> {
             players.push(drain("host", &mut p.hurt_log, &mut p.attack_log));
         }
         if let Some(host) = self.lan.as_mut() {
-            for g in &mut host.hub.guests {
+            host.hub.guests.update_all(|g| {
                 let name = g.name.clone();
                 if let Some(m) = g.motion.as_mut() {
                     players.push(drain(&name, &mut m.hurt_log, &mut m.attack_log));
@@ -1331,7 +1358,7 @@ impl Game<'_> {
                     // Dead, not yet respawned: what its last body logged.
                     players.push(drain(&name, &mut hurts, &mut attacks));
                 }
-            }
+            });
         }
         json!({ "ok": true, "players": players })
     }

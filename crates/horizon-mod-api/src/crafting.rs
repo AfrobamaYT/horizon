@@ -143,25 +143,37 @@ impl WalkedIngredient {
         tags: &std::collections::HashMap<String, Vec<String>>,
         custom: CustomIds<'_>,
     ) -> Option<Self> {
+        Self::walk_resolved(v, tags, custom, &|id| Some(id.to_owned()))
+    }
+
+    pub(crate) fn walk_resolved(
+        v: &Value,
+        tags: &std::collections::HashMap<String, Vec<String>>,
+        custom: CustomIds<'_>,
+        resolve: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<Self> {
         let mut list: Vec<String> = Vec::new();
+        let mut valid = true;
         let mut add = |s: &str| {
             let more: Vec<String> = match s.strip_prefix('#') {
                 Some(tag) => tags.get(tag).cloned().unwrap_or_default(),
                 None => vec![s.to_owned()],
             };
             for i in more {
-                if !list.contains(&i) {
-                    list.push(i);
+                match resolve(&i) {
+                    Some(i) if !list.contains(&i) => list.push(i),
+                    Some(_) => {}
+                    None => valid = false,
                 }
             }
         };
         match v {
             Value::String(s) => add(s),
             Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
-            Value::Object(o) => return Self::walk_object(o, tags, custom),
+            Value::Object(o) => return Self::walk_object(o, tags, custom, resolve),
             _ => return None,
         }
-        Self::flat(list)
+        valid.then(|| Self::flat(list)).flatten()
     }
     /// A plain list's answer: its ids in order, no shapes.
     fn flat(list: Vec<String>) -> Option<Self> {
@@ -181,6 +193,7 @@ impl WalkedIngredient {
         o: &serde_json::Map<String, Value>,
         tags: &std::collections::HashMap<String, Vec<String>>,
         custom: CustomIds<'_>,
+        resolve: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Self> {
         // Current NeoForge marks a custom ingredient with
         // `neoforge:ingredient_type`; `type` is the older packs' key.
@@ -199,7 +212,7 @@ impl WalkedIngredient {
             "neoforge:compound" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::walk(s, tags, custom))
+                    .map(|s| Self::walk_resolved(s, tags, custom, resolve))
                     .collect::<Option<_>>()?;
                 let mut seen = Vec::new();
                 for sub in &subs {
@@ -217,7 +230,7 @@ impl WalkedIngredient {
             "neoforge:intersection" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::walk(s, tags, custom))
+                    .map(|s| Self::walk_resolved(s, tags, custom, resolve))
                     .collect::<Option<_>>()?;
                 nested = Some((Shape::Intersection, subs.clone()));
                 subs.first()?
@@ -229,8 +242,8 @@ impl WalkedIngredient {
             }
             // The base's ids without the subtracted's.
             "neoforge:difference" => {
-                let base = Self::walk(o.get("base")?, tags, custom)?;
-                let gone = Self::walk(o.get("subtracted")?, tags, custom)?;
+                let base = Self::walk_resolved(o.get("base")?, tags, custom, resolve)?;
+                let gone = Self::walk_resolved(o.get("subtracted")?, tags, custom, resolve)?;
                 nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
                 base.order
                     .iter()
@@ -258,33 +271,6 @@ impl WalkedIngredient {
             children: nested,
             custom: None,
         })
-    }
-    /// `test` by id: a shape asks each child its own way — a mod's kind
-    /// among them answers through `custom` — and a plain list names it.
-    pub(crate) fn test(
-        &self,
-        id: &str,
-        custom: &dyn Fn(&str, &serde_json::Map<String, Value>) -> bool,
-    ) -> bool {
-        match &self.children {
-            // Each child its own `test`, as on NeoForge — a mod's kind
-            // among them answers through its hook.
-            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test(id, custom)),
-            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test(id, custom)),
-            Some((Shape::Difference, kids)) => {
-                kids.first().is_some_and(|k| k.test(id, custom))
-                    && kids.get(1).is_none_or(|k| !k.test(id, custom))
-            }
-            None => {
-                if !self.set.contains(id) {
-                    return false;
-                }
-                match &self.custom {
-                    Some((kind, data)) => custom(kind, data),
-                    None => true,
-                }
-            }
-        }
     }
 }
 /// A set of accepted items (expanded from an item, list or tag), and the

@@ -4,7 +4,7 @@
 //! (SayCommand, EmoteCommands, MsgCommand), relayed by the hub as chat.
 use super::Game;
 use horizon_client::{
-    command::{Arg, ParseResults, vanilla},
+    command::{Arg, ParseResults},
     lan::{
         data::component_nbt,
         hub::{HostEvent, chat::ChatMessage},
@@ -21,7 +21,11 @@ impl Game<'_> {
     /// CommandDispatcher.parse with the guest's permission level.
     fn parse_as(&mut self, permission: u8, command: &str) -> ParseResults {
         let level = std::mem::replace(&mut self.ui.registries.permission, permission);
-        let parse = vanilla::game_dispatcher_with_features(&self.level.enabled_features)
+        let parse = self
+            .ui
+            .dispatcher
+            .0
+            .clone()
             .parse(command, &self.ui.registries);
         self.ui.registries.permission = level;
         parse
@@ -34,9 +38,8 @@ impl Game<'_> {
         permission: u8,
         command: &str,
     ) -> Vec<(String, String)> {
-        self.parse_as(permission, command).signable_arguments(
-            vanilla::game_dispatcher_with_features(&self.level.enabled_features),
-        )
+        self.parse_as(permission, command)
+            .signable_arguments(&self.ui.dispatcher.0)
     }
 
     /// ServerGamePacketListenerImpl.detectRateSpam: a chat message or command adds 20 to the

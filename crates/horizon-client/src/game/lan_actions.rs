@@ -14,7 +14,6 @@ use super::{
     respawn_anchor::RespawnConfig,
 };
 use horizon_client::{
-    command::vanilla,
     containers::BlockEntity,
     entities::Experience,
     first_person::{Hand, SwingAnimation},
@@ -360,7 +359,7 @@ fn direction(face: i32) -> [i32; 3] {
 fn building_players(host: &LanHost) -> Vec<BuildingPlayer> {
     host.hub
         .guests
-        .iter()
+        .simulation_iter()
         .map(|g| BuildingPlayer {
             conn: Some(g.conn),
             dimension: Dim::from_id(&g.dimension),
@@ -396,7 +395,7 @@ impl Game<'_> {
         super::dedicated::crash_fixture("guest", || {
             self.lan
                 .as_ref()
-                .is_some_and(|host| host.hub.guests.iter().any(|g| g.conn == conn && g.placed))
+                .is_some_and(|host| host.hub.guest(conn).is_some_and(|g| g.placed))
         });
         let dimension =
             (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
@@ -408,12 +407,7 @@ impl Game<'_> {
 
     /// Where guest `conn` is in the hub's list.
     pub(super) fn guest_index(&self, conn: u32) -> Option<usize> {
-        self.lan
-            .as_ref()?
-            .hub
-            .guests
-            .iter()
-            .position(|g| g.conn == conn)
+        self.lan.as_ref()?.hub.guests.connection_index(conn)
     }
 
     /// `as_guest`, with the system messages the guest's action earns (the
@@ -505,39 +499,43 @@ impl Game<'_> {
                 host.hub.guests[i].position[1],
                 host.hub.guests[i].position[2],
             );
-            host.hub.guests[i].motion = PlayerMotion::new(self.motion, p).ok().map(Box::new);
+            {
+                let value = PlayerMotion::new(self.motion, p).ok().map(Box::new);
+                host.hub.guests.update(i, |guest| guest.motion = value);
+            }
             // The first body after joining burns, breathes and falls on as saved.
-            let g = &mut host.hub.guests[i];
-            if let Some(saved) = g.loaded_body.take()
-                && let Some(m) = g.motion.as_mut()
-            {
-                saved.apply(m);
-                // LivingEntity.readAdditionalSaveData: the saved attributes.
-                let _ =
-                    m.apply_saved_attributes(g.saved.as_ref().and_then(|t| t.get("attributes")));
-                // The abilities' walking speed is the movement speed's base.
-                let _ = m.set_walking_speed_base(g.abilities.walking_speed);
-            }
-            // ServerPlayer.restoreFrom: a body that follows another takes its
-            // attributes (a scale of 0.1 stays 0.1 after a respawn or a trip
-            // to another level).
-            let g = &mut host.hub.guests[i];
-            if let Some(carried) = g.carried_attributes.take()
-                && let Some(m) = g.motion.as_mut()
-            {
-                let _ = m.apply_saved_attributes(Some(&carried));
-            }
-            // The saved golden hearts go on the first body of a player who
-            // has been here before.
-            let saved = host.hub.guests[i].saved_absorption.take();
-            if let (Some(m), Some(amount)) = (host.hub.guests[i].motion.as_mut(), saved) {
-                let _ = m.internal_set_absorption(amount);
-            }
-            let kept = host.hub.guests[i].logs_kept.take();
-            if let (Some(m), Some((hurts, attacks))) = (host.hub.guests[i].motion.as_mut(), kept) {
-                m.hurt_log = hurts;
-                m.attack_log = attacks;
-            }
+            host.hub.guests.update(i, |g| {
+                if let Some(saved) = g.loaded_body.take()
+                    && let Some(m) = g.motion.as_mut()
+                {
+                    saved.apply(m);
+                    // LivingEntity.readAdditionalSaveData: the saved attributes.
+                    let _ = m
+                        .apply_saved_attributes(g.saved.as_ref().and_then(|t| t.get("attributes")));
+                    // The abilities' walking speed is the movement speed's base.
+                    let _ = m.set_walking_speed_base(g.abilities.walking_speed);
+                }
+                // ServerPlayer.restoreFrom: a body that follows another takes its
+                // attributes (a scale of 0.1 stays 0.1 after a respawn or a trip
+                // to another level).
+
+                if let Some(carried) = g.carried_attributes.take()
+                    && let Some(m) = g.motion.as_mut()
+                {
+                    let _ = m.apply_saved_attributes(Some(&carried));
+                }
+                // The saved golden hearts go on the first body of a player who
+                // has been here before.
+                let saved = g.saved_absorption.take();
+                if let (Some(m), Some(amount)) = (g.motion.as_mut(), saved) {
+                    let _ = m.internal_set_absorption(amount);
+                }
+                let kept = g.logs_kept.take();
+                if let (Some(m), Some((hurts, attacks))) = (g.motion.as_mut(), kept) {
+                    m.hurt_log = hurts;
+                    m.attack_log = attacks;
+                }
+            });
         }
         let mut play = host.play.remove(&conn).unwrap_or_default();
         if fresh {
@@ -549,16 +547,15 @@ impl Game<'_> {
             // A new ServerPlayer has everything to record again.
             play.score_recorded = Default::default();
         }
-        let g = &mut host.hub.guests[i];
         // The guest's body.
-        let Some(mut motion) = g.motion.take() else {
+        let Some(mut motion) = host.hub.guests.update(i, |g| g.motion.take()) else {
             self.ui.registries.permission = permission;
             host.play.insert(conn, play);
             return Err(TurnRefused::Gone);
         };
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.conn).or_default(),
+            self.guest_attachments.entry(conn).or_default(),
         );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
@@ -569,7 +566,10 @@ impl Game<'_> {
             self.guest_combat.remove(&conn).unwrap_or_default()
         };
         let host_combat = std::mem::replace(&mut self.combat, guest_combat);
-        self.potions.swap_player(&mut g.effects, &mut play.potions);
+        host.hub.guests.update(i, |g| {
+            self.potions.swap_player(&mut g.effects, &mut play.potions)
+        });
+        let g = &host.hub.guests[i];
         motion.position = Vec3::new(g.position[0], g.position[1], g.position[2]);
         motion.entity_id = g.entity_id;
         motion.ground.on_ground = g.on_ground;
@@ -596,11 +596,14 @@ impl Game<'_> {
         let (yaw, pitch) = (self.yaw, self.pitch);
         self.yaw = g.yaw;
         self.pitch = g.pitch;
-        std::mem::swap(&mut self.inventory, &mut g.inventory);
-        std::mem::swap(&mut self.armor, &mut g.armor);
-        std::mem::swap(&mut self.offhand, &mut g.offhand);
-        std::mem::swap(&mut self.equipment, &mut g.equipment);
-        std::mem::swap(&mut self.carried, &mut g.carried);
+        host.hub.guests.update(i, |g| {
+            std::mem::swap(&mut self.inventory, &mut g.inventory);
+            std::mem::swap(&mut self.armor, &mut g.armor);
+            std::mem::swap(&mut self.offhand, &mut g.offhand);
+            std::mem::swap(&mut self.equipment, &mut g.equipment);
+            std::mem::swap(&mut self.carried, &mut g.carried);
+        });
+        let g = &host.hub.guests[i];
         let selected = std::mem::replace(&mut self.selected, g.selected);
         let (mode, creative) = (self.mode, self.creative);
         let outer_abilities = self.acting_abilities.replace(g.abilities);
@@ -614,7 +617,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             unreachable!("LanHost dropped inside a guest turn; closes are deferred");
         };
-        let g = &mut host.hub.guests[i];
+        let g = &host.hub.guests[i];
         let xp = std::mem::replace(
             &mut self.experience,
             Experience {
@@ -679,7 +682,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             unreachable!("LanHost dropped inside a guest turn; closes are deferred");
         };
-        let g = &mut host.hub.guests[i];
+        let g = &host.hub.guests[i];
         let host_station = self.station.take();
         // The guest's bed, sleep counter and respawn point; the host's
         // respawn point, anchor and action bar stay theirs.
@@ -699,22 +702,26 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             unreachable!("LanHost dropped inside a guest turn; closes are deferred");
         };
-        let g = &mut host.hub.guests[i];
-        std::mem::swap(&mut self.ender_items, &mut g.ender_items);
+        let simulated = host.hub.guests.update(i, |g| {
+            std::mem::swap(&mut self.ender_items, &mut g.ender_items);
+            g.participates_in_player_simulation()
+        });
         // The guest's advancements, recipe book and statistics.
-        if g.participates_in_player_simulation() {
+        if simulated {
             self.advancement_tree();
         }
         let Some(host) = self.lan.as_mut() else {
             unreachable!("LanHost dropped inside a guest turn; closes are deferred");
         };
-        let g = &mut host.hub.guests[i];
-        std::mem::swap(&mut self.adv.progress, &mut g.advancements);
-        std::mem::swap(&mut self.adv.changed, &mut g.advancements_changed);
-        std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
-        std::mem::swap(&mut self.level.recipe_book, &mut g.recipe_book);
-        std::mem::swap(&mut self.level.player_extra, &mut g.saved);
-        std::mem::swap(&mut self.level.last_death, &mut g.last_death);
+        host.hub.guests.update(i, |g| {
+            std::mem::swap(&mut self.adv.progress, &mut g.advancements);
+            std::mem::swap(&mut self.adv.changed, &mut g.advancements_changed);
+            std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
+            std::mem::swap(&mut self.level.recipe_book, &mut g.recipe_book);
+            std::mem::swap(&mut self.level.player_extra, &mut g.saved);
+            std::mem::swap(&mut self.level.last_death, &mut g.last_death);
+        });
+        let g = &host.hub.guests[i];
         std::mem::swap(&mut self.stats, &mut play.stats);
         std::mem::swap(&mut self.hook, &mut play.hook);
         let adv_loaded = std::mem::replace(&mut self.adv.loaded, true);
@@ -1121,146 +1128,160 @@ impl Game<'_> {
                 host.hub.seat_order += 1;
                 host.hub.seat_order
             });
-        let g = &mut host.hub.guests[i];
-        std::mem::swap(
-            &mut self.player_attachments,
-            self.guest_attachments.entry(g.conn).or_default(),
-        );
-        let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
-        // Entity.removePassenger: 60 ticks before it may board again.
-        let guest_boarding =
-            super::boarding::after_leaving(self.boarding_cooldown, g.vehicle, guest_vehicle);
-        (self.boarding_cooldown, self.riding_at_tick) = host_boarding;
-        g.boarding_cooldown = guest_boarding;
-        if guest_vehicle.is_none() {
-            g.vehicle_good = None;
+        enum TurnTeleport {
+            Command([f64; 3], [bool; 3]),
+            Position([f64; 3]),
+            Rider([f64; 3]),
         }
-        g.vehicle = guest_vehicle;
-        if let Some(order) = seat_order {
-            g.vehicle_order = order;
-        }
-        let fell_asleep = bed.is_some() && g.bed.is_none();
-        (g.bed, g.sleep_timer, g.spawn) = (bed, guest_sleep_timer, guest_spawn);
-        g.respawn_elsewhere = guest_respawn.map(|c| c.saved());
-        g.sleeping = g.bed.is_some();
-        if fell_asleep {
-            g.woke_from = None;
-        }
-        if let Some((text, _)) = guest_message {
-            g.send(&C::SystemChat(play::SystemChat {
-                content: literal(&text),
-                overlay: true,
-            }));
-        }
-        std::mem::swap(&mut self.ender_items, &mut g.ender_items);
-        std::mem::swap(&mut self.adv.progress, &mut g.advancements);
-        std::mem::swap(&mut self.adv.changed, &mut g.advancements_changed);
-        std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
-        std::mem::swap(&mut self.level.recipe_book, &mut g.recipe_book);
-        std::mem::swap(&mut self.level.player_extra, &mut g.saved);
-        std::mem::swap(&mut self.level.last_death, &mut g.last_death);
-        std::mem::swap(&mut self.stats, &mut play.stats);
-        std::mem::swap(&mut self.hook, &mut play.hook);
-        self.adv.loaded = adv_loaded;
-        play.last_inventory = std::mem::replace(&mut self.adv.last_inventory, last_inventory);
-        play.levitation = std::mem::replace(&mut self.adv.levitation, levitation);
-        play.marks = std::mem::replace(&mut self.adv.marks, marks);
-        let stat_events = std::mem::take(&mut play.stats.events);
-        let name = g.name.clone();
-        self.potions.swap_player(&mut g.effects, &mut play.potions);
-        if let Some(key) = host_ender {
-            self.world
-                .block_entities
-                .insert(key, BlockEntity::Chest(self.ender_items.clone()));
-            self.ender_open = Some(key);
-        }
-        play.level_up_sound = std::mem::replace(&mut self.level_up_sound, level_up_sound);
-        let new_xp = std::mem::replace(&mut self.experience, xp);
-        g.xp_level = new_xp.level;
-        g.xp_progress = new_xp.progress;
-        g.xp_total = new_xp.total;
-        self.mode = mode;
-        self.creative = creative;
-        self.entity_reach = entity_reach;
-        self.block_reach = block_reach;
-        g.selected = std::mem::replace(&mut self.selected, selected);
-        std::mem::swap(&mut self.inventory, &mut g.inventory);
-        std::mem::swap(&mut self.armor, &mut g.armor);
-        std::mem::swap(&mut self.offhand, &mut g.offhand);
-        std::mem::swap(&mut self.equipment, &mut g.equipment);
-        std::mem::swap(&mut self.carried, &mut g.carried);
-        // A teleport with a rotation (commands) turns the guest. `/rotate`
-        // (ServerPlayer.forceSetRotation) sends the rotation alone, rider or not.
-        let forced = std::mem::take(&mut self.rotation_forced);
-        let turned = !forced && [self.yaw, self.pitch] != [g.yaw, g.pitch];
-        [g.yaw, g.pitch] = [self.yaw, self.pitch];
-        if forced {
-            g.send(&C::PlayerRotation(play::PlayerRotation {
-                yaw: g.yaw,
-                relative_yaw: false,
-                pitch: g.pitch,
-                relative_pitch: false,
-            }));
-        }
-        self.yaw = yaw;
-        self.pitch = pitch;
-        self.eye = eye.1;
-        std::mem::swap(&mut self.player, &mut player);
-        if let Some(mut m) = player {
-            g.health = m.health.health();
-            g.food = m.health.food.food;
-            g.saturation = m.health.food.saturation;
-            // A teleport (commands, a pearl) moves the guest; a pearl's is
-            // sent even to where they stand (ServerPlayer.teleport).
-            let at = [m.position.x, m.position.y, m.position.z];
-            // A hit with extra knockback stopped the guest's sprint
-            // (Player.causeExtraKnockback's setSprinting(false)).
-            if !m.sprinting {
-                g.sprinting = false;
+        let (stat_events, name, teleport) = host.hub.guests.update(i, |g| {
+            let mut teleport = None;
+            std::mem::swap(
+                &mut self.player_attachments,
+                self.guest_attachments.entry(g.conn).or_default(),
+            );
+            let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
+            // Entity.removePassenger: 60 ticks before it may board again.
+            let guest_boarding =
+                super::boarding::after_leaving(self.boarding_cooldown, g.vehicle, guest_vehicle);
+            (self.boarding_cooldown, self.riding_at_tick) = host_boarding;
+            g.boarding_cooldown = guest_boarding;
+            if guest_vehicle.is_none() {
+                g.vehicle_good = None;
             }
-            m.sprinting = false;
-            // The acting body's glide flag is authoritative for this turn.
-            // In a nested turn this is the inner guest, never the suspended
-            // outer actor whose body the swap restores above.
-            g.fall_flying = m.fall_flying;
-            // ServerPlayer.indicateDamage: the hit's direction to the player.
-            if let Some(yaw) = m.health.indicated_dir.take() {
-                g.send(&C::HurtAnimation(play::HurtAnimation {
-                    id: g.entity_id,
-                    yaw,
+            g.vehicle = guest_vehicle;
+            if let Some(order) = seat_order {
+                g.vehicle_order = order;
+            }
+            let fell_asleep = bed.is_some() && g.bed.is_none();
+            (g.bed, g.sleep_timer, g.spawn) = (bed, guest_sleep_timer, guest_spawn);
+            g.respawn_elsewhere = guest_respawn.map(|c| c.saved());
+            g.sleeping = g.bed.is_some();
+            if fell_asleep {
+                g.woke_from = None;
+            }
+            if let Some((text, _)) = guest_message {
+                g.send(&C::SystemChat(play::SystemChat {
+                    content: literal(&text),
+                    overlay: true,
                 }));
             }
-            let teleported = std::mem::take(&mut m.teleported);
-            let teleported_delta = m.teleported_delta;
-            m.teleported_delta = [false; 3];
-            let moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
-            g.motion = Some(Box::new(m));
-            // The pearl and the bed took the rider out of its vehicle at their
-            // source (`stop_riding`), so `left_vehicle` already says so.
-            // ServerPlayer.dismountTo: the client hears it is out of the
-            // vehicle before the teleport beside it. A rider sits where its
-            // vehicle puts it (lan_vehicles.rs), with no teleport.
-            if let Some(vehicle) = left_vehicle {
-                g.send(&C::SetPassengers(play::SetPassengers {
-                    vehicle: vehicle as i32,
-                    passengers: Vec::new(),
+            std::mem::swap(&mut self.ender_items, &mut g.ender_items);
+            std::mem::swap(&mut self.adv.progress, &mut g.advancements);
+            std::mem::swap(&mut self.adv.changed, &mut g.advancements_changed);
+            std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
+            std::mem::swap(&mut self.level.recipe_book, &mut g.recipe_book);
+            std::mem::swap(&mut self.level.player_extra, &mut g.saved);
+            std::mem::swap(&mut self.level.last_death, &mut g.last_death);
+            std::mem::swap(&mut self.stats, &mut play.stats);
+            std::mem::swap(&mut self.hook, &mut play.hook);
+            self.adv.loaded = adv_loaded;
+            play.last_inventory = std::mem::replace(&mut self.adv.last_inventory, last_inventory);
+            play.levitation = std::mem::replace(&mut self.adv.levitation, levitation);
+            play.marks = std::mem::replace(&mut self.adv.marks, marks);
+            let stat_events = std::mem::take(&mut play.stats.events);
+            let name = g.name.clone();
+            self.potions.swap_player(&mut g.effects, &mut play.potions);
+            if let Some(key) = host_ender {
+                self.world
+                    .block_entities
+                    .insert(key, BlockEntity::Chest(self.ender_items.clone()));
+                self.ender_open = Some(key);
+            }
+            play.level_up_sound = std::mem::replace(&mut self.level_up_sound, level_up_sound);
+            let new_xp = std::mem::replace(&mut self.experience, xp);
+            g.xp_level = new_xp.level;
+            g.xp_progress = new_xp.progress;
+            g.xp_total = new_xp.total;
+            self.mode = mode;
+            self.creative = creative;
+            self.entity_reach = entity_reach;
+            self.block_reach = block_reach;
+            g.selected = std::mem::replace(&mut self.selected, selected);
+            std::mem::swap(&mut self.inventory, &mut g.inventory);
+            std::mem::swap(&mut self.armor, &mut g.armor);
+            std::mem::swap(&mut self.offhand, &mut g.offhand);
+            std::mem::swap(&mut self.equipment, &mut g.equipment);
+            std::mem::swap(&mut self.carried, &mut g.carried);
+            // A teleport with a rotation (commands) turns the guest. `/rotate`
+            // (ServerPlayer.forceSetRotation) sends the rotation alone, rider or not.
+            let forced = std::mem::take(&mut self.rotation_forced);
+            let turned = !forced && [self.yaw, self.pitch] != [g.yaw, g.pitch];
+            [g.yaw, g.pitch] = [self.yaw, self.pitch];
+            if forced {
+                g.send(&C::PlayerRotation(play::PlayerRotation {
+                    yaw: g.yaw,
+                    relative_yaw: false,
+                    pitch: g.pitch,
+                    relative_pitch: false,
                 }));
             }
-            if g.vehicle.is_none() && (moved > 0.0001 || turned || teleported) {
-                // A command's teleport carries its relative axes as the
-                // packet's DELTA flags; any other move is absolute.
-                if teleported {
-                    host.hub.teleport_command(i, at, teleported_delta);
-                } else {
-                    host.hub.teleport(i, Some(at));
+            self.yaw = yaw;
+            self.pitch = pitch;
+            self.eye = eye.1;
+            std::mem::swap(&mut self.player, &mut player);
+            if let Some(mut m) = player {
+                g.health = m.health.health();
+                g.food = m.health.food.food;
+                g.saturation = m.health.food.saturation;
+                // A teleport (commands, a pearl) moves the guest; a pearl's is
+                // sent even to where they stand (ServerPlayer.teleport).
+                let at = [m.position.x, m.position.y, m.position.z];
+                // A hit with extra knockback stopped the guest's sprint
+                // (Player.causeExtraKnockback's setSprinting(false)).
+                if !m.sprinting {
+                    g.sprinting = false;
                 }
-            } else if teleported {
-                // ServerPlayer.startRiding and an asPassenger transition also
-                // teleport the rider. Retain its mount and publish its body.
-                host.hub.teleport_rider(i, at);
+                m.sprinting = false;
+                // The acting body's glide flag is authoritative for this turn.
+                // In a nested turn this is the inner guest, never the suspended
+                // outer actor whose body the swap restores above.
+                g.fall_flying = m.fall_flying;
+                // ServerPlayer.indicateDamage: the hit's direction to the player.
+                if let Some(yaw) = m.health.indicated_dir.take() {
+                    g.send(&C::HurtAnimation(play::HurtAnimation {
+                        id: g.entity_id,
+                        yaw,
+                    }));
+                }
+                let teleported = std::mem::take(&mut m.teleported);
+                let teleported_delta = m.teleported_delta;
+                m.teleported_delta = [false; 3];
+                let moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
+                g.motion = Some(Box::new(m));
+                // The pearl and the bed took the rider out of its vehicle at their
+                // source (`stop_riding`), so `left_vehicle` already says so.
+                // ServerPlayer.dismountTo: the client hears it is out of the
+                // vehicle before the teleport beside it. A rider sits where its
+                // vehicle puts it (lan_vehicles.rs), with no teleport.
+                if let Some(vehicle) = left_vehicle {
+                    g.send(&C::SetPassengers(play::SetPassengers {
+                        vehicle: vehicle as i32,
+                        passengers: Vec::new(),
+                    }));
+                }
+                if g.vehicle.is_none() && (moved > 0.0001 || turned || teleported) {
+                    // A command's teleport carries its relative axes as the
+                    // packet's DELTA flags; any other move is absolute.
+                    if teleported {
+                        teleport = Some(TurnTeleport::Command(at, teleported_delta));
+                    } else {
+                        teleport = Some(TurnTeleport::Position(at));
+                    }
+                } else if teleported {
+                    // ServerPlayer.startRiding and an asPassenger transition also
+                    // teleport the rider. Retain its mount and publish its body.
+                    teleport = Some(TurnTeleport::Rider(at));
+                }
             }
+            (stat_events, name, teleport)
+        });
+        match teleport {
+            Some(TurnTeleport::Command(at, delta)) => host.hub.teleport_command(i, at, delta),
+            Some(TurnTeleport::Position(at)) => host.hub.teleport(i, Some(at)),
+            Some(TurnTeleport::Rider(at)) => host.hub.teleport_rider(i, at),
+            None => {}
         }
-        let g = &mut host.hub.guests[i];
+        let g = &host.hub.guests[i];
         if new_mode != g.game_mode {
             let conn = g.conn;
             host.hub
@@ -1268,16 +1289,17 @@ impl Game<'_> {
         }
         // The turn's previous mode, as `Game::set_mode` kept it: the mode left
         // by the turn's last change, when it changed more than once.
-        let g = &mut host.hub.guests[i];
-        g.previous_game_mode = turn_previous.map(GameMode::id);
-        // The turn's abilities: a mode change made in it set the flags first
-        // (`Game::set_mode`), then a mod's writes won, as in vanilla.
-        if let Some(now) = turn_abilities
-            && now != g.abilities
-        {
-            g.abilities = now;
-            g.send(&g.abilities_packet());
-        }
+        host.hub.guests.update(i, |g| {
+            g.previous_game_mode = turn_previous.map(GameMode::id);
+            // The turn's abilities: a mode change made in it set the flags first
+            // (`Game::set_mode`), then a mod's writes won, as in vanilla.
+            if let Some(now) = turn_abilities
+                && now != g.abilities
+            {
+                g.abilities = now;
+                g.send(&g.abilities_packet());
+            }
+        });
         // LivingEntity.checkTotemDeathProtection's entity event, to every
         // client tracking the guest and its own; this window draws it too.
         if let Some(body) = totem {
@@ -1705,6 +1727,18 @@ impl Game<'_> {
             host.hub.guest(conn).is_some_and(|g| g.spectator())
                 && self.boat_loot_pending(self.boats[i].id)
         });
+        if spectator_pending {
+            // ServerPlayer.openMenu: the refused spectator's action bar, red.
+            let message = horizon_client::text::Text::translate("container.spectatorCantOpen", &[])
+                .with_color(horizon_client::text::RED);
+            host.hub.send_to(
+                conn,
+                &C::SystemChat(play::SystemChat {
+                    content: horizon_client::lan::data::component_nbt(&message.component()),
+                    overlay: true,
+                }),
+            );
+        }
         if spectator_pending || !self.guest_may_open(conn, menu, None) {
             let viewed = self.lan.as_ref().is_some_and(|host| {
                 host.hub
@@ -2195,9 +2229,11 @@ impl Game<'_> {
         if !cancel {
             return;
         }
-        if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
-            g.abilities.flying = !flying;
-            g.send(&g.abilities_packet());
+        if let Some(host) = self.lan.as_mut() {
+            let _ = host.hub.update_guest(conn, |g| {
+                g.abilities.flying = !flying;
+                g.send(&g.abilities_packet());
+            });
         }
     }
 
@@ -2253,7 +2289,7 @@ impl Game<'_> {
                     if spectator {
                         return;
                     }
-                    if !host.hub.guests[gi].may_reach_block(a.pos) {
+                    if !host.hub.guests.update(gi, |g| g.may_reach_block(a.pos)) {
                         return;
                     }
                     // ServerPlayerGameMode.handleBlockBreakAction: no dig starts
@@ -2355,7 +2391,7 @@ impl Game<'_> {
                         return;
                     };
                     host.hub.ack(conn, a.sequence);
-                    if !host.hub.guests[gi].may_reach_block(a.pos) {
+                    if !host.hub.guests.update(gi, |g| g.may_reach_block(a.pos)) {
                         // Too far (handleBlockBreakAction's "too far"): the ack has the client
                         // undo its prediction, and only the dig drops — `destroy_pos` and the
                         // ticks since its START stay, so a STOP for the same block after the
@@ -2476,10 +2512,11 @@ impl Game<'_> {
                     let Some(host) = self.lan.as_mut() else {
                         return;
                     };
-                    let g = &mut host.hub.guests[gi];
-                    let slot = g.selected;
-                    std::mem::swap(&mut g.inventory[slot], &mut g.offhand);
-                    let (offhand, main) = (g.offhand.clone(), g.inventory[slot].clone());
+                    let (offhand, main) = host.hub.guests.update(gi, |g| {
+                        let slot = g.selected;
+                        std::mem::swap(&mut g.inventory[slot], &mut g.offhand);
+                        (g.offhand.clone(), g.inventory[slot].clone())
+                    });
                     if let Some(play) = host.play.get_mut(&conn) {
                         play.using = None;
                     }
@@ -2546,7 +2583,10 @@ impl Game<'_> {
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
-                host.hub.guests[gi].selected = p.slot as usize;
+                {
+                    let value = p.slot as usize;
+                    host.hub.guests.update(gi, |guest| guest.selected = value);
+                }
                 if let Some(play) = host.play.get_mut(&conn)
                     && changed
                     && play
@@ -2655,7 +2695,7 @@ impl Game<'_> {
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
-                let g = &mut host.hub.guests[gi];
+                let g = &host.hub.guests[gi];
                 if !g.creative() || !(1..46).contains(&p.slot) {
                     return;
                 }
@@ -2672,19 +2712,23 @@ impl Game<'_> {
                     let Some(host) = self.lan.as_mut() else {
                         return;
                     };
-                    host.hub.guests[gi].menu_sent[p.slot as usize] = item;
+                    host.hub
+                        .guests
+                        .update(gi, |g| g.menu_sent[p.slot as usize] = item);
                     return;
                 }
                 let slot = p.slot as usize;
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
-                let g = &mut host.hub.guests[gi];
-                let old = g.menu_slot(slot);
-                g.set_menu_slot(slot, item.clone());
-                // InventoryMenu.setRemoteSlot: the client already has it, so broadcastChanges
-                // sends nothing back that could undo a click made since.
-                g.menu_sent[slot] = item.clone();
+                let old = host.hub.guests.update(gi, |g| {
+                    let old = g.menu_slot(slot);
+                    g.set_menu_slot(slot, item.clone());
+                    // InventoryMenu.setRemoteSlot: the client already has it, so broadcastChanges
+                    // sends nothing back that could undo a click made since.
+                    g.menu_sent[slot] = item.clone();
+                    old
+                });
                 // InventoryMenu's ArmorSlot and off-hand slot: setByPlayer.
                 let equipment = match slot {
                     5..=8 => Some(["head", "chest", "legs", "feet"][slot - 5]),
@@ -2944,8 +2988,8 @@ impl Game<'_> {
                             .rules
                             .available_rules()
                             .map(|r| play::GameRuleEntry {
-                                name: format!("minecraft:{}", r.name),
-                                value: self.ui.rules.get(r.name).unwrap_or(r.default).to_string(),
+                                name: r.name.clone(),
+                                value: self.ui.rules.get(&r.name).unwrap_or(r.default).to_string(),
                             })
                             .collect(),
                     }),
@@ -2954,8 +2998,8 @@ impl Game<'_> {
             S::SetGameRule(p) if permission >= 2 => {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
-                        if let Some(rule) = horizon_client::gamerules::rule(&entry.name)
-                            && let Some(value) = self.ui.rules.get(rule.name)
+                        if let Some(rule) = self.ui.rules.rule(&entry.name).cloned()
+                            && let Some(value) = self.ui.rules.get(&rule.name)
                         {
                             let Some(host) = self.lan.as_ref() else {
                                 return;
@@ -2968,7 +3012,7 @@ impl Game<'_> {
                                 entity_id,
                                 name: &name,
                             };
-                            self.game_rule_changed(rule.name, value, Some(&actor));
+                            self.game_rule_changed(&rule.name, value, Some(&actor));
                         }
                         let message = horizon_client::text::Text::tr(
                             "commands.gamerule.set",
@@ -3332,18 +3376,19 @@ impl Game<'_> {
                 });
             return;
         }
-        let g = &mut host.hub.guests[gi];
-        (g.yaw, g.pitch) = (yaw, pitch);
-        // A new body there: no fall distance or motion carried over, but the
-        // player's attributes (ServerPlayer.teleport keeps the entity).
-        g.new_body(true);
+        host.hub.guests.update(gi, |g| {
+            (g.yaw, g.pitch) = (yaw, pitch);
+            // A new body there: no fall distance or motion carried over, but the
+            // player's attributes (ServerPlayer.teleport keeps the entity).
+            g.new_body(true);
+        });
         host.hub.teleport(gi, Some(at));
     }
     fn guest_tick_death(&mut self, gi: usize) {
         if self
             .lan
             .as_mut()
-            .is_some_and(|host| host.hub.guests[gi].tick_death())
+            .is_some_and(|host| host.hub.guests.update(gi, |g| g.tick_death()))
         {
             self.guest_drop_carried(gi);
         }
@@ -3353,7 +3398,7 @@ impl Game<'_> {
         let carried = self
             .lan
             .as_mut()
-            .and_then(|host| host.hub.guests[gi].carried.take());
+            .and_then(|host| host.hub.guests.update(gi, |g| g.carried.take()));
         if let Some(c) = carried {
             self.drop_guest_items(gi, vec![c]);
         }
@@ -3367,7 +3412,7 @@ impl Game<'_> {
         let carried = self
             .lan
             .as_mut()
-            .and_then(|host| host.hub.guests[gi].carried.take());
+            .and_then(|host| host.hub.guests.update(gi, |g| g.carried.take()));
         if let Some(c) = carried {
             self.lan_place_back(gi, vec![c]);
             if let Some(host) = self.lan.as_mut() {
@@ -3471,11 +3516,12 @@ impl Game<'_> {
                 ]
             }
         };
-        let g = &mut self.lan.as_mut()?.hub.guests[gi];
         let d = [centre[0] - eye[0], centre[1] - eye[1], centre[2] - eye[2]];
         let horizontal = (d[0] * d[0] + d[2] * d[2]).sqrt();
-        g.yaw = (-d[0].atan2(d[2])).to_degrees() as f32;
-        g.pitch = (-d[1].atan2(horizontal)).to_degrees() as f32;
+        self.lan.as_mut()?.hub.guests.update(gi, |g| {
+            g.yaw = (-d[0].atan2(d[2])).to_degrees() as f32;
+            g.pitch = (-d[1].atan2(horizontal)).to_degrees() as f32;
+        });
         Some((centre, eye))
     }
 
@@ -3523,7 +3569,7 @@ impl Game<'_> {
         if let Some(g) = host
             .hub
             .guests
-            .iter()
+            .simulation_iter()
             .find(|g| g.entity_id == id && g.conn != conn && host.hub.here(g))
         {
             return Some(g.bounds());
@@ -3583,7 +3629,7 @@ impl Game<'_> {
         };
         // handleUseItemOn: within reach, then the hit point within
         // a block of the block's centre (logged when it isn't).
-        if !host.hub.guests[gi].may_reach_block(hit.pos) {
+        if !host.hub.guests.update(gi, |g| g.may_reach_block(hit.pos)) {
             return Err(ActionRefused::OutOfReach);
         }
         let inside = (0..3).all(|k| (hit.point[k] - f64::from(hit.pos[k]) - 0.5).abs() < 1.0000001);
@@ -3715,10 +3761,12 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return Err(ActionRefused::Stale);
         };
-        let g = &mut host.hub.guests[gi];
         if let Some((yaw, pitch)) = rotation {
-            (g.yaw, g.pitch) = (yaw, pitch);
+            host.hub
+                .guests
+                .update(gi, |g| (g.yaw, g.pitch) = (yaw, pitch));
         }
+        let g = &host.hub.guests[gi];
         // SpawnEggItem.use calls ServerLevel.mayInteract at its own
         // fluid ray's position, unlike useOn's packet-supplied block.
         let held = if hand == Hand::Off {
@@ -3959,7 +4007,10 @@ impl Game<'_> {
             return Err(ActionRefused::Stale);
         };
         let (old_yaw, old_pitch) = (host.hub.guests[gi].yaw, host.hub.guests[gi].pitch);
-        if self.look_at_entity(gi, id, None).is_none() {
+        let boat = self.boats.iter().position(|boat| boat.id as i32 == id);
+        // A packet names its target already. Keep the attacker's actual yaw
+        // for the boat's knockback instead of aiming a ray at its center.
+        if boat.is_none() && self.look_at_entity(gi, id, None).is_none() {
             return Err(ActionRefused::InvalidTarget);
         }
         // A mace's smash sets the attacker's velocity and sends it at once, before the
@@ -3970,7 +4021,12 @@ impl Game<'_> {
                     .player
                     .as_mut()
                     .is_some_and(|p| std::mem::take(&mut p.health.sync_velocity));
-                g.attack();
+                if let Some(index) = boat {
+                    g.strike_boat(index);
+                    g.swing_arm();
+                } else {
+                    g.attack();
+                }
                 let p = g.player.as_mut()?;
                 let sent = std::mem::replace(&mut p.health.sync_velocity, marked);
                 sent.then_some(p.velocity)
@@ -3987,8 +4043,14 @@ impl Game<'_> {
         {
             host.mob_players.insert(id, conn);
         }
-        host.hub.guests[gi].yaw = old_yaw;
-        host.hub.guests[gi].pitch = old_pitch;
+        {
+            let value = old_yaw;
+            host.hub.guests.update(gi, |guest| guest.yaw = value);
+        }
+        {
+            let value = old_pitch;
+            host.hub.guests.update(gi, |guest| guest.pitch = value);
+        }
         Ok(true)
     }
 
@@ -4247,7 +4309,7 @@ impl Game<'_> {
         };
         let skip = usize::from(text.starts_with('/'));
         let command = &text[skip..];
-        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
+        let d = self.ui.dispatcher.0.clone();
         // The completions come from the server's players and lists, not from the host's own registries: a
         // dedicated server has no local player (they would list "Player"), and a LAN world's guests are not in
         // the host's list.
@@ -4343,12 +4405,10 @@ impl Game<'_> {
         let world = self
             .level
             .world_spawn
-            .map(|[x, y, z]| [f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5]);
-        let spawn = host.hub.guests[i]
-            .spawn
-            .or(world)
+            .map(|[x, y, z]| [f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5])
             .or(self.spawn.map(|s| [s.x, s.y, s.z]))
             .unwrap_or([0.5, 80.0, 0.5]);
+        let spawn = host.hub.guests[i].spawn.unwrap_or(world);
         if !host.hub.guests[i].dead {
             return;
         }
@@ -4443,39 +4503,47 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let g = &mut host.hub.guests[i];
-        // restartClientLoadTimerAfterRespawn.
-        g.dead = false;
-        g.load_timeout = horizon_client::lan::guest::CLIENT_LOADED_TIMEOUT;
-        g.loading = true;
-        g.death_time = 0;
-        g.food = 20;
-        g.saturation = 5.0;
-        g.sent_health = None;
-        // ServerPlayer.restoreFrom(old, false): the base values come back,
-        // and the new player has the max health they give.
-        if let Some(m) = g.new_body(false) {
-            let m = *m;
-            g.logs_kept = Some((m.hurt_log, m.attack_log));
-        }
-        g.health = g.respawn_health(self.motion);
-        let mut xp = Experience {
-            level: g.xp_level,
-            progress: g.xp_progress,
-            total: g.xp_total,
-        };
-        xp.respawn(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
-        (g.xp_level, g.xp_progress, g.xp_total) = (xp.level, xp.progress, xp.total);
-        // PlayerEvent.Clone, at the end of `restoreFrom`: the data is copied,
-        // the new player not yet placed.
-        let (cloned, name) = (g.uuid, g.name.clone());
+        let (cloned, name) = host.hub.guests.update(i, |g| {
+            // restartClientLoadTimerAfterRespawn.
+            g.dead = false;
+            g.load_timeout = horizon_client::lan::guest::CLIENT_LOADED_TIMEOUT;
+            g.loading = true;
+            g.death_time = 0;
+            g.food = 20;
+            g.saturation = 5.0;
+            g.sent_health = None;
+            // ServerPlayer.restoreFrom(old, false): the base values come back,
+            // and the new player has the max health they give.
+            if let Some(m) = g.new_body(false) {
+                let m = *m;
+                g.logs_kept = Some((m.hurt_log, m.attack_log));
+            }
+            g.health = g.respawn_health(self.motion);
+            let mut xp = Experience {
+                level: g.xp_level,
+                progress: g.xp_progress,
+                total: g.xp_total,
+            };
+            xp.respawn(
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                    || g.game_mode == SPECTATOR,
+            );
+            (g.xp_level, g.xp_progress, g.xp_total) = (xp.level, xp.progress, xp.total);
+            // PlayerEvent.Clone, at the end of `restoreFrom`: the data is copied,
+            // the new player not yet placed.
+            (g.uuid, g.name.clone())
+        });
         self.native_player_clone(cloned, &name, true);
         let clock_rate = self.network_clock_rate();
         let ctx = TickCtx {
             world: &mut self.world,
             entities: &[],
             next_entity: &mut self.next_entity,
-            spawn,
+            // PlayerList.respawn / sendLevelInfo send level respawn data,
+            // independently of the personal destination passed to Hub::respawn.
+            spawn: world,
             difficulty: i32::from(self.ui.difficulty),
             difficulty_locked: self.level.difficulty_locked,
             clock_rate,
@@ -4528,7 +4596,10 @@ impl Game<'_> {
         };
         if !keep_point {
             // copyOriginalSpawnPosition false: the fresh player has none.
-            host.hub.guests[i].spawn = None;
+            {
+                let value = None;
+                host.hub.guests.update(i, |guest| guest.spawn = value);
+            }
         } else if let Some(point) = copied_respawn_point(own.is_some(), forced_spawn) {
             let g = &host.hub.guests[i];
             let (uuid, id, name) = (g.uuid, g.entity_id, g.name.clone());
@@ -4543,7 +4614,10 @@ impl Game<'_> {
                 cancel: &mut cancel,
             });
             if cancel && let Some(host) = self.lan.as_mut() {
-                host.hub.guests[i].spawn = None;
+                {
+                    let value = None;
+                    host.hub.guests.update(i, |guest| guest.spawn = value);
+                }
             }
         }
         if let Some(config) = elsewhere {
@@ -4570,7 +4644,10 @@ impl Game<'_> {
                 return;
             };
             let at = found.map_or(world, |(at, yaw)| {
-                host.hub.guests[i].yaw = yaw;
+                {
+                    let value = yaw;
+                    host.hub.guests.update(i, |guest| guest.yaw = value);
+                }
                 [at.x, at.y, at.z]
             });
             if found.is_none() {
@@ -4878,7 +4955,10 @@ impl Game<'_> {
             );
             if cancel {
                 if let Some(host) = self.lan.as_mut() {
-                    host.hub.guests[gi].health = 1.0;
+                    {
+                        let value = 1.0;
+                        host.hub.guests.update(gi, |guest| guest.health = value);
+                    }
                 }
                 return;
             }
@@ -4897,17 +4977,25 @@ impl Game<'_> {
             return;
         };
         let here = host.hub.here(&host.hub.guests[gi]);
-        let g = &mut host.hub.guests[gi];
+        let g = &host.hub.guests[gi];
         if g.health <= 0.0 && !g.dead {
-            g.dead = true;
-            g.last_death = Some((g.dimension.clone(), g.position.map(|v| v.floor() as i32)));
+            host.hub.guests.update(gi, |g| {
+                g.dead = true;
+                g.last_death = Some((g.dimension.clone(), g.position.map(|v| v.floor() as i32)));
+            });
+            let g = &host.hub.guests[gi];
             let (id, at) = (g.entity_id, g.position);
             let reward = Experience {
                 level: g.xp_level,
                 progress: g.xp_progress,
                 total: g.xp_total,
             }
-            .death_reward(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
+            .death_reward(
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                    || g.game_mode == SPECTATOR,
+            );
             let (name, uuid) = (g.name.clone(), g.uuid);
             // ServerPlayer.die: dropAllDeathLoot unless a spectator, from the eyes less 0.3.
             let drops = (g.game_mode != SPECTATOR)
@@ -4926,7 +5014,11 @@ impl Game<'_> {
             // ServerPlayer.die: with showDeathMessages, the message goes to
             // the dying player's death screen and to everyone the team lets
             // see it; without it, the death screen gets an empty one.
-            let message = if self.ui.rules.bool("show_death_messages") {
+            let message = if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SHOW_DEATH_MESSAGES)
+            {
                 let me = self.player_text(&name, uuid);
                 let text = match cause {
                     Some(key) => horizon_client::text::Text::translate(&key, &[me]),
@@ -5301,20 +5393,22 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let g = &mut host.hub.guests[gi];
-        g.position = at;
-        g.previous_position = at;
-        g.yaw = yaw;
-        g.pitch = 0.0;
-        g.moves.clear();
-        if let Some(m) = g.motion.as_mut() {
-            m.position = stand;
-            m.velocity = Vec3::ZERO;
-            m.yaw = yaw;
-            m.pitch = 0.0;
-            let _ = m.set_sleeping(false);
-        }
-        if !g.dead {
+        let alive = host.hub.guests.update(gi, |g| {
+            g.position = at;
+            g.previous_position = at;
+            g.yaw = yaw;
+            g.pitch = 0.0;
+            g.moves.clear();
+            if let Some(m) = g.motion.as_mut() {
+                m.position = stand;
+                m.velocity = Vec3::ZERO;
+                m.yaw = yaw;
+                m.pitch = 0.0;
+                let _ = m.set_sleeping(false);
+            }
+            !g.dead
+        });
+        if alive {
             host.hub.teleport(gi, Some(at));
         }
     }
@@ -5329,7 +5423,7 @@ impl Game<'_> {
                 return;
             };
             if host.hub.here(&host.hub.guests[gi])
-                && let Some(head) = host.hub.guests[gi].woke_from.take()
+                && let Some(head) = host.hub.guests.update(gi, |g| g.woke_from.take())
             {
                 self.wake_guest_from(gi, head);
             }
@@ -5342,7 +5436,7 @@ impl Game<'_> {
         };
         host.hub.wake(gi);
         if host.hub.here(&host.hub.guests[gi])
-            && let Some(head) = host.hub.guests[gi].woke_from.take()
+            && let Some(head) = host.hub.guests.update(gi, |g| g.woke_from.take())
         {
             self.wake_guest_from(gi, head);
         }
@@ -5354,12 +5448,13 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let g = &mut host.hub.guests[gi];
-        let was_deep = g.sleep_timer >= 100;
-        g.sleep_timer = super::tick_sleep_timer(g.sleep_timer, g.bed.is_some());
-        let deep_sleep = !was_deep && g.sleep_timer >= 100 && g.bed.is_some();
-        let identity = deep_sleep.then(|| (g.uuid, g.name.clone()));
-        let (bed, gone, uuid) = (g.bed, g.dead || g.health <= 0.0, g.uuid);
+        let (identity, bed, gone, uuid) = host.hub.guests.update(gi, |g| {
+            let was_deep = g.sleep_timer >= 100;
+            g.sleep_timer = super::tick_sleep_timer(g.sleep_timer, g.bed.is_some());
+            let deep_sleep = !was_deep && g.sleep_timer >= 100 && g.bed.is_some();
+            let identity = deep_sleep.then(|| (g.uuid, g.name.clone()));
+            (identity, g.bed, g.dead || g.health <= 0.0, g.uuid)
+        });
         if let Some(head) = bed {
             let block = self.world.block(head[0], head[1], head[2]);
             let bed_exists = self.res.facts().get(block).name.ends_with("_bed");
@@ -5410,11 +5505,12 @@ impl Game<'_> {
                 self.wake_guest(gi);
             } else if let Some(host) = self.lan.as_mut() {
                 // LivingEntity.tick: a sleeper's xRot is 0.
-                let g = &mut host.hub.guests[gi];
-                g.pitch = 0.0;
-                if let Some(m) = g.motion.as_mut() {
-                    m.pitch = 0.0;
-                }
+                host.hub.guests.update(gi, |g| {
+                    g.pitch = 0.0;
+                    if let Some(m) = g.motion.as_mut() {
+                        m.pitch = 0.0;
+                    }
+                });
             }
         }
         if let Some((player, name)) = identity {
@@ -5455,7 +5551,12 @@ impl Game<'_> {
 
     /// `SleepStatus.sleepersNeeded`.
     fn sleepers_needed(&self, active: i64) -> i64 {
-        let percent = i64::from(self.ui.rules.int("players_sleeping_percentage").max(0));
+        let percent = i64::from(
+            self.ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+                .max(0),
+        );
         ((active * percent + 99) / 100).max(1)
     }
 
@@ -5484,7 +5585,12 @@ impl Game<'_> {
             return;
         }
         // ServerLevel.canSleepThroughNights.
-        if self.ui.rules.int("players_sleeping_percentage") > 100 {
+        if self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+            > 100
+        {
             return;
         }
         let needed = self.sleepers_needed(active);
@@ -5579,8 +5685,10 @@ impl Game<'_> {
     /// sounds are heard at the guest.
     fn guest_server_tick(&mut self, conn: u32) {
         // Entity.baseTick: the boarding cooldown counts down once a tick.
-        if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
-            g.boarding_cooldown = super::boarding::tick_down(g.boarding_cooldown);
+        if let Some(host) = self.lan.as_mut() {
+            let _ = host.hub.update_guest(conn, |g| {
+                g.boarding_cooldown = super::boarding::tick_down(g.boarding_cooldown);
+            });
         }
         self.guest_replay(conn);
         self.guest_vehicle_tick(conn);
@@ -5590,19 +5698,24 @@ impl Game<'_> {
         };
         let fell = host
             .hub
-            .guest_mut(conn)
+            .guest(conn)
             .and_then(|g| g.moves.last().map(|m| m.0[1]))
             .unwrap_or(0.0);
         self.guest_glide_tick(conn, fell);
-        let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) else {
+        let Some((moves, from_ground)) = self.lan.as_mut().and_then(|host| {
+            host.hub.update_guest(conn, |g| {
+                let moves = std::mem::take(&mut g.moves);
+                let from_ground = if moves.is_empty() {
+                    g.on_ground
+                } else {
+                    g.moves_from_ground
+                };
+                (moves, from_ground)
+            })
+        }) else {
             return;
         };
-        let moves = std::mem::take(&mut g.moves);
-        let from_ground = if moves.is_empty() {
-            g.on_ground
-        } else {
-            g.moves_from_ground
-        };
+        let g = self.lan.as_ref().unwrap().hub.guest(conn).unwrap();
         if g.spectator() {
             // Spectators' effects still run (LivingEntity.baseTick).
             if !g.effects.list.is_empty() {
@@ -5741,8 +5854,10 @@ impl Game<'_> {
             let mut events = std::mem::take(&mut w.player.events);
             // LayeredCauldronBlock.handleEntityOnFireInside along those moves.
             for event in &events {
-                if let MotionEvent::CauldronExtinguish { pos } = event {
-                    game.cauldron_extinguish(*pos);
+                match event {
+                    MotionEvent::CauldronExtinguish { pos } => game.cauldron_extinguish(*pos),
+                    MotionEvent::PowderSnowMelt { pos } => game.powder_snow_melt(*pos),
+                    _ => {}
                 }
             }
             // Entity.baseTick: rain puts out a burning player.
@@ -5924,7 +6039,14 @@ impl Game<'_> {
                         host.hub.entity_event(id, event as i8);
                     }
                 }
-                MotionEvent::Fall(event) => self.landing_block_updates(&event),
+                MotionEvent::Fall(event) => {
+                    let player = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.hub.guest(conn))
+                        .map(|g| g.uuid);
+                    self.landing_block_updates(player, &event)
+                }
                 // PowderSnowBlock.entityInside: every player around sees the
                 // snowflake (`ServerLevel.sendParticles`).
                 MotionEvent::Snowflake { position, velocity } => {
@@ -5946,6 +6068,11 @@ impl Game<'_> {
                             .entity_event(g.entity_id, super::combat::DROWN_EVENT);
                     }
                     self.drown_particles(at, [0.0; 3]);
+                }
+                // ServerPlayer.onInsideBlock: the enter_block trigger, for the
+                // player who moved.
+                MotionEvent::EnterBlock { state } => {
+                    self.as_guest(conn, |game| game.trigger_enter_block(state));
                 }
                 // HoneyBlock.maybeDoSlideEffects: the sound reaches the
                 // others (Player.playSound excludes the player, whose client
@@ -6040,12 +6167,14 @@ impl Game<'_> {
             })
             .unwrap_or(true);
         let mut changed = None;
-        if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
-            let gliding = start && !in_liquid;
-            if g.fall_flying != gliding {
-                g.fall_flying = gliding;
-                changed = Some((g.uuid, g.name.clone(), gliding));
-            }
+        if let Some(host) = self.lan.as_mut() {
+            let _ = host.hub.update_guest(conn, |g| {
+                let gliding = start && !in_liquid;
+                if g.fall_flying != gliding {
+                    g.fall_flying = gliding;
+                    changed = Some((g.uuid, g.name.clone(), gliding));
+                }
+            });
         }
         if let Some((uuid, name, gliding)) = changed {
             self.native_entity_toggle_glide(uuid, &name, gliding);
@@ -6070,25 +6199,31 @@ impl Game<'_> {
     /// `elytra_glide` game event. Entity.checkFallDistanceAccumulation runs
     /// first: a glide that isn't diving keeps the fall distance at 1.
     fn guest_glide_tick(&mut self, conn: u32, fell: f64) {
-        let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) else {
+        let Some(creative) = self.lan.as_mut().and_then(|host| {
+            host.hub
+                .update_guest(conn, |g| {
+                    if !g.fall_flying {
+                        if let Some(m) = g.motion.as_mut() {
+                            m.fall_fly_ticks = 0;
+                        }
+                        return None;
+                    }
+                    let creative = g.creative();
+                    if let Some(m) = g.motion.as_mut()
+                        && fell > -0.5
+                        && m.fall_distance > 1.0
+                    {
+                        m.fall_distance = 1.0;
+                    }
+                    Some(creative)
+                })
+                .flatten()
+        }) else {
             return;
         };
-        if !g.fall_flying {
-            if let Some(m) = g.motion.as_mut() {
-                m.fall_fly_ticks = 0;
-            }
-            return;
-        }
-        let creative = g.creative();
-        if let Some(m) = g.motion.as_mut()
-            && fell > -0.5
-            && m.fall_distance > 1.0
-        {
-            m.fall_distance = 1.0;
-        }
         if self.guest_can_glide(conn) != Some(true) {
-            if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
-                g.fall_flying = false;
+            if let Some(host) = self.lan.as_mut() {
+                let _ = host.hub.update_guest(conn, |g| g.fall_flying = false);
             }
             return;
         }
@@ -6236,7 +6371,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return Err(ActionRefused::Stale);
         };
-        if !host.hub.guests[gi].may_reach_block(pos) {
+        if !host.hub.guests.update(gi, |g| g.may_reach_block(pos)) {
             return Err(ActionRefused::OutOfReach);
         }
         let (min_y, max_y) = (self.world.shape.min_y, self.world.shape.max_y() - 1);
@@ -6799,7 +6934,7 @@ impl Game<'_> {
         if !paused {
             self.combat.stuck.tick();
         }
-        for g in &mut host.hub.guests {
+        host.hub.guests.update_all(|g| {
             g.shoulders = super::shoulders::shoulder_variants(g.saved.as_ref());
             g.stuck = match self.guest_combat.get_mut(&g.conn) {
                 Some(combat) => {
@@ -6810,7 +6945,7 @@ impl Game<'_> {
                 }
                 None => (0, 0),
             };
-        }
+        });
     }
 
     /// The guests' items in use, for the players around (`LivingEntity.startUsingItem`
@@ -6819,10 +6954,10 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        for g in &mut host.hub.guests {
+        host.hub.guests.update_all(|g| {
             let using = host.play.get(&g.conn).and_then(GuestPlay::using);
             g.living_flags = super::lan::living_flags(using);
-        }
+        });
     }
 
     /// A use the server ran swung the guest's hand: their own client is told
@@ -6936,6 +7071,65 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
+    fn crafting_guest_self_swap_keeps_eight_items() {
+        use horizon_client::{chunk::Chunk, items::ItemStack};
+        use horizon_protocol::packets::play::{ContainerClick, Serverbound};
+        use std::sync::Arc;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let table = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:crafting_table")
+                .unwrap();
+            game.world.set(1, 64, 1, table).unwrap();
+            game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 8));
+            });
+            game.lan_open_crafting(12, [1, 64, 1]);
+            let window = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .play
+                .get(&12)
+                .unwrap()
+                .crafting
+                .table
+                .as_ref()
+                .unwrap()
+                .0;
+            game.lan_guest_packet(
+                12,
+                Serverbound::ContainerClick(ContainerClick {
+                    container: window,
+                    state: 0,
+                    slot: 37,
+                    button: 0,
+                    input: 2,
+                    changed: Vec::new(),
+                    carried: None,
+                }),
+            );
+            let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert_eq!(guest.inventory[0].as_ref().unwrap().count, 8);
+            assert_eq!(
+                guest
+                    .inventory
+                    .iter()
+                    .flatten()
+                    .map(|s| s.count)
+                    .sum::<u32>(),
+                8
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
     fn block_menu_handle_and_use_each_count_the_guest_once() {
         use horizon_client::chunk::Chunk;
         use mod_api::NativeBlockUpdateFlags;
@@ -6996,13 +7190,29 @@ mod tests {
                     assert!(!game.lid_openers.contains_key(&pos));
                 },
             );
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 3;
+            {
+                let value = 3;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
             assert_eq!(game.open_block_menu(12, pos), super::MenuOpen::Opened);
             assert!(!game.lid_openers.contains_key(&pos));
             game.guest_close_all(12);
             assert!(!game.lid_openers.contains_key(&pos));
             // The incoming double-count bug kept a shulker open after its last close.
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 0;
+            {
+                let value = 0;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
             let shulker = game
                 .pack
                 .assets
@@ -7052,10 +7262,14 @@ mod tests {
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
             assert!(!game.lan_open_container(12, (2, 64, 0)));
-            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Fake;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = GuestKind::Fake;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(game.lan_open_container(12, (0, 64, 0)));
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
-            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Network;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = GuestKind::Network;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(game.lan_open_container(12, (0, 64, 0)));
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
         });
@@ -7180,9 +7394,12 @@ mod tests {
                 r.block_part(block_key, self.user.clone());
                 let block_key = r.block_key("minecraft:cake");
                 r.block_part(block_key, self.user.clone());
-                r.item_part("minecraft:stick", self.user.clone());
-                r.item_part("minecraft:water_bucket", self.user.clone());
-                r.item_part("minecraft:stone", self.user.clone());
+                let item = r.item_key("minecraft:stick");
+                r.item_part(item, self.user.clone());
+                let item = r.item_key("minecraft:water_bucket");
+                r.item_part(item, self.user.clone());
+                let item = r.item_key("minecraft:stone");
+                r.item_part(item, self.user.clone());
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -7562,8 +7779,15 @@ mod tests {
 
                 // The real guest packet reaches empty use with the guest's UUID.
                 game.world.set(0, 64, 4, lever).unwrap();
-                game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
-                    Some(ItemStack::new("minecraft:stick", 1));
+                {
+                    let value = Some(ItemStack::new("minecraft:stick", 1));
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |g| g.inventory[0] = value);
+                }
                 *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
                 *user.empty_answer.lock().unwrap() = Some(Answer::Success);
                 game.lan_guest_packet(
@@ -7597,9 +7821,10 @@ mod tests {
                     (Some(20), cake, 20, item_uses + 1),
                 ] {
                     game.world.set(0, 64, 4, cake).unwrap();
-                    let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-                    guest.game_mode = 0;
-                    guest.food = 10;
+                    game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                        guest.game_mode = 0;
+                        guest.food = 10;
+                    });
                     *user.empty_food.lock().unwrap() = food_write;
                     game.lan_guest_packet(
                         12,
@@ -7617,7 +7842,15 @@ mod tests {
                     assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].food, food);
                     assert_eq!(user.item_uses.load(SeqCst), item_calls);
                 }
-                game.lan.as_mut().unwrap().hub.guests[0].game_mode = 1;
+                {
+                    let value = 1;
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |guest| guest.game_mode = value);
+                }
                 game.world.set(0, 64, 4, stone).unwrap();
                 game.lan_guest_packet(
                     12,
@@ -8425,5 +8658,149 @@ mod pickup_xp_tests {
         mod_api::testing::with_mods(mods, || assert_eq!(take_orb(), none));
         let mods = vec![mod_api::ModEntry::new("cancel", Box::new(Listen(true)))].into();
         mod_api::testing::with_mods(mods, || assert_eq!(take_orb(), (true, 0)));
+    }
+}
+
+#[cfg(test)]
+mod respawn_world_point_tests {
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use horizon_client::lan::{Joined, NetConfig, Out, PlayerSender, guest::Guest, hub::HubConfig};
+    use horizon_core::geometry::Vec3;
+    use horizon_protocol::packets::{configuration::ClientInformation, play::Clientbound};
+    use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+    /// PlayerList.respawn sends world respawn data, independently of the personal landing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn guest_respawn_keeps_world_information_distinct_from_personal_landing() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        let scratch = std::env::temp_dir().join(format!(
+            "horizon-respawn-point-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&scratch).unwrap();
+        game.world_root = scratch.clone();
+        let world = [0, 100, 0];
+        let personal = [5.5, 101.0, 5.5];
+        game.level.world_spawn = Some(world);
+        game.spawn = Some(Vec3::new(0.5, 100.0, 0.5));
+        game.lan_host(
+            super::super::lan::LanSettings {
+                port: 0,
+                guest_commands: true,
+                force_game_mode: false,
+            },
+            NetConfig {
+                announce: false,
+                ..NetConfig::loopback(0, "respawn-test".into(), 2)
+            },
+            HubConfig {
+                default_game_mode: 0,
+                guest_commands: true,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: "minecraft:overworld".into(),
+                allow_flight: false,
+                seed: 0,
+                max_players: 2,
+                integrated: false,
+                levels: Default::default(),
+            },
+        )
+        .unwrap();
+        let (tx, rx) = mpsc::channel();
+        let mut guest = Guest::new(
+            Joined {
+                conn: 2,
+                uuid: 330,
+                name: "RespawnGuest".into(),
+                properties: Vec::new(),
+                info: ClientInformation::new(2),
+                brand: "test".into(),
+                sender: PlayerSender::new(tx, Arc::default()),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:25565".parse().unwrap(),
+                expected: false,
+            },
+            2,
+            [0.5, 100.0, 0.5],
+            2,
+        );
+        guest.dimension = "minecraft:overworld".into();
+        guest.placed = true;
+        guest.loaded = true;
+        guest.spawn = Some(personal);
+        guest.health = 0.0;
+        guest.dead = true;
+        game.lan.as_mut().unwrap().hub.guests.push(guest);
+        game.guest_respawn(2);
+        let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+        assert_eq!(guest.uuid, 330);
+        assert_eq!(guest.position, personal);
+        assert_eq!(guest.health, 20.0);
+        assert!(!guest.dead);
+        let mut packets = Vec::new();
+        for out in rx.try_iter() {
+            match out {
+                Out::Packet(body) => packets.push(body),
+                Out::Packets(bodies) => packets.extend(bodies),
+                Out::Disconnect(_) => panic!("unexpected disconnect"),
+            }
+        }
+        let mut sequence = Vec::new();
+        let mut points = Vec::new();
+        for body in packets {
+            let mut r = horizon_protocol::buf::Reader::new(&body);
+            let id = r.varint().unwrap();
+            match Clientbound::decode(id, r.rest()).unwrap() {
+                Clientbound::Respawn(_) => sequence.push(84),
+                Clientbound::SetDefaultSpawnPosition(p) => {
+                    sequence.push(99);
+                    points.push((
+                        p.pos.dimension,
+                        p.pos.pos,
+                        p.yaw.to_bits(),
+                        p.pitch.to_bits(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(sequence, [84, 99, 99]);
+        assert_eq!(points, vec![("minecraft:overworld".into(), world, 0, 0); 2]);
+        drop(game);
+        std::fs::remove_dir_all(scratch).unwrap();
     }
 }

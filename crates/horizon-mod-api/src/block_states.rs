@@ -3,17 +3,17 @@
 //! rather than handle methods. Both sides read the game's tables; definitions are copied out.
 use super::{Backend, BackendRef, BlockSoundType, BlockStateId, BlockStateRange, Host};
 
-/// One property and its legal values in a block's state definition.
+/// One property and its legal values in a state definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct BlockStateProperty {
+pub struct StateProperty {
     /// Property name.
     pub name: String,
     /// Legal serialized values.
     pub values: Vec<String>,
 }
 
-impl BlockStateProperty {
+impl StateProperty {
     /// Construct a definition entry from a property name and legal values.
     pub fn new(name: String, values: Vec<String>) -> Self {
         Self { name, values }
@@ -23,14 +23,14 @@ impl BlockStateProperty {
 /// A property constraint used when matching a state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct BlockStateConstraint {
+pub struct StateConstraint {
     /// Property name.
     pub name: String,
     /// Required serialized value.
     pub value: String,
 }
 
-impl BlockStateConstraint {
+impl StateConstraint {
     /// Construct a property constraint.
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
@@ -43,8 +43,8 @@ impl BlockStateConstraint {
 /// An invalid constraint, identifying its index in the supplied list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum BlockStateMatchError {
-    /// The block has no such property.
+pub enum StateMatchError {
+    /// The definition has no such property.
     UnknownProperty(u32),
     /// The property does not admit this value.
     InvalidValue(u32),
@@ -91,7 +91,7 @@ impl BlockStates<'_> {
         self.backend?.block_state_has_block_entity(state)
     }
     /// The block's property names and legal serialized values. None without resolved tables.
-    pub fn definition(&self, block: crate::BlockKey) -> Option<Vec<BlockStateProperty>> {
+    pub fn definition(&self, block: crate::BlockKey) -> Option<Vec<StateProperty>> {
         self.backend?.block_state_definition(block)
     }
 
@@ -102,8 +102,8 @@ impl BlockStates<'_> {
         &self,
         state: BlockStateId,
         block: crate::BlockKey,
-        constraints: &[BlockStateConstraint],
-    ) -> Option<Result<bool, BlockStateMatchError>> {
+        constraints: &[StateConstraint],
+    ) -> Option<Result<bool, StateMatchError>> {
         self.backend?.block_state_matches(state, block, constraints)
     }
 

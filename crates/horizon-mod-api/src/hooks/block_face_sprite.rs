@@ -9,6 +9,7 @@ pub trait Helpers {
     /// None when the model has no face that way or isn't baked. API @API:block_face_sprite@.
     #[helper(
         side = "client",
+        resource_read = true,
         target = "horizon_client::game::native_block_sprites::Game<'_>::native_block_face_sprite"
     )]
     fn block_face_sprite();

@@ -10,6 +10,6 @@ pub trait Hooks {
 }
 
 pub trait Helpers {
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_book_category();
 }

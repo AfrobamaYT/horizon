@@ -68,6 +68,57 @@ another mod's hook object is not exposed.
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
 
+### Load phases and access
+
+Native and wasm hooks share the installed dependency-ordered mod slice, including registration,
+config loading and reload-listener registration. The shared resolver keeps bundle-order ties,
+checks present optional dependencies too, and refuses cycles for both build targets. Content-only
+packages stay after code in the loaded-mod inventory; listener-specific edges still use `ReloadOrder`.
+
+Each owning thread progresses through `Packages → Registration → Setup → Config → World`.
+
+| Phase | Available access |
+| --- | --- |
+| Packages | Package discovery; no game Host operations. |
+| Registration | Declarations through `RegistrationContext`; no Host. |
+| Setup | Client setup reads, published asset/data queries and registry/settings/mod-list reads; no world handles or transactions. |
+| Config | Settings reads and the existing mod-scoped `ConfigFiles` service; no world handles, transactions or other game operations. |
+| Reloading | Published asset/data queries, registry facts, settings and mod-list reads, listener registration, and existing `DataLoadContext` callbacks; no world handles or transactions. |
+| World | The owning game's side-typed `ServerHost` or `ClientHost`. |
+
+Registration runs once: `register`, `component_types`, `blocks`, `items` and `standalone_models`
+receive only `RegistrationContext`. Client setup runs once after the initial asset apply. The
+window's Client/Common configs load once immediately after client setup and before title,
+connection, input, render or ordinary tick callbacks. This includes pack-error recovery: the failed
+selection is cleared and saved during initialization, but its options screen opens only after Config
+completes. A title-screen callback is already in World: world-handle constructors can return `None`,
+rather than being forbidden in Setup. A dedicated
+server loads Common once before its first world; Server configs load and unload per world.
+A second world does not repeat registration or client setup. Config loading can read settings and
+use the existing scoped `ConfigFiles` service to read or save its own config files. World handles,
+transactions and other game operations panic with `Config` in the diagnostic.
+Config file polling is not a phase transition, and Server config unloading leaves the World phase.
+
+Every data or asset reload enters `Reloading`, including listener registration, prepare, apply and
+the reload completion notice. Initial loads can nest in Setup; runtime reloads nest in World.
+Returning, including after a failed prepare, restores the entering phase. Published asset/data
+queries are classified in the catalog (`resource_read`), not granted by helper-name exceptions.
+They read the currently published generation, not pending prepare output: completion callbacks can
+refresh sprite and recipe caches after apply, including on first world open, without gaining world
+handles or transactions. Their rustdoc names their load-phase availability. Server listener
+registration retains `&dyn Host`, restricted to these published facts, registry facts, settings and
+mod-list queries; callbacks already taking `DataLoadContext` keep that context. Neither permits
+opening a world handle or transaction. The first client registration and prepare run on the loader
+thread; later registration runs on the render thread, prepare on its worker, and apply on the owning
+game thread. Startup's empty client Host is not an extra permission.
+
+The game alone advances phases. An illegal or wrong-thread advance is refused before dispatch;
+a forbidden mod call panics naming the phase, rather than returning a Result a listener could ignore.
+There is no separate common-setup, load-complete or intermod event: registration and the first server
+reload cover common setup, client setup is `client_setup`, dedicated setup is `server_about_to_start`,
+and dependencies express intermod ordering. Load complete is the edge after initial Config and before
+`server_about_to_start`, not a hook.
+
 The generated executable uses the installed game's `crates/horizon-client/src/native_main.rs.template`.
 The launcher supplies only ordered literal mod IDs and hook factory paths. The template owns entry
 construction, the allocator and the canonical game identity. Source without this template is refused
@@ -135,7 +186,9 @@ None of them loads a chunk. Light above the build height reads as full sky and b
 none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
 so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`,
 `item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
-`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
+`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. Fluid reads return `FluidState` with a
+`FluidKey`, amount, falling flag and engine-derived source flag; `is_empty()` and `is_source()` report
+those states without a registry lookup. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
 `LevelHost` has no random, by design: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
@@ -225,7 +278,13 @@ authoritative context or an unavailable mapping returns `None`, not a stale memb
 `host.block_state_default(stone)`, `host.block_states().states_of(stone)`,
 `host.block_item(stone)`, `host.block_in_tag(stone, tag)` and restricted-level
 `schedule_block_tick(pos, stone, delay)` use `BlockKey`. Property expressions accepted by
-`block_state_id`, tag names and fluid ids are separate domains and remain strings.
+`block_state_id`, tag names and existing fluid operation arguments remain strings for now.
+
+Declare a tank-only fluid in your own namespace with `r.declare_fluid("chocolate")`; the returned `FluidKey` identifies it for the mod load. Request vanilla or another mod's declared fluid with `r.fluid_key("minecraft:water")` or `r.fluid_key("other:chocolate")`. Requests resolve after all registrations, so declaration order does not matter; an unknown request stops the load and names the requesting mod. Tank-only fluids have no world simulation or world state. Fluid stacks and recipe ingredients use these keys; remaining fluid operations move to them in subsequent changes.
+A saved tank whose fluid's mod is absent carries an opaque unresolved identity. Its stack's
+`key()` is `None`; `UnresolvedFluid::id(host)` reads its saved name. It can move between
+name-backed mod tanks, but not into vanilla buckets or cauldrons.
+
 `NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
 application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
 uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks
@@ -288,10 +347,11 @@ block hooks) by block. The factory is a `BlockEntityPart` method, not a global `
 
 `r.block_entity_type_key("other:press")` looks up another mod's type, and
 `r.block_entity_type_key("minecraft:chest")` looks up a vanilla type. Both return the same opaque
-`BlockEntityTypeKey` as the declaration builder: equality and hashing use the type ID, not its blocks.
-The final registry checks these requests at load and refuses unknown IDs, naming the requesting mod
-and type. Use a canonical type ID, not a block ID (`minecraft:shulker_box`, not
-`minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
+`BlockEntityTypeKey` as the declaration builder: equality and hashing use the shared load-owned
+registration slot, not the type's blocks. Bare names use the `minecraft:` namespace. The final
+registry resolves requests after all declarations and refuses unknown IDs, naming the requesting mod
+and type. `key.id(host)` reads the canonical name for diagnostics; a key retains its identity until
+restart. Use a type ID, not a block ID (`minecraft:shulker_box`, not `minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
 `living.hurt_and_break(host, slot, amount)` changes equipped durability on the server; negative amounts repair. It returns the pre-shrink stack only on break, and `None` when nothing breaks or the entity or slot is unavailable. Creative players' equipment is exempt. The operation does not fire equip effects.
 
 `block_entity.replace_data(host, data)` replaces its saved payload, clearing omitted fields while retaining
@@ -300,6 +360,13 @@ false for a missing or stale block entity, data the entity cannot load, or an un
 Lookup keys may answer capabilities for vanilla and native types. `block_entity_part` accepts only
 native types and returns `BlockEntityPartError::VanillaType` immediately for a vanilla key. Native
 Parts are expanded after every mod has registered, so a Part can target a type declared later.
+
+For an item-specific Part, request its canonical registry key once in `register`:
+`let stick = r.item_key("minecraft:stick"); r.item_part(stick, Sharp);`. Bare names use the
+`minecraft:` namespace. Requests may refer to content declared later; the final item registry refuses
+unknown IDs with the requesting mod. `ItemKey` equality uses its load-owned slot, and `key.id(host)`
+reads its canonical diagnostic name. Item capability registration and item helpers still use strings;
+their migration is a separate change.
 
 `r.block_part_tag("minecraft:logs", Rotates)` and `r.item_part_tag("minecraft:axes", Sharp)` attach a part to
 every member of a tag (its name without `#`). Each game resolves them against its own tags when its world
@@ -407,6 +474,10 @@ host.transaction(|host, tx| {
     Ok(())
 })
 ```
+
+Cauldron interactions outside a transaction keep vanilla's effect order. Inside an open
+transaction, their statistic award (including `player_stat_award`), sound and overflow
+item toss/spawn wait until the outermost successful commit; an abort emits none of them.
 
 #### Entity energy and fluids
 
@@ -611,6 +682,8 @@ tables. Fact queries and matching allocate nothing; `definition` copies the prop
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as the block's consecutive ids |
 | `definition(block)` | Property names and legal serialized values |
 | `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
+
+Use `StateConstraint` for each partial constraint; `StateMatchError` identifies an invalid property or value by index. `StateProperty` describes a property's legal values. These types are shared by state-definition services.
 
 None for an unknown state or block, and on a host with no game behind it (a mod's test double).
 

@@ -187,6 +187,7 @@
   "Could not read the build log: {error}": "Pudeva minga legg el registr de compilaziun: {error}",
   "Could not read the saved sign-in.": "Pudeva minga legg l'access salvà.",
   "Could not read the saved sign-in. Sign in again.": "Pudeva minga legg l'access salvà. Accedi ancamò.",
+  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Pudeva minga lègg {name}: {error}",
   "Could not run {program}: {error}": "Pudeva minga eseguir {program}: {error}",
   "Could not save the renewed sign-in.": "Pudeva minga salvà l'access rinnovà.",
@@ -1153,5 +1154,6 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "I scaricament, i access e i aggiornament passan travers chestu proxy (http://host:port, socks5://host:port). Vœui significa nissun: HTTPS_PROXY l’è duperà inveci quand el lanciador l’è stà avvià cun un.",
   "{name} was left out: made for another Horizon version": "{name} l'è staa lassaa foeura: faa per un'altra version de Horizon",
   "{name} was left out: clashes with {other}": "{name} l'è staa lassaa foeura: el va in conflit con {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} l'è staa lassaa foeura: el gh'ha bisogn de {other}, che l'è staa lassaa foeura"
+  "{name} was left out: it needs {other}, which was left out": "{name} l'è staa lassaa foeura: el gh'ha bisogn de {other}, che l'è staa lassaa foeura",
+  "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.": "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."
 }

@@ -161,6 +161,10 @@ impl NativeConfigs {
 impl Game<'_> {
     /// Asks the mods for their configs and loads those of `kinds`.
     fn native_configs_load(&mut self, kinds: &[NativeConfigKind], world: Option<&Path>) {
+        let phase = self.mod_phase.clone();
+        let _config = phase
+            .config()
+            .expect("config load on its owning game thread");
         let config_dir = match Self::native_config_dir() {
             Ok(dir) => dir,
             Err(e) => {
@@ -179,19 +183,22 @@ impl Game<'_> {
         }
     }
 
-    /// The window's `Client` and `Common` configs, once: on its first frame
-    /// step, or before it starts a world's server thread if that comes first.
+    /// The window's `Client` and `Common` configs, once: after client setup
+    /// and before its title, connection or ordinary runtime callbacks.
     pub(super) fn native_configs_client_start(&mut self) {
+        // Other local players share the process's client setup, not another
+        // Client/Common load or a second config watcher.
+        if self.options.split_guest {
+            return;
+        }
         if !self.native_configs.started {
             use NativeConfigKind::{Client, Common};
             self.native_configs_load(&[Client, Common], None);
         }
     }
 
-    /// The window's frame step: its configs load on the first, and changed
-    /// files reload once a second.
+    /// The window's frame step: changed config files reload once a second.
     pub(super) fn native_configs_tick_client(&mut self) {
-        self.native_configs_client_start();
         self.native_configs_poll();
     }
 
@@ -229,6 +236,97 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use NativeConfigKind::{Client, Common, Server};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn config_permissions_and_once_per_side_survive_two_worlds() {
+        use mod_api::{Hooks, Host, HostSide, HostTransaction, ModEntry};
+        use std::sync::{Arc, Mutex};
+        struct Probe(Arc<Mutex<Vec<(bool, NativeConfigKind)>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Probe {
+            fn register_configs(
+                &self,
+                _: HostSide<'_>,
+                event: &mut mod_api::RegisterConfigsEvent<'_>,
+            ) {
+                for kind in [Client, Common, Server] {
+                    event
+                        .configs
+                        .push(NativeConfig::new("phase_probe", kind, "enabled=true"));
+                }
+            }
+            fn config_loading(
+                &self,
+                mut host: HostSide<'_>,
+                event: &mut mod_api::ConfigLoadingEvent<'_>,
+            ) {
+                assert_eq!(
+                    mod_api::__private::current_phase(),
+                    mod_api::__private::ModPhase::Config
+                );
+                let read: &dyn Host = match &host {
+                    HostSide::Server(host) => &**host,
+                    HostSide::Client(host) => &**host,
+                };
+                let _ = read.setting("phase_probe", "unused");
+                let refused =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read.entity(1)))
+                        .unwrap_err();
+                assert!(refused.downcast_ref::<String>().unwrap().contains("Config"));
+                if let HostSide::Server(host) = &mut host {
+                    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let _: Result<(), ()> = host.transaction(|_, _| Ok(()));
+                    }))
+                    .unwrap_err();
+                    assert!(refused.downcast_ref::<String>().unwrap().contains("Config"));
+                }
+                self.0.lock().unwrap().push((true, event.config.kind));
+            }
+            fn config_unloading(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::ConfigUnloadingEvent<'_>,
+            ) {
+                assert_eq!(
+                    mod_api::__private::current_phase(),
+                    mod_api::__private::ModPhase::World
+                );
+                self.0.lock().unwrap().push((false, event.config.kind));
+            }
+        }
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new("phase_probe", Box::new(Probe(calls.clone())))].into();
+        mod_api::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_client_game(|game| {
+                game.mod_phase =
+                    mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Setup);
+                game.native_configs_client_start();
+                game.native_configs_client_start();
+                game.options.split_guest = true;
+                game.native_configs = NativeConfigs::default();
+                game.native_configs_client_start();
+                game.options.split_guest = false;
+                game.options.execution_role =
+                    crate::game::execution_role::ExecutionRole::IntegratedServer;
+                for world in ["phase-world-one", "phase-world-two"] {
+                    game.native_configs_server_start(Path::new(world), false);
+                    game.native_configs_server_stop();
+                }
+            });
+        });
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [
+                (true, Client),
+                (true, Common),
+                (true, Server),
+                (false, Server),
+                (true, Server),
+                (false, Server),
+            ]
+        );
+    }
 
     struct Folder(PathBuf);
 

@@ -379,9 +379,9 @@ impl Game<'_> {
     /// server thread's players are all hosted).
     pub(super) fn spawn_phantoms(&mut self) {
         let rules = &self.ui.rules;
-        if !rules.bool("spawn_mobs")
-            || !rules.bool("spawn_monsters")
-            || !rules.bool("spawn_phantoms")
+        if !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            || !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS)
+            || !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_PHANTOMS)
             || self.dim != Dim::Overworld
             || !self.has_custom_spawner(mod_api::SpawnerKind::Phantom)
         {
@@ -522,12 +522,9 @@ mod tests {
             game.player = None;
             game.world.day_time = 18000;
             let host = game.lan.as_mut().unwrap();
-            host.hub
-                .guests
-                .iter_mut()
-                .find(|g| g.uuid == 2)
-                .unwrap()
-                .position = [1000.0, 100.0, 0.0];
+            let guests = &mut host.hub.guests;
+            let index = guests.iter().position(|g| g.uuid == 2).unwrap();
+            guests.update(index, |g| g.position = [1000.0, 100.0, 0.0]);
             for guest in &host.hub.guests {
                 let mut play = super::super::lan_actions::GuestPlay::default();
                 play.stats.custom("time_since_rest", 200_000);

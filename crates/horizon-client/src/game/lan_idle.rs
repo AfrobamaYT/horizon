@@ -46,7 +46,9 @@ impl IdleStates {
     /// The level in place's idle entities, or None before its tracking ran.
     pub(super) fn pass(&mut self, hub: &Hub, percent: i32) -> Option<IdlePass<'_>> {
         let now = hub.tracking_ticks()?;
-        let viewers = (hub.guests.iter().enumerate())
+        let viewers = hub
+            .guests
+            .simulation_indexed_iter()
             .filter(|(_, g)| hub.watches(g))
             .map(|(i, g)| (i, [g.position[0], g.position[2]], g.view_distance * 16))
             .collect();

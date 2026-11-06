@@ -261,8 +261,8 @@ impl Game<'_> {
     fn native_menu_rules(&self, menu: MenuRef, slot: usize) -> Option<Box<Menu>> {
         self.native_menu_slot_backing(menu, slot)?;
         let guest = self.native_menu_guest(menu)?;
-        let (kind, disabled) = match &guest.menu {
-            None => (Kind::Inventory, None),
+        let (kind, disabled, menu_id) = match &guest.menu {
+            None => (Kind::Inventory, None, None),
             Some(open) => {
                 let world = self.native_level_world(self.native_level(&guest.dimension)?)?;
                 let name = self
@@ -286,10 +286,11 @@ impl Game<'_> {
                     Some(BlockEntity::Crafter(c)) => Some(c.disabled),
                     _ => None,
                 };
-                (kind, disabled)
+                (kind, disabled, name)
             }
         };
         let mut rules = Box::new(Menu::new(kind));
+        rules.set_registry_id(menu_id);
         (slot < rules.slot_count()).then_some(())?;
         load_player(&mut rules, guest);
         for (k, off) in disabled.iter().flatten().enumerate() {
@@ -306,19 +307,16 @@ impl Game<'_> {
         slot: usize,
     ) -> Option<&mut Option<ItemStack>> {
         let backing = self.native_menu_slot_backing(menu, slot)?;
-        let mut guests = self
-            .lan
-            .iter_mut()
-            .flat_map(|host| host.hub.guests.iter_mut());
-        let g = guests.find(|g| {
+        let guests = &mut self.lan.as_mut()?.hub.guests;
+        let index = guests.iter().position(|g| {
             g.placed
                 && g.uuid == menu.fields().player.uuid()
                 && g.entity_id as u32 == menu.fields().player.entity().id()
         })?;
         match backing {
-            MenuSlotBacking::Ender(n) => g.ender_items.get_mut(n),
-            MenuSlotBacking::CraftGrid(n) => g.craft_grid.get_mut(n),
-            MenuSlotBacking::Native(n) => g.native_menu.get_mut(n),
+            MenuSlotBacking::Ender(n) => guests.ender_items_mut(index)?.get_mut(n),
+            MenuSlotBacking::CraftGrid(n) => guests.craft_grid_mut(index)?.get_mut(n),
+            MenuSlotBacking::Native(n) => guests.native_menu_mut(index)?.get_mut(n),
             _ => None,
         }
     }
@@ -586,8 +584,14 @@ mod tests {
             assert_eq!(inventory.slot(game, 46), None);
             let stone = ItemStack::new("minecraft:stone", 4);
             let host = game.lan.as_mut().unwrap();
-            host.hub.guests[0].inventory[9] = Some(stone.clone());
-            host.hub.guests[0].carried = Some(stone.clone());
+            {
+                let value = Some(stone.clone());
+                host.hub.guests.update(0, |g| g.inventory[9] = value);
+            }
+            {
+                let value = Some(stone.clone());
+                host.hub.guests.update(0, |guest| guest.carried = value);
+            }
             let title = horizon_world::nbt::Tag::String("test".into());
             let window = host
                 .hub
@@ -641,7 +645,7 @@ mod tests {
             assert_eq!(inventory.slot_count(game), None);
             let host = game.lan.as_mut().unwrap();
             host.play.clear();
-            host.hub.guests[0] = guest();
+            host.hub.guests.replace(0, guest());
             assert_eq!(inventory.slot_count(game), None);
 
             use horizon_client::{containers::BlockEntity, lan::menu::Slots};
