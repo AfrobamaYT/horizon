@@ -3345,9 +3345,9 @@ mod tests {
         let points =
             horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
                 .unwrap();
-        let frame = "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre";
+        let frame = "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre";
         let scoped =
-            "horizon_client::game::native_hooks::GameLevel<'_>::native_pre_remove_side_effects";
+            "horizon_client::game::native_hooks::pre_remove_side_effects::GameLevel<'_>::native_pre_remove_side_effects";
         let mods = [bundle_of(
             "alpha",
             &format!(
@@ -3371,7 +3371,7 @@ mod tests {
         let points =
             horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
                 .unwrap();
-        let frame = "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre";
+        let frame = "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre";
         let mods = [bundle_of(
             "alpha",
             &format!(
