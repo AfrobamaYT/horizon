@@ -21,6 +21,7 @@ wasm-encoder = "0.261"
 wit-parser = "0.261"
 # The worldgen side of a mod's structure type, driven from worker threads in the bench test.
 horizon-core = { path = "../horizon-core" }
+horizon-client-core = { path = "../horizon-client-core" }
 horizon-world = { path = "../horizon-world" }
 serde_json = "1"
 

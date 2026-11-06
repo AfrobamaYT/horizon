@@ -1893,6 +1893,85 @@ pub mod tests {
     }
 
     #[test]
+    fn block_entity_slots_resolve_forward_declarations_and_refuse_unknown() {
+        struct Request(Arc<std::sync::Mutex<Vec<BlockEntityTypeKey>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Request {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let later = r.block_entity_type_key("owner:press");
+                assert_eq!(later, r.block_entity_type_key("owner:press"));
+                assert_eq!(BlockEntityTypeKey::from_slot(later.0), Ok(later));
+                assert!(BlockEntityTypeKey::from_slot(later.0 + 1).is_err());
+                self.0.lock().unwrap().push(later);
+            }
+        }
+        struct Declare(Arc<std::sync::Mutex<Vec<BlockEntityTypeKey>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Declare {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let declared = r.block_entity_type("press").build();
+                let chest = r.block_entity_type_key("chest");
+                self.0.lock().unwrap().extend([declared, chest]);
+            }
+        }
+        let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
+        install_parts(&[
+            ModEntry::new("first", Box::new(Request(keys.clone()))),
+            ModEntry::new("owner", Box::new(Declare(keys.clone()))),
+        ])
+        .unwrap();
+        let types = |names: &[&str]| {
+            horizon_client_core::block_entity_types::BlockEntityTypes::new(
+                Default::default(),
+                names.iter().map(|s| (*s).to_owned()).collect(),
+            )
+        };
+        assert_eq!(
+            crate::registry_keys::resolve_block_entity_types(&types(&["minecraft:chest"]))
+                .unwrap_err(),
+            [
+                "mod first requested unknown block entity type owner:press",
+                "mod owner requested unknown block entity type owner:press"
+            ]
+        );
+        crate::registry_keys::resolve_block_entity_types(&types(&[
+            "minecraft:chest",
+            "owner:press",
+            "minecraft:furnace",
+        ]))
+        .unwrap();
+        let keys = keys.lock().unwrap();
+        assert_eq!(keys[0], keys[1]);
+        assert_ne!(keys[0], keys[2]);
+        assert_eq!(
+            crate::registry_keys::block_entity_type_key("owner:press"),
+            Some(keys[0])
+        );
+        assert_eq!(
+            crate::registry_keys::block_entity_type_name(keys[2]),
+            Some("minecraft:chest")
+        );
+        let furnace = crate::registry_keys::block_entity_type_key("minecraft:furnace").unwrap();
+        assert_ne!(furnace, keys[2]);
+        assert_eq!(BlockEntityTypeKey::from_slot(furnace.0), Ok(furnace));
+        assert!(BlockEntityTypeKey::from_slot(u32::MAX).is_err());
+        struct Table;
+        impl Backend for Table {
+            fn block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
+                crate::registry_keys::block_entity_type_name(key)
+                    .unwrap()
+                    .to_owned()
+            }
+        }
+        impl Host for Table {
+            fn backend(&self) -> Option<BackendRef<'_>> {
+                Some(BackendRef::of(self))
+            }
+        }
+        assert_eq!(keys[0].id(&Table), "owner:press");
+    }
+
+    #[test]
     fn registry_keys_reject_unknown_unattached_requests_with_the_requesting_mod() {
         struct Unknown;
         #[mod_api::__subscriptions]
