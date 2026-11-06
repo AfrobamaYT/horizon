@@ -618,6 +618,20 @@ fn resource_id(file: &str, kind: &str, ext: &str) -> Option<String> {
 }
 impl DataStore {
     pub fn load(packs: &[&DataPack]) -> Self {
+        Self::load_impl(packs, None)
+    }
+    /// Command resources and function tags share the owning server load's
+    /// conditions; raw JSON stacks remain intact for world-table readers.
+    pub fn load_with_conditions(
+        packs: &[&DataPack],
+        conditions: &horizon_world::conditions::LoadConditions,
+    ) -> Self {
+        Self::load_impl(packs, Some(conditions))
+    }
+    fn load_impl(
+        packs: &[&DataPack],
+        conditions: Option<&horizon_world::conditions::LoadConditions>,
+    ) -> Self {
         let mut s = Self::default();
         for pack in packs {
             // `tags` walks the whole tags tree, so a `tags/function` file is
@@ -667,6 +681,9 @@ impl DataStore {
                     && let Some(bytes) = pack.read(&f)
                     && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
                 {
+                    if conditions.is_some_and(|conditions| !conditions.allows(&v)) {
+                        continue;
+                    }
                     let entries = tag_entries(&v);
                     let slot = s.function_tags.entry(id).or_default();
                     if v["replace"].as_bool() == Some(true) {
@@ -685,6 +702,10 @@ impl DataStore {
                     s.item_modifiers.insert(id, v);
                 }
             }
+        }
+        if let Some(conditions) = conditions {
+            s.predicates.retain(|_, value| conditions.allows(value));
+            s.item_modifiers.retain(|_, value| conditions.allows(value));
         }
         s
     }
@@ -1308,6 +1329,13 @@ mod tests {
         }
         assert!(store.predicates.contains_key("demo:nested/entry"));
         assert!(store.item_modifiers.contains_key("demo:nested/entry"));
+        let filtered = DataStore::load_with_conditions(
+            &packs.iter().collect::<Vec<_>>(),
+            &horizon_world::conditions::LoadConditions::vanilla(),
+        );
+        assert!(filtered.predicates.is_empty());
+        assert!(filtered.item_modifiers.is_empty());
+        assert_eq!(filtered.files, store.files);
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -205,7 +205,7 @@ impl Game<'_> {
             self.cmds.vanilla_disabled,
             enabled_features,
         );
-        let prepared = self.prepare_server_reload(&stack)?;
+        let prepared = self.prepare_server_reload(&stack, resources)?;
         if let Some(root) = next_root {
             self.options.resources = root.prepared().to_owned();
             self.pack.data_source = root.data().clone();
@@ -1016,7 +1016,7 @@ impl Game<'_> {
             &self.level.enabled_features,
         );
         stack.enabled = self.fns.enabled.clone();
-        let prepared = match self.prepare_server_reload(&stack) {
+        let prepared = match self.prepare_server_reload(&stack, &self.options.resources) {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.fns.enabled = previous_enabled;
