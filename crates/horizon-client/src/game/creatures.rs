@@ -10479,6 +10479,7 @@ mod conversion_tag_tests {
                     &source,
                     &format!("minecraft:{to}"),
                     horizon_client::mobs::conversion::Params::KEEP_ALL,
+                    |_, _| {},
                 )
                 .unwrap();
             assert_ne!(old_id, new_id);

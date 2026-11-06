@@ -665,7 +665,7 @@ impl Game<'_> {
                         },
                         [at.x, at.y, at.z],
                         horizon_client::sculk::Context {
-                            source: Some(horizon_client::mobs::Who::Mob(*id)),
+                            source: Some(horizon_client::mobs::Who::Mob(*id).into()),
                             living: true,
                             ..Default::default()
                         },
@@ -1566,7 +1566,7 @@ mod stand_equip_event_tests {
             let heard = candidate(&game);
             assert_eq!(heard.map(|info| info.event), event, "{slot} -> {item}");
             if let Some(info) = heard {
-                assert_eq!(info.source, Some(Who::Mob(id)));
+                assert_eq!(info.source, Some(Who::Mob(id).into()));
                 assert_eq!(info.pos, [6.5, 200.0, 10.5]);
                 assert!(info.owner.is_none());
             }
