@@ -3417,7 +3417,7 @@ impl Game<'_> {
         let Some(name) = ctx.literals.get(1).cloned() else {
             return Ok(0);
         };
-        let Some(rule) = gamerules::rule(&name) else {
+        let Some(rule) = self.ui.rules.rule(&name).cloned() else {
             return Ok(0);
         };
         let current = self.ui.rules.get(rule.name).unwrap_or(rule.default);
@@ -3451,7 +3451,7 @@ impl Game<'_> {
             }),
             _ => None,
         };
-        self.set_game_rule(rule, value, actor.as_ref());
+        self.set_game_rule(&rule, value, actor.as_ref());
         self.feedback(Text::tr("commands.gamerule.set", &[&rule.name, &value]));
         Ok(match value {
             Value::Bool(b) => i32::from(b),
