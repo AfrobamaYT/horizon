@@ -428,7 +428,7 @@ impl BlockEntities {
         self.asleep.remove(pos);
         let entity = self.map.remove(pos)?;
         let token = NEXT_LEASE
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
             .expect("block entity lease space exhausted");
         self.out.insert(*pos, token);
         Some((BlockEntityLease { pos: *pos, token }, entity))
@@ -532,7 +532,7 @@ impl BlockEntities {
             }
             if new_is_mod {
                 self.mods.entry(chunk_of(p)).or_default().insert(p);
-            } else if matches!(old, Some(BlockEntity::Mod(_))) {
+            } else {
                 forget_mod(&mut self.mods, p);
             }
         }
