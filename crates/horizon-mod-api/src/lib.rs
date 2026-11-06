@@ -1041,18 +1041,6 @@ pub struct NativeScreen {
     pub own_background: bool,
 }
 
-/// Key definitions for a compiled mod's Options > Mods page (`native_mods`).
-/// Its display metadata comes from its validated runtime package.
-#[derive(Clone, Debug, Default, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
-pub struct NativeMod {
-    /// Its id: its settings folder and its keys' lines.
-    pub id: String,
-    /// Its keys: name, label and default key (`key.keyboard.z`). The page
-    /// lists them first; `native_mod_key` reads the player's choice.
-    pub keys: Vec<[String; 3]>,
-}
-
 /// An item the panel shows (`native_panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
@@ -1081,7 +1069,7 @@ pub enum NativePanelEvent {
     },
     /// The search box's text, each time the player changes it.
     Search(String),
-    /// A key (`key.keyboard.r`; compare it with `native_mod_key`) went down
+    /// A physical key (`key.keyboard.r`) went down
     /// while the pointer was on an item: a slot of the screen's, or the
     /// panel's.
     Key {

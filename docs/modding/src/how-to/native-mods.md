@@ -198,7 +198,7 @@ a content package cannot shadow a compiled mod's id.
 Move the executable, prepared resources and canonical package directory together. The copied
 projects retain their flat manifest, crate, assets and data. The game's mod list and crash details
 use its embedded inventory, including code-only mods. Display names and descriptions come from the
-validated manifests; `NativeMod.title` and `NativeMod.description` are removed.
+validated manifests; Controls bindings are declared through `Registrar::register_key_mapping`, not a separate `NativeMod` metadata hook.
 
 `native-mods.json` is provenance and rebuild status, not game identity, authentication, announcements
 or startup input. The launcher retains it for build/status displays. The separate `horizon-server`
