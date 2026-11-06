@@ -1631,46 +1631,6 @@ impl Game<'_> {
         host.native_commands.as_ref()?.levels.get(name).copied()
     }
 
-    /// Convert the native tree's validated argument kinds using vanilla's source-aware paths.
-    fn resolve_native_command(
-        &mut self,
-        context: Context,
-    ) -> Result<mod_api::CommandInvocation, horizon_client::command::CommandError> {
-        use super::commands::{Target, err};
-        use mod_api::{CommandArgument, CommandArgumentValue as Value, CommandInvocation};
-        let mut arguments = Vec::with_capacity(context.args.len());
-        for argument in context.args {
-            let value = match argument.value {
-                Arg::Str(value) => Value::String(value),
-                Arg::Int(value) => Value::Integer(value),
-                Arg::Double(value) => Value::Number(value),
-                Arg::Bool(value) => Value::Boolean(value),
-                Arg::Entity(selector) => {
-                    let targets = self.resolve_entity_argument(&selector, true)?;
-                    let [target] = targets.as_slice() else {
-                        return Err(err("argument.entity.toomany", &[]));
-                    };
-                    let player = match target {
-                        Target::Player => self.native_acting_player(),
-                        Target::Guest(conn) => self
-                            .command_guest(*conn)
-                            .and_then(|guest| self.native_player_ref(guest.uuid)),
-                        _ => None,
-                    }
-                    .ok_or_else(|| err("argument.entity.notfound.player", &[]))?;
-                    Value::Player(player)
-                }
-                Arg::Coords(coordinates) => {
-                    Value::BlockPos(self.resolve_coords(&coordinates).map(|v| v.floor() as i32))
-                }
-                Arg::Item(input) => Value::Item(self.command_item_stack(&input, 1)?),
-                _ => unreachable!("the native tree contains only registered native argument kinds"),
-            };
-            arguments.push(CommandArgument::new(argument.name, value));
-        }
-        Ok(CommandInvocation::new(context.literals, arguments))
-    }
-
     /// Resolve the source once at the command boundary, retaining its output origin.
     fn native_command_origin(
         &mut self,
@@ -1722,6 +1682,46 @@ impl Game<'_> {
         } else {
             Err(err("command.unknown.command", &[]))
         }
+    }
+
+    /// Convert the native tree's validated argument kinds using vanilla's source-aware paths.
+    fn resolve_native_command(
+        &mut self,
+        context: Context,
+    ) -> Result<mod_api::CommandInvocation, horizon_client::command::CommandError> {
+        use super::commands::{Target, err};
+        use mod_api::{CommandArgument, CommandArgumentValue as Value, CommandInvocation};
+        let mut arguments = Vec::with_capacity(context.args.len());
+        for argument in context.args {
+            let value = match argument.value {
+                Arg::Str(value) => Value::String(value),
+                Arg::Int(value) => Value::Integer(value),
+                Arg::Double(value) => Value::Number(value),
+                Arg::Bool(value) => Value::Boolean(value),
+                Arg::Entity(selector) => {
+                    let targets = self.resolve_entity_argument(&selector, true)?;
+                    let [target] = targets.as_slice() else {
+                        return Err(err("argument.entity.toomany", &[]));
+                    };
+                    let player = match target {
+                        Target::Player => self.native_acting_player(),
+                        Target::Guest(conn) => self
+                            .command_guest(*conn)
+                            .and_then(|guest| self.native_player_ref(guest.uuid)),
+                        _ => None,
+                    }
+                    .ok_or_else(|| err("argument.entity.notfound.player", &[]))?;
+                    Value::Player(player)
+                }
+                Arg::Coords(coordinates) => {
+                    Value::BlockPos(self.resolve_coords(&coordinates).map(|v| v.floor() as i32))
+                }
+                Arg::Item(input) => Value::Item(self.command_item_stack(&input, 1)?),
+                _ => unreachable!("the native tree contains only registered native argument kinds"),
+            };
+            arguments.push(CommandArgument::new(argument.name, value));
+        }
+        Ok(CommandInvocation::new(context.literals, arguments))
     }
 
     /// A guest's command for the mods, inside their swap
