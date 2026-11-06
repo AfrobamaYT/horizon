@@ -132,6 +132,18 @@ impl Catalog {
     pub fn default_base(&self, entity: &str, id: AttributeId) -> Option<f64> {
         self.defaults.get(entity).and_then(|b| b[id.0])
     }
+    /// The entity type's whole supplier row, attribute name to base — the
+    /// shape of an `entity-types.json` row. None if the type has no row.
+    pub fn entity_row(&self, entity: &str) -> Option<std::collections::HashMap<String, f64>> {
+        let bases = self.defaults.get(entity)?;
+        Some(
+            self.attributes
+                .iter()
+                .enumerate()
+                .filter_map(|(i, a)| bases[i].map(|base| (a.name.clone(), base)))
+                .collect(),
+        )
+    }
     /// A copy of the catalog with `entity`'s supplier built from its
     /// `template`'s row and `overrides`: a mod entity type's declared
     /// attribute set (`EntityAttributeCreationEvent`), as its content row is
@@ -393,5 +405,28 @@ mod row_tests {
             catalog.with_entity_row("ruby:ghoul", "missing:template", &[]),
             Err(EntityRowError::UnknownTemplate { .. })
         ));
+    }
+
+    /// A merged row reads back whole, name to base, as an
+    /// `entity-types.json` row is.
+    #[test]
+    fn an_entity_row_lists_its_values() {
+        let catalog = catalog();
+        let merged = catalog
+            .with_entity_row(
+                "ruby:ghoul",
+                "minecraft:zombie",
+                &[("minecraft:max_health".into(), 55.0)],
+            )
+            .unwrap();
+        assert_eq!(
+            merged.entity_row("ruby:ghoul").unwrap(),
+            [
+                ("minecraft:max_health".to_owned(), 55.0),
+                ("minecraft:armor".to_owned(), 2.0)
+            ]
+            .into()
+        );
+        assert_eq!(merged.entity_row("missing:entity"), None);
     }
 }

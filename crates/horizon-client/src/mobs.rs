@@ -411,6 +411,26 @@ pub struct Flags {
     pub animal: bool,
 }
 
+/// The fields of [`MobType`] its type's attribute row gives, built by
+/// [`MobType::attribute_fields`]: the one map from an attribute to the
+/// field a mob spawns with.
+pub(crate) struct MobTypeAttributeFields {
+    pub max_health: f32,
+    pub speed: f64,
+    pub flying_speed: f64,
+    pub attack_damage: f32,
+    pub attack_knockback: f64,
+    pub follow_range: f64,
+    pub step_height: f64,
+    pub armor: f32,
+    pub armor_toughness: f32,
+    pub knockback_resistance: f64,
+    pub jump_strength: f64,
+    pub gravity: f64,
+    pub safe_fall_distance: f64,
+    pub fall_damage_multiplier: f64,
+    pub water_efficiency: f64,
+}
 #[derive(Clone, Debug)]
 pub struct MobType {
     pub id: String,
@@ -483,27 +503,54 @@ impl MobType {
         self.layers.get(key)
     }
 
-    /// Takes the mod's declared attribute set (#845, NeoForge's
-    /// `EntityAttributeCreationEvent`): each value replaces the row's, in
-    /// the attribute map the finalize store and the live attribute map's
-    /// catalog read, and in the fields a mob of the type spawns with.
-    pub fn declare_attributes(&mut self, attributes: &[(String, f64)]) {
-        for (id, value) in attributes {
-            Arc::make_mut(&mut self.attributes).insert(id.clone(), *value);
-            match id.as_str() {
-                "minecraft:max_health" => self.max_health = *value as f32,
-                "minecraft:movement_speed" => self.speed = *value,
-                "minecraft:flying_speed" => self.flying_speed = *value,
-                "minecraft:attack_damage" => self.attack_damage = *value as f32,
-                "minecraft:attack_knockback" => self.attack_knockback = *value,
-                "minecraft:follow_range" => self.follow_range = *value,
-                "minecraft:armor" => self.armor = *value as f32,
-                "minecraft:armor_toughness" => self.armor_toughness = *value as f32,
-                "minecraft:knockback_resistance" => self.knockback_resistance = *value,
-                "minecraft:jump_strength" => self.jump_strength = *value,
-                _ => {}
-            }
+    /// The spawn fields an entity type's attribute row carries (its
+    /// `entity-types.json` row): the one map from an attribute to the field
+    /// a mob of the type spawns with, over the loader's own fallback. The
+    /// json's parser and the rest loader of a declared set (#845) both take
+    /// it, so the fields cannot drift from the row they read.
+    pub(crate) fn attribute_fields(attributes: &HashMap<String, f64>) -> MobTypeAttributeFields {
+        let attr = |k: &str| attributes.get(&format!("minecraft:{k}")).copied();
+        MobTypeAttributeFields {
+            max_health: attr("max_health").unwrap_or(10.0) as f32,
+            speed: attr("movement_speed").unwrap_or(0.25),
+            flying_speed: attr("flying_speed").unwrap_or(0.4),
+            attack_damage: attr("attack_damage").unwrap_or(0.0) as f32,
+            attack_knockback: attr("attack_knockback").unwrap_or(0.0),
+            follow_range: attr("follow_range").unwrap_or(16.0),
+            step_height: attr("step_height").unwrap_or(0.6),
+            armor: attr("armor").unwrap_or(0.0) as f32,
+            armor_toughness: attr("armor_toughness").unwrap_or(0.0) as f32,
+            knockback_resistance: attr("knockback_resistance").unwrap_or(0.0),
+            jump_strength: attr("jump_strength").unwrap_or(0.42),
+            gravity: attr("gravity").unwrap_or(0.08),
+            safe_fall_distance: attr("safe_fall_distance").unwrap_or(3.0),
+            fall_damage_multiplier: attr("fall_damage_multiplier").unwrap_or(1.0),
+            water_efficiency: attr("water_movement_efficiency").unwrap_or(0.0),
         }
+    }
+
+    /// Takes the type's row from the live attribute map's catalog (#845):
+    /// the merged row the map itself answers (the template's with the
+    /// declared set on top), as its attribute map and its spawn fields, so
+    /// the two records cannot diverge.
+    pub fn take_attribute_row(&mut self, attributes: Arc<HashMap<String, f64>>) {
+        let fields = Self::attribute_fields(&attributes);
+        self.attributes = attributes;
+        self.max_health = fields.max_health;
+        self.speed = fields.speed;
+        self.flying_speed = fields.flying_speed;
+        self.attack_damage = fields.attack_damage;
+        self.attack_knockback = fields.attack_knockback;
+        self.follow_range = fields.follow_range;
+        self.step_height = fields.step_height;
+        self.armor = fields.armor;
+        self.armor_toughness = fields.armor_toughness;
+        self.knockback_resistance = fields.knockback_resistance;
+        self.jump_strength = fields.jump_strength;
+        self.gravity = fields.gravity;
+        self.safe_fall_distance = fields.safe_fall_distance;
+        self.fall_damage_multiplier = fields.fall_damage_multiplier;
+        self.water_efficiency = fields.water_efficiency;
     }
 
     /// The vanilla entity type whose class this type's mobs are: the type
@@ -633,7 +680,7 @@ impl MobTypes {
                 continue;
             }
             let defaults = exact.get(&id).cloned().unwrap_or_default();
-            let attr = |k: &str| defaults.get(&format!("minecraft:{k}")).copied();
+            let fields = MobType::attribute_fields(&defaults);
             let mut layers = crate::fast_hash::FxHashMap::default();
             if let Some(all) = models.as_ref().and_then(Value::as_object) {
                 for prefix in def.layer_prefixes() {
@@ -651,7 +698,6 @@ impl MobTypes {
                 }
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
-            let speed = attr("movement_speed").unwrap_or(0.25);
             let flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
             out.insert(
                 id.clone(),
@@ -661,22 +707,22 @@ impl MobTypes {
                     width: t["width"].as_f64().unwrap_or(0.6),
                     height: t["height"].as_f64().unwrap_or(1.8),
                     eye_height: t["eye_height"].as_f64().unwrap_or(1.6),
-                    max_health: attr("max_health").unwrap_or(10.0) as f32,
-                    speed,
-                    flying_speed: attr("flying_speed").unwrap_or(0.4),
-                    attack_damage: attr("attack_damage").unwrap_or(0.0) as f32,
-                    attack_knockback: attr("attack_knockback").unwrap_or(0.0),
-                    follow_range: attr("follow_range").unwrap_or(16.0),
-                    step_height: attr("step_height").unwrap_or(0.6),
-                    armor: attr("armor").unwrap_or(0.0) as f32,
-                    armor_toughness: attr("armor_toughness").unwrap_or(0.0) as f32,
-                    knockback_resistance: attr("knockback_resistance").unwrap_or(0.0),
-                    jump_strength: attr("jump_strength").unwrap_or(0.42),
+                    max_health: fields.max_health,
+                    speed: fields.speed,
+                    flying_speed: fields.flying_speed,
+                    attack_damage: fields.attack_damage,
+                    attack_knockback: fields.attack_knockback,
+                    follow_range: fields.follow_range,
+                    step_height: fields.step_height,
+                    armor: fields.armor,
+                    armor_toughness: fields.armor_toughness,
+                    knockback_resistance: fields.knockback_resistance,
+                    jump_strength: fields.jump_strength,
                     attributes: Arc::new(defaults.clone()),
-                    gravity: attr("gravity").unwrap_or(0.08),
-                    safe_fall_distance: attr("safe_fall_distance").unwrap_or(3.0),
-                    fall_damage_multiplier: attr("fall_damage_multiplier").unwrap_or(1.0),
-                    water_efficiency: attr("water_movement_efficiency").unwrap_or(0.0),
+                    gravity: fields.gravity,
+                    safe_fall_distance: fields.safe_fall_distance,
+                    fall_damage_multiplier: fields.fall_damage_multiplier,
+                    water_efficiency: fields.water_efficiency,
                     water_slowdown: def.water_slowdown(),
                     air_speed: def.air_speed(),
                     baby_scale: def.baby_scale(),

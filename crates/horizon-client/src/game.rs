@@ -23309,16 +23309,26 @@ fn load_world_rest(
         } else {
             MobTypes::load_for_server(root)?
         };
-        // #845: the declared sets take their types' fields too, so a mob of
-        // the type spawns with them; the catalog took its row in core.
+        // #845: the declared sets take their types' rows — the merged rows
+        // the live attribute map's catalog took in core (the template's with
+        // the declared set on top) — as their attribute map and spawn
+        // fields, so a mob of the type spawns with what the map answers.
         for declaration in mod_api::__private::entity_attribute_declarations() {
-            if let Some(kind) = types.types.get_mut(&declaration.id) {
-                kind.declare_attributes(&declaration.attributes);
-            } else {
-                log::warn!(
+            let row = resources
+                .motion()
+                .attributes
+                .entity_row(&declaration.id)
+                .map(std::sync::Arc::new);
+            match (types.types.get_mut(&declaration.id), row) {
+                (Some(kind), Some(row)) => kind.take_attribute_row(row),
+                (Some(_), None) => log::warn!(
+                    "Horizon: mod entity attributes of {} never reached the catalog; ignored",
+                    declaration.id
+                ),
+                (None, _) => log::warn!(
                     "Horizon: mod entity attributes of {} name no loaded entity type; ignored",
                     declaration.id
-                );
+                ),
             }
         }
         let mob_types: HashMap<_, _> = types
