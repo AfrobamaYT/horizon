@@ -50,10 +50,14 @@ and the apply re-checks the decision's preconditions and refuses, never recomput
 
 Registration has only a `RegistrationContext`. Each side then enters Setup, Config and World;
 config loading can read settings and use its existing scoped `ConfigFiles` service, but cannot
-acquire world handles, open transactions or call other game operations. Data and
-asset reloads temporarily enter Reloading and restore Setup (initial client assets) or World when
-they finish or fail. Server reload Host reads are restricted to registry facts, settings and the
-mod list; existing data-context callbacks keep `DataLoadContext`. A forbidden operation panics naming
+acquire world handles, open transactions or call other game operations. Client setup and initial
+Client/Common configs finish before title, connection or ordinary runtime callbacks begin, so the
+first client pre-tick is already in World even without an open world. Data and asset reloads
+temporarily enter Reloading and restore Setup or World when they finish or fail. The catalog marks
+published asset/data queries as `resource_read`: completion hooks can refresh sprite/recipe caches
+from the newly published generation without acquiring a world handle or transaction. Server reload
+Host reads are restricted to those published facts, registry facts, settings and the mod list;
+existing data-context callbacks keep `DataLoadContext`. A forbidden operation panics naming
 the phase. The game alone advances the thread-local boundary, so the window and integrated server
 cannot change one another's permissions. [Load phases and access](trait-mods.md#load-phases-and-access)
 lists the once-per-process, per-world and per-reload moments. No additional FML or intermod bus is added.

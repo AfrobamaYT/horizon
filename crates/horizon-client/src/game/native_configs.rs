@@ -183,8 +183,8 @@ impl Game<'_> {
         }
     }
 
-    /// The window's `Client` and `Common` configs, once: on its first frame
-    /// step, or before it starts a world's server thread if that comes first.
+    /// The window's `Client` and `Common` configs, once: after client setup
+    /// and before its title, connection or ordinary runtime callbacks.
     pub(super) fn native_configs_client_start(&mut self) {
         // Other local players share the process's client setup, not another
         // Client/Common load or a second config watcher.
@@ -197,10 +197,8 @@ impl Game<'_> {
         }
     }
 
-    /// The window's frame step: its configs load on the first, and changed
-    /// files reload once a second.
+    /// The window's frame step: changed config files reload once a second.
     pub(super) fn native_configs_tick_client(&mut self) {
-        self.native_configs_client_start();
         self.native_configs_poll();
     }
 

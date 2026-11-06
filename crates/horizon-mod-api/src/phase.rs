@@ -16,7 +16,8 @@ pub enum ModPhase {
     Config,
     /// The owning game's normal runtime.
     World,
-    /// Restricted data or asset loading, returning to its entering phase.
+    /// Restricted data or asset loading, including published resource queries,
+    /// returning to its entering phase.
     Reloading,
 }
 
@@ -55,6 +56,7 @@ impl std::error::Error for PhaseError {}
 
 /// Engine-only authority for one thread; moving it does not transfer authority.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct PhaseOwner {
     thread: std::thread::ThreadId,
 }
@@ -166,10 +168,22 @@ pub fn current_phase() -> ModPhase {
     PHASE.with(|cell| cell.get().phase)
 }
 
+/// The catalog-owned access class of a generated game operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LoadAccess {
+    /// A world operation or service acquisition, unavailable during loading.
+    WorldOnly,
+    /// The existing client setup reads, not general reload permissions.
+    ClientSetup,
+    /// Published asset/data facts, including resource-cache queries.
+    PublishedResources,
+}
+
 /// One cell read at the generated API boundary, not a tick scan or registry lookup.
 /// A refused mod call panics so a listener cannot ignore a Result and continue.
 #[inline]
-pub fn check_access(operation: &str, setup_read: bool) {
+pub fn check_access(operation: &str, access: LoadAccess) {
     let phase = current_phase();
     if phase == ModPhase::World {
         return;
@@ -201,9 +215,9 @@ pub fn check_access(operation: &str, setup_read: bool) {
     let settings = operation == "setting";
     let allowed = match phase {
         ModPhase::World => true,
-        ModPhase::Setup => settings || metadata || setup_read,
+        ModPhase::Setup => settings || metadata || access != LoadAccess::WorldOnly,
         ModPhase::Config => settings || operation == "config_files",
-        ModPhase::Reloading => settings || metadata,
+        ModPhase::Reloading => settings || metadata || access == LoadAccess::PublishedResources,
         ModPhase::Packages | ModPhase::Registration => false,
     };
     assert!(

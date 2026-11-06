@@ -81,24 +81,31 @@ Each owning thread progresses through `Packages → Registration → Setup → C
 | --- | --- |
 | Packages | Package discovery; no game Host operations. |
 | Registration | Declarations through `RegistrationContext`; no Host. |
-| Setup | Client resource reads and registry/settings/mod-list reads; no world handles or transactions. |
+| Setup | Client setup reads, published asset/data queries and registry/settings/mod-list reads; no world handles or transactions. |
 | Config | Settings reads and the existing mod-scoped `ConfigFiles` service; no world handles, transactions or other game operations. |
-| Reloading | Registry facts, settings and mod-list reads, listener registration, and existing `DataLoadContext` callbacks; no world handles or transactions. |
+| Reloading | Published asset/data queries, registry facts, settings and mod-list reads, listener registration, and existing `DataLoadContext` callbacks; no world handles or transactions. |
 | World | The owning game's side-typed `ServerHost` or `ClientHost`. |
 
 Registration runs once: `register`, `component_types`, `blocks`, `items` and `standalone_models`
-receive only `RegistrationContext`. Client setup runs once after the initial asset apply. Client
-and Common configs load once on their owning side; Server configs load and unload per world.
+receive only `RegistrationContext`. Client setup runs once after the initial asset apply. The
+window's Client/Common configs load once immediately after client setup and before title,
+connection, input, render or ordinary tick callbacks. A title-screen callback is already in World:
+world-handle constructors can return `None`, rather than being forbidden in Setup. A dedicated
+server loads Common once before its first world; Server configs load and unload per world.
 A second world does not repeat registration or client setup. Config loading can read settings and
 use the existing scoped `ConfigFiles` service to read or save its own config files. World handles,
 transactions and other game operations panic with `Config` in the diagnostic.
 Config file polling is not a phase transition, and Server config unloading leaves the World phase.
 
 Every data or asset reload enters `Reloading`, including listener registration, prepare, apply and
-the reload completion notice. The initial client asset reload nests in Setup; later reloads and
-server data loads nest in World. Returning, including after a failed prepare, restores the entering
-phase. Server listener registration retains `&dyn Host`, restricted to registry facts, settings
-and mod-list queries; callbacks already taking `DataLoadContext` keep that context. Neither permits
+the reload completion notice. Initial loads can nest in Setup; runtime reloads nest in World.
+Returning, including after a failed prepare, restores the entering phase. Published asset/data
+queries are classified in the catalog (`resource_read`), not granted by helper-name exceptions.
+They read the currently published generation, not pending prepare output: completion callbacks can
+refresh sprite and recipe caches after apply, including on first world open, without gaining world
+handles or transactions. Their rustdoc names their load-phase availability. Server listener
+registration retains `&dyn Host`, restricted to these published facts, registry facts, settings and
+mod-list queries; callbacks already taking `DataLoadContext` keep that context. Neither permits
 opening a world handle or transaction. The first client registration and prepare run on the loader
 thread; later registration runs on the render thread, prepare on its worker, and apply on the owning
 game thread. Startup's empty client Host is not an extra permission.

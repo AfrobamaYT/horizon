@@ -23151,6 +23151,8 @@ fn start_game<'a>(
     if game.options.is_client_start() {
         game.native_client_setup();
     }
+    // Finish Setup -> Config -> World before title, connection, input or tick hooks.
+    game.native_configs_client_start();
     match game.options.world.clone() {
         _ if game.options.server.is_some() => {
             let (address, name) = (

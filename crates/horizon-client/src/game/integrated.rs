@@ -395,8 +395,6 @@ impl Game<'_> {
         creative: bool,
         create: Option<&WorldOptions>,
     ) -> Result<()> {
-        // The window's mod configs before the server's, as on NeoForge.
-        self.native_configs_client_start();
         self.client_logging_out();
         horizon_client::command::vanilla::set_horizon_commands(
             self.options.pregen || self.settings.extras.pregen,

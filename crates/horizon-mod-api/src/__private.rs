@@ -49,7 +49,7 @@ pub use crate::part_table::{
     has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
 };
 pub use crate::phase::{
-    ModPhase, PhaseError, PhaseOwner, check_access, current_phase, install_packages,
+    LoadAccess, ModPhase, PhaseError, PhaseOwner, check_access, current_phase, install_packages,
 };
 /// The game's side of wasm mods, for `horizon-mod-wasm`.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
