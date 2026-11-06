@@ -263,6 +263,33 @@ mod tests {
     }
 
     #[test]
+    fn scaled_draw_and_click_agree() {
+        let screen = NoResources::new(std::path::Path::new("."));
+        let atlas =
+            HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        for unicode in [false, true] {
+            let settings = crate::hud::GuiScale {
+                requested: 3,
+                unicode,
+            };
+            let mut draw = HudBatch::new([960, 720], settings);
+            assert_eq!(draw.scale, if unicode { 4.0 } else { 3.0 });
+            let mut ui = Ui::new(&atlas, &mut draw, (0.0, 0.0));
+            let layout = screen.layout(&ui);
+            let button = &layout.buttons[0];
+            let physical = (
+                (button.x + button.w / 2.0) * ui.density,
+                (button.y + CONTROL / 2.0) * ui.density,
+            );
+            screen.draw(&mut ui);
+            let mut hit = HudBatch::new([960, 720], settings);
+            let cursor = (physical.0 / hit.scale, physical.1 / hit.scale);
+            let ui = Ui::new(&atlas, &mut hit, cursor);
+            assert_eq!(screen.click(&ui), Some(Action::Download));
+        }
+    }
+
+    #[test]
     fn text_wraps_within_the_column_and_keeps_every_word() {
         with_ui([1280, 720], (0.0, 0.0), |ui| {
             for paragraph in PARAGRAPHS {

@@ -9316,7 +9316,7 @@ impl Game<'_> {
         let warp = |window: &Window| {
             let _ = window.set_cursor_position(centre);
         };
-        let scale = HudBatch::new(size).scale;
+        let scale = HudBatch::new(size, self.settings.gui_scale_inputs()).scale;
         let was_grabbed = self.captured;
         if self.options.offscreen && !self.split_window {
             // A genuinely hidden `--offscreen` run leaves the system pointer where
@@ -9604,7 +9604,7 @@ impl Game<'_> {
             || self.dialog_open())
             && self.player.is_none()
         {
-            HudBatch::new(size)
+            HudBatch::new(size, self.settings.gui_scale_inputs())
         } else {
             self.hud_layers(size)
         };
@@ -9628,7 +9628,7 @@ impl Game<'_> {
         batch
     }
     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
-        let mut batch = HudBatch::new(size);
+        let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         batch.glint_colour = self.settings.extras.pvp.tweaks.glint_texel();
         // GlobalSettingsUniform's GameTime, for a resource pack's text shader.
         batch.game_time = ((self.world.game_time.rem_euclid(24000)) as f32
@@ -11110,6 +11110,14 @@ impl Game<'_> {
             None => game_of.iter().position(|x| *x == Some(g)),
         };
         let mut menu = Menu::new(kind);
+        let menu_id = if matches!(kind, Kind::Mount(_)) {
+            Some("horizon:mount_inventory")
+        } else if matches!(kind, Kind::Inventory | Kind::ItemPicker) {
+            None
+        } else {
+            self.remote_menu_type()
+        };
+        menu.set_registry_id(menu_id);
         menu.brewed_potion_hook = !mod_api::__private::mods().is_empty();
         if matches!(kind, Kind::Mount(_)) {
             menu.mount = self.mount_menu_entity();
@@ -11418,7 +11426,7 @@ impl Game<'_> {
         else {
             return false;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let hover = match self.slot_at(&batch, self.cursor.0, self.cursor.1) {
             None => Hover::Nothing,
             Some(slot) if slot >= Creative::DISPLAY => {
@@ -11445,7 +11453,7 @@ impl Game<'_> {
         else {
             return false;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let Some(slot) = self.slot_at(&batch, self.cursor.0, self.cursor.1) else {
             return false;
         };
@@ -11478,7 +11486,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let Some(slot) = self
             .slot_at(&batch, self.cursor.0, self.cursor.1)
             .filter(|_| menu)
@@ -11654,7 +11662,10 @@ impl Game<'_> {
         let Some(r) = self.renderer.as_ref() else {
             return;
         };
-        let batch = HudBatch::new([r.config.width, r.config.height]);
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         if let Some(slot) = self.slot_at(&batch, self.cursor.0, self.cursor.1)
             && slot != 200
             && slot < Creative::DISPLAY
@@ -11670,7 +11681,10 @@ impl Game<'_> {
         let Some(r) = self.renderer.as_ref() else {
             return (None, false);
         };
-        let batch = HudBatch::new([r.config.width, r.config.height]);
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         (
             self.slot_at(&batch, self.cursor.0, self.cursor.1),
             self.clicked_outside(&batch),
@@ -11922,7 +11936,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let Some(slot) = self.slot_at(&batch, self.cursor.0, self.cursor.1) else {
             return;
         };
@@ -15822,18 +15836,20 @@ impl Game<'_> {
                 owner.use_duration as f32 - (owner.use_item_remaining_ticks as f32 - a + 1.0);
             use horizon_client::first_person::ItemPose;
             // ItemUseAnimation.SPEAR.
-            let spear = using
-                .then(|| horizon_client::spear::Kinetic::of(&stack.item))
-                .flatten()
-                .map(|kinetic| ItemPose::Spear {
-                    kinetic,
+            let animation = using.then(|| self.item_use_animation(&stack));
+            use horizon_world::consumable::UseAnimation;
+            let pose = match animation {
+                Some(UseAnimation::Spear) => ItemPose::Spear {
+                    kinetic: horizon_client::spear::Kinetic::of(&stack.item)
+                        .expect("spear animation requires kinetic data"),
                     time_held: ticks_used,
                     ticks_since_hit: self.kinetic_hit_ticks(a),
-                });
-            let pose = match &*stack.item {
-                _ if let Some(pose) = spear => pose,
-                "minecraft:bow" if using => ItemPose::Bow { ticks_used },
-                "minecraft:crossbow" => {
+                },
+                Some(UseAnimation::Bow) => ItemPose::Bow { ticks_used },
+                Some(UseAnimation::Crossbow) | None
+                    if &*stack.item == "minecraft:crossbow"
+                        || animation == Some(UseAnimation::Crossbow) =>
+                {
                     let charged = stack.data().is_some_and(|d| !d.charged.is_empty());
                     ItemPose::Crossbow {
                         ticks_used: (using && !charged).then_some(ticks_used),
@@ -15842,31 +15858,18 @@ impl Game<'_> {
                         charged: charged && hand == Hand::Main,
                     }
                 }
-                "minecraft:trident" if using => ItemPose::Trident { ticks_used },
+                Some(UseAnimation::Trident) => ItemPose::Trident { ticks_used },
                 // ItemUseAnimation.BRUSH: applyBrushTransform.
-                "minecraft:brush" if using => ItemPose::Brush {
+                Some(UseAnimation::Brush) => ItemPose::Brush {
                     remaining: owner.use_item_remaining_ticks as f32,
                     partial: a,
                 },
-                _ if using => {
-                    let components = self
-                        .pack
-                        .item_renderer
-                        .models
-                        .components(&horizon_client::item_render::stack_view(&stack));
-                    let mut animation = components
-                        .get("minecraft:consumable")
-                        .map_or(horizon_world::consumable::UseAnimation::None, |c| {
-                            horizon_client::first_person::consumable_animation(c)
-                        });
-                    self.native_use_animation(&stack, &mut animation);
-                    item_use::use_pose(
-                        animation,
-                        owner.use_item_remaining_ticks as f32,
-                        owner.use_duration as f32,
-                        a,
-                    )
-                }
+                Some(animation) => item_use::use_pose(
+                    animation,
+                    owner.use_item_remaining_ticks as f32,
+                    owner.use_duration as f32,
+                    a,
+                ),
                 _ if spinning => ItemPose::SpinAttack,
                 // ItemInHandRenderer: a STAB swing of this hand jabs.
                 _ if self
@@ -16906,7 +16909,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (ox, oy) = Self::creative_origin(&batch);
         let (cx, cy) = self.cursor;
         // NeoForge's page buttons, when mods add tabs.
@@ -17386,7 +17389,10 @@ impl Game<'_> {
                     )
                 });
                 if let Some(renderer) = &mut self.renderer {
-                    let mut hud = HudBatch::new([renderer.config.width, renderer.config.height]);
+                    let mut hud = HudBatch::new(
+                        [renderer.config.width, renderer.config.height],
+                        self.settings.gui_scale_inputs(),
+                    );
                     horizon_client::level_loading::draw_file_fixer(
                         &mut hud,
                         &self.gui.atlas,
@@ -17405,7 +17411,10 @@ impl Game<'_> {
                 screen_info::level_loading(progress, &screen_info::tr)
             });
             if let Some(renderer) = &mut self.renderer {
-                let mut hud = HudBatch::new([renderer.config.width, renderer.config.height]);
+                let mut hud = HudBatch::new(
+                    [renderer.config.width, renderer.config.height],
+                    self.settings.gui_scale_inputs(),
+                );
                 let (w, h) = (hud.width, hud.height);
                 horizon_client::ui::menu_background(
                     &mut hud,
@@ -17441,7 +17450,10 @@ impl Game<'_> {
                 horizon_client::widgets::begin_screen(|| {
                     screen_info::level_loading(Some(loader.progress.fraction()), &screen_info::tr)
                 });
-                let mut hud = HudBatch::new([renderer.config.width, renderer.config.height]);
+                let mut hud = HudBatch::new(
+                    [renderer.config.width, renderer.config.height],
+                    self.settings.gui_scale_inputs(),
+                );
                 horizon_client::level_loading::draw_progress(
                     &mut hud,
                     &self.gui.atlas,
@@ -17456,7 +17468,10 @@ impl Game<'_> {
         // (`LoadingOverlay`) until `drive_pack_reload` applies it.
         if let Some(reload) = &self.pack_reload {
             if let Some(renderer) = &mut self.renderer {
-                let mut hud = HudBatch::new([renderer.config.width, renderer.config.height]);
+                let mut hud = HudBatch::new(
+                    [renderer.config.width, renderer.config.height],
+                    self.settings.gui_scale_inputs(),
+                );
                 horizon_client::level_loading::draw_loading_overlay(
                     &mut hud,
                     &self.gui.atlas,
@@ -17618,7 +17633,7 @@ impl Game<'_> {
             self.ui.hide_gui,
             self.shows_panorama(),
         ) {
-            let scale = HudBatch::new(size).scale;
+            let scale = HudBatch::new(size, self.settings.gui_scale_inputs()).scale;
             crosshair.debug_crosshair(at, view_pitch, view_yaw, scale);
         }
         let debug_lines = horizon_client::gizmos::camera_relative(&lines, at, view);
@@ -19417,7 +19432,10 @@ impl Game<'_> {
             match &event {
                 WindowEvent::CursorMoved { position, .. } => {
                     if let Some(r) = &self.renderer {
-                        let b = HudBatch::new([r.config.width, r.config.height]);
+                        let b = HudBatch::new(
+                            [r.config.width, r.config.height],
+                            self.settings.gui_scale_inputs(),
+                        );
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
                     }
                 }
@@ -19704,7 +19722,10 @@ impl Game<'_> {
                 }
                 WindowEvent::CursorMoved { position, .. } => {
                     if let Some(r) = &self.renderer {
-                        let b = HudBatch::new([r.config.width, r.config.height]);
+                        let b = HudBatch::new(
+                            [r.config.width, r.config.height],
+                            self.settings.gui_scale_inputs(),
+                        );
                         let previous = self.cursor;
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
                         match self.screen_mouse_dragged(previous) {
@@ -19817,7 +19838,10 @@ impl Game<'_> {
                             .as_ref()
                             .map(|w| w.inner_size())
                             .unwrap_or_default();
-                        let batch = HudBatch::new([size.width, size.height]);
+                        let batch = HudBatch::new(
+                            [size.width, size.height],
+                            self.settings.gui_scale_inputs(),
+                        );
                         let gui = (batch.width, batch.height);
                         if step_scroll {
                             title.step_scroll(d, self.cursor, gui);
@@ -19961,7 +19985,7 @@ impl Game<'_> {
                         .as_ref()
                         .map(|r| [r.config.width, r.config.height])
                         .unwrap_or([1, 1]);
-                    let b = HudBatch::new(size);
+                    let b = HudBatch::new(size, self.settings.gui_scale_inputs());
                     let atlas = &self.gui.atlas;
                     let shift = self.has_shift_down();
                     let (action, sound) = self.title.as_mut().map_or((Action::None, false), |t| {
@@ -19991,7 +20015,7 @@ impl Game<'_> {
                         .as_ref()
                         .map(|r| [r.config.width, r.config.height])
                         .unwrap_or([1, 1]);
-                    let b = HudBatch::new(size);
+                    let b = HudBatch::new(size, self.settings.gui_scale_inputs());
                     if let Some(title) = self.title.as_mut() {
                         title.select_world_at(self.cursor.0, self.cursor.1, (b.width, b.height));
                     }
@@ -23584,11 +23608,7 @@ impl Loading {
         if let Some(stop) = &boot_paint_stop {
             stop.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
-        horizon_client::hud::GUI_UNICODE.store(
-            self.settings.force_unicode,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+
         self.window = Some(window);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
@@ -23631,11 +23651,6 @@ impl Loading {
             self.settings.horizon.api,
         ) {
             Ok(r) => {
-                horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
-                horizon_client::hud::GUI_UNICODE.store(
-                    self.settings.force_unicode,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
                 self.renderer = Some(r);
             }
             Err(e) => self.error = Some(e),
@@ -23678,7 +23693,7 @@ impl Loading {
         else {
             return;
         };
-        let mut batch = HudBatch::new(size);
+        let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         self.draw_menu(&mut batch);
         self.menu.frame_drawn((batch.width, batch.height));
         let mut frame = loading_frame(&batch);

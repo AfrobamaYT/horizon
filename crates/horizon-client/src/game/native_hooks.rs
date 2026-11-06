@@ -1129,7 +1129,10 @@ impl Game<'_> {
             return self.screen_view_now();
         };
         let renderer = self.renderer.as_ref()?;
-        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let batch = HudBatch::new(
+            [renderer.config.width, renderer.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         Some(NativeScreenView::from(
             mod_api::__private::built::NativeScreenView {
                 id,
@@ -1266,7 +1269,10 @@ impl Game<'_> {
     fn screen_change_view(&self, screen: Screen) -> NativeScreenView<'_> {
         let rect = match &self.renderer {
             Some(renderer) => self.screen_rect(
-                &HudBatch::new([renderer.config.width, renderer.config.height]),
+                &HudBatch::new(
+                    [renderer.config.width, renderer.config.height],
+                    self.settings.gui_scale_inputs(),
+                ),
                 screen,
             ),
             None => [0.0; 4],
@@ -4625,7 +4631,10 @@ impl Game<'_> {
             return None;
         }
         let renderer = self.renderer.as_ref()?;
-        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let batch = HudBatch::new(
+            [renderer.config.width, renderer.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         if self.screen != Screen::Playing {
             return Some(self.screen_view(&batch, self.screen));
         }
@@ -7524,13 +7533,10 @@ impl Game<'_> {
     pub(super) fn native_use_duration(&self, stack: &ItemStack, duration: &mut i32) {
         self.fire_use_duration(stack, duration);
     }
-    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
-    /// `animation` arrives with its consumable's (`eat`, `drink`), else
-    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
-    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
-    /// Asked each frame the hand draws an item in use, for an item with no
-    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
-    /// theirs). Client-side.
+    /// `Item.getUseAnimation` of `stack` in use, with the item's vanilla
+    /// answer as the starting animation. Asked on the client each first-person
+    /// frame and each local or remote player model tick. A spear override is
+    /// refused if the item has no kinetic data.
     pub(super) fn native_use_animation(&self, stack: &ItemStack, animation: &mut UseAnimation) {
         self.fire_use_animation(stack, animation);
     }
@@ -9898,7 +9904,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map(|r| [r.config.width, r.config.height])?;
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
         Some(self.slot_view(slot)?.item.to_string())
     }
@@ -10529,7 +10535,10 @@ impl Game<'_> {
         let Some(renderer) = self.renderer.as_ref() else {
             return Vec::new();
         };
-        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let batch = HudBatch::new(
+            [renderer.config.width, renderer.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         let mut areas = self.screen_own_exclusion(&batch);
         self.native_screen_exclusion_areas(&view, &mut areas);
         areas.retain(|a| a.iter().all(|v| v.is_finite()) && a[2] > 0.0 && a[3] > 0.0);
@@ -11957,7 +11966,10 @@ impl Game<'_> {
     fn native_screen_at(&self) -> Option<(String, Vec<i32>, [f32; 2])> {
         let s = self.shown_native_screen()?;
         let r = self.renderer.as_ref()?;
-        let batch = HudBatch::new([r.config.width, r.config.height]);
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         let (ox, oy) = self.inventory_origin(&batch);
         let at = [self.cursor.0 - ox, self.cursor.1 - oy];
         Some((s.block.clone(), s.data.clone(), at))

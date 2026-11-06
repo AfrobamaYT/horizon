@@ -3429,7 +3429,7 @@ impl Game<'_> {
         let Some(name) = ctx.literals.get(1).cloned() else {
             return Ok(0);
         };
-        let Some(rule) = gamerules::rule(&name) else {
+        let Some(rule) = self.ui.rules.rule(&name).cloned() else {
             return Ok(0);
         };
         let current = self.ui.rules.get(rule.name).unwrap_or(rule.default);
@@ -3463,7 +3463,7 @@ impl Game<'_> {
             }),
             _ => None,
         };
-        self.set_game_rule(rule, value, actor.as_ref());
+        self.set_game_rule(&rule, value, actor.as_ref());
         self.feedback(Text::tr("commands.gamerule.set", &[&rule.name, &value]));
         Ok(match value {
             Value::Bool(b) => i32::from(b),
@@ -3831,7 +3831,7 @@ impl Game<'_> {
     /// `PoiTypes`: the point of interest type of a block state.
     fn poi_type(&self, state: horizon_world::registry::BlockStateId) -> Option<&'static str> {
         let s = self.pack.assets.registry.state(state)?;
-        horizon_client::save::poi_type(s).map(|(kind, _)| kind)
+        horizon_world::poi::poi_type(s).map(|(kind, _)| kind)
     }
     /// `LocateCommand.locatePoi`: `PoiManager.findClosestWithType` within
     /// 256 blocks of the source, over the loaded chunks.

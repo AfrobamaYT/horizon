@@ -181,23 +181,6 @@ pub fn jeb_wool_rgb(age: f32) -> u32 {
 pub const VILLAGER_TYPES: [&str; 7] = [
     "plains", "desert", "jungle", "savanna", "snow", "swamp", "taiga",
 ];
-pub const PROFESSIONS: [&str; 15] = [
-    "none",
-    "armorer",
-    "butcher",
-    "cartographer",
-    "cleric",
-    "farmer",
-    "fisherman",
-    "fletcher",
-    "leatherworker",
-    "librarian",
-    "mason",
-    "nitwit",
-    "shepherd",
-    "toolsmith",
-    "weaponsmith",
-];
 fn baby_or<'a>(
     m: &Mob,
     adult: impl Into<Cow<'a, str>>,
@@ -964,7 +947,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                 white,
                 false,
             );
-            let prof = PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()];
+            let prof = super::villager::profession(m.extra.variant2).id;
             if !m.is_baby() && prof != "none" {
                 push(
                     &mut v,
@@ -2167,7 +2150,7 @@ fn render_visible(
                 .split_once("/type/")
                 .or_else(|| layer.texture.split_once("/baby/"))
         {
-            let profession = PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()];
+            let profession = super::villager::profession(m.extra.variant2).id;
             data.villager_hats
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2936,7 +2919,7 @@ mod tests {
             let kind = std::sync::Arc::new(types.types[kind].clone());
             for baby in [false, true] {
                 for t in 0..VILLAGER_TYPES.len() {
-                    for p in 0..PROFESSIONS.len() {
+                    for p in 0..crate::mobs::villager::PROFESSIONS.len() {
                         let mut m =
                             Mob::new(1, kind.clone(), horizon_core::geometry::Vec3::ZERO, 0.0);
                         m.extra.age = if baby { -24000 } else { 0 };

@@ -387,6 +387,7 @@ const OFFHAND: usize = 40;
 
 pub struct Menu {
     kind: Kind,
+    registry_id: Option<Box<str>>,
     slots: Vec<Slot>,
     containers: [Vec<Option<ItemStack>>; 4],
     grid_size: usize,
@@ -576,6 +577,20 @@ pub fn native_menu_slot_rules(
     max_stack: &mut u32,
 ) {
     crate::native_client_hooks::menu_slot_rules(context, menu, slot, stack, may_place, max_stack);
+}
+
+/// Apply the scoped rule to a slot's own answers, then enforce its item cap.
+pub fn apply_menu_slot_rules(
+    context: &LoopContext,
+    menu: &str,
+    slot: usize,
+    stack: &ItemStack,
+    mut may_place: bool,
+    mut max_stack: u32,
+    item_max: u32,
+) -> (bool, u32) {
+    native_menu_slot_rules(context, menu, slot, stack, &mut may_place, &mut max_stack);
+    (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
 }
 
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
@@ -885,6 +900,7 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             kind,
+            registry_id: None,
             slots,
             containers,
             grid_size,
@@ -942,6 +958,17 @@ impl Menu {
 
     pub fn kind(&self) -> Kind {
         self.kind
+    }
+
+    /// Registry identity of this menu, or the mount sentinel for a mount menu.
+    /// Player inventory and the creative picker have no registered menu type.
+    pub fn registry_id(&self) -> Option<&str> {
+        self.registry_id.as_deref()
+    }
+
+    /// Set the identity obtained from the open window's menu registry.
+    pub fn set_registry_id(&mut self, id: Option<&str>) {
+        self.registry_id = id.map(Into::into);
     }
 
     /// `clickMenuButton`: the loom's pattern buttons and the stonecutter's
@@ -1755,18 +1782,15 @@ impl Menu {
         let Kind::Mod(t) = self.kind else {
             return (false, 0);
         };
-        let mut may_place = self.slots[s].role == Role::Mod;
-        let mut max_stack = CONTAINER_MAX;
-        let index = self.slots[s].index;
-        native_menu_slot_rules(
+        apply_menu_slot_rules(
             env.loop_context,
             t.id,
-            index,
+            self.slots[s].index,
             stack,
-            &mut may_place,
-            &mut max_stack,
-        );
-        (may_place, max_stack.clamp(1, CONTAINER_MAX))
+            self.slots[s].role == Role::Mod,
+            CONTAINER_MAX,
+            u32::MAX,
+        )
     }
 
     /// `Slot.getMaxStackSize(stack)`.
@@ -3696,6 +3720,18 @@ pub(crate) mod tests {
         let mut menu = Menu::new(kind);
         menu.creative = true;
         test(&env, &mut menu);
+    }
+
+    #[test]
+    fn menu_keeps_the_open_window_registry_identity() {
+        let mut menu = Menu::new(Kind::Chest(3));
+        assert_eq!(menu.registry_id(), None);
+        menu.set_registry_id(Some("minecraft:generic_9x3"));
+        assert_eq!(menu.registry_id(), Some("minecraft:generic_9x3"));
+        menu.set_registry_id(Some("example:chest"));
+        assert_eq!(menu.registry_id(), Some("example:chest"));
+        menu.set_registry_id(None);
+        assert_eq!(menu.registry_id(), None);
     }
 
     /// The Mouse Tweaks wheel's targets: vanilla's routing of one item.

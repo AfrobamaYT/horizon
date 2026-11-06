@@ -283,11 +283,8 @@ fn villager_flag(m: &mut Mob, flag: &str) {
         .unwrap_or_else(|| panic!("unknown mob flag {flag}"));
     match k {
         "profession" => {
-            let p = horizon_client::mobs::render::PROFESSIONS
-                .iter()
-                .position(|p| *p == v)
-                .expect("profession");
-            villager::set_profession(m, p as u8);
+            let p = villager::profession_index(v).expect("profession");
+            villager::set_profession(m, p);
         }
         "level" => m.extra.villager_level = v.parse().unwrap(),
         "xp" => {
@@ -841,7 +838,7 @@ fn villager(m: &Mob) -> String {
     };
     let mut s = format!(
         "prof {} lvl {} xp {} food {} age {} inv {} gossip {} rep {} sleep {}",
-        horizon_client::mobs::render::PROFESSIONS[m.extra.variant2 as usize % 15],
+        villager::profession(m.extra.variant2).id,
         m.extra.villager_level.max(1),
         villager::xp(m),
         e.map_or(0, |e| e.food_level),
