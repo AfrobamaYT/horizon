@@ -6,7 +6,12 @@ use horizon_world::{
     compression::Compression,
     nbt::{self, Limits, NamedTag, Tag},
 };
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::Path,
+    sync::{Arc, OnceLock},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
@@ -21,6 +26,7 @@ impl std::fmt::Display for Value {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq)]
 pub struct Rule {
     pub name: &'static str,
     pub category: &'static str,
@@ -129,12 +135,43 @@ pub const RULES: &[Rule] = &[
 pub const MAX_MINECART_SPEED: Rule = i("max_minecart_speed", "misc", 8, 1, 1000);
 pub const MINECART_IMPROVEMENTS: &str = "minecraft:minecart_improvements";
 
-pub fn available_rules(minecart_improvements: bool) -> impl Iterator<Item = &'static Rule> {
-    RULES
-        .iter()
-        .chain(minecart_improvements.then_some(&MAX_MINECART_SPEED))
+/// Immutable, ordered rule definitions shared by game-rule consumers.
+#[derive(Debug, PartialEq)]
+pub struct RuleRegistry {
+    rules: Vec<Rule>,
 }
-
+impl RuleRegistry {
+    fn vanilla() -> Self {
+        Self {
+            rules: RULES
+                .iter()
+                .cloned()
+                .chain(std::iter::once(MAX_MINECART_SPEED.clone()))
+                .collect(),
+        }
+    }
+    pub fn available_rules(&self, minecart_improvements: bool) -> impl Iterator<Item = &Rule> {
+        let count = self.rules.len() - usize::from(!minecart_improvements);
+        self.rules[..count].iter()
+    }
+    pub fn rule(&self, name: &str) -> Option<&Rule> {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        self.available_rules(true).find(|r| r.name == name)
+    }
+}
+/// The vanilla-backed registry, shared by all existing consumers.
+pub fn rule_registry() -> Arc<RuleRegistry> {
+    static REGISTRY: OnceLock<Arc<RuleRegistry>> = OnceLock::new();
+    REGISTRY
+        .get_or_init(|| Arc::new(RuleRegistry::vanilla()))
+        .clone()
+}
+pub fn available_rules(minecart_improvements: bool) -> impl Iterator<Item = &'static Rule> {
+    static REGISTRY: OnceLock<Arc<RuleRegistry>> = OnceLock::new();
+    REGISTRY
+        .get_or_init(rule_registry)
+        .available_rules(minecart_improvements)
+}
 pub fn rule(name: &str) -> Option<&'static Rule> {
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
     available_rules(true).find(|r| r.name == name)
@@ -294,6 +331,7 @@ pub mod vanilla {
 /// Current values (defaults unless set).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameRules {
+    registry: Arc<RuleRegistry>,
     values: Vec<Value>,
     // Keep entries that cannot be interpreted by the current registry verbatim.
     // A temporarily absent mod must not lose its saved rule values.
@@ -302,8 +340,13 @@ pub struct GameRules {
 }
 impl Default for GameRules {
     fn default() -> Self {
+        let registry = rule_registry();
         Self {
-            values: available_rules(true).map(|rule| rule.default).collect(),
+            values: registry
+                .available_rules(true)
+                .map(|rule| rule.default)
+                .collect(),
+            registry,
             unknown: nbt::Compound::new(),
             minecart_improvements: false,
         }
@@ -320,14 +363,15 @@ impl GameRules {
     /// newly enabled rules and discard rules absent from the target feature set.
     pub fn copy_with_features(&self, features: &[String]) -> Self {
         let mut rules = Self::with_features(features);
+        rules.registry = self.registry.clone();
         rules.unknown = self.unknown.clone();
-        for (rule, &value) in available_rules(true).zip(&self.values) {
+        for (rule, &value) in self.registry.available_rules(true).zip(&self.values) {
             rules.set(rule.name, value);
         }
         rules
     }
-    pub fn available_rules(&self) -> impl Iterator<Item = &'static Rule> + use<> {
-        available_rules(self.minecart_improvements)
+    pub fn available_rules(&self) -> impl Iterator<Item = &Rule> {
+        self.registry.available_rules(self.minecart_improvements)
     }
     pub fn get(&self, name: &str) -> Option<Value> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
@@ -419,7 +463,8 @@ impl GameRules {
             return rules;
         };
         rules.unknown = data.clone();
-        for r in rules.available_rules() {
+        let registry = rules.registry.clone();
+        for r in registry.available_rules(rules.minecart_improvements) {
             let key = format!("minecraft:{}", r.name);
             let value = data
                 .get(&key.as_str().into())
@@ -489,6 +534,21 @@ mod tests {
                 .unwrap()
                 .get("missing:example"),
             Some(&Tag::Long(123))
+        );
+    }
+
+    #[test]
+    fn vanilla_registry_is_shared_with_rule_consumers() {
+        let registry = rule_registry();
+        let rules = GameRules::default();
+        assert!(Arc::ptr_eq(&registry, &rules.registry));
+        assert!(std::ptr::eq(
+            registry.rule("minecraft:keep_inventory").unwrap(),
+            rule("keep_inventory").unwrap()
+        ));
+        assert_eq!(
+            registry.available_rules(false).count() + 1,
+            registry.available_rules(true).count()
         );
     }
 
