@@ -44,6 +44,20 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
         }
         return;
     }
+    if matches!(message.as_str(), "fuel_get" | "fuel_set") {
+        use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
+        let node = game.node();
+        loop {
+            if message.as_str() == "fuel_get" {
+                let _ = view::get_many(&[(node, 0), (node, 1)]);
+            } else {
+                let _ = view::set_many(&[
+                    (node, 0, vec![view::Cell::S(9)]),
+                    (node, 1, vec![view::Cell::S(9)]),
+                ]);
+            }
+        }
+    }
     if matches!(message.as_str(), "oversize_get" | "oversize_set") {
         use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
         let node = game.node();

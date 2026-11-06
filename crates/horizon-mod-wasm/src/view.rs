@@ -1069,6 +1069,18 @@ mod tests {
 
     #[test]
     #[ignore = "needs the internals guest fixture"]
+    fn guest_batches_exhaust_fuel_without_committing_writes() {
+        for message in ["fuel_get", "fuel_set"] {
+            let group = fixture_group_with_fuel(true);
+            let mut game = fixture_game();
+            let error = fixture_result(&group, &mut game, message).unwrap_err();
+            assert!(error.contains("fuel"), "{error}");
+            assert_eq!((game.left, game.right), (1, 10));
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
     fn guest_oversize_batches_trap_without_writes() {
         for message in ["oversize_get", "oversize_set"] {
             let group = fixture_group();
