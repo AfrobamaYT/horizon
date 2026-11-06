@@ -47,6 +47,18 @@ class ConceptPages(unittest.TestCase):
         self.assertIn("[second](#second)", chapter["content"])
         self.assertIn("# Third", chapter["sub_items"][2]["Chapter"]["content"])
 
+    def test_links_resolve_generated_chapter_and_anchor_without_a_file(self):
+        book = copy.deepcopy(self.book)
+        book["sections"].append({"Chapter": dict(name="Hook notes", path="reference/hook-notes.md",
+            content="# Hook notes\n\n## Example\n", sub_items=[])})
+        path = (self.src / pages.GROUPS[0]).with_suffix("") / "000-first.md"
+        path.write_text(path.read_text() + "[notes](../../reference/hook-notes.md#example)\n")
+        pages.expand(copy.deepcopy(book), self.src)
+        self.assertFalse((self.src / "reference/hook-notes.md").exists())
+        path.write_text(path.read_text().replace("#example", "#absent"))
+        with self.assertRaisesRegex(AssertionError, "missing anchor"):
+            pages.expand(book, self.src)
+
     def test_unlinked_published_anchor_cannot_disappear(self):
         path = (self.src / pages.GROUPS[0]).with_suffix("") / "000-first.md"
         path.write_text(path.read_text().replace("## First", "## Renamed"))
