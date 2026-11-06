@@ -4,7 +4,7 @@ name: modding-book-pages
 on:
   push:
     branches: [main]
-    paths: ["docs/modding/**", "crates/horizon-mod-api/**"]
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "tools/*modding*", "tests/test_modding_concept_pages.py"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: cargo install mdbook --locked --version 0.4.52
       - run: mdbook build docs/modding
+      - run: python3 tools/modding_concept_pages.py --html target/modding-book
       - run: cargo doc -p horizon-mod-api --no-deps
       # book.toml sets build-dir = "../../target/modding-book".
       - run: cp -r target/doc target/modding-book/api
