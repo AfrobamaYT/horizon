@@ -24,6 +24,8 @@ use horizon_client::{
     text::Text,
 };
 use horizon_world::registry::BlockStateId;
+#[cfg(test)]
+use mod_api::prelude::*;
 use mod_api::{Identifier, ModelError, ModelPart, ModelRef};
 
 /// Atlas-resolved standalone geometry, indexed by model slot and resource generation.
@@ -1408,7 +1410,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn prepared_model_entity_pixels() {
-        use mod_api::{__private::game::Fields, ClientHost};
+        use mod_api::__private::game::Fields;
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
@@ -1486,7 +1488,7 @@ mod tests {
     fn prepared_instance_matches_cpu_pixels() {
         use glam::DVec3;
         use horizon_client::gfx::fail_next_prepared_upload;
-        use mod_api::{__private::game::Fields, ClientHost};
+        use mod_api::__private::game::Fields;
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
@@ -1604,8 +1606,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn resolved_model_draws_and_resource_replacement_invalidates_it() {
-        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
-        use mod_api::{BlockEntityDrawContext, ClientHost};
+        use super::super::host::draw::GameBlockEntityDrawContext;
+        use mod_api::BlockEntityDrawContext;
 
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
@@ -1825,7 +1827,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn text_lays_glyphs_out_under_the_pose_in_the_frames_light() {
-        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
+        use super::super::host::draw::GameBlockEntityDrawContext;
         use mod_api::BlockEntityDrawContext;
 
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -1878,7 +1880,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_built_cube_face_draws_in_its_sprite() {
-        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
+        use super::super::host::draw::GameBlockEntityDrawContext;
         use mod_api::BlockEntityDrawContext;
 
         super::super::native_entity_refs::tests::with_game(|game| {

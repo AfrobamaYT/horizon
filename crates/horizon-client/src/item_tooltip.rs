@@ -1900,7 +1900,9 @@ mod tests {
 
     struct NoHost;
     impl mod_api::Host for NoHost {}
-    impl ClientHost for NoHost {}
+    mod_api::impl_host_areas!(NoHost);
+    impl mod_api::ClientHost for NoHost {}
+    mod_api::impl_client_host_areas!(NoHost);
 
     #[test]
     fn empty_component_boundaries_keep_builder_order() {
