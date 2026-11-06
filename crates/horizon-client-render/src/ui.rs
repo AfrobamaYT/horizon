@@ -1834,7 +1834,10 @@ mod tests {
     }
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap()
     }
 
     /// `defaultScrollingHelper` draws an overflowing label from `left` less the
@@ -2184,7 +2187,10 @@ mod tests {
     #[test]
     fn append_fields_highlight_the_whole_value_and_blink_their_cursor() {
         use crate::hud::Blend;
-        let atlas = HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
         let end = 10.0 + HudBatch::text_width(&atlas, "abc") + 1.0;
         let span = |b: &HudBatch, r: &std::ops::Range<u32>| {
             let v = &b.vertices[r.start as usize..r.end as usize];
@@ -2287,7 +2293,10 @@ mod tests {
     }
     #[test]
     fn edit_box_clicks_place_the_cursor_and_select() {
-        let atlas = HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
         let mut e = EditBox::new(10.0, 0.0, 200.0, 20.0);
         e.set_value("hello world");
         let at = |e: &EditBox, s: &str| e.text_x() + atlas.font.width(s);

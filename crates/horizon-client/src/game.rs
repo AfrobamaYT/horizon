@@ -2534,7 +2534,13 @@ impl UiResources {
             });
             let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
             let atlas = startup::time("ui.atlas", || {
-                HudAtlas::build_over_with_image(root, defaults, mod_image)
+                HudAtlas::build_over_with_image(
+                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                    &horizon_assets::resource_source::ResourceSource::directory(
+                        defaults.to_path_buf(),
+                    ),
+                    mod_image,
+                )
             });
             let panorama = panorama
                 .join()
@@ -2549,7 +2555,9 @@ impl UiResources {
     /// and chat measure with, and a one-pixel panorama.
     pub fn server(root: &std::path::Path) -> Result<Self> {
         Ok(Self {
-            atlas: HudAtlas::fonts(root)?,
+            atlas: HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            ))?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([0; 4])),
         })
     }

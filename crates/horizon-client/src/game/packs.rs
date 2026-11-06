@@ -529,8 +529,14 @@ pub(super) fn stage_pack(
     // the frame that applies the reload (about 20 ms of it).
     let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {
         let atlas = s.spawn(|| {
-            HudAtlas::build_over_with_image(&root, vanilla_root, mod_image)
-                .map_err(|e| e.to_string())
+            HudAtlas::build_over_with_image(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                &horizon_assets::resource_source::ResourceSource::directory(
+                    vanilla_root.to_path_buf(),
+                ),
+                mod_image,
+            )
+            .map_err(|e| e.to_string())
         });
         let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&root, vanilla_root));
         let small = s.spawn(|| {

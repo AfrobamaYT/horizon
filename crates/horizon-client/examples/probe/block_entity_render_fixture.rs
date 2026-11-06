@@ -122,7 +122,9 @@ pub fn main() -> Result<()> {
         horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
     )?;
     let renderer = BlockEntityRenderer::load(root, registry, item_data.defaults())?;
-    let atlas = HudAtlas::build(root)?;
+    let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+        root.to_path_buf(),
+    ))?;
     let banners = Banners::load(root, item_data.defaults());
     let items = ItemRenderer::load(root, &item_data)?;
     let (sprites, names, grid) = fake_sprites(textures)?;

@@ -1284,7 +1284,10 @@ mod tests {
 
     fn gui(root: &std::path::Path) -> UiResources {
         UiResources {
-            atlas: HudAtlas::fonts(root).unwrap(),
+            atlas: HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([
                 96, 110, 111, 255,
             ])),

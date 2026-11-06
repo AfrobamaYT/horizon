@@ -218,8 +218,10 @@ mod tests {
 
     /// A Ui over a `size` window at GUI scale 1, the cursor at `cursor` pixels.
     fn with_ui<R>(size: [u32; 2], cursor: (f32, f32), f: impl FnOnce(&mut Ui) -> R) -> R {
-        let atlas =
-            HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
         let mut batch = HudBatch::new(size);
         let cursor = (cursor.0 / batch.scale, cursor.1 / batch.scale);
         let mut ui = Ui::new(&atlas, &mut batch, cursor);

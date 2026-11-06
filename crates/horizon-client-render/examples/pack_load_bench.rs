@@ -415,7 +415,12 @@ fn main() {
             runs,
             || {},
             || {
-                if let Err(e) = HudAtlas::build_over(&root, &vanilla_root) {
+                if let Err(e) = HudAtlas::build_over(
+                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                    &horizon_assets::resource_source::ResourceSource::directory(
+                        vanilla_root.to_path_buf(),
+                    ),
+                ) {
                     eprintln!("GUI atlas failed: {e}");
                 }
             },
@@ -427,7 +432,10 @@ fn main() {
             runs,
             || {},
             || {
-                let _ = HudAtlas::build(&vanilla_root);
+                let _ =
+                    HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+                        vanilla_root.to_path_buf(),
+                    ));
             },
         ),
     );

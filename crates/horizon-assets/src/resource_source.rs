@@ -229,6 +229,32 @@ impl ResourceSource {
         String::from_utf8(self.read(name)?)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
+    /// At most the first `max` bytes, for image headers and other bounded probes.
+    pub fn read_head(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
+        if !stays_inside(name) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "unsafe resource name",
+            ));
+        }
+        match self.0.as_ref() {
+            Storage::Directory(root) => {
+                horizon_core::prepared_files::read_head(&root.join(name), max)
+            }
+            Storage::Archive(archive) => archive.read_head(name, max),
+            Storage::Prefix { source, prefix } => source.read_head(&format!("{prefix}{name}"), max),
+            Storage::Index(files) => match &files
+                .get(name)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
+                .0
+            {
+                ResourceStorage::File { source, name } => source.read_head(name, max),
+                ResourceStorage::Bytes(bytes) => Ok(bytes
+                    [..bytes.len().min(usize::try_from(max).unwrap_or(usize::MAX))]
+                    .to_vec()),
+            },
+        }
+    }
     /// Whether a resource exists, without inflating an archive entry.
     pub fn contains(&self, name: &str) -> bool {
         if !stays_inside(name) {
@@ -601,6 +627,9 @@ mod tests {
         ]));
         for (source, name) in [(&scoped, "file"), (&indexed, "file"), (&indexed, "derived")] {
             assert!(source.contains(name));
+            assert_eq!(source.read_head(name, 2).unwrap(), b"ab");
+            assert_eq!(source.read_head(name, 0).unwrap(), b"");
+            assert_eq!(source.read_head(name, 8).unwrap(), b"abcd");
             assert_eq!(source.read_limited(name, 4).unwrap(), b"abcd");
             assert_eq!(
                 source.read_limited(name, 3).unwrap_err().kind(),

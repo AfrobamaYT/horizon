@@ -980,7 +980,12 @@ mod tests {
 
         super::super::native_entity_refs::tests::with_game(|game| {
             // The server fixture only measures fonts; this test needs drawable glyphs.
-            game.gui.atlas = horizon_client::hud::HudAtlas::build(&game.options.resources).unwrap();
+            game.gui.atlas = horizon_client::hud::HudAtlas::build(
+                &horizon_assets::resource_source::ResourceSource::directory(
+                    game.options.resources.to_path_buf(),
+                ),
+            )
+            .unwrap();
             let mut surface = draw();
             let mut drawn = GameBlockEntityDrawContext {
                 game,

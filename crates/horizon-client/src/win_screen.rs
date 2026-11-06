@@ -341,7 +341,10 @@ mod tests {
         std::fs::write(texts.join("end.txt"), end).unwrap();
         std::fs::write(texts.join("credits.json"), credits).unwrap();
         std::fs::write(texts.join("postcredits.txt"), post).unwrap();
-        let atlas = HudAtlas::fonts(&root).unwrap();
+        let atlas = HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
+            root.to_path_buf(),
+        ))
+        .unwrap();
         let screen = WinScreen::new(poem, &root, "Steve", &atlas.font);
         let _ = std::fs::remove_dir_all(&root);
         screen
@@ -473,7 +476,10 @@ mod tests {
     #[test]
     fn the_screen_ends_once_everything_rolled_past() {
         let mut s = screen(false, "", CREDITS, "");
-        let atlas = HudAtlas::fonts(Path::new("/nonexistent")).unwrap();
+        let atlas = HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent")).to_owned(),
+        ))
+        .unwrap();
         let mut batch = HudBatch::new([640, 480]);
         let h = batch.height;
         let end = (s.total_scroll_length as f32 + 2.0 * h + 24.0) / 0.75;

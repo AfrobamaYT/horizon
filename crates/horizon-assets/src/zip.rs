@@ -226,46 +226,38 @@ impl Zip {
     /// than trusting the archive's declared uncompressed size.
     pub fn read_limited(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
         let max = usize::try_from(max).unwrap_or(usize::MAX).min(MAX_ENTRY);
+        let bytes = self.read_prefix(name, max as u64 + 1)?;
+        if bytes.len() > max {
+            return Err(invalid("entry exceeds the size limit"));
+        }
+        Ok(bytes)
+    }
+    /// Read a prefix without inflating the remainder or trusting declared sizes.
+    pub fn read_head(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
+        self.read_prefix(name, max.min(MAX_ENTRY as u64 + 1))
+    }
+    fn read_prefix(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
         let index = self
             .index(name)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?;
-        // A clone shares the reader's data and the central directory: reading
-        // needs `&mut`.
         let mut archive = self.archive.clone();
-        let mut entry = archive.by_index_raw(index).map_err(invalid)?;
-        let method = entry.compression();
-        let capacity = (entry.compressed_size() as usize).min(self.len);
-        let mut raw = Vec::with_capacity(capacity.min(max + 1));
-        if method == CompressionMethod::Stored {
-            entry.take(max as u64 + 1).read_to_end(&mut raw)?;
-        } else {
-            entry.read_to_end(&mut raw)?;
-        }
-        match method {
-            CompressionMethod::Stored if raw.len() <= max => Ok(raw),
-            CompressionMethod::Stored => Err(invalid("entry exceeds the size limit")),
+        let entry = archive.by_index_raw(index).map_err(invalid)?;
+        let capacity = entry.compressed_size().min(self.len as u64).min(max) as usize;
+        let mut bytes = Vec::with_capacity(capacity);
+        match entry.compression() {
+            CompressionMethod::Stored => entry.take(max).read_to_end(&mut bytes)?,
             CompressionMethod::Deflated => {
-                // Java's ZipFile trusts neither size an entry declares: it
-                // inflates the stream to its end and keeps what comes out.
-                // Packs in the wild (a Nexo-generated one served through
-                // Dropbox, for one) carry central-directory sizes that point
-                // at other files, and miniz_oxide, which refuses input past
-                // the stream's end, failed whole entries with "corrupt
-                // deflate stream" and with them the whole pack. Only the
-                // size limit stands between the archive and a zip bomb.
-                let decoder = flate2::read::DeflateDecoder::new(raw.as_slice());
-                let mut decoded = Vec::with_capacity(raw.len().min(max));
-                decoder
-                    .take(max as u64 + 1)
-                    .read_to_end(&mut decoded)
-                    .map_err(|_| invalid("corrupt deflate stream"))?;
-                if decoded.len() > max {
-                    return Err(invalid("entry inflates past the size limit"));
-                }
-                Ok(decoded)
+                // Java's ZipFile ignores inaccurate uncompressed sizes and bytes
+                // after the deflate stream. Decode the stream directly so header
+                // reads need neither the whole compressed entry nor its output.
+                flate2::read::DeflateDecoder::new(entry)
+                    .take(max)
+                    .read_to_end(&mut bytes)
+                    .map_err(|_| invalid("corrupt deflate stream"))?
             }
-            _ => Err(invalid("unsupported zip compression")),
-        }
+            _ => return Err(invalid("unsupported zip compression")),
+        };
+        Ok(bytes)
     }
 }
 
@@ -383,6 +375,9 @@ mod tests {
         for compressed in [false, true] {
             let bytes = archive_of(&[("file", b"abcd", compressed)]);
             let zip = Zip::from_bytes(bytes).unwrap();
+            assert_eq!(zip.read_head("file", 2).unwrap(), b"ab");
+            assert_eq!(zip.read_head("file", 0).unwrap(), b"");
+            assert_eq!(zip.read_head("file", 8).unwrap(), b"abcd");
             assert_eq!(zip.read_limited("file", 4).unwrap(), b"abcd");
             assert_eq!(
                 zip.read_limited("file", 3).unwrap_err().kind(),

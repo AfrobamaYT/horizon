@@ -23,7 +23,9 @@ pub(super) fn show(looked_in: &std::path::Path, settings: &Settings) -> Result<(
         window: None,
         renderer: None,
         gui: UiResources {
-            atlas: HudAtlas::build(looked_in)?,
+            atlas: HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+                looked_in.to_path_buf(),
+            ))?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([0; 4])),
         },
         screen: NoResources::new(looked_in),

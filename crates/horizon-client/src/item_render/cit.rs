@@ -103,12 +103,17 @@ pub(super) fn load(
     root: &Path,
     library: Arc<ModelLibrary>,
 ) -> (Arc<ModelLibrary>, Option<CitModels>) {
-    let rules = CitRules::load(root);
+    let rules = CitRules::load(&crate::resource_source::ResourceSource::directory(
+        root.to_owned(),
+    ));
     // A `cit.properties` alone can still turn vanilla's glint off.
     if rules.is_empty() && rules.global.use_glint {
         return (library, None);
     }
-    let extra = cit_assets::load_models(root, &rules.rules);
+    let extra = cit_assets::load_models(
+        &crate::resource_source::ResourceSource::directory(root.to_owned()),
+        &rules.rules,
+    );
     let library = if extra.is_empty() {
         library
     } else {

@@ -805,7 +805,11 @@ fn offer_data_packs_with_a_feature_asks_and_the_confirm_screen_decides() {
     );
     // Back (`onAbort`): the Data Packs screen reopens with the selection
     // it had, the confirm screen is gone.
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
     // confirm_experiments::footer_pair's Back, for a 480-wide screen
     // (COLUMN_SPACING is 10).
     let back_x = ((480.0_f32 - (150.0 * 2.0 + 10.0)) / 2.0).trunc() + 150.0 + 10.0 + 1.0;
@@ -1050,7 +1054,11 @@ fn delete_removes_links_without_following_them() {
 fn hovered_buttons_ask_for_the_hand_or_not_allowed() {
     use crate::widgets::Cursor;
     let mut f = Fixture::new();
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
     let cursor_over = |title: &Title, label: Option<&str>| {
         let mouse = label.map_or((0.0, 0.0), |label| {
             let buttons = title.buttons(480.0, 262.0);
@@ -1077,7 +1085,11 @@ fn world_search_hint_is_gray_and_only_shown_empty_and_unfocused() {
     let mut f = Fixture::new();
     f.world("World", "World");
     f.select();
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
     let draw = |title: &Title| {
         let mut batch = HudBatch::new([480, 262]);
         title.draw(&atlas, &mut batch, (0.0, 0.0), true);
@@ -1117,7 +1129,11 @@ fn scrolled_world_list_draws_inside_the_list_and_drags_its_scroller() {
     f.title.release();
     f.title.drag((bar.0, 60.0), size);
     assert_eq!(f.title.scroll.get().amount, moved);
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
     let mut batch = HudBatch::new([480, 262]);
     f.title.draw(&atlas, &mut batch, (0.0, 0.0), true);
     assert!(!batch.vertices.is_empty());
@@ -2128,7 +2144,10 @@ fn a_finished_optimization_stamps_the_level_data() {
 /// 590 px World Type label on Create World, `hi_in`'s Join Server).
 #[test]
 fn a_button_label_wider_than_its_button_stays_inside_it() {
-    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+        (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+    ))
+    .unwrap();
     let mut b = Button {
         x: 100.0,
         y: 40.0,
@@ -2337,7 +2356,10 @@ mod text_and_icon {
     use super::*;
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap()
     }
     fn button(label: &str, icon: Option<(&'static str, f32)>) -> Button {
         Button {
@@ -2443,7 +2465,10 @@ mod text_and_icon {
 fn a_create_world_tab_label_wider_than_its_tab_stays_inside_it() {
     let mut f = Fixture::new();
     f.click("Singleplayer");
-    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+        (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+    ))
+    .unwrap();
     // 90 px wide: three 20 px tabs from x = 14, too narrow for "Game".
     let mut batch = HudBatch::new([90, 262]);
     f.title.draw(&atlas, &mut batch, (0.0, 100.0), true);

@@ -179,7 +179,9 @@ impl ArmorStandAssets {
             player,
             equipment,
             trim_overrides,
-            trims: TrimRegistry::load(root),
+            trims: TrimRegistry::load(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_owned(),
+            )),
             root: root.to_owned(),
         }
     }
@@ -387,7 +389,11 @@ impl Game<'_> {
                 self.trim_slots.push(e);
                 continue;
             }
-            let Some((w, h, rgba)) = t.generate(&self.armor_stand_assets.root) else {
+            let Some((w, h, rgba)) =
+                t.generate(&horizon_assets::resource_source::ResourceSource::directory(
+                    self.armor_stand_assets.root.clone(),
+                ))
+            else {
                 continue;
             };
             let used: Vec<usize> = self.trim_slots.iter().map(|e| e.1).collect();

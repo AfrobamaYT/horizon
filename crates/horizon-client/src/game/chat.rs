@@ -2221,7 +2221,7 @@ mod tests {
         use std::collections::HashMap;
         // The missing-glyph metrics measure without game assets.
         let font = Font::load(
-            Path::new("/nonexistent-horizon-chat-test-resources"),
+            &horizon_assets::resource_source::ResourceSource::default(),
             &HashMap::new(),
             &[],
             (1, 1),
