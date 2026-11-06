@@ -1042,6 +1042,16 @@ impl Game<'_> {
             }
         };
         let root = self.options.resources.clone();
+        let context = match self.prepare_loop_context(&root) {
+            Ok(context) => context,
+            Err(error) => {
+                self.fns.enabled = previous_enabled;
+                self.cmds.vanilla_disabled = previous_vanilla_disabled;
+                return Err(Self::reload_failure(ReloadStageError::DataSource(
+                    error.to_string(),
+                )));
+            }
+        };
         let world = match self.prepare_world_reload(&stack, &root, self.mods.data_switched) {
             Ok(world) => world,
             Err(error) => {
@@ -1052,6 +1062,7 @@ impl Game<'_> {
                 )));
             }
         };
+        self.install_loop_context(context);
         self.save_datapack_settings();
         self.fns.packs = stack.packs.clone();
         self.apply_server_reload(prepared, &stack);
