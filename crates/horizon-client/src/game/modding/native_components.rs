@@ -44,6 +44,11 @@ impl Game<'_> {
         let layers = self.items().get(item)?.compostable.as_ref()?;
         Some(self.res.providers().layer_chance(layers))
     }
+    /// The slot `stack` is equipped to (`Equippable.slot`) after its component patch, behind
+    /// `ItemResource::equippable_slot`, through the opaque backend. API @API:item_components@.
+    pub(super) fn native_item_equippable_slot(&self, stack: &ItemStack) -> Option<String> {
+        horizon_client::item_sync::equippable_slot(stack, self.items())
+    }
     /// Whether enchantments `a` and `b` may share an item (`Enchantment.areCompatible`), by the
     /// world's enchantment definitions. API @API:item_components@.
     pub(super) fn native_enchantments_compatible(&self, a: &str, b: &str) -> bool {
@@ -134,6 +139,23 @@ impl Game<'_> {
         data.set_other(&removed, default.then(|| Tag::Compound(Default::default())));
         stack.tidy();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod equippable_slot_tests {
+    use horizon_client::items::ItemStack;
+
+    /// `Equippable.slot`: armour goes where it is worn, a plain item goes nowhere.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_equippable_slot_follows_the_equippable_component() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let slot = |item: &str| game.native_item_equippable_slot(&ItemStack::new(item, 1));
+            assert_eq!(slot("minecraft:iron_helmet").as_deref(), Some("head"));
+            assert_eq!(slot("minecraft:iron_boots").as_deref(), Some("feet"));
+            assert_eq!(slot("minecraft:dirt"), None);
+        });
     }
 }
 
