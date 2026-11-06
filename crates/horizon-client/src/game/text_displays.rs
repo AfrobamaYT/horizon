@@ -218,7 +218,7 @@ impl Game<'_> {
     /// The camera's yaw and pitch as `DisplayRenderer` reads them (the
     /// front view turns around).
     fn display_camera_angles(&self) -> [f32; 2] {
-        if self.camera_type == super::perspective::CameraType::ThirdPersonFront {
+        if self.camera_type == horizon_client::camera::CameraType::ThirdPersonFront {
             [self.yaw + 180.0, -self.pitch]
         } else {
             [self.yaw, self.pitch]

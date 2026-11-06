@@ -12,5 +12,7 @@ pub mod model;
 pub mod obj;
 pub mod palette;
 pub mod resolve;
+pub mod resource_source;
+pub mod zip;
 
 pub use json::DecodeError;
