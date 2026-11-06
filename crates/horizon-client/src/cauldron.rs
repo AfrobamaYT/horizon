@@ -151,6 +151,55 @@ const COLORS: [&str; 16] = [
     "black",
 ];
 
+#[derive(Clone, Copy)]
+enum Action {
+    EmptyLava,
+    EmptyWater,
+    EmptySnow,
+    FillWater,
+    FillLava,
+    FillSnow,
+    EmptyPotion,
+    FillBottle,
+    TopUpPotion,
+    CleanBanner,
+    CleanShulker,
+}
+
+/// Vanilla's per-cauldron item dispatch, built once and shared by all views.
+fn interactions() -> &'static [std::collections::HashMap<String, Action>; 4] {
+    use Action::*;
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<[std::collections::HashMap<String, Action>; 4]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut maps = std::array::from_fn::<_, 4, _>(|_| std::collections::HashMap::new());
+        for map in &mut maps {
+            for (item, action) in [
+                ("lava_bucket", EmptyLava),
+                ("water_bucket", EmptyWater),
+                ("powder_snow_bucket", EmptySnow),
+            ] {
+                map.insert(format!("minecraft:{item}"), action);
+            }
+        }
+        for (kind, item, action) in [
+            (0, "potion", EmptyPotion),
+            (1, "bucket", FillWater),
+            (1, "glass_bottle", FillBottle),
+            (1, "potion", TopUpPotion),
+            (2, "bucket", FillLava),
+            (3, "bucket", FillSnow),
+        ] {
+            maps[kind].insert(format!("minecraft:{item}"), action);
+        }
+        for color in COLORS {
+            maps[1].insert(format!("minecraft:{color}_banner"), CleanBanner);
+            maps[1].insert(format!("minecraft:{color}_shulker_box"), CleanShulker);
+        }
+        maps
+    })
+}
+
 /// The cauldron interaction of the held item (`useItemOn`); the hand stack is
 /// changed through `player`. `removes_dye` is whether the held item is in the
 /// `cauldron_can_remove_dye` tag.
@@ -164,10 +213,10 @@ pub fn interact(
         return pass();
     };
     let kind = match cauldron.name.as_str() {
-        "minecraft:cauldron" => "empty",
-        "minecraft:water_cauldron" => "water",
-        "minecraft:lava_cauldron" => "lava",
-        "minecraft:powder_snow_cauldron" => "powder_snow",
+        "minecraft:cauldron" => 0,
+        "minecraft:water_cauldron" => 1,
+        "minecraft:lava_cauldron" => 2,
+        "minecraft:powder_snow_cauldron" => 3,
         _ => return pass(),
     };
     let level: u8 = cauldron
@@ -178,7 +227,7 @@ pub fn interact(
     let item = &*held.item;
     let water_potion = held.data().and_then(|d| d.potion.as_deref()) == Some("minecraft:water");
     // Dispatcher.get: tags first, then the item map.
-    if kind == "water" && removes_dye {
+    if kind == 1 && removes_dye {
         if held.data().and_then(|d| d.dyed_color).is_none() {
             return pass();
         }
@@ -203,9 +252,12 @@ pub fn interact(
         create_filled_result(player, ItemStack::new("minecraft:bucket", 1), true);
         changed(block, Some(sound), "fill_cauldron")
     };
-    match item {
-        "minecraft:lava_bucket" => {
-            return if under_water {
+    let Some(action) = interactions()[kind].get(item) else {
+        return pass();
+    };
+    match action {
+        Action::EmptyLava => {
+            if under_water {
                 Interaction {
                     outcome: Outcome::Consume,
                     block: None,
@@ -218,17 +270,15 @@ pub fn interact(
                     state("minecraft:lava_cauldron", None),
                     "minecraft:item.bucket.empty_lava",
                 )
-            };
+            }
         }
-        "minecraft:water_bucket" => {
-            return empty_bucket(
-                player,
-                state("minecraft:water_cauldron", Some(3)),
-                "minecraft:item.bucket.empty",
-            );
-        }
-        "minecraft:powder_snow_bucket" => {
-            return if under_water {
+        Action::EmptyWater => empty_bucket(
+            player,
+            state("minecraft:water_cauldron", Some(3)),
+            "minecraft:item.bucket.empty",
+        ),
+        Action::EmptySnow => {
+            if under_water {
                 Interaction {
                     outcome: Outcome::Consume,
                     block: None,
@@ -241,12 +291,9 @@ pub fn interact(
                     state("minecraft:powder_snow_cauldron", Some(3)),
                     "minecraft:item.bucket.empty_powder_snow",
                 )
-            };
+            }
         }
-        _ => {}
-    }
-    match (kind, item) {
-        ("empty", "minecraft:potion") => {
+        Action::EmptyPotion => {
             if !water_potion {
                 return pass();
             }
@@ -257,13 +304,13 @@ pub fn interact(
                 "use_cauldron",
             )
         }
-        ("water", "minecraft:bucket") => fill_bucket(
+        Action::FillWater => fill_bucket(
             player,
             "minecraft:water_bucket",
             level == 3,
             "minecraft:item.bucket.fill",
         ),
-        ("water", "minecraft:glass_bottle") => {
+        Action::FillBottle => {
             create_filled_result(
                 player,
                 ItemStack::new("minecraft:potion", 1).with_potion("minecraft:water"),
@@ -275,7 +322,7 @@ pub fn interact(
                 "use_cauldron",
             )
         }
-        ("water", "minecraft:potion") => {
+        Action::TopUpPotion => {
             if level == 3 || !water_potion {
                 return pass();
             }
@@ -286,12 +333,7 @@ pub fn interact(
                 .insert("level".into(), (level % 3 + 1).to_string());
             changed(next, Some("minecraft:item.bottle.empty"), "use_cauldron")
         }
-        ("water", name)
-            if name
-                .strip_prefix("minecraft:")
-                .and_then(|n| n.strip_suffix("_banner"))
-                .is_some_and(|c| COLORS.contains(&c)) =>
-        {
+        Action::CleanBanner => {
             let layers = held.data().map_or(0, |d| d.banner_patterns.len());
             if layers == 0 {
                 return pass();
@@ -303,28 +345,22 @@ pub fn interact(
             create_filled_result(player, cleaned, false);
             changed(lowered(cauldron), None, "clean_banner")
         }
-        ("water", name)
-            if name
-                .strip_prefix("minecraft:")
-                .and_then(|n| n.strip_suffix("_shulker_box"))
-                .is_some_and(|c| COLORS.contains(&c)) =>
-        {
+        Action::CleanShulker => {
             create_filled_result(player, held.transmute("minecraft:shulker_box", 1), false);
             changed(lowered(cauldron), None, "clean_shulker_box")
         }
-        ("lava", "minecraft:bucket") => fill_bucket(
+        Action::FillLava => fill_bucket(
             player,
             "minecraft:lava_bucket",
             true,
             "minecraft:item.bucket.fill_lava",
         ),
-        ("powder_snow", "minecraft:bucket") => fill_bucket(
+        Action::FillSnow => fill_bucket(
             player,
             "minecraft:powder_snow_bucket",
             level == 3,
             "minecraft:item.bucket.fill_powder_snow",
         ),
-        _ => pass(),
     }
 }
 
@@ -455,6 +491,53 @@ mod tests {
         assert_eq!(outcome(&water(2), false, "minecraft:bucket"), Outcome::Pass);
         assert_eq!(outcome(&empty, false, "minecraft:bucket"), Outcome::Pass);
         assert_eq!(outcome(&empty, false, "minecraft:stone"), Outcome::Pass);
+    }
+
+    #[test]
+    fn table_preserves_tag_priority_and_cauldron_guards() {
+        let water = state("minecraft:water_cauldron", Some(3));
+        let lava = state("minecraft:lava_cauldron", None);
+        let bucket = ItemStack::new("minecraft:water_bucket", 1);
+        // A matching dye tag is terminal even when the item is also in the item table.
+        assert_eq!(outcome(&water, false, true, &bucket), Outcome::Pass);
+        assert_eq!(outcome(&water, false, false, &bucket), Outcome::Success);
+        assert_eq!(outcome(&lava, false, true, &bucket), Outcome::Success);
+        assert_eq!(
+            outcome(
+                &lava,
+                true,
+                false,
+                &ItemStack::new("minecraft:lava_bucket", 1)
+            ),
+            Outcome::Consume
+        );
+        assert_eq!(
+            outcome(
+                &water,
+                false,
+                false,
+                &ItemStack::new("minecraft:red_banner", 1)
+            ),
+            Outcome::Pass
+        );
+        assert_eq!(
+            outcome(
+                &water,
+                false,
+                false,
+                &ItemStack::new("minecraft:red_shulker_box", 1)
+            ),
+            Outcome::Success
+        );
+        assert_eq!(
+            outcome(
+                &water,
+                false,
+                false,
+                &ItemStack::new("example:red_shulker_box", 1)
+            ),
+            Outcome::Pass
+        );
     }
 
     #[test]
