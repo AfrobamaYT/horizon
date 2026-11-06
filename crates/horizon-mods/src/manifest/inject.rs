@@ -2,6 +2,13 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+const RESERVED: &str = concat!(
+    "_ as async await break const continue crate dyn else enum extern false fn for if ",
+    "impl in let loop match mod move mut pub ref return self Self static struct super ",
+    "trait true type unsafe use where while abstract become box do final gen macro ",
+    "override priv try typeof unsized virtual yield"
+);
+
 /// A listener in the mod's crate root. Freshness fields are written by the inject tool.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -69,11 +76,11 @@ impl Kind {
 }
 
 impl Inject {
-    pub(super) fn check_all(entries: &[Self], code: bool) -> Result<(), InjectError> {
+    pub(super) fn check_all(entries: &[Self], mod_id: &str, code: bool) -> Result<(), InjectError> {
         let mut ids = std::collections::HashSet::new();
         for entry in entries {
             let invalid = |field, fix| InjectError::Invalid {
-                id: entry.id.clone(),
+                id: format!("{mod_id}:{}", entry.id),
                 field,
                 fix,
             };
@@ -87,7 +94,8 @@ impl Inject {
                 return Err(invalid("at/hash", "run inject add for the pinned game"));
             }
             let name = entry.with.as_bytes();
-            if name.is_empty()
+            if RESERVED.split_whitespace().any(|word| word == entry.with)
+                || name.is_empty()
                 || name[0].is_ascii_digit()
                 || !name.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_')
             {
@@ -174,7 +182,7 @@ pub enum Route {
     Source(NoSlotReason),
 }
 
-/// Escape-hatch refusals, never part of `mod_api`.
+/// Escape-hatch refusals, never part of `mod_api`; `id` is qualified as `package:inject`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InjectError {
     Invalid {
@@ -243,15 +251,16 @@ impl std::error::Error for InjectError {}
 /// Freshness failures never fall back to source. Wasm call/local slots await W3.
 pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
     let inject = entry.inject;
+    let id = format!("{}:{}", entry.mod_id, inject.id);
     let Some(place) = slots.iter().find(|p| p.at == inject.at) else {
         return Err(InjectError::Missing {
-            id: inject.id.clone(),
+            id,
             at: inject.at.clone(),
         });
     };
     if place.hash != inject.hash {
         return Err(InjectError::Changed {
-            id: inject.id.clone(),
+            id,
             at: inject.at.clone(),
             old: inject.hash.clone(),
             new: place.hash.clone(),
@@ -268,15 +277,12 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
             |call| (Some(call), None),
         ) else {
             return Err(InjectError::Lost {
-                id: inject.id.clone(),
+                id,
                 at: inject.at.clone(),
             });
         };
         if Some(call.nth) != inject.nth {
-            return Err(InjectError::Moved {
-                id: inject.id.clone(),
-                nth: call.nth,
-            });
+            return Err(InjectError::Moved { id, nth: call.nth });
         }
         &call.slots
     } else {
@@ -310,7 +316,7 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
         inject.at.clone()
     };
     Err(InjectError::NoSlot {
-        id: inject.id.clone(),
+        id,
         reason,
         declaration: format!("slots/{}.txt: {line}", entry.mod_id),
     })
@@ -391,6 +397,13 @@ mod tests {
         }
         assert!(parse(&format!("{DECL}{DECL}"), &native).is_err());
         assert!(parse(DECL, "").is_err());
+        for name in RESERVED.split_whitespace() {
+            let mut i = inject(Kind::Head);
+            i.with = name.into();
+            assert!(
+                matches!(Inject::check_all(&[i], "sample", true), Err(InjectError::Invalid { id, field: "with", .. }) if id == "sample:ground")
+            );
+        }
     }
 
     #[test]
@@ -480,13 +493,9 @@ mod tests {
                     "callee" => places[0].calls[0].call = "game::other".into(),
                     _ => unreachable!(),
                 }
-                assert!(
-                    run(&i, target, &places)
-                        .unwrap_err()
-                        .to_string()
-                        .starts_with(code),
-                    "{case}"
-                );
+                let error = run(&i, target, &places).unwrap_err().to_string();
+                assert!(error.starts_with(code), "{case}");
+                assert!(error.contains("sample:ground"));
             }
         }
     }

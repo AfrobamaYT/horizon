@@ -96,7 +96,8 @@ impl Game<'_> {
         let Some((honey, facing)) = self.hive_state(at) else {
             return;
         };
-        let Some(BlockEntity::Beehive(mut hive)) = self.world.block_entities.take(&key) else {
+        let Some((lease, BlockEntity::Beehive(mut hive))) = self.world.block_entities.take(&key)
+        else {
             return;
         };
         let fire = [
@@ -119,7 +120,7 @@ impl Game<'_> {
         hive.server_tick(at, facing, honey, &mut host);
         self.world
             .block_entities
-            .put(key, BlockEntity::Beehive(hive));
+            .put(lease, BlockEntity::Beehive(hive));
     }
     /// `BeehiveBlockEntity.addOccupant` for a bee its `BeeEnterHiveGoal`
     /// sent in: off its lead, its tag stored, the bee gone.
@@ -143,13 +144,14 @@ impl Game<'_> {
         self.mobs[i].extra.mount = None;
         let tag = self.mob_tree_nbt(i);
         let flower = bee::get(&self.mobs[i]).and_then(|b| b.flower);
-        let Some(BlockEntity::Beehive(mut hive)) = self.world.block_entities.take(&key) else {
+        let Some((lease, BlockEntity::Beehive(mut hive))) = self.world.block_entities.take(&key)
+        else {
             return;
         };
         let stored = hive.add_occupant(at, tag, flower, &mut GameHive { game: self });
         self.world
             .block_entities
-            .put(key, BlockEntity::Beehive(hive));
+            .put(lease, BlockEntity::Beehive(hive));
         if stored {
             let kind = self.mobs[i].kind.id.clone();
             let block = self
@@ -167,13 +169,14 @@ impl Game<'_> {
     /// `BeehiveBlockEntity.emptyAllLivingFromHive` with no player about.
     pub(super) fn empty_hive(&mut self, at: [i32; 3], facing: [i32; 2], status: Release) {
         let key = (at[0], at[1], at[2]);
-        let Some(BlockEntity::Beehive(mut hive)) = self.world.block_entities.take(&key) else {
+        let Some((lease, BlockEntity::Beehive(mut hive))) = self.world.block_entities.take(&key)
+        else {
             return;
         };
         hive.release_all(at, facing, None, status, &mut GameHive { game: self });
         self.world
             .block_entities
-            .put(key, BlockEntity::Beehive(hive));
+            .put(lease, BlockEntity::Beehive(hive));
     }
     /// `BeehiveBlock.playerDestroy` without silk touch: the bees come out
     /// angry at the player unless smoke calms them, then
@@ -285,7 +288,8 @@ impl Game<'_> {
             self.level_set(pos, reset)?;
         }
         if !smokey
-            && let Some(BlockEntity::Beehive(mut hive)) = self.world.block_entities.take(&key)
+            && let Some((lease, BlockEntity::Beehive(mut hive))) =
+                self.world.block_entities.take(&key)
         {
             // emptyAllLivingFromHive: the bees within 4 blocks of the player
             // go for them.
@@ -298,7 +302,7 @@ impl Game<'_> {
             );
             self.world
                 .block_entities
-                .put(key, BlockEntity::Beehive(hive));
+                .put(lease, BlockEntity::Beehive(hive));
             if let Some(p) = self.player_view().map(|p| p.position) {
                 for m in self.mobs.iter_mut().filter(|m| released.contains(&m.id)) {
                     if m.distance_sqr(p) <= 16.0 {

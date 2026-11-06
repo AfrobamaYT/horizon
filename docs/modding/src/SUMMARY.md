@@ -36,7 +36,8 @@
 - [Legacy native hook API history (frozen)](reference/native-api-history.md)
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()
-- [NeoForge counterparts](reference/neoforge-counterparts.md)
+<!-- The counterparts preprocessor renders the current declarations at the published URL. -->
+- [NeoForge counterparts]()
 
 # For agents
 

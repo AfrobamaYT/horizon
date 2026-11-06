@@ -30,7 +30,8 @@ fn declaration(selector: &str, ordinal: Option<usize>) -> Declaration {
         target: "horizon_client::game::Game::run".into(),
         selector: selector.into(),
         ordinal,
-        origin: "sites/test.txt:2".into(),
+        ctx: String::new(),
+        origin: "slots/test.txt:2".into(),
     }
 }
 
@@ -63,7 +64,8 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
         target: "lower::lower_run".into(),
         selector: "make".into(),
         ordinal: Some(0),
-        origin: "sites/lower.txt:1".into(),
+        ctx: String::new(),
+        origin: "slots/lower.txt:1".into(),
     };
     let (lower, found) = rewrite(
         "pub struct Made(pub u32); fn make() -> Made { Made(7) } fn lower_run() -> Made { make() }",
@@ -174,15 +176,15 @@ fn site_rewrite_ordinals_hashes_and_refusals() {
         (".missing", Some(0), "matched no call"),
     ] {
         let error = run(source, &[declaration(selector, ordinal)]).unwrap_err();
-        assert!(error.origin.as_ref().unwrap().contains("sites/test.txt:2"));
+        assert!(error.origin.as_ref().unwrap().contains("slots/test.txt:2"));
         assert!(error.to_string().contains(reason));
     }
     let mut conflict = declaration("self.step", Some(1));
-    conflict.origin = "sites/other.txt:4".into();
+    conflict.origin = "slots/other.txt:4".into();
     let error = run(source, &[declarations[0].clone(), conflict]).unwrap_err();
     assert!(
-        error.to_string().contains("sites/test.txt:2")
-            && error.to_string().contains("sites/other.txt:4")
+        error.to_string().contains("slots/test.txt:2")
+            && error.to_string().contains("slots/other.txt:4")
     );
     let nested = "impl Game { fn run(&mut self) { add(add(1)); } }";
     assert!(

@@ -39,7 +39,7 @@ jobs:
   # Dyna's image enforces the event and repository check again in job-started.sh.
   # GitHub's external-contributor approval is the third lock.
   changes:
-    if: github.event_name != 'schedule'
+    if: github.event_name != 'schedule' && !inputs.prepare-output-check
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -484,7 +484,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 -m unittest discover -s tests -v
-          python3 -m unittest discover -s tools/ci -p test_prepared_cache.py -v
+          python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
@@ -620,7 +620,6 @@ jobs:
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   prepared-output-check:
     if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'
-    needs: changes
     runs-on: dyna-large
     timeout-minutes: 60
     permissions:
@@ -644,18 +643,25 @@ jobs:
           java-version: '25'
       - name: Check prepared output digest
         run: |
-          HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+          # Never reuse a completed preparation for this diagnostic, including a retry.
+          for attempt in 1 2; do
+            HORIZON_PREPARE_KEY="${GITHUB_SHA:0:16}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt" \
+              HORIZON_PREPARE_EXPORT_DIGEST="$RUNNER_TEMP/export.digest" \
+              HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
+            exported=$(cat "$RUNNER_TEMP/export.digest")
+            actual=$(python3 tools/prepare_output.py digest 2>/dev/null) || { echo "::error::prepared output digest unavailable"; exit 1; }
+            { echo "fresh export $attempt: $exported"; echo "seeded export $attempt: $actual"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          done
           set +e
           python3 tools/prepare_output.py check > "$RUNNER_TEMP/output-check.log" 2>&1
           result=$?
           set -e
-          actual=$(python3 tools/prepare_output.py digest 2>/dev/null) || { echo "::error::prepared output digest unavailable"; exit 1; }
           expected=$(awk '!/^#/ && NF == 2 { value=$2 } END { print value }' crates/horizon-prepare/output-versions.txt)
           { echo "prepared output check: $([ "$result" -eq 0 ] && echo pass || echo fail)"; echo "actual: $actual"; echo "expected: $expected"; } | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$result"
 
   vanilla-parity:
-    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch'
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check
     runs-on: dyna-large
     permissions:
       contents: read

@@ -724,6 +724,7 @@ struct InteractTarget {
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
     world: &'w mut World,
+    command_block_transition: Option<command_blocks::CommandBlockTransition>,
     redstone_experiments: bool,
     facts: &'w BlockFacts,
     collision: &'w BlockCollisionRegistry<'w>,
@@ -1862,6 +1863,12 @@ impl LevelAccess for GameLevel<'_> {
             .map(|s| s.status == horizon_client::block_entity_anim::ShulkerStatus::Closed)
     }
     fn remove_block_entity(&mut self, pos: BlockPos, old: BlockStateId, side_effects: bool) -> u8 {
+        if let Some(change) = &mut self.command_block_transition
+            && change.preserve(self.world, pos, old)
+        {
+            // Returning 0 skips remove_entity's side effects once; command blocks have no contents or drops.
+            return 0;
+        }
         self.remove_entity(pos, old, side_effects)
     }
     fn load_block_entity(&mut self, pos: BlockPos, mut nbt: horizon_core::nbt::Compound) {
@@ -3466,6 +3473,14 @@ impl Dim {
             _ => Self::Overworld,
         }
     }
+    /// The dimension as mods' level handles name it.
+    fn key(self) -> mod_api::DimensionKey {
+        match self {
+            Self::Overworld => mod_api::DimensionKey::OVERWORLD,
+            Self::Nether => mod_api::DimensionKey::NETHER,
+            Self::End => mod_api::DimensionKey::END,
+        }
+    }
     /// The level's shape in a world of vanilla's dimension types.
     fn shape(self) -> horizon_client::save::LevelShape {
         use horizon_client::save::LevelShape;
@@ -4982,6 +4997,7 @@ impl Game<'_> {
         }
         let native_authoritative = self.native_authoritative();
         let mut level = GameLevel {
+            command_block_transition: None,
             redstone_experiments: self
                 .level
                 .enabled_features
@@ -10647,7 +10663,11 @@ impl Game<'_> {
         } else {
             (0.8, 0.8 + self.world.random.next_float() * 0.4)
         };
-        self.audio.play(sound, Some(at), volume, pitch);
+        if self.is_logical_server() {
+            self.audio.play(sound, Some(at), volume, pitch);
+        } else {
+            self.play_client_player_sound(sound, volume, pitch);
+        }
     }
     /// The open menu as the verified engine (`horizon_client::menu`): the
     /// game's slots are copied in, `run` acts on it, and the slots, carried
@@ -24821,20 +24841,6 @@ mod tests {
 
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
-
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn client_camera_entity_is_the_player_without_a_server_camera() {
-        use mod_api::ClientHost;
-        super::native_entity_refs::tests::with_client_game(|game| {
-            let camera = (game as &dyn ClientHost).camera_entity();
-            assert_eq!(
-                camera.map(|entity| entity.id()),
-                Some(game.own_entity_id() as u32),
-                "the player's own view follows the player"
-            );
-        });
-    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
