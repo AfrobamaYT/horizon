@@ -15,6 +15,7 @@ pub(crate) struct Requests {
 pub(crate) struct Names {
     entries: Vec<Request>,
     pub(crate) slots: HashMap<String, u32>,
+    utf16_slots: HashMap<Vec<u16>, u32>,
 }
 
 #[derive(Clone)]
@@ -179,19 +180,34 @@ pub fn resolve_fluids(ids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
             .request("horizon", id)
             .expect("registry owns valid ids");
     }
+    names.utf16_slots = names
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(slot, entry)| (entry.id.encode_utf16().collect(), slot as u32))
+        .collect();
     let _ = crate::part_table::resolved_fluids().set(names);
     Ok(())
 }
 
 /// Find a fluid key at a data-loading boundary.
 pub fn fluid_key(id: &str) -> Option<FluidKey> {
-    let id = if id.contains(':') {
-        id.to_owned()
+    let names = crate::part_table::resolved_fluids().get()?;
+    let slot = if id.contains(':') {
+        names.slots.get(id)
     } else {
-        format!("minecraft:{id}")
+        names.slots.get(&format!("minecraft:{id}"))
     };
+    Some(FluidKey(*slot?))
+}
+
+/// Resolve an NBT UTF-16 fluid name without allocating.
+pub fn fluid_key_utf16(id: &[u16]) -> Option<FluidKey> {
     Some(FluidKey(
-        *crate::part_table::resolved_fluids().get()?.slots.get(&id)?,
+        *crate::part_table::resolved_fluids()
+            .get()?
+            .utf16_slots
+            .get(id)?,
     ))
 }
 

@@ -1834,6 +1834,14 @@ pub mod tests {
         resolve_fluids(&["minecraft:water"]).unwrap();
         let chocolate = fluid_key("maker:chocolate").unwrap();
         assert_eq!(fluid_id(chocolate), Some("maker:chocolate"));
+        for name in ["minecraft:water", "maker:chocolate"] {
+            let key = fluid_key(name).unwrap();
+            assert_eq!(
+                crate::registry_keys::fluid_key_utf16(&name.encode_utf16().collect::<Vec<_>>()),
+                Some(key)
+            );
+            assert_eq!(fluid_id(key), Some(name));
+        }
         assert_eq!(FluidKey::from_slot(chocolate.0), Ok(chocolate));
         assert!(fluid_key("missing:fluid").is_none());
     }
