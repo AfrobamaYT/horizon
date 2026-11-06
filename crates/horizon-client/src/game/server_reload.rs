@@ -97,6 +97,7 @@ impl Game<'_> {
             self.sync_function_registries(stack);
         });
         self.reload_resources = prepared.resources;
+        self.structure_templates.clear();
     }
     /// The retained server reload listeners of the last successful reload.
     pub(super) fn native_reload_resources(&self) -> &dyn ServerReloadResources {

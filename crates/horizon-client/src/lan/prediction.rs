@@ -771,7 +771,11 @@ mod tests {
             return None;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();

@@ -5005,7 +5005,10 @@ mod classic_tests {
     #[test]
     fn classic_logo_and_icon_geometry_matches_minecraft() {
         let root = Path::new("/nonexistent/horizon-test-resources");
-        let mut atlas = HudAtlas::build(root).unwrap();
+        let mut atlas = HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let r = crate::hud::Rect {
             u0: 0.0,
             v0: 0.0,

@@ -947,7 +947,11 @@ mod section_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = load(&root, assets.registry).unwrap();
         let mut world = World::test_scene(&assets, &render, 3).unwrap();
         let state = |name: &str| assets.registry.default_state(name).unwrap();

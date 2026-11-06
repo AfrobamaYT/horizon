@@ -866,7 +866,7 @@ mod tests {
         drop(writer);
         let mut atlas = HudAtlas::boot();
         atlas.font = horizon_client::font::Font::load(
-            &root,
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
             &Default::default(),
             &[],
             (1024, 1024),
