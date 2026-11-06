@@ -109,8 +109,9 @@ def moved_source(source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--move', action='store_true')
-    parser.add_argument('--verify', metavar='BASE')
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--move', action='store_true')
+    mode.add_argument('--verify', metavar='BASE')
     args = parser.parse_args()
     def git(*args):
         return subprocess.check_output(['git', *args]).decode()
@@ -122,7 +123,6 @@ def main():
                 for m in DECL.findall(source) if m[1]}
     metadata[str(GAME / 'game_tests.rs')] = '// game-module-cfg: always\n'
     removed, added = Counter(), Counter()
-    changed = []
     for old in base_files:
         path = Path(old)
         if not args.verify and (not path.is_file() or path.is_symlink()):
@@ -140,7 +140,7 @@ def main():
         expected = metadata.get(old, '') + rewrite(expected, old, moves)
         new = moves.get(old, old)
         if args.verify:
-            if old in moves or old == game:
+            if old in moves or old == game or old.startswith(f'{GAME}/'):
                 assert Path(new).read_text() == expected, f'undeclared edit: {old} -> {new}'
             if old in moves:
                 # Normalize only the declared file-reference and visibility edits.
@@ -152,13 +152,15 @@ def main():
                 subprocess.run(['git', 'mv', old, new], check=True)
             if expected != original:
                 Path(new).write_text(expected)
-                changed.append(new)
     if args.verify:
         assert removed == added
         build = 'crates/horizon-mod-api-gen/src/build.rs'
+        build_sources = git('show', f'{args.verify}:{build}'), Path(build).read_text()
+        for output in ('mod_api_host_generated.rs', 'mod_api_fire_generated.rs', 'mod_api_goal_view_generated.rs'):
+            binding = next(line.strip() for line in build_sources[0].splitlines() if line.lstrip().startswith(f'("{output}",'))
+            assert binding in {line.strip() for line in build_sources[1].splitlines()}
         blocks = []
-        for text, end in [(git('show', f'{args.verify}:{build}'), 'fs::write(out_dir.join("native_hook_modules.rs")'),
-                          (Path(build).read_text(), '    Ok(modules)')]:
+        for text, end in zip(build_sources, ('fs::write(out_dir.join("native_hook_modules.rs")', '    Ok(modules)')):
             start = text.index('let mut modules = String::new();')
             blocks.append(text[start:text.index(end, start)])
         normalized = [subprocess.check_output(['rustfmt', '--edition', '2024', '--emit', 'stdout'],
@@ -172,7 +174,7 @@ def main():
         for directory in sorted(GAME.rglob('*'), key=lambda p: len(p.parts), reverse=True):
             if directory.is_dir() and not any(directory.iterdir()):
                 directory.rmdir()
-        print('\n'.join(changed))
+        print(f'Moved {len(moves)} source files and rewrote their references.')
 
 
 if __name__ == '__main__':

@@ -221,13 +221,11 @@ state stays separate from the library tests. This compiles gameplay twice for ex
 
 ## How `Game` is organised
 
-- `struct Game` (game.rs) keeps the core loop and fields. Features live in `game/<area>/<feature>.rs`
-  or `game/<area>/<feature>/mod.rs` when they have children. An area's `.game-area` marker enables
-  build-derived declarations: add the source file, not a shared list entry. Logical modules remain
-  direct children of `game`, preserving `super`, privacy and every existing target path.
+- `struct Game` (game.rs) keeps the core loop and fields. Each `game/<area>/<feature>.rs` (or
+  `<feature>/mod.rs`) adds an `impl Game<'_>` block and state types. Logical modules remain direct
+  children of `game`; an area's `.game-area` marker enables build-derived declarations.
 - Find a feature's code: `grep -rn "fn tick_<thing>\|fn <verb>_<thing>" crates/horizon-client/src/game*`;
-  the file is usually `game/<area>/<thing>s.rs` or `game/<area>/<thing>s/mod.rs`. Who calls it:
-  grep the name in game.rs's `fn tick` / `fn tick_world`.
+  the file is under `game/<area>/`. Find its callers in game.rs's `fn tick` / `fn tick_world`.
 - Fields that say which mode runs: `remote` (this window is a client of a server: multiplayer, LAN guest, or
   single player on its server thread), `lan` (`LanHost`: this world is open to the network), `integrated`
   (the window's own server thread), `serving` (this `Game` *is* that server thread), `options.dedicated`.

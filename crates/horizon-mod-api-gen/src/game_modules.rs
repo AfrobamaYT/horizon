@@ -77,19 +77,31 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
 /// Expand the same directory-derived include before source traversal, without needing OUT_DIR.
 /// Other includes are left alone: source tools must not evaluate arbitrary build-time code.
 pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
-    let mut expanded = source.to_owned();
-    if source.contains(INCLUDE) {
-        expanded = expanded.replace(INCLUDE, &declarations(&path.with_extension(""))?);
-    }
     const NATIVE: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/native_hook_modules.rs\"));";
-    if source.contains(NATIVE) {
-        let root = path
-            .ancestors()
-            .nth(6)
-            .ok_or("native hook source outside the game tree")?;
-        expanded = expanded.replace(NATIVE, &crate::build::native_hook_modules(root)?);
+    if !source.contains(INCLUDE) && !source.contains(NATIVE) {
+        return Ok(source.to_owned());
     }
-    Ok(expanded)
+    let file = syn::parse_file(source).map_err(|e| e.to_string())?;
+    let mut lines: Vec<_> = source.split_inclusive('\n').map(str::to_owned).collect();
+    for item in file.items {
+        if let syn::Item::Macro(item) = item
+            && item.mac.path.is_ident("include")
+        {
+            let line = item.mac.path.segments[0].ident.span().start().line - 1;
+            lines[line] = match lines[line].trim_end_matches('\n') {
+                INCLUDE => declarations(&path.with_extension(""))?,
+                NATIVE => crate::build::native_hook_modules(
+                    path.canonicalize()
+                        .map_err(|e| e.to_string())?
+                        .ancestors()
+                        .nth(6)
+                        .ok_or("native hook source outside the game tree")?,
+                )?,
+                _ => continue,
+            };
+        }
+    }
+    Ok(lines.concat())
 }
 
 pub(crate) fn parse(path: &Path, source: &str) -> Result<syn::File, String> {
@@ -112,12 +124,9 @@ mod tests {
         ] {
             assert!(code.contains(&format!("{visibility} mod {name};")));
         }
-        assert!(
-            crate::points::game_files(&src, true)
-                .unwrap()
-                .iter()
-                .any(|file| file.module == "horizon_client::game::game_tests")
-        );
+        let files = crate::points::game_files(&src, true).unwrap();
+        let game_tests = "horizon_client::game::game_tests";
+        assert!(files.iter().any(|file| file.module == game_tests));
     }
 
     #[test]
@@ -127,7 +136,13 @@ mod tests {
         let area = game.join("network");
         fs::create_dir_all(&area).unwrap();
         fs::write(area.join(".game-area"), "").unwrap();
-        fs::write(root.join("game.rs"), INCLUDE).unwrap();
+        let source = format!("const DOC: &str = r#\"\n{INCLUDE}\n\"#;\n{INCLUDE}");
+        fs::write(root.join("game.rs"), &source).unwrap();
+        assert!(
+            expand(&root.join("game.rs"), &source)
+                .unwrap()
+                .contains(INCLUDE)
+        );
         fs::create_dir_all(area.join("remote")).unwrap();
         fs::write(area.join("remote/mod.rs"), "mod child;").unwrap();
         fs::write(area.join("remote/child.rs"), "").unwrap();
