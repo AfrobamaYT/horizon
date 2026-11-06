@@ -735,7 +735,8 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
     use mod_api::__private::{ModPhase, PhaseOwner};
     use mod_api::{
         ClientHost, ClientSetupEvent, ClientTickPreEvent, ConfigLoadingEvent, Hooks, HostSide,
-        ModEntry, NativeConfig, NativeConfigKind, RegisterConfigsEvent,
+        ModEntry, NativeConfig, NativeConfigKind, RegisterConfigsEvent, ScreenOpening,
+        ScreenOpeningEvent,
     };
     use std::{sync::Mutex, time::Instant};
 
@@ -765,6 +766,16 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
                 .unwrap()
                 .push(format!("{:?}", event.config.kind));
         }
+        fn screen_opening(
+            &self,
+            host: &dyn ClientHost,
+            _: &mut ScreenOpeningEvent<'_>,
+        ) -> Option<ScreenOpening> {
+            assert!(host.level("minecraft:overworld").is_none());
+            assert_eq!(mod_api::__private::current_phase(), ModPhase::World);
+            self.0.lock().unwrap().push("screen".into());
+            None
+        }
         fn client_tick_pre(&self, host: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {
             assert!(host.level("minecraft:overworld").is_none());
             assert!(host.entity(1).is_none());
@@ -779,32 +790,42 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
     )]
     .into();
     mod_api::testing::with_mods(mods, || {
-        with_client_game(|game| {
-            let resources = game.res.clone();
-            let options = game.options.clone();
-            let root = options.resources.clone();
-            let gui = UiResources::server(&root).unwrap();
-            let _setup = PhaseOwner::scope(ModPhase::Setup);
-            let mut started = start_game(
-                &resources,
-                game.pack.clone(),
-                gui,
-                options,
-                None,
-                Audio::silent(&root),
-                root,
-                Instant::now(),
-                None,
-                Some(game.settings.clone()),
-                None,
-                Vec::new(),
-            )
-            .unwrap()
-            .unwrap();
-            // The event loop dispatches this before any per-tick work,
-            // even on the title screen, without a world or renderer.
-            started.native_client_tick_pre();
-            assert_eq!(*seen.lock().unwrap(), ["setup", "Client", "Common", "tick"]);
-        })
+        for pack_error in [None, Some("selected resource pack failed")] {
+            seen.lock().unwrap().clear();
+            with_client_game(|game| {
+                let resources = game.res.clone();
+                let options = game.options.clone();
+                let root = options.resources.clone();
+                let gui = UiResources::server(&root).unwrap();
+                let _setup = PhaseOwner::scope(ModPhase::Setup);
+                let mut started = start_game(
+                    &resources,
+                    game.pack.clone(),
+                    gui,
+                    options,
+                    pack_error.map(str::to_owned),
+                    Audio::silent(&root),
+                    root,
+                    Instant::now(),
+                    None,
+                    Some(game.settings.clone()),
+                    None,
+                    Vec::new(),
+                )
+                .unwrap()
+                .unwrap();
+                // The event loop dispatches this before any per-tick work,
+                // even on the title screen, without a world or renderer.
+                started.native_client_tick_pre();
+                assert_eq!(started.ui.options.resource_error.as_deref(), pack_error);
+                let mut expected = vec!["setup", "Client", "Common", "screen"];
+                if pack_error.is_some() {
+                    assert!(started.ui.options.resource_packs_open());
+                    expected.push("screen");
+                }
+                expected.push("tick");
+                assert_eq!(*seen.lock().unwrap(), expected);
+            })
+        }
     });
 }
