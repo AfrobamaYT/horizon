@@ -303,7 +303,7 @@ impl Game<'_> {
         }
         self.world
             .block_entities
-            .retain(|k, _| (k.0 >> 4, k.2 >> 4) != (x, z));
+            .unload(|k| (k.0 >> 4, k.2 >> 4) == (x, z));
         for info in &p.chunk.block_entities {
             let pos = (
                 x * 16 + i32::from(info.packed_xz as u8 >> 4),

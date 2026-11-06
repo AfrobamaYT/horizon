@@ -40,8 +40,10 @@ fn retired_leases_never_restore_removed_or_unloaded_instances() {
             .set(entities.attachments_mut(P).unwrap(), Holder::Level, 7)
             .unwrap();
         let slots = entities.tickers(|_| 0);
-        let (lease, taken) = entities.take(&P).unwrap();
+        let (mut lease, taken) = entities.take(&P).unwrap();
+        assert!(entities.rekey(&P, &mut lease));
         retire(&mut entities);
+        assert!(!entities.rekey(&P, &mut lease));
         assert!(!entities.put(lease, taken));
         assert!(entities.get(&P).is_none());
         assert!(entities.attachments_mut(P).is_none());
@@ -76,11 +78,12 @@ fn replacement_taken_before_old_put_rejects_aba_without_changing_tick_order() {
         assert!(entities.mods_near(0.0, 0.0, 64.0).next().is_none());
         assert!(!entities.put(old_lease, old));
         assert!(matches!(entities.get(&P), Some(BlockEntity::Chest(items)) if items.len() == 2));
-        let (old_lease, old) = entities.take(&P).unwrap();
+        let (mut old_lease, old) = entities.take(&P).unwrap();
         replace(&mut entities);
         VALUE
             .set(entities.attachments_mut(P).unwrap(), Holder::Level, 9)
             .unwrap();
+        assert!(!entities.rekey(&P, &mut old_lease));
         let (new_lease, new) = entities.take(&P).unwrap();
         assert!(!entities.put(old_lease, old));
         assert!(entities.get(&P).is_none());
@@ -112,13 +115,31 @@ fn a_loaded_replacement_can_stop_ticking_without_restoring_the_taken_instance() 
 }
 
 #[test]
+fn remote_column_retirement_revokes_taken_instances_including_omitted_replacements() {
+    for replacement in [false, true] {
+        let mut entities = level();
+        entities.insert(P, chest(1));
+        entities.insert(Q, chest(2));
+        let (lease, entity) = entities.take(&P).unwrap();
+        entities.unload(|p| chunk_of(*p) == (0, 0));
+        if replacement {
+            entities.insert((2, 64, 1), chest(3));
+        }
+        assert!(!entities.put(lease, entity));
+        assert!(entities.get(&P).is_none());
+        assert!(matches!(entities.get(&Q), Some(BlockEntity::Chest(items)) if items.len() == 2));
+    }
+}
+
+#[test]
 fn a_lease_from_another_store_cannot_consume_the_current_lease() {
     let mut first = level();
     let mut second = level();
     first.insert(P, chest(1));
     second.insert(P, chest(2));
-    let (foreign, old) = first.take(&P).unwrap();
+    let (mut foreign, old) = first.take(&P).unwrap();
     let (current, new) = second.take(&P).unwrap();
+    assert!(!second.rekey(&P, &mut foreign));
     assert!(!second.put(foreign, old));
     assert!(second.put(current, new));
     assert!(matches!(second.get(&P), Some(BlockEntity::Chest(items)) if items.len() == 2));

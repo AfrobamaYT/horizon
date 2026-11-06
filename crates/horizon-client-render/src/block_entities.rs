@@ -33,6 +33,19 @@ use std::sync::{
 
 static NEXT_LEASE: AtomicU64 = AtomicU64::new(1);
 
+fn next_lease() -> u64 {
+    let mut token = NEXT_LEASE.load(Ordering::Relaxed);
+    loop {
+        let next = token
+            .checked_add(1)
+            .expect("block entity lease space exhausted");
+        match NEXT_LEASE.compare_exchange_weak(token, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return token,
+            Err(current) => token = current,
+        }
+    }
+}
+
 /// Exclusive authority to return one instance taken from a block entity store.
 /// Invalidated by removal, replacement, unloading, or the next ticker sweep.
 /// Dropping it does not restore the instance; it cannot be cloned or forged.
@@ -427,11 +440,19 @@ impl BlockEntities {
     pub fn take(&mut self, pos: &Pos) -> Option<(BlockEntityLease, BlockEntity)> {
         self.asleep.remove(pos);
         let entity = self.map.remove(pos)?;
-        let token = NEXT_LEASE
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
-            .expect("block entity lease space exhausted");
+        let token = next_lease();
         self.out.insert(*pos, token);
         Some((BlockEntityLease { pos: *pos, token }, entity))
+    }
+    /// Re-key a live lease when an intentional state change keeps the instance.
+    /// Ordinary removal still revokes it; a retired or foreign lease cannot re-key.
+    pub fn rekey(&mut self, pos: &Pos, lease: &mut BlockEntityLease) -> bool {
+        if lease.pos != *pos || self.out.get(pos) != Some(&lease.token) {
+            return false;
+        }
+        lease.token = next_lease();
+        self.out.insert(*pos, lease.token);
+        true
     }
     /// Return the taken instance in its slot; false if its lease was retired.
     pub fn put(&mut self, lease: BlockEntityLease, entity: BlockEntity) -> bool {
