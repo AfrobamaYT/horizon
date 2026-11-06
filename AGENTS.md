@@ -152,8 +152,8 @@ python3 tools/agent_control_e2e.py         # horizon-ctl / MCP end to end
   harnesses for CI.
 - A harness = `tools/test_<name>_parity.py` (324 of them) + a Java oracle (`mods/horizon/src/test/java/dev/horizonlab/parity/Vanilla*Oracle.java`)
   + a Rust probe: `crates/<crate>/examples/<name>_{probe,fixture}.rs` (horizon-world 175, horizon-client 104),
-  or the game binary with a fixture env var (`game/dispense_fixture.rs`, `game/sculk_fixture.rs`,
-  `game/command_harness.rs`, `game/net_harness.rs`). Copy a nearby harness for a new one.
+  or the game binary with a fixture env var (`game/interface/dispense_fixture.rs`, `game/blocks/sculk_fixture.rs`,
+  `game/administration/command_harness.rs`, `game/network/net_harness.rs`). Copy a nearby harness for a new one.
 - Developing a native mod? Run `horizon-launcher settings native-profile developer` once. Developer builds the game crate
   unoptimized: a mod edit rebuilds about 6× faster than with Balanced, while game logic runs up to about twice as
   slow. Use it while developing, not for playing; Optimized stays the default for players and releases
@@ -231,15 +231,15 @@ state stays separate from the library tests. This compiles gameplay twice for ex
   (the window's own server thread), `serving` (this `Game` *is* that server thread), `options.dedicated`.
   `fn tick` returns `tick_remote()` when `remote` is set; a server ticks its levels (`fn tick_world`).
 - A server's players run through the shared gameplay code: `as_guest` swaps the guest's
-  state (position, inventory, mode, mining, item use) into `Game` for one call (`game/lan_actions.rs`), and
+  state (position, inventory, mode, mining, item use) into `Game` for one call (`game/network/lan_actions.rs`), and
   `levels.rs` swaps whole dimensions in the same way. Changes reach clients through the block log, level
-  events and the entity tracker (`lan/tracking.rs`, `game/lan_entities.rs`).
+  events and the entity tracker (`lan/tracking.rs`, `game/network/lan_entities.rs`).
 - Shared read-only data: `Resources` (`res`: blocks, items, recipes, mob types, biomes) and `PackResources`
   (`pack`), both in game.rs.
 
 ## Single player runs on a server thread
 
-`game/integrated.rs` runs a second `Game` (`serving`) on a "Server thread" with one level per dimension;
+`game/world/integrated.rs` runs a second `Game` (`serving`) on a "Server thread" with one level per dimension;
 the window joins it as a client through memory (`remote`), exactly as a LAN guest or a dedicated server's
 player does (#1514). A window's `Game` never ticks a world itself: the old in-frame path is gone
 (`--in-frame` and `--no-server-thread` only print a notice; `HORIZON_SERVER_THREAD` is ignored).

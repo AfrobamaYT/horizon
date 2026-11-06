@@ -106,7 +106,7 @@ pub struct World {
     pub block_log_held: Vec<(i32, i32, i32)>,
     /// Every write since the mobs last ticked (position, old and new state),
     /// for `ServerLevel.sendBlockUpdated`'s path recomputing; kept only while
-    /// the mobs of this world tick (`game/creatures.rs`).
+    /// the mobs of this world tick (`game/mobs/creatures.rs`).
     pub path_writes: Option<Vec<((i32, i32, i32), u32, u32)>>,
     /// The chunks changed in bulk (`edit_runs`) since the log was last
     /// drained, kept while `block_log` is: sent to the players whole.

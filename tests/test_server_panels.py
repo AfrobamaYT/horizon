@@ -14,7 +14,7 @@ EGG = SERVER / "pterodactyl-egg.json"
 START = SERVER / "panel-start.sh"
 INIT_RS = (ROOT / "crates/horizon-server/src/init.rs").read_text()
 CONFIG_RS = (ROOT / "crates/horizon-server-launch/src/config.rs").read_text()
-DEDICATED_RS = (ROOT / "crates/horizon-client/src/game/dedicated.rs").read_text()
+DEDICATED_RS = (next(ROOT.glob('crates/horizon-client/src/game/*/dedicated.rs'))).read_text()
 
 # Read at install only, so init.rs does not know them.
 INSTALL_ONLY = {"HORIZON_VERSION"}

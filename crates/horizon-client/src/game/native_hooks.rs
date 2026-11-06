@@ -8262,7 +8262,7 @@ impl Game<'_> {
     }
     /// `PlayerRespawnPositionEvent`: where `player` respawns, once the server found it. The
     /// `original_*` arguments are that point; the mods may change `level`, `position`, `yaw`,
-    /// `pitch` and `copy_original_spawn_position` (`game/respawn_position.rs` applies them).
+    /// `pitch` and `copy_original_spawn_position` (`game/world/respawn_position.rs` applies them).
     pub(super) fn native_player_respawn_position(
         &mut self,
         call: mod_api::__private::PlayerRespawnPositionCall<'_>,
@@ -13719,7 +13719,7 @@ mod tests {
 
     #[test]
     fn lifecycle_source_stays_hookable() {
-        let source = include_str!("native_lifecycle.rs");
+        let source = include_str!("modding/native_lifecycle.rs");
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
             assert!(!line.contains("cfg"), "a cfg in lifecycle source: {line}");

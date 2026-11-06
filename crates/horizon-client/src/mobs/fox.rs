@@ -5,7 +5,7 @@
 //! item's on-consumed effects: a chorus fruit teleports it).
 //! Strolling through villages and defending trusted players are not ported yet.
 //! The goal that walks to a dropped item is here; the game side takes the
-//! items (`Fox.pickUpItem`, `game/foxes.rs`). A totem in the mouth is a
+//! items (`Fox.pickUpItem`, `game/mobs/foxes.rs`). A totem in the mouth is a
 //! `death_protection` item like any other held one (`Mob::damage`).
 use super::{
     Mob, MobEvent, MobWorld, Seen, Species,

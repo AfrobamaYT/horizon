@@ -54,6 +54,8 @@ def plan(files, source):
 
 
 def rewrite(text, path, moves):
+    if path == 'tools/move_game_modules.py':
+        return text
     # Resolve source-relative Rust includes and #[path]s before replacing documented paths.
     if path.endswith('.rs'):
         def relative(match):

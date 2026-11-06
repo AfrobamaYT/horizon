@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
 class RemoteMotionTests(unittest.TestCase):
     def test_mob_velocity_reaches_squid_animation(self):
-        source = (ROOT / "crates/horizon-client/src/game/remote.rs").read_text()
+        source = (next(ROOT.glob('crates/horizon-client/src/game/*/remote.rs'))).read_text()
         start = source.index("    fn remote_motion(")
         end = source.index("    fn apply_remote_health(", start)
         fixture = r'''
@@ -32,7 +32,7 @@ impl Potions { fn remote_thrown_motion(&mut self, _id: u32, _v: Vec3) -> bool { 
 #[derive(Default)]
 struct End;
 impl End { fn remote_eye_motion(&mut self, _id: u32, _v: [f64; 3]) {} }
-// game/mob_index.rs: the same answers as a linear search.
+// game/mobs/mob_index.rs: the same answers as a linear search.
 #[derive(Default)]
 struct MobIndex;
 impl MobIndex {
