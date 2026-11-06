@@ -310,6 +310,11 @@ modelled dragon. The read does not load levels.
 
 `MobRef::can_use_portal` reads the existing server portal decision for a mob in the current level, including mounts and player riders. It takes `&dyn Host`: `Some(false)` means the mob is ineligible, while `None` means a client, stale or unavailable handle, parked mob, or the separately modelled dragon. It does not load a level.
 
+`MobRef::leash_holder` takes `&dyn ServerHost` and reads the live mob leash. `MobLeashHolder::Unleashed`
+is a definite absence; `Entity` holds an existing entity handle for a player, mob or boat, and `Knot` holds
+fence coordinates. `None` means the mob or holder is unavailable, the level is parked, or a saved holder has
+not resolved; this read neither loads a level nor changes the leash.
+
 Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`) and
 `set_baby` (`Mob.setBaby` through the canonical species-specific setup). Ageable mobs start at their species'
 baby age (`-48000` for a sniffer, otherwise `-24000`) or become adults at `0`, including the age-boundary
@@ -679,7 +684,11 @@ trusting native code is the player's decision, never an agent's.
 4. **Stage.** The projects are copied first, so the build and its key use that copy whatever happens to the
    folder meanwhile. For raw injections the launcher writes `horizon-mixin.toml` and runs `horizon-mixins apply`.
    It stages the mod crates and generated executable, copying only changed files into `native/stage/`,
-   so Cargo, which goes by file times, recompiles only the crates the mods touch. Registry dependencies
+   so Cargo, which goes by file times, recompiles only the crates the mods touch.
+   Each file written gets the current time, never the archive's (the commit's) or the copy's original: on
+   Windows and macOS a copy keeps it, and a file older than the last build reads as already compiled, so
+   switching Nightlies linked the previous one's crates (horizon-rust/horizon#10421). A stage from before
+   that fix is written again once (`native/stage.stamped` marks it). Registry dependencies
    are checked against Horizon's `Cargo.lock` ([The mod's crate](#the-mods-crate)).
 5. **Compile**: `cargo build --locked --profile <fast|release> [--config ...] [--features horizon-client/mods] -p
    horizon-native-game`, into `native/target/`, with one of three build modes:

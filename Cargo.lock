@@ -2030,7 +2030,6 @@ dependencies = [
  "horizon-mods",
  "horizon-world",
  "log",
- "semver",
  "serde_json",
  "wasm-encoder 0.261.0",
  "wasmtime",

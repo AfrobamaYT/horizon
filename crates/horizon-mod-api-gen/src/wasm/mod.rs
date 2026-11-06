@@ -832,6 +832,8 @@ mod tests {
 
     #[test]
     fn services_use_native_forwards_and_frame_resources() {
+        use quote::ToTokens;
+
         std::thread::Builder::new()
             .stack_size(64 << 20)
             .spawn(|| {
@@ -945,13 +947,28 @@ mod tests {
                                 _ => None,
                             })
                             .unwrap();
-                        assert_eq!(method.block.stmts.len(), 1);
-                        let syn::Stmt::Expr(syn::Expr::MethodCall(call), _) =
-                            &method.block.stmts[0]
-                        else {
-                            panic!("native forward")
+                        let access = if service == "ClientSession" {
+                            quote::quote!(mod_api::__private::LoadAccess::ClientSetup)
+                        } else {
+                            quote::quote!(mod_api::__private::LoadAccess::WorldOnly)
                         };
-                        assert_eq!(call.method, format!("native_{name}"));
+                        let native = quote::format_ident!("native_{name}");
+                        let args: Vec<_> = method.sig.inputs.iter().filter_map(|arg| match arg {
+                            syn::FnArg::Receiver(_) => None,
+                            syn::FnArg::Typed(arg) => match &*arg.pat {
+                                syn::Pat::Ident(pat) => Some(&pat.ident),
+                                _ => panic!("named forwarding argument"),
+                            },
+                        }).collect();
+                        let expected: syn::Block = syn::parse_quote!({
+                            mod_api::__private::check_access(#name, #access);
+                            self.#native(#(#args),*)
+                        });
+                        assert_eq!(
+                            method.block.to_token_stream().to_string(),
+                            expected.to_token_stream().to_string(),
+                            "{service}::{name} guards before forwarding its arguments"
+                        );
                     }
                 }
                 assert!(wasm.host.contains("Ok(h.commands())"));

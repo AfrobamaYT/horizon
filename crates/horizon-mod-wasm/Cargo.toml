@@ -12,7 +12,6 @@ horizon-mods = { path = "../horizon-mods", default-features = false }
 horizon-mod-points = { path = "../horizon-mod-points", features = ["wasm-host"] }
 wasmtime = { version = "50", default-features = false, features = ["anyhow", "cranelift", "component-model", "runtime", "std", "parallel-compilation", "pulley"] }
 wit-component = "0.261"
-semver = "1"
 log = "0.4"
 
 [dev-dependencies]
