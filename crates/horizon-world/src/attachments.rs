@@ -498,20 +498,29 @@ struct IndexedAttachments<H> {
 impl<H: Copy + Eq + Hash + Send + Sync> AttachmentPublisher for IndexedAttachments<H> {
     fn publish(&self, changes: &[AttachmentChange<'_>]) {
         if let Some(index) = self.index.upgrade() {
-            let mut index = index.lock().unwrap();
-            for change in changes {
-                match change.entry {
-                    Some(entry) => index.set(&self.owner, change.key, entry.clone()),
-                    None => index.remove(&self.owner, change.key),
-                };
-            }
+            let retired = {
+                let mut index = index.lock().unwrap();
+                let mut retired = index::AttachmentChange::new(());
+                for change in changes {
+                    retired.merge(match change.entry {
+                        Some(entry) => index.set(&self.owner, change.key, entry.clone()),
+                        None => index.remove(&self.owner, change.key),
+                    });
+                }
+                retired
+            };
+            retired.into_result();
         }
     }
 
     fn unregister(&self) -> bool {
-        self.index
-            .upgrade()
-            .is_some_and(|index| index.lock().unwrap().unregister(&self.owner))
+        self.index.upgrade().is_some_and(|index| {
+            let change = {
+                let mut index = index.lock().unwrap();
+                index.unregister(&self.owner)
+            };
+            change.into_result()
+        })
     }
 }
 
@@ -582,12 +591,16 @@ impl Attachments {
         index: &Arc<Mutex<index::AttachmentIndex<H>>>,
         holder: H,
     ) -> AttachmentRegistration {
-        let owner = index.lock().unwrap().register(
-            holder,
-            self.entries
-                .iter()
-                .map(|(key, entry)| (key.clone(), entry.clone())),
-        );
+        let change = {
+            let mut index = index.lock().unwrap();
+            index.register(
+                holder,
+                self.entries
+                    .iter()
+                    .map(|(key, entry)| (key.clone(), entry.clone())),
+            )
+        };
+        let owner = change.into_result();
         let registration = AttachmentRegistration {
             publisher: Arc::new(IndexedAttachments {
                 index: Arc::downgrade(index),
