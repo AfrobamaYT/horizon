@@ -172,7 +172,7 @@ pub fn current_phase() -> ModPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LoadAccess {
-    /// A world operation or service acquisition, unavailable during loading.
+    /// No extra load access beyond the phase's metadata/settings exceptions.
     WorldOnly,
     /// The existing client setup reads, not general reload permissions.
     ClientSetup,
@@ -215,7 +215,14 @@ pub fn check_access(operation: &str, access: LoadAccess) {
     let settings = operation == "setting";
     let allowed = match phase {
         ModPhase::World => true,
-        ModPhase::Setup => settings || metadata || access != LoadAccess::WorldOnly,
+        ModPhase::Setup => {
+            settings
+                || metadata
+                || matches!(
+                    access,
+                    LoadAccess::ClientSetup | LoadAccess::PublishedResources
+                )
+        }
         ModPhase::Config => settings || operation == "config_files",
         ModPhase::Reloading => settings || metadata || access == LoadAccess::PublishedResources,
         ModPhase::Packages | ModPhase::Registration => false,

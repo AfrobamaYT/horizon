@@ -85,14 +85,14 @@ pub(super) fn generate(
         let (declaration, implementation) = host_method(method, name, trait_name, &types.exports)?;
         // The catalog owns all forwarding boundaries, including services and handle backends.
         let access = if helper.resource_read {
-            quote!(mod_api::__private::LoadAccess::PublishedResources)
+            quote::quote!(mod_api::__private::LoadAccess::PublishedResources)
         } else if side == Side::Client
             && receiver.is_none()
             && !matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some())
         {
-            quote!(mod_api::__private::LoadAccess::ClientSetup)
+            quote::quote!(mod_api::__private::LoadAccess::ClientSetup)
         } else {
-            quote!(mod_api::__private::LoadAccess::WorldOnly)
+            quote::quote!(mod_api::__private::LoadAccess::WorldOnly)
         };
         let guarded = |source: &str| -> Result<String, String> {
             let mut method = syn::parse_str::<syn::TraitItemFn>(source)

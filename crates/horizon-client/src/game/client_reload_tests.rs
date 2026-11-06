@@ -727,7 +727,7 @@ fn client_completion_reads_published_resources_without_world_access() {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "needs prepared resources and RUST_MIN_STACK=33554432"]
 fn client_startup_finishes_configs_before_the_first_runtime_callback() {
     use crate::game::{
         Audio, UiResources, native_entity_refs::tests::with_client_game, start_game,
