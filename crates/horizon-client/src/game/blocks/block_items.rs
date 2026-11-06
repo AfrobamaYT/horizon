@@ -477,7 +477,7 @@ mod tests {
                     .expect("native type");
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
-                event.blocks.push(horizon_mods::content::Block {
+                event.blocks.push(horizon_mod_package::content::Block {
                     id: CRATE.into(),
                     template: "minecraft:white_banner".into(),
                     item: true,

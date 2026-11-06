@@ -3,8 +3,8 @@
 //! `HORIZON_WASM_STD` at the std member; the test is ignored elsewhere.
 use std::sync::Mutex;
 
+use horizon_mod_package::manifest::Manifest;
 use horizon_mod_wasm::{Refusal, WasmPackage};
-use horizon_mods::manifest::Manifest;
 use mod_api::{__private::game::BackendRefOf, Text};
 
 /// The built sample: its manifest and its `mod.wasm`, and the std member.
@@ -12,8 +12,10 @@ fn sample() -> (Manifest, Vec<u8>, Vec<u8>) {
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let package = path("HORIZON_WASM_SAMPLE");
     let std_member = std::fs::read(path("HORIZON_WASM_STD")).unwrap();
-    let manifest = horizon_mods::Package::read(&package).unwrap().manifest;
-    let module = horizon_mods::Package::read_wasm(&package).unwrap();
+    let manifest = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
+    let module = horizon_mod_package::Package::read_wasm(&package).unwrap();
     (manifest, module, std_member)
 }
 

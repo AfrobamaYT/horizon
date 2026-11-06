@@ -17,7 +17,7 @@ fn ruby(version: &str) -> Vec<u8> {
     let manifest = format!(
         "id = \"ruby\"\nname = \"Ruby\"\nversion = \"{version}\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n"
     );
-    horizon_mods::Package::write_files(
+    horizon_mod_package::Package::write_files(
         &manifest,
         &[(
             "assets/ruby/lang/en_us.json",
@@ -97,7 +97,10 @@ fn an_install_is_checked_then_recorded_as_the_launchers_own() {
     let path = home.join("horizon-mods/ruby.hmod");
     assert_eq!(fs::read(&path).unwrap(), bytes);
     assert_eq!(
-        horizon_mods::Package::read(&path).unwrap().manifest.id,
+        horizon_mod_package::Package::read(&path)
+            .unwrap()
+            .manifest
+            .id,
         "ruby"
     );
     let record: serde_json::Value =
@@ -132,7 +135,7 @@ fn install_holds_the_shared_lock_through_download_and_releases_it_on_error() {
         std::thread::scope(|scope| {
             scope
                 .spawn(|| {
-                    assert!(horizon_mods::install_lock::try_lock_home(&home).is_none());
+                    assert!(horizon_mod_package::install_lock::try_lock_home(&home).is_none());
                 })
                 .join()
                 .unwrap();
@@ -146,7 +149,7 @@ fn install_holds_the_shared_lock_through_download_and_releases_it_on_error() {
     std::thread::scope(|scope| {
         scope
             .spawn(|| {
-                let _guard = horizon_mods::install_lock::try_lock_home(&home).unwrap();
+                let _guard = horizon_mod_package::install_lock::try_lock_home(&home).unwrap();
             })
             .join()
             .unwrap();
@@ -160,7 +163,7 @@ fn install_reads_the_manifest_after_the_other_installer_finishes() {
     let index = registry("1.0", &bytes, "file:///ruby.hmod");
     let home = scratch("transaction-read");
     std::thread::scope(|scope| {
-        let guard = horizon_mods::install_lock::lock_home(&home).unwrap();
+        let guard = horizon_mod_package::install_lock::lock_home(&home).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let target = &home;
         let registry = &index;
@@ -319,9 +322,10 @@ fn code_packages_never_reach_the_content_browser_install_path() {
     let module = b"\0asm\x01\0\0\0";
     let manifest = format!(
         "id = \"ruby\"\nname = \"Ruby\"\nversion = \"1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n",
-        horizon_mods::manifest::sha512_of(module)
+        horizon_mod_package::manifest::sha512_of(module)
     );
-    let bytes = horizon_mods::Package::write_files(&manifest, &[("mod.wasm", module)]).unwrap();
+    let bytes =
+        horizon_mod_package::Package::write_files(&manifest, &[("mod.wasm", module)]).unwrap();
     let index = registry("1.0", &bytes, "file:///ruby.hmod");
     let home = scratch("code");
     let error = install(&index, &home, "ruby", &serve(bytes.clone())).unwrap_err();

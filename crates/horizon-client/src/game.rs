@@ -117,7 +117,7 @@ use horizon_core::{
     position::BlockPos,
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
-use horizon_mods::selection::{Argument, LaunchArguments};
+use horizon_mod_package::selection::{Argument, LaunchArguments};
 use horizon_world::{
     block_collision::BlockCollisionRegistry,
     collision_context::{CollisionContext, CollisionEntity, CollisionItem},
@@ -24071,7 +24071,10 @@ fn run_loading(
 
 pub use launch_api::{UsageError, exit_code};
 
-pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime) -> Result<()> {
+pub fn run_with(
+    launch: LaunchArguments,
+    native: horizon_mod_package::runtime::Runtime,
+) -> Result<()> {
     let Some(mut options) = Options::read(launch)? else {
         return Ok(());
     };

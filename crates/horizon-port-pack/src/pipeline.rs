@@ -245,7 +245,7 @@ pub fn loadable(mods: &[std::path::PathBuf]) -> (Vec<std::path::PathBuf>, Vec<St
     let mut on: Vec<(std::path::PathBuf, String, Vec<String>)> = Vec::new();
     let mut off = Vec::new();
     for path in mods {
-        let manifest = horizon_mods::Package::read(path).map(|package| package.manifest);
+        let manifest = horizon_mod_package::Package::read(path).map(|package| package.manifest);
         let m = match manifest {
             Ok(m) => m,
             Err(e) => {
@@ -258,7 +258,7 @@ pub fn loadable(mods: &[std::path::PathBuf]) -> (Vec<std::path::PathBuf>, Vec<St
             .collect();
         let clash = on
             .iter()
-            .find_map(|(_, id, ns)| horizon_mods::content::clash((id, ns), (&m.id, &owned)));
+            .find_map(|(_, id, ns)| horizon_mod_package::content::clash((id, ns), (&m.id, &owned)));
         match clash {
             Some(why) => off.push(format!("{} not loaded: {why}", m.id)),
             None => on.push((path.clone(), m.id, owned)),

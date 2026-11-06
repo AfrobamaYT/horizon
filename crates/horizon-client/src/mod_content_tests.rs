@@ -1,6 +1,6 @@
 use super::*;
 use crate::{assets::Assets, blocks::BlockFacts, items::Items};
-use horizon_mods::manifest::JarRef;
+use horizon_mod_package::manifest::JarRef;
 use horizon_world::native_load_context::DataLoadOrigin;
 
 #[path = "mod_content_block_entity_tests.rs"]
@@ -242,7 +242,7 @@ fn a_missing_jar_refuses_the_whole_load_before_decoded_output() {
     )
     .unwrap_err();
     let missing = error
-        .downcast_ref::<horizon_mods::manifest::MissingJar>()
+        .downcast_ref::<horizon_mod_package::manifest::MissingJar>()
         .unwrap();
     assert_eq!(missing.owners, ["alpha"]);
     assert_eq!(missing.jar, m.jars[0]);
@@ -320,7 +320,7 @@ fn item_components_patch_the_template_entry() {
 
 #[test]
 fn creative_tabs_keep_vanilla_items_missing_from_search() {
-    let tab = horizon_mods::content::CreativeTab {
+    let tab = horizon_mod_package::content::CreativeTab {
         id: "test:restricted".into(),
         title: "Restricted".into(),
         icon: "minecraft:barrier".into(),
@@ -792,7 +792,7 @@ fn ruby_mod_with_pistons(dir: &Path, pistons: bool) -> ContentMod {
             .unwrap();
         }
     }
-    let package = horizon_mods::Package::read(dir).unwrap();
+    let package = horizon_mod_package::Package::read(dir).unwrap();
     ContentMod {
         id: "ruby".into(),
         content: Content::read(dir, &package.manifest).unwrap(),
@@ -1652,7 +1652,7 @@ fn content_root_carries_a_structure_mod() {
         base.join("worldgen/structure/minecraft/village/plains/houses/plains_small_house_1.nbt");
     fs::create_dir_all(dir.join("data/huts/structure")).unwrap();
     fs::copy(&house, dir.join("data/huts/structure/hut.nbt")).unwrap();
-    let package = horizon_mods::Package::read(&dir).unwrap();
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "huts".into(),
         content: Content::read(&dir, &package.manifest).unwrap(),
@@ -2315,7 +2315,7 @@ fn folder_mod(dir: &Path, files: &[(&str, &str)]) -> ContentMod {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
-    let package = horizon_mods::Package::read(dir).unwrap();
+    let package = horizon_mod_package::Package::read(dir).unwrap();
     ContentMod {
         id: package.manifest.id.clone(),
         content: Content::read(dir, &package.manifest).unwrap(),
@@ -2924,7 +2924,7 @@ fn connecting_blocks_join_themselves_and_their_tag() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
-    let package = horizon_mods::Package::read(&dir).unwrap();
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "cable".into(),
         content: Content::read(&dir, &package.manifest).unwrap(),
@@ -3255,7 +3255,7 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
         );
         fs::write(dir.join(format!("data/ruby/recipe/{name}.json")), recipe).unwrap();
     }
-    let package = horizon_mods::Package::read(&dir).unwrap();
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "ruby".into(),
         content: Content::read(&dir, &package.manifest).unwrap(),
@@ -3344,7 +3344,7 @@ fn creative_tabs_come_on_their_own_page() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
-    let package = horizon_mods::Package::read(&dir).unwrap();
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "gems".into(),
         content: Content::read(&dir, &package.manifest).unwrap(),
@@ -5184,7 +5184,7 @@ fn biome_modifiers_take_one_biome_or_a_list() {
 #[test]
 #[ignore = "full content root: CI and pr_ready run it"]
 fn blocks_and_items_declared_in_code_get_ids() {
-    use horizon_mods::content::{Block, Item};
+    use horizon_mod_package::content::{Block, Item};
     let Some(base) = prepared() else {
         return;
     };
@@ -5304,7 +5304,7 @@ fn blocks_and_items_declared_in_code_get_ids() {
 
 #[test]
 fn a_file_item_whose_remainder_was_refused_takes_only_its_mod_out() {
-    use horizon_mods::content::Item;
+    use horizon_mod_package::content::Item;
     let item = |id: &str, remainder: Option<&str>| Item {
         id: id.into(),
         template: "minecraft:diamond".into(),
@@ -5321,12 +5321,14 @@ fn a_file_item_whose_remainder_was_refused_takes_only_its_mod_out() {
         }
     };
     let mut jar = make("jar", vec![item("jar:tool", Some("jar:jar"))]);
-    jar.content.blocks.push(horizon_mods::content::Block {
-        id: "jar:jar".into(),
-        template: "minecraft:glass".into(),
-        item: true,
-        ..Default::default()
-    });
+    jar.content
+        .blocks
+        .push(horizon_mod_package::content::Block {
+            id: "jar:jar".into(),
+            template: "minecraft:glass".into(),
+            item: true,
+            ..Default::default()
+        });
     let mut mods = vec![
         jar,
         make(
@@ -5895,7 +5897,7 @@ fn sign_text_colors_are_the_signs_dye_ids() {
         .iter()
         .map(|(name, _)| *name)
         .collect();
-    assert_eq!(names, horizon_mods::content::DYE_COLORS);
+    assert_eq!(names, horizon_mod_package::content::DYE_COLORS);
 }
 
 /// A content mod of recipes, a tag and a name, for vanilla's items: what
@@ -6075,7 +6077,7 @@ fn a_data_mod_loads_unloads_and_loads_again() {
 
     // Another set of mods builds its own root beside it and leaves this one as it was.
     let ruby = ruby_mod(&scratch.join("ruby"));
-    let package = horizon_mods::Package::read(&scratch.join("glint")).unwrap();
+    let package = horizon_mod_package::Package::read(&scratch.join("glint")).unwrap();
     let glint_again = ContentMod {
         id: "glint".into(),
         jars: Vec::new(),
@@ -6124,10 +6126,10 @@ fn roots_unused_for_a_day_are_removed() {
 
 // These fixtures accept every listed content package on both sides. Production
 // captures the inventory after admission, including active code-only packages.
-fn fixture_inventory(mods: &[ContentMod]) -> horizon_mods::enabled::EnabledMods {
-    horizon_mods::enabled::EnabledMods::new(
+fn fixture_inventory(mods: &[ContentMod]) -> horizon_mod_package::enabled::EnabledMods {
+    horizon_mod_package::enabled::EnabledMods::new(
         mods.iter()
-            .map(|package| (package.id.clone(), horizon_mods::Side::Both)),
+            .map(|package| (package.id.clone(), horizon_mod_package::Side::Both)),
     )
 }
 fn build_fixture(base: &Path, jars: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>> {

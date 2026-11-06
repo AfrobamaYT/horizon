@@ -66,7 +66,7 @@ One fixed list per kind, Modrinth's, minus `cursed`:
   colored-lighting, foliage, path-tracing, pbr, reflections, shadows (features); potato, low, medium, high,
   screenshot (performance).
 
-They live in `horizon_mods::index::categories(kind)`; the site and the launcher read them from the index's projects
+They live in `horizon_mod_package::index::categories(kind)`; the site and the launcher read them from the index's projects
 and show the kind's list as filters.
 
 ## Submitting and editing

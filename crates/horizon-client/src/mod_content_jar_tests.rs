@@ -1,6 +1,6 @@
 use super::*;
 use crate::datapack::{self, DataPack, DataStore};
-use horizon_mods::manifest::MissingJar;
+use horizon_mod_package::manifest::MissingJar;
 use std::io::Write as _;
 
 struct Fixture(PathBuf);
@@ -270,7 +270,7 @@ fn changing_jar_list_or_order_rebuilds_and_missing_after_compose_keeps_the_old_r
     mods[0].jars[0] = relabeled.clone();
     let versioned = resource_root_fixture(&base, &store, &mods, &cache).unwrap();
     assert_ne!(versioned, shortened);
-    let accepted: Vec<horizon_mods::manifest::JarRequirement> =
+    let accepted: Vec<horizon_mod_package::manifest::JarRequirement> =
         serde_json::from_slice(&fs::read(versioned.join(JAR_INPUTS)).unwrap()).unwrap();
     assert_eq!(accepted[0].jar, relabeled);
     mods[0].jars[0] = b.clone();
@@ -318,7 +318,7 @@ fn accepted_jar_inputs_distinguish_unreadable_invalid_and_non_file_cache_entries
     ));
 
     let jar = JarRef::new("original".into(), "1".into(), "d".repeat(128)).unwrap();
-    let requirements = [horizon_mods::manifest::JarRequirement {
+    let requirements = [horizon_mod_package::manifest::JarRequirement {
         owners: vec!["alpha".into(), "beta".into()],
         jar: jar.clone(),
     }];
@@ -336,7 +336,7 @@ fn accepted_jar_inputs_distinguish_unreadable_invalid_and_non_file_cache_entries
 
 #[test]
 fn code_only_inventory_changes_cache_roots_and_recipe_conditions_without_content_namespaces() {
-    use horizon_mods::{Side, enabled::EnabledMods};
+    use horizon_mod_package::{Side, enabled::EnabledMods};
     let fixture = Fixture::new("enabled-inventory");
     fixture.write(
         "base/data/minecraft/recipe/code_only.json",

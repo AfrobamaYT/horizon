@@ -32,7 +32,7 @@ pub(super) fn template(path: &Path) -> Result<String, String> {
 
 pub(super) fn main_rs(
     template: &str,
-    mods: &[&horizon_mods::Manifest],
+    mods: &[&horizon_mod_package::Manifest],
     listed: &[super::inject::ListedPoint],
 ) -> String {
     let entries = mods
@@ -41,7 +41,7 @@ pub(super) fn main_rs(
         .map(|(i, m)| format!("        {:?} => mod_{i}::hooks,\n", m.id))
         .collect::<String>();
     let inventory = mods.iter().map(|m| format!(
-        "    horizon_mods::runtime::BuiltMod {{ id: {:?}, version: {:?}, side: horizon_mods::Side::{:?} }},\n",
+        "    horizon_mod_package::runtime::BuiltMod {{ id: {:?}, version: {:?}, side: horizon_mod_package::Side::{:?} }},\n",
         m.id, m.version, m.side,
     )).collect::<String>();
     let checks = mods
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn generates_only_tool_contract_tables_without_mutating_package() {
         let dir = fixture();
-        let path = dir.join(horizon_mods::manifest::MANIFEST);
+        let path = dir.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap()
             + "[[native.injection]]\nid='test'\ntarget='horizon_client::game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n";
         fs::write(&path, &text).unwrap();
@@ -534,14 +534,14 @@ mod tests {
     fn generated_main_keeps_mod_order() {
         let template = include_str!("../../../crates/horizon-client/src/native_main.rs.template");
         let dir = fixture();
-        let mut base = horizon_mods::Package::read(&dir).unwrap().manifest;
+        let mut base = horizon_mod_package::Package::read(&dir).unwrap().manifest;
         base.id = "base".into();
         base.version = "1.2.3".into();
-        base.side = horizon_mods::Side::Both;
+        base.side = horizon_mod_package::Side::Both;
         let mut extra = base.clone();
         extra.id = "extra".into();
         extra.version = "2.0.0".into();
-        extra.side = horizon_mods::Side::Client;
+        extra.side = horizon_mod_package::Side::Client;
         let mods = [&base, &extra];
         for count in 0..=2 {
             let text = main_rs(template, &mods[..count], &[]);
@@ -563,8 +563,8 @@ mod tests {
             assert_eq!(
                 inventory,
                 &[
-                    "    horizon_mods::runtime::BuiltMod { id: \"base\", version: \"1.2.3\", side: horizon_mods::Side::Both },",
-                    "    horizon_mods::runtime::BuiltMod { id: \"extra\", version: \"2.0.0\", side: horizon_mods::Side::Client },",
+                    "    horizon_mod_package::runtime::BuiltMod { id: \"base\", version: \"1.2.3\", side: horizon_mod_package::Side::Both },",
+                    "    horizon_mod_package::runtime::BuiltMod { id: \"extra\", version: \"2.0.0\", side: horizon_mod_package::Side::Client },",
                 ][..count]
             );
         }

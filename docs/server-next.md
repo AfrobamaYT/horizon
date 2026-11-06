@@ -150,7 +150,7 @@ drift. Gameplay is about 420 000 lines (`game/` 133 k, `mobs/` 62 k, `lan/` 15 k
 | Saving and light off the tick thread (5.5) | `game/world/saving.rs`, `save.rs`, `horizon-world` | everyone |
 | Fast path (8) | `horizon-protocol` (the `horizon:hello` payloads), `lan/conn.rs` (server), `net.rs` and `game/remote*.rs` (client) | every Horizon client against every Horizon server |
 | Operations (9.2) | `crates/horizon-server` (supervisor, panel, control API, MCP), `crates/horizon-server-files` | dedicated |
-| Plugin API (W9) | `crates/horizon-mods` and the server hooks from #3706 and #3878 | integrated server, LAN, dedicated |
+| Plugin API (W9) | `crates/horizon-mod-package` and the server hooks from #3706 and #3878 | integrated server, LAN, dedicated |
 | Bench (W0) | `tools/server_bench.py`, `crates/horizon-bots`, `benchmarks/` | — |
 
 What changes for single player: it gets the exact parallel phases (4.1, 4.2 `tick = "vanilla"`), the cheaper

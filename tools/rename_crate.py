@@ -40,7 +40,7 @@ def rewrite(path, source):
         source = source.replace("../horizon-mods\"", "../horizon-mod-package\"")
         source = source.replace("../horizon-mods'", "../horizon-mod-package'")
         source = source.replace("dependencies.horizon-mods]", "dependencies.horizon-mod-package]")
-    if path == "crates/cargo-horizon-mod/src/check.rs":
+    if path in {"crates/cargo-horizon-mod/src/check.rs", "crates/horizon-mod-registry/tests/submit.rs"}:
         source = source.replace("../horizon-mods/tests/", "../horizon-mod-package/tests/")
     if path in LOCKS:
         source = source.replace('"horizon-mods"', '"horizon-mod-package"')

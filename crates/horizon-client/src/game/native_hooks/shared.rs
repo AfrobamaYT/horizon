@@ -3926,7 +3926,7 @@ mod tests {
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
                 event.blocks.extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| {
-                    horizon_mods::content::Block {
+                    horizon_mod_package::content::Block {
                         id: id.into(),
                         template: "minecraft:white_banner".into(),
                         ..Default::default()
@@ -4217,7 +4217,7 @@ mod tests {
     fn mod_sign_constructor_prioritizes_templates_over_suffixes() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::mod_content::{ContentMod, build};
-        use horizon_mods::content::{Block, Content};
+        use horizon_mod_package::content::{Block, Content};
 
         let base = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES")
@@ -4265,7 +4265,10 @@ mod tests {
                 jars: Vec::new(),
             }],
             &root,
-            &horizon_mods::enabled::EnabledMods::new([("ruby".into(), horizon_mods::Side::Both)]),
+            &horizon_mod_package::enabled::EnabledMods::new([(
+                "ruby".into(),
+                horizon_mod_package::Side::Both,
+            )]),
         )
         .unwrap();
         let settings = Settings::default();

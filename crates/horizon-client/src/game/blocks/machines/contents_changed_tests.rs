@@ -116,7 +116,7 @@ impl Hooks for Observed {
     }
 
     fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
-        event.blocks.push(horizon_mods::content::Block {
+        event.blocks.push(horizon_mod_package::content::Block {
             id: DEPOT.into(),
             template: "minecraft:white_banner".into(),
             ..Default::default()

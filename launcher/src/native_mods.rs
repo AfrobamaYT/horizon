@@ -24,7 +24,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use horizon_mods::dependencies;
+use horizon_mod_package::dependencies;
 
 mod api;
 mod crates;
@@ -45,7 +45,7 @@ const PREFIX: &str = "native-";
 const STAGING: &str = "embedded-inventory-packages-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
-pub const MIXINS_REV: &str = horizon_mods::index::native::MIXINS_REV;
+pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
 
 /// What a native build is compiled for, as the player picks it on the Mods page. `Optimized`, the
 /// default, is the release profile the daily prebuilt game is built with (thin LTO, one codegen
@@ -552,7 +552,7 @@ pub fn internals_rustc_wrapper() -> Option<i32> {
 /// Discover used internals without installing a game or changing an instance.
 pub fn sync_internals(
     folder: &Path,
-) -> Result<Vec<horizon_mods::internals::ListedInternal>, String> {
+) -> Result<Vec<horizon_mod_package::internals::ListedInternal>, String> {
     internals_sync::check(folder).map_err(|error| error.to_string())
 }
 
@@ -604,10 +604,10 @@ pub fn cache_info(clear: bool) -> Result<CacheInfo, String> {
 
 const MANIFEST: &str = "horizon-mixin.toml";
 /// A registry download's `horizon-mod.toml` at the `.hmod` package root.
-const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
+const NATIVE_MANIFEST: &str = horizon_mod_package::manifest::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hmod`, each on or
 /// off in `horizon-mods.txt` like any mod.
-pub const INSTALLED: &str = horizon_mods::mod_list::NATIVE_DIR;
+pub const INSTALLED: &str = horizon_mod_package::mod_list::NATIVE_DIR;
 
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
 /// Each flat `.hmod` passes the registry's shared package boundary; no code is run.
@@ -625,7 +625,7 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
     paths.sort();
     let mut count = 0;
     for path in paths {
-        let bundle = horizon_mods::index::native::Bundle::read(&path)
+        let bundle = horizon_mod_package::index::native::Bundle::read(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
         if !crate::browser::java::is_enabled(home, &bundle.manifest.id) {
             continue;
@@ -700,14 +700,14 @@ pub fn routes(home: &Path, profile: Profile) -> Routes {
 /// A validated flat mod project. The package manifest owns identity and build pins.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bundle {
-    pub manifest: horizon_mods::manifest::Manifest,
+    pub manifest: horizon_mod_package::manifest::Manifest,
     pub dir: PathBuf,
     /// The typed injection sites projected for conflict warnings.
     pub injections: Vec<Injection>,
 }
 
 impl Bundle {
-    fn native(&self) -> &horizon_mods::manifest::Native {
+    fn native(&self) -> &horizon_mod_package::manifest::Native {
         self.manifest
             .native
             .as_ref()
@@ -1837,7 +1837,7 @@ fn source(revision: &str) -> Result<PathBuf, String> {
     }
     let archive = format!(
         "https://codeload.github.com/{}/tar.gz/{revision}",
-        horizon_mods::index::native::PREBUILT_REPO
+        horizon_mod_package::index::native::PREBUILT_REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
     let top = unpack_archive(&archive, &partial, u64::MAX)?;
@@ -2147,7 +2147,7 @@ fn pipeline(
         return Err(format!("{MISMATCH}{list}; rebuild against this game.").into());
     }
     if target == Target::Server {
-        let jars = horizon_mods::manifest::collect_jar_requirements(
+        let jars = horizon_mod_package::manifest::collect_jar_requirements(
             mods.iter()
                 .map(|bundle| (bundle.manifest.id.as_str(), bundle.manifest.jar.as_slice())),
         )
@@ -2834,7 +2834,7 @@ fn install(
         package::copy(
             bundle,
             &partial
-                .join(horizon_mods::mod_list::NATIVE_DIR)
+                .join(horizon_mod_package::mod_list::NATIVE_DIR)
                 .join(&bundle.manifest.id),
         )?;
     }
@@ -2878,7 +2878,7 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
         "Horizon.app",
         "native-mods.json",
         "native-data",
-        horizon_mods::mod_list::NATIVE_DIR,
+        horizon_mod_package::mod_list::NATIVE_DIR,
     ]
     .iter()
     .map(|s| s.to_string())
@@ -4113,7 +4113,7 @@ mod tests {
         )
         .unwrap();
         fs::write(source.join(Target::Server.binary()), b"unmodded").unwrap();
-        let native_dir = horizon_mods::mod_list::NATIVE_DIR;
+        let native_dir = horizon_mod_package::mod_list::NATIVE_DIR;
         fs::create_dir_all(source.join(native_dir).join("stale")).unwrap();
         let project = dir("server-runtime-project");
         write_bundle(&project, "exported", "pub fn hook() {}");
@@ -4165,12 +4165,12 @@ mod tests {
         );
         assert!(!package.join("jars").exists());
         assert!(!output.join(native_dir).join("stale").exists());
-        let runtime = horizon_mods::runtime::Runtime::load(
+        let runtime = horizon_mod_package::runtime::Runtime::load(
             &output.join(Target::Server.binary()),
-            &[horizon_mods::runtime::BuiltMod {
+            &[horizon_mod_package::runtime::BuiltMod {
                 id: "exported",
                 version: "0.1.0",
-                side: horizon_mods::Side::Client,
+                side: horizon_mod_package::Side::Client,
             }],
         )
         .unwrap();

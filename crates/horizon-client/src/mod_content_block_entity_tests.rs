@@ -177,7 +177,7 @@ fn code_declared_types_build_a_root_and_membership_changes_invalidate_its_cache(
     let code_only = resource_root_fixture(&base, Path::new(""), &mods, &cache).unwrap();
     assert_ne!(code_only, base);
     assert_eq!(
-        horizon_mods::enabled::EnabledMods::read(&code_only)
+        horizon_mod_package::enabled::EnabledMods::read(&code_only)
             .unwrap()
             .server_ids()
             .collect::<Vec<_>>(),

@@ -16,7 +16,7 @@
 //!   (`.hmod`, `.hpack`, resource pack `.zip`, `.hshader`).
 //! - `registry build|review|check|list`: the registry repository's CI.
 //! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
-use horizon_mods::{Content, Manifest, Package, index::native, manifest::MANIFEST};
+use horizon_mod_package::{Content, Manifest, Package, index::native, manifest::MANIFEST};
 mod check;
 mod internals;
 mod jar;
@@ -185,7 +185,7 @@ fn pin(horizon: Option<&str>) -> Result<String, String> {
                 )
             });
     };
-    if !horizon_mods::manifest::revision(horizon) {
+    if !horizon_mod_package::manifest::revision(horizon) {
         return Err("--horizon: a Horizon commit is 40 lowercase hex digits".into());
     }
     Ok(horizon.into())
@@ -203,7 +203,7 @@ fn newest_prebuilt(releases: &serde_json::Value) -> Option<String> {
                 .as_str()
                 .is_some_and(|name| name.starts_with(native::PREBUILT_ARCHIVE))
         });
-        (readable && horizon_mods::manifest::revision(commit)).then(|| commit.to_string())
+        (readable && horizon_mod_package::manifest::revision(commit)).then(|| commit.to_string())
     })
 }
 
@@ -327,7 +327,7 @@ fn check(args: &[String]) -> Result<(), String> {
         .ok_or("cargo horizon-mod check <file>")?;
     let path = Path::new(file);
     let kind = match flag(args, "--kind") {
-        Some(k) => horizon_mods::index::Kind::from(k.to_string()),
+        Some(k) => horizon_mod_package::index::Kind::from(k.to_string()),
         None => check::kind_of(path)
             .ok_or("pass --kind mod|modpack|resourcepack: the extension doesn't say")?,
     };
@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn native_build_and_check_share_the_content_executable_boundary() {
-        use horizon_mods::manifest::ContentFileError;
+        use horizon_mod_package::manifest::ContentFileError;
         use std::io::Write;
 
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -520,7 +520,7 @@ mod tests {
         let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
         assert!(api.contains(&format!("rev = \"{commit}\"")), "{api}");
         let hmod = build_in(&path).unwrap();
-        let bundle = horizon_mods::index::native::Bundle::read(&hmod).unwrap();
+        let bundle = horizon_mod_package::index::native::Bundle::read(&hmod).unwrap();
         assert_eq!(bundle.manifest.id, "machine_mod");
         let names: Vec<_> = bundle.files.keys().map(String::as_str).collect();
         assert_eq!(names, ["Cargo.toml", "horizon-mod.toml", "src/lib.rs"]);
@@ -538,7 +538,7 @@ mod tests {
         }
         assert_eq!(
             check::kind_of(&hmod),
-            Some(horizon_mods::index::Kind::NativeMod)
+            Some(horizon_mod_package::index::Kind::NativeMod)
         );
         assert_eq!(check::kind_of(&dir.join("machine_mod.hnmod")), None);
         let report = check::check(&hmod, check::kind_of(&hmod).unwrap(), None, None).unwrap();

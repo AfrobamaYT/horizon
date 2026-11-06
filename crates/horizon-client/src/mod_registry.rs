@@ -11,7 +11,7 @@
 //! game needs. Everything here blocks: the game runs it on a worker
 //! (`game/interface/mod_browser.rs`).
 use crate::mod_browser::Listing;
-use horizon_mods::index::{self, Index, Kind, Project, Trust, Version};
+use horizon_mod_package::index::{self, Index, Kind, Project, Trust, Version};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -104,7 +104,7 @@ pub fn installable<'a>(index: &Index, p: &'a Project) -> Option<&'a Version> {
     }
     index
         .installable(p, GAME)
-        .filter(|v| v.capabilities == [horizon_mods::Capability::Registries])
+        .filter(|v| v.capabilities == [horizon_mod_package::Capability::Registries])
 }
 
 /// The registry's projects the browser offers, most downloaded first: content
@@ -168,7 +168,7 @@ pub fn install(
     let relative = format!("{}/{id}.hmod", crate::mod_list::DIR);
     let target = home.join(&relative);
     // Share the entire read/modify/write transaction with the launcher's installers.
-    let _lock = horizon_mods::install_lock::lock_home(home)
+    let _lock = horizon_mod_package::install_lock::lock_home(home)
         .map_err(|e| format!("cannot lock mod browser in {}: {e}", home.display()))?;
     let mut list = Installed::load(home)?;
     let ours = list.position(id);
@@ -183,7 +183,7 @@ pub fn install(
         return Err("code mods are installed and updated in the launcher".into());
     }
     if target.exists() && old_file.as_deref() == Some(relative.as_str()) {
-        let package = horizon_mods::Package::read(&target)?;
+        let package = horizon_mod_package::Package::read(&target)?;
         if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
             return Err("code mods are installed and updated in the launcher".into());
         }
@@ -216,7 +216,7 @@ pub fn install(
     fs::write(&download, &bytes).map_err(|e| format!("{}: {e}", download.display()))?;
     let checked = || -> Result<_, String> {
         let trust = index::check_file(index, p, v, &download)?;
-        let package = horizon_mods::Package::read(&download)?;
+        let package = horizon_mod_package::Package::read(&download)?;
         if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
             return Err("code mods are installed and updated in the launcher".into());
         }
@@ -349,7 +349,7 @@ impl Installed {
             return Some(version.to_owned());
         }
         let path: PathBuf = home.join(crate::mod_list::DIR).join(format!("{id}.hmod"));
-        horizon_mods::Package::read(&path)
+        horizon_mod_package::Package::read(&path)
             .ok()
             .filter(|p| p.manifest.id == id)
             .map(|p| p.manifest.version)

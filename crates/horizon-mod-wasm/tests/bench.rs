@@ -120,8 +120,10 @@ fn load(budgets: Budgets) -> horizon_mod_wasm::Loaded {
         },
         &std_member,
         vec![horizon_mod_wasm::WasmPackage {
-            manifest: horizon_mods::Package::read(&package).unwrap().manifest,
-            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+            manifest: horizon_mod_package::Package::read(&package)
+                .unwrap()
+                .manifest,
+            module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
@@ -312,9 +314,11 @@ fn a_point_filled_by_a_wasm_mod() {
     // the other tests here load it without registering a listener).
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let package = path("HORIZON_WASM_BENCH");
-    let built = horizon_mods::Package::read(&package).unwrap().manifest;
+    let built = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
     let wasm = built.wasm.as_ref().unwrap();
-    let manifest = horizon_mods::manifest::Manifest::parse(&format!(
+    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!(
         "id = \"bench_mod\"\nname = \"Benchmark mod\"\nversion = \"1.0.0\"\napi = \"0.2\"\n\
          capabilities = [\"registries\"]\n\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"{}\"\n\n\
          [[native.injection]]\nid = \"tick\"\ntarget = \"horizon_client::game::Game<'_>::tick\"\n\
@@ -328,7 +332,7 @@ fn a_point_filled_by_a_wasm_mod() {
         &std::fs::read(path("HORIZON_WASM_STD")).unwrap(),
         vec![horizon_mod_wasm::WasmPackage {
             manifest,
-            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+            module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);

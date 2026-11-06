@@ -125,7 +125,7 @@ pub fn horizon_label(version: &str) -> String {
 pub fn enabled(home: &Path) -> Vec<Mod> {
     let mut out = Vec::new();
     for path in hmods(home) {
-        match horizon_mods::index::native::Bundle::read(&path) {
+        match horizon_mod_package::index::native::Bundle::read(&path) {
             Ok(b) => {
                 if java::is_enabled(home, &b.manifest.id) {
                     let digest = native_mods::digest(
@@ -150,16 +150,16 @@ pub fn pinning(home: &Path, revision: &str) -> Vec<String> {
 }
 
 /// The readable native mods turned on in game folder `home`.
-pub fn bundles_on(home: &Path) -> Vec<horizon_mods::index::native::Bundle> {
+pub fn bundles_on(home: &Path) -> Vec<horizon_mod_package::index::native::Bundle> {
     hmods(home)
         .into_iter()
-        .filter_map(|path| horizon_mods::index::native::Bundle::read(&path).ok())
+        .filter_map(|path| horizon_mod_package::index::native::Bundle::read(&path).ok())
         .filter(|b| java::is_enabled(home, &b.manifest.id))
         .collect()
 }
 
 /// Paths declared by a native package, in manifest order.
-pub fn declared_internals(manifest: &horizon_mods::Manifest) -> Vec<String> {
+pub fn declared_internals(manifest: &horizon_mod_package::Manifest) -> Vec<String> {
     manifest
         .native
         .as_ref()
@@ -182,7 +182,7 @@ pub struct Installed {
     pub internals: Vec<String>,
     pub origin: Option<crate::github_mods::Origin>,
     /// The validated package icon, or the package error (the file remains removable).
-    pub icon: Result<Option<Arc<horizon_mods::icon::Icon>>, String>,
+    pub icon: Result<Option<Arc<horizon_mod_package::icon::Icon>>, String>,
 }
 
 /// Discover the actual files, not just GitHub sidecars. Registry files already have a row.
@@ -195,7 +195,7 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
             if !path.is_file() || tracked.entries.iter().any(|e| e.file == file) {
                 return None;
             }
-            let package = horizon_mods::manifest::Package::read(&path);
+            let package = horizon_mod_package::manifest::Package::read(&path);
             let (id, version) = package
                 .as_ref()
                 .map(|p| (p.manifest.id.clone(), p.manifest.version.clone()))
@@ -286,7 +286,7 @@ pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     let mut packages = hmods(home);
     // A wasm mod's declarations also select a source build's internals table.
     packages.extend(
-        fs::read_dir(home.join(horizon_mods::mod_list::DIR))
+        fs::read_dir(home.join(horizon_mod_package::mod_list::DIR))
             .into_iter()
             .flatten()
             .flatten()
@@ -336,8 +336,10 @@ mod tests {
     #[test]
     fn regular_wasm_package_changes_invalidate_the_build_view_cache() {
         let home = std::env::temp_dir().join(format!("wasm-build-view-{}", std::process::id()));
-        fs::create_dir_all(home.join(horizon_mods::mod_list::DIR)).unwrap();
-        let package = home.join(horizon_mods::mod_list::DIR).join("example.hmod");
+        fs::create_dir_all(home.join(horizon_mod_package::mod_list::DIR)).unwrap();
+        let package = home
+            .join(horizon_mod_package::mod_list::DIR)
+            .join("example.hmod");
         fs::write(&package, b"a").unwrap();
         let before = fingerprint(&home, None);
         fs::write(&package, b"ab").unwrap();

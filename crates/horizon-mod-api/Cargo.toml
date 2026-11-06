@@ -15,7 +15,7 @@ horizon-world = { path = "../horizon-world" }
 horizon-items = { path = "../horizon-items" }
 horizon-client-core = { path = "../horizon-client-core" }
 horizon-assets = { path = "../horizon-assets" }
-horizon-mods = { path = "../horizon-mods", default-features = false }
+horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }

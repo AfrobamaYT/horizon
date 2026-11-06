@@ -11,7 +11,7 @@ const CRATES: &[(&str, &str)] = &[
     ("horizon_items", "crates/horizon-items/src"),
     ("horizon_client_core", "crates/horizon-client-core/src"),
     ("horizon_assets", "crates/horizon-assets/src"),
-    ("horizon_mods", "crates/horizon-mods/src"),
+    ("horizon_mod_package", "crates/horizon-mod-package/src"),
 ];
 
 /// One module: its crate, its path below the crate root, and its items.

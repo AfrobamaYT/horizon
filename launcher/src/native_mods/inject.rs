@@ -3,7 +3,7 @@
 //! source of its own spliced into the game. Every `Game` method the staging pass admits is a
 //! point, on both routes: the prebuilt game was staged before it was built, and the source route
 //! runs the revision's own pass on its copy; `points.json` lists them.
-use horizon_mods::manifest::InjectionKind;
+use horizon_mod_package::manifest::InjectionKind;
 use std::{fs, path::Path};
 
 /// One `trait_method` injection: the mod's method, the function it listens at, and where.
@@ -83,15 +83,15 @@ impl std::fmt::Display for PointError {
 
 /// A mod's point injections, in manifest order. The manifest's own check has already refused any
 /// that isn't a plain HEAD or RETURN on a `target`.
-pub(super) fn of(manifest: &horizon_mods::Manifest) -> Vec<PointInjection> {
+pub(super) fn of(manifest: &horizon_mod_package::Manifest) -> Vec<PointInjection> {
     injections(manifest, false)
 }
 
-pub(super) fn raw_of(manifest: &horizon_mods::Manifest) -> Vec<PointInjection> {
+pub(super) fn raw_of(manifest: &horizon_mod_package::Manifest) -> Vec<PointInjection> {
     injections(manifest, true)
 }
 
-fn injections(manifest: &horizon_mods::Manifest, raw: bool) -> Vec<PointInjection> {
+fn injections(manifest: &horizon_mod_package::Manifest, raw: bool) -> Vec<PointInjection> {
     manifest
         .native
         .iter()
@@ -173,7 +173,7 @@ mod tests {
     fn fixture(name: &str, injection: &str) -> (std::path::PathBuf, Bundle) {
         let root = super::super::tests::dir(&format!("inject-{name}"));
         super::super::tests::write_bundle(&root, "example", "");
-        let path = root.join(horizon_mods::manifest::MANIFEST);
+        let path = root.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap()
             + &injection.replace("[[injection]]", "[[native.injection]]");
         fs::write(path, text).unwrap();
@@ -198,7 +198,7 @@ mod tests {
             "pub(crate) fn bump(value: &mut i32) { *value += 1; }\n",
         )
         .unwrap();
-        let path = root.join(horizon_mods::manifest::MANIFEST);
+        let path = root.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap()
             + "[[native.module]]\nid = 'runtime'\nfile = 'crates/horizon-client/src/game.rs'\nname = 'runtime'\nsource = 'src/runtime.rs'\n";
         fs::write(&path, text).unwrap();
@@ -225,7 +225,7 @@ mod tests {
     fn a_module_only_bundle_still_needs_the_tool() {
         let root = super::super::tests::dir("inject-module-only");
         super::super::tests::write_bundle(&root, "example", "");
-        let path = root.join(horizon_mods::manifest::MANIFEST);
+        let path = root.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap()
             + "[[native.module]]\nid = 'runtime'\nfile = 'crates/horizon-client/src/game.rs'\nname = 'runtime'\nsource = 'src/lib.rs'\n";
         fs::write(&path, text).unwrap();
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn rejects_manual_tool_crate_declarations() {
         let (root, _) = fixture("tool-route", "");
-        let path = root.join(horizon_mods::manifest::MANIFEST);
+        let path = root.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap();
         fs::write(path, text + "[[crate]]\nid='code'\npath='src'\n").unwrap();
         assert!(super::super::bundle_in(&root).is_err());

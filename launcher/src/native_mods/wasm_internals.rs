@@ -1,6 +1,6 @@
 //! Only installed, enabled wasm mods opt a from-source game into an internals table.
 use crate::i18n::trf;
-use horizon_mods::{manifest::Package, mod_list};
+use horizon_mod_package::{manifest::Package, mod_list};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -99,7 +99,7 @@ mod tests {
     use super::*;
 
     fn install(home: &Path, id: &str, internals: &str) {
-        let text = format!("id = '{id}'\nname = 'Fixture'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'nightly'\n{internals}", horizon_mods::manifest::sha512_of(b"\0asmfixture"));
+        let text = format!("id = '{id}'\nname = 'Fixture'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'nightly'\n{internals}", horizon_mod_package::manifest::sha512_of(b"\0asmfixture"));
         let bytes = Package::write_files(
             &text,
             &[

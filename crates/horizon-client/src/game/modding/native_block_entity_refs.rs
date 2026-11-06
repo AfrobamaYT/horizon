@@ -215,7 +215,7 @@ impl Game<'_> {
         entity: BlockEntityRef,
         values: Vec<i32>,
     ) -> Result<bool, BlockEntityDataError> {
-        let limit = usize::from(horizon_mods::content::MAX_MENU_SLOTS);
+        let limit = usize::from(horizon_mod_package::content::MAX_MENU_SLOTS);
         if values.len() > limit {
             return Err(BlockEntityDataError::TooManySlots {
                 count: values.len() as u64,

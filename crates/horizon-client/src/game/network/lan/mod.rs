@@ -350,7 +350,7 @@ fn data_load_context(
     origin: horizon_world::native_load_context::DataLoadOrigin,
 ) -> std::io::Result<horizon_world::native_load_context::LoadContext> {
     use horizon_world::native_load_context::DataLoadOrigin;
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let ids: Vec<_> = if origin == DataLoadOrigin::ServerDataLoad {
         inventory.server_ids().collect()
     } else {

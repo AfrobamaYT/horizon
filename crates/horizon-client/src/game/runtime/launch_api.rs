@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn game_uses_the_command_selection_context() {
-        use horizon_mods::selection::{LaunchArguments, content_packages};
+        use horizon_mod_package::selection::{LaunchArguments, content_packages};
         use std::{collections::BTreeSet, fs, process::Command};
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -249,7 +249,7 @@ mod tests {
             );
             fs::write(
                 path,
-                horizon_mods::Package::write_files(&manifest, &[]).unwrap(),
+                horizon_mod_package::Package::write_files(&manifest, &[]).unwrap(),
             )
             .unwrap();
         }

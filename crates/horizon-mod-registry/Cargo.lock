@@ -461,7 +461,7 @@ dependencies = [
  "base64",
  "getrandom 0.3.4",
  "hmac",
- "horizon-mods",
+ "horizon-mod-package",
  "http-body-util",
  "rusqlite",
  "serde",
@@ -475,7 +475,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-mods"
+name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
  "horizon-core",

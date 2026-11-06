@@ -4,7 +4,7 @@
 //! list of listeners, exactly as a native mod does: its places fire it through
 //! `mod_points::wire::forwarded`, as hook calls within its group's limits.
 use crate::Refusal;
-use horizon_mods::manifest::{InjectionKind, Manifest};
+use horizon_mod_package::manifest::{InjectionKind, Manifest};
 use mod_api::__private::wasm_host::{CallHost, Exports};
 use mod_points::__private::wire::{Forward, HostKind, PointHost, Record, Value, forwarded};
 use mod_points::PointId;
@@ -155,7 +155,7 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
     }
     let interface = format!(
         "{}-listeners",
-        horizon_mods::manifest::export_prefix(&manifest.id)
+        horizon_mod_package::manifest::export_prefix(&manifest.id)
     );
     let subscribed: Subscribed = exports
         .func(&interface, "subscribed")

@@ -838,10 +838,12 @@ mod tests {
             std::env::var_os("HORIZON_WASM_INTERNALS").expect("fixture directory"),
         );
         let package = root.join("counter/target/horizon-mod/internals_counter.hmod");
-        let manifest = horizon_mods::Package::read(&package).unwrap().manifest;
+        let manifest = horizon_mod_package::Package::read(&package)
+            .unwrap()
+            .manifest;
         let package = crate::WasmPackage {
             manifest,
-            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+            module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
         };
         let std = std::fs::read(std::env::var_os("HORIZON_WASM_STD").expect("std member")).unwrap();
         let mut config = crate::RuntimeConfig::default();
@@ -858,7 +860,7 @@ mod tests {
             &component,
             &[Member {
                 id: "internals_counter",
-                exports: horizon_mods::manifest::export_prefix("internals_counter"),
+                exports: horizon_mod_package::manifest::export_prefix("internals_counter"),
             }],
             config.budgets,
             |linker| {
@@ -870,7 +872,7 @@ mod tests {
         .exports;
         let interface = format!(
             "{}-raw-listeners",
-            horizon_mods::manifest::export_prefix("internals_counter")
+            horizon_mod_package::manifest::export_prefix("internals_counter")
         );
         let listed = exports
             .func::<(), (Vec<(String, String)>,)>(&interface, "declared")

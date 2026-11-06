@@ -54,8 +54,10 @@ fn built() -> ([horizon_mod_wasm::WasmPackage; 4], Vec<u8>) {
     let packages = ["counter_lib", "alpha", "beta", "gamma"].map(|id| {
         let package = folder.join(format!("{id}/target/horizon-mod/{id}.hmod"));
         horizon_mod_wasm::WasmPackage {
-            manifest: horizon_mods::Package::read(&package).unwrap().manifest,
-            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+            manifest: horizon_mod_package::Package::read(&package)
+                .unwrap()
+                .manifest,
+            module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
         }
     });
     (packages, std_member)
@@ -67,7 +69,7 @@ fn a_library_refused_over_a_point_takes_its_dependents_with_it() {
     let (mut packages, std_member) = built();
     // The library lists a point this game doesn't have.
     let wasm = packages[0].manifest.wasm.as_ref().unwrap();
-    packages[0].manifest = horizon_mods::manifest::Manifest::parse(&format!(
+    packages[0].manifest = horizon_mod_package::manifest::Manifest::parse(&format!(
         "id = \"counter_lib\"\nname = \"Counter library\"\nversion = \"1.0.0\"\napi = \"0.2\"\n\
          capabilities = [\"registries\"]\n\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"{}\"\n\n\
          [[native.injection]]\nid = \"gone\"\ntarget = \"horizon_client::game::Game<'_>::gone\"\n\

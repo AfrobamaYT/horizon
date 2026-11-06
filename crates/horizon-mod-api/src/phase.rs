@@ -250,7 +250,7 @@ pub struct PackageInfo {
     pub(crate) id: String,
     pub(crate) version: String,
     pub(crate) kind: PackageKind,
-    pub(crate) side: horizon_mods::Side,
+    pub(crate) side: horizon_mod_package::Side,
     /// Its own namespace, then the others it declares.
     pub(crate) namespaces: Vec<String>,
     /// The ids it declares dependencies on.
@@ -258,7 +258,7 @@ pub struct PackageInfo {
 }
 
 impl PackageInfo {
-    fn new(kind: PackageKind, manifest: &horizon_mods::Manifest) -> Self {
+    fn new(kind: PackageKind, manifest: &horizon_mod_package::Manifest) -> Self {
         Self {
             id: manifest.id.clone(),
             version: manifest.version.clone(),
@@ -284,7 +284,7 @@ impl PackageInfo {
         self.kind
     }
     /// The package's declared side.
-    pub fn side(&self) -> horizon_mods::Side {
+    pub fn side(&self) -> horizon_mod_package::Side {
         self.side
     }
     /// The package's own namespace followed by any additional namespaces.
@@ -309,7 +309,7 @@ pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     let packages: Vec<_> = ids
         .iter()
         .map(|id| {
-            let manifest = horizon_mods::Manifest::parse(&format!(
+            let manifest = horizon_mod_package::Manifest::parse(&format!(
                 "id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n"
             ))
             .unwrap();
@@ -323,8 +323,8 @@ pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
 }
 
 fn inventory(
-    native: &[horizon_mods::packages::AdjacentManifest],
-    content: &[horizon_mods::selection::SelectedPackage],
+    native: &[horizon_mod_package::packages::AdjacentManifest],
+    content: &[horizon_mod_package::selection::SelectedPackage],
 ) -> Vec<PackageInfo> {
     let mut packages: Vec<_> = native
         .iter()
@@ -354,8 +354,8 @@ fn inventory(
 
 /// Records the package inventory once at startup; a second call panics.
 pub fn install_packages(
-    native: &[horizon_mods::packages::AdjacentManifest],
-    content: &[horizon_mods::selection::SelectedPackage],
+    native: &[horizon_mod_package::packages::AdjacentManifest],
+    content: &[horizon_mod_package::selection::SelectedPackage],
 ) {
     assert!(
         PACKAGES.set(inventory(native, content).into()).is_ok(),
@@ -590,7 +590,7 @@ mod tests {
     #[test]
     fn resolved_dispatch_slice_keeps_order_in_registration_config_and_reload() {
         use crate::*;
-        use horizon_mods::dependencies;
+        use horizon_mod_package::dependencies;
         use std::sync::Mutex;
         struct Trace {
             id: &'static str,
@@ -620,7 +620,7 @@ mod tests {
         impl ServerHost for Server {}
         let declarations: Vec<_> = ["z", "lib", "a"].into_iter().map(|id| {
             let deps = if id == "lib" { "" } else { "[dependencies]\nlib='^1'" };
-            horizon_mods::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{deps}")).unwrap()
+            horizon_mod_package::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{deps}")).unwrap()
         }).collect();
         let declared: Vec<_> = declarations
             .iter()
@@ -806,20 +806,20 @@ mod tests {
 
     #[test]
     fn inventory_keeps_first_content_package_after_code_mods() {
-        let native = [horizon_mods::packages::AdjacentManifest {
+        let native = [horizon_mod_package::packages::AdjacentManifest {
             path: Default::default(),
-            manifest: horizon_mods::Manifest::parse(
+            manifest: horizon_mod_package::Manifest::parse(
                 "id='runtime'\nname='Runtime'\nversion='3'\napi='0.2'\ncapabilities=['registries']\n",
             )
             .unwrap(),
         }];
         let package = |version: &str| {
-            let manifest = horizon_mods::Manifest::parse(&format!(
+            let manifest = horizon_mod_package::Manifest::parse(&format!(
                 "id='plain'\nname='Plain'\nversion='{version}'\napi='0.2'\ncapabilities=['registries']\n"
             )).unwrap();
-            horizon_mods::selection::SelectedPackage {
+            horizon_mod_package::selection::SelectedPackage {
                 path: Default::default(),
-                package: horizon_mods::Package {
+                package: horizon_mod_package::Package {
                     manifest,
                     icon: None,
                 },
@@ -833,11 +833,11 @@ mod tests {
         let runtime = view.get("runtime").unwrap();
         assert_eq!(runtime.kind(), PackageKind::Code);
         assert_eq!(runtime.version(), "3");
-        assert_eq!(runtime.side(), horizon_mods::Side::Client);
+        assert_eq!(runtime.side(), horizon_mod_package::Side::Client);
         let plain = view.get("plain").unwrap();
         assert_eq!(plain.kind(), PackageKind::Content);
         assert_eq!(plain.version(), "1");
-        assert_eq!(plain.side(), horizon_mods::Side::Client);
+        assert_eq!(plain.side(), horizon_mod_package::Side::Client);
         assert_eq!(plain.namespaces().collect::<Vec<_>>(), ["plain"]);
         assert!(!plain.depends_on("runtime"));
         assert!(view.get("missing").is_none());

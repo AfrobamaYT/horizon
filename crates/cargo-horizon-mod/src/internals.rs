@@ -1,5 +1,5 @@
 //! Tool-written internal declarations and the old/new pin's signature diff.
-use horizon_mods::{
+use horizon_mod_package::{
     Manifest,
     index::native,
     internals::{self, ListedInternal},
@@ -86,7 +86,7 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
 /// Adds or refreshes `entries` in `[native].internals`, which also holds a `[wasm]` mod's.
 fn upsert(
     doc: &mut DocumentMut,
-    declared: &[horizon_mods::manifest::Internal],
+    declared: &[horizon_mod_package::manifest::Internal],
     entries: &[&ListedInternal],
 ) -> Result<(), String> {
     let mut listed: BTreeMap<_, _> = declared
@@ -630,7 +630,7 @@ mod tests {
     fn tools_and_launcher_share_the_freshness_check() {
         let entries: Vec<ListedInternal> =
             serde_json::from_str(include_str!("../tests/fixtures/internals-new.json")).unwrap();
-        let mut declared = horizon_mods::manifest::Internal {
+        let mut declared = horizon_mod_package::manifest::Internal {
             path: "horizon_client::game::Game<'_>::reach".into(),
             kind: None,
             hash: "2222".into(),

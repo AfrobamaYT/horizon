@@ -7,7 +7,7 @@
 use super::{api, dependencies, inject, internals, Profile, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
-use horizon_mods::index::native;
+use horizon_mod_package::index::native;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -514,8 +514,8 @@ pub(super) fn compile(
         .arg(format!("mod_api={}", api_library.display()))
         .arg("--extern")
         .arg(format!(
-            "horizon_mods={}",
-            library(&deps, "horizon_mods")?.display()
+            "horizon_mod_package={}",
+            library(&deps, "horizon_mod_package")?.display()
         ));
     for (position, &index) in resolution.order.iter().enumerate() {
         let id = projects[index].bundle.manifest.id.as_str();

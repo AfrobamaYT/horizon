@@ -1,5 +1,5 @@
 //! Add an exact, original Java jar as a passive asset/data source.
-use horizon_mods::{
+use horizon_mod_package::{
     Manifest,
     manifest::{JarRef, MANIFEST},
 };

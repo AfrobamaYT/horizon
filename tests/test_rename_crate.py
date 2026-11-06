@@ -31,6 +31,8 @@ path = "../crates/horizon-mod-package"
                          "crates/horizon-mod-package/tests/file.hmod")
         self.assertEqual(rename.destination("crates/horizon-mods-other/src/lib.rs"),
                          "crates/horizon-mods-other/src/lib.rs")
+        self.assertEqual(rename.rewrite("crates/horizon-mod-registry/tests/submit.rs", '../horizon-mods/tests/index'),
+                         '../horizon-mod-package/tests/index')
 
     def test_rust_library_identifiers_and_link_arguments_change(self):
         source = '''use horizon_mods::{Content, Side};

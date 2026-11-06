@@ -69,7 +69,7 @@ fn use_jar_records_exact_metadata_hash_and_order_without_copying_the_jar() {
                 String::from_utf8_lossy(&result.stderr)
             );
             let added = fs::read_to_string(&manifest).unwrap();
-            let parsed = horizon_mods::Manifest::parse(&added).unwrap();
+            let parsed = horizon_mod_package::Manifest::parse(&added).unwrap();
             let jar = parsed.jar.last().unwrap();
             assert_eq!(
                 jar.sha512(),
@@ -88,7 +88,7 @@ fn use_jar_records_exact_metadata_hash_and_order_without_copying_the_jar() {
     }
     let text = fs::read_to_string(&manifest).unwrap();
     assert!(text.starts_with(&original));
-    let parsed = horizon_mods::Manifest::parse(&text).unwrap();
+    let parsed = horizon_mod_package::Manifest::parse(&text).unwrap();
     assert_eq!(
         parsed
             .jar

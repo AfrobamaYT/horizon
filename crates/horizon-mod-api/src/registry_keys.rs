@@ -37,7 +37,7 @@ impl Names {
         } else {
             format!("minecraft:{id}")
         };
-        if !horizon_mods::content::namespaced_id(&id) {
+        if !horizon_mod_package::content::namespaced_id(&id) {
             return Err(format!("mod {mod_id}: invalid registry key {id:?}"));
         }
         let slot = *self.slots.entry(id.clone()).or_insert_with(|| {

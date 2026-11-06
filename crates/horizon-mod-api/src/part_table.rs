@@ -10,7 +10,7 @@ use super::{
     EntityCapabilityKey, EntityPart, EntityRef, HOOK_COUNT, HookId, Host, ItemCapabilityKey,
     ItemPart, ItemPlace, MenuPart, ModEntry, PlaceProvider, ServerHost, TicketController,
 };
-use horizon_mods::content::BlockEntityType;
+use horizon_mod_package::content::BlockEntityType;
 use std::{
     any::{Any, type_name},
     cell::{Cell, RefCell},

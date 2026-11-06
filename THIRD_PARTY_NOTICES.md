@@ -2,10 +2,10 @@
 
 ## horizon-mixins
 
-The raw injection schema in `crates/horizon-mods/src/manifest.rs` is adapted from
+The raw injection schema in `crates/horizon-mod-package/src/manifest.rs` is adapted from
 [horizon-mixins](https://github.com/horizon-rust/horizon-mixins/tree/ddd9700b21997c95d95ac6ee5ecafe3830cf622a),
 Copyright (c) 2026 levzzz, under the MIT license
-(`crates/horizon-mods/HORIZON_MIXINS_LICENSE`).
+(`crates/horizon-mod-package/HORIZON_MIXINS_LICENSE`).
 
 ## wgpu-hal
 

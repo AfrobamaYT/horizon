@@ -7,7 +7,7 @@ repository is public and opens a pull request adding `mods/<id>.toml` to
 **It takes no versions for such a project**: they are the repository's GitHub releases, read and checked by that
 repository's CI with no pull request ("publish a GitHub release in <repo>", a 409). Projects listed before that
 (no `repo`) can still be sent as a file: the service runs the file's own checks
-(`horizon_mods::index::inspect`, the signature, the entry's fields), uploads it to the `staging` release as
+(`horizon_mod_package::index::inspect`, the signature, the entry's fields), uploads it to the `staging` release as
 `<sha256>.<extension>` and opens a pull request adding or updating the entry. Formats and rules:
 [docs/modding/src/reference/registry-index.md](../../docs/modding/src/reference/registry-index.md).
 

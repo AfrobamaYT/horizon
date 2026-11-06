@@ -796,7 +796,7 @@ mod tests {
                 _: &mod_api::RegistrationContext,
                 event: &mut mod_api::BlocksEvent<'_>,
             ) {
-                event.blocks.push(horizon_mods::content::Block {
+                event.blocks.push(horizon_mod_package::content::Block {
                     id: "fluid_filter_test:water_tank".into(),
                     template: "minecraft:stone".into(),
                     ..Default::default()

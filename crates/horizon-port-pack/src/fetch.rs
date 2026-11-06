@@ -242,7 +242,7 @@ pub(crate) fn download(
 /// Download exactly the manifest jar through the Modrinth CDN.
 pub fn download_jar(
     url: &str,
-    jar: &horizon_mods::manifest::JarRef,
+    jar: &horizon_mod_package::manifest::JarRef,
     dest: &Path,
 ) -> Result<(), String> {
     let response =

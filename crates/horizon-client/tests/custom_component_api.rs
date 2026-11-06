@@ -79,10 +79,10 @@ fn registration_limits_and_defaults_are_bound_to_the_connection() {
             format!(r#"{{"template":"minecraft:stone","components":{patch}}}"#),
         )
         .unwrap();
-        let package = horizon_mods::Package::read(&dir).unwrap();
+        let package = horizon_mod_package::Package::read(&dir).unwrap();
         ContentMod {
             id: id.into(),
-            content: horizon_mods::Content::read(&dir, &package.manifest).unwrap(),
+            content: horizon_mod_package::Content::read(&dir, &package.manifest).unwrap(),
             jars: Vec::new(),
         }
     };
@@ -139,10 +139,10 @@ fn registration_limits_and_defaults_are_bound_to_the_connection() {
         Path::new(""),
         &accepted,
         &out,
-        &horizon_mods::enabled::EnabledMods::new(
+        &horizon_mod_package::enabled::EnabledMods::new(
             accepted
                 .iter()
-                .map(|package| (package.id.clone(), horizon_mods::Side::Both)),
+                .map(|package| (package.id.clone(), horizon_mod_package::Side::Both)),
         ),
     )
     .unwrap();

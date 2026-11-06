@@ -28,7 +28,7 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
     // `mod_loaded` asks which mods are loaded, not which namespaces
     // they own: a mod that also owns a namespace doesn't make that
     // namespace another mod.
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let mods: Vec<&str> = inventory
         .server_ids()
         .chain(std::iter::once("minecraft"))

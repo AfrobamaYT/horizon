@@ -333,14 +333,14 @@ def mark_old_rust(steps, warning):
 
 def mod_features(crates):
     """The features CI's workspace-wide test run gives these crates. Cargo unifies features over the packages it
-    builds, so a crate tested alone needs the ones the workspace would have turned on for it: horizon-mods' index."""
-    return " --features horizon-mods/index" if crates is not None and "horizon-mods" in crates else ""
+    builds, so a crate tested alone needs the ones the workspace would have turned on for it: horizon-mod-package' index."""
+    return " --features horizon-mod-package/index" if crates is not None and "horizon-mod-package" in crates else ""
 
 
 # What horizon-client's full content-root tests load (mod_content_tests.rs). They take minutes on prepared data, so
 # they are #[ignore]d and run here only when one of these changes.
 CONTENT_ROOT = ("crates/horizon-client/src/mod_content", "crates/horizon-client-render/src/assets.rs", "crates/horizon-items/",
-                "crates/horizon-mods/", "crates/horizon-assets/")
+                "crates/horizon-mod-package/", "crates/horizon-assets/")
 CONTENT_ROOT_TESTS = "cargo test --locked -p horizon-client-lib --lib mod_content::tests:: -- --ignored"
 
 

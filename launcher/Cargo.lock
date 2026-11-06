@@ -2713,7 +2713,7 @@ dependencies = [
  "horizon-friends",
  "horizon-mcp",
  "horizon-mod-api-gen",
- "horizon-mods",
+ "horizon-mod-package",
  "horizon-port-pack",
  "horizon-prepare",
  "horizon-protocol",
@@ -2786,7 +2786,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-mods"
+name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
@@ -2806,7 +2806,7 @@ dependencies = [
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
- "horizon-mods",
+ "horizon-mod-package",
  "serde",
  "serde_json",
  "sha1",

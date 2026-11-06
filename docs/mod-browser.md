@@ -85,7 +85,7 @@ The launcher's **Mods** page has the five kinds as tabs: **Mods**, **Modpacks**,
 and **Data packs**, each with a search field (Enter searches). Mods, Modpacks, Resource packs and Data packs pick their
 source: Horizon's registry or Modrinth, with **CurseForge (coming soon)** beside them, disabled. Mods start on
 Horizon's registry; **Shader packs** search it only (Horizon's own packs); data packs install into the world picked
-under the search. On Horizon's registry, **Filters** lists the kind's categories (`horizon_mods::index::page::categories`,
+under the search. On Horizon's registry, **Filters** lists the kind's categories (`horizon_mod_package::index::page::categories`,
 named and ordered as on playhorizon.dev) and the tags its projects carry (the 30 most used, `#tag`): a result has
 every category and tag picked, and the search words, which also match a project's tags, narrow them further. While
 the panel is closed, what is picked stays in view as chips under **Filters**, each with a cross that removes it, and
@@ -187,7 +187,7 @@ launcher reads its `index.json` (`browser/horizon.rs`; `HORIZON_MOD_INDEX=<file 
 registry instead, whose files may then be on disk) at most every ten minutes, and keeps the last copy in
 `mod-browser/horizon-index.json`. Before a result is installed it shows whether its files are signed and, for a mod,
 what it may do, in the words of the game's Options > Mods. A download goes to `mod-browser/downloads/` and is moved
-into place only after `horizon_mods::index::check_file` passes (size, SHA-256, the author's signature when the project
+into place only after `horizon_mod_package::index::check_file` passes (size, SHA-256, the author's signature when the project
 has a key, the file's own manifest against the index). A content mod becomes `horizon-mods/<id>.hmod`, turned on; a native mod becomes
 `horizon-native-mods/<id>.hmod`, and the launcher builds it into the game ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md));
 `mods disable` and `mods enable` switch it in `horizon-mods.txt`. When the index takes a file down, the launcher turns

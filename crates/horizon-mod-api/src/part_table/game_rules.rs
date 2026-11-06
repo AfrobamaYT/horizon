@@ -27,7 +27,7 @@ impl PartRegistrar {
         } else {
             format!("{}:{id}", self.mod_id)
         };
-        if !horizon_mods::content::namespaced_id(&id) {
+        if !horizon_mod_package::content::namespaced_id(&id) {
             return Err(super::GameRuleError::InvalidId);
         }
         if id.split_once(':').unwrap().0 != self.mod_id {
