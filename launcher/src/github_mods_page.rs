@@ -504,6 +504,12 @@ impl Launcher {
             remove.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 if this.github.confirm_remove.as_deref() == Some(&row.file) {
                     let home = this.mods.home();
+                    let Some(_lock) = horizon_launcher::browser::try_lock_home(&home) else {
+                        this.mods.message =
+                            Some(Err(tr("Wait for the current operation to finish.").into()));
+                        cx.notify();
+                        return;
+                    };
                     let result = if row.origin.is_some() {
                         github_mods::remove(&home, &row.id).map(|_| ())
                     } else {

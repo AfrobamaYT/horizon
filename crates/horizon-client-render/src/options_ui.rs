@@ -7849,6 +7849,16 @@ mod tests {
         assert_eq!(toggles(&mut ui, &s), [(0, true), (1, true)]);
         ui.open_at(true, Page::Mods);
         assert_eq!(toggles(&mut ui, &s), [(0, false), (1, true)]);
+        ui.mod_browser.listings.push(crate::mod_browser::Listing {
+            id: "content".into(),
+            installed: Some("1.0".into()),
+            ..Default::default()
+        });
+        ui.mod_project = "content".into();
+        ui.open_at(true, Page::ModProject);
+        assert_eq!(toggles(&mut ui, &s), [(0, false)]);
+        ui.open_at(false, Page::ModProject);
+        assert_eq!(toggles(&mut ui, &s), [(0, true)]);
     }
 
     /// An Extras or PvP & HUD label wider than half a row takes the whole row, so every label
