@@ -35,6 +35,7 @@
 - [The mod API (rustdoc)](reference/api.md)
 - [Legacy native hook API history (frozen)](reference/native-api-history.md)
 - [Hook notes](reference/hook-notes.md)
+- [NeoForge counterparts](reference/neoforge-counterparts.md)
 
 # For agents
 

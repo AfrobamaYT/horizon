@@ -3426,7 +3426,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.Clone (not cancellable)",
+        neoforge = "PlayerEvent.Clone",
         cancellable = false
     )]
     fn player_clone();
@@ -3545,7 +3545,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.LoadFromFile (not cancellable)",
+        neoforge = "PlayerEvent.LoadFromFile",
         cancellable = false
     )]
     fn player_load_from_file();
@@ -3587,7 +3587,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.SaveToFile (not cancellable)",
+        neoforge = "PlayerEvent.SaveToFile",
         cancellable = false
     )]
     fn player_save_to_file();
