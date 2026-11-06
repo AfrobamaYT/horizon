@@ -107,6 +107,7 @@ const EXPORTS: &[&str] = &[
     "ServerReloadListener",
     "ClientReloadListener",
     "PlaceProvider",
+    "TooltipAppender",
     "CriterionTest",
 ];
 

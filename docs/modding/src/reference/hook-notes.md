@@ -182,6 +182,10 @@ registered twice is logged and left out. A property no mod registers reads 0, de
 
 `native_render_item_in_frame(entity_id, pos, stack, canceled)` runs before a visible item frame draws its item or map, including glow and invisible frames. Set `canceled` to hide the item without hiding the frame.
 
+## Block screen effects
+
+`native_extract_block_screen_effect(effect, state, pos, canceled)` is NeoForge's `ExtractBlockScreenEffectEvent`: once a frame for each of the first-person view's block overlays that is shown, before its quads are built. `Block` is the view-blocking block the camera is inside, `Water` the block at the eye while it is under water, and `Fire` fire's default state at the player's block while they burn (first person only). None of them fire for a spectator. Set `canceled` to leave that one overlay out; the other overlays and the HUD's camera overlays (vignette, pumpkin, portal, freezing) stay. With no listener the frame pays one `listened` check.
+
 ## Villager farming
 
 Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
@@ -240,6 +244,19 @@ requires a farmer at work and `mob_griefing` enabled.
   complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
   and may add, change or remove any line. Horizon's creative search reads vanilla's exported tooltip text, so it
   does not fire with no player while search trees are built, as NeoForge does.
+
+- Data component tooltip lines: `Registrar::register_tooltip_appender(component, placement, appender)` (NeoForge's
+  `RegisterTooltipAppendersEvent`) gives one component's `TooltipAppender` a `TooltipPlacement`: `BeforeAll`, `AfterAll`,
+  or `Before(id)` and `After(id)` for a component detail Horizon lists (`minecraft:lore`, `minecraft:enchantments`...), where
+  the lines go among the other components' lines. The game asks only that appender, only for a stack that carries the
+  component (live, transient ones included) and whose `tooltip_display` shows it, and only while its mod is enabled. It gets
+  the stack and a `TooltipAppendContext` (the local player, `advanced`, `creative`, and `nested` for a crossbow's projectile),
+  and adds its lines after the item's own lines and before the durability and advanced lines. The creative search doesn't read
+  these lines, as it doesn't `item_tooltip`. A mod that reacts to every item keeps `item_tooltip`.
+  `Before`/`After` accept only the 23 vanilla anchors listed in `tooltip_appender.rs`, not other registered
+  components. The `registerAppender(TooltipLocation, ...)` overload is not represented. Several appenders may register
+  for one component; all run in registration order at an equal placement. The player is always the local player,
+  including for nested crossbow projectiles where vanilla passes no player; use `nested` to distinguish those calls.
 
 - An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
   block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the
@@ -2707,6 +2724,9 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `player.open_menu(host, block_entity)` opens its menu on the server and returns true only when opened. It returns
   false for stale or wrong-level handles, non-providers, cancelled opens, and players without a connection (including
   fake players), since no connection can receive the menu.
+- `block_entity.viewers(host)` lists the players with its container open on the server, read from their open menus
+  when called: players in its level, not spectators or fake players, a double chest's menu on both halves. `None` for
+  a stale handle or a client.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered.
