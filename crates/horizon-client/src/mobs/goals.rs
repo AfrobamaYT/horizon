@@ -729,7 +729,7 @@ impl Mob {
     /// the codec's defaults are 0, 3 and a factor of 1); else the spears'.
     fn active_attack_range(&self) -> Option<(f32, f32)> {
         let item = self.active_item()?;
-        let patch = (self.extra.main_hand.as_deref() == Some(item))
+        let patch = (self.extra.main_hand_id() == Some(item))
             .then(|| self.extra.main_hand_stack().and_then(|s| s.data()))
             .flatten();
         if patch.is_some_and(|d| d.other("!minecraft:attack_range").is_some()) {
@@ -756,9 +756,9 @@ impl Mob {
     /// `LivingEntity.getActiveItem`: the item being used, else the main hand's.
     pub fn active_item(&self) -> Option<&str> {
         if super::spear_use::is_using_item(self) && self.extra.using_off_hand {
-            self.extra.off_hand.as_deref()
+            self.extra.off_hand_id()
         } else {
-            self.extra.main_hand.as_deref()
+            self.extra.main_hand_id()
         }
     }
     /// Whether the species is a `TamableAnimal` (not the horses and llamas,

@@ -273,6 +273,7 @@ mod tests {
     #[test]
     fn cooking_requires_output_components_and_capacity() {
         let (items, recipes, providers) = data("output-components");
+        let context = crate::test_resources::server_loop_context();
         let mut different = ItemStack::new("test:ingot", 1);
         different.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Cold".into()));
         for (output, eligible) in [
@@ -298,7 +299,7 @@ mod tests {
                 recipes_used: HashMap::new(),
             };
             let recipe = recipes
-                .cook(f.kind.recipe_type(), f.items[0].as_ref().unwrap())
+                .cook(context, f.kind.recipe_type(), f.items[0].as_ref().unwrap())
                 .unwrap();
             assert_eq!(
                 (&*recipe.result.item, recipe.result.count, recipe.time),
@@ -306,7 +307,7 @@ mod tests {
             );
             let mut drops = Vec::new();
             assert_eq!(
-                f.tick(&recipes, &items, &providers, &mut drops),
+                f.tick(context, &recipes, &items, &providers, &mut drops),
                 eligible.then_some(true),
                 "output {before:?}"
             );
@@ -314,7 +315,7 @@ mod tests {
             if eligible {
                 assert!(f.items[1].is_none());
                 for _ in 1..200 {
-                    f.tick(&recipes, &items, &providers, &mut drops);
+                    f.tick(context, &recipes, &items, &providers, &mut drops);
                 }
                 assert_eq!(f.items[0].as_ref().unwrap().count, 2);
                 assert_eq!(
