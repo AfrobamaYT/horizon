@@ -107,6 +107,34 @@ pub use world::{TargetInfo, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
 
+/// A mob's stored active effect with its registry index resolved once at creation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StoredEffect {
+    pub id: &'static str,
+    pub duration: i32,
+    pub amplifier: i32,
+    pub registry_index: Option<usize>,
+}
+impl StoredEffect {
+    pub fn new(id: &'static str, duration: i32, amplifier: i32) -> Self {
+        Self {
+            id,
+            duration,
+            amplifier,
+            registry_index: horizon_client_core::potions::effect(id).map(|def| def.index),
+        }
+    }
+    /// Copy a registered instance after an update or hidden-effect promotion, without resolving again.
+    pub fn from_instance(id: &'static str, instance: &crate::effects::EffectInstance) -> Self {
+        Self {
+            id,
+            duration: instance.duration,
+            amplifier: instance.amplifier,
+            registry_index: instance.registry_index,
+        }
+    }
+}
+
 use crate::{
     blocks::BlockFacts,
     health::{DamageContainer, DamageLevel, Reduction},
@@ -1209,7 +1237,7 @@ pub struct Extra {
     pub repellent: Option<[i32; 3]>,
     pub vector: [f64; 3],
     /// Active status effects: (effect id, ticks left, amplifier).
-    pub effects: Vec<(&'static str, i32, i32)>,
+    pub effects: Vec<StoredEffect>,
     /// Hidden effect instances behind an active effect, keyed by effect id.
     pub effect_chains: Vec<crate::effects::EffectInstance>,
     /// The effects above given with `hideParticles`: no swirls for them.
@@ -2665,7 +2693,9 @@ impl Mob {
     }
 
     /// What other mobs see of this one this tick (`player`: the player's
-    /// UUID, which villagers' reputation is keyed by).
+    /// UUID, which villagers' reputation is keyed by). Inline: the game's
+    /// snapshot of every mob writes each one in its slot, not through a copy.
+    #[inline]
     pub fn seen(&self, player: Option<[i32; 4]>) -> Seen {
         let m = self;
         let villager = m.species() == Species::Villager;
@@ -2737,7 +2767,7 @@ impl Mob {
                 .extra
                 .effects
                 .iter()
-                .map(|e| e.0.trim_start_matches("minecraft:"))
+                .map(|e| e.id.trim_start_matches("minecraft:"))
                 .collect(),
             hunted_recently: m.species() == Species::Piglin && m.extra.ints[0] > 0,
             hurt_recently: m.species() == Species::Piglin && m.extra.piglin.hurt,
@@ -3184,7 +3214,7 @@ pub trait ModEffectTicks {
     fn tick_mod_effect(
         &self,
         level: &mut DamageLevel<'_>,
-        effect: &str,
+        effect: usize,
         mob: &mut Mob,
         tick_count: i32,
         amplifier: i32,
@@ -3192,7 +3222,7 @@ pub trait ModEffectTicks {
     /// `MobEffectEvent.Expired`: `mob`'s `effect` (`amplifier` from 0)
     /// counted down to nothing. A mod that cancels refuses the expiry: the
     /// effect stays at no ticks and asks again next tick.
-    fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool);
+    fn effect_expired(&self, mob: u32, effect: usize, amplifier: i32, cancel: &mut bool);
 }
 /// Native mod hooks the mob AI asks while it decides.
 pub trait MobHooks {
@@ -3643,11 +3673,11 @@ impl Mob {
         // (`#bypasses_resistance` and `#bypasses_effects` skip it).
         if !source.kind.bypasses_effects()
             && !source.kind.bypasses_resistance()
-            && let Some(&(_, _, amp)) = self
+            && let Some(&StoredEffect { amplifier: amp, .. }) = self
                 .extra
                 .effects
                 .iter()
-                .find(|e| e.0 == "minecraft:resistance")
+                .find(|e| e.id == "minecraft:resistance")
         {
             let remainder = 25i32.wrapping_sub(amp.wrapping_add(1).wrapping_mul(5));
             amount = (amount * remainder as f32 / 25.0).max(0.0);
@@ -4037,8 +4067,9 @@ impl Mob {
         if self.extra.sprinting {
             v *= 1.0 + f64::from(0.3f32);
         }
-        for (e, _, amp) in &self.extra.effects {
-            match *e {
+        for effect in &self.extra.effects {
+            let amp = effect.amplifier;
+            match effect.id {
                 "minecraft:speed" => v *= 1.0 + 0.2 * f64::from(amp + 1),
                 "minecraft:slowness" => v *= (1.0 - 0.15 * f64::from(amp + 1)).max(0.0),
                 _ => {}
@@ -4047,7 +4078,7 @@ impl Mob {
         v
     }
     pub fn has_effect(&self, effect: &str) -> bool {
-        self.extra.effects.iter().any(|e| e.0 == effect)
+        self.extra.effects.iter().any(|e| e.id == effect)
     }
     /// `LivingEntity.isCurrentlyGlowing`: the Glowing effect or the `Glowing` tag (on a
     /// server's client, `glowing` holds shared flag 6 instead).
@@ -4059,15 +4090,12 @@ impl Mob {
         self.invisible
     }
     /// Removes effects and schedules the effect-status update when needed.
-    pub fn retain_effects(
-        &mut self,
-        mut keep: impl FnMut(&(&'static str, i32, i32)) -> bool,
-    ) -> bool {
+    pub fn retain_effects(&mut self, mut keep: impl FnMut(&StoredEffect) -> bool) -> bool {
         let before = self.extra.effects.len();
         self.extra.effects.retain(|e| {
             let keep = keep(e);
-            if !keep && e.0 == "minecraft:absorption" {
-                self.absorption = (self.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
+            if !keep && e.id == "minecraft:absorption" {
+                self.absorption = (self.absorption - 4.0 * (e.amplifier + 1) as f32).max(0.0);
             }
             keep
         });
@@ -4076,21 +4104,23 @@ impl Mob {
             let effects = &self.extra.effects;
             self.extra
                 .effect_chains
-                .retain(|e| effects.iter().any(|x| x.0 == e.id));
+                .retain(|e| effects.iter().any(|x| x.id == e.id));
             self.extra
                 .hidden_effects
-                .retain(|e| effects.iter().any(|x| x.0 == *e));
+                .retain(|e| effects.iter().any(|x| x.id == *e));
             self.extra
                 .ambient_effects
-                .retain(|e| effects.iter().any(|x| x.0 == *e));
+                .retain(|e| effects.iter().any(|x| x.id == *e));
         }
         self.effects_dirty |= changed;
         changed
     }
     /// Loads an effect without applying its attribute modifiers a second time.
     pub fn load_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
-        self.extra.effects.retain(|e| e.0 != effect);
-        self.extra.effects.push((effect, ticks, amplifier));
+        self.extra.effects.retain(|e| e.id != effect);
+        self.extra
+            .effects
+            .push(StoredEffect::new(effect, ticks, amplifier));
         self.effects_dirty = true;
     }
     /// `LivingEntity.addEffect` of a `MobEffectInstance` with its flags: the effect as
@@ -4110,11 +4140,32 @@ impl Mob {
         let mut incoming = crate::effects::EffectInstance::new(effect, ticks, amplifier);
         incoming.ambient = ambient;
         incoming.visible = visible;
-        let index = self.extra.effects.iter().position(|e| e.0 == effect);
-        let old_amp = index.map(|i| self.extra.effects[i].2);
+        self.add_effect_instance(effect, incoming)
+    }
+
+    /// Apply an already resolved effect instance through the same update path as content input.
+    pub fn add_effect_instance(
+        &mut self,
+        effect: &'static str,
+        mut incoming: crate::effects::EffectInstance,
+    ) -> bool {
+        // Player instances use short vanilla names; every mob chain uses its canonical name,
+        // including a weaker incoming instance saved behind the active effect.
+        incoming.id = effect;
+        let index = self.extra.effects.iter().position(|e| e.id == effect);
+        let old_amp = index.map(|i| self.extra.effects[i].amplifier);
         let mut active = if let Some(i) = index {
-            let (_, duration, amp) = self.extra.effects[i];
-            let mut active = crate::effects::EffectInstance::new(effect, duration, amp);
+            let stored = &self.extra.effects[i];
+            let mut active = crate::effects::EffectInstance {
+                id: stored.id,
+                registry_index: stored.registry_index,
+                duration: stored.duration,
+                amplifier: stored.amplifier,
+                ambient: false,
+                visible: true,
+                client_blend: (false, false),
+                hidden: None,
+            };
             active.ambient = self.extra.ambient_effects.contains(&effect);
             active.visible = !self.extra.hidden_effects.contains(&effect);
             if let Some(i) = self.extra.effect_chains.iter().position(|e| e.id == effect) {
@@ -4129,11 +4180,11 @@ impl Mob {
             self.extra.effect_chains.push(*hidden);
         }
         if let Some(i) = index {
-            self.extra.effects[i] = (effect, active.duration, active.amplifier);
+            self.extra.effects[i] = StoredEffect::from_instance(effect, &active);
         } else {
             self.extra
                 .effects
-                .push((effect, active.duration, active.amplifier));
+                .push(StoredEffect::from_instance(effect, &active));
         }
         self.extra.ambient_effects.retain(|h| *h != effect);
         if active.ambient {
@@ -5361,7 +5412,10 @@ mod magic_absorb_tests {
         // The same effect, no stronger and no longer, ambient again and visible: ambient stays
         // (nothing changed), the visibility follows.
         assert!(m.add_effect_with("speed", 100, 0, true, true));
-        assert_eq!(m.extra.effects, vec![(speed, 600, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new(speed, 600, 0)]
+        );
         assert!(
             m.extra.ambient_effects.contains(&speed) && !m.extra.hidden_effects.contains(&speed)
         );
@@ -5373,7 +5427,10 @@ mod magic_absorb_tests {
         assert!(!m.extra.ambient_effects.contains(&speed));
         assert!(m.add_effect_with("speed", 900, 0, true, true));
         assert!(m.extra.ambient_effects.contains(&speed));
-        assert_eq!(m.extra.effects, vec![(speed, 900, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new(speed, 900, 0)]
+        );
     }
 
     #[test]
@@ -5393,7 +5450,14 @@ mod magic_absorb_tests {
                 None,
             );
         }
-        assert_eq!(m.extra.effects, vec![("minecraft:absorption", 110, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new(
+                "minecraft:absorption",
+                110,
+                0
+            )]
+        );
         assert_eq!(m.absorption, 2.0);
     }
 
@@ -5436,7 +5500,35 @@ mod magic_absorb_tests {
                 None,
             );
         }
-        assert_eq!(m.extra.effects, vec![("minecraft:speed", 110, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new("minecraft:speed", 110, 0)]
+        );
+    }
+
+    #[test]
+    fn resolved_instances_preserve_mob_identity_through_hidden_promotion() {
+        let mut m = witch();
+        let def = horizon_client_core::potions::effect("speed").unwrap();
+        let effect = "minecraft:speed";
+        assert!(m.add_effect_instance(effect, crate::effects::EffectInstance::from_def(def, 2, 1)));
+        assert!(
+            !m.add_effect_instance(effect, crate::effects::EffectInstance::from_def(def, 5, 0))
+        );
+        assert_eq!(m.extra.effect_chains[0].id, effect);
+        for _ in 0..2 {
+            ai::tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                None,
+            );
+        }
+        let restored = &m.extra.effects[0];
+        assert_eq!(restored.id, "minecraft:speed");
+        assert_eq!((restored.duration, restored.amplifier), (3, 0));
+        assert_eq!(restored.registry_index, Some(0));
+        assert!(m.extra.effect_chains.is_empty());
     }
 
     #[test]
@@ -5452,7 +5544,10 @@ mod magic_absorb_tests {
                 None,
             );
         }
-        assert_eq!(m.extra.effects, vec![("minecraft:speed", 3, 0)]);
+        assert_eq!(
+            m.extra.effects,
+            vec![crate::mobs::StoredEffect::new("minecraft:speed", 3, 0)]
+        );
         assert!(m.extra.ambient_effects.contains(&"minecraft:speed"));
         assert!(m.extra.hidden_effects.contains(&"minecraft:speed"));
         m.add_effect("speed", 1, 2);
@@ -5849,9 +5944,9 @@ mod totem_tests {
         assert_eq!(
             m.extra.effects,
             vec![
-                ("minecraft:regeneration", 900, 1),
-                ("minecraft:absorption", 100, 1),
-                ("minecraft:fire_resistance", 800, 0),
+                crate::mobs::StoredEffect::new("minecraft:regeneration", 900, 1),
+                crate::mobs::StoredEffect::new("minecraft:absorption", 100, 1),
+                crate::mobs::StoredEffect::new("minecraft:fire_resistance", 800, 0),
             ]
         );
         assert!(

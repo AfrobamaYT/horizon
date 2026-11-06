@@ -1,7 +1,7 @@
 //! Mob handles for native server mods.
 use super::{Game, commands::Target};
 use horizon_client::mobs::{self, Mob, Species, Who};
-use mod_api::{EntityRef, LivingRef, MobRef};
+use mod_api::{EntityRef, LivingRef, MobLeashHolder, MobRef};
 
 /// Brain-backed vanilla `getTarget` overrides. Piglins and hoglins use
 /// Horizon's `ai.target` as the stand-in for their brain memory.
@@ -184,6 +184,61 @@ impl Game<'_> {
             Target::Mob(_) | Target::Dragon(_) => Some(MobRef::new(entity)),
             _ => None,
         }
+    }
+
+    /// The active mob's portal cooldown, or zero when no portal state exists.
+    pub(super) fn native_mob_portal_cooldown(&self, mob: MobRef) -> Option<i32> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        self.mobs.iter().find(|m| m.id == id)?;
+        Some(self.portals.entities.get(&id).map_or(0, |p| p.cooldown))
+    }
+
+    /// The existing portal decision for an available mob in the current level.
+    pub(super) fn native_mob_can_use_portal(&self, mob: MobRef) -> Option<bool> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        let mob = self.mobs.iter().find(|m| m.id == id)?;
+        Some(self.mob_can_use_portal(mob))
+    }
+
+    /// The live leash holder, refusing unresolved saved and unavailable holders.
+    pub(super) fn native_mob_leash_holder(&self, mob: MobRef) -> Option<MobLeashHolder> {
+        use horizon_client::mobs::leash::Holder;
+
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        let mob = self.mobs.iter().find(|m| m.id == id)?;
+        if mob.extra.leash_pending.is_some() {
+            return None;
+        }
+        Some(match mob.extra.leash {
+            None => MobLeashHolder::Unleashed,
+            Some(Holder::Knot(pos)) => MobLeashHolder::Knot(pos),
+            Some(Holder::Mob(id)) => {
+                let entity = self.native_entity(id)?;
+                if !matches!(self.native_entity_target(entity), Some(Target::Mob(_))) {
+                    return None;
+                }
+                MobLeashHolder::Entity(entity)
+            }
+            Some(Holder::Boat(id)) => {
+                let entity = self.native_entity(id)?;
+                if !matches!(self.native_entity_target(entity), Some(Target::Boat(_))) {
+                    return None;
+                }
+                MobLeashHolder::Entity(entity)
+            }
+            Some(Holder::Player) => {
+                let uuid = mob.extra.leash_player?;
+                let player =
+                    self.native_player_ref(horizon_client::lan::playerdata::ints_uuid(uuid))?;
+                MobLeashHolder::Entity(player.entity())
+            }
+        })
     }
 
     /// `Mob.getTarget`. Brain-backed mobs read their attack memory; piglins
@@ -415,6 +470,179 @@ mod tests {
         game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
         game.native_mob_ref(game.native_entity(id).unwrap())
             .unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_leash_holder_reads_live_state() {
+        use super::super::{boats::Boat, lan::LanSettings};
+        use horizon_client::lan::{
+            Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig, playerdata::uuid_ints,
+        };
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use mobs::leash::{Holder, Pending};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicI32, AtomicUsize},
+        };
+
+        with_game(|game| {
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn: 20,
+                    uuid: 20,
+                    name: "holder".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:1".parse().unwrap(),
+                    expected: false,
+                },
+                20,
+                [0.0, 0.0, 0.0],
+                10,
+            );
+            guest.placed = true;
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
+            let cow = add_mob(game, 12, "minecraft:cow");
+            let other = add_mob(game, 13, "minecraft:cow");
+            game.boats
+                .push(Boat::new(14, "oak".into(), Vec3::ZERO, 0.0));
+            let boat = game.native_entity(14).unwrap();
+            assert_eq!(cow.leash_holder(game), Some(MobLeashHolder::Unleashed));
+            let motion =
+                horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+            game.lan.as_mut().unwrap().hub.guest_mut(20).unwrap().motion = Some(Box::new(motion));
+            game.as_guest(20, |game| {
+                assert!(game.interact_leash(0, "minecraft:lead"));
+                assert_eq!(
+                    cow.leash_holder(game),
+                    Some(MobLeashHolder::Entity(game.native_entity(20).unwrap()))
+                );
+            })
+            .unwrap();
+            for (holder, expected) in [
+                (Holder::Mob(13), MobLeashHolder::Entity(other.entity())),
+                (Holder::Boat(14), MobLeashHolder::Entity(boat)),
+                (Holder::Knot([1, 2, 3]), MobLeashHolder::Knot([1, 2, 3])),
+            ] {
+                game.mobs[0].extra.leash = Some(Holder::Player);
+                game.mobs[0].extra.leash_player = Some(uuid_ints(20));
+                game.as_guest(20, |game| {
+                    assert!(game.tie_player_leads(glam::DVec3::ZERO, holder, None));
+                    assert_eq!(cow.leash_holder(game), Some(expected));
+                })
+                .unwrap();
+            }
+            game.mobs[0].extra.leash = None;
+            game.mobs[0].extra.leash_pending = Some(Pending::Uuid([0, 0, 0, 99]));
+            assert_eq!(cow.leash_holder(game), None);
+            let stale = MobRef::new(EntityRef::new(NativeWorldEpoch::new(999), 12));
+            assert_eq!(stale.leash_holder(game), None);
+            game.enter_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(cow.leash_holder(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_portal_cooldown_tracks_ticks_and_refuses_unavailable_handles() {
+        use super::super::Dim;
+        use horizon_client::nether_portal::ENTITY_DELAY;
+
+        with_game(|game| {
+            let mob = add_mob(game, 12, "minecraft:cow");
+            assert_eq!(mob.portal_cooldown(game), Some(0));
+            game.set_portal_cooldown(12);
+            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY));
+            game.handle_entity_portals();
+            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 1));
+            game.handle_entity_portals();
+            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 2));
+
+            let stale = MobRef::new(EntityRef::new(
+                NativeWorldEpoch::new(mob.entity().epoch().get() + 1),
+                12,
+            ));
+            assert_eq!(stale.portal_cooldown(game), None);
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 15;
+            game.dragon = Some(dragon);
+            let dragon = game
+                .native_mob_ref(game.native_entity(15).unwrap())
+                .unwrap();
+            assert_eq!(dragon.portal_cooldown(game), None);
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(mob.portal_cooldown(game), None);
+            game.enter_level(Dim::Overworld).unwrap();
+            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 2));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_portal_eligibility_matches_gameplay() {
+        with_game(|game| {
+            let cow = add_mob(game, 12, "minecraft:cow");
+            let wither = add_mob(game, 13, "minecraft:wither");
+            let check = |game: &Game<'_>, handle: MobRef, expected| {
+                let mob = game
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == handle.entity().id())
+                    .unwrap();
+                assert_eq!(game.mob_can_use_portal(mob), expected);
+                let host: &dyn mod_api::Host = game;
+                assert_eq!(handle.can_use_portal(host), Some(expected));
+            };
+            check(game, cow, true);
+            check(game, wither, false);
+            game.mobs[0].extra.mount = Some(99);
+            check(game, cow, false);
+            game.mobs[0].extra.mount = None;
+            game.riding = Some(12);
+            check(game, cow, false);
+            game.riding = None;
+            check(game, cow, true);
+            let stale = MobRef::new(mod_api::EntityRef::new(NativeWorldEpoch::new(999), 12));
+            let host: &dyn mod_api::Host = game;
+            assert_eq!(stale.can_use_portal(host), None);
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            let host: &dyn mod_api::Host = game;
+            assert_eq!(cow.can_use_portal(host), None);
+            game.enter_command_level(super::super::Dim::Overworld)
+                .unwrap();
+            check(game, cow, true);
+        });
     }
 
     #[test]

@@ -31,4 +31,16 @@ pub trait Helpers {
         target = "horizon_client::game::native_block_states::Game<'_>::native_block_states_of"
     )]
     fn block_states_of();
+    #[helper(
+        side = "both",
+        backend = true,
+        target = "horizon_client::game::native_block_states::Game<'_>::native_block_state_definition"
+    )]
+    fn block_state_definition();
+    #[helper(
+        side = "both",
+        backend = true,
+        target = "horizon_client::game::native_block_states::Game<'_>::native_block_state_matches"
+    )]
+    fn block_state_matches();
 }

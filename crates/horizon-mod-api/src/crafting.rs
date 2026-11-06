@@ -474,9 +474,11 @@ impl Ingredient {
 /// `ingredients` and `results` are filled from the game's own parse of the
 /// shaped, shapeless and cooking types: a shaped recipe's pattern cells row
 /// by row (empty cells left out), a shapeless recipe's list, a cooking
-/// recipe's `ingredient`, and the result as `results[0]`. Any other type (a
-/// mod's own, stonecutting, smithing and the special ones) leaves both
-/// empty: read `json`.
+/// recipe's `ingredient`, and the result as `results[0]`. Stonecutting,
+/// smithing and special crafting recipes instead expose their typed [`RecipeRule`]
+/// in `rule`, keeping these two lists empty. Dynamic outputs are rules/templates,
+/// not fixed stacks; use [`LevelRef::craft`] to assemble a crafting grid.
+/// A mod's own type leaves these fields empty and keeps its `json`.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Recipe {
@@ -496,6 +498,10 @@ pub struct Recipe {
     pub cooking_time: Option<u32>,
     /// Experience a cooking recipe gives, `None` for any other type.
     pub experience: Option<f32>,
+    /// Parsed stonecutting, smithing or special crafting rule. `None` for
+    /// shaped, shapeless, cooking and mod-defined types. The ingredient roles,
+    /// bounds and templates come from the game's canonical parse.
+    pub rule: Option<RecipeRule>,
     /// The recipe's file, as the data pack wrote it.
     pub json: Arc<Value>,
 }
@@ -510,6 +516,7 @@ impl Recipe {
             results: Vec::new(),
             cooking_time: None,
             experience: None,
+            rule: None,
             json,
         }
     }

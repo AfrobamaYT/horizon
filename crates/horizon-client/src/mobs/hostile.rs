@@ -392,7 +392,13 @@ pub fn creeper_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
                 .extra
                 .effects
                 .iter()
-                .map(|(id, ticks, amp)| (id.strip_prefix("minecraft:").unwrap_or(id), *ticks, *amp))
+                .map(|e| {
+                    (
+                        e.id.strip_prefix("minecraft:").unwrap_or(e.id),
+                        e.duration,
+                        e.amplifier,
+                    )
+                })
                 .collect();
             let color = horizon_client_core::potions::effects_color(
                 effects

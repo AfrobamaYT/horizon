@@ -48,7 +48,9 @@ pub use crate::part_table::{
     HookParts, KnownIds, PartsRef, block_entity_types, block_listens, has_part_hook,
     has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
 };
-pub use crate::phase::install_packages;
+pub use crate::phase::{
+    LoadAccess, ModPhase, PhaseError, PhaseOwner, check_access, current_phase, install_packages,
+};
 /// The game's side of wasm mods, for `horizon-mod-wasm`.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub mod wasm_host {
@@ -246,12 +248,14 @@ pub mod game {
     }
 
     pub struct ModEntryFields<'a> {
+        pub id: &'static str,
         pub hooks: &'a dyn Hooks,
     }
     impl Fields for ModEntry {
         type Fields<'a> = ModEntryFields<'a>;
         fn fields(&self) -> ModEntryFields<'_> {
             ModEntryFields {
+                id: self.id,
                 hooks: &*self.hooks,
             }
         }
@@ -436,3 +440,11 @@ pub mod game {
         }
     }
 }
+
+// hidden: load-owned key resolution, used by the game at the registry boundaries
+pub use crate::registry_keys::effect_key;
+pub use crate::registry_keys::{
+    ResolvedBlock, block as resolved_block, effect as resolved_effect, resolve_blocks,
+    resolve_effects,
+};
+pub use crate::registry_keys::{block_id as block_key_id, effect_id as effect_key_id};

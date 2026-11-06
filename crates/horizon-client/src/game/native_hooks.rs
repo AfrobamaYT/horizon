@@ -1015,12 +1015,12 @@ use mod_api::__private::game::IngredientTest;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientModifiers, ClientReloadListeners, EnchantmentInfo,
-    EntityRef, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
-    NativeNoteBlockChange, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
-    RecipeBookCategory, ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase,
-    TicketController, ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, ClientInputOptions, ClientModifiers, ClientReloadListeners,
+    CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LivingRef,
+    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
+    NativeLifecycleContext, NativeNoteBlockChange, NativeServerPlayer, PathComputationType,
+    Placement, PlayerRef, RecipeBookCategory, ScreenOpening, ScreenshotImage,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
@@ -1028,6 +1028,7 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, TooltipPlace, UsePhase,
 };
+use mod_api::{BlockKey, EffectKey};
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
     NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
@@ -2685,6 +2686,10 @@ impl Game<'_> {
     /// Selection/F3+T and server-pack reloads share this point; initial startup does not
     /// (`client_setup` is the once-only moment after the initial load).
     pub(super) fn native_client_resources_reloaded(&mut self) {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("client reload notice on its owning thread");
         self.fire_client_resources_reloaded();
     }
     /// NeoForge's `FMLClientSetupEvent`: the client started. Fires once per game process,
@@ -2973,6 +2978,10 @@ impl Game<'_> {
     /// Server-side (the single player's integrated server included); a client
     /// connected to a server never fires it.
     pub(super) fn native_server_data_loaded(&mut self, reload: bool) {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("server data notice on its owning thread");
         self.fire_server_data_loaded(reload);
     }
     /// The folders of JSON files native mods read from the data
@@ -4760,8 +4769,10 @@ impl Game<'_> {
         self.fire_register_commands(commands);
     }
     /// A player's command on the server (`Commands.performCommand`),
-    /// without its slash, for a command a mod registered and the player's
-    /// level allows: set `ran` when it is yours. The player's state is
+    /// parsed into `command` with typed, source-resolved arguments, for a command
+    /// a mod registered and the player's level allows: set `ran` when it is yours.
+    /// Missing optional arguments are absent; parsing or resolution failures never
+    /// reach listeners. The player's state is
     /// swapped in for the call, so `native_player` and the other helpers
     /// read that player; `native_feedback` answers them. A single player's
     /// owner console (`horizon-ctl command`) reaches it too, as the owner at
@@ -4769,7 +4780,7 @@ impl Game<'_> {
     pub(super) fn native_perform_command(
         &mut self,
         player: &NativeServerPlayer,
-        command: &str,
+        command: &CommandInvocation,
         ran: &mut bool,
     ) {
         self.fire_perform_command(player, command, ran);
@@ -4980,13 +4991,20 @@ impl Game<'_> {
     }
     /// A command a mod registered, typed on the dedicated server's console
     /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), without its slash: set `ran`
-    /// when it is yours. There is no player: the source is the console, at
+    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
+    /// typed arguments: set `ran` when it is yours. Relative coordinates and
+    /// selectors use the console at the Overworld spawn, with zero rotation.
+    /// Missing optional arguments are absent; invalid input never reaches listeners.
+    /// There is no player: the source is the console, at
     /// permission level 4, so `native_acting_player` is None and the
     /// player-only helpers give nothing; `native_feedback` answers on the
     /// console. A name no mod registered goes to vanilla's dispatcher as
     /// before.
-    pub(super) fn native_perform_console_command(&mut self, command: &str, ran: &mut bool) {
+    pub(super) fn native_perform_console_command(
+        &mut self,
+        command: &CommandInvocation,
+        ran: &mut bool,
+    ) {
         self.fire_perform_console_command(command, ran);
     }
     /// A server player's ender pearl landed and is about to teleport them
@@ -5994,15 +6012,15 @@ impl Game<'_> {
     ) {
         self.fire_player_bucket_entity(player, name, entity_id, entity);
     }
-    /// A server player changed a beacon's selected effects, after they were stored. Empty effect ids
-    /// mean no effect. Server-side.
+    /// A server player changed a beacon's selected effects, after they were stored. Each selected
+    /// effect is its load-owned key; None means no effect. Server-side.
     pub(super) fn native_player_change_beacon_effect(
         &mut self,
         player: u128,
         name: &str,
         pos: [i32; 3],
-        primary: &str,
-        secondary: &str,
+        primary: Option<EffectKey>,
+        secondary: Option<EffectKey>,
     ) {
         self.fire_player_change_beacon_effect(player, name, pos, primary, secondary);
     }
@@ -6844,8 +6862,13 @@ impl Game<'_> {
     }
 
     /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`).
-    pub(super) fn native_raid_state_change(&mut self, raid: i32, pos: [i32; 3], state: &str) {
+    /// `stopped`). The handle identifies its owning level, even if parked.
+    pub(super) fn native_raid_state_change(
+        &mut self,
+        raid: mod_api::RaidRef,
+        pos: [i32; 3],
+        state: &str,
+    ) {
         self.fire_raid_state_change(raid, pos, state);
     }
 
@@ -8674,7 +8697,7 @@ impl Game<'_> {
     /// and `native_apply_effect_tick` follows. Server-side.
     pub(super) fn native_should_apply_effect_tick_this_tick(
         &self,
-        effect: &str,
+        effect: EffectKey,
         tick_count: i32,
         amplifier: i32,
         apply: &mut bool,
@@ -8702,7 +8725,7 @@ impl Game<'_> {
     /// which it didn't have. Server-side.
     pub(super) fn native_on_effect_added(
         &mut self,
-        effect: &str,
+        effect: EffectKey,
         entity: Option<i32>,
         amplifier: i32,
     ) {
@@ -8725,7 +8748,7 @@ impl Game<'_> {
     /// Server-side.
     pub(super) fn native_mob_effect_added(
         &mut self,
-        effect: &str,
+        effect: EffectKey,
         entity: Option<i32>,
         amplifier: i32,
     ) {
@@ -8740,7 +8763,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_applicable(
         &mut self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         applicable: &mut Option<mod_api::EffectApplicable>,
     ) {
         self.fire_mob_effect_applicable(entity, effect, applicable);
@@ -8795,7 +8818,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_expired(
         &self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         amplifier: i32,
         cancel: &mut bool,
     ) {
@@ -8809,7 +8832,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_remove(
         &mut self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         amplifier: i32,
         cancel: &mut bool,
     ) {
@@ -9694,14 +9717,14 @@ impl GameLevel<'_> {
         &self,
         ticks: &mut Ticks,
         pos: [i32; 3],
-        block: &str,
+        block: BlockKey,
         delay: i32,
     ) -> bool {
-        let Some(state) = self.registry.default_state(block) else {
+        let Some(resolved) = mod_api::__private::resolved_block(block) else {
             return false;
         };
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let block = self.behaviours.block(state);
+        let block = resolved.block;
         let time = self.game_time();
         ticks.schedule_block(time, at, block, delay, TickPriority::Normal)
             != ScheduleResult::MissingChunk
@@ -10111,6 +10134,20 @@ impl Game<'_> {
             && self.title.is_none()
             && self.sign_edit.is_none()
             && self.book.is_none()
+    }
+    /// A snapshot of the current input preferences.
+    pub(super) fn native_input_options(&self) -> ClientInputOptions {
+        let settings = &self.settings;
+        ClientInputOptions {
+            sensitivity: settings.sensitivity,
+            invert_x: settings.invert_x,
+            invert_y: settings.invert_y,
+            mouse_wheel_sensitivity: settings.mouse_wheel_sensitivity,
+            discrete_scroll: settings.discrete_scroll,
+            toggle_crouch: settings.toggle_crouch,
+            toggle_sprint: settings.toggle_sprint,
+            auto_jump: settings.auto_jump,
+        }
     }
     /// This `Game` is the window's, not a server's.
     pub(super) fn native_window(&self) -> bool {
@@ -10736,7 +10773,10 @@ impl Game<'_> {
     /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
     /// the content mods (`.hmod`) and the world's data packs, in file order: each
-    /// one typed (`Recipe`: its ingredients, results, group and cooking time and experience) with its file as JSON for a mod's own type. These are the
+    /// one typed (`Recipe`: its ingredients, results, group, cooking time and
+    /// experience, or its stonecutting, smithing or special crafting rule),
+    /// with its file as JSON for a mod's own type. Dynamic rules are not fixed
+    /// outputs; use `LevelRef::craft` to assemble a crafting grid. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
     /// load conditions held, so a pack's override or removal shows. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty
@@ -14073,7 +14113,8 @@ mod entity_inside_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-            r.block_part("minecraft:stone", self.0.clone());
+            let block_key = r.block_key("minecraft:stone");
+            r.block_part(block_key, self.0.clone());
         }
     }
 
@@ -14160,7 +14201,8 @@ mod item_fall_on_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-            r.block_part("minecraft:stone", self.0.clone());
+            let block_key = r.block_key("minecraft:stone");
+            r.block_part(block_key, self.0.clone());
         }
     }
 

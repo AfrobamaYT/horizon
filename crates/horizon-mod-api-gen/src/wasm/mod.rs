@@ -28,6 +28,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "LevelWriteHost",
     "ConfigFiles",
     "Commands",
+    "Levels",
     "Messages",
     "Players",
     "ClientSession",
@@ -51,6 +52,7 @@ pub(super) const IMPORTS: &[&str] = &[
 pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ConfigFiles", "host", "Ok(h.config_files())"),
     ("Commands", "server_host_mut", "Ok(h.commands())"),
+    ("Levels", "server_host", "Ok(h.levels())"),
     ("Messages", "server_host", "Ok(h.messages())"),
     ("Players", "server_host", "Ok(h.players())"),
     ("ClientSession", "client_host", "Ok(h.client_session())"),
@@ -747,7 +749,91 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn client_input_options_have_a_generated_wasm_binding() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let client =
+                    &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
+                assert!(client.functions.contains_key("input-options"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name == "ClientHost::input_options")
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn recipe_rules_are_generated_in_wasm_contract() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let types = &resolve.interfaces[resolve.packages[package].interfaces["types"]];
+                let rule = types.types["recipe-rule"];
+                let wit_parser::TypeDefKind::Variant(variants) = &resolve.types[rule].kind else {
+                    panic!("recipe-rule is not a variant")
+                };
+                for name in [
+                    "stonecutting",
+                    "smithing-transform",
+                    "smithing-trim",
+                    "transmute",
+                    "firework-star",
+                    "repair-item",
+                ] {
+                    assert!(
+                        variants.cases.iter().any(|case| case.name == name),
+                        "missing {name}"
+                    );
+                }
+                assert!(wasm.wit.contains("rule: option<recipe-rule>"));
+                assert!(
+                    wasm.wit
+                        .contains("recipes-of-type: func(kind: string) -> list<recipe>")
+                );
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name.contains("recipes_of_type"))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn services_use_native_forwards_and_frame_resources() {
+        use quote::ToTokens;
+
         std::thread::Builder::new()
             .stack_size(64 << 20)
             .spawn(|| {
@@ -861,13 +947,28 @@ mod tests {
                                 _ => None,
                             })
                             .unwrap();
-                        assert_eq!(method.block.stmts.len(), 1);
-                        let syn::Stmt::Expr(syn::Expr::MethodCall(call), _) =
-                            &method.block.stmts[0]
-                        else {
-                            panic!("native forward")
+                        let access = if service == "ClientSession" {
+                            quote::quote!(mod_api::__private::LoadAccess::ClientSetup)
+                        } else {
+                            quote::quote!(mod_api::__private::LoadAccess::WorldOnly)
                         };
-                        assert_eq!(call.method, format!("native_{name}"));
+                        let native = quote::format_ident!("native_{name}");
+                        let args: Vec<_> = method.sig.inputs.iter().filter_map(|arg| match arg {
+                            syn::FnArg::Receiver(_) => None,
+                            syn::FnArg::Typed(arg) => match &*arg.pat {
+                                syn::Pat::Ident(pat) => Some(&pat.ident),
+                                _ => panic!("named forwarding argument"),
+                            },
+                        }).collect();
+                        let expected: syn::Block = syn::parse_quote!({
+                            mod_api::__private::check_access(#name, #access);
+                            self.#native(#(#args),*)
+                        });
+                        assert_eq!(
+                            method.block.to_token_stream().to_string(),
+                            expected.to_token_stream().to_string(),
+                            "{service}::{name} guards before forwarding its arguments"
+                        );
                     }
                 }
                 assert!(wasm.host.contains("Ok(h.commands())"));

@@ -79,6 +79,12 @@ impl ModsState {
 
 /// Capture load inputs at the resource-generation boundary, before workers share them.
 pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client::Result<ItemData> {
+    let phase = mod_api::__private::PhaseOwner::scope(if role.is_client() {
+        mod_api::__private::ModPhase::Setup
+    } else {
+        mod_api::__private::ModPhase::World
+    });
+    let _reload = phase.reloading()?;
     let mut registries: BTreeMap<_, _> = builtin_registries(root)?
         .registries
         .into_iter()
@@ -120,6 +126,11 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
     horizon_protocol::item::custom::install(first, names)
         .map_err(|error| format!("invalid native component registration: {error}"))?;
     Ok(())
+}
+
+/// Finish every once-only content declaration on the registration thread.
+pub(super) fn freeze_declarations() {
+    let _ = native_declared();
 }
 
 struct NativeDeclared {
@@ -370,6 +381,7 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
+    mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
     register_entity_types(&overlay.mods);
     register_menu_types(&overlay.mods);
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);

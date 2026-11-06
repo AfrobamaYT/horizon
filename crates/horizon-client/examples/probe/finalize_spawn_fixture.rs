@@ -364,7 +364,7 @@ fn describe(m: &Mob, all: &[Mob], regs: &SpawnRegistries) -> String {
         .extra
         .effects
         .iter()
-        .map(|(e, d, a)| format!("{e}:{a}:{d}"))
+        .map(|effect| format!("{}:{}:{}", effect.id, effect.amplifier, effect.duration))
         .collect();
     fx.sort();
     t.push(format!(

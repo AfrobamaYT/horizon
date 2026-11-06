@@ -139,10 +139,10 @@ impl Game<'_> {
                     .for_player(t, |g| g.remove_player_effects(None))
                     .unwrap_or(false),
                 (Target::Player | Target::Guest(_), Some(e)) => self
-                    .for_player(t, |g| g.remove_player_effects(Some(e.id)))
+                    .for_player(t, |g| g.remove_player_effects(Some(e.index)))
                     .unwrap_or(false),
                 (Target::Mob(id), e) => match self.mobs.iter_mut().find(|m| m.id == id) {
-                    Some(m) => m.retain_effects(|x| e.is_some_and(|e| x.0 != namespaced(e.id))),
+                    Some(m) => m.retain_effects(|x| e.is_some_and(|e| x.id != namespaced(e.id))),
                     None => false,
                 },
                 _ => continue,

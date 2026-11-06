@@ -65,6 +65,11 @@ console permission level 4 and the existing console command path, while
 `host.players().acting_player()` returns the optional `PlayerRef` whose state is
 swapped in for this hook. The online list includes connected players even during
 nested player turns; a displaced body's reads still refuse where they did before.
+`host.players().player_by_name(name)` finds a connected real player by account
+name, case-insensitively, or returns `None`; it does not match nicknames or fake
+players. `host.levels().list_levels()` returns loaded server level handles in
+vanilla dimension order, or an empty list before a server world opens. Both
+services are available through `&dyn ServerHost` and do not mutate the world.
 Read identity through `player.uuid()`, `player.name(host)`,
 `player.permission_level(host)` and `player.address(host)`. The address is the
 connection IP without a port (the forwarded address behind a Velocity proxy),
@@ -89,14 +94,37 @@ are generated imports, and acquiring a service just reborrows the current call's
 frame resource. Block and fluid scheduling stays on `LevelTicksHost`, and
 `tick_stats()` stays on `ServerHost`.
 
+## Typed server commands
+
+Register each server usage with `register_commands` and `NativeCommand`. The
+`perform_command` and `perform_console_command` events carry a `CommandInvocation`,
+not a raw line to split. Match its `literals` to your command path, then read named
+values through `command.argument(name)` and `CommandArgumentValue`. An integer is
+already an `i32`; a player argument is a live `PlayerRef`, not selector text.
+Return `Flow::Cancel` when your listener handles the command.
+
+The server parses and checks permissions before resolving arguments or calling a
+listener. Omitted optional arguments are absent, including an omitted optional
+player: they do not silently select the source player. A present player argument
+must select exactly one online player; missing players or invalid input produce
+command feedback without calling the listener. Word and greedy text arguments
+are strings, numbers are finite doubles, booleans are typed, and item arguments
+are component-bearing stacks of one item. Block positions are resolved and floored
+from the source's world, relative or local coordinates without loading chunks.
+A player's source is their position and rotation. The console has no source
+entity and uses the Overworld spawn's block corner with zero rotation, so `@s`
+cannot resolve there. Both hooks receive the same owned data, on native and wasm.
+
 ## Observing advancement progress
 
 Subscribe to `player_advancement_progress` to inspect the whole advancement immediately after
 one criterion is granted or revoked, before its completion rewards. `event.progress.criteria`
 includes obtained and unobtained criteria; `obtained_at` is the original saved grant date or
 `None`. `requirements` lists the OR groups, `completed_requirements` counts satisfied groups,
-and `done` is the game's completion result. This also describes first-tick and reload grants
-for the event's player, even when another player's state is in place.
+and `done` is the game's completion result. A player-issued `/reload` mutates and snapshots
+the acting player's live progress, including during a nested turn. For a suspended outer
+player, reload grants still use the displaced hub record; full owner-correct reload awards
+for suspended and inactive players remain tracked in #1240.
 
 Keep `event.progress.clone()` if it is needed later: the owned `AdvancementProgress` snapshot
 cannot change the player's progress and is not updated by subsequent events. No-op grants and
@@ -213,6 +241,13 @@ and code mods; the scaffold does not create one.
 Raw injections belong in the same manifest as `[[native.injection]]` tables. The decision ladder, the fields and the
 forms are in the modding book: [Injections](../injections.md).
 
+### Dimension shape
+
+`LevelRef::dimension_shape` reads the loaded server level's build range, logical height,
+skylight and ceiling from its dimension shape. It accepts `&dyn Host`, including when the
+level is parked, and returns `None` for a stale or unavailable level or on a client. It does
+not load a level or allocate.
+
 ### Raid handles
 
 Raid handles returned by `LevelRef::raid`, `raid_at` and `raids` resolve their
@@ -222,6 +257,16 @@ come from that level's mobs; raid ids are local to a level. A closed level, an
 earlier world epoch or a client refuses the handle. Entity handles in a parked
 raid's member list keep their identity; their ordinary entity operations still
 require the entity's level to be in place.
+
+### Tool transformation previews
+
+`LevelRef::block_transform` previews a tool against a loaded block in the server level in place.
+Pass the live player, hand, stack, position and hit; the owned result describes the new state,
+relative durability cost, sound, loot and particle. The call does not apply the result. It fires
+`block_tool_modification` with `ToolUse::simulated` set to `true`: listeners must not change the
+level during a simulation. A stale or unavailable player or level, unloaded position, invalid face,
+or tool with no transformation returns `None`. The real action fires the same hook with
+`simulated` set to `false`.
 
 ### Named hook points
 
@@ -258,6 +303,17 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 `set_sleeping_pos` and `clear_sleeping_pos` only change a player's sleeping position/pose, without moving them,
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
+
+`MobRef::portal_cooldown` reads the current mob portal cooldown in ticks from the server's portal state.
+Zero means no cooldown; `None` means a stale, parked or otherwise unavailable mob, a client, or the separately
+modelled dragon. The read does not load levels.
+
+`MobRef::can_use_portal` reads the existing server portal decision for a mob in the current level, including mounts and player riders. It takes `&dyn Host`: `Some(false)` means the mob is ineligible, while `None` means a client, stale or unavailable handle, parked mob, or the separately modelled dragon. It does not load a level.
+
+`MobRef::leash_holder` takes `&dyn ServerHost` and reads the live mob leash. `MobLeashHolder::Unleashed`
+is a definite absence; `Entity` holds an existing entity handle for a player, mob or boat, and `Knot` holds
+fence coordinates. `None` means the mob or holder is unavailable, the level is parked, or a saved holder has
+not resolved; this read neither loads a level nor changes the leash.
 
 Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`) and
 `set_baby` (`Mob.setBaby` through the canonical species-specific setup). Ageable mobs start at their species'
@@ -332,6 +388,20 @@ over them) all answer the gate; `mod_loaded` asks which mods' data is in the roo
 and the content mods that are on. `neoforge:true`, `not`, `and` and `or` combine; a condition the game
 does not know leaves the file out, so a future shape fails closed. Tags, loot tables and advancements
 do not answer the gate yet.
+
+### Reading recipe rules
+
+`recipes_of_type` returns the loaded recipes after pack overrides. Shaped,
+shapeless and cooking recipes expose their resolved ingredients and fixed
+results. Stonecutting, smithing and special crafting recipes expose a typed
+`RecipeRule` instead, including resolved ingredient roles. A smithing or
+special rule's result depends on its inputs: its template is not a fixed
+stack. Use `LevelRef::craft` for the actual output and remainders of a
+crafting grid. Smithing transform's template and addition ingredients can be
+absent, requiring empty slots. Trim patterns are either registry references or
+inline definitions. Result templates retain their count and component patch;
+stonecutting exposes the complete fixed output. A mod-defined recipe type
+retains its original `json`. Look up recipes again after a data reload.
 
 ### Recipe filters
 
@@ -614,7 +684,11 @@ trusting native code is the player's decision, never an agent's.
 4. **Stage.** The projects are copied first, so the build and its key use that copy whatever happens to the
    folder meanwhile. For raw injections the launcher writes `horizon-mixin.toml` and runs `horizon-mixins apply`.
    It stages the mod crates and generated executable, copying only changed files into `native/stage/`,
-   so Cargo, which goes by file times, recompiles only the crates the mods touch. Registry dependencies
+   so Cargo, which goes by file times, recompiles only the crates the mods touch.
+   Each file written gets the current time, never the archive's (the commit's) or the copy's original: on
+   Windows and macOS a copy keeps it, and a file older than the last build reads as already compiled, so
+   switching Nightlies linked the previous one's crates (horizon-rust/horizon#10421). A stage from before
+   that fix is written again once (`native/stage.stamped` marks it). Registry dependencies
    are checked against Horizon's `Cargo.lock` ([The mod's crate](#the-mods-crate)).
 5. **Compile**: `cargo build --locked --profile <fast|release> [--config ...] [--features horizon-client/mods] -p
    horizon-native-game`, into `native/target/`, with one of three build modes:
