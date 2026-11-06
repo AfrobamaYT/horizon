@@ -242,7 +242,6 @@
   "Downloading the prebuilt game at {revision} (once)": "Downloading the prebuilt game at {revision} (once)",
   "Downloading {source}…": "Đang tải xuống {source}…",
   "Downloads": "Tải xuống",
-  "Downloads, sign-ins and updates go through this HTTP proxy (http://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Việc tải xuống, đăng nhập và cập nhật đều thông qua proxy HTTP này (http://host:port). Trống có nghĩa là không có: HTTPS_PROXY được sử dụng thay thế khi trình khởi chạy được khởi động bằng một.",
   "Duplicate…": "Nhân bản…",
   "E_GAME_DEPENDENCY: {mod}: Cargo.toml depends on the game ({key}). Declare game internals through horizon-internals instead.": "E_GAME_DEPENDENCY: {mod}: Cargo.toml depends on the game ({key}). Declare game internals through horizon-internals instead.",
   "E_INTERNAL_AMBIGUOUS: {mod} uses {path}, which has multiple kinds; choose a kind from: {kinds}.": "E_INTERNAL_AMBIGUOUS: {mod} uses {path}, which has multiple kinds; choose a kind from: {kinds}.",
@@ -1145,5 +1144,10 @@
   "Made for Horizon {pin}, you play {yours}: choose matching mod versions or a matching Horizon version before building": "Made for Horizon {pin}, you play {yours}: choose matching mod versions or a matching Horizon version before building",
   "Star on GitHub": "Gắn sao trên GitHub",
   "Windows' Smart App Control is blocking the build (os error 4551). It only lets signed programs run, and a native build runs programs no one has signed: the ones it compiles on this computer and some of the compiler's own. To build native mods, turn it off in Windows Security > App & browser control > Smart App Control settings, then build again. On some Windows versions it can't be turned back on without reinstalling Windows. Content mods (.hmod) need no build and work with it on.": "Windows' Smart App Control is blocking the build (os error 4551). It only lets signed programs run, and a native build runs programs no one has signed: the ones it compiles on this computer and some of the compiler's own. To build native mods, turn it off in Windows Security > App & browser control > Smart App Control settings, then build again. On some Windows versions it can't be turned back on without reinstalling Windows. Content mods (.hmod) need no build and work with it on.",
-  "{count} stars on GitHub": "{count} sao trên GitHub"
+  "{count} stars on GitHub": "{count} sao trên GitHub",
+  "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Việc tải xuống, đăng nhập và cập nhật đều thông qua proxy này (http://host:port, socks5://host:port). Trống có nghĩa là không có: HTTPS_PROXY được sử dụng thay thế khi trình khởi chạy được khởi động bằng một.",
+  "{name} was left out: made for another Horizon version": "Đã bỏ qua {name}: được làm cho phiên bản Horizon khác",
+  "{name} was left out: clashes with {other}": "Đã bỏ qua {name}: xung đột với {other}",
+  "{name} was left out: it needs {other}, which was left out": "Đã bỏ qua {name}: cần {other}, mà {other} đã bị bỏ qua",
+  "Doesn't build on the Horizon you play ({code}): a build leaves it out until its author updates it": "Không build được trên Horizon bạn đang chơi ({code}): bản build sẽ bỏ qua nó cho đến khi tác giả cập nhật"
 }

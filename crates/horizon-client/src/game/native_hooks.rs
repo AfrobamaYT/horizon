@@ -10646,7 +10646,7 @@ impl Game<'_> {
     pub(super) fn native_mapping(&self, name: &str) -> Option<NativeKeyMapping> {
         let &(_, key) = MAPPINGS.iter().find(|m| m.0 == name)?;
         let down = match key {
-            Some(k) => self.keys.contains(&k),
+            Some(k) => self.movement_key_held(k),
             None => self.mouse_held()[usize::from(name == "key.use")],
         };
         Some(NativeKeyMapping {
@@ -11942,35 +11942,51 @@ impl Game<'_> {
             .collect();
         self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
     }
-    /// Options > Mods' rows for the native mods, after the others.
+    /// Options > Mods' rows for loaded code mods, after the content-only rows.
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
         let native = self.mods.native.clone();
-        self.settings
+        // Wasm proxies are installed in the same dispatch table as native mods. Their rows
+        // need the same live switch and settings page, not a frozen content-only toggle.
+        let mut rows: Vec<_> = self
+            .settings
             .mods
             .installed
-            .retain(|row| row.native.is_none() && !native.built().iter().any(|m| m.id == row.id));
-        for package in native.packages() {
+            .iter()
+            .filter(|row| {
+                mod_api::__private::mod_index(&row.id).is_some()
+                    && !native.built().iter().any(|m| m.id == row.id)
+            })
+            .cloned()
+            .collect();
+        rows.extend(native.packages().iter().map(|package| {
             let m = &package.manifest;
-            let mut buttons = Vec::new();
-            self.native_settings(&m.id, &mut buttons);
-            let page = NativePage {
-                keys: mods
-                    .iter_mut()
-                    .find(|page| page.id == m.id)
-                    .map(|page| std::mem::take(&mut page.keys))
-                    .unwrap_or_default(),
-                buttons,
-            };
-            self.settings.mods.installed.push(Installed {
+            Installed {
                 id: m.id.clone(),
                 title: [m.name.as_str(), " ", m.version.as_str()].concat(),
                 description: m.description.clone(),
                 problem: None,
                 dev: false,
-                native: Some(page),
+                native: None,
+            }
+        }));
+        self.settings
+            .mods
+            .installed
+            .retain(|row| !rows.iter().any(|code| code.id == row.id));
+        for mut row in rows {
+            let mut buttons = Vec::new();
+            self.native_settings(&row.id, &mut buttons);
+            row.native = Some(NativePage {
+                keys: mods
+                    .iter_mut()
+                    .find(|page| page.id == row.id)
+                    .map(|page| std::mem::take(&mut page.keys))
+                    .unwrap_or_default(),
+                buttons,
             });
+            self.settings.mods.installed.push(row);
         }
     }
     /// A click on button `button` of native mod `i`'s page (its index in
