@@ -361,6 +361,27 @@ mod tests {
     #[ignore = "needs prepared resources"]
     fn patched_bow_keeps_vanilla_animation_without_listener() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
+            use UseAnimation::*;
+            for (id, expected) in [
+                ("minecraft:bread", Eat),
+                ("minecraft:milk_bucket", Drink),
+                ("minecraft:shield", Block),
+                ("minecraft:bow", Bow),
+                ("minecraft:crossbow", Crossbow),
+                ("minecraft:trident", Trident),
+                ("minecraft:spyglass", Spyglass),
+                ("minecraft:goat_horn", TootHorn),
+                ("minecraft:brush", Brush),
+                ("minecraft:bundle", Bundle),
+                ("minecraft:iron_spear", Spear),
+                ("minecraft:stick", None),
+            ] {
+                assert_eq!(
+                    game.item_use_animation(&horizon_client::items::ItemStack::new(id, 1)),
+                    expected,
+                    "{id}"
+                );
+            }
             let mut bow = horizon_client::items::ItemStack::new("minecraft:bow", 1);
             bow.data_mut().set_other(
                 "minecraft:consumable",
