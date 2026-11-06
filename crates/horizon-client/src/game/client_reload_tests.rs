@@ -53,6 +53,36 @@ fn root_with_asset(name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 #[test]
+fn stage_reads_resolved_asset_bytes_without_a_directory() {
+    use horizon_assets::resource_source::{Resource, ResourceSource};
+    let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+        "assets/test_mod/hats/top.json".into(),
+        Resource::bytes(b"selected".to_vec()),
+    )]));
+    let applied = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let listener = Arc::new(HatListener {
+        seen: std::sync::Mutex::new(Vec::new()),
+        applied: applied.clone(),
+    });
+    let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
+    listeners
+        .add_listener(id("test_mod:hats"), hats(), listener.clone())
+        .unwrap();
+    let prepared =
+        stage_client_reload(&source, listeners, mod_api::__private::ModPhase::World).unwrap();
+    assert_eq!(
+        listener.seen.lock().unwrap().as_slice(),
+        ["test_mod:top=selected"]
+    );
+    assert!(applied.lock().unwrap().is_empty());
+    apply_client_reload(
+        &mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::World),
+        prepared,
+    );
+    assert_eq!(applied.lock().unwrap().as_slice(), ["hats"]);
+}
+
+#[test]
 fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
     let root = root_with_asset("merged", b"\"top\"");
     let applied = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -64,8 +94,12 @@ fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
-    let prepared =
-        stage_client_reload(&root, listeners, mod_api::__private::ModPhase::World).unwrap();
+    let prepared = stage_client_reload(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        listeners,
+        mod_api::__private::ModPhase::World,
+    )
+    .unwrap();
     assert_eq!(
         listener.seen.lock().unwrap().as_slice(),
         ["test_mod:top=\"top\""]
@@ -103,8 +137,11 @@ fn a_listener_error_keeps_every_previous_state() {
     listeners
         .add_listener(id("test_mod:failing"), hats(), Arc::new(Failing))
         .unwrap();
-    let Err(error) = stage_client_reload(&root, listeners, mod_api::__private::ModPhase::World)
-    else {
+    let Err(error) = stage_client_reload(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        listeners,
+        mod_api::__private::ModPhase::World,
+    ) else {
         panic!("a failing listener stops the whole reload")
     };
     assert_eq!(
@@ -125,7 +162,12 @@ fn a_converted_file_outside_the_pack_is_absent_not_empty() {
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
-    stage_client_reload(&root, listeners, mod_api::__private::ModPhase::World).unwrap();
+    stage_client_reload(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        listeners,
+        mod_api::__private::ModPhase::World,
+    )
+    .unwrap();
     assert_eq!(
         listener.seen.lock().unwrap().as_slice(),
         ["test_mod:top={}"],
@@ -282,6 +324,21 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
     )
     .unwrap();
 
+    // Only the archive remains when loading starts.
+    {
+        use std::io::Write;
+        let path = dir.join("packs/override.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for name in ["pack.mcmeta", asset] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(&std::fs::read(pack_dir.join(name)).unwrap())
+                .unwrap();
+        }
+        zip.finish().unwrap();
+        std::fs::remove_dir_all(&pack_dir).unwrap();
+    }
+
     struct HatListener {
         live: Arc<Mutex<Vec<String>>>,
         reject: Arc<AtomicBool>,
@@ -390,8 +447,7 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
                 )
                 .unwrap()
                 .root;
-                horizon_client::packs::resource_root(&base, packs, &crate::game::packs::cache_dir())
-                    .unwrap()
+                horizon_client::packs::resources(base.source().clone(), packs).unwrap()
             };
             // The mod's packaged asset over nothing, with the real root's own
             // assets in the same view.
@@ -675,6 +731,49 @@ fn an_arm_pose_answer_replaces_the_pose_the_item_gives() {
 }
 
 #[test]
+fn resolved_ui_resources_do_not_restore_a_filtered_panorama_face() {
+    use horizon_assets::resource_source::{Resource, ResourceSource};
+    struct Scratch(PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let scratch = Scratch(std::env::temp_dir().join(format!(
+            "horizon-ui-filter-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )));
+    let folder = scratch
+        .0
+        .join("assets/minecraft/textures/gui/title/background");
+    std::fs::create_dir_all(&folder).unwrap();
+    let base = ResourceSource::directory(scratch.0.clone());
+    let mut files = std::collections::BTreeMap::new();
+    for face in 0..6 {
+        let name = format!("assets/minecraft/textures/gui/title/background/panorama_{face}.png");
+        let mut png =
+            png::Encoder::new(std::fs::File::create(scratch.0.join(&name)).unwrap(), 1, 1);
+        png.set_color(png::ColorType::Rgba);
+        png.set_depth(png::BitDepth::Eight);
+        png.write_header()
+            .unwrap()
+            .write_image_data(&[200, 30, 40, 255])
+            .unwrap();
+        // The resolved selection hides face 1 even though the base directory has it.
+        if face != 1 {
+            files.insert(name.clone(), Resource::file(base.clone(), name));
+        }
+    }
+    assert!(base.contains("assets/minecraft/textures/gui/title/background/panorama_1.png"));
+    let gui = crate::game::UiResources::load(&ResourceSource::indexed(files)).unwrap();
+    assert_eq!(gui.panorama.texels(), [96, 110, 111, 255].repeat(6));
+}
+
+#[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn client_completion_reads_published_resources_without_world_access() {
     use crate::game::native_entity_refs::tests::with_client_game;
@@ -796,7 +895,10 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
                 let resources = game.res.clone();
                 let options = game.options.clone();
                 let root = options.resources.clone();
-                let gui = UiResources::server(&root).unwrap();
+                let gui = UiResources::server(
+                    &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+                )
+                .unwrap();
                 let _setup = PhaseOwner::scope(ModPhase::Setup);
                 let mut started = start_game(
                     &resources,
@@ -804,7 +906,9 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
                     gui,
                     options,
                     pack_error.map(str::to_owned),
-                    Audio::silent(&root),
+                    Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                        root.clone(),
+                    )),
                     root,
                     Instant::now(),
                     None,

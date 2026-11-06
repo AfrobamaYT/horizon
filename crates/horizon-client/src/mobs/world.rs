@@ -464,9 +464,15 @@ pub(crate) fn with_resource_test_world(
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry).unwrap();
     let motion = crate::motion::MotionResources::load(root, &assets).unwrap();
-    let data = super::MobData::load(root, &facts);
+    let data = super::MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let types = super::MobTypes::load(root).unwrap();
-    let biomes = crate::biome::Biomes::load(root).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )
+    .unwrap();
     let defaults = horizon_world::item_defaults::read(root).unwrap();
     let items = crate::items::Items::load(
         root,
@@ -484,6 +490,7 @@ pub(crate) fn with_resource_test_world(
     build(&mut world, registry);
     let lid_openers = std::collections::HashMap::new();
     let w = MobWorld {
+        goal_host: None,
         teams: Default::default(),
         loop_context: crate::test_resources::server_loop_context(),
         world: &world,
@@ -495,6 +502,7 @@ pub(crate) fn with_resource_test_world(
         suffocation: &suffocation,
         data: &data,
         player: None,
+        player_identity: None,
         controlling_player_movement: None,
         nearest_player: None,
         others,
@@ -544,6 +552,7 @@ pub(crate) fn test_player(position: Vec3) -> super::PlayerView {
         ),
         eye: [position.x, position.y + 1.62, position.z],
         alive: true,
+        invulnerable: false,
         creative: false,
         sneaking: false,
         swimming: false,
