@@ -1,9 +1,5 @@
 //! Dense attachment membership with immutable, shared-entry snapshots.
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    sync::Arc,
-};
+use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 use super::AttachmentEntry;
 use crate::nbt::JavaString;
@@ -32,39 +28,14 @@ pub struct AttachmentOwner<H> {
 
 struct Owner {
     generation: Arc<()>,
-    keys: HashSet<Arc<AttachmentKey>>,
+    slots: HashMap<Arc<AttachmentKey>, usize>,
 }
 
-struct Bucket<H> {
-    rows: Arc<Vec<AttachmentRow<H>>>,
-    slots: HashMap<H, usize>,
-}
-
-impl<H: Copy + Eq + Hash> Bucket<H> {
-    fn set(&mut self, holder: H, entry: Arc<AttachmentEntry>) {
-        let slot = self.slots.get(&holder).copied();
-        if slot.is_some_and(|slot| Arc::ptr_eq(&self.rows[slot].entry, &entry)) {
-            return;
-        }
-        let rows = Arc::make_mut(&mut self.rows);
-        let row = AttachmentRow { holder, entry };
-        if let Some(slot) = slot {
-            rows[slot] = row;
-        } else {
-            self.slots.insert(holder, rows.len());
-            rows.push(row);
-        }
-    }
-
-    fn remove(&mut self, holder: H) {
-        let Some(slot) = self.slots.remove(&holder) else {
-            return;
-        };
-        let rows = Arc::make_mut(&mut self.rows);
-        rows.swap_remove(slot);
-        if let Some(moved) = rows.get(slot) {
-            self.slots.insert(moved.holder, slot);
-        }
+fn reclaim_sparse_map<K: Eq + Hash, V>(map: &mut HashMap<K, V>) {
+    if map.is_empty() {
+        *map = HashMap::new();
+    } else if map.len() < map.capacity() / 4 {
+        map.shrink_to_fit();
     }
 }
 
@@ -73,10 +44,11 @@ impl<H: Copy + Eq + Hash> Bucket<H> {
 /// Snapshots clone one Arc, and borrowed row iteration needs no locks or allocations.
 /// Mutation copies a bucket's row vector only when a snapshot retains that version;
 /// entries themselves remain shared. With no retained version, updates are in place.
-/// All key/holder lookups are expected O(1). Unregistration visits only that holder's
-/// keys, not all types. Key strings are shared across every membership in a bucket.
-/// The owner registration is an explicit lifecycle operation,
-/// never an effect of dropping a map or a token.
+/// All key/holder lookups are expected O(1). An owner's key-to-slot map is the only
+/// reverse index; unregistration visits only that holder's keys, not all types.
+/// Key strings are shared across every membership in a bucket. Sparse tables and
+/// row vectors shrink below quarter capacity, amortizing reclamation over removals.
+/// Registration and unload are explicit lifecycle operations, never Drop effects.
 ///
 /// Rows append on first insertion. Replacement preserves the slot; removal fills it
 /// from the final row. Order is deterministic given the ordered registration/mutation
@@ -84,7 +56,7 @@ impl<H: Copy + Eq + Hash> Bucket<H> {
 /// holders must supply a defined registration order rather than HashMap iteration.
 #[non_exhaustive]
 pub struct AttachmentIndex<H> {
-    buckets: HashMap<Arc<AttachmentKey>, Bucket<H>>,
+    buckets: HashMap<Arc<AttachmentKey>, Arc<Vec<AttachmentRow<H>>>>,
     owners: HashMap<H, Owner>,
     empty: Arc<Vec<AttachmentRow<H>>>,
 }
@@ -112,7 +84,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         let mut omitted = self
             .owners
             .remove(&holder)
-            .map_or_else(HashSet::new, |owner| owner.keys);
+            .map_or_else(HashMap::new, |owner| owner.slots);
         // A live stale token retains its identity, so generations cannot wrap or be
         // reused, including across distinct indexes.
         let generation = Arc::new(());
@@ -121,14 +93,14 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
             holder,
             Owner {
                 generation: token.generation.clone(),
-                keys: omitted.clone(),
+                slots: omitted.clone(),
             },
         );
         for (key, entry) in entries {
             omitted.remove(&key);
             self.set(&token, &key, entry);
         }
-        for key in omitted {
+        for (key, _) in omitted {
             self.remove(&token, &key);
         }
         token
@@ -137,10 +109,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     /// Capture current membership and values. Missing keys share the same empty Arc;
     /// acquiring an empty snapshot neither allocates nor registers the key.
     pub fn snapshot(&self, key: &AttachmentKey) -> Arc<Vec<AttachmentRow<H>>> {
-        self.buckets
-            .get(key)
-            .map_or(&self.empty, |bucket| &bucket.rows)
-            .clone()
+        self.buckets.get(key).unwrap_or(&self.empty).clone()
     }
 
     /// Publish insertion or replacement. Return false for a stale or foreign token,
@@ -157,18 +126,24 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         if !Arc::ptr_eq(&owner.generation, &token.generation) {
             return false;
         }
-        if !owner.keys.contains(key) {
+        let row = AttachmentRow {
+            holder: token.holder,
+            entry,
+        };
+        if let Some(&slot) = owner.slots.get(key) {
+            let rows = self.buckets.get_mut(key).unwrap();
+            if !Arc::ptr_eq(&rows[slot].entry, &row.entry) {
+                Arc::make_mut(rows)[slot] = row;
+            }
+        } else {
             let shared_key = self
                 .buckets
                 .get_key_value(key)
                 .map_or_else(|| Arc::new(key.clone()), |(key, _)| key.clone());
-            owner.keys.insert(shared_key.clone());
-            self.buckets.entry(shared_key).or_insert_with(|| Bucket {
-                rows: Arc::new(Vec::new()),
-                slots: HashMap::new(),
-            });
+            let rows = self.buckets.entry(shared_key.clone()).or_default();
+            owner.slots.insert(shared_key, rows.len());
+            Arc::make_mut(rows).push(row);
         }
-        self.buckets.get_mut(key).unwrap().set(token.holder, entry);
         true
     }
 
@@ -180,8 +155,9 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         if !Arc::ptr_eq(&owner.generation, &token.generation) {
             return false;
         }
-        if owner.keys.remove(key) {
-            self.remove_membership(token.holder, key);
+        if let Some(slot) = owner.slots.remove(key) {
+            reclaim_sparse_map(&mut owner.slots);
+            self.remove_membership(key, slot);
         }
         true
     }
@@ -206,17 +182,30 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         let Some(owner) = self.owners.remove(&holder) else {
             return false;
         };
-        for key in owner.keys {
-            self.remove_membership(holder, &key);
+        for (key, slot) in owner.slots {
+            self.remove_membership(&key, slot);
         }
+        reclaim_sparse_map(&mut self.owners);
         true
     }
 
-    fn remove_membership(&mut self, holder: H, key: &AttachmentKey) {
-        let bucket = self.buckets.get_mut(key).unwrap();
-        bucket.remove(holder);
-        if bucket.slots.is_empty() {
+    fn remove_membership(&mut self, key: &AttachmentKey, slot: usize) {
+        let rows = Arc::make_mut(self.buckets.get_mut(key).unwrap());
+        rows.swap_remove(slot);
+        if let Some(moved) = rows.get(slot) {
+            *self
+                .owners
+                .get_mut(&moved.holder)
+                .unwrap()
+                .slots
+                .get_mut(key)
+                .unwrap() = slot;
+        }
+        if rows.is_empty() {
             self.buckets.remove(key);
+            reclaim_sparse_map(&mut self.buckets);
+        } else if rows.len() < rows.capacity() / 4 {
+            rows.shrink_to_fit();
         }
     }
 }
@@ -352,6 +341,40 @@ mod tests {
         assert!(index.unregister(&clone));
         assert!(!index.set(&clone, &key("a"), entry(9)));
         assert_eq!(values(&index.snapshot(&key("b"))), [(2, 20)]);
+    }
+
+    #[test]
+    fn multi_key_mass_unload_repairs_survivors_reverse_slots() {
+        let mut index = AttachmentIndex::default();
+        let owners: Vec<_> = (0..64)
+            .map(|i| {
+                let mut entries = vec![(key("a"), entry(i))];
+                if i % 2 == 0 {
+                    entries.push((key("b"), entry(i + 100)));
+                }
+                index.register(i as u32, entries)
+            })
+            .collect();
+        let mut alive = [true; 64];
+        for step in 0..64 {
+            let removed = step * 17 % 64;
+            alive[removed] = false;
+            assert!(index.unload(removed as u32));
+            for (i, owner) in owners.iter().enumerate().filter(|(i, _)| alive[*i]) {
+                assert!(index.set(owner, &key("a"), entry(i as i32 + 1000)));
+            }
+            for (name, offset) in [("a", 1000), ("b", 100)] {
+                let mut actual = values(&index.snapshot(&key(name)));
+                actual.sort_unstable();
+                let expected: Vec<_> = (0..64)
+                    .filter(|&i| alive[i] && (name == "a" || i % 2 == 0))
+                    .map(|i| (i as u32, i as i32 + offset))
+                    .collect();
+                assert_eq!(actual, expected);
+            }
+        }
+        assert!(index.snapshot(&key("a")).is_empty());
+        assert!(index.snapshot(&key("b")).is_empty());
     }
 
     #[test]
