@@ -17,7 +17,13 @@ fn selected(fixture: &Fixture, id: &str, code: bool, side: &str) -> SelectedPack
     let manifest = format!(
         "id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\nside='{side}'\nnamespaces=['shared_space']\ncapabilities=['registries']\n{wasm}"
     );
-    let files: &[(&str, &[u8])] = if code { &[("mod.wasm", module)] } else { &[] };
+    let files: Vec<(&str, &[u8])> = if code {
+        vec![
+            ("mod.wasm", module.as_slice()),
+            ("Cargo.toml", b"[package]\nname='inventory_fixture'\nversion='1.0.0'\n".as_slice()),
+            ("src/lib.rs", b"pub struct Mod;".as_slice()),
+        ]
+    } else { Vec::new() };
     let path = fixture.0.join(format!("{id}.hmod"));
     std::fs::write(&path, horizon_mods::Package::write_files(&manifest, &files).unwrap()).unwrap();
     SelectedPackage { package: horizon_mods::Package::read(&path).unwrap(), path }
