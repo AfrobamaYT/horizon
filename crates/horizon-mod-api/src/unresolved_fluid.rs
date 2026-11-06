@@ -57,7 +57,7 @@ pub fn intern(id: &str) -> Option<UnresolvedFluid> {
         format!("minecraft:{id}")
     };
     if id.len() > MAX_ID_BYTES
-        || !horizon_mods::content::namespaced_id(&id)
+        || !horizon_mod_package::content::namespaced_id(&id)
         || id.starts_with("minecraft:")
     {
         return None;

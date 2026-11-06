@@ -782,7 +782,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// file that does not parse); Horizon's content loader refuses the whole
 /// set, so they stay out of the carry.
 fn unreadable(name: &str, bytes: &mut Vec<u8>) -> Option<String> {
-    if let Err(e) = horizon_mods::content::check_path(name) {
+    if let Err(e) = horizon_mod_package::content::check_path(name) {
         return Some(e);
     }
     if !(name.ends_with(".json") || name.ends_with(".mcmeta")) {
@@ -2219,8 +2219,8 @@ mod tests {
         );
 
         // Horizon's own reader accepts it: blocks and items declared, files fenced.
-        let package = horizon_mods::Package::read(&carried).unwrap();
-        let content = horizon_mods::Content::read(&carried, &package.manifest).unwrap();
+        let package = horizon_mod_package::Package::read(&carried).unwrap();
+        let content = horizon_mod_package::Content::read(&carried, &package.manifest).unwrap();
         let blocks: Vec<&str> = content.blocks.iter().map(|b| b.id.as_str()).collect();
         assert_eq!(blocks, ["gem:gem_block", "gem:gem_door"]);
         assert_eq!(content.items.len(), 1);
@@ -2299,9 +2299,9 @@ mod tests {
         // No block is declared from another namespace's blockstate.
         assert!(report.blocks.is_empty());
         let carried = out.join("carry");
-        let package = horizon_mods::Package::read(&carried).unwrap();
+        let package = horizon_mod_package::Package::read(&carried).unwrap();
         assert_eq!(package.manifest.namespaces, ["kaisyn", "towers_wg"]);
-        let content = horizon_mods::Content::read(&carried, &package.manifest).unwrap();
+        let content = horizon_mod_package::Content::read(&carried, &package.manifest).unwrap();
         assert!(
             content
                 .files
