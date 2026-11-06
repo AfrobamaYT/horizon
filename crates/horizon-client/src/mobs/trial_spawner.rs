@@ -14,8 +14,8 @@ use super::{
     spawner::{self, SpawnData, SpawnDataExt, SpawnerLevel, SpawnerSpawn},
 };
 pub use crate::chunk::block_entity::{ConfigSlot, TrialConfig, TrialSpawner};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_core::{position::BlockPos, random::RandomSource};
-use horizon_world::nbt::{Compound, JavaString, Tag};
 use std::{collections::HashMap, path::Path, sync::OnceLock};
 
 /// An entity's UUID as its four ints (`UUIDUtil.CODEC`).
@@ -1154,7 +1154,7 @@ mod tests {
     use super::*;
 
     fn tag(snbt: &str) -> Tag {
-        horizon_world::nbt::parse_snbt(snbt).expect("snbt").0
+        horizon_core::nbt::parse_snbt(snbt).expect("snbt").0
     }
 
     #[test]

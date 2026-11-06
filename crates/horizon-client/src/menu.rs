@@ -1439,7 +1439,7 @@ impl Menu {
         }
         if let Some(result) = self.containers[RESULT][0].as_mut() {
             result.data_mut().custom_name = (!name.trim().is_empty())
-                .then(|| horizon_world::nbt::Tag::String(name.as_str().into()));
+                .then(|| horizon_core::nbt::Tag::String(name.as_str().into()));
             result.tidy();
         }
         self.anvil.name = Some(name);
@@ -2338,7 +2338,7 @@ pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
             return None;
         }
         match d.other("minecraft:max_stack_size") {
-            Some(horizon_world::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
+            Some(horizon_core::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
             _ => None,
         }
     });
@@ -3814,7 +3814,7 @@ pub(crate) mod tests {
             let mut item = ItemStack::new("minecraft:stone", 15);
             item.data_mut().set_other(
                 "minecraft:max_stack_size",
-                Some(horizon_world::nbt::Tag::Int(16)),
+                Some(horizon_core::nbt::Tag::Int(16)),
             );
             menu.set_player_item(0, Some(item.clone()));
             for i in 1..36 {

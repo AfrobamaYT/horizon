@@ -9,7 +9,7 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "read",
-        neoforge = "IBlockExtension.isPathfindable"
+        neoforge = "none (vanilla BlockBehaviour.isPathfindable; NeoForge 26.3 has no IBlockExtension.isPathfindable, IBlockExtension.getBlockPathType answers a different question)"
     )]
     fn is_pathfindable();
 }

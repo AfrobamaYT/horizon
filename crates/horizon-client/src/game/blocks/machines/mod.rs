@@ -188,7 +188,7 @@ impl Containers<'_> {
     }
     /// `ItemStack.getMaxStackSize`: its component, else the item's.
     pub(super) fn max_stack(&self, stack: &ItemStack) -> u32 {
-        if let Some(horizon_world::nbt::Tag::Int(n)) = stack
+        if let Some(horizon_core::nbt::Tag::Int(n)) = stack
             .data()
             .and_then(|d| d.other("minecraft:max_stack_size"))
         {

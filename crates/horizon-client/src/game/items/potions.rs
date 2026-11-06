@@ -24,11 +24,11 @@ use horizon_client::{
     projectiles::{Projectile, ProjectileKind},
     text::Text,
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{
     geometry::{Aabb, Axis, Direction, Vec3},
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::nbt::Tag;
 use mod_api::{EffectApplicable, EffectTickChange, EntityRef, LivingRef, NativePlayerFood};
 
 /// Per-cloud settings; natural lingering clouds keep their creation defaults.
@@ -782,12 +782,15 @@ impl Game<'_> {
                 .play("minecraft:entity.generic.drink", Some(eye), 0.5, pitch);
         }
         // ItemStack.onUseTick: the item's own tick after the consumable's.
-        self.item_on_use_tick(stack, ticks - 1);
+        if !self.item_on_use_tick(stack, ticks - 1) {
+            return true;
+        }
         if i64::from(ticks) < i64::from(duration) {
             self.using = Some((slot, ticks));
             return true;
         }
         self.finish_drinking(slot, stack);
+        self.use_item_finished(stack);
         true
     }
     /// `PotionItem.finishUsingItem` (and `OminousBottleItem`'s) of `stack` in

@@ -582,13 +582,13 @@ impl LevelAccess for Asker {
         _: BlockPos,
         _: BlockStateId,
         _: bool,
-        updates: &mut Vec<super::NeighbourUpdate>,
+        updates: &mut Vec<horizon_core::neighbour_update::NeighbourUpdate>,
     ) {
         if self.asks {
             updates.extend([
-                super::NeighbourUpdate::NeighboursExcept(Direction::Up),
-                super::NeighbourUpdate::OutputSignal,
-                super::NeighbourUpdate::Neighbours,
+                horizon_core::neighbour_update::NeighbourUpdate::NeighboursExcept(Direction::Up),
+                horizon_core::neighbour_update::NeighbourUpdate::OutputSignal,
+                horizon_core::neighbour_update::NeighbourUpdate::Neighbours,
             ]);
         }
     }
@@ -1498,6 +1498,7 @@ fn connections_follow_connects_to_both_ways() {
                 ConnectionKind::Bars => {
                     sim.bars_attach_to(pos, own, neighbour, sturdy, Direction::East)
                 }
+                _ => unreachable!("every connection kind is matched"),
             }
         };
         // Vanilla: a sturdy face connects, a glass block's face does not.

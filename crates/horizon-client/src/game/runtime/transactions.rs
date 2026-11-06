@@ -901,6 +901,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -1147,16 +1148,16 @@ mod tests {
         // A chest minecart's, a chest boat's and a chested donkey's slots: an abort puts back
         // what an insert changed; a commit keeps an exchange, whose new item goes into the next
         // free slot.
-        let mut chested = horizon_world::nbt::Compound::new();
-        chested.insert("ChestedHorse".into(), horizon_world::nbt::Tag::Byte(1));
+        let mut chested = horizon_core::nbt::Compound::new();
+        chested.insert("ChestedHorse".into(), horizon_core::nbt::Tag::Byte(1));
         let vehicles = [
             (
                 "minecraft:chest_minecart",
-                horizon_world::nbt::Compound::new(),
+                horizon_core::nbt::Compound::new(),
             ),
             (
                 "minecraft:oak_chest_boat",
-                horizon_world::nbt::Compound::new(),
+                horizon_core::nbt::Compound::new(),
             ),
             ("minecraft:donkey", chested),
         ];
@@ -1167,8 +1168,8 @@ mod tests {
                 "minecraft:donkey",
                 [8.5, 70.0, 8.5],
                 {
-                    let mut chested = horizon_world::nbt::Compound::new();
-                    chested.insert("ChestedHorse".into(), horizon_world::nbt::Tag::Byte(1));
+                    let mut chested = horizon_core::nbt::Compound::new();
+                    chested.insert("ChestedHorse".into(), horizon_core::nbt::Tag::Byte(1));
                     chested
                 },
             )
@@ -1319,7 +1320,7 @@ mod mod_capability_tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
-    use horizon_world::nbt::{Compound, Tag};
+    use horizon_core::nbt::{Compound, Tag};
     use mod_api::__private::part_tests::{CHEMICALS, ChemTank, Chemical};
     use mod_api::ServerHost;
     use mod_api::{BlockSide, HostTransaction, ResourceHandler, move_resources};

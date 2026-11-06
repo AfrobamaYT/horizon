@@ -370,12 +370,12 @@ impl Game<'_> {
     pub(super) fn boat_loot_pending(&self, id: u32) -> bool {
         matches!(
             self.persist.raw.get(&id),
-            Some(horizon_world::nbt::Tag::Compound(map)) if map.contains_key(&"LootTable".into())
+            Some(horizon_core::nbt::Tag::Compound(map)) if map.contains_key(&"LootTable".into())
         )
     }
 
     pub(super) fn unpack_boat_loot(&mut self, i: usize) {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let id = self.boats[i].id;
         let (table, seed) = {
             let Some(Tag::Compound(map)) = self.persist.raw.get_mut(&id) else {

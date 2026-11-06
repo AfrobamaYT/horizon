@@ -59,18 +59,12 @@ use horizon_core::{
     ticks::{ScheduleResult, TickPriority},
 };
 use horizon_world::level::{BonemealCheck, PlaceContext};
-use horizon_world::{
-    consumable::UseAnimation,
-    fluid::FluidKind,
-    level::{BlockId, LevelAccess, PlacementContext, Ticks},
-    nbt::{Compound, Tag},
-    registry::{BlockRegistry, BlockStateId},
-};
 use mod_api::__private::game::IngredientTest;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientInputOptions, ClientModifiers, ClientReloadListeners,
+    self, Answered, BlockPlacement, ClientAudioOptions, ClientChatOptions, ClientGraphicsOptions,
+    ClientGuiOptions, ClientInputOptions, ClientModifiers, ClientReloadListeners,
     CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LayerDefinition,
     LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
     NativeLifecycleContext, NativeNoteBlockChange, NativeServerPlayer, PathComputationType,
@@ -101,6 +95,17 @@ use std::{
     time::Duration,
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
+use {
+    horizon_core::{
+        nbt::{Compound, Tag},
+        use_animation::UseAnimation,
+    },
+    horizon_world::{
+        fluid::FluidKind,
+        level::{BlockId, LevelAccess, PlacementContext, Ticks},
+        registry::{BlockRegistry, BlockStateId},
+    },
+};
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
 include!("shared.rs");

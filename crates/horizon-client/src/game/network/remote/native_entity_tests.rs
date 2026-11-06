@@ -4,10 +4,10 @@
 use crate::game::{
     Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
 };
+use horizon_core::nbt::Tag;
 use horizon_protocol::entity_data::Value;
 use horizon_protocol::item::{Component, Stack, component};
 use horizon_protocol::packets::play::{self, Clientbound as C};
-use horizon_world::nbt::Tag;
 use mod_api::EquipmentSlot;
 
 fn spawn(dimension: &str) -> play::SpawnInfo {
@@ -32,6 +32,7 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
     let settings = Settings::default();
     let loaded = load_resources(
         horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
@@ -243,6 +244,7 @@ fn a_villager_raid_sweat_event_draws_particles() {
     let settings = Settings::default();
     let loaded = load_resources(
         horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,

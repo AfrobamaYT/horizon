@@ -127,13 +127,13 @@ impl Game<'_> {
     }
     /// `BeaconBlockEntity.tick` of the beacon at `key`.
     pub(super) fn tick_beacon_at(&mut self, key: (i32, i32, i32)) {
-        let Some(BlockEntity::Beacon(mut b)) = self.world.block_entities.take(&key) else {
+        let Some((lease, BlockEntity::Beacon(mut b))) = self.world.block_entities.take(&key) else {
             return;
         };
         let previous = b.levels;
         self.tick_beacon(key, &mut b, false);
         let current = b.levels;
-        self.world.block_entities.put(key, BlockEntity::Beacon(b));
+        self.world.block_entities.put(lease, BlockEntity::Beacon(b));
         if (previous == 0) != (current == 0) {
             self.native_beacon_state_change(self.dim.id(), [key.0, key.1, key.2], current > 0);
         }
@@ -149,11 +149,12 @@ impl Game<'_> {
             .filter_map(|(k, e)| matches!(e, BlockEntity::Beacon(_)).then_some(*k))
             .collect();
         for key in keys {
-            let Some(BlockEntity::Beacon(mut b)) = self.world.block_entities.take(&key) else {
+            let Some((lease, BlockEntity::Beacon(mut b))) = self.world.block_entities.take(&key)
+            else {
                 continue;
             };
             self.tick_beacon(key, &mut b, true);
-            self.world.block_entities.put(key, BlockEntity::Beacon(b));
+            self.world.block_entities.put(lease, BlockEntity::Beacon(b));
         }
     }
     fn tick_beacon(&mut self, (x, y, z): (i32, i32, i32), b: &mut Beacon, client: bool) {

@@ -719,29 +719,53 @@ fn not_built(
     out
 }
 
+pub(super) struct PreparedLoopContext {
+    game: Arc<horizon_world::native_load_context::LoopContext>,
+    audio: Option<horizon_world::native_load_context::LoopContext>,
+}
+
 impl Game<'_> {
     /// Build this game's loop context over the loaded registries and the mods'
     /// current settings. Called where a resource generation starts or reloads: a
     /// client at window start and after a resource reload, a server when it starts
     /// its mods and on `/reload`. A client hands a second one to its audio.
     pub(super) fn refresh_loop_context(&mut self) -> horizon_client::Result<()> {
+        let context = self.prepare_loop_context(&self.options.resources)?;
+        self.install_loop_context(context);
+        Ok(())
+    }
+
+    pub(super) fn prepare_loop_context(
+        &self,
+        resources: &std::path::Path,
+    ) -> horizon_client::Result<PreparedLoopContext> {
         let side = self.options.execution_role.loop_side();
-        let inventory = horizon_mods::enabled::EnabledMods::read(&self.options.resources)?;
+        let inventory = horizon_mods::enabled::EnabledMods::read(resources)?;
         let ids: Vec<_> = if self.is_logical_server() {
             inventory.server_ids().collect()
         } else {
             inventory.client_ids().collect()
         };
         let item_data = self.res.core.item_data.context();
-        self.loop_context = Arc::new(item_data.loop_context(side, ids.iter().copied()));
+        let audio = self
+            .options
+            .execution_role
+            .is_client()
+            .then(|| item_data.loop_context(side, ids.iter().copied()));
+        Ok(PreparedLoopContext {
+            game: Arc::new(item_data.loop_context(side, ids.iter().copied())),
+            audio,
+        })
+    }
+
+    pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
+        self.loop_context = context.game;
         if let Some(host) = self.lan.as_mut() {
             host.hub.loop_context = self.loop_context.clone();
         }
-        if self.options.execution_role.is_client() {
-            self.audio
-                .set_loop_context(item_data.loop_context(side, ids));
+        if let Some(audio) = context.audio {
+            self.audio.set_loop_context(audio);
         }
-        Ok(())
     }
 
     /// Stage a fresh root only when live code admission changes the inventory.
@@ -906,6 +930,7 @@ impl Game<'_> {
         let root = self.options.resources.clone();
         let data_source = self.pack.data_source.clone();
         let data_changes = self.pack.data_changes.clone();
+        let additional_data = self.pack.additional_data.clone();
         let enabled = self.applied_mods();
         let selected = self.mods.selected.clone();
         let refused = self.mods.refused.clone();
@@ -914,6 +939,7 @@ impl Game<'_> {
             g.options.resources = root;
             g.pack.data_source = data_source;
             g.pack.data_changes = data_changes;
+            g.pack.additional_data = additional_data;
             g.settings.mods.enabled = enabled.clone();
             g.mods.applied = Some(enabled);
             g.mods.selected = selected;
@@ -1071,14 +1097,14 @@ mod tests {
         assert_eq!(ghoul.health, 40.0);
         let saved =
             |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
-        let keys = |tag: &horizon_world::nbt::Tag| -> Vec<String> {
-            let horizon_world::nbt::Tag::Compound(map) = tag else {
+        let keys = |tag: &horizon_core::nbt::Tag| -> Vec<String> {
+            let horizon_core::nbt::Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
             };
             map.keys().map(|k| k.to_string_lossy()).collect()
         };
         let (zombie_tag, ghoul_tag) = (saved(&zombie), saved(&ghoul));
-        let Some(horizon_world::nbt::Tag::String(id)) = ghoul_tag.get("id") else {
+        let Some(horizon_core::nbt::Tag::String(id)) = ghoul_tag.get("id") else {
             panic!("a saved mob has its id");
         };
         assert_eq!(id.to_string_lossy(), "ruby:ghoul");
@@ -1112,7 +1138,7 @@ mod tests {
     #[test]
     fn a_mod_trader_type_is_a_wandering_trader_under_its_own_id() {
         use horizon_client::mobs::{Mob, Species};
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let types = living_mod_types();
         let merchant = &types["ruby:merchant"];
         assert_eq!(merchant.species, Species::WanderingTrader);

@@ -12,7 +12,7 @@ pub trait Hooks {
         side = "server",
         contract = "replace",
         out = "data",
-        neoforge = "IPlayerExtension.openMenu(MenuProvider, Consumer<RegistryFriendlyByteBuf>)",
+        neoforge = "IPlayerExtension.openMenu",
         cancellable = false
     )]
     fn menu_extra_data();

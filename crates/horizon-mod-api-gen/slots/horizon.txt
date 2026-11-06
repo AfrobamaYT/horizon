@@ -41,3 +41,6 @@ horizon_client_render::screen_effects::ScreenEffects::build
 horizon_client_render::sprites::Sprites::finish
 horizon_client_render::sprites::Sprites::register
 horizon_client_render::ui::menu_background
+# Low-frequency autosave scheduling: rate changes and world startup, not the per-tick path.
+horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 |
+horizon_client::game::Game<'_>::on_tick_rate_changed | self.next_autosave_interval | 0 |

@@ -15,15 +15,17 @@ use horizon_client::{
 };
 use horizon_core::position::BlockPos;
 use horizon_protocol::packets::play::{self, Clientbound as C, Serverbound as S};
-use horizon_world::{
-    chunk::BlockState,
-    level::flags,
-    nbt::Tag,
-    registry::{BlockRegistry, BlockStateId},
-};
 use winit::{
     event::{ElementState, KeyEvent},
     keyboard::{KeyCode, PhysicalKey},
+};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        chunk::BlockState,
+        level::flags,
+        registry::{BlockRegistry, BlockStateId},
+    },
 };
 
 type Pos = (i32, i32, i32);
@@ -1005,13 +1007,24 @@ impl Game<'_> {
         if let Ok(id) = registry.resolve(&wanted)
             && wanted != *current
         {
-            let entity = self.world.block_entities.take(&pos);
+            let old = self.world.block(pos.0, pos.1, pos.2);
+            let (lease, entity) = self.world.block_entities.take(&pos).unzip();
             let at = BlockPos::new(pos.0, pos.1, pos.2);
-            self.with_level(|b, level, ticks| {
-                b.set_block(level, ticks, at, id, flags::UPDATE_CLIENTS)
+            let lease = self.with_level(|b, level, ticks| {
+                level.command_block_transition = lease.map(|lease| CommandBlockTransition {
+                    lease,
+                    old,
+                    new: id,
+                    available: old_mode != s.mode,
+                });
+                b.set_block(level, ticks, at, id, flags::UPDATE_CLIENTS);
+                level
+                    .command_block_transition
+                    .take()
+                    .map(|change| change.lease)
             });
-            if let Some(entity) = entity {
-                self.world.block_entities.put(pos, entity);
+            if let Some((lease, entity)) = lease.zip(entity) {
+                self.world.block_entities.put(lease, entity);
             }
             let _ = self.process_level_events();
         }
@@ -1048,9 +1061,86 @@ impl Game<'_> {
     }
 }
 
+/// One state-preserving command edit, scoped to its exact removal boundary.
+pub(super) struct CommandBlockTransition {
+    lease: horizon_client::block_entities::BlockEntityLease,
+    old: BlockStateId,
+    new: BlockStateId,
+    available: bool,
+}
+
+impl CommandBlockTransition {
+    pub(super) fn preserve(&mut self, world: &mut World, pos: BlockPos, old: BlockStateId) -> bool {
+        if !self.available || self.old != old || self.new != world.block(pos.x, pos.y, pos.z) {
+            return false;
+        }
+        if !world
+            .block_entities
+            .rekey(&(pos.x, pos.y, pos.z), &mut self.lease)
+        {
+            return false;
+        }
+        self.available = false;
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn mode_switch_preserves_command_entity_output_and_state() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let pos = (1, 64, 1);
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let old = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:command_block")
+                .unwrap();
+            game.world.set(pos.0, pos.1, pos.2, old).unwrap();
+            let mut command = CommandBlock::default();
+            command.set_command("say preserved");
+            command.powered = true;
+            command.last_output = Some(Text::literal("previous output"));
+            game.world
+                .block_entities
+                .insert(pos, BlockEntity::CommandBlock(Box::new(command)));
+            for (mode, conditional) in [
+                (Mode::Sequence, false),
+                (Mode::Auto, false),
+                (Mode::Redstone, false),
+                (Mode::Redstone, true),
+            ] {
+                game.apply_command_block(&CommandBlockEdit {
+                    pos,
+                    command: "say updated".into(),
+                    track_output: true,
+                    mode,
+                    conditional,
+                    auto: false,
+                });
+                let entity = game
+                    .command_block(pos)
+                    .expect("state change kept the instance");
+                assert_eq!(entity.command, "say updated");
+                assert_eq!(entity.last_output_string(), "previous output");
+                assert!(entity.powered);
+                assert_eq!(game.block_state_at(pos).unwrap().name, mode.block());
+                assert_eq!(
+                    game.block_state_at(pos).unwrap().properties["conditional"],
+                    conditional.to_string()
+                );
+            }
+        });
+    }
 
     #[test]
     fn a_minecart_screen_has_no_mode_buttons_and_a_lower_output_row() {

@@ -46,7 +46,10 @@ macro_rules! world_biomes {
 /// The world's packs' content files, as a field-level borrow (see the macros).
 fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOverlay<'_> {
     match world_tables {
-        Some(t) => horizon_world::loot::PackOverlay { files: &t.files },
+        Some(t) => horizon_world::loot::PackOverlay {
+            conditions: &t.conditions,
+            files: &t.files,
+        },
         None => horizon_world::loot::PackOverlay::NONE,
     }
 }
@@ -118,18 +121,6 @@ use horizon_core::{
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_mods::selection::{Argument, LaunchArguments};
-use horizon_world::{
-    block_collision::BlockCollisionRegistry,
-    collision_context::{CollisionContext, CollisionEntity, CollisionItem},
-    entity_obstruction::{EntityIdentity, EntityObstructionWorld, ObstructionEntity},
-    fluid::FluidState,
-    level::{
-        Behaviours, BucketContent, Dimension as LevelDimension, EntityQuery, Landing, LevelAccess,
-        LevelEvent, PlaceContext, PlaceOutcome, PlacementContext, PlayerContext, PlayerEffect,
-        Ticks, flags as level_flags,
-    },
-    registry::BlockStateId,
-};
 pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
@@ -161,6 +152,21 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Window, WindowId},
+};
+use {
+    horizon_core::dimension::Dimension as LevelDimension,
+    horizon_world::{
+        block_collision::BlockCollisionRegistry,
+        collision_context::{CollisionContext, CollisionEntity, CollisionItem},
+        entity_obstruction::{EntityIdentity, EntityObstructionWorld, ObstructionEntity},
+        fluid::FluidState,
+        level::{
+            Behaviours, BucketContent, EntityQuery, Landing, LevelAccess, LevelEvent, PlaceContext,
+            PlaceOutcome, PlacementContext, PlayerContext, PlayerEffect, Ticks,
+            flags as level_flags,
+        },
+        registry::BlockStateId,
+    },
 };
 
 /// The time a frame spends uploading chunk meshes when the player set no
@@ -718,6 +724,7 @@ struct InteractTarget {
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
     world: &'w mut World,
+    command_block_transition: Option<command_blocks::CommandBlockTransition>,
     redstone_experiments: bool,
     facts: &'w BlockFacts,
     collision: &'w BlockCollisionRegistry<'w>,
@@ -999,7 +1006,7 @@ impl LevelAccess for GameLevel<'_> {
         pos: BlockPos,
         state: BlockStateId,
         moved: bool,
-        updates: &mut Vec<horizon_world::level::NeighbourUpdate>,
+        updates: &mut Vec<horizon_core::neighbour_update::NeighbourUpdate>,
     ) {
         if self.native_authoritative {
             self.native_affect_neighbors_after_removal(self.dimension, pos, state, moved, updates);
@@ -1328,7 +1335,7 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn adjust_connects_to(
         &self,
-        kind: horizon_world::level::ConnectionKind,
+        kind: horizon_core::connection_kind::ConnectionKind,
         pos: BlockPos,
         state: BlockStateId,
         neighbour: BlockStateId,
@@ -1856,10 +1863,16 @@ impl LevelAccess for GameLevel<'_> {
             .map(|s| s.status == horizon_client::block_entity_anim::ShulkerStatus::Closed)
     }
     fn remove_block_entity(&mut self, pos: BlockPos, old: BlockStateId, side_effects: bool) -> u8 {
+        if let Some(change) = &mut self.command_block_transition
+            && change.preserve(self.world, pos, old)
+        {
+            // Returning 0 skips remove_entity's side effects once; command blocks have no contents or drops.
+            return 0;
+        }
         self.remove_entity(pos, old, side_effects)
     }
-    fn load_block_entity(&mut self, pos: BlockPos, mut nbt: horizon_world::nbt::Compound) {
-        use horizon_world::nbt::Tag;
+    fn load_block_entity(&mut self, pos: BlockPos, mut nbt: horizon_core::nbt::Compound) {
+        use horizon_core::nbt::Tag;
         for (k, v) in [("x", pos.x), ("y", pos.y), ("z", pos.z)] {
             nbt.insert(k.into(), Tag::Int(v));
         }
@@ -1919,7 +1932,7 @@ struct FallingBlock {
     stuck: Vec3,
     damage: horizon_client::falling_block::Damage,
     /// The UUID and compound it was loaded with, kept while it moves.
-    saved: Option<Box<([i32; 4], horizon_world::nbt::Tag)>>,
+    saved: Option<Box<([i32; 4], horizon_core::nbt::Tag)>>,
 }
 impl FallingBlock {
     /// Where `FallingBlockRenderer` draws the block's model corner, `alpha`
@@ -2004,6 +2017,7 @@ struct WorldRest {
 /// recipes, loot tables and tags from the world's pack stack, over the
 /// resource root's own. Worlds without packs use `Resources.rest` directly.
 struct WorldTables {
+    conditions: horizon_world::conditions::LoadConditions,
     suffocation: horizon_world::suffocation::SuffocationRegistry<'static>,
     /// The pack files the tables were built from (a native mod's among
     /// them), for the advancement tree reload and the loot data.
@@ -2011,6 +2025,7 @@ struct WorldTables {
     items: Items,
     recipes: Recipes,
     stations: horizon_client::stations::StationData,
+    reload_sources: Option<Arc<horizon_client::crafting::ResolvedSources>>,
     /// The values of the data map types native mods registered
     /// (`native_data_map_types`).
     data_maps: native_data_maps::DataMaps,
@@ -2018,6 +2033,19 @@ struct WorldTables {
     /// over the game's own, by registry (`TagLoader.loadTagsForExistingRegistries`):
     /// what the predicates' `#tag`s of those registries read.
     pack_tags: HashMap<&'static str, HashMap<String, HashSet<String>>>,
+}
+
+struct PreparedParts {
+    blocks: Vec<mod_api::__private::ResolvedBlock>,
+    tags: HashMap<String, horizon_world::level::data::BlockSet>,
+    parts: Option<mod_api::Parts>,
+}
+
+struct PreparedWorldReload {
+    tables: Option<WorldTables>,
+    health: horizon_client::health::HealthResources,
+    parts: PreparedParts,
+    wire: Option<Arc<horizon_client::lan::data::SyncData>>,
 }
 
 impl WorldTables {
@@ -2135,7 +2163,7 @@ pub(super) fn durability_damage(damage: f32) -> f32 {
 /// as vanilla casts it); an entry it removed keeps vanilla's `fallback`.
 pub(super) fn answered_wear(
     entries: &[mod_api::NativeArmorHurt],
-    slot: horizon_world::player_inventory::EquipmentSlot,
+    slot: horizon_core::equipment_slot::EquipmentSlot,
     fallback: u32,
 ) -> u32 {
     entries
@@ -2144,8 +2172,8 @@ pub(super) fn answered_wear(
         .map_or(fallback, |e| e.new_damage as u32)
 }
 
-pub(super) fn armor_slot(index: usize) -> horizon_world::player_inventory::EquipmentSlot {
-    use horizon_world::player_inventory::EquipmentSlot;
+pub(super) fn armor_slot(index: usize) -> horizon_core::equipment_slot::EquipmentSlot {
+    use horizon_core::equipment_slot::EquipmentSlot;
     match index {
         0 => EquipmentSlot::Head,
         1 => EquipmentSlot::Chest,
@@ -2205,6 +2233,7 @@ pub struct PackResources {
     source: horizon_assets::resource_source::ResourceSource,
     data_source: horizon_assets::resource_source::ResourceSource,
     data_changes: horizon_assets::resource_source::ResourceSource,
+    additional_data: Arc<[Arc<horizon_client::datapack::DataPack>]>,
     assets: Arc<Assets>,
     block_registries: Arc<horizon_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -2297,6 +2326,7 @@ impl PackResources {
             source: root.source().clone(),
             data_source: root.data().clone(),
             data_changes: root.data_changes().clone(),
+            additional_data: Arc::from([]),
             names: Arc::new(Names::load(root.source())),
             clouds: Arc::new(load_clouds(root.source())),
             forcefield: Arc::new(load_forcefield(root.source())),
@@ -4028,13 +4058,7 @@ impl Game<'_> {
     }
     /// `LivingEntity.getUsedItemHand`: the hand of the item in use.
     fn used_hand(&self) -> Option<Hand> {
-        self.using.map(|(slot, _)| {
-            if slot == shield::OFFHAND_SLOT {
-                Hand::Off
-            } else {
-                Hand::Main
-            }
-        })
+        item_use::hand_of(self.using)
     }
     /// Run `f` with `hand` acting (`held`, `consume_held`, `swing_arm`).
     fn with_hand<T>(&mut self, hand: Hand, f: impl FnOnce(&mut Self) -> T) -> T {
@@ -4315,7 +4339,7 @@ impl Game<'_> {
     /// The block entity at `pos` saved with its id and position
     /// (`saveWithFullMetadata`), or the saved one Horizon keeps as loaded:
     /// what a broken block's loot sees as `LootContextParams.BLOCK_ENTITY`.
-    fn loot_block_entity(&self, pos: [i32; 3], block: &str) -> Option<horizon_world::nbt::Tag> {
+    fn loot_block_entity(&self, pos: [i32; 3], block: &str) -> Option<horizon_core::nbt::Tag> {
         let key = (pos[0], pos[1], pos[2]);
         match self.world.block_entities.get(&key) {
             Some(entity) => Some(horizon_client::save::encode_block_entity(
@@ -4332,7 +4356,7 @@ impl Game<'_> {
     fn loot_place_at(
         &self,
         origin: [f64; 3],
-        block_entity: Option<horizon_world::nbt::Tag>,
+        block_entity: Option<horizon_core::nbt::Tag>,
     ) -> horizon_world::loot::NativeLootPlace {
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
@@ -4359,7 +4383,7 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
         held: Option<&ItemStack>,
-        block_entity: Option<horizon_world::nbt::Tag>,
+        block_entity: Option<horizon_core::nbt::Tag>,
     ) -> Vec<ItemStack> {
         let registry = self.pack.assets.registry;
         let dynamic = self.pending.dynamic(pos);
@@ -4963,6 +4987,7 @@ impl Game<'_> {
         }
         let native_authoritative = self.native_authoritative();
         let mut level = GameLevel {
+            command_block_transition: None,
             redstone_experiments: self
                 .level
                 .enabled_features
@@ -7033,7 +7058,7 @@ impl Game<'_> {
                 self.use_item_on_block(hit, self.hand, held.as_ref(), mod_api::UsePhase::Block);
             if block_answer.is_none()
                 && mod_api::__private::has_part_hook(mod_api::HookId::UseItemOn)
-                && mod_api::__private::parts("use_item_on")
+                && mod_api::__private::parts(mod_api::HookId::UseItemOn, "use_item_on")
                     .for_hook(mod_api::HookId::UseItemOn)
                     .is_some_and(|parts| !parts.block_state(state).is_empty())
             {
@@ -7858,8 +7883,7 @@ impl Game<'_> {
             self.using = None;
             return;
         };
-        // Switching hotbar slots only ends a main-hand use.
-        let hand_changed = slot != self.selected && slot != shield::OFFHAND_SLOT;
+        let hand_changed = self.use_hand_changed(slot);
         if !self.right || hand_changed || self.screen != Screen::Playing {
             self.using = None;
             self.release_used_item(&stack, ticks, hand_changed);
@@ -7871,9 +7895,14 @@ impl Game<'_> {
             self.using = None;
             return;
         };
+        let going_on = self.use_item_ticked(&stack, ticks);
+        // A mod's tick released it: nothing of this use is left to run.
+        if self.using != Some((slot, ticks)) {
+            return;
+        }
         // a mod's tick ran the use out: finished now, or frozen until let go
         // for an item used on release (CrossbowItem.useOnRelease).
-        if !self.use_item_ticked(&stack, ticks) {
+        if !going_on {
             if &*stack.item != "minecraft:crossbow" {
                 self.complete_using_item(slot, &stack, &info);
             }
@@ -7881,14 +7910,12 @@ impl Game<'_> {
         }
         if self.blocks_attacks(&stack).is_some() {
             // ShieldItem: used for 72000 ticks, i.e. until released.
-            self.item_on_use_tick(&stack, ticks);
-            self.using = Some((slot, ticks + 1));
+            if self.item_on_use_tick(&stack, ticks) {
+                self.using = Some((slot, ticks + 1));
+            }
             return;
         }
         if self.tick_drinking(slot, ticks, &stack) {
-            if self.using.is_none() {
-                self.use_item_finished(&stack);
-            }
             return;
         }
         if &*stack.item == "minecraft:bow" {
@@ -7954,7 +7981,9 @@ impl Game<'_> {
         if consumable.should_emit(remaining) {
             self.emit_consume(consumable, &stack, 5);
         }
-        self.item_on_use_tick(&stack, ticks);
+        if !self.item_on_use_tick(&stack, ticks) {
+            return;
+        }
         match item_use::count_down(ticks, self.use_duration) {
             Some(ticks) => self.using = Some((slot, ticks)),
             None => self.complete_using_item(slot, &stack, &info),
@@ -8034,16 +8063,18 @@ impl Game<'_> {
         self.using = None;
         self.use_vibration(stack, "minecraft:item_interact_finish");
     }
+    /// Whether the use effects of `stack` ask for interaction vibrations.
+    pub(super) fn use_vibrates(&self, stack: &ItemStack) -> bool {
+        self.items()
+            .get(&stack.item)
+            .is_some_and(|i| i.interact_vibrations)
+    }
     /// `ItemStack.causeUseVibration` for `stack` used by the player: the
     /// `event` game event (`ITEM_INTERACT_START` when the use begins,
     /// `ITEM_INTERACT_FINISH` when it ends) from the player, at its feet, when
     /// the stack's use effects ask for interaction vibrations (the default).
     pub(super) fn use_vibration(&mut self, stack: &ItemStack, event: &'static str) {
-        if !self
-            .items()
-            .get(&stack.item)
-            .is_some_and(|i| i.interact_vibrations)
-        {
+        if !self.use_vibrates(stack) {
             return;
         }
         let Some(p) = self.player.as_ref().map(|p| p.position) else {
@@ -13460,7 +13491,14 @@ impl Game<'_> {
                 self.set_screen(Screen::Options);
                 self.options_from_title = true;
                 let resources = self.vanilla_root();
-                self.ui.options.open_data_packs(dir, selected, resources);
+                let additional = self
+                    .discover_mod_packs(mod_api::PackType::ServerData)
+                    .into_iter()
+                    .filter_map(|pack| pack.selection)
+                    .collect();
+                self.ui
+                    .options
+                    .open_data_packs(dir, selected, resources, additional);
             }
             Action::None => {}
         }
@@ -13587,7 +13625,9 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         let stack = self.reload_datapacks(false, &level.enabled_features)?;
-        (self.world_tables, self.health_resources) = self.build_world_tables(&stack, false)?;
+        let root = self.options.resources.clone();
+        (self.world_tables, self.health_resources) =
+            self.build_world_tables(&stack, false, &root, self.mods.data_switched)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
@@ -13911,6 +13951,7 @@ impl Game<'_> {
         self.server_loot.set(None);
         self.server_items = None;
         self.session_lock = None;
+        mod_api::__private::clear_game_parts();
         self.world_adopted = false;
         self.world_icon = None;
         horizon_client::crash::clear_detail("World");
@@ -14092,7 +14133,7 @@ impl Game<'_> {
                 return None;
             }
             let max = match component("minecraft:max_damage") {
-                Some(horizon_world::nbt::Tag::Int(value)) => u32::try_from(*value).ok()?,
+                Some(horizon_core::nbt::Tag::Int(value)) => u32::try_from(*value).ok()?,
                 _ => info.max_damage,
             };
             if max == 0 {
@@ -14678,7 +14719,7 @@ impl Game<'_> {
         if let Some(broken) = broken {
             self.award_stat("broken", &broken.item, 1);
             self.player_equipment_broke(
-                horizon_world::player_inventory::EquipmentSlot::MainHand,
+                horizon_core::equipment_slot::EquipmentSlot::MainHand,
                 &broken,
             );
         }
@@ -15647,7 +15688,7 @@ impl Game<'_> {
             use horizon_client::first_person::ItemPose;
             use item_use::ItemUseState;
             let state = using.then(|| self.item_use_state(&stack));
-            use horizon_world::consumable::UseAnimation;
+            use horizon_core::use_animation::UseAnimation;
             let pose = match state {
                 Some(ItemUseState::Spear(timing)) => ItemPose::Spear {
                     timing,
@@ -16847,13 +16888,13 @@ impl Game<'_> {
             Some((tag, ..)) => {
                 let extra = level
                     .player_extra
-                    .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-                if let horizon_world::nbt::Tag::Compound(map) = extra {
+                    .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+                if let horizon_core::nbt::Tag::Compound(map) = extra {
                     map.insert("RootVehicle".into(), tag);
                 }
             }
             None if local && self.pending_vehicle.is_none() => {
-                if let Some(horizon_world::nbt::Tag::Compound(map)) = &mut level.player_extra {
+                if let Some(horizon_core::nbt::Tag::Compound(map)) = &mut level.player_extra {
                     map.remove(&"RootVehicle".into());
                 }
             }
@@ -16865,15 +16906,15 @@ impl Game<'_> {
             level.absorption = p.health.absorption();
             let extra = level
                 .player_extra
-                .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-            if let horizon_world::nbt::Tag::Compound(map) = extra {
+                .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+            if let horizon_core::nbt::Tag::Compound(map) = extra {
                 map.insert(
                     "Fire".into(),
-                    horizon_world::nbt::Tag::Short(
+                    horizon_core::nbt::Tag::Short(
                         p.fire_ticks.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16,
                     ),
                 );
-                map.insert("Air".into(), horizon_world::nbt::Tag::Short(p.air as i16));
+                map.insert("Air".into(), horizon_core::nbt::Tag::Short(p.air as i16));
                 // LivingEntity.addAdditionalSaveData: AttributeMap.pack.
                 map.insert("attributes".into(), p.saved_attributes());
             }
@@ -18670,7 +18711,7 @@ impl Game<'_> {
                     );
                     let sky_light = dimension.has_skylight;
                     let decode: terrain::DecodeChunk =
-                        Box::new(move |root: &horizon_world::nbt::NamedTag| {
+                        Box::new(move |root: &horizon_core::nbt::NamedTag| {
                             horizon_client::save::decode_lit(
                                 root, registry, &biomes, layout, sky_light,
                             )
@@ -21685,6 +21726,7 @@ impl Game<'_> {
                         &self.options.resources,
                         &packs,
                         self.res.biomes(),
+                        &self.pack.additional_data,
                     )
                 })
                 .unwrap_or_default();
@@ -21790,6 +21832,7 @@ impl Game<'_> {
             &self.options.resources,
             self.res.biomes(),
             &self.level.enabled_features,
+            &self.pack.additional_data,
         );
         (!Arc::ptr_eq(&table, self.res.biomes())).then_some(table)
     }
@@ -21811,6 +21854,8 @@ impl Game<'_> {
         &mut self,
         stack: &functions::PackStack,
         reload: bool,
+        root: &std::path::Path,
+        data_switched: bool,
     ) -> Result<(Option<WorldTables>, horizon_client::health::HealthResources)> {
         let phase = self.mod_phase.clone();
         let _reload = phase
@@ -21821,10 +21866,14 @@ impl Game<'_> {
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
         let files = functions::overlay_files(stack, contributed);
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+        let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+        let overlay = horizon_world::loot::PackOverlay {
+            conditions: &conditions,
+            files: &files,
+        };
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
-        let root = &self.options.resources;
         let base = if reload {
             &self.health_resources
         } else {
@@ -21833,7 +21882,10 @@ impl Game<'_> {
         let health = base.with_packs(root, &overlay, reload)?;
         // With no pack, `res` holds the tables, unless content mods switched
         // live since it was loaded: their data is in the new root.
-        if files.is_empty() && !self.mods.data_switched {
+        if files.is_empty()
+            && !data_switched
+            && conditions == horizon_world::conditions::LoadConditions::vanilla()
+        {
             return Ok((None, health));
         }
         let mut items = Items::load(
@@ -21848,12 +21900,16 @@ impl Game<'_> {
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-        let sources = lan::load_sources(
-            root,
-            &self.res.core.item_data,
-            self.options.execution_role.data_load_origin(),
-            &overlay,
-        )?;
+        let sources = if reload {
+            lan::prepare_server_sources(root, &self.res.core.item_data, &overlay)?
+        } else {
+            lan::load_sources(
+                root,
+                &self.res.core.item_data,
+                self.options.execution_role.data_load_origin(),
+                &overlay,
+            )?
+        };
         let recipes = Recipes::from_resolved(root, &items, &overlay, &sources)?;
         let stations = horizon_client::stations::StationData::from_sources(
             root,
@@ -21864,7 +21920,7 @@ impl Game<'_> {
         );
         let data_maps = native_data_maps::DataMaps::load(
             &data_map_types,
-            &files,
+            &overlay,
             &items.item_tags,
             &items.block_tags,
         );
@@ -21895,11 +21951,13 @@ impl Game<'_> {
             .collect();
         Ok((
             Some(WorldTables {
+                conditions,
                 suffocation,
                 files,
                 items,
                 recipes,
                 stations,
+                reload_sources: reload.then_some(sources),
                 data_maps,
                 pack_tags,
             }),
@@ -21956,9 +22014,13 @@ impl Game<'_> {
     /// Resolve the mods' parts against the tags this game plays with (`/reload` again): mods
     /// that attach parts to a block or item it doesn't have are an error.
     pub(super) fn resolve_parts(&self) -> Result<()> {
-        let items = self.items();
+        let prepared = self.prepare_parts(self.items())?;
+        self.install_parts(prepared);
+        Ok(())
+    }
+    fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         let registry = self.pack.assets.registry;
-        mod_api::__private::resolve_blocks(|id| {
+        let blocks = mod_api::__private::prepare_blocks(|id| {
             let default = registry.default_state(id)?;
             let of_block = |state| {
                 registry
@@ -21980,12 +22042,12 @@ impl Game<'_> {
             })
         })
         .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
-        native_world_read::resolve_block_tags(items, |name| {
+        let tags = native_world_read::prepare_block_tags(items, |name| {
             registry
                 .default_state(name)
                 .map(|state| self.res.behaviours().block(state))
         });
-        mod_api::__private::resolve_parts(
+        let parts = mod_api::__private::prepare_parts(
             &items.block_tags,
             &items.item_tags,
             mod_api::__private::KnownIds {
@@ -22009,8 +22071,17 @@ impl Game<'_> {
             }
             _ => "Mod parts refused".to_owned(),
         })?;
+        Ok(PreparedParts {
+            blocks,
+            tags,
+            parts,
+        })
+    }
+    fn install_parts(&self, prepared: PreparedParts) {
+        mod_api::__private::install_blocks(prepared.blocks);
+        native_world_read::install_block_tags(prepared.tags);
+        mod_api::__private::install_resolved_parts(prepared.parts);
         self.resolve_pathfindable();
-        Ok(())
     }
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
     /// on nothing else, so path finding and spawning read it with no dispatch.
@@ -22024,66 +22095,92 @@ impl Game<'_> {
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
-    pub(super) fn reload_world_tables(&mut self, stack: &functions::PackStack) {
-        if self.remote.is_some() {
-            return;
-        }
-        // One pass over the recipes for this reload: the tables built next and
-        // the players' copy below share it.
+    fn prepare_world_reload(
+        &mut self,
+        stack: &functions::PackStack,
+        root: &std::path::Path,
+        data_switched: bool,
+    ) -> Result<PreparedWorldReload> {
+        let (tables, health) = self.build_world_tables(stack, true, root, data_switched)?;
+        let items = tables
+            .as_ref()
+            .map_or_else(|| self.res.items(), |tables| &tables.items);
+        let parts = self.prepare_parts(items)?;
+        let overlay = pack_files(&tables);
+        let kept = self
+            .lan
+            .as_ref()
+            .map(|host| host.hub.lan.shared.sync())
+            .or_else(lan::cached_reload_sync);
+        let wire = if let Some(kept) = kept {
+            let sources = match tables
+                .as_ref()
+                .and_then(|tables| tables.reload_sources.clone())
+            {
+                Some(sources) => sources,
+                None => lan::prepare_server_sources(root, &self.res.core.item_data, &overlay)?,
+            };
+            Some(
+                lan::prepare_wire_reload(root, &self.res.core.item_data, &overlay, &kept, &sources)
+                    .map_err(|error| format!("wire reload: {error}"))?,
+            )
+        } else {
+            None
+        };
+        Ok(PreparedWorldReload {
+            tables,
+            health,
+            parts,
+            wire,
+        })
+    }
+
+    fn reload_world_tables(&mut self, prepared: PreparedWorldReload) {
+        let PreparedWorldReload {
+            tables,
+            health,
+            parts,
+            wire,
+        } = prepared;
         lan::forget_server_sources();
-        if let Err(error) = self.refresh_loop_context() {
-            log::warn!("Horizon: data-load inventory could not be refreshed: {error}");
-            return;
+        if let Some(tables) = &tables
+            && let Some(sources) = &tables.reload_sources
+        {
+            let overlay = horizon_world::loot::PackOverlay {
+                conditions: &tables.conditions,
+                files: &tables.files,
+            };
+            lan::install_server_sources(
+                &self.options.resources,
+                &self.res.core.item_data,
+                &overlay,
+                sources.clone(),
+            );
         }
-        match self.build_world_tables(stack, true) {
-            Ok((tables, health)) => {
-                self.world_tables = tables;
-                self.health_resources = health;
-            }
-            Err(e) => {
-                log::warn!("Horizon: the world's data packs are not applied: {e}");
-                return;
-            }
-        }
+        self.world_tables = tables;
+        self.health_resources = health;
+        self.server_items = None;
+        self.install_parts(parts);
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
-        if let Err(e) = self.resolve_parts() {
-            log::warn!("Horizon: {e}");
-        }
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
         // PlayerList.reloadResources: the tags and recipes go to the players
         // and their advancements reload. The synchronized registries (the
         // dialogs, and the commands' ids of them) stay the hub's.
-        let kept = self.lan.as_ref().map(|host| host.hub.lan.shared.sync());
-        match kept {
-            Some(kept) => {
-                match lan::reload_sync_data(
-                    &self.options.resources,
-                    &self.res.core.item_data,
-                    &self.pack_files(),
-                    &kept,
-                ) {
-                    Ok(sync) => {
-                        self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
-                        self.run_native_advancement_grants();
-                    }
-                    Err(e) => {
-                        log::warn!("Horizon: the players are not sent the reloaded data: {e}")
-                    }
-                }
-            }
-            None => {
-                if let Err(e) = lan::reload_cached_sync_data(
-                    &self.options.resources,
-                    &self.res.core.item_data,
-                    &self.pack_files(),
-                ) {
-                    log::warn!("Horizon: the cached world data is not reloaded: {e}");
-                }
-            }
+        lan::install_wire_reload(
+            &self.options.resources,
+            &self.res.core.item_data,
+            &self.pack_files(),
+            wire.clone(),
+        );
+        if self.lan.is_some()
+            && let Some(sync) = wire
+        {
+            self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
+            self.run_native_advancement_grants();
         }
         let overlay = pack_files(&self.world_tables);
         self.adv.tree = Arc::new(horizon_client::advancements::Tree::load_with(
@@ -22289,6 +22386,7 @@ struct GameplayTables {
 /// models), which `load_resources` rolls back from.
 fn load_core(
     resources: &horizon_assets::resource_source::ResourceRoot,
+    additional_data: &[Arc<horizon_client::datapack::DataPack>],
     role: execution_role::ExecutionRole,
     parallel: bool,
     progress: &Progress,
@@ -22384,6 +22482,7 @@ fn load_core(
                         registry,
                         biomes.clone(),
                         item_data.clone(),
+                        additional_data,
                     );
                 }
                 Ok::<_, String>(biomes)
@@ -22454,7 +22553,9 @@ fn gameplay_tables(
             .map_err(|e| e.to_string())
         });
         let motion = startup::time("core.motion", || {
-            MotionResources::load_with_facts(root, assets, &facts)
+            let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+            let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+            MotionResources::load_with_conditions(root, assets, &facts, &conditions)
         })
         .map_err(|e| e.to_string());
         (light.join(), motion)
@@ -22474,6 +22575,7 @@ fn gameplay_tables(
 #[allow(clippy::too_many_arguments)]
 fn load_resources(
     mut resolved: horizon_assets::resource_source::ResourceRoot,
+    additional_data: Vec<Arc<horizon_client::datapack::DataPack>>,
     launch_world: Option<&str>,
     vanilla_root: &std::path::Path,
     settings: &Settings,
@@ -22531,7 +22633,7 @@ fn load_resources(
                 // it waits for the core that loaded.
                 let early = launch_world.filter(|_| root == vanilla_root);
                 startup::time("core", || {
-                    load_core(&resolved, role, parallel, progress, early)
+                    load_core(&resolved, &additional_data, role, parallel, progress, early)
                 })
             });
             let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
@@ -22587,13 +22689,14 @@ fn load_resources(
             assets.registry,
             biomes.clone(),
             item_data.clone(),
+            &additional_data,
         );
     }
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
         MeshTables::new(&assets, &render, &facts, visibility)
     })?);
     let pack_step = startup::step("pack.assemble");
-    let pack = PackResources::assemble(
+    let mut pack = PackResources::assemble(
         &resolved,
         assets.clone(),
         render,
@@ -22602,6 +22705,7 @@ fn load_resources(
         biomes.clone(),
         Arc::new(light),
     );
+    pack.additional_data = additional_data.into();
     drop(pack_step);
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(4);
@@ -22817,7 +22921,12 @@ fn load_world_rest(
         .files
         .into_iter()
         .collect::<Vec<_>>();
-    let overlay = &horizon_world::loot::PackOverlay { files: &files };
+    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+    let overlay = &horizon_world::loot::PackOverlay {
+        conditions: &conditions,
+        files: &files,
+    };
     progress.set(6);
     // Independent tables load together, within the worker budget the settings
     // allow. Only the recipes and the stations read another table: the items.
@@ -23059,6 +23168,13 @@ fn build_renderer(
         wide_frame,
         shader_pack,
     ))?;
+    let (prepared_vertices, prepared_ranges) =
+        native_block_entity_draw::StandaloneGeometry::new(pack, gui).prepared_upload();
+    renderer.install_prepared_models(
+        pack.render.generation,
+        &prepared_vertices,
+        prepared_ranges,
+    )?;
     renderer.hud.sprite_animations = atlas
         .sprite_animations
         .iter()
@@ -23628,7 +23744,11 @@ impl Loading {
             "Horizon: loading the title artwork after {} ms",
             self.started.elapsed().as_millis()
         );
-        self.menu.set_root(root, &self.settings);
+        let additional = self
+            .options
+            .as_ref()
+            .map_or_else(Vec::new, |options| pack_finders::data_packs(&options.mods));
+        self.menu.set_root(root, &self.settings, additional.into());
         self.gui = Some(gui);
         self.title_drawn = false;
         horizon_client::ui_theme::reset_atlas();
@@ -24138,6 +24258,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     })?;
     let mut loaded = load_resources(
         selected_root,
+        pack_finders::data_packs(&options.mods),
         launch_world(&options),
         &vanilla_root,
         &early_settings,
@@ -24568,8 +24689,13 @@ mod tests {
                 &game.pack.data_changes,
                 game.cmds.vanilla_disabled,
                 &game.level.enabled_features,
+                &game.pack.additional_data,
             );
-            game.reload_world_tables(&stack);
+            let root = game.options.resources.clone();
+            let prepared = game
+                .prepare_world_reload(&stack, &root, game.mods.data_switched)
+                .unwrap();
+            game.reload_world_tables(prepared);
             assert_eq!(stone_key.id(game), name);
             assert_eq!(
                 stone_key,
@@ -24594,7 +24720,7 @@ mod tests {
                 .default_state("minecraft:stone")
                 .unwrap();
             assert!(
-                !mod_api::__private::parts("test")
+                !mod_api::__private::parts(mod_api::HookId::AnalogOutput, "test")
                     .for_hook(mod_api::HookId::AnalogOutput)
                     .unwrap()
                     .block_state(stone)
@@ -24604,6 +24730,41 @@ mod tests {
             let _ = std::fs::remove_dir_all(dir);
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_option_snapshots_follow_settings() {
+        super::native_entity_refs::tests::with_client_game(|game| {
+            game.settings.fov = 90.0;
+            game.settings.render_distance = 12;
+            game.settings.gamma = 0.75;
+            game.settings.gui_scale = 3;
+            game.settings.show_subtitles = true;
+            game.settings.chat_visibility = 1;
+            game.settings.chat_delay = 1.5;
+            game.settings.master_volume = 0.25;
+            let host: &dyn mod_api::ClientHost = game;
+            let (graphics, gui, chat, audio) = (
+                host.graphics_options(),
+                host.gui_options(),
+                host.chat_options(),
+                host.audio_options(),
+            );
+            assert_eq!(graphics.fov, 90.0);
+            assert_eq!(graphics.render_distance, 12);
+            assert_eq!(graphics.brightness, 0.75);
+            assert_eq!(gui.gui_scale, 3);
+            assert!(gui.show_subtitles);
+            assert_eq!(chat.visibility, 1);
+            assert_eq!(chat.delay, 1.5);
+            assert_eq!(audio.master_volume, 0.25);
+
+            game.settings.fov = 70.0;
+            let host: &dyn mod_api::ClientHost = game;
+            assert_eq!(host.graphics_options().fov, 70.0);
+            assert_eq!(graphics.fov, 90.0, "an older snapshot stays unchanged");
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_input_options_follow_settings() {
@@ -24660,6 +24821,20 @@ mod tests {
 
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_camera_entity_is_the_player_without_a_server_camera() {
+        use mod_api::ClientHost;
+        super::native_entity_refs::tests::with_client_game(|game| {
+            let camera = (game as &dyn ClientHost).camera_entity();
+            assert_eq!(
+                camera.map(|entity| entity.id()),
+                Some(game.own_entity_id() as u32),
+                "the player's own view follows the player"
+            );
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
