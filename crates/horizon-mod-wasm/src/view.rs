@@ -245,7 +245,8 @@ fn contain<T>(f: impl FnOnce() -> wasmtime::Result<T>) -> wasmtime::Result<T> {
 
 fn charge(mut host: impl wasmtime::AsContextMut, cost: usize) -> wasmtime::Result<()> {
     let mut store = host.as_context_mut();
-    if let Ok(fuel) = store.get_fuel() {
+    if store.engine().get_consume_fuel() {
+        let fuel = store.get_fuel()?;
         let left = fuel
             .checked_sub(cost as u64)
             .ok_or_else(|| wasmtime::Error::msg("internals fuel exhausted"))?;
