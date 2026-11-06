@@ -186,7 +186,9 @@ None of them loads a chunk. Light above the build height reads as full sky and b
 none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
 so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`,
 `item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
-`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
+`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. Fluid reads return `FluidState` with a
+`FluidKey`, amount, falling flag and engine-derived source flag; `is_empty()` and `is_source()` report
+those states without a registry lookup. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
 `LevelHost` has no random, by design: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
@@ -664,6 +666,47 @@ mods that each declare their own `Chemical` under one name, rather than sharing 
 each other's handlers. So the game refuses that at startup, naming both mods and both types, as NeoForge's
 `CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
 namespace. Both checks run once, when the mods register.
+
+### Entity parts and mob goals
+
+`r.entity_part("minecraft:zombie", ZombieGoals)` attaches an `EntityPart` to one entity type, a mod's
+own or vanilla's. Its single method `register_goals` runs at every `Mob` construction of that type —
+spawned or loaded, the moment vanilla's `registerGoals` fan-out ends — and the goals it adds join the
+mob's two selectors beside the species' own, with the same priorities, flag locks and interruption:
+
+```rust
+struct ZombieGoals;
+#[mod_api::horizon_part]
+impl EntityPart for ZombieGoals {
+    fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+        // goals.mob().id() is "minecraft:zombie": branch as per-species code does.
+        goals.add_goal(7, Stare::default());
+        goals.add_target_goal(3, Remember::default());
+    }
+}
+```
+
+`goals.add_goal(priority, goal)` and `goals.add_target_goal(priority, goal)` are `GoalSelector.addGoal`
+on the mob's two selectors; `GoalFlags` claims MOVE, LOOK, JUMP and TARGET as vanilla's `Goal.Flag`
+does, and a higher priority (a lower number) interrupts a running goal holding the same flag. A goal
+object is per mob, built fresh at every construction, and its state is never saved: a goal that needs
+memory across loads keeps it in attachments. A mob whose type has no part, or a game with no entity
+parts at all, pays nothing — the wrapper and the tick's read view exist only where a mod goal runs.
+
+A `Goal` reads and writes through its `GoalContext`: `mob()` is a fresh handle of the mob it runs on,
+`host()` the tick's read view, `random()` the mob's own random (`mob.getRandom()`, so a mod's draws
+keep the mob's stream in shape). The read view answers the ticking mob itself directly, the player the
+tick sees, and every other entity from the tick's snapshot — a `getEntities` of the moment the mob
+list was taken out — so a read the snapshot does not carry (a mob's gear or effects, its species id)
+answers `None`, and the handle docs mark the reads that carry the snapshot rule. Writes apply to the
+mob itself through the engine's own paths: `move_to(pos, speed)` and `stop_navigation()`
+(`PathNavigation`), `look_at(pos)` (`LookControl`), `jump()`, and `set_target(Option<LivingRef>)`
+(`Mob.setTarget`, with the write handle's rules: a brain-backed species refuses, as do foxes,
+endermen and zombified piglins, whose setter side effects are not modeled). Writes to other entities
+are not part of a goal; the write handles a `ServerHost` takes do not exist in a goal tick.
+
+Entity parts are a native mod's for now: the goal surface does not cross to wasm (see the
+`attach_entity_part` note), so `r.entity_part` is absent from a wasm build.
 
 ### Block-state facts
 

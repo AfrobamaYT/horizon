@@ -15,6 +15,27 @@ fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())
 }
 
+fn read_template_data(
+    saved: &std::path::Path,
+    prepared: &std::path::Path,
+    resource: Option<horizon_assets::resource_source::Resource>,
+) -> Option<Tag> {
+    let saved = std::iter::once_with(|| std::fs::read(saved).ok());
+    let resources = std::iter::once_with(|| match resource {
+        Some(resource) => resource.read().ok(),
+        None => std::fs::read(prepared).ok(),
+    });
+    for bytes in saved.chain(resources).flatten() {
+        let Ok(raw) = Compression::Gzip.decode(&bytes, 1 << 28) else {
+            continue;
+        };
+        if let Ok((named, _)) = nbt::read_named(&raw, Limits::templates()) {
+            return Some(named.tag);
+        }
+    }
+    None
+}
+
 impl Game<'_> {
     pub(in crate::game) fn state_transforms(&self) -> Option<&'static StateTransforms> {
         static TRANSFORMS: OnceLock<Option<StateTransforms>> = OnceLock::new();
@@ -30,35 +51,33 @@ impl Game<'_> {
             })
             .as_ref()
     }
-    /// A template's tree by id, as `StructureTemplateManager` reads it from
-    /// disk.
+    /// A saved world template, or the winning passive/world-pack resource.
     pub(in crate::game) fn read_template_tag(&self, id: &str) -> Option<Tag> {
+        use horizon_assets::resource_source::{Resource, stays_inside};
         let (ns, path) = id.split_once(':').unwrap_or(("minecraft", id));
-        let candidates = [
-            self.world_root
-                .join("generated")
-                .join(ns)
-                .join("structures")
-                .join(format!("{path}.nbt")),
-            self.options
-                .resources
-                .join("worldgen/structure")
-                .join(ns)
-                .join(format!("{path}.nbt")),
-        ];
-        for file in candidates {
-            let Ok(bytes) = std::fs::read(&file) else {
-                continue;
-            };
-            let Ok(raw) = Compression::Gzip.decode(&bytes, 1 << 28) else {
-                continue;
-            };
-            let Ok((named, _)) = nbt::read_named(&raw, Limits::templates()) else {
-                continue;
-            };
-            return Some(named.tag);
+        if !stays_inside(ns) || !stays_inside(path) {
+            return None;
         }
-        None
+        let saved = self
+            .world_root
+            .join("generated")
+            .join(ns)
+            .join("structures")
+            .join(format!("{path}.nbt"));
+        let prepared = self
+            .options
+            .resources
+            .join("worldgen/structure")
+            .join(ns)
+            .join(format!("{path}.nbt"));
+        let name = format!("data/{ns}/structure/{path}.nbt");
+        let resource = self.fns.data_resource(&name).or_else(|| {
+            self.pack
+                .data_source
+                .contains(&name)
+                .then(|| Resource::file(self.pack.data_source.clone(), name))
+        });
+        read_template_data(&saved, &prepared, resource)
     }
     /// `BlockPosArgument.getLoadedBlockPos(pos)`, or the source's block.
     fn place_pos(&self, ctx: &Context, name: &str) -> R<[i32; 3]> {
@@ -252,5 +271,87 @@ impl Game<'_> {
             &[Text::literal(id), num(pos[0]), num(pos[1]), num(pos[2])],
         ));
         Ok(1)
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    use horizon_assets::resource_source::{Resource, ResourceSource};
+    use std::{io::Write, path::PathBuf};
+
+    #[test]
+    fn template_tags_read_archives_below_saved_world_structures() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-command-template-source-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let scratch = Scratch(root);
+        let bytes = |value: &str| {
+            let named = nbt::NamedTag {
+                name: "".into(),
+                tag: Tag::compound([("marker", Tag::String(value.into()))]),
+            };
+            Compression::Gzip
+                .encode(&nbt::write_named(&named, Limits::templates()).unwrap())
+                .unwrap()
+        };
+        let prepared = scratch.0.join("prepared.nbt");
+        let saved = scratch.0.join("saved/probe.nbt");
+        let jar = scratch.0.join("templates.jar");
+        std::fs::write(&prepared, bytes("base")).unwrap();
+        {
+            let mut archive = zip::ZipWriter::new(std::fs::File::create(&jar).unwrap());
+            archive
+                .start_file(
+                    "data/example/structure/probe.nbt",
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .unwrap();
+            archive.write_all(&bytes("archive")).unwrap();
+            archive.finish().unwrap();
+        }
+        let source = ResourceSource::archive(&jar).unwrap();
+        let resource = Resource::file(source, "data/example/structure/probe.nbt".into());
+        let marker = |resource| {
+            read_template_data(&saved, &prepared, resource)
+                .unwrap()
+                .get("marker")
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(
+            marker(Some(resource.clone())),
+            Tag::String("archive".into())
+        );
+        std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+        std::fs::write(&saved, bytes("saved")).unwrap();
+        assert_eq!(marker(Some(resource.clone())), Tag::String("saved".into()));
+        std::fs::write(&saved, b"invalid gzip").unwrap();
+        assert_eq!(
+            marker(Some(resource.clone())),
+            Tag::String("archive".into())
+        );
+        std::fs::remove_file(&saved).unwrap();
+        assert!(
+            read_template_data(
+                &saved,
+                &prepared,
+                Some(Resource::bytes(b"invalid gzip".to_vec()))
+            )
+            .is_none()
+        );
+        assert_eq!(marker(None), Tag::String("base".into()));
+        std::fs::remove_file(&jar).unwrap();
+        assert_eq!(marker(Some(resource)), Tag::String("archive".into()));
+        assert!(!scratch.0.join("data").exists());
     }
 }

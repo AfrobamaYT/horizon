@@ -346,6 +346,17 @@ impl ResourceSource for Bundled {
         vec!["horizon".into()]
     }
 }
+impl ResourceSource for horizon_assets::resource_source::ResourceSource {
+    fn read(&self, path: &str) -> Option<Vec<u8>> {
+        self.read(path).ok()
+    }
+    fn exists(&self, path: &str) -> bool {
+        self.contains(path)
+    }
+    fn namespaces(&self) -> Vec<String> {
+        self.namespaces("assets")
+    }
+}
 impl ResourceSource for std::path::PathBuf {
     fn read(&self, path: &str) -> Option<Vec<u8>> {
         std::fs::read(self.join(path)).ok()
@@ -394,7 +405,7 @@ pub fn apply_deprecated(map: &mut HashMap<String, String>, json: &[u8]) {
 /// characters in strings, `=` or `=>` and `;`), which vanilla reads lang files with (expected
 /// from `Language.loadFromJson`, Gson). A file that is not JSON even so adds nothing; a value
 /// that is not a string, number or boolean (`GsonHelper.convertToString`) ends the file there.
-fn read_lang_file(bytes: &[u8], map: &mut HashMap<String, String>) {
+pub fn read_lang_file(bytes: &[u8], map: &mut HashMap<String, String>) {
     use horizon_world::datafix::json::{Json, parse_lenient};
     if let Ok(entries) = serde_json::from_slice::<HashMap<String, String>>(bytes) {
         map.extend(entries);
@@ -1072,5 +1083,29 @@ mod tests {
             }
         }
         assert!(failed.is_empty(), "{failed:?}");
+    }
+}
+
+#[cfg(test)]
+mod shared_source_tests {
+    use super::*;
+    #[test]
+    fn selected_language_and_english_fallback_read_resolved_resources() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            (
+                "assets/reader/lang/en_us.json".into(),
+                Resource::bytes(
+                    br#"{"reader.hello":"Hello","reader.only":"English fallback"}"#.to_vec(),
+                ),
+            ),
+            (
+                "assets/reader/lang/fr_fr.json".into(),
+                Resource::bytes(br#"{"reader.hello":"Bonjour"}"#.to_vec()),
+            ),
+        ]));
+        let language = Language::load(&[&source], "fr_fr");
+        assert_eq!(language.map["reader.hello"], "Bonjour");
+        assert_eq!(language.map["reader.only"], "English fallback");
     }
 }

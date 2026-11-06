@@ -63,6 +63,7 @@ pub mod nav;
 pub mod nether;
 pub mod panda;
 pub mod parrot;
+pub mod part_goals;
 pub mod path;
 pub mod phantom;
 pub mod piglin;
@@ -2528,6 +2529,9 @@ pub struct Seen {
     pub bounds: Aabb,
     pub eye_y: f64,
     pub alive: bool,
+    /// `invulnerable_flag`, which `asValidTarget` refuses a target by
+    /// (#1175): a valid-target rule the tick's view asks.
+    pub invulnerable: bool,
     pub baby: bool,
     pub in_love: bool,
     pub tame: bool,
@@ -2748,6 +2752,7 @@ impl Mob {
             bounds: m.bounds(),
             eye_y: m.eye_y(),
             alive: m.alive(),
+            invulnerable: m.invulnerable_flag,
             baby: m.is_baby(),
             // A villager is "in love" when it is willing to breed (`canBreed`).
             in_love: if villager {
@@ -3060,6 +3065,9 @@ pub struct PlayerView {
     pub bounds: Aabb,
     pub eye: [f64; 3],
     pub alive: bool,
+    /// The `invulnerable` ability, which `asValidTarget` refuses a target
+    /// by (#1175): a valid-target rule a goal tick's view asks.
+    pub invulnerable: bool,
     pub creative: bool,
     pub sneaking: bool,
     /// `Entity.isSwimming`.
@@ -3177,6 +3185,12 @@ pub struct MobWorld<'a> {
     pub suffocation: &'a horizon_world::suffocation::SuffocationRegistry<'a>,
     pub data: &'a MobData,
     pub player: Option<PlayerView>,
+    /// The uuid and entity id of the player whose view `player` is (#1077):
+    /// captured once where the tick lends its player — the game's own, or the
+    /// guest a server's mob sees — so a goal resolves that player without a
+    /// scan, and a fake player's view resolves as none. None when `player` is
+    /// None.
+    pub player_identity: Option<([i32; 4], u32)>,
     /// `getKnownMovement` of a mob's controlling player passenger, if any.
     pub controlling_player_movement: Option<Vec3>,
     /// `getNearestPlayer(mob, -1)`: where the nearest non-spectator of every
@@ -3237,6 +3251,9 @@ pub struct MobWorld<'a> {
     /// The mod hooks the AI asks mid-tick, on a server where a mod listens
     /// (None otherwise: the AI asks nothing).
     pub mob_hooks: Option<&'a dyn MobHooks>,
+    /// The goal view's facts (#1077), on the native-authoritative side where
+    /// a mod attached an entity part (None otherwise: no mod goal runs).
+    pub goal_host: Option<&'a dyn part_goals::GoalHost>,
     /// Whether a listener can cancel animal taming.
     pub asks_animal_tame: bool,
     /// Whether a listener can cancel a mob's block destruction.
@@ -3331,7 +3348,25 @@ pub fn entity_random(id: u32, position: Vec3) -> LegacyRandom {
     random
 }
 impl Mob {
+    /// A mob as its authoritative side builds it — spawned, or loaded from a
+    /// chunk (`Mob.finalizeSpawn` runs around it): the species' own goals, then
+    /// the goals every mod part attached to its type (#1077), vanilla's
+    /// `registerGoals` moment.
     pub fn new(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
+        let mut mob = Self::new_remote(id, kind, position, yaw);
+        // The parts a mod attached to this entity type add their goals right
+        // after the species' own (#1077): vanilla's `registerGoals` moment,
+        // which belongs to the authoritative construction.
+        part_goals::attach(&mut mob);
+        mob
+    }
+    /// The same construction without the mod parts' goals: a client's copy of
+    /// a server's mob, from its spawn packet. The species' goals stand — the
+    /// client's own reads of its copy ask them — but a mod part's
+    /// `register_goals` runs nowhere here: the authoritative side already ran
+    /// it for the mob itself, and a copy's would only allocate goal state no
+    /// tick runs (#1077).
+    pub fn new_remote(id: u32, kind: Arc<MobType>, position: Vec3, yaw: f32) -> Self {
         let random = entity_random(id, position);
         let mut mob = Self {
             join: Default::default(),
@@ -3917,7 +3952,11 @@ impl Mob {
         if self.species() == Species::GlowSquid && self.ai.last_hurt_by.is_some() {
             aquatic::hurt_server(self);
         }
+        // Squid.hurtServer (also GlowSquid's result): parent health damage has
+        // happened, but without a last living attacker the subclass returns false.
         success
+            && (!matches!(self.species(), Species::Squid | Species::GlowSquid)
+                || self.ai.last_hurt_by.is_some())
     }
     /// `damage` by a source whose direct entity is `direct` (an entity type id), which `source`
     /// cannot carry: `DamageSources.indirectMagic(potion or cloud, owner)`.
@@ -6178,6 +6217,72 @@ mod effect_refusal_tests {
         );
     }
 
+    fn check_squid_damage_result(id: &str) {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let types = MobTypes::load_for_server(&root).unwrap();
+        let mut attacker = mob(&types, "minecraft:cow");
+        attacker.id = 2;
+        attacker.position = Vec3::new(4.0, 64.0, 4.0);
+        assert!(attacker.alive());
+        let by_cow = Damage {
+            kind: DamageKind::Generic,
+            ..Damage::mob(attacker.id, [4.0, 64.0, 4.0]).with_species(Species::Cow)
+        };
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        // An unrelated parent's generic acceptance remains true.
+        let mut cow = mob(&types, "minecraft:cow");
+        assert!(cow.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert_eq!(cow.health, 9.0);
+        // A parent's existing rejection never reaches the subclass aftermath.
+        let mut protected = mob(&types, id);
+        protected.invulnerable_flag = true;
+        assert!(!protected.damage(level, 1.0, by_cow));
+        assert_eq!(protected.health, 10.0);
+        if protected.species() == Species::GlowSquid {
+            assert_eq!(aquatic::dark_ticks(&protected), 0);
+        }
+        for no_ai in [false, true] {
+            for attributed in [true, false] {
+                let mut victim = mob(&types, id);
+                victim.no_ai = no_ai;
+                assert_eq!(victim.health, 10.0);
+                assert!(victim.ai.last_hurt_by.is_none());
+                let source = if attributed {
+                    by_cow
+                } else {
+                    Damage::of(DamageKind::Generic)
+                };
+                let accepted = victim.damage(level, 1.0, source);
+                // Check the parent's state first: false must not roll back damage.
+                assert_eq!(victim.health, 9.0);
+                assert_eq!(
+                    victim.ai.last_hurt_by,
+                    attributed.then_some(Who::Mob(attacker.id))
+                );
+                if victim.species() == Species::GlowSquid {
+                    assert_eq!(
+                        aquatic::dark_ticks(&victim),
+                        if attributed { 100 } else { 0 }
+                    );
+                }
+                assert_eq!(accepted, attributed, "{id} NoAI={no_ai}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared entity types in HORIZON_TEST_RESOURCES"]
+    fn glow_squid_damage_result_keeps_parent_health_side_effect() {
+        check_squid_damage_result("minecraft:glow_squid");
+    }
+
+    #[test]
+    #[ignore = "needs prepared entity types in HORIZON_TEST_RESOURCES"]
+    fn squid_damage_result_keeps_parent_health_side_effect() {
+        check_squid_damage_result("minecraft:squid");
+    }
+
     /// Squid.hurtServer reports a hit only when a living entity dealt it, so
     /// environmental damage leaves a glow squid glowing; a mob's blow dims it.
     #[test]
@@ -6193,11 +6298,13 @@ mod effect_refusal_tests {
         let level = &mut test_level.level();
         let mut burned = mob(&types, "minecraft:glow_squid");
         burned.health = 10.0;
-        assert!(burned.damage(level, 1.0, Damage::of(DamageKind::Campfire)));
+        assert!(!burned.damage(level, 1.0, Damage::of(DamageKind::Campfire)));
+        assert_eq!(burned.health, 9.0);
         assert_eq!(aquatic::dark_ticks(&burned), 0);
         let mut struck = mob(&types, "minecraft:glow_squid");
         struck.health = 10.0;
         assert!(struck.damage(level, 1.0, Damage::mob(2, [0.0, 64.0, 0.0])));
+        assert_eq!(struck.health, 9.0);
         assert_eq!(aquatic::dark_ticks(&struck), 100);
     }
 }

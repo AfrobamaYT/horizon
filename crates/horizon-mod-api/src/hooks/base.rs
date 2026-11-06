@@ -1153,7 +1153,8 @@ pub trait Hooks {
     /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
     /// survival and entity obstruction checks. A trait mod returns
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
-    /// `None` to leave the answer to the next mod or vanilla.
+    /// `None` to leave the answer to the next mod or vanilla. Changes to the event's fluid
+    /// copy are mod-provided data forwarded to later Parts, never consumed by the engine.
     /// Authoritative servers only.
     #[hook(
         side = "server",
@@ -1826,11 +1827,13 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Slot placement and stack limits for a content mod menu. `slot` is the
-    /// backing container index, including player inventory slots. The slot's
-    /// own answers arrive first; the maximum is bounded to 1–99 and the item
-    /// limit. Runs in the restricted context during server clicks and client
-    /// prediction. Answer from the stack and context alone, and fast.
+    /// Slot placement and stack limits for registered vanilla and mod menus;
+    /// mounts use `horizon:mount_inventory`, while player inventory and the
+    /// creative picker have no registered type. `slot` is the backing index,
+    /// including player inventory slots. The slot's own answers arrive first;
+    /// the maximum is bounded to 1–99 and the item limit. Refusal also prevents
+    /// quick-move top-ups. Runs in the restricted context on server and client
+    /// prediction; answer from the stack and context alone, and fast.
     #[hook(
         side = "both",
         contract = "listen",

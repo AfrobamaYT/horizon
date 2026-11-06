@@ -180,6 +180,15 @@ pub(super) fn register_layer_definitions(role: ExecutionRole) {
     Game::native_layer_definitions(&RegistrationContext::new(), &mut layers);
     horizon_client::mobs::model_layers::register(layers);
 }
+/// The native mods' F3 debug entries (`native_register_debug_entries`), kept once at start.
+pub(super) fn register_debug_entries(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut entries = Vec::new();
+    Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
+    horizon_client::debug_entries::register(entries);
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
@@ -191,7 +200,7 @@ pub(super) fn register_layer_definitions(role: ExecutionRole) {
 /// process.
 pub(super) struct ContentOverlay {
     /// The root with the mods' content merged in.
-    pub(super) root: std::path::PathBuf,
+    pub(super) root: horizon_assets::resource_source::ResourceRoot,
     /// The accepted content mods, in overlay order.
     pub(super) mods: Vec<horizon_client::mod_content::ContentMod>,
     /// The protocol entries of the accepted mods.
@@ -361,7 +370,9 @@ pub(super) fn content_overlay(
         })
         .collect();
     horizon_mods::dependencies::resolve_content(&loaded).map_err(|error| error.to_string())?;
-    let root = mod_content::resource_root(root, jar_store, &mods, &here.join(".horizon-cache"))?;
+    let cache = here.join(".horizon-cache");
+    let prepared = mod_content::resource_root(root, jar_store, &mods, &cache)?;
+    let root = mod_content::resolved_resources(root, prepared, jar_store, &mods, cache)?;
     Ok(ContentOverlay {
         root,
         mods,
@@ -376,24 +387,24 @@ pub(super) fn content_overlay(
 pub(super) fn content_root(
     root: &std::path::Path,
     sources: &ModsState,
-) -> horizon_client::Result<std::path::PathBuf> {
+) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let jar_store = horizon_client::logging::game_home().join("jars");
     let overlay = content_overlay(root, sources, &jar_store)?;
-    register_block_entity_types(&overlay.root, &overlay.mods)?;
+    register_block_entity_types(overlay.root.prepared(), &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);
     }
-    if overlay.root != root {
+    if overlay.root.prepared() != root {
         log::info!(
             "Horizon: content from {} mod(s) in {}",
             overlay.mods.len(),
-            overlay.root.display()
+            overlay.root.prepared().display()
         );
     }
     register_mob_effects(&overlay.mods);
     mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
     let behavior: serde_json::Value =
-        horizon_world::json_file::read(&overlay.root.join("block-behaviours.json"))?;
+        horizon_world::json_file::read(&overlay.root.prepared().join("block-behaviours.json"))?;
     let fluids = behavior["fluids"]
         .as_array()
         .ok_or("missing fluid registry")?;
@@ -759,12 +770,16 @@ impl Game<'_> {
             return;
         }
         let root = self.options.resources.clone();
+        let data_source = self.pack.data_source.clone();
+        let data_changes = self.pack.data_changes.clone();
         let enabled = self.applied_mods();
         let selected = self.mods.selected.clone();
         let refused = self.mods.refused.clone();
         let reload = move |g: &mut Game<'_>| {
             let at = std::time::Instant::now();
             g.options.resources = root;
+            g.pack.data_source = data_source;
+            g.pack.data_changes = data_changes;
             g.settings.mods.enabled = enabled.clone();
             g.mods.applied = Some(enabled);
             g.mods.selected = selected;
@@ -901,7 +916,8 @@ mod tests {
             Mob::new(2, ghoul.clone(), at, 0.0),
         );
         assert_eq!(ghoul.health, 40.0);
-        let saved = |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None);
+        let saved =
+            |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
         let keys = |tag: &horizon_world::nbt::Tag| -> Vec<String> {
             let horizon_world::nbt::Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -952,7 +968,8 @@ mod tests {
         let trader = Mob::new(1, types["minecraft:wandering_trader"].clone(), at, 0.0);
         let merchant = Mob::new(2, merchant.clone(), at, 0.0);
         assert!(merchant.ai.goals.has("Float") && trader.ai.goals.has("Float"));
-        let saved = |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None);
+        let saved =
+            |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
         let keys = |tag: &Tag| -> Vec<String> {
             let Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -1161,7 +1178,7 @@ mod tests {
         };
         let enabled = std::collections::BTreeSet::from(["plain".to_owned()]);
         sources.select(&here, &enabled);
-        assert_eq!(content_root(&base, &sources).unwrap(), base);
+        assert_eq!(content_root(&base, &sources).unwrap().prepared(), base);
         let local = horizon_protocol::mod_list::local();
         let ids: Vec<_> = local.iter().map(|m| m.id.as_str()).collect();
         if mode.as_deref() == Some("compiled") {
@@ -1250,7 +1267,7 @@ mod tests {
             ..Default::default()
         };
         let overlay = content_overlay(&base, &content, &store).unwrap();
-        assert_eq!(overlay.root, base);
+        assert_eq!(overlay.root.prepared(), base);
         assert_eq!(
             overlay
                 .mods

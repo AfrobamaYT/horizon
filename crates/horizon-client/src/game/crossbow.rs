@@ -415,7 +415,7 @@ mod tests {
         use crate::game::{Audio, Options, Progress, Settings, load_resources};
         let settings = Settings::default();
         let loaded = load_resources(
-            root.to_path_buf(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
             None,
             root,
             &settings,
@@ -436,7 +436,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (root).to_path_buf(),
+            )),
             None,
         )
         .unwrap();

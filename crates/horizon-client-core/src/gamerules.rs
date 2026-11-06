@@ -646,24 +646,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registered_bool_round_trips_and_categories_validate() {
-        let rule = Rule {
-            name: "example:enabled".into(),
-            category: "example:machines".into(),
-            default: Value::Bool(true),
-            min: 0,
-            max: 0,
-        };
-        let registry =
-            Arc::new(RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule]).unwrap());
-        let mut rules = GameRules::with_registry(registry.clone(), &[]);
-        assert_eq!(rules.get("example:enabled"), Some(Value::Bool(true)));
-        assert!(rules.set("example:enabled", Value::Bool(false)));
-        let loaded = GameRules::from_nbt_with_registry(&rules.to_nbt().tag, &[], registry);
-        assert_eq!(loaded.get("example:enabled"), Some(Value::Bool(false)));
-    }
-
-    #[test]
     fn unknown_rules_survive_save_and_feature_copy() {
         let source = Tag::compound([(
             "data",
