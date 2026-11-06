@@ -378,7 +378,10 @@ jobs:
           HORIZON_WASM_BENCH: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/bench/hook/target/horizon-mod/bench_mod.hmod
           HORIZON_WASM_INTERNALS_BENCH: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/bench/internals/target/horizon-mod/internals_bench.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1
+        # The internals bench seals the process-wide hook registry, so it runs alone, as its #[ignore] note says.
+        run: |
+          cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1 --skip internals_bench
+          cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1 internals_bench
 
   verify:
     needs: changes

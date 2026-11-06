@@ -90,6 +90,10 @@ pub mod reload {
 
 /// The structs the game fills for its hooks, each turned into the API's own with `From`.
 pub mod built {
+    /// Wrap a slot in the model store's published generation.
+    pub fn model_ref(generation: u64, slot: u32) -> crate::ModelRef {
+        crate::ModelRef(generation, slot)
+    }
     pub use crate::built::{
         ChannelRef, NativeActiveEffect, NativeBlockClick, NativeExplosionStart, NativeItemClick,
         NativeItemFished, NativeLifecycleContext, NativeLootDrops, NativePlayerAbilities,
@@ -184,6 +188,20 @@ pub mod game {
         enchantments: ItemEnchantments,
     ) -> (Vec<(Identifier, u32)>, bool) {
         (enchantments.entries, enchantments.changed)
+    }
+
+    pub struct ModelRefFields {
+        pub generation: u64,
+        pub slot: u32,
+    }
+    impl Fields for ModelRef {
+        type Fields<'a> = ModelRefFields;
+        fn fields(&self) -> ModelRefFields {
+            ModelRefFields {
+                generation: self.0,
+                slot: self.1,
+            }
+        }
     }
 
     pub struct BlockEntityRefFields {
