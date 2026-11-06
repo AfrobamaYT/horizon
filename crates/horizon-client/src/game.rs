@@ -8042,10 +8042,8 @@ impl Game<'_> {
                     };
                     if let Some(living) = mob {
                         let effect = mod_api::NativeActiveEffect::new(
-                            mod_api::Identifier::parse_namespaced(
-                                horizon_client::brewing::namespaced(def.id),
-                            )
-                            .expect("the game's effect ids are namespaced"),
+                            mod_api::__private::effect_key(def.index)
+                                .expect("effects resolved at load"),
                             eff.duration,
                             eff.amplifier,
                             eff.ambient,
@@ -8073,9 +8071,11 @@ impl Game<'_> {
                 let mut changed = false;
                 for effect in effects {
                     changed |= match mob {
-                        Some(living) => self.native_living_remove_effect(living, effect),
-                        None => self
-                            .remove_player_effects(Some(effect.trim_start_matches("minecraft:"))),
+                        Some(living) => horizon_client::brewing::effect(effect)
+                            .and_then(|def| mod_api::__private::effect_key(def.index))
+                            .is_some_and(|key| self.native_living_remove_effect(living, key)),
+                        None => horizon_client::brewing::effect(effect)
+                            .is_some_and(|def| self.remove_player_effects(Some(def.index))),
                     };
                 }
                 changed
@@ -21832,6 +21832,33 @@ impl Game<'_> {
     pub(super) fn resolve_parts(&self) -> Result<()> {
         let items = self.items();
         let registry = self.pack.assets.registry;
+        mod_api::__private::resolve_blocks(|id| {
+            let default = registry.default_state(id)?;
+            let of_block = |state| {
+                registry
+                    .state(BlockStateId(state))
+                    .is_some_and(|s| s.name == id)
+            };
+            let mut first = default.0;
+            while first > 0 && of_block(first - 1) {
+                first -= 1;
+            }
+            let mut last = default.0;
+            while of_block(last + 1) {
+                last += 1;
+            }
+            Some(mod_api::__private::ResolvedBlock {
+                default,
+                states: mod_api::BlockStateRange::new(BlockStateId(first), last - first + 1),
+                block: self.res.behaviours().block(default),
+            })
+        })
+        .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
+        native_world_read::resolve_block_tags(items, |name| {
+            registry
+                .default_state(name)
+                .map(|state| self.res.behaviours().block(state))
+        });
         mod_api::__private::resolve_parts(
             &items.block_tags,
             &items.item_tags,
@@ -24291,6 +24318,18 @@ mod tests {
         mod_api::__private::install_parts(&mods).unwrap();
         mod_api::__private::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
+            let stone_key = mod_api::__private::part_tests::block_key("stone");
+            let name = stone_key.id(game);
+            let dir = std::env::temp_dir().join(format!("horizon-key-tags-{}", std::process::id()));
+            game.session_lock = Some(horizon_client::save::SessionLock::acquire(&dir).unwrap());
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "test:reload"),
+                Some(false)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "base_stone_overworld"),
+                Some(true)
+            );
             game.load_server_loot();
             let stack = super::functions::pack_stack(
                 &game.world_root,
@@ -24299,6 +24338,23 @@ mod tests {
                 &game.level.enabled_features,
             );
             game.reload_world_tables(&stack);
+            assert_eq!(stone_key.id(game), name);
+            assert_eq!(
+                stone_key,
+                mod_api::__private::part_tests::block_key("minecraft:stone")
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "test:reload"),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "minecraft:logs"),
+                Some(false)
+            );
+            assert_eq!(
+                game.native_block_in_tag(stone_key, "base_stone_overworld"),
+                Some(true)
+            );
             let stone = game
                 .pack
                 .assets
@@ -24312,6 +24368,8 @@ mod tests {
                     .block_state(stone)
                     .is_empty()
             );
+            game.session_lock = None;
+            let _ = std::fs::remove_dir_all(dir);
         });
     }
     #[test]

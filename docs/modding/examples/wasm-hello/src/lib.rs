@@ -2,8 +2,8 @@
 //! native mod too.
 // ANCHOR: mod
 use mod_api::{
-    Flow, Hooks, HostSide, ItemPart, Registrar, RegistrationContext, ServerChatEvent, ServerHost,
-    Text, UseItemEvent,
+    BlockKey, EffectKey, Flow, Hooks, HostSide, ItemPart, Registrar, RegistrationContext,
+    ServerChatEvent, ServerHost, Text, UseItemEvent,
 };
 use mod_points::{Points, TickArgs};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[derive(Default)]
 pub struct Mod {
     ticks: AtomicU64,
+    stone: std::sync::OnceLock<BlockKey>,
+    speed: std::sync::OnceLock<EffectKey>,
 }
 
 /// Sticks announce each use.
@@ -29,9 +31,16 @@ impl ItemPart for Stick {
 impl Hooks for Mod {
     fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext) {
         registrar.item_part("minecraft:stick", Stick);
+        let _ = self.stone.set(registrar.block_key("minecraft:stone"));
+        let _ = self.speed.set(registrar.effect_key("minecraft:speed"));
     }
 
-    fn server_chat(&self, _host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
+    fn server_chat(&self, host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
+        let stone = *self.stone.get().expect("registered block key");
+        let speed = *self.speed.get().expect("registered effect key");
+        assert_eq!(stone.id(host), "minecraft:stone");
+        assert_eq!(speed.id(host), "minecraft:speed");
+        assert!(host.block_state_default(stone).is_some());
         *event.message = Text::literal(format!("{} (via mod.wasm)", event.raw_text));
         Flow::Continue
     }

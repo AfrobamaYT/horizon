@@ -1055,3 +1055,7 @@ mod tests {
         assert_eq!(group.enter(Call::Hook).err(), Some(CallRefused::Stopped));
     }
 }
+
+#[cfg(test)]
+#[path = "wasm_key_tests.rs"]
+mod key_tests;
