@@ -22,17 +22,23 @@ impl Game<'_> {
         self.world
             .attachments
             .bind_index(index, AttachmentHolder::Level(level));
-        self.world
-            .chunks
-            .observe_attachments(Arc::new(IndexedAttachmentObserver::new(
-                index,
-                move |holder| match holder {
-                    Holder::Chunk(pos) => Some(AttachmentHolder::Chunk(ChunkRef::new(level, pos))),
-                    _ => None,
-                },
-            )));
+        let observer = Arc::new(IndexedAttachmentObserver::new(
+            index,
+            move |holder| match holder {
+                Holder::Chunk(pos) => Some(AttachmentHolder::Chunk(ChunkRef::new(level, pos))),
+                Holder::BlockEntity(pos) => Some(AttachmentHolder::BlockEntity(
+                    mod_api::__private::game::block_entity_ref(level, pos),
+                )),
+                _ => None,
+            },
+        ));
+        self.world.chunks.observe_attachments(observer.clone());
+        self.world.block_entities.observe_attachments(observer);
     }
 }
+
+#[cfg(test)]
+mod block_entity_tests;
 
 #[cfg(test)]
 mod tests {

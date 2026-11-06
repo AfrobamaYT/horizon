@@ -25,6 +25,7 @@
 //! the start of the next tick, from the block state then.
 use crate::chunk::block_entity::{BlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 use crate::fast_hash::{FxHashMap, FxHashSet};
+use horizon_world::attachments::{Attachments, Holder, observer::AttachmentObserver};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -46,7 +47,8 @@ pub enum Ticking {
 #[derive(Default)]
 pub struct BlockEntities {
     map: HashMap<Pos, BlockEntity>,
-    attachments: HashMap<Pos, horizon_world::attachments::Attachments>,
+    attachments: HashMap<Pos, Attachments>,
+    attachment_observer: Option<Arc<dyn AttachmentObserver>>,
     /// `Level.blockEntityTickers`: positions and the slot each was given.
     tickers: Arc<Vec<(Pos, u32)>>,
     /// `LevelChunk.tickersInLevel`: the live slot of each ticking position.
@@ -90,6 +92,25 @@ pub struct BlockEntities {
     /// Like `mods`, one taken out stays listed until `put` or `remove`.
     boxes: FxHashSet<Pos>,
     asleep: FxHashSet<Pos>,
+}
+
+fn retire_attachments(
+    maps: &mut HashMap<Pos, Attachments>,
+    observer: Option<&Arc<dyn AttachmentObserver>>,
+    pos: &Pos,
+) {
+    if let Some(previous) = maps.remove(pos) {
+        if let Some(observer) = observer {
+            observer.unload(Holder::BlockEntity([pos.0, pos.1, pos.2]));
+        }
+        drop(previous);
+    }
+}
+
+impl Drop for BlockEntities {
+    fn drop(&mut self) {
+        self.unload_attachments();
+    }
 }
 
 /// A structure or test instance block: the block entities whose box the frame may draw.
@@ -185,6 +206,25 @@ pub fn chunk_map_order(positions: impl IntoIterator<Item = Pos>) -> Vec<Pos> {
 }
 
 impl BlockEntities {
+    /// Bind this dimension's authoritative maps, including saved entries not yet read.
+    pub fn observe_attachments(&mut self, observer: Arc<dyn AttachmentObserver>) {
+        self.unload_attachments();
+        for (pos, map) in &mut self.attachments {
+            if map.has_index_entries() || map.has_index_binding() {
+                let _ = observer.bind(Holder::BlockEntity([pos.0, pos.1, pos.2]), map);
+            }
+        }
+        self.attachment_observer = Some(observer);
+    }
+
+    fn unload_attachments(&self) {
+        if let Some(observer) = &self.attachment_observer {
+            for pos in self.attachments.keys() {
+                observer.unload(Holder::BlockEntity([pos.0, pos.1, pos.2]));
+            }
+        }
+    }
+
     /// Whether the ticking table has been built.
     pub fn has_states(&self) -> bool {
         !self.states.is_empty()
@@ -243,7 +283,13 @@ impl BlockEntities {
         if !self.map.contains_key(&pos) && !self.out.contains(&pos) {
             return None;
         }
-        Some(self.attachments.entry(pos).or_default())
+        let map = self.attachments.entry(pos).or_default();
+        if let Some(observer) = &self.attachment_observer
+            && !map.has_index_binding()
+        {
+            let _ = observer.bind(Holder::BlockEntity([pos.0, pos.1, pos.2]), map);
+        }
+        Some(map)
     }
     /// The attachment map of the block entity at `pos`, if it has one.
     pub fn attachments(&self, pos: Pos) -> Option<&horizon_world::attachments::Attachments> {
@@ -259,7 +305,11 @@ impl BlockEntities {
         match data {
             Some(data) => self.restore_attachments(pos, data),
             None => {
-                self.attachments.remove(&pos);
+                retire_attachments(
+                    &mut self.attachments,
+                    self.attachment_observer.as_ref(),
+                    &pos,
+                );
             }
         }
     }
@@ -277,8 +327,15 @@ impl BlockEntities {
     }
     /// Restore a loaded block entity's attachment map.
     pub fn restore_attachments(&mut self, pos: Pos, data: horizon_world::attachments::Attachments) {
-        if self.map.contains_key(&pos) {
-            self.attachments.insert(pos, data);
+        if self.map.contains_key(&pos) || self.out.contains(&pos) {
+            let map = self.attachments.entry(pos).or_default();
+            map.replace_contents(data);
+            if let Some(observer) = &self.attachment_observer
+                && map.has_index_entries()
+                && !map.has_index_binding()
+            {
+                let _ = observer.bind(Holder::BlockEntity([pos.0, pos.1, pos.2]), map);
+            }
         }
     }
     /// Whether any mod block entity is in the map: until one is, a block change
@@ -348,7 +405,12 @@ impl BlockEntities {
             (old, new) => std::mem::discriminant(old) == std::mem::discriminant(new),
         };
         if !self.map.get(&pos).is_some_and(same_type) {
-            self.attachments.remove(&pos);
+            retire_attachments(
+                &mut self.attachments,
+                self.attachment_observer.as_ref(),
+                &pos,
+            );
+            self.out.remove(&pos);
         }
         let new_box = shows_box(&entity);
         self.asleep.remove(&pos);
@@ -390,13 +452,16 @@ impl BlockEntities {
     }
     /// `LevelChunk.removeBlockEntity`: the block entity and its slot.
     pub fn remove(&mut self, pos: &Pos) -> Option<BlockEntity> {
-        self.attachments.remove(pos);
+        retire_attachments(
+            &mut self.attachments,
+            self.attachment_observer.as_ref(),
+            pos,
+        );
+        self.out.remove(pos);
         self.asleep.remove(pos);
         self.cancel(pos);
         let removed = self.map.remove(pos);
-        if matches!(removed, Some(BlockEntity::Mod(_))) {
-            forget_mod(&mut self.mods, *pos);
-        }
+        forget_mod(&mut self.mods, *pos);
         self.boxes.remove(pos);
         removed
     }
@@ -431,6 +496,16 @@ impl BlockEntities {
     pub fn unload(&mut self, mut gone: impl FnMut(&Pos) -> bool) {
         let asleep = std::mem::take(&mut self.asleep);
         self.retain(|p, _| !gone(p));
+        let mut out = std::mem::take(&mut self.out);
+        out.retain(|pos| {
+            if gone(pos) {
+                self.remove(pos);
+                false
+            } else {
+                true
+            }
+        });
+        self.out = out;
         self.asleep = asleep;
         let map = &self.map;
         self.asleep.retain(|p| map.contains_key(p));
@@ -445,11 +520,12 @@ impl BlockEntities {
             &mut self.attachments,
         );
         let (mods, boxes) = (&mut self.mods, &mut self.boxes);
+        let observer = self.attachment_observer.as_ref();
         self.asleep.clear();
         self.map.retain(|p, e| {
             let kept = keep(p, e);
             if !kept {
-                attachments.remove(p);
+                retire_attachments(attachments, observer, p);
                 *freed |= live.remove(p).is_some();
                 pending.remove(p);
                 forget_mod(mods, *p);
@@ -459,6 +535,7 @@ impl BlockEntities {
         });
     }
     pub fn clear(&mut self) {
+        self.unload_attachments();
         self.attachments.clear();
         self.map.clear();
         self.mods.clear();
@@ -480,7 +557,8 @@ impl BlockEntities {
     pub fn load_chunk(&mut self, entities: Vec<(Pos, BlockEntity)>) {
         let order = chunk_map_order(entities.iter().map(|(p, _)| *p));
         for (p, e) in entities {
-            self.attachments.remove(&p);
+            retire_attachments(&mut self.attachments, self.attachment_observer.as_ref(), &p);
+            self.out.remove(&p);
             self.asleep.remove(&p);
             let new_is_mod = matches!(e, BlockEntity::Mod(_));
             self.note_box(p, Some(&e));
@@ -565,6 +643,9 @@ impl BlockEntities {
         self.cancel(pos);
     }
 }
+
+#[cfg(test)]
+mod attachment_tests;
 
 #[cfg(test)]
 mod tests {
