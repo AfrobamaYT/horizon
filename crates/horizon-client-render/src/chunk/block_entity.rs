@@ -89,7 +89,7 @@ pub enum BlockEntity {
     /// A block entity of a mod (`native_block_entity`), kept as its saved
     /// compound for the mod to read and change.
     Mod(Box<ModBlockEntity>),
-    /// `PotentSulfurBlockEntity` (`game/potent_sulfur.rs`).
+    /// `PotentSulfurBlockEntity` (`game/blocks/potent_sulfur.rs`).
     PotentSulfur(PotentSulfur),
     /// `StructureBlockEntity` (`structure_block.rs`).
     StructureBlock(Box<crate::structure_block::StructureBlock>),
@@ -229,7 +229,7 @@ pub struct Banner {
     /// Components not consumed by BannerBlockEntity's implicit fields.
     pub components: horizon_world::nbt::Compound,
 }
-/// `CreakingHeartBlockEntity` (the logic is in `game/creaking.rs`).
+/// `CreakingHeartBlockEntity` (the logic is in `game/mobs/creaking.rs`).
 #[derive(Clone, Debug, Default)]
 pub struct CreakingHeart {
     /// The protector: its entity id once resolved, and its UUID (the saved form).

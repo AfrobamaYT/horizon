@@ -4,13 +4,20 @@ use std::sync::Arc;
 use wasmtime::component::WasmList;
 use wasmtime::{AsContextMut, StoreContextMut};
 
-type Get = Result<Arc<Vec<wire::Cell>>, wire::Refusal>;
+type Get = Result<u32, wire::Refusal>;
 type Read = (Resource<wire::Node>, u32);
-type Write = (Resource<wire::Node>, u32, WasmList<wire::Cell>);
+type Write = (Resource<wire::Node>, u32, u32);
+
+#[derive(wasmtime::component::ComponentType, wasmtime::component::Lower)]
+#[component(record)]
+struct BatchValues {
+    entries: Arc<Vec<Get>>,
+    cells: Arc<Vec<wire::Cell>>,
+}
 
 #[derive(Default)]
 pub(super) struct Buffers {
-    cells: Vec<Arc<Vec<wire::Cell>>>,
+    cells: Arc<Vec<wire::Cell>>,
     pending: Vec<internals::Value>,
     gets: Arc<Vec<Get>>,
     sets: Arc<Vec<Result<(), wire::Refusal>>>,
@@ -23,6 +30,7 @@ impl Buffers {
     fn begin(&mut self) {
         Arc::get_mut(&mut self.gets).unwrap().clear();
         Arc::get_mut(&mut self.sets).unwrap().clear();
+        Arc::get_mut(&mut self.cells).unwrap().clear();
         self.requests.clear();
         self.refused.clear();
     }
@@ -34,34 +42,33 @@ impl Buffers {
         }
     }
 
-    fn encode(&mut self, index: usize, value: internals::Value) -> Get {
+    fn encode(&mut self, value: internals::Value) -> Get {
         crate::frame::value_size(&value)?;
-        while self.cells.len() <= index {
-            self.cells.push(Arc::new(Vec::new()));
-        }
-        let cells = Arc::get_mut(&mut self.cells[index]).unwrap();
-        cells.clear();
+        let cells = Arc::get_mut(&mut self.cells).unwrap();
+        let start = cells.len();
         internals::flatten_into(value, cells, &mut self.pending);
-        Ok(self.cells[index].clone())
+        Ok((cells.len() - start) as u32)
     }
 
     fn input(
         &mut self,
         store: &mut StoreContextMut<'_, State>,
-        cells: WasmList<wire::Cell>,
+        cells: &WasmList<wire::Cell>,
         index: usize,
+        start: usize,
+        len: usize,
     ) -> wasmtime::Result<bool> {
         while self.inputs.len() <= index {
             self.inputs.push(Vec::new());
         }
-        if cells.len() > 65_536 {
+        if len > 65_536 {
             return Ok(false);
         }
         let input = &mut self.inputs[index];
         input.clear();
         let mut bytes = 0usize;
-        for index in 0..cells.len() {
-            let cell = cells.get(store.as_context_mut(), index).unwrap()?;
+        for offset in start..start + len {
+            let cell = cells.get(store.as_context_mut(), offset).unwrap()?;
             if let wire::Cell::Str(value) = &cell {
                 let next = bytes.saturating_add(value.len());
                 charge(
@@ -82,7 +89,7 @@ impl Buffers {
 fn get_many(
     store: StoreContextMut<'_, State>,
     reads: WasmList<Read>,
-) -> wasmtime::Result<Arc<Vec<Get>>> {
+) -> wasmtime::Result<(Arc<Vec<Get>>, Arc<Vec<wire::Cell>>)> {
     bounded_batch(reads.len())?;
     State::with_buffer::<Buffers, _>(store, |buffers, mut store| {
         contain(|| {
@@ -99,16 +106,15 @@ fn get_many(
             let mut output = 0usize;
             for index in 0..buffers.requests.len() {
                 let (node, field) = &buffers.requests[index];
-                let value = View
-                    .get_value(node, *field)
-                    .and_then(|v| buffers.encode(index, v));
-                if let Ok(cells) = &value {
+                let value = View.get_value(node, *field).and_then(|v| buffers.encode(v));
+                if let Ok(len) = value {
+                    let cells = &buffers.cells[buffers.cells.len() - len as usize..];
                     output = output.saturating_add(wire_cost(cells));
                 }
                 Arc::get_mut(&mut buffers.gets).unwrap().push(value);
             }
             charge(&mut store, output)?;
-            Ok(buffers.gets.clone())
+            Ok((buffers.gets.clone(), buffers.cells.clone()))
         })
     })
 }
@@ -116,6 +122,7 @@ fn get_many(
 fn set_many(
     store: StoreContextMut<'_, State>,
     writes: WasmList<Write>,
+    cells: WasmList<wire::Cell>,
 ) -> wasmtime::Result<Arc<Vec<Result<(), wire::Refusal>>>> {
     bounded_batch(writes.len())?;
     State::with_buffer::<Buffers, _>(store, |buffers, mut store| {
@@ -124,13 +131,21 @@ fn set_many(
             let fuel_before = store.get_fuel().ok();
             buffers.begin();
             charge(&mut store, writes.len().max(1))?;
+            let mut start = 0usize;
             for index in 0..writes.len() {
-                let (node, field, cells) = writes.get(store.as_context_mut(), index).unwrap()?;
-                charge(&mut store, node_cost(&node).saturating_add(cells.len()))?;
-                let accepted = buffers.input(&mut store, cells, index)?;
+                let (node, field, len) = writes.get(store.as_context_mut(), index).unwrap()?;
+                let len = len as usize;
+                let end = start
+                    .checked_add(len)
+                    .filter(|end| *end <= cells.len())
+                    .ok_or_else(|| wasmtime::Error::msg("invalid internals batch lengths"))?;
+                charge(&mut store, node_cost(&node).saturating_add(len))?;
+                let accepted = buffers.input(&mut store, &cells, index, start, len)?;
+                start = end;
                 buffers.refused.push(!accepted);
                 buffers.requests.push((node, field));
             }
+            wasmtime::ensure!(start == cells.len(), "invalid internals batch lengths");
             for (index, (node, field)) in buffers.requests.drain(..).enumerate() {
                 let value = if buffers.refused[index] {
                     Err(wire::Refusal::NotHere("internals budget".into()))
@@ -154,9 +169,12 @@ fn set_many(
 pub(super) fn add_to_linker(linker: &mut Linker<State>) -> wasmtime::Result<()> {
     linker.allow_shadowing(true);
     let mut interface = linker.instance("horizon:mod-internals/view@0.1.0")?;
-    interface.func_wrap("get-many", |store, (reads,)| Ok((get_many(store, reads)?,)))?;
-    interface.func_wrap("set-many", |store, (writes,)| {
-        Ok((set_many(store, writes)?,))
+    interface.func_wrap("get-many", |store, (reads,)| {
+        let (entries, cells) = get_many(store, reads)?;
+        Ok((BatchValues { entries, cells },))
+    })?;
+    interface.func_wrap("set-many", |store, (writes, cells)| {
+        Ok((set_many(store, writes, cells)?,))
     })?;
     linker.allow_shadowing(false);
     Ok(())

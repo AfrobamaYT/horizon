@@ -1,7 +1,6 @@
 //! Native hook implementations, split by catalog area.
 //!
 //! Hook documentation and contract versions live in the catalog, not a shared changelog.
-//! The numbered history is frozen in the modding book's legacy API history reference.
 //!
 //! Native mods are built against an exact game revision, rather than a hook API revision.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
