@@ -5,10 +5,24 @@ use horizon_client::command::{Reader, args::Registries, block};
 use horizon_client::items::ItemStack;
 use horizon_world::chunk::BlockState;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
-use mod_api::{BlockSoundType, BlockStateRange};
+use mod_api::{BlockKey, BlockSoundType, BlockStateRange, EffectKey};
 use std::sync::{Arc, Mutex};
 
 impl Game<'_> {
+    /// The canonical block id retained by the load-owned registration slot. An invalid slot
+    /// is a boundary error, including when a wasm guest supplies it.
+    pub(super) fn native_block_key_id(&self, key: BlockKey) -> String {
+        mod_api::__private::block_key_id(key)
+            .expect("invalid block key slot")
+            .to_owned()
+    }
+    /// The canonical effect id retained by the load-owned registration slot.
+    pub(super) fn native_effect_key_id(&self, key: EffectKey) -> String {
+        mod_api::__private::effect_key_id(key)
+            .expect("invalid effect key slot")
+            .to_owned()
+    }
+
     /// The state `name` names, read as `/setblock` reads a block
     /// (`BlockStateParser.parseForBlock`): `minecraft:oak_stairs[facing=east]`,
     /// `stone` for `minecraft:stone`, the properties left out at their
@@ -30,8 +44,8 @@ impl Game<'_> {
     /// The default state of `block` (`minecraft:oak_stairs`, or `oak_stairs`):
     /// `Block.defaultBlockState`, the one a block takes when nothing else
     /// says. None for an unknown block.
-    pub(super) fn native_block_state_default(&self, block: &str) -> Option<BlockStateId> {
-        default_state(self.pack.assets.registry, block)
+    pub(super) fn native_block_state_default(&self, block: BlockKey) -> Option<BlockStateId> {
+        Some(mod_api::__private::resolved_block(block)?.default)
     }
     /// `BlockState.canBeReplaced()`: whether placing a block where this state stands
     /// replaces it (air, grass, water, snow layers). None for an unknown state.
@@ -67,24 +81,10 @@ impl Game<'_> {
     }
     /// The states of `block` (`StateDefinition.getPossibleStates`), as the consecutive ids the
     /// registry numbers them with. None for an unknown block.
-    pub(super) fn native_block_states_of(&self, block: &str) -> Option<BlockStateRange> {
-        let registry = self.pack.assets.registry;
-        let default = registry.default_state(block)?;
-        let of_block = |id: u32| {
-            registry
-                .state(BlockStateId(id))
-                .is_some_and(|s| s.name == block)
-        };
-        let mut first = default.0;
-        while first > 0 && of_block(first - 1) {
-            first -= 1;
-        }
-        let mut last = default.0;
-        while of_block(last + 1) {
-            last += 1;
-        }
-        Some(BlockStateRange::new(BlockStateId(first), last - first + 1))
+    pub(super) fn native_block_states_of(&self, block: BlockKey) -> Option<BlockStateRange> {
+        Some(mod_api::__private::resolved_block(block)?.states)
     }
+
     /// `Item.getCraftingRemainder`: Horizon currently stores the remainder's
     /// item id, so the result is a single plain stack.
     pub(super) fn native_item_crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
@@ -95,9 +95,9 @@ impl Game<'_> {
 
     /// `Block.asItem`: the block's item name, including air for a block with
     /// no item; None if the block name is unknown.
-    pub(super) fn native_block_item(&self, block: &str) -> Option<String> {
+    pub(super) fn native_block_item(&self, block: BlockKey) -> Option<String> {
         let behaviours = self.res.behaviours();
-        let id = behaviours.table.block_by_name(block)?;
+        let id = mod_api::__private::resolved_block(block)?.block;
         Some(behaviours.block_data(id).item.to_string())
     }
 
@@ -152,11 +152,6 @@ pub(super) fn parse(
     registry.resolve(&state).ok()
 }
 
-/// `Block.defaultBlockState` of the block `block` names (`Identifier.parse`).
-pub(super) fn default_state(registry: &BlockRegistry, block: &str) -> Option<BlockStateId> {
-    registry.default_state(&horizon_client::command::args::normalize(block))
-}
-
 /// `BlockStateParser.serialize`: the block, then `[key=value,...]` in the
 /// state definition's (name) order.
 pub(super) fn serialize(state: &BlockState) -> String {
@@ -209,14 +204,15 @@ mod tests {
                     .is_none()
             );
             assert_eq!(
-                host.block_item("minecraft:stone").as_deref(),
+                host.block_item(mod_api::__private::part_tests::block_key("minecraft:stone"))
+                    .as_deref(),
                 Some("minecraft:stone")
             );
             assert_eq!(
-                host.block_item("minecraft:water").as_deref(),
+                host.block_item(mod_api::__private::part_tests::block_key("minecraft:water"))
+                    .as_deref(),
                 Some("minecraft:air")
             );
-            assert_eq!(host.block_item("missing:unknown"), None);
         });
     }
 
@@ -269,21 +265,44 @@ mod tests {
     }
 
     #[test]
-    fn a_block_has_its_default_state() {
+    fn a_block_key_resolves_its_default_state() {
+        use mod_api::__private::{ResolvedBlock, part_tests, resolve_blocks, resolved_block};
         let (_, registry) = blocks();
-        assert_eq!(default_state(registry, "oak_stairs"), Some(BlockStateId(1)));
+        mod_api::__private::install(Default::default());
+        part_tests::register_game_keys([
+            "minecraft:oak_stairs".to_owned(),
+            "minecraft:wheat".to_owned(),
+        ]);
+        resolve_blocks(|id| {
+            let default = registry.default_state(id)?;
+            Some(ResolvedBlock {
+                default,
+                states: BlockStateRange::new(default, 1),
+                block: horizon_world::level::states::BlockId(0),
+            })
+        })
+        .unwrap();
         assert_eq!(
-            default_state(registry, "minecraft:wheat"),
-            Some(BlockStateId(5))
+            resolved_block(part_tests::block_key("oak_stairs"))
+                .unwrap()
+                .default,
+            BlockStateId(1)
         );
-        for block in [
-            "minecraft:nothing",
-            "oak_stairs[half=top]",
-            "minecraft:",
-            "",
-        ] {
-            assert_eq!(default_state(registry, block), None, "{block:?}");
-        }
+        assert_eq!(
+            resolved_block(part_tests::block_key("minecraft:wheat"))
+                .unwrap()
+                .default,
+            BlockStateId(5)
+        );
+        // A valid key has no mapping on a different owning thread. Raw unknown slots are
+        // refused by the generated host boundary, not revalidated by typed operations.
+        let key = part_tests::block_key("minecraft:wheat");
+        assert!(
+            std::thread::spawn(move || resolved_block(key))
+                .join()
+                .unwrap()
+                .is_none()
+        );
     }
 }
 
@@ -324,7 +343,11 @@ mod facts_tests {
             assert_eq!((sound.volume, sound.pitch), (1.0, 1.0));
             // Oak stairs: facing 4 × half 2 × shape 5 × waterlogged 2 = 80 states, its default
             // among them; stone has one.
-            let range = facts.states_of("minecraft:oak_stairs").unwrap();
+            let range = facts
+                .states_of(mod_api::__private::part_tests::block_key(
+                    "minecraft:oak_stairs",
+                ))
+                .unwrap();
             assert_eq!(range.len(), 80);
             assert!(range.contains(stairs));
             assert!(range.iter().all(
@@ -332,12 +355,12 @@ mod facts_tests {
             ));
             assert_eq!(
                 facts
-                    .states_of("minecraft:stone")
+                    .states_of(mod_api::__private::part_tests::block_key("minecraft:stone"))
                     .map(|r| (r.first(), r.len())),
                 Some((stone, 1))
             );
-            // Unknown: None.
-            assert_eq!(facts.states_of("mymod:nothing"), None);
+            // Unknown state ids: None.
+
             assert_eq!(facts.destroy_speed(BlockStateId(u32::MAX)), None);
             assert_eq!(facts.sound(BlockStateId(u32::MAX)), None);
         });

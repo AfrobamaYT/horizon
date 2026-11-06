@@ -630,27 +630,37 @@ pub(super) fn conversions(
                         .collect();
                     format!("{path} {{ {} }}", parts.join(", "))
                 }
-                Kind::TupleRecord(items) if items.iter().all(|i| *i == Ty::Unit) => {
-                    let units = vec!["()"; items.len()].join(", ");
-                    format!("{{ let _ = w; {path}({units}) }}")
-                }
-                Kind::TupleRecord(items) => match items.as_slice() {
-                    [one] => format!("{path}({})", lift(types, one, "w")),
-                    _ => {
+                Kind::TupleRecord(items) => {
+                    let (prepare, fields) = if items.iter().all(|item| *item == Ty::Unit) {
+                        ("let _ = w;".to_string(), vec!["()"; items.len()].join(", "))
+                    } else if let [one] = items.as_slice() {
+                        (String::new(), lift(types, one, "w"))
+                    } else {
                         let names: Vec<String> =
                             (0..items.len()).map(|i| format!("t{i}")).collect();
-                        let parts: Vec<String> = items
+                        let fields = items
                             .iter()
                             .zip(&names)
                             .map(|(item, name)| lift(types, item, name))
-                            .collect();
-                        format!(
-                            "{{ let ({},) = w; {path}({}) }}",
-                            names.join(", "),
-                            parts.join(", ")
+                            .collect::<Vec<_>>();
+                        (
+                            format!("let ({},) = w;", names.join(", ")),
+                            fields.join(", "),
                         )
+                    };
+                    let construct = if !types.guest.get()
+                        && let Some(constructor) = &def.host_constructor
+                    {
+                        format!("{path}::{constructor}({fields}).map_err(Refused::because)?")
+                    } else {
+                        format!("{path}({fields})")
+                    };
+                    if prepare.is_empty() {
+                        construct
+                    } else {
+                        format!("{{ {prepare} {construct} }}")
                     }
-                },
+                }
                 Kind::Unit => format!("{{ let _ = w; {path} }}"),
                 Kind::Enum(cases) => {
                     let arms: Vec<String> = cases
@@ -773,6 +783,9 @@ pub(super) fn conversions(
                 Kind::Opaque(_) => unreachable!(),
             };
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn lift_{id}(w: {wire}) -> Result<{path}, Refused> {{ Ok({body}) }}").unwrap();
+            if def.rust == "mod_api::Recipe" {
+                writeln!(code, "#[cfg(test)] pub(super) fn recipe_roundtrip(v: &{rust}) -> Result<{path}, Refused> {{ lift_{id}(lower_{id}(v)?) }}").unwrap();
+            }
         }
         // An event's written-back fields, both ways.
         if outs.contains(&id)

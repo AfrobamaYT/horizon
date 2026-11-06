@@ -191,7 +191,11 @@ impl Game<'_> {
         }
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::Piglin || !m.alive() || m.extra.using_item > 0 {
+            if m.species() != Species::Piglin
+                || !m.alive()
+                || m.extra.using_item > 0
+                || !self.creatures.ticked.contains(&m.id)
+            {
                 continue;
             }
             // `Piglin.wantsToPickUp`: NeoForge's `canEntityGrief` for the piglin.
