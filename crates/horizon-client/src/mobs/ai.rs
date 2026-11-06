@@ -5476,12 +5476,12 @@ mod dolphin_noai_air_tests {
             mob.persistent = true;
             mob.attrs.speed = 0.0;
             mob.air = initial;
-            let mut random = LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
             let mut events = Vec::new();
             assert_eq!(mob.health, 10.0);
             assert_eq!(mob.max_air_supply(), 4800);
             for (index, expected) in expected.into_iter().enumerate() {
-                assert!(tick(&mut mob, w, &mut random, &mut events));
+                assert!(tick(&mut mob, w, &mut test_level.level(), &mut events));
                 assert_eq!(mob.age, (index + 1) as u32);
                 assert_eq!(mob.fluids.eye_in_water, water);
                 assert_eq!(mob.health, 10.0);
