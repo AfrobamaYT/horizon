@@ -240,6 +240,17 @@ pub(super) fn generate(
                         {
                             Some("false")
                         }
+                        // A read that answers `Result`: its refusal is the
+                        // error a host without a backend answers.
+                        syn::Type::Path(path)
+                            if path
+                                .path
+                                .segments
+                                .last()
+                                .is_some_and(|seg| seg.ident == "Result") =>
+                        {
+                            Some("Err(mod_api::NoBackend::no_backend())")
+                        }
                         syn::Type::Path(path)
                             if path.path.segments.last().is_some_and(|seg| {
                                 matches!(
@@ -467,6 +478,11 @@ fn goal_view(
         // refusal, or the empty string of a metadata read.
         let forwarded = match *refusal {
             Some("None") => ".flatten()".to_string(),
+            // A `Result` read's no-backend answer is its error type's own
+            // `NoBackend` value, wrapped back in the `Err`.
+            Some(refusal) if refusal.starts_with("Err(") => {
+                ".unwrap_or_else(|| Err(mod_api::NoBackend::no_backend()))".to_string()
+            }
             Some(refusal) => format!(".unwrap_or({refusal})"),
             None => ".unwrap_or_default()".to_string(),
         };
