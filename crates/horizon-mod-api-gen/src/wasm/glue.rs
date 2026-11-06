@@ -27,9 +27,9 @@ pub(super) fn flat_element(
     match ty {
         Ty::Unit | Ty::Prim(..) | Ty::Wide(..) | Ty::Duration => true,
         Ty::Array(item, n) if (1..=12).contains(n) => flat_element(types, item, seen),
-        Ty::Option(item) | Ty::Ref(item, _) | Ty::Boxed(item) | Ty::Shared(item) => {
-            flat_element(types, item, seen)
-        }
+        Ty::Option(item) => flat_element(types, item, seen),
+        // Owned boxes and shared pointers allocate while converting even when their WIT is flat.
+        Ty::Ref(..) | Ty::Boxed(..) | Ty::Shared(..) => false,
         Ty::Result(a, b) => flat_element(types, a, seen) && flat_element(types, b, seen),
         Ty::Tuple(items) => items.iter().all(|item| flat_element(types, item, seen)),
         Ty::Named(id) => {

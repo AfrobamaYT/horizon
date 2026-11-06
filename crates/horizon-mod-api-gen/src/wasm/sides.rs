@@ -897,9 +897,12 @@ fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Resul
                     wire_type(types, item)
                 ));
                 let var = format!("b{}", scratch.len());
-                scratch.push((var.clone(), format!("Vec<{}>", rust_ty(types, item, false))));
-                writeln!(prep, "{var}.clear(); for value in {source}.iter(wasmtime::AsContextMut::as_context_mut(&mut store))? {{ let value = value?; {var}.push({}); }}", lift(types, item, "value")).unwrap();
-                args.push(format!("{var}.as_slice()"));
+                scratch.push((
+                    var.clone(),
+                    format!("super::FlatInput<{}>", rust_ty(types, item, false)),
+                ));
+                writeln!(prep, "let {var} = super::FlatInputGuard(&mut {var}.0); {var}.0.clear(); for value in {source}.iter(wasmtime::AsContextMut::as_context_mut(&mut store))? {{ let value = value?; {var}.0.push({}); }}", lift(types, item, "value")).unwrap();
+                args.push(format!("{var}.0.as_slice()"));
             } else {
                 if wire.is_some() {
                     params.push(format!("{source}: {}", wire_type(types, ty)));
@@ -944,14 +947,20 @@ fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Resul
         } else {
             format!("({},)", types.join(", "))
         };
-        registrations.insert(
-            (interface, wit_ident(&method.name)),
-            crate::wasm_imports::Registration {
-                parameters: format!("{pattern}: {param_types}"),
-                body,
-                shadow: true,
-            },
-        );
+        let key = (interface, wit_ident(&method.name));
+        if registrations
+            .insert(
+                key.clone(),
+                crate::wasm_imports::Registration {
+                    parameters: format!("{pattern}: {param_types}"),
+                    body,
+                    shadow: true,
+                },
+            )
+            .is_some()
+        {
+            return Err(format!("duplicate flat-list import {key:?}"));
+        }
     }
     let mut resolve = wit_parser::Resolve::default();
     let package = resolve
