@@ -1146,7 +1146,8 @@ mod tests {
             .unwrap();
             game.world_root = root.clone();
             let stone = mod_api::__private::part_tests::block_key("minecraft:stone");
-            let old_tag = game.native_block_in_tag(stone, "reload_test:candidate");
+            let old_tag =
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate");
             let old_context = game.loop_context.clone();
             let old_root = game.options.resources.clone();
             let old_data = game.pack.data_source.clone();
@@ -1170,12 +1171,16 @@ mod tests {
             assert_eq!(game.damage_tag_generation, old_generation);
             assert_eq!(game.fns.enabled, old_enabled);
             assert_eq!(
-                game.native_block_in_tag(stone, "reload_test:candidate"),
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
                 old_tag
             );
             mod_api::__private::install_parts(&[]).unwrap();
             game.reload_datapacks(true, &[]).unwrap();
             assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
+            assert_eq!(
+                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
+                Some(true)
+            );
             let _ = std::fs::remove_dir_all(root);
         });
     }
