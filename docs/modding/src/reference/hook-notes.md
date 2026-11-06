@@ -19,6 +19,14 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Client window and screen state
+
+`ClientHost::window_focused()` reports the last focus state from the window
+system. `ClientHost::observed_screen_id()` returns the same ID screen hooks see,
+including overlays. `None` means no view is available: there may be no open
+screen or no renderer yet. It does not mean the client is outside a world.
+Read again after a screen or focus change.
+
 ## Input preferences
 
 `ClientHost::input_options()` returns a copy of the current mouse and movement
@@ -1546,7 +1554,7 @@ registration path.
 
 - A raid wave has spawned at its position, with its raid id, wave number and raider count (riders' mounts not counted).
 
-- A raid is triggered or reaches `victory`, `loss` or `stopped`: `native_raid_state_change(raid, pos, state)` reports its id, center and new state.
+- A raid is triggered or reaches `victory`, `loss` or `stopped`: `native_raid_state_change(raid, pos, state)` reports its owning `RaidRef`, center and new state. The handle retains its level even when that level is parked; an already removed raid cannot be read.
 
 - `native_sculk_bloom(dimension, pos)` is called after a sculk catalyst at `pos` takes experience and enters the blooming state.
 
@@ -2041,7 +2049,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied.
 - **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
-- **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`.
+- **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`. Its `RaidRef` identifies the owning level, not necessarily the level currently in place.
 - **`native_world_saved(wait)`**: the server completed its world save cycle; `wait` is true when chunk writes were flushed before returning.
 - **`native_entities_load(dimension, chunk, count)`**: saved entity records for `chunk` finished loading into `dimension`.
 - **`native_entities_unload(dimension, chunk, count)`**: entities in `chunk` left the active world and were queued for saving.
@@ -2488,8 +2496,10 @@ handle, an entity the client doesn't track and a level it doesn't show:
   change and no draw. `set_owner` on an arrow also allows pickup for a player owner (`AbstractArrow.setOwner`);
   `deflect` does not (vanilla's `EntityReference` overload). Arrows (and a mob's trident for
   `pickup`) also have `pickup`/`set_pickup` (`NativeArrowPickup`), `base_damage`/`set_base_damage` and
-  `critical`/`set_critical`; the critical flag reaches clients through the entity data, and the others are
-  server-only as in vanilla.
+  `critical`/`set_critical` and `pierce_level`/`set_pierce_level`. The pierce level is a signed byte:
+  vanilla stores all values from -128 through 127 unchanged, and nonpositive values do not pierce. The
+  typed result distinguishes a stale handle, a non-arrow projectile and a wrong-side host. The critical
+  flag reaches clients through entity data; these handle methods operate on the server.
 - `living.drop(host, stack, throw_randomly, include_thrower_name)` throws a stack the mod holds from the eyes
   (`LivingEntity.drop`) and gives the item entity; it never touches a slot. `is_tamed(host)` and `owner(host)` read a
   tamable mob or a horse (`TamableAnimal.isTame`, its owner's UUID).
@@ -3147,3 +3157,31 @@ It searches the world's saved templates before data packs and returns the rotate
 in vanilla placement order, with each transformed state and its saved block-entity data. It uses
 the palette selected at `at`; processors and entities are not included. Invalid or missing names
 return `None`. A builder can retain this snapshot and place its blocks over time.
+
+## Entity model layers
+
+`Hooks::layer_definitions` is the client registration-phase counterpart of NeoForge 26.3's
+`EntityRenderersEvent.RegisterLayerDefinitions`. It receives a `RegistrationContext`, once at
+client startup, and collects `(id, LayerDefinition)` entries in dependency order. Dedicated
+and integrated server roles do not fire this client event. IDs are `<mod id>:<model>#<layer>`;
+vanilla-namespace, malformed and duplicate IDs are logged and left out.
+
+A `LayerDefinition` holds a `MeshDefinition` of named parts whose `CubeListBuilder` boxes sit
+at a `PartPose`, on a texture of the given size. Texture offsets, mirroring and
+`CubeDeformation` match vanilla's model builders. This listener is compiled in the API tests:
+
+```rust,ignore
+{{#include ../../../../crates/horizon-client/tests/mod_api_hooks.rs:layer_definitions}}
+```
+
+`ClientHost::bake_layer` bakes a registered layer or a vanilla layer by its
+`entity-models.json` name (`minecraft:zombie#main`) into an owned `ModelPart` tree. Bake once
+and keep it. Before each frame, call `reset_all_poses` and set the parts' positions and
+rotations as `setupAnim` does. A layer unavailable from the cached mob types is read from
+resources for each bake, so do not bake it every frame.
+
+Draw the tree with `BlockEntityDrawContext::model_part`, using the same draw context the mob
+or block entity submit hook received. There is no separate Host drawing helper. Positions
+are texels, +y down and the front towards -z; convert the mob's frame with scale
+`[1.0, -1.0, -1.0]` then translation `[0.0, -1.501, 0.0]`, as `LivingEntityRenderer` does.
+The sprite is the entity texture ID and the tint is `0xRRGGBB`.

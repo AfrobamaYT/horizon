@@ -207,7 +207,7 @@ impl Game<'_> {
         else {
             return false;
         };
-        self.native_raid_state_change(raid.id(), center, "stopped");
+        self.native_raid_state_change(raid, center, "stopped");
         true
     }
 }
@@ -218,7 +218,112 @@ mod tests {
     use super::*;
     use horizon_client::mobs::{Mob, raider};
     use horizon_core::geometry::Vec3;
-    use mod_api::NativeWorldEpoch;
+    use mod_api::{Hooks, NativeWorldEpoch, RaidStateChangeEvent, ServerHost};
+    use std::sync::{Arc, Mutex};
+
+    type RaidObservation = (RaidRef, String, Option<NativeRaidStatus>, bool);
+    struct RaidObserver(Arc<Mutex<Vec<RaidObservation>>>);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for RaidObserver {
+        fn raid_state_change(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut RaidStateChangeEvent<'_>,
+        ) {
+            let status = event.raid.status(host);
+            let wrote = event.state == "stopped" && event.raid.set_omen_level(host, 17);
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.raid, event.state.to_owned(), status, wrote));
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn raid_events_keep_the_owning_level_with_colliding_ids() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "raid-observer",
+            Box::new(RaidObserver(seen.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                let level = game.native_level(game.dim.id()).unwrap();
+                assert!(game.create_or_extend_raid([10, 70, 10], Some(2)).is_some());
+                let raid = level.raid_at(game, [10, 70, 10]).unwrap();
+                assert!(
+                    game.enter_command_level(super::super::Dim::Nether)
+                        .is_some()
+                );
+                game.read_raids();
+                let current = game.native_level(game.dim.id()).unwrap();
+                let (id, _) = game
+                    .raiding
+                    .raids_mut(current.dimension())
+                    .unwrap()
+                    .create_or_extend([100, 70, 100], 2, None, 7);
+                assert_eq!(id, raid.id());
+                let other = current.raid(game, id).unwrap();
+                let before = other.omen_level(game);
+                assert!(raid.stop(game));
+                assert_eq!(raid.omen_level(game), Some(17));
+                assert_eq!(other.omen_level(game), before);
+                assert!(other.is_active(game));
+                game.raid_command_stop(id);
+                let tick_id = game
+                    .raiding
+                    .raids_mut(current.dimension())
+                    .unwrap()
+                    .create_or_extend([200, 70, 200], 2, None, 7)
+                    .0;
+                let tick_raid = current.raid(game, tick_id).unwrap();
+                game.world.health_rules.difficulty = horizon_world::food::Difficulty::Peaceful;
+                game.tick_raids();
+                let records = seen.lock().unwrap();
+                assert_eq!(records.len(), 4);
+                assert_eq!(
+                    records[0],
+                    (
+                        raid,
+                        "triggered".into(),
+                        Some(NativeRaidStatus::Ongoing),
+                        false
+                    )
+                );
+                assert_eq!(
+                    records[1],
+                    (
+                        raid,
+                        "stopped".into(),
+                        Some(NativeRaidStatus::Stopped),
+                        true
+                    )
+                );
+                assert_eq!(
+                    records[2],
+                    (
+                        other,
+                        "stopped".into(),
+                        Some(NativeRaidStatus::Stopped),
+                        true
+                    )
+                );
+                assert_eq!(
+                    records[3],
+                    (
+                        tick_raid,
+                        "stopped".into(),
+                        Some(NativeRaidStatus::Stopped),
+                        true
+                    )
+                );
+            })
+        });
+    }
 
     fn raider_mob(game: &mut Game<'_>, id: u32, raid: i32, wave: i32, health: f32) {
         let kind = game

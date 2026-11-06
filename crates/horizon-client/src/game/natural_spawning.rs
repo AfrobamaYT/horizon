@@ -981,15 +981,18 @@ impl<'a> Game<'a> {
         if self.world_debug {
             return;
         }
+        let mut laps = horizon_client::spans::laps();
         let players = self.level_players();
         if players.is_empty() {
             return;
         }
         let mut scratch = std::mem::take(&mut self.spawn_scratch);
         let spawnable = self.spawning_chunks(&players, &mut scratch);
+        laps.lap("sn_candidates");
         for &key in &scratch.candidates {
             *self.world.inhabited.entry(key).or_insert(0) += 1;
         }
+        laps.lap("sn_inhabited");
         let spawn_mobs = self.ui.rules.bool("spawn_mobs");
         let spawn_enemies = self.ui.rules.bool("spawn_monsters");
         let mut random = std::mem::replace(&mut self.world.random, LegacyRandom::new(0));
@@ -997,6 +1000,7 @@ impl<'a> Game<'a> {
         let last_state;
         let extras = {
             let level = self.natural_level();
+            laps.lap("sn_level");
             let counted: Vec<Counted> = self
                 .mobs
                 .iter()
@@ -1020,20 +1024,25 @@ impl<'a> Game<'a> {
                     spectator: p.spectator,
                 })
                 .collect();
+            laps.lap("sn_materialize");
             let mut state = SpawnState::new(&level, spawnable, players, &counted, |cx, cz| {
                 self.world.chunks.contains_key(&(cx, cz))
             });
+            laps.lap("sn_state");
             last_state = state.counts();
             let categories = if spawn_mobs {
                 state.filtered_categories(spawn_enemies, self.world.game_time % 400 == 0)
             } else {
                 Vec::new()
             };
+            laps.lap("sn_categories");
             // Util.shuffle.
             for i in (1..scratch.candidates.len()).rev() {
                 let j = random.next_int_bound(i as i32 + 1).unwrap_or(0) as usize;
                 scratch.candidates.swap(i, j);
             }
+            laps.lap("sn_shuffle");
+            spawn_selection::attempt_counters(false);
             if !categories.is_empty() {
                 for chunk in scratch.candidates.drain(..) {
                     let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LegacyRandom| {
@@ -1058,12 +1067,15 @@ impl<'a> Game<'a> {
             let rides = std::mem::take(&mut *level.rides.borrow_mut());
             (created, rides)
         };
+        spawn_selection::attempt_counters(true);
+        laps.lap("sn_attempts");
         self.world.random = random;
         // ServerChunkCache.lastSpawnState, for the debug overlay.
         self.spawn_counts.insert(self.dim, last_state);
         let (created, rides) = extras;
         self.add_spawned(pending, created, rides, false);
         self.spawn_scratch = scratch;
+        laps.lap("sn_finalize");
     }
     /// `NoiseBasedChunkGenerator.spawnOriginalMobs`: creature packs for a
     /// freshly generated chunk, from the biome at its corner column's top,
