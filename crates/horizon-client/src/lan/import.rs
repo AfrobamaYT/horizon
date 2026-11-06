@@ -53,9 +53,6 @@ pub struct Imported {
     /// asked for: they need the game's tree and its counters.
     pub advancements: Option<Value>,
     pub stats: Option<Value>,
-    /// Whether the mods' attachments came (a whole import): the game's own copy of them is then
-    /// the record's.
-    pub attachments: bool,
     /// Whether the other players are told the player has arrived (when it is placed).
     pub announce: bool,
     /// Whether the request asks the player to be let into the world now. The import never places
@@ -417,7 +414,7 @@ impl Kept {
                     g.last_death.clone(),
                     g.seen_credits,
                     g.post_effects.clone(),
-                    g.attachments.clone(),
+                    horizon_world::attachments::Attachments::clone(&g.attachments),
                 )
             }),
             dimension: g.dimension.clone(),
@@ -484,13 +481,8 @@ impl Kept {
             (None, _) => {}
         }
         if let Some((saved, death, credits, post, attachments)) = self.other {
-            (
-                g.saved,
-                g.last_death,
-                g.seen_credits,
-                g.post_effects,
-                g.attachments,
-            ) = (saved, death, credits, post, attachments);
+            (g.saved, g.last_death, g.seen_credits, g.post_effects) = (saved, death, credits, post);
+            g.attachments.replace_contents(attachments);
         }
         // The client is in one dimension, and only a login can change it.
         g.dimension = self.dimension;
@@ -499,7 +491,7 @@ impl Kept {
 
 /// Applies the request to the held player `uuid` and tells its client, leaving it held
 /// (`Hub::confirm_arrival` places it). The caller gives the player its advancements and
-/// statistics (`Imported::advancements`, `Imported::stats`) and its attachments.
+/// statistics (`Imported::advancements`, `Imported::stats`).
 ///
 /// Nothing changes when it refuses: the record is read and checked first, and the
 /// guest is touched only once everything is known to be well.
@@ -612,7 +604,6 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
     Ok(Imported {
         advancements: records("advancements"),
         stats: records("stats"),
-        attachments: request.parts.len() == PARTS.len(),
         parts: request.parts,
         announce: request.announce,
         place: request.place,

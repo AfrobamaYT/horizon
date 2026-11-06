@@ -161,7 +161,7 @@ pub fn apply(guest: &mut Guest, level: &Level) {
         .map(|s| [s[0] + 0.5, s[1], s[2] + 0.5]);
     guest.respawn_elsewhere = level.respawn_elsewhere.clone();
     guest.saved = level.player_extra.clone();
-    guest.attachments = match attachment_compound(
+    let attachments = match attachment_compound(
         guest
             .saved
             .as_ref()
@@ -170,6 +170,7 @@ pub fn apply(guest: &mut Guest, level: &Level) {
         Ok(Some(data)) => horizon_world::attachments::Attachments::from_nbt(data.clone()),
         _ => Default::default(),
     };
+    guest.attachments.replace_contents(attachments);
     guest.seen_credits = level.seen_credits;
     guest.post_effects.clone_from(&level.post_effects);
     guest.last_death = level.last_death.clone();
@@ -855,7 +856,8 @@ mod tests {
         let mut loaded = guest();
         loaded.uuid = original.uuid;
         assert!(load(&mut loaded, &dir));
-        loaded.attachments = loaded.attachments.copy_on_death().unwrap();
+        let copy = loaded.attachments.copy_on_death().unwrap();
+        loaded.attachments.replace_contents(copy);
         assert_eq!(
             keep.get(
                 &mut loaded.attachments,

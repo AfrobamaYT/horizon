@@ -4,9 +4,12 @@ pub mod index;
 mod lifetime;
 #[doc(hidden)]
 pub mod observer;
+mod resident;
 
 #[doc(hidden)]
 pub use lifetime::{AttachmentLifetime, HasAttachmentLifetime};
+#[doc(hidden)]
+pub use resident::ResidentAttachments;
 
 use std::{
     any::Any,

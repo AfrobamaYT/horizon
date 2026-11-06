@@ -1510,13 +1510,25 @@ mod mod_capability_tests {
             game.lan_acting_uuid = Some(guest);
             std::mem::swap(
                 &mut game.player_attachments,
-                game.guest_attachments.get_mut(&conn).unwrap(),
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .attachments_mut(conn)
+                    .unwrap(),
             );
             let host: &mut dyn ServerHost = game;
             ENERGY.set(host, player, 70).unwrap();
             std::mem::swap(
                 &mut game.player_attachments,
-                game.guest_attachments.get_mut(&conn).unwrap(),
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .attachments_mut(conn)
+                    .unwrap(),
             );
             game.lan_acting_uuid = None;
             game.transaction_close(false);

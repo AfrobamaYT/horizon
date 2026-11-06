@@ -183,10 +183,12 @@ impl Game<'_> {
             host.play.insert(conn, play);
             return Err(TurnRefused::Gone);
         };
-        std::mem::swap(
-            &mut self.player_attachments,
-            self.guest_attachments.entry(conn).or_default(),
-        );
+        let attachments = host.hub.guests.update(i, |g| {
+            std::mem::replace(
+                &mut self.player_attachments,
+                std::mem::take(&mut g.attachments),
+            )
+        });
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
         // A new body starts with no record of the last one.
@@ -400,6 +402,7 @@ impl Game<'_> {
         self.block_reach = self.interaction_range("minecraft:block_interaction_range", 4.5, 5.0);
         let building_boxes = std::mem::replace(&mut self.lan_building_boxes, other_boxes);
         Ok(GuestSwap {
+            attachments,
             conn,
             i,
             play,
@@ -517,6 +520,7 @@ impl Game<'_> {
             }
         }
         let GuestSwap {
+            attachments,
             conn,
             i,
             mut play,
@@ -768,10 +772,7 @@ impl Game<'_> {
         }
         let (stat_events, name, teleport) = host.hub.guests.update(i, |g| {
             let mut teleport = None;
-            std::mem::swap(
-                &mut self.player_attachments,
-                self.guest_attachments.entry(g.conn).or_default(),
-            );
+            g.attachments = std::mem::replace(&mut self.player_attachments, attachments);
             let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
             // Entity.removePassenger: 60 ticks before it may board again.
             let guest_boarding = crate::game::boarding::after_leaving(
