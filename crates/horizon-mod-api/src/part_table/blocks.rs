@@ -2,7 +2,7 @@
 /// lookup, and only once some part listens at all.
 pub fn block_listens(hook: HookId, name: &'static str, state: BlockStateId) -> bool {
     has_scoped_hook(hook)
-        && parts(name)
+        && parts(hook, name)
             .for_hook(hook)
             .is_some_and(|table| !table.block_state(state).is_empty())
 }
@@ -514,6 +514,38 @@ pub mod tests {
     }
 
     #[test]
+    fn tagged_dispatch_requires_its_own_world_table() {
+        game_thread();
+        resolve(&["test:gauge"]).unwrap();
+        let installed = super::TEST_PARTS.get();
+        let failure = std::thread::Builder::new()
+            .name("part-worker".into())
+            .spawn(move || {
+                super::TEST_PARTS.set(installed);
+                assert!(super::try_parts(HookId::ShouldCheckWeakPower, "other").is_ok());
+                let error = super::try_parts(HookId::AnalogOutput, "analog_output")
+                    .err()
+                    .unwrap();
+                let panic = std::panic::catch_unwind(|| read(1)).unwrap_err();
+                (error, panic)
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(failure.0.hook, "analog_output");
+        assert_eq!(failure.0.thread, "part-worker");
+        let message = failure.1.downcast_ref::<String>().unwrap();
+        assert!(message.contains("analog_output") && message.contains("part-worker"));
+        assert_eq!(read(1), 106);
+        super::clear_game_parts();
+        assert_eq!(read(1), 1);
+        resolve(&["test:gauge"]).unwrap();
+        assert_eq!(read(1), 106);
+        mark_game_thread();
+        assert_eq!(read(1), 1);
+    }
+
+    #[test]
     fn a_block_part_answers_for_its_block_only() {
         game_thread();
         // No world is open, so no state has its parts yet: nothing answers.
@@ -528,7 +560,7 @@ pub mod tests {
     fn scoped_dispatch_looks_up_only_subscribed_hooks_and_parts() {
         game_thread();
         resolve(&[]).unwrap();
-        let parts = super::parts("test");
+        let parts = super::parts(HookId::AnalogOutput, "test");
         let analog = parts.for_hook(HookId::AnalogOutput).unwrap();
         let connect = parts.for_hook(HookId::ShouldRedstoneWireConnectTo).unwrap();
         assert_eq!(analog.block_state(BlockStateId(1)).len(), 1);
@@ -608,14 +640,14 @@ pub mod tests {
         resolve(&[]).unwrap();
         // Out of range, and in range but a block no part is attached to.
         assert!(
-            super::parts("analog_output")
+            super::parts(HookId::AnalogOutput, "analog_output")
                 .for_hook(HookId::AnalogOutput)
                 .unwrap()
                 .block_state(BlockStateId(99))
                 .is_empty()
         );
         assert!(
-            super::parts("analog_output")
+            super::parts(HookId::AnalogOutput, "analog_output")
                 .for_hook(HookId::AnalogOutput)
                 .unwrap()
                 .block_state(BlockStateId(0))
