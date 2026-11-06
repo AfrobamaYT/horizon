@@ -250,6 +250,15 @@ pub(super) fn register_layer_definitions(role: ExecutionRole) {
     Game::native_layer_definitions(&RegistrationContext::new(), &mut layers);
     horizon_client::mobs::model_layers::register(layers);
 }
+/// The native mods' F3 debug entries (`native_register_debug_entries`), kept once at start.
+pub(super) fn register_debug_entries(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut entries = Vec::new();
+    Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
+    horizon_client::debug_entries::register(entries);
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
@@ -864,6 +873,7 @@ impl Game<'_> {
         let root = self.options.resources.clone();
         let data_source = self.pack.data_source.clone();
         let data_changes = self.pack.data_changes.clone();
+        let additional_data = self.pack.additional_data.clone();
         let enabled = self.applied_mods();
         let selected = self.mods.selected.clone();
         let refused = self.mods.refused.clone();
@@ -872,6 +882,7 @@ impl Game<'_> {
             g.options.resources = root;
             g.pack.data_source = data_source;
             g.pack.data_changes = data_changes;
+            g.pack.additional_data = additional_data;
             g.settings.mods.enabled = enabled.clone();
             g.mods.applied = Some(enabled);
             g.mods.selected = selected;

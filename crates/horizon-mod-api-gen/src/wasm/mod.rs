@@ -32,6 +32,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "Messages",
     "Players",
     "ClientSession",
+    "RenderAssets",
     "menu::SlotView",
     "Registrar",
     "CapabilityProviders",
@@ -44,6 +45,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "AttachmentStore",
     "ServerReloadListeners",
     "ClientReloadListeners",
+    "PackFinders",
     "ServerReloadResources",
     "CriterionContext",
 ];
@@ -56,6 +58,7 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("Messages", "server_host", "Ok(h.messages())"),
     ("Players", "server_host", "Ok(h.players())"),
     ("ClientSession", "client_host", "Ok(h.client_session())"),
+    ("RenderAssets", "client_host", "Ok(h.render_assets())"),
     // A level hook's host first: inside a level write it is the one the call hands over.
     (
         "AttachmentStore",
@@ -892,6 +895,32 @@ mod tests {
                 let client = &resolve.interfaces[package.interfaces["client-host"]];
                 let session = &resolve.interfaces[package.interfaces["client-session"]];
                 assert!(!client.functions.contains_key("client-session"));
+                assert!(!client.functions.contains_key("render-assets"));
+                let assets = &resolve.interfaces[package.interfaces["render-assets"]];
+                assert!(assets.functions.contains_key("model"));
+                let draw = &resolve.interfaces[package.interfaces["block-entity-draw-context"]];
+                assert!(draw.functions.contains_key("model"));
+                for (owner, name) in [("ClientHost", "render_assets"), ("RenderAssets", "model")] {
+                    let declarations = syn::parse_file(&generated.host).unwrap();
+                    let method = declarations.items.iter().find_map(|item| match item {
+                        syn::Item::Trait(item) if item.ident == owner => item.items.iter().find_map(|item| match item {
+                            syn::TraitItem::Fn(method) if method.sig.ident == name => Some(method),
+                            _ => None,
+                        }),
+                        _ => None,
+                    }).unwrap();
+                    assert!(method.to_token_stream().to_string().contains("LoadAccess :: PublishedResources"));
+                }
+                // A resource read may not accidentally open a mixed service during reload.
+                let mut mixed = crate::catalog::Catalog::load(&root).unwrap();
+                mixed.helpers.iter_mut().find(|helper| helper.name == "client_server").unwrap().service = Some("render_assets".into());
+                let (host, implementation, _) = crate::host::generate(&root, &mixed, &generated.hooks).unwrap();
+                for source in [host, implementation] {
+                    assert!(source.contains("check_access(\"render_assets\", mod_api::__private::LoadAccess::WorldOnly)"));
+                }
+                assert!(wasm.host.contains("Ok(h.render_assets())"));
+                assert!(wasm.host.contains("ModelRef::from_parts"));
+                assert!(!wasm.unbound.iter().any(|name| name.starts_with("RenderAssets::")));
                 for method in ["client-server", "client-language", "client-frame-stats"] {
                     assert!(session.functions.contains_key(method), "missing {method}");
                     assert!(!client.functions.contains_key(method));
@@ -944,6 +973,7 @@ mod tests {
                     ("Messages", &["broadcast", "text_allowed"][..]),
                     ("Players", &["acting_player", "server_players"][..]),
                     ("ClientSession", &["client_server", "client_language", "client_frame_stats"][..]),
+                    ("RenderAssets", &["model"][..]),
                     ("Backend", &["player_address", "player_permission_level", "player_block_breaking", "player_ambient_mood"][..]),
                 ] {
                     let item = implementation
@@ -969,7 +999,9 @@ mod tests {
                                 _ => None,
                             })
                             .unwrap();
-                        let access = if service == "ClientSession" {
+                        let access = if service == "RenderAssets" {
+                            quote::quote!(mod_api::__private::LoadAccess::PublishedResources)
+                        } else if service == "ClientSession" {
                             quote::quote!(mod_api::__private::LoadAccess::ClientSetup)
                         } else {
                             quote::quote!(mod_api::__private::LoadAccess::WorldOnly)
@@ -1004,6 +1036,40 @@ mod tests {
                         .any(|name| name.starts_with("Commands::")
                             || name.starts_with("Messages::")
                             || name.starts_with("Players::"))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn pack_finders_bind_the_scoped_mutable_repository() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let finder =
+                    &resolve.interfaces[resolve.packages[package].interfaces["pack-finders"]];
+                assert!(finder.functions.contains_key("pack-type"));
+                assert!(finder.functions.contains_key("add-pack-finders"));
+                assert!(wasm.host.contains("frame::pack_finders_mut()?"));
+                assert!(wasm.host.contains("frame.pack_finders_mut(&mut *p1.packs)"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name.starts_with("PackFinders::"))
                 );
             })
             .unwrap()

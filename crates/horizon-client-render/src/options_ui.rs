@@ -1600,6 +1600,8 @@ pub struct OptionsUi {
     data_pack_dir: Option<std::path::PathBuf>,
     /// The game's resources, for the built-in data pack's icon.
     data_pack_resources: std::path::PathBuf,
+    /// Additional repository entries retained while the folder watcher refreshes.
+    additional_data_pack_infos: Vec<crate::pack_screen::PackInfo>,
     /// The folder's entries when its packs were listed, and when they were
     /// last compared with it.
     data_pack_stamp: (Vec<(String, Option<std::time::SystemTime>)>, Instant),
@@ -1686,6 +1688,7 @@ impl Default for OptionsUi {
             pack_screen: None,
             data_pack_dir: None,
             data_pack_resources: Default::default(),
+            additional_data_pack_infos: Vec::new(),
             data_pack_stamp: (Vec::new(), Instant::now()),
             resource_error: None,
             pack_focus: Instant::now(),
@@ -2076,9 +2079,12 @@ impl OptionsUi {
         dir: std::path::PathBuf,
         selected: Vec<String>,
         resources: std::path::PathBuf,
+        additional: Vec<crate::pack_screen::PackInfo>,
     ) {
         self.open_at(false, Page::Packs);
         self.pack_infos = crate::datapack::screen_packs(&dir, &resources);
+        self.pack_infos.extend(additional.iter().cloned());
+        self.additional_data_pack_infos = additional;
         self.data_pack_resources = resources;
         self.pack_selection = selected;
         self.data_pack_stamp = (crate::datapack::folder_stamp(&dir), Instant::now());
@@ -2101,6 +2107,8 @@ impl OptionsUi {
             return;
         }
         self.pack_infos = crate::datapack::screen_packs(dir, &self.data_pack_resources);
+        self.pack_infos
+            .extend(self.additional_data_pack_infos.iter().cloned());
         if let Some(p) = self.pack_screen.take() {
             self.pack_selection = p.commit();
             self.packs(atlas, size).changed = p.changed;
