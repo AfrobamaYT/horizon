@@ -314,6 +314,22 @@ pub fn hook_points(root: &Path) -> Result<Vec<HookPoint>, String> {
         .collect())
 }
 
+/// Serialize hook names and NeoForge counterparts for the port-pack event report.
+/// The declaration loader remains the single source of these labels.
+pub fn neoforge_catalog(root: &Path) -> Result<String, String> {
+    let hooks: Vec<_> = Catalog::load(root)?
+        .hooks
+        .into_iter()
+        .map(|hook| {
+            serde_json::json!({
+                "name": hook.name,
+                "neoforge": hook.counterparts.neoforge.join(" / "),
+            })
+        })
+        .collect();
+    serde_json::to_string(&serde_json::json!({ "hooks": hooks })).map_err(|e| e.to_string())
+}
+
 /// The crate folder and module path of a hook target that is a free function
 /// outside `Game`. `horizon-client-lib` builds from `horizon-client/src`
 /// (`client_lib.rs`).

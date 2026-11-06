@@ -15,6 +15,7 @@ pub trait ItemPlacesHost {
     }
 }
 /// The handles' reads of the `item_places` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait ItemPlacesBackend {
     /// Side: both.
@@ -77,6 +78,7 @@ pub trait ItemPlacesBackend {
     }
 }
 /// The handles' server writes of the `item_places` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait ItemPlacesBackendMut {
     /// Side: server.

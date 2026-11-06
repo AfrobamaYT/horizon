@@ -1,6 +1,5 @@
 //! The game's side of the `living_flags` area (`horizon-mod-api/src/host/living_flags.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LivingFlagsBackend for Game<'_> {
     fn living_gliding_ticks(&self, living: LivingRef) -> Option<i32> {

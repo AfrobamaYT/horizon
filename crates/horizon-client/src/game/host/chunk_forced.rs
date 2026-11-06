@@ -1,6 +1,5 @@
 //! The game's side of the `chunk_forced` area (`horizon-mod-api/src/host/chunk_forced.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ChunkForcedBackend for Game<'_> {
     fn level_chunk_ref(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {

@@ -1,6 +1,5 @@
 //! The game's side of the `boss_bar_refs` area (`horizon-mod-api/src/host/boss_bar_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl BossBarRefsServerHost for Game<'_> {
     fn boss_bar(&self, id: &str) -> Option<BossBarRef> {

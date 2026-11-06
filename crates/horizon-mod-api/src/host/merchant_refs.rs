@@ -15,6 +15,7 @@ pub trait MerchantRefsServerHost {
     }
 }
 /// The handles' reads of the `merchant_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait MerchantRefsBackend {
     /// Side: server.
@@ -77,6 +78,7 @@ pub trait MerchantRefsBackend {
     }
 }
 /// The handles' server writes of the `merchant_refs` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait MerchantRefsBackendMut {
     /// Side: server.

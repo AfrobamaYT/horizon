@@ -1,6 +1,5 @@
 //! The game's side of the `player_stats` area (`horizon-mod-api/src/host/player_stats.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl PlayerStatsBackend for Game<'_> {
     fn player_stat(&self, player: PlayerRef, stat_type: NativeStatType, key: &str) -> Option<i32> {

@@ -1,6 +1,5 @@
 //! The game's side of the `player_modes` area (`horizon-mod-api/src/host/player_modes.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl PlayerModesBackend for Game<'_> {
     fn player_permission_level(&self, player: PlayerRef) -> Option<u8> {

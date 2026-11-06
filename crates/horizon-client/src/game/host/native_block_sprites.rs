@@ -1,6 +1,5 @@
 //! The game's side of the `native_block_sprites` area (`horizon-mod-api/src/host/native_block_sprites.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl NativeBlockSpritesClientHost for Game<'_> {
     fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {

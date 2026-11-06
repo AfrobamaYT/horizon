@@ -1,6 +1,5 @@
 //! The game's side of the `living_refs` area (`horizon-mod-api/src/host/living_refs.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LivingRefsHost for Game<'_> {
     fn living(&self, entity: EntityRef) -> Option<LivingRef> {

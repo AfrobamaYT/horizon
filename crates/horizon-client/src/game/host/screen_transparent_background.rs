@@ -1,7 +1,6 @@
 //! The game's side of the `screen_transparent_background` area (`horizon-mod-api/src/host/screen_transparent_background.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
-use mod_api::{prelude::*, *};
+use mod_api::prelude::*;
 impl ScreenTransparentBackgroundClientHost for Game<'_> {
     fn apply_screen_blur(&self) -> bool {
         mod_api::__private::check_access(

@@ -15,7 +15,6 @@ use super::{
 };
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
-use mod_api::prelude::*;
 use mod_api::{
     DimensionKey, EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind,
     NativeBlockUpdateFlags, NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
@@ -1297,7 +1296,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
         use horizon_client::chunk::Chunk;
-        use mod_api::{ChunkStatus, Host, NativeAuthority};
+        use mod_api::{ChunkStatus, NativeAuthority};
         use std::sync::Arc;
         with_game(|game| {
             let level = game.native_level(game.dim.id()).unwrap();

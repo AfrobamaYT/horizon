@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `mob_goals` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait MobGoalsBackend {
     /// Side: server.
@@ -28,6 +29,7 @@ pub trait MobGoalsBackend {
     }
 }
 /// The handles' server writes of the `mob_goals` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait MobGoalsBackendMut {
     /// Side: server.

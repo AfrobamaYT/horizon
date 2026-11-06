@@ -1,6 +1,5 @@
 //! The game's side of the `item_places` area (`horizon-mod-api/src/host/item_places.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl ItemPlacesHost for Game<'_> {
     fn entity_type_in_tag(&self, entity_type: &str, tag: &str) -> bool {

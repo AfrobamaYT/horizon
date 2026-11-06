@@ -1,6 +1,5 @@
 //! The game's side of the `entity_physics` area (`horizon-mod-api/src/host/entity_physics.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl EntityPhysicsBackend for Game<'_> {
     fn entity_no_physics(&self, entity: EntityRef) -> Option<bool> {

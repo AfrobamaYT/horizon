@@ -1,6 +1,5 @@
 //! The game's side of the `level_item_entities` area (`horizon-mod-api/src/host/level_item_entities.rs`).
 use crate::game::Game;
-use mod_api::__private::game::*;
 use mod_api::{prelude::*, *};
 impl LevelItemEntitiesBackendMut for Game<'_> {
     fn level_pop_resource(
