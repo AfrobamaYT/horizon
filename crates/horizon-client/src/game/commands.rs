@@ -26,7 +26,7 @@ use horizon_client::{
     command::{
         Arg, CommandError, Context, Reader,
         args::{BlockInput, Coordinates, GameMode, ItemInput, Selector, Sort},
-        vanilla::{self, DIFFICULTIES},
+        vanilla::DIFFICULTIES,
     },
     gamerules::{self, Value},
     items::ItemStack,
@@ -219,7 +219,7 @@ impl Game<'_> {
     /// Commands.performCommand for a line without its slash. A client mod's
     /// `command` hook is the caller's: this also runs on a server.
     pub(super) fn run_command(&mut self, command: &str) -> bool {
-        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
+        let d = self.ui.dispatcher.0.clone();
         let parse = d.parse(command, &self.ui.registries);
         let result = match parse.executable() {
             Err(e) => {
@@ -1231,7 +1231,7 @@ impl Game<'_> {
         }
     }
     fn cmd_help(&mut self, ctx: &Context) -> R<i32> {
-        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
+        let d = self.ui.dispatcher.0.clone();
         let level = self.ui.registries.permission;
         match ctx.get("command") {
             None => {
