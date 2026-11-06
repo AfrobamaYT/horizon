@@ -126,10 +126,7 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
             std::fs::create_dir_all(&tags).unwrap();
             std::fs::write(tags.join("requires_code.json"), br#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"machine_sample"}],"values":["minecraft:diamond"]}"#).unwrap();
             game.reload_datapacks(true, &[]).unwrap();
-            let read_tags = |game: &Game<'_>| {
-                let files = game.pack_files();
-                horizon_client::items::load_tags(&game.options.resources, "item", &horizon_world::loot::PackOverlay { files: &files }).unwrap()
-            };
+            let read_tags = |game: &Game<'_>| game.items().item_tags.clone();
             let read = |game: &Game<'_>| {
                 crate::game::lan::server_sources(&game.options.resources, &game.res.core.item_data, &game.pack_files()).unwrap()
             };
