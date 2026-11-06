@@ -2554,6 +2554,61 @@ pub(super) mod tests {
                 .unwrap();
             game.world.set(0, 64, 0, shulker).unwrap();
             use horizon_client::block_entity_anim::{Shulker, ShulkerStatus};
+            // The early guest packet pass changes opener status before entity
+            // hooks run, and before tick_block_entities synchronizes animations.
+            // Exercise that producer with both an absent and a closed snapshot.
+            for had_snapshot in [false, true] {
+                game.be_anims.shulkers.remove(&[0, 64, 0]);
+                game.world.shulkers.remove(&[0, 64, 0]);
+                if had_snapshot {
+                    game.world.shulkers.insert([0, 64, 0], Shulker::default());
+                }
+                for support in [Support::Full, Support::Center, Support::Rigid] {
+                    assert_eq!(
+                        level.block_face_sturdy(game, [0, 64, 0], Face::Up, support),
+                        Some(true),
+                    );
+                }
+                assert!(game.container_openers_changed((0, 64, 0), true));
+                assert_eq!(
+                    game.be_anims.shulkers[&[0, 64, 0]].status,
+                    ShulkerStatus::Opening
+                );
+                for parked in [false, true] {
+                    if parked {
+                        assert!(
+                            game.enter_command_level(super::super::Dim::Nether)
+                                .is_some()
+                        );
+                    }
+                    for support in [Support::Full, Support::Center, Support::Rigid] {
+                        assert_eq!(
+                            level.block_face_sturdy(game, [0, 64, 0], Face::Up, support),
+                            Some(false),
+                        );
+                        assert_eq!(
+                            level.block_face_sturdy(game, [0, 64, 0], Face::Down, support),
+                            Some(true),
+                        );
+                    }
+                }
+                assert!(
+                    game.enter_command_level(super::super::Dim::Overworld)
+                        .is_some()
+                );
+                assert!(game.container_openers_changed((0, 64, 0), false));
+                assert_eq!(
+                    game.world.shulkers[&[0, 64, 0]].status,
+                    ShulkerStatus::Closing
+                );
+                for support in [Support::Full, Support::Center, Support::Rigid] {
+                    assert_eq!(
+                        level.block_face_sturdy(game, [0, 64, 0], Face::Up, support),
+                        Some(false),
+                    );
+                }
+            }
+            game.be_anims.shulkers.remove(&[0, 64, 0]);
             for status in [
                 ShulkerStatus::Closed,
                 ShulkerStatus::Opening,

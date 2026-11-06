@@ -22,9 +22,23 @@ pub use wgpu;
 
 static RENDERERS: OnceLock<RenderInstalled> = OnceLock::new();
 
+/// A renderer and its owner's index in the installed mod dispatch order.
+// exhaustive: private fields; construction records ownership explicitly, never by trait-object identity.
+pub struct RenderEntry {
+    mod_index: usize,
+    hooks: &'static dyn RenderHooks,
+}
+
+impl RenderEntry {
+    /// Bind a renderer to its mod's index once, when the game installs its mods.
+    pub fn new(mod_index: usize, hooks: &'static dyn RenderHooks) -> Self {
+        Self { mod_index, hooks }
+    }
+}
+
 /// The renderers with their per-hook subscriber set, as [`install`] leaves them.
 struct RenderInstalled {
-    renderers: Box<[&'static dyn RenderHooks]>,
+    renderers: Box<[RenderEntry]>,
     subscribers: Subscribers,
 }
 
@@ -42,9 +56,10 @@ fn render_installed() -> Option<&'static RenderInstalled> {
     RENDERERS.get()
 }
 
-fn new_render_installed(renderers: Box<[&'static dyn RenderHooks]>) -> RenderInstalled {
+fn new_render_installed(renderers: Box<[RenderEntry]>) -> RenderInstalled {
     let subscriptions = renderers.iter().enumerate().flat_map(|(index, renderer)| {
         renderer
+            .hooks
             .subscribed()
             .iter()
             .flatten()
@@ -59,9 +74,7 @@ fn new_render_installed(renderers: Box<[&'static dyn RenderHooks]>) -> RenderIns
 }
 
 /// Install trait mod renderers in dispatch order, once per process.
-pub fn install(
-    renderers: Box<[&'static dyn RenderHooks]>,
-) -> Result<(), Box<[&'static dyn RenderHooks]>> {
+pub fn install(renderers: Box<[RenderEntry]>) -> Result<(), Box<[RenderEntry]>> {
     match RENDERERS.set(new_render_installed(renderers)) {
         Ok(()) => Ok(()),
         Err(installed) => Err(installed.renderers),
@@ -76,7 +89,8 @@ fn entered_render(
         installed
             .subscribers
             .indices(hook_id as usize)
-            .map(move |index| installed.renderers[index])
+            .filter(move |&index| crate::mod_index_on(installed.renderers[index].mod_index))
+            .map(move |index| installed.renderers[index].hooks)
     })
 }
 
@@ -238,7 +252,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Install renderers for this test thread, as [`install`] does once per process.
-    fn install_for_test(renderers: Box<[&'static dyn RenderHooks]>) -> &'static RenderInstalled {
+    fn install_for_test(renderers: &[&'static dyn RenderHooks]) -> &'static RenderInstalled {
+        let renderers = renderers
+            .iter()
+            .enumerate()
+            .map(|(index, &hooks)| RenderEntry::new(index, hooks))
+            .collect();
         let installed = Box::leak(Box::new(new_render_installed(renderers)));
         TEST_RENDERERS.set(Some(installed));
         installed
@@ -270,10 +289,42 @@ mod tests {
     }
 
     #[test]
+    fn shared_renderer_identity_does_not_merge_mod_owners() {
+        use crate as mod_api;
+
+        struct Owner;
+        #[crate::__subscriptions]
+        impl crate::Hooks for Owner {}
+        let mods = vec![
+            crate::ModEntry::new("first", Box::new(Owner)),
+            crate::ModEntry::new("second", Box::new(Owner)),
+        ]
+        .into();
+        crate::testing::with_mods(mods, || {
+            let count = Arc::new(AtomicUsize::new(0));
+            let hooks = Box::leak(Box::new(CountingNeeds(count.clone())));
+            // Both owners intentionally return the very same trait object.
+            let renderers = vec![RenderEntry::new(0, hooks), RenderEntry::new(1, hooks)].into();
+            let installed = Box::leak(Box::new(new_render_installed(renderers)));
+            TEST_RENDERERS.set(Some(installed));
+            assert!(crate::__private::set_mod_enabled("first", false));
+            native_render_needs(&mut RenderNeeds::default());
+            assert_eq!(count.load(Ordering::Relaxed), 1);
+            assert!(crate::__private::set_mod_enabled("second", false));
+            native_render_needs(&mut RenderNeeds::default());
+            assert_eq!(count.load(Ordering::Relaxed), 1);
+            assert!(crate::__private::set_mod_enabled("first", true));
+            native_render_needs(&mut RenderNeeds::default());
+            assert_eq!(count.load(Ordering::Relaxed), 2);
+        });
+        TEST_RENDERERS.set(None);
+    }
+
+    #[test]
     fn needs_accumulate_in_mod_order() {
         static DEPTH: Depth = Depth;
         static SPANS: Spans = Spans;
-        install_for_test(Box::new([&DEPTH, &SPANS] as [&dyn RenderHooks; 2]));
+        install_for_test(&[&DEPTH, &SPANS]);
         let mut needs = RenderNeeds::default();
         native_render_needs(&mut needs);
         assert_eq!(
@@ -296,9 +347,9 @@ mod tests {
         let renderers = {
             let mut renderers = renderers;
             renderers.push(listener);
-            renderers.into_boxed_slice()
+            renderers
         };
-        let installed = install_for_test(renderers);
+        let installed = install_for_test(&renderers);
         assert_eq!(
             installed
                 .subscribers
@@ -330,9 +381,9 @@ mod tests {
         let renderers = {
             let mut renderers = renderers;
             renderers.push(listener);
-            renderers.into_boxed_slice()
+            renderers
         };
-        let installed = install_for_test(renderers);
+        let installed = install_for_test(&renderers);
         let needs = RenderNeeds::default();
         std::thread::scope(|scope| {
             scope.spawn(|| {
@@ -365,12 +416,12 @@ mod tests {
     #[test]
     fn empty_render_dispatch_builds_no_event() {
         let mut needs = RenderNeeds::default();
-        install_for_test(Box::new([]));
+        install_for_test(&[]);
         NEEDS_EVENTS_BUILT.set(0);
         native_render_needs(&mut needs);
         assert_eq!(NEEDS_EVENTS_BUILT.get(), 0);
         static QUIET: Quiet = Quiet;
-        install_for_test(Box::new([&QUIET as &dyn RenderHooks]));
+        install_for_test(&[&QUIET]);
         native_render_needs(&mut needs);
         assert_eq!(NEEDS_EVENTS_BUILT.get(), 0);
         native_render_needs(&mut needs);
@@ -392,10 +443,10 @@ mod tests {
         let renderers = {
             let mut renderers = renderers;
             renderers.push(listener);
-            renderers.into_boxed_slice()
+            renderers
         };
-        let before: Box<[&'static dyn RenderHooks]> = renderers.clone();
-        install_for_test(renderers);
+        let before: Vec<&'static dyn RenderHooks> = renderers.clone();
+        install_for_test(&renderers);
         native_render_needs(&mut RenderNeeds::default()); // Warm dispatch outside the timed loop.
         let iterations = 1_000_000;
         let start = Instant::now();
@@ -414,10 +465,10 @@ mod tests {
         }
         let subscribed = start.elapsed().as_nanos() as f64 / f64::from(iterations);
         // With no subscriber left, dispatch returns after its count check.
-        let renderers: Box<[&'static dyn RenderHooks]> = (0..9)
+        let renderers: Vec<&'static dyn RenderHooks> = (0..9)
             .map(|_| Box::leak(Box::new(Quiet)) as &'static dyn RenderHooks)
             .collect();
-        install_for_test(renderers);
+        install_for_test(&renderers);
         native_render_needs(&mut RenderNeeds::default()); // Warm the empty dispatch.
         let start = Instant::now();
         for _ in 0..iterations {
