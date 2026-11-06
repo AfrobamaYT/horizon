@@ -291,7 +291,9 @@ mod tests {
             tables,
             assets: assets.clone(),
             render,
-            biomes: Arc::new(Biomes::load(&root)?),
+            biomes: Arc::new(Biomes::load(
+                &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            )?),
             hidden_states: Arc::from([]),
         };
         let lookup = Lookup::new(&context, 2048);

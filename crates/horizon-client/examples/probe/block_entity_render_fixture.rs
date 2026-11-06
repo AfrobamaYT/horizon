@@ -121,12 +121,19 @@ pub fn main() -> Result<()> {
         root,
         horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
     )?;
-    let renderer = BlockEntityRenderer::load(root, registry, item_data.defaults())?;
+    let renderer = BlockEntityRenderer::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        registry,
+        item_data.defaults(),
+    )?;
     let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
         root.to_path_buf(),
     ))?;
     let banners = Banners::load(root, item_data.defaults());
-    let items = ItemRenderer::load(root, &item_data)?;
+    let items = ItemRenderer::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &item_data,
+    )?;
     let (sprites, names, grid) = fake_sprites(textures)?;
     let air = registry.default_state("minecraft:air").ok_or("no air")?;
     let mut out = BufWriter::new(fs::File::create(output)?);

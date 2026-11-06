@@ -111,16 +111,20 @@ pub struct Names {
     map: HashMap<String, String>,
 }
 impl Names {
-    pub fn load(root: &Path) -> Self {
+    pub fn load(root: &horizon_assets::resource_source::ResourceSource) -> Self {
         let read = |namespace: &str| {
-            fs::read(root.join(format!("assets/{namespace}/lang/en_us.json")))
+            root.read(&format!("assets/{namespace}/lang/en_us.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<HashMap<String, String>>(&b).ok())
                 .unwrap_or_default()
         };
         let mut map = read("minecraft");
         // Content mods' names (docs/modpacks.md); none in a vanilla root.
-        for namespace in crate::mod_content::namespaces(root) {
+        for namespace in root
+            .namespaces("assets")
+            .into_iter()
+            .filter(|ns| ns != "minecraft")
+        {
             map.extend(read(&namespace));
         }
         Self { map }
@@ -1629,5 +1633,19 @@ mod tests {
         assert!(!Creative::tab_wants_hand(&b, false, (169.0, 140.0)));
         assert!(Creative::tab_wants_hand(&b, false, (170.0, 140.0)));
         assert!(!Creative::tab_wants_hand(&b, false, (180.0, 132.0)));
+    }
+}
+
+#[cfg(test)]
+mod source_name_tests {
+    #[test]
+    fn item_names_read_selected_namespace_resources_without_files() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+            "assets/reader/lang/en_us.json".into(),
+            Resource::bytes(br#"{"item.reader.widget":"Selected widget"}"#.to_vec()),
+        )]));
+        let names = super::Names::load(&source);
+        assert_eq!(names.item("reader:widget"), "Selected widget");
     }
 }

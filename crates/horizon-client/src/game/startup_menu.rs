@@ -88,7 +88,9 @@ impl StartupMenu {
             &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
         );
         horizon_client::lang::set(horizon_client::lang::Language::load(
-            &[&root],
+            &[&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )],
             &settings.language,
         ));
         self.root = root;
@@ -504,7 +506,9 @@ impl Loading {
 
     fn open_menu_options(&mut self, page: Page) {
         self.menu.options.open_at(false, page);
-        self.menu.options.languages = horizon_client::lang::available(&[&self.menu.root]);
+        self.menu.options.languages = horizon_client::lang::available(&[
+            &horizon_assets::resource_source::ResourceSource::directory(self.menu.root.clone()),
+        ]);
         self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[]);
         self.menu.options.pack_selection = self.settings.resource_packs.clone();
         self.menu.options.pack_screen = None;
@@ -529,7 +533,9 @@ impl Loading {
                 }
                 Event::Language(code) => {
                     horizon_client::lang::set(horizon_client::lang::Language::load(
-                        &[&self.menu.root],
+                        &[&horizon_assets::resource_source::ResourceSource::directory(
+                            self.menu.root.clone(),
+                        )],
                         &code,
                     ));
                     self.save_menu_settings();
@@ -601,7 +607,9 @@ impl Loading {
                         );
                         let screen = horizon_client::win_screen::WinScreen::new(
                             false,
-                            &self.menu.root,
+                            &horizon_assets::resource_source::ResourceSource::directory(
+                                self.menu.root.clone(),
+                            ),
                             &name,
                             &gui.atlas.font,
                         );

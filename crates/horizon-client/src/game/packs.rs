@@ -391,8 +391,12 @@ impl Game<'_> {
             }
         };
         // Everything loaded: switch over.
-        self.waypoint_styles = horizon_client::locator_bar::WaypointStyles::load(&root);
-        self.armor_stand_assets.reload_trims(&root);
+        self.waypoint_styles = horizon_client::locator_bar::WaypointStyles::load(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        );
+        self.armor_stand_assets.reload_trims(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        );
         self.random_tick_sections.clear();
         self.portals.sections.clear();
         self.options.resources = root.clone();
@@ -403,7 +407,7 @@ impl Game<'_> {
         self.skin_slots.forget();
         self.skin_downloads
             .borrow_mut()
-            .set_resource_root(self.options.resources.clone());
+            .set_resource_root(self.pack.source.clone());
         self.maps.slots.forget();
         self.map_patches.clear();
         // Kept mod block entities name the old atlas's sprites, and their view distances the old
@@ -413,7 +417,7 @@ impl Game<'_> {
         // The atlas's sprites moved: the particle engine re-reads every rect
         // and the packs' sprite sets, or every particle draws a stale region.
         self.particles.reload(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            &self.pack.source,
             &self.gui.atlas.sprites,
             &self.gui.atlas.translucent,
         );
@@ -425,7 +429,7 @@ impl Game<'_> {
             .villager_hats
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            horizon_client::mobs::villager_hats::VillagerHats::load(&root);
+            horizon_client::mobs::villager_hats::VillagerHats::load(&self.pack.source);
         *self
             .res
             .mob_data()
@@ -464,13 +468,10 @@ impl Game<'_> {
         lang::set(if language.code == code {
             language
         } else {
-            lang::Language::load(&[&root], &code)
+            lang::Language::load(&[&self.pack.source], &code)
         });
         self.refresh_remote_language();
-        self.audio.reload_with(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            sounds,
-        );
+        self.audio.reload_with(&self.pack.source, sounds);
         self.clear_lod();
         // A pack that may replace leaf models falls back to `Off` before the
         // reload marks every section dirty.
@@ -526,8 +527,11 @@ pub(super) fn stage_pack(
     // The mod listeners prepare against the merged root before the heavy
     // staging builds run: a listener that fails aborts the reload without the
     // renderer work, keeping every listener's previous assets.
-    let client_applies = super::client_reload::stage_client_reload(&root, client_listeners)
-        .map_err(|e| e.to_string())?;
+    let client_applies = super::client_reload::stage_client_reload(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        client_listeners,
+    )
+    .map_err(|e| e.to_string())?;
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
     let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
@@ -560,7 +564,12 @@ pub(super) fn stage_pack(
                 horizon_client::ui::read_metadata(
                     &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
                 ),
-                lang::Language::load(&[&root], &lang::code()),
+                lang::Language::load(
+                    &[&horizon_assets::resource_source::ResourceSource::directory(
+                        root.to_path_buf(),
+                    )],
+                    &lang::code(),
+                ),
             )
         });
         (
@@ -594,10 +603,12 @@ pub(super) fn stage_pack(
     )?;
     let textures = prepare_renderer_textures(&pack);
     let cem = Arc::new(horizon_client::mobs::cem::CemModels::load(
-        &root,
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
         res.mob_types(),
     ));
-    let block_entity_shapes = res.block_entity_render().shapes_for(&root);
+    let block_entity_shapes = res.block_entity_render().shapes_for(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+    );
     progress.set(3);
     Ok(StagedPack {
         root,

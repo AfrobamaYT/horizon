@@ -3162,7 +3162,10 @@ mod tests {
         let types = super::super::MobTypes::load(&root).unwrap();
         let assets = crate::assets::Assets::load(&root).unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
-        let data = MobData::load(&root, &facts);
+        let data = MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
         for id in ["minecraft:villager", "minecraft:wandering_trader"] {
             let kind = std::sync::Arc::new(types.types[id].clone());
             let mut mob = Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0);

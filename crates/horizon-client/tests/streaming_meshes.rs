@@ -71,7 +71,12 @@ fn columns_loaded_past_the_render_distance_mesh_when_they_come_in_range() {
     let context = Arc::new(WorkerContext {
         tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
         light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
-        biomes: Arc::new(Biomes::load(&root).unwrap()),
+        biomes: Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
+        ),
         assets,
         render: render.clone(),
         hidden_states: Arc::from([]),
@@ -163,7 +168,12 @@ fn relit_columns_keep_every_mesh_current() {
     let context = Arc::new(WorkerContext {
         tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
         light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
-        biomes: Arc::new(Biomes::load(&root).unwrap()),
+        biomes: Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
+        ),
         assets: assets.clone(),
         render: render.clone(),
         hidden_states: Arc::from([]),

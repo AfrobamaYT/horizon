@@ -2575,6 +2575,7 @@ impl UiResources {
 /// cloning shares the loaded data.
 #[derive(Clone)]
 pub struct PackResources {
+    source: horizon_assets::resource_source::ResourceSource,
     assets: Arc<Assets>,
     block_registries: Arc<horizon_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -2603,7 +2604,7 @@ impl PackResources {
         let visibility = models::load_visibility(root, assets.registry)?;
         let tables = Arc::new(MeshTables::new(&assets, &render, facts, visibility)?);
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
-            root,
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
             render.model_library.clone(),
             item_data,
         )?;
@@ -2664,9 +2665,16 @@ impl PackResources {
             assets,
             render,
             item_renderer: Arc::new(item_renderer),
-            names: Arc::new(Names::load(root)),
-            clouds: Arc::new(load_clouds(root)),
-            forcefield: Arc::new(load_forcefield(root)),
+            source: horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            names: Arc::new(Names::load(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            )),
+            clouds: Arc::new(load_clouds(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            )),
+            forcefield: Arc::new(load_forcefield(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            )),
         }
     }
 }
@@ -17758,7 +17766,7 @@ impl Game<'_> {
             menu_blur: self.menu_blur(),
             post_effects: horizon_client::post_chain::Request {
                 effects: &requested_post_effects,
-                root: &self.options.resources,
+                root: &self.pack.source,
                 menu_blur_radius: self.settings.menu_blur as f32,
                 // GlobalSettingsUniform.update.
                 globals: horizon_client::post_chain::Globals {
@@ -20502,8 +20510,10 @@ impl Game<'_> {
     }
 }
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).
-fn load_clouds(root: &std::path::Path) -> (u32, u32, Vec<bool>) {
-    horizon_client::hud::decode(&root.join("assets/minecraft/textures/environment/clouds.png"))
+fn load_clouds(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<bool>) {
+    root.read("assets/minecraft/textures/environment/clouds.png")
+        .map_err(Into::into)
+        .and_then(|bytes| horizon_client::hud::decode_bytes(&bytes))
         .map(|(w, h, px)| {
             (
                 w,
@@ -20514,8 +20524,10 @@ fn load_clouds(root: &std::path::Path) -> (u32, u32, Vec<bool>) {
         .unwrap_or((1, 1, vec![false]))
 }
 /// misc/forcefield.png for the world border wall (square, power of two).
-fn load_forcefield(root: &std::path::Path) -> (u32, u32, Vec<u8>) {
-    horizon_client::hud::decode(&root.join("assets/minecraft/textures/misc/forcefield.png"))
+fn load_forcefield(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<u8>) {
+    root.read("assets/minecraft/textures/misc/forcefield.png")
+        .map_err(Into::into)
+        .and_then(|bytes| horizon_client::hud::decode_bytes(&bytes))
         .ok()
         .filter(|(w, h, _)| w == h && w.is_power_of_two())
         .unwrap_or((1, 1, vec![0; 4]))
@@ -20568,6 +20580,7 @@ impl<'a> Game<'a> {
             &gui.atlas.sprites,
             &gui.atlas.translucent,
         );
+        let resource_source = pack.source.clone();
         let game = Game {
             world_biomes: None,
             world_biomes_base: None,
@@ -20902,7 +20915,7 @@ impl<'a> Game<'a> {
                         .unwrap_or_default()
                         .join("assets/skins"),
                 );
-                downloads.set_resource_root(root.clone());
+                downloads.set_resource_root(resource_source.clone());
                 downloads
             }),
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
@@ -21160,12 +21173,29 @@ impl GameCpuResources {
         let model = |key| document.as_ref().and_then(|document| document.model(key));
         Ok(Self {
             painting_variants: paintings::PaintingVariants::load(root),
-            frame_model: frames::bake_frame(root, "item_frame"),
-            glow_frame_model: frames::bake_frame(root, "glow_item_frame"),
-            map_frame_model: frames::bake_frame(root, "item_frame_map"),
-            glow_map_frame_model: frames::bake_frame(root, "glow_item_frame_map"),
-            armor_stand_assets: armor_stands::ArmorStandAssets::load(root, document.as_ref()),
-            waypoint_styles: horizon_client::locator_bar::WaypointStyles::load(root),
+            frame_model: frames::bake_frame(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                "item_frame",
+            ),
+            glow_frame_model: frames::bake_frame(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                "glow_item_frame",
+            ),
+            map_frame_model: frames::bake_frame(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                "item_frame_map",
+            ),
+            glow_map_frame_model: frames::bake_frame(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                "glow_item_frame_map",
+            ),
+            armor_stand_assets: armor_stands::ArmorStandAssets::load(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                document.as_ref(),
+            ),
+            waypoint_styles: horizon_client::locator_bar::WaypointStyles::load(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            ),
             boat_models: boats::BoatModels::load(document.as_ref()),
             cart_models: minecarts::CartModels::load(document.as_ref()),
             crystal_model: model("minecraft:end_crystal#main"),
@@ -21931,11 +21961,19 @@ fn load_core(
                 let item_renderer = startup::time("core.item_models", || {
                     if headless {
                         horizon_client::item_render::ItemRenderer::load_for_server(
-                            root, library, item_data,
+                            &horizon_assets::resource_source::ResourceRoot::directory(
+                                root.to_path_buf(),
+                            ),
+                            library,
+                            item_data,
                         )
                     } else {
                         horizon_client::item_render::ItemRenderer::load_with_library(
-                            root, library, item_data,
+                            &horizon_assets::resource_source::ResourceRoot::directory(
+                                root.to_path_buf(),
+                            ),
+                            library,
+                            item_data,
                         )
                     }
                 })
@@ -21955,8 +21993,12 @@ fn load_core(
             });
             let biomes = Step::spawn(scope, parallel, "biomes", || {
                 let biomes = Arc::new(
-                    startup::time("core.biomes", || Biomes::load(root))
-                        .map_err(|e| e.to_string())?,
+                    startup::time("core.biomes", || {
+                        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                            root.to_path_buf(),
+                        ))
+                    })
+                    .map_err(|e| e.to_string())?,
                 );
                 // A launch that names a world: its data preload needs only the
                 // block registry and the biomes, so it starts here rather than
@@ -21973,8 +22015,12 @@ fn load_core(
                 Ok::<_, String>(biomes)
             });
             let environment = Step::spawn(scope, parallel, "environment", || {
-                startup::time("core.environment", || Environment::load(root))
-                    .map_err(|e| e.to_string())
+                startup::time("core.environment", || {
+                    Environment::load(&horizon_assets::resource_source::ResourceSource::directory(
+                        root.to_path_buf(),
+                    ))
+                })
+                .map_err(|e| e.to_string())
             });
             let collision = Step::spawn(scope, parallel, "collision", || {
                 startup::time("core.collision", || collisions::load(root, registry))
@@ -22190,7 +22236,7 @@ fn load_resources(
             &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
         );
         horizon_client::lang::set(horizon_client::lang::Language::load(
-            &[&root],
+            &[&pack.source],
             &settings.language,
         ));
     }
@@ -22318,7 +22364,7 @@ fn load_resources(
         Vec::new()
     } else {
         match client_reload::stage_client_reload(
-            &root,
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
             client_reload::register_startup_client_reload_listeners(),
         ) {
             Ok(steps) => steps,
@@ -22434,7 +22480,7 @@ fn load_world_rest(
             return Ok(Default::default());
         }
         let mut renderer = BlockEntityRenderer::load_with_visibility(
-            root,
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
             registry,
             visibility,
             resources.item_defaults(),
@@ -22462,9 +22508,15 @@ fn load_world_rest(
         .into_iter()
         .map(|(k, v)| (k, Arc::new(v)))
         .collect();
-        let mut mob_data = horizon_client::mobs::MobData::load(root, facts);
+        let mut mob_data = horizon_client::mobs::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            facts,
+        );
         mob_data.cem = std::sync::RwLock::new(Arc::new(if draws {
-            horizon_client::mobs::cem::CemModels::load(root, &mob_types)
+            horizon_client::mobs::cem::CemModels::load(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                &mob_types,
+            )
         } else {
             horizon_client::mobs::cem::CemModels::default()
         }));
@@ -22542,8 +22594,16 @@ fn load_world_rest(
         fog,
         music: horizon_client::music::MusicTables::load(root),
         ambient: horizon_client::ambience::AmbientTables::load(root),
-        nether_environment: Environment::load_dimension(root, "the_nether", false)?,
-        end_environment: Environment::load_dimension(root, "the_end", false)?,
+        nether_environment: Environment::load_dimension(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            "the_nether",
+            false,
+        )?,
+        end_environment: Environment::load_dimension(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            "the_end",
+            false,
+        )?,
         behaviours: behaviours?,
         mob_types,
         mob_data,
@@ -23318,12 +23378,12 @@ impl Loading {
         // Audio is created on the main thread, after the core is ready.
         let audio = if !options.execution_role.is_client() {
             Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                (&options.resources).to_path_buf(),
+                options.resources.to_path_buf(),
             ))
         } else {
             Audio::with_device(
                 &horizon_assets::resource_source::ResourceSource::directory(
-                    (&options.resources).to_path_buf(),
+                    options.resources.to_path_buf(),
                 ),
                 &self.settings.sound_device,
             )
@@ -23685,12 +23745,12 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     options.resources = loaded.root.clone();
     let audio = if !options.execution_role.is_client() || options.headless {
         Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-            (&options.resources).to_path_buf(),
+            options.resources.to_path_buf(),
         ))
     } else {
         Audio::with_device(
             &horizon_assets::resource_source::ResourceSource::directory(
-                (&options.resources).to_path_buf(),
+                options.resources.to_path_buf(),
             ),
             &early_settings.sound_device,
         )

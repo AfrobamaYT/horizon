@@ -1635,7 +1635,10 @@ fn content_root_carries_a_structure_mod() {
     }
 
     let assets = Assets::load(&root).unwrap();
-    let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
@@ -1664,7 +1667,10 @@ fn a_superflat_world_runs_its_structure_sets_on_flat_ground() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
@@ -1740,7 +1746,10 @@ fn a_decorated_superflat_world_without_structures_grows_its_features() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data = crate::test_resources::item_data(
         &base,
         horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
@@ -1812,7 +1821,10 @@ fn a_superflat_world_keeps_its_strongholds_on_every_seed_and_leaves_null_layers_
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
@@ -1892,7 +1904,10 @@ fn a_superflat_structure_override_naming_no_set_lets_every_set_generate() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
@@ -2411,7 +2426,10 @@ fn exploration_maps_skip_the_starts_a_chunk_saved_as_referenced() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
@@ -2452,7 +2470,10 @@ fn exploration_maps_skip_the_structures_maps_pointed_at() {
     let scratch = std::env::temp_dir().join(format!("horizon-map-refs-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
@@ -2505,7 +2526,10 @@ fn debug_density_line_lists_the_noise_settings_functions() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
@@ -2897,7 +2921,10 @@ fn an_old_chunks_saved_village_comes_back_with_its_pieces() {
         return;
     };
     let assets = Assets::load(&base).unwrap();
-    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(base.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {
@@ -4933,7 +4960,10 @@ fn content_root_generates_a_biome_modifier_ore() {
         let root = resource_root(&base, Path::new(""), &[m], &dir.join("cache")).unwrap();
         let assets = Assets::load(&root).unwrap();
         let zinc = assets.registry.default_state("zinc:zinc_ore").unwrap().0;
-        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let item_data =
             crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
         let terrain_resources = crate::vanillagen::TerrainResources {
@@ -5259,8 +5289,12 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
     assert_eq!(&*block("signs:board").item, "signs:notice");
     assert_eq!(&*block("signs:bracket").item, "signs:lantern");
     let defaults = horizon_world::item_defaults::read(&root).unwrap();
-    let mut renderer =
-        crate::block_entity_render::BlockEntityRenderer::load(&root, registry, &defaults).unwrap();
+    let mut renderer = crate::block_entity_render::BlockEntityRenderer::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        registry,
+        &defaults,
+    )
+    .unwrap();
     renderer.add_mod_signs(&facts, registry);
     for name in [
         "signs:notice",
@@ -5494,7 +5528,10 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
     let assets = Assets::load(&root).unwrap();
     let registry = assets.registry;
     let facts = BlockFacts::load(&root, registry).unwrap();
-    let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )
+    .unwrap();
     let item_data =
         crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain_resources = crate::vanillagen::TerrainResources {

@@ -28,7 +28,10 @@ fn fixture() -> Fixture {
         });
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     let render = assets
         .reload(&horizon_assets::resource_source::ResourceRoot::directory(
             root.to_path_buf(),

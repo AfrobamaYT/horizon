@@ -564,7 +564,9 @@ fn remesh(
     let facts = BlockFacts::load(root, assets.registry)?;
     let visibility = models::load_visibility(root, assets.registry)?;
     let tables = MeshTables::new(assets, render, &facts, visibility)?;
-    let biomes = Biomes::load(root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let seed = world_seed(save).unwrap_or_else(|| {
         eprintln!(
             "scene_replay: no seed in {}, biome blending uses 0",

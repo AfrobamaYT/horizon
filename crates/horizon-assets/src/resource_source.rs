@@ -135,6 +135,11 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>, active: &mut BTreeSet<Pa
 }
 
 impl ResourceSource {
+    /// Whether both readers belong to the same opened resource generation.
+    pub fn same_generation(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// Namespace folders beneath a resource top level, in name order.
     pub fn namespaces(&self, top: &str) -> Vec<String> {
         if !stays_inside(top) {
@@ -484,6 +489,14 @@ mod tests {
         }
     }
     #[cfg(unix)]
+    #[test]
+    fn generation_identity_is_shared_only_by_clones() {
+        let first = ResourceSource::directory(PathBuf::from("same-prepared-root"));
+        assert!(first.same_generation(&first.clone()));
+        let reload = ResourceSource::directory(PathBuf::from("same-prepared-root"));
+        assert!(!first.same_generation(&reload));
+    }
+
     #[test]
     fn directory_aliases_are_listed_but_cycles_are_not_followed() {
         let fixture = Fixture::new();

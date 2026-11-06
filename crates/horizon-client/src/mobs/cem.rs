@@ -18,13 +18,13 @@
 //! new geometry.
 
 use super::{Mob, MobType, Part, Polygon, Species};
+use horizon_assets::resource_source::ResourceSource;
 use horizon_optifine::cem::{
     files::{atlas_name, jem_files, load_jem},
     model::{Bone, EntityModel, MAX_BYTES},
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    path::Path,
     sync::Arc,
 };
 
@@ -52,10 +52,8 @@ const FALLBACK_STEPS: usize = 3;
 
 impl CemModels {
     /// The `.jem` files under `root` applied to the layers of `types`.
-    pub fn load(root: &Path, types: &HashMap<String, Arc<MobType>>) -> Self {
-        let files = jem_files(&horizon_assets::resource_source::ResourceSource::directory(
-            root.to_owned(),
-        ));
+    pub fn load(root: &ResourceSource, types: &HashMap<String, Arc<MobType>>) -> Self {
+        let files = jem_files(root);
         if files.is_empty() {
             set_rule_species(Vec::new());
             return Self::default();
@@ -68,7 +66,7 @@ impl CemModels {
     /// `files` ([`jem_files`]) applied to the `vanilla` layers; also the species ids whose
     /// rules read the standing block, for the per-tick gate.
     fn from_files(
-        root: &Path,
+        root: &ResourceSource,
         files: &BTreeMap<String, Vec<String>>,
         vanilla: &HashMap<&str, (&Arc<Part>, &str)>,
     ) -> (Self, Vec<String>) {
@@ -118,14 +116,7 @@ impl CemModels {
                 .find(|&(_, path)| {
                     parsed
                         .entry(path)
-                        .or_insert_with(|| {
-                            load_jem(
-                                &horizon_assets::resource_source::ResourceSource::directory(
-                                    root.to_owned(),
-                                ),
-                                path,
-                            )
-                        })
+                        .or_insert_with(|| load_jem(root, path))
                         .is_some()
                 });
             let Some((name, path)) = found else {
@@ -177,16 +168,6 @@ fn set_rule_species(species: Vec<String>) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(species.into_iter().collect());
 }
 
-/// A pack file's text, None when it's missing or larger than a model may read: its size is
-/// checked before anything is read.
-fn read_small(path: &Path) -> Option<String> {
-    let len = std::fs::metadata(path).ok()?.len();
-    if len > MAX_BYTES as u64 {
-        return None;
-    }
-    std::fs::read_to_string(path).ok()
-}
-
 /// One `optifine/cem/<name>.properties` random-model rule: `models.<n>` selects the model
 /// variant (the base file, for Fresh Animations), `blocks.<n>` and `nbt.<n>.<key>` the
 /// conditions, all of which must hold for the rule's number to become the animations'
@@ -221,9 +202,13 @@ pub fn tracks_standing(id: &str) -> bool {
 
 /// The random-model rules beside the `.jem` at `path` (`cow.properties` beside `cow.jem`),
 /// which the layer that file shapes reads for its `rule_index`.
-fn load_rules(root: &Path, path: &str) -> Vec<Rule> {
+fn load_rules(root: &ResourceSource, path: &str) -> Vec<Rule> {
     path.strip_suffix(".jem")
-        .and_then(|properties| read_small(&root.join(format!("{properties}.properties"))))
+        .and_then(|properties| {
+            root.read_limited(&format!("{properties}.properties"), MAX_BYTES as u64)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+        })
         .map(|text| parse_rules(&text))
         .unwrap_or_default()
 }
@@ -721,6 +706,7 @@ fn part(
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
 
     fn plane(name: &str, children: Vec<Part>) -> Part {
         Part {
@@ -741,6 +727,24 @@ mod tests {
                 .or_else(|| p.children.iter().find_map(|c| walk(c, name)))
         }
         walk(part, name).unwrap()
+    }
+
+    #[test]
+    fn model_rules_read_resolved_resources_and_enforce_the_byte_limit() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            (
+                "assets/minecraft/optifine/cem/cow.properties".into(),
+                Resource::bytes(b"models.2=1\nblocks.2=grass_block\n".to_vec()),
+            ),
+            (
+                "assets/minecraft/optifine/cem/large.properties".into(),
+                Resource::bytes(vec![b' '; MAX_BYTES + 1]),
+            ),
+        ]));
+        assert!(!load_rules(&source, "assets/minecraft/optifine/cem/cow.jem").is_empty());
+        assert!(load_rules(&source, "assets/minecraft/optifine/cem/large.jem").is_empty());
+        assert!(load_rules(&source, "assets/minecraft/optifine/cem/missing.jem").is_empty());
     }
 
     #[test]
@@ -869,7 +873,7 @@ mod tests {
         .into_iter()
         .collect();
         let (models, _) = CemModels::from_files(
-            &root,
+            &ResourceSource::directory(root.clone()),
             &jem_files(&horizon_assets::resource_source::ResourceSource::directory(
                 root.to_owned(),
             )),
@@ -923,7 +927,7 @@ mod tests {
             .map(|k| (*k, (&tree, "minecraft:test")))
             .collect();
         let (models, _) = CemModels::from_files(
-            &root,
+            &ResourceSource::directory(root.clone()),
             &jem_files(&horizon_assets::resource_source::ResourceSource::directory(
                 root.to_owned(),
             )),

@@ -3,7 +3,8 @@ use super::{
     anim::Poses,
     render::{PROFESSIONS, VILLAGER_TYPES},
 };
-use std::{collections::HashMap, fs, path::Path};
+use horizon_assets::resource_source::ResourceSource;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 enum Hat {
@@ -17,7 +18,7 @@ enum Hat {
 pub struct VillagerHats(HashMap<String, Hat>);
 
 impl VillagerHats {
-    pub fn load(root: &Path) -> Self {
+    pub fn load(root: &ResourceSource) -> Self {
         let mut hats = HashMap::new();
         for folder in ["villager", "zombie_villager"] {
             for (group, names) in [
@@ -26,8 +27,9 @@ impl VillagerHats {
             ] {
                 for name in names {
                     let texture = format!("entity/{folder}/{group}/{name}");
-                    let path = root.join(format!("assets/minecraft/textures/{texture}.png.mcmeta"));
-                    let metadata = fs::read(path)
+                    let path = format!("assets/minecraft/textures/{texture}.png.mcmeta");
+                    let metadata = root
+                        .read(&path)
                         .ok()
                         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
                     let hat = match metadata
@@ -65,13 +67,34 @@ impl VillagerHats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn resolved_texture_metadata_controls_villager_hats_without_files() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            (
+                "assets/minecraft/textures/entity/villager/profession/farmer.png.mcmeta".into(),
+                Resource::bytes(br#"{"villager":{"hat":"full"}}"#.to_vec()),
+            ),
+            (
+                "assets/minecraft/textures/entity/villager/type/plains.png.mcmeta".into(),
+                Resource::bytes(br#"{"villager":{"hat":"partial"}}"#.to_vec()),
+            ),
+        ]));
+        let hats = VillagerHats::load(&source);
+        assert_eq!(hats.0["entity/villager/profession/farmer"], Hat::Full);
+        assert_eq!(hats.0["entity/villager/type/plains"], Hat::Partial);
+        assert_eq!(hats.0["entity/zombie_villager/type/plains"], Hat::None);
+    }
 
     #[test]
     #[ignore = "requires prepared 26.3 models and textures in HORIZON_TEST_RESOURCES"]
     fn metadata_head_visibility_matches_exported_no_hat_models() {
         use crate::mobs::{load_model, render::draw};
         let root = std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES");
-        let mut hats = VillagerHats::load(Path::new(&root));
+        let mut hats =
+            VillagerHats::load(&ResourceSource::directory(std::path::PathBuf::from(&root)));
         assert_eq!(hats.0["entity/villager/profession/farmer"], Hat::Full);
         assert_eq!(hats.0["entity/villager/type/plains"], Hat::None);
         for (name, folder) in [

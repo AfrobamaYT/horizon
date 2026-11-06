@@ -54,10 +54,10 @@ pub(super) fn register_startup_client_reload_listeners() -> mod_api::ClientListe
 /// merged resource root the reload will publish; runs on the reload's worker,
 /// off the game-owning thread.
 pub(super) fn stage_client_reload(
-    root: &std::path::Path,
+    root: &horizon_assets::resource_source::ResourceSource,
     listeners: mod_api::ClientListenerRegistry,
 ) -> Result<Vec<PreparedClientReload>, ReloadStageError> {
-    let pack = DataPack::builtin(root);
+    let pack = DataPack::from_source("vanilla".into(), root.clone());
     let ordered = listeners.finish().map_err(ReloadStageError::Order)?;
     prepare_listeners(
         ordered,

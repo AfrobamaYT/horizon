@@ -1185,8 +1185,12 @@ mod tests {
             format!(r#"{{"attributes": {attributes}}}"#),
         )
         .unwrap();
-        let environment =
-            crate::environment::Environment::load_dimension(&root, name, false).unwrap();
+        let environment = crate::environment::Environment::load_dimension(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            name,
+            false,
+        )
+        .unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         environment.sample(6000, None, None)
     }

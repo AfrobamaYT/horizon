@@ -29,7 +29,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         root,
         horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
     )?;
-    let grass = ItemRenderer::load(root, &item_data)?.grass_color(0.5, 1.0) as u32;
+    let grass = ItemRenderer::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &item_data,
+    )?
+    .grass_color(0.5, 1.0) as u32;
     let mut output = BufWriter::new(fs::File::create(&args[2])?);
     for row in input["cases"].as_array().unwrap() {
         let state = row[0].as_u64().unwrap() as u32;

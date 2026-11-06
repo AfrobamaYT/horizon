@@ -128,7 +128,9 @@ fn main() -> Result<()> {
         &crate::test_resources::server_load(),
     )?;
     step("recipes");
-    let biomes = Biomes::load(&root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     step("biomes");
     let light = LightTables::load(&root, assets.registry, &facts)?;
     step("light tables");

@@ -53,6 +53,32 @@ fn root_with_asset(name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 #[test]
+fn stage_reads_resolved_asset_bytes_without_a_directory() {
+    use horizon_assets::resource_source::{Resource, ResourceSource};
+    let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+        "assets/test_mod/hats/top.json".into(),
+        Resource::bytes(b"selected".to_vec()),
+    )]));
+    let applied = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let listener = Arc::new(HatListener {
+        seen: std::sync::Mutex::new(Vec::new()),
+        applied: applied.clone(),
+    });
+    let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
+    listeners
+        .add_listener(id("test_mod:hats"), hats(), listener.clone())
+        .unwrap();
+    let prepared = stage_client_reload(&source, listeners).unwrap();
+    assert_eq!(
+        listener.seen.lock().unwrap().as_slice(),
+        ["test_mod:top=selected"]
+    );
+    assert!(applied.lock().unwrap().is_empty());
+    apply_client_reload(prepared);
+    assert_eq!(applied.lock().unwrap().as_slice(), ["hats"]);
+}
+
+#[test]
 fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
     let root = root_with_asset("merged", b"\"top\"");
     let applied = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -64,7 +90,11 @@ fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
-    let prepared = stage_client_reload(&root, listeners).unwrap();
+    let prepared = stage_client_reload(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        listeners,
+    )
+    .unwrap();
     assert_eq!(
         listener.seen.lock().unwrap().as_slice(),
         ["test_mod:top=\"top\""]
@@ -99,7 +129,10 @@ fn a_listener_error_keeps_every_previous_state() {
     listeners
         .add_listener(id("test_mod:failing"), hats(), Arc::new(Failing))
         .unwrap();
-    let Err(error) = stage_client_reload(&root, listeners) else {
+    let Err(error) = stage_client_reload(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        listeners,
+    ) else {
         panic!("a failing listener stops the whole reload")
     };
     assert_eq!(
@@ -120,7 +153,11 @@ fn a_converted_file_outside_the_pack_is_absent_not_empty() {
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
-    stage_client_reload(&root, listeners).unwrap();
+    stage_client_reload(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        listeners,
+    )
+    .unwrap();
     assert_eq!(
         listener.seen.lock().unwrap().as_slice(),
         ["test_mod:top={}"],
@@ -391,8 +428,11 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             // The mod's packaged asset over nothing, with the real root's own
             // assets in the same view.
             let root = merged(&[]);
-            let prepared =
-                stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
+            let prepared = stage_client_reload(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                game.register_client_reload_listeners(),
+            )
+            .unwrap();
             assert!(live.lock().unwrap().is_empty(), "nothing published yet");
             apply_client_reload(prepared);
             assert_eq!(live.lock().unwrap().as_slice(), ["mod"]);
@@ -407,15 +447,20 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             );
             assert_eq!(packs.len(), 1);
             let root = merged(&packs);
-            let prepared =
-                stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
+            let prepared = stage_client_reload(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                game.register_client_reload_listeners(),
+            )
+            .unwrap();
             apply_client_reload(prepared);
             assert_eq!(live.lock().unwrap().as_slice(), ["mod", "pack"]);
             // A rejected prepare aborts the reload and keeps the previous state.
             reject.store(true, Ordering::Relaxed);
             let root = merged(&[]);
-            let Err(error) = stage_client_reload(&root, game.register_client_reload_listeners())
-            else {
+            let Err(error) = stage_client_reload(
+                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                game.register_client_reload_listeners(),
+            ) else {
                 panic!("a failing listener stops the whole reload")
             };
             assert!(error.to_string().contains("client_test:hats"));

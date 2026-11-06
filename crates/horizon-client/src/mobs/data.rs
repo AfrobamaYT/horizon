@@ -6,6 +6,7 @@
 use super::keyframes::Animation;
 use super::path::PathType;
 use crate::blocks::{BlockFacts, Fluid};
+use horizon_assets::resource_source::ResourceRoot;
 use horizon_world::registry::BlockStateId;
 pub use mod_api::mobs::PathComputationType;
 use serde_json::Value;
@@ -89,7 +90,9 @@ pub struct MobData {
     pub species_placements: std::sync::OnceLock<Vec<Placement>>,
 }
 impl MobData {
-    pub fn load(root: &Path, facts: &BlockFacts) -> Self {
+    pub fn load(root: &ResourceRoot, facts: &BlockFacts) -> Self {
+        let source = root.source();
+        let root = root.prepared();
         let parsed: Option<Value> = fs::read(root.join("mob-data.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok());
@@ -112,22 +115,12 @@ impl MobData {
         data.entity_tags =
             crate::items::load_tags(root, "entity_type", &horizon_world::loot::PackOverlay::NONE)
                 .unwrap_or_default();
-        data.villager_hats = std::sync::RwLock::new(super::villager_hats::VillagerHats::load(root));
-        let random = horizon_optifine::random_textures::RandomTextures::scan(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
-        );
-        let blinks = horizon_optifine::blink::Blinks::scan(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
-            &random,
-        );
-        let mut emissive = horizon_optifine::emissive::Emissive::scan(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
-            &random,
-        );
-        emissive.pair_beside(
-            &horizon_assets::resource_source::ResourceSource::directory(root.to_owned()),
-            blinks.files(),
-        );
+        data.villager_hats =
+            std::sync::RwLock::new(super::villager_hats::VillagerHats::load(source));
+        let random = horizon_optifine::random_textures::RandomTextures::scan(source);
+        let blinks = horizon_optifine::blink::Blinks::scan(source, &random);
+        let mut emissive = horizon_optifine::emissive::Emissive::scan(source, &random);
+        emissive.pair_beside(source, blinks.files());
         data.emissive = std::sync::RwLock::new(std::sync::Arc::new(emissive));
         data.blinks = std::sync::RwLock::new(blinks);
         data.random_textures = std::sync::RwLock::new(random);

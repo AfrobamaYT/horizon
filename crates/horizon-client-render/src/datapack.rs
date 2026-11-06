@@ -19,6 +19,10 @@ pub struct DataPack {
     source: ResourceSource,
 }
 impl DataPack {
+    /// A named resource layer, retaining its open source for lazy reads.
+    pub fn from_source(id: String, source: ResourceSource) -> Self {
+        Self { id, source }
+    }
     /// Every file path under `prefix` (relative to the pack root).
     pub fn list(&self, prefix: &str) -> Vec<String> {
         self.source.list(prefix)

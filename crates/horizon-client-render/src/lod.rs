@@ -3990,7 +3990,9 @@ mod tests {
             &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
         )?);
         let facts = BlockFacts::load(&root, assets.registry)?;
-        let biomes = Arc::new(Biomes::load(&root)?);
+        let biomes = Arc::new(Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?);
         let tables = Arc::new(MeshTables::new(
             &assets,
             &render,
@@ -5309,7 +5311,9 @@ mod tests {
             &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
         )?);
         let facts = BlockFacts::load(&root, assets.registry)?;
-        let biomes = Arc::new(Biomes::load(&root)?);
+        let biomes = Arc::new(Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?);
         let tables = Arc::new(MeshTables::new(
             &assets,
             &render,

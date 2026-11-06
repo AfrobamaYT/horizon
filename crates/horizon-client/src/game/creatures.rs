@@ -9692,8 +9692,14 @@ mod pearl_tests {
         let registry = assets.registry;
         let facts = horizon_client::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let data = horizon_client::mobs::MobData::load(&root, &facts);
-        let biomes = horizon_client::biome::Biomes::load(&root).unwrap();
+        let data = horizon_client::mobs::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
+        let biomes = horizon_client::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = horizon_client::items::Items::load(
             &root,

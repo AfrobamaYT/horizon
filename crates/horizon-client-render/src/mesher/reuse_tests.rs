@@ -119,7 +119,10 @@ fn a_shader_pack_lights_the_faces_itself() {
         });
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     let render = assets
         .reload(&horizon_assets::resource_source::ResourceRoot::directory(
             root.to_path_buf(),
@@ -179,7 +182,10 @@ fn a_shader_pack_lights_every_nether_face_like_an_up_face() {
         });
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     let render = assets
         .reload(&horizon_assets::resource_source::ResourceRoot::directory(
             root.to_path_buf(),
@@ -236,7 +242,10 @@ fn separate_ao_passes_ao_in_alpha_without_darkening_rgb() {
         });
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     let render = assets
         .reload(&horizon_assets::resource_source::ResourceRoot::directory(
             root.to_path_buf(),
@@ -290,7 +299,10 @@ fn reused_mesh_matches_fresh_geometry_across_sections_and_resource_reload() {
         });
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     let state = |name| assets.registry.default_state(name).unwrap().0;
     let names = [
         "minecraft:stone",
@@ -465,7 +477,10 @@ fn a_shader_pack_s_still_water_top_starts_at_its_south_west_corner() {
         });
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     let render = assets
         .reload(&horizon_assets::resource_source::ResourceRoot::directory(
             root.to_path_buf(),

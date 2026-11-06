@@ -1133,7 +1133,11 @@ mod tests {
             horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
         )
         .unwrap();
-        let renderer = ItemRenderer::load(&root, &data).unwrap();
+        let renderer = ItemRenderer::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &data,
+        )
+        .unwrap();
         let tinted: Vec<i32> = super::layer_state(&renderer, "minecraft:grass_block")
             .layers
             .iter()

@@ -67,7 +67,11 @@ fn main() -> horizon_client::Result<()> {
     let block_retained = LIVE.load(Relaxed) - initial;
     let start_items = Instant::now();
     let item_data = test_resources::item_data(root, DataLoadOrigin::ClientPreload)?;
-    let items = ItemRenderer::load_with_library(root, render.model_library.clone(), &item_data)?;
+    let items = ItemRenderer::load_with_library(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        render.model_library.clone(),
+        &item_data,
+    )?;
     let item_ms = start_items.elapsed().as_secs_f64() * 1000.;
     let total_ms = start.elapsed().as_secs_f64() * 1000.;
     let retained = LIVE.load(Relaxed) - initial;

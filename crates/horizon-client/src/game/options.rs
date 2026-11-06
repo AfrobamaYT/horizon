@@ -128,8 +128,7 @@ impl Game<'_> {
         let ui = &mut self.ui.options;
         ui.open_at(!from_title && self.title.is_none(), page);
         ui.minecart_improvements = minecart_improvements;
-        let root = self.options.resources.clone();
-        ui.languages = lang::available(&[&root]);
+        ui.languages = lang::available(&[&self.pack.source]);
         self.refresh_pack_lists();
     }
     /// While the resource pack screen is open, `resourcepacks/` is looked at once a second
@@ -464,8 +463,7 @@ impl Game<'_> {
     }
     /// LanguageManager.setSelected + reload: translations, then re-wrap chat.
     pub(super) fn load_language(&mut self, code: &str) {
-        let root = self.options.resources.clone();
-        lang::set(lang::Language::load(&[&root], code));
+        lang::set(lang::Language::load(&[&self.pack.source], code));
         self.refresh_remote_language();
         self.ui.chat.rescale(&self.gui.atlas);
         self.creative_screen.forget_items();

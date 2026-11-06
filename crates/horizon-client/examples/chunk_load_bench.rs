@@ -84,7 +84,9 @@ fn main() -> Result<(), Error> {
     )?);
     let facts = BlockFacts::load(&root, assets.registry)?;
     let visibility = models::load_visibility(&root, assets.registry)?;
-    let biomes = Arc::new(Biomes::load(&root)?);
+    let biomes = Arc::new(Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )?);
     let context = Arc::new(WorkerContext {
         tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility)?),
         light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),

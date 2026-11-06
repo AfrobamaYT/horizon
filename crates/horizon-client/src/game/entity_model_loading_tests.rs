@@ -124,7 +124,10 @@ fn optimized(root: &Path) -> BTreeMap<String, Part> {
     let document = EntityModelDocument::load(root).ok();
     let boats = BoatModels::load(document.as_ref());
     let carts = CartModels::load(document.as_ref());
-    let armor = ArmorStandAssets::load(root, document.as_ref());
+    let armor = ArmorStandAssets::load(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        document.as_ref(),
+    );
     let mut models = BTreeMap::new();
     for (label, group) in [("boat", boats.models), ("chest_boat", boats.chest_models)] {
         for (wood, part) in group {
@@ -222,7 +225,10 @@ fn armor_equipment_loads_without_an_entity_model_document() {
     )
     .unwrap();
     fs::write(equipment.join("invalid.json"), b"{").unwrap();
-    let assets = ArmorStandAssets::load(&root.0, None);
+    let assets = ArmorStandAssets::load(
+        &horizon_assets::resource_source::ResourceSource::directory(root.0.to_path_buf()),
+        None,
+    );
     assert!(assets.main.is_none());
     assert!(assets.layers.is_empty());
     assert_eq!(
@@ -250,13 +256,23 @@ fn content_mods_equipment_loads_under_its_namespace() {
     )
     .unwrap();
     // Not a content root: other namespaces stay unread, as before.
-    assert!(ArmorStandAssets::load(&root.0, None).equipment.is_empty());
+    assert!(
+        ArmorStandAssets::load(
+            &horizon_assets::resource_source::ResourceSource::directory(root.0.to_path_buf()),
+            None
+        )
+        .equipment
+        .is_empty()
+    );
     fs::write(
         root.0.join(horizon_items::content_namespaces::MARKER),
         br#"["gems"]"#,
     )
     .unwrap();
-    let assets = ArmorStandAssets::load(&root.0, None);
+    let assets = ArmorStandAssets::load(
+        &horizon_assets::resource_source::ResourceSource::directory(root.0.to_path_buf()),
+        None,
+    );
     assert_eq!(
         assets.equipment["gems:ruby"]["humanoid_leggings"],
         vec![("gems:entity/equipment/humanoid_leggings/ruby".into(), None)]
@@ -308,4 +324,19 @@ fn entity_model_document_benchmark() {
             "baseline_median_ms": old, "optimized_median_ms": new, "speedup": old / new
         })
     );
+}
+
+#[test]
+fn equipment_layers_read_resolved_resources_and_retain_the_source() {
+    use horizon_assets::resource_source::{Resource, ResourceSource};
+    let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+        "assets/example/equipment/nested/cloth.json".into(),
+        Resource::bytes(br#"{"layers":{"humanoid":[{"texture":"example:cloth"}]}}"#.to_vec()),
+    )]));
+    let assets = ArmorStandAssets::load(&source, None);
+    assert_eq!(
+        assets.equipment["example:nested/cloth"]["humanoid"][0].0,
+        "example:entity/equipment/humanoid/cloth"
+    );
+    assert!(assets.root.same_generation(&source));
 }

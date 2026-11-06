@@ -8,6 +8,7 @@ use crate::cit_assets::{self, model_id, sprite_id};
 use crate::hud::cit_glint::GlintTextures;
 use crate::items::ItemStack;
 use glam::Vec3;
+use horizon_assets::resource_source::ResourceSource;
 use horizon_assets::{
     item_bake::{BakedItemModel, bake_resolved},
     model::{Material, TextureSlot},
@@ -16,7 +17,6 @@ use horizon_assets::{
 use horizon_world::nbt::Tag;
 use std::{
     collections::{BTreeMap, HashMap},
-    path::Path,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
@@ -100,20 +100,15 @@ pub fn worn_rule(rules: &CitRules, kind: Kind, stack: &ItemStack, item_max: u32)
 
 /// The rules at `root` and `library` with their models, or `library` alone without rules.
 pub(super) fn load(
-    root: &Path,
+    root: &ResourceSource,
     library: Arc<ModelLibrary>,
 ) -> (Arc<ModelLibrary>, Option<CitModels>) {
-    let rules = CitRules::load(&crate::resource_source::ResourceSource::directory(
-        root.to_owned(),
-    ));
+    let rules = CitRules::load(root);
     // A `cit.properties` alone can still turn vanilla's glint off.
     if rules.is_empty() && rules.global.use_glint {
         return (library, None);
     }
-    let extra = cit_assets::load_models(
-        &crate::resource_source::ResourceSource::directory(root.to_owned()),
-        &rules.rules,
-    );
+    let extra = cit_assets::load_models(root, &rules.rules);
     let library = if extra.is_empty() {
         library
     } else {
@@ -375,7 +370,11 @@ impl ItemRenderer {
 mod tests {
     use super::*;
     use horizon_assets::item_model::{DisplayContext, NoEnv, StackView};
-    use std::{collections::BTreeSet, fs, path::PathBuf};
+    use std::{
+        collections::BTreeSet,
+        fs,
+        path::{Path, PathBuf},
+    };
 
     const CIT: &str = "assets/minecraft/optifine/cit";
 
@@ -518,16 +517,21 @@ mod tests {
     }
 
     fn renderer(root: &Path) -> ItemRenderer {
-        let library = crate::model_library::ParsedModels::load(
-            &crate::resource_source::ResourceSource::directory(root.to_owned()),
-        )
+        let library = crate::model_library::ParsedModels::load(&ResourceSource::directory(
+            root.to_path_buf(),
+        ))
         .into_item_library();
         let data = crate::test_resources::item_data(
             root,
             horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
         )
         .unwrap();
-        ItemRenderer::load_with_library(root, library, &data).unwrap()
+        ItemRenderer::load_with_library(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            library,
+            &data,
+        )
+        .unwrap()
     }
 
     fn rule(r: &ItemRenderer, name: &str) -> usize {

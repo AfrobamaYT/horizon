@@ -743,7 +743,9 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
         );
         let assets = crate::assets::Assets::load(&root)?;
-        let biomes = crate::biome::Biomes::load(&root)?;
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?;
         let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
         let terrain_resources = crate::vanillagen::TerrainResources {
             dir: &root.join("worldgen"),
@@ -1061,7 +1063,9 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
         );
         let assets = crate::assets::Assets::load(&root)?;
-        let biomes = crate::biome::Biomes::load(&root)?;
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?;
         let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
         let terrain_resources = crate::vanillagen::TerrainResources {
             dir: &root.join("worldgen"),
@@ -1141,7 +1145,9 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
         );
         let assets = crate::assets::Assets::load(&root)?;
-        let biomes = crate::biome::Biomes::load(&root)?;
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?;
         let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
         let terrain_resources = crate::vanillagen::TerrainResources {
             dir: &root.join("worldgen"),
@@ -1231,7 +1237,9 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
         );
         let assets = crate::assets::Assets::load(&root)?;
-        let biomes = crate::biome::Biomes::load(&root)?;
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?;
         let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
         let terrain_resources = crate::vanillagen::TerrainResources {
             dir: &root.join("worldgen"),

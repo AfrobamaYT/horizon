@@ -68,7 +68,9 @@ pub fn main() -> Result<()> {
     let root = Path::new(".local/horizon-client/26.3");
     let assets = Assets::load(root)?;
     let facts = BlockFacts::load(root, assets.registry)?;
-    let biomes = Biomes::load(root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let collision = collisions::load(root, assets.registry)?;
     let tables = AnimateTables::load(root, assets.registry, &biomes)?;
     let mut world = World::new(facts.air, 0);

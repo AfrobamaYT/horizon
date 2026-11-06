@@ -20,6 +20,7 @@ use crate::{
     world::World,
 };
 use glam::{DVec3, Mat4, Quat, Vec3};
+use horizon_assets::resource_source::{ResourceRoot, ResourceSource};
 use horizon_core::geometry::{
     Direction,
     trig::{self, Mth},
@@ -32,7 +33,6 @@ use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     f32::consts::PI,
-    path::Path,
     sync::{
         Arc, Mutex, PoisonError, RwLock,
         atomic::{AtomicBool, Ordering},
@@ -1366,22 +1366,23 @@ const VIEW_DISTANCE: f64 = 64.0;
 
 impl BlockEntityRenderer {
     pub fn load(
-        root: &Path,
+        root: &ResourceRoot,
         registry: &BlockRegistry,
         defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> Result<Self> {
-        let visibility = load_visibility(root, registry)?;
+        let visibility = load_visibility(root.prepared(), registry)?;
         Self::load_with_visibility(root, registry, visibility, defaults)
     }
     /// [`BlockEntityRenderer::load`] over the face visibility the meshes use
     /// (`MeshTables::visibility`): a clone shares its shapes and their faces.
     pub fn load_with_visibility(
-        root: &Path,
+        root: &ResourceRoot,
         registry: &BlockRegistry,
         visibility: FaceVisibility,
         defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> Result<Self> {
-        let all: Value = serde_json::from_slice(&std::fs::read(root.join("entity-models.json"))?)?;
+        let all: Value =
+            serde_json::from_slice(&std::fs::read(root.prepared().join("entity-models.json"))?)?;
         let models = MODELS
             .iter()
             .filter_map(|(key, layer)| all.get(*layer).map(|v| (*key, ModelPart::parse(v))))
@@ -1389,15 +1390,15 @@ impl BlockEntityRenderer {
         let mut renderer = Self::new(models, registry);
         renderer.visibility = Some(Mutex::new(visibility));
         // The packs' custom entity models (`.jem` files), before anything draws.
-        renderer.set_shapes(renderer.shapes_for(root));
+        renderer.set_shapes(renderer.shapes_for(root.source()));
         // Sherd items: provides_pottery_pattern -> decorated_pot_pattern asset id.
         for (item, components) in defaults.entries() {
             let Some(pattern) = components["minecraft:provides_pottery_pattern"].as_str() else {
                 continue;
             };
             let name = pattern.strip_prefix("minecraft:").unwrap_or(pattern);
-            let file = root.join(format!("data/minecraft/decorated_pot_pattern/{name}.json"));
-            let Ok(def) = std::fs::read(file) else {
+            let file = format!("data/minecraft/decorated_pot_pattern/{name}.json");
+            let Ok(def) = root.source().read(&file) else {
                 continue;
             };
             let def: Value = serde_json::from_slice(&def)?;
@@ -1436,7 +1437,7 @@ impl BlockEntityRenderer {
     }
     /// The models the packs under `root` give, their `.jem` files over vanilla's, for
     /// [`Self::set_shapes`] (a pack reload): vanilla's own, shared, without any.
-    pub fn shapes_for(&self, root: &Path) -> Arc<BlockEntityShapes> {
+    pub fn shapes_for(&self, root: &ResourceSource) -> Arc<BlockEntityShapes> {
         match crate::block_entity_cem::reshape(root, &self.vanilla.models) {
             Some((models, textures)) => Arc::new(BlockEntityShapes::new(models, textures)),
             None => self.vanilla.clone(),
@@ -4355,7 +4356,12 @@ mod tests {
         let assets = Assets::load(&root).unwrap();
         let registry = assets.registry;
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let renderer = BlockEntityRenderer::load(&root, registry, &defaults).unwrap();
+        let renderer = BlockEntityRenderer::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            registry,
+            &defaults,
+        )
+        .unwrap();
         let state = registry.default_state("minecraft:decorated_pot").unwrap();
         let sprites: HashMap<String, Rect> = [
             "entity/decorated_pot/decorated_pot_base",
@@ -4432,7 +4438,12 @@ mod tests {
         };
         // No block entity's `.jem` (a mob's only): vanilla's shapes, not a copy.
         let empty = pack("render-none", &[("optifine/cem/zombie.jem", "{}".into())]);
-        assert!(Arc::ptr_eq(&renderer.shapes_for(&empty), &renderer.vanilla));
+        assert!(Arc::ptr_eq(
+            &renderer.shapes_for(&horizon_assets::resource_source::ResourceSource::directory(
+                empty.to_path_buf()
+            )),
+            &renderer.vanilla
+        ));
         let root = pack(
             "render-chest",
             &[(
@@ -4443,7 +4454,9 @@ mod tests {
                 ),
             )],
         );
-        renderer.set_shapes(renderer.shapes_for(&root));
+        renderer.set_shapes(renderer.shapes_for(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        ));
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&empty);
         let rect = |u0: f32| Rect {

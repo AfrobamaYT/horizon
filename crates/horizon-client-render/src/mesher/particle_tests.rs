@@ -18,7 +18,10 @@ fn terrain_particles_use_the_particle_sprite_and_vanilla_tint_sources() {
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
     let tables = MeshTables::new(&assets, &render, &facts, visibility).unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     let state = |name| assets.registry.default_state(name).unwrap();
     let sprite = |name| {
         let layer = render.model_catalog.particle(state(name)).unwrap();
@@ -78,7 +81,10 @@ fn block_tints_match_the_chunk_mesh_for_grass_blocks() {
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
     let tables = MeshTables::new(&assets, &render, &facts, visibility).unwrap();
-    let biomes = Biomes::load(&root).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap();
     let state = |name| assets.registry.default_state(name).unwrap();
     let center = Chunk::empty(0, 0);
     let mut region = [[None; 3]; 3];
