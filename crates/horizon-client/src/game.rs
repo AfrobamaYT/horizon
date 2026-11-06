@@ -46,7 +46,10 @@ macro_rules! world_biomes {
 /// The world's packs' content files, as a field-level borrow (see the macros).
 fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOverlay<'_> {
     match world_tables {
-        Some(t) => horizon_world::loot::PackOverlay { files: &t.files },
+        Some(t) => horizon_world::loot::PackOverlay {
+            conditions: &t.conditions,
+            files: &t.files,
+        },
         None => horizon_world::loot::PackOverlay::NONE,
     }
 }
@@ -2007,6 +2010,7 @@ struct WorldRest {
 /// recipes, loot tables and tags from the world's pack stack, over the
 /// resource root's own. Worlds without packs use `Resources.rest` directly.
 struct WorldTables {
+    conditions: horizon_world::conditions::LoadConditions,
     suffocation: horizon_world::suffocation::SuffocationRegistry<'static>,
     /// The pack files the tables were built from (a native mod's among
     /// them), for the advancement tree reload and the loot data.
@@ -21858,7 +21862,12 @@ impl Game<'_> {
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
         let files = functions::overlay_files(stack, contributed);
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+        let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+        let overlay = horizon_world::loot::PackOverlay {
+            conditions: &conditions,
+            files: &files,
+        };
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
         let base = if reload {
@@ -21869,7 +21878,10 @@ impl Game<'_> {
         let health = base.with_packs(root, &overlay, reload)?;
         // With no pack, `res` holds the tables, unless content mods switched
         // live since it was loaded: their data is in the new root.
-        if files.is_empty() && !data_switched {
+        if files.is_empty()
+            && !data_switched
+            && conditions == horizon_world::conditions::LoadConditions::vanilla()
+        {
             return Ok((None, health));
         }
         let mut items = Items::load(
@@ -21904,7 +21916,7 @@ impl Game<'_> {
         );
         let data_maps = native_data_maps::DataMaps::load(
             &data_map_types,
-            &files,
+            &overlay,
             &items.item_tags,
             &items.block_tags,
         );
@@ -21935,6 +21947,7 @@ impl Game<'_> {
             .collect();
         Ok((
             Some(WorldTables {
+                conditions,
                 suffocation,
                 files,
                 items,
@@ -22130,6 +22143,7 @@ impl Game<'_> {
             && let Some(sources) = &tables.reload_sources
         {
             let overlay = horizon_world::loot::PackOverlay {
+                conditions: &tables.conditions,
                 files: &tables.files,
             };
             lan::install_server_sources(
@@ -22535,7 +22549,9 @@ fn gameplay_tables(
             .map_err(|e| e.to_string())
         });
         let motion = startup::time("core.motion", || {
-            MotionResources::load_with_facts(root, assets, &facts)
+            let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+            let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+            MotionResources::load_with_conditions(root, assets, &facts, &conditions)
         })
         .map_err(|e| e.to_string());
         (light.join(), motion)
@@ -22901,7 +22917,12 @@ fn load_world_rest(
         .files
         .into_iter()
         .collect::<Vec<_>>();
-    let overlay = &horizon_world::loot::PackOverlay { files: &files };
+    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
+    let overlay = &horizon_world::loot::PackOverlay {
+        conditions: &conditions,
+        files: &files,
+    };
     progress.set(6);
     // Independent tables load together, within the worker budget the settings
     // allow. Only the recipes and the stations read another table: the items.

@@ -7001,7 +7001,7 @@ mod held_item_name_tests {
         chances[drops::SLOTS.iter().position(|s| *s == "body").unwrap()] = 2.0;
         horse.extra.drop_chances = Some(Box::new(chances));
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let loot = LootData::load(&root, &PackOverlay { files: &[] }, &defaults).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::new(&[]), &defaults).unwrap();
         let death = Death {
             loot: &loot,
             damage: None,

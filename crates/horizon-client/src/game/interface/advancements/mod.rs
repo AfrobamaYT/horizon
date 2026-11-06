@@ -392,9 +392,21 @@ impl Game<'_> {
             Some(tables) => tables.files.clone(),
             None => super::functions::content_overlay(stack),
         };
+        let conditions = match &self.world_tables {
+            Some(tables) => tables.conditions.clone(),
+            None => horizon_world::conditions::LoadConditions::vanilla(),
+        };
         self.adv.pending_tree = std::thread::Builder::new()
             .name("horizon-advancements".into())
-            .spawn(move || Tree::shared(&data, &horizon_world::loot::PackOverlay { files: &files }))
+            .spawn(move || {
+                Tree::shared(
+                    &data,
+                    &horizon_world::loot::PackOverlay {
+                        conditions: &conditions,
+                        files: &files,
+                    },
+                )
+            })
             .ok();
     }
     pub(super) fn load_advancements(&mut self) {

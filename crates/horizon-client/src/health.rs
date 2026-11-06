@@ -458,6 +458,14 @@ pub struct HealthResources {
 }
 impl HealthResources {
     pub fn load(root: &Path) -> Result<Self> {
+        Self::load_with_conditions(root, &horizon_world::conditions::LoadConditions::vanilla())
+    }
+    /// Startup damage resources use the same engine-owned server inventory
+    /// as the other tables, before any world pack stack exists.
+    pub fn load_with_conditions(
+        root: &Path,
+        conditions: &horizon_world::conditions::LoadConditions,
+    ) -> Result<Self> {
         let read = |name: &str| -> Result<serde_json::Value> {
             Ok(serde_json::from_slice(&fs::read(root.join(name))?)?)
         };
@@ -467,7 +475,13 @@ impl HealthResources {
                 ids[name].as_u64().ok_or("missing player float ID")?,
             )?)
         };
-        let damage = Catalog::load(root, &horizon_world::loot::PackOverlay::NONE)?;
+        let damage = Catalog::load(
+            root,
+            &horizon_world::loot::PackOverlay {
+                conditions,
+                ..horizon_world::loot::PackOverlay::NONE
+            },
+        )?;
         for name in ["minecraft:fall", "minecraft:stalagmite", "minecraft:starve"] {
             if damage.id(name).is_none() {
                 return Err(format!("missing damage type {name}").into());

@@ -107,7 +107,7 @@ impl DataMaps {
     /// data map is skipped alone.
     pub(crate) fn load(
         types: &[NativeDataMapType],
-        files: &[(String, Vec<Vec<u8>>)],
+        overlay: &horizon_world::loot::PackOverlay<'_>,
         item_tags: &HashMap<String, HashSet<String>>,
         block_tags: &HashMap<String, HashSet<String>>,
     ) -> Self {
@@ -153,11 +153,16 @@ impl DataMaps {
             let (ns, path) = ty.id.split_once(':').unwrap_or_default();
             let wanted = format!("data_maps/{ns}:{dir}/{path}");
             let mut map = BTreeMap::new();
-            if let Some((_, versions)) = files.iter().find(|(k, _)| *k == wanted) {
+            if let Some((_, versions)) = overlay.files.iter().find(|(k, _)| *k == wanted) {
                 for bytes in versions {
-                    let applied = serde_json::from_slice::<Value>(bytes)
-                        .ok()
-                        .is_some_and(|file| apply_file(&mut map, &file, tags));
+                    let file = serde_json::from_slice::<Value>(bytes).ok();
+                    if file
+                        .as_ref()
+                        .is_some_and(|file| !overlay.conditions.allows(file))
+                    {
+                        continue;
+                    }
+                    let applied = file.is_some_and(|file| apply_file(&mut map, &file, tags));
                     if !applied {
                         log::warn!(
                             "Horizon: a data map file of {} is not a data map, skipped",
@@ -260,7 +265,10 @@ mod tests {
         )]);
         DataMaps::load(
             &[ty("mymod:fuel", "minecraft:item")],
-            files,
+            &horizon_world::loot::PackOverlay {
+                files,
+                ..horizon_world::loot::PackOverlay::NONE
+            },
             &items,
             &HashMap::new(),
         )
@@ -368,7 +376,7 @@ mod tests {
                 ty("mymod:a", "minecraft:block"),
                 ty("mymod:a", "minecraft:block"),
             ],
-            &[],
+            &horizon_world::loot::PackOverlay::NONE,
             &HashMap::new(),
             &HashMap::new(),
         );
@@ -381,6 +389,33 @@ mod tests {
     }
 
     #[test]
+    fn conditional_layers_are_skipped_before_replace_and_remove() {
+        let f = files(&[(
+            "data_maps/mymod:item/fuel",
+            &[
+                json!({"values":{"minecraft:coal":1}}),
+                json!({"neoforge:conditions":[{"type":"unsupported"}],"replace":true}),
+                json!({"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"provider"}],"remove":["minecraft:coal"],"values":{"minecraft:stick":2}}),
+            ],
+        )]);
+        let off = load(&f);
+        assert_eq!(get(&off, "minecraft:coal"), Some(&json!(1)));
+        assert!(get(&off, "minecraft:stick").is_none());
+        let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
+        let on = DataMaps::load(
+            &[ty("mymod:fuel", "minecraft:item")],
+            &horizon_world::loot::PackOverlay {
+                files: &f,
+                conditions: &enabled,
+            },
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert!(get(&on, "minecraft:coal").is_none());
+        assert_eq!(get(&on, "minecraft:stick"), Some(&json!(2)));
+    }
+
+    #[test]
     fn block_maps_read_the_block_tags() {
         let blocks = tags(&[("minecraft:logs", &["minecraft:oak_log"])]);
         let f = files(&[(
@@ -389,7 +424,10 @@ mod tests {
         )]);
         let maps = DataMaps::load(
             &[ty("mymod:hardness", "minecraft:block")],
-            &f,
+            &horizon_world::loot::PackOverlay {
+                files: &f,
+                ..horizon_world::loot::PackOverlay::NONE
+            },
             &HashMap::new(),
             &blocks,
         );
