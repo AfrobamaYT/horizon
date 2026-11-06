@@ -14,7 +14,6 @@ use super::{
     respawn_anchor::RespawnConfig,
 };
 use horizon_client::{
-    command::vanilla,
     containers::BlockEntity,
     entities::Experience,
     first_person::{Hand, SwingAnimation},
@@ -4262,7 +4261,7 @@ impl Game<'_> {
         };
         let skip = usize::from(text.starts_with('/'));
         let command = &text[skip..];
-        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
+        let d = self.ui.dispatcher.0.clone();
         // The completions come from the server's players and lists, not from the host's own registries: a
         // dedicated server has no local player (they would list "Player"), and a LAN world's guests are not in
         // the host's list.

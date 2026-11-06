@@ -2,11 +2,7 @@
 //! filtering command sources, then run the final command once per source,
 //! reporting each result to the `store` callbacks of its source.
 use super::{Arg, Context, Dim, Game, R, Target, data::DataRef, err};
-use horizon_client::{
-    command::{CommandError, vanilla},
-    nbt_path::NbtPath,
-    text::Text,
-};
+use horizon_client::{command::CommandError, nbt_path::NbtPath, text::Text};
 use horizon_world::nbt::Tag;
 
 /// `CommandSourceStack` fields Horizon models: the executing entity (None for
@@ -232,7 +228,7 @@ impl Game<'_> {
     /// Run one command line with `source` (no error reporting): the entry
     /// for functions and `execute run`.
     pub(in crate::game) fn execute_line(&mut self, line: &str, source: Source) -> R<i32> {
-        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
+        let d = self.ui.dispatcher.0.clone();
         let parse = d.parse(line, &self.ui.registries);
         let (ctx, _) = parse.executable()?;
         let ctx = ctx.clone();

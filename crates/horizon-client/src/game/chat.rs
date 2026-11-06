@@ -154,6 +154,16 @@ pub(super) enum ChatExit {
 fn should_discard_draft(reason: ChatExit, save_chat_drafts: bool) -> bool {
     reason != ChatExit::Interrupted && (reason != ChatExit::Intentional || !save_chat_drafts)
 }
+/// An owned command tree, initialized even before a world is opened.
+pub struct SessionDispatcher(pub Arc<horizon_client::command::Dispatcher>);
+impl Default for SessionDispatcher {
+    fn default() -> Self {
+        let registry = horizon_client::gamerules::RuleRegistry::vanilla();
+        Self(Arc::new(
+            horizon_client::command::vanilla::session_dispatcher(&registry, &[]),
+        ))
+    }
+}
 /// UI and command state that lives beside the game.
 #[derive(Default)]
 pub struct UiState {
@@ -169,6 +179,8 @@ pub struct UiState {
     pub in_bed_chat: bool,
     pub registries: Registries,
     pub rules: GameRules,
+    /// The server session command tree.
+    pub dispatcher: SessionDispatcher,
     pub clock: WorldClock,
     /// Command state for registered clocks other than Overworld. Overworld's
     /// canonical ticks stay in World.day_time and its state stays in clock.
@@ -1601,8 +1613,17 @@ impl Game<'_> {
     /// `ServerClockManager.ServerClockInstance.loadFrom`: restore the existing
     /// Overworld state when a world opens; clear the other command-state cache.
     pub(super) fn load_world_state(&mut self) {
-        self.ui.rules =
-            GameRules::load_with_features(&self.world_root, &self.level.enabled_features);
+        self.ui.rules = GameRules::load_with_registry(
+            &self.world_root,
+            &self.level.enabled_features,
+            self.level.rule_registry.clone(),
+        );
+        self.ui.dispatcher = SessionDispatcher(Arc::new(
+            horizon_client::command::vanilla::session_dispatcher(
+                &self.level.rule_registry,
+                &self.level.enabled_features,
+            ),
+        ));
         self.ui.clock = WorldClock::default();
         self.ui.command_clocks.clear();
         // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.
