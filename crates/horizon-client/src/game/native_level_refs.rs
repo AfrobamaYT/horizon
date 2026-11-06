@@ -432,6 +432,37 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn shared_level_signal_dispatches_and_clamps_part_output() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::geometry::Direction;
+        use mod_api::Host;
+        use std::sync::Arc;
+
+        mod_api::__private::part_tests::signal_game_thread();
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let y = game.world.bottom_y() + 1;
+            let glass = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:glass")
+                .unwrap();
+            game.world.set(1, y, 1, glass).unwrap();
+            let level = game.native_level(game.dim.id()).unwrap();
+            let host: &dyn Host = game;
+            assert_eq!(level.signal(host, [1, y, 1], Direction::East), Some(15));
+            assert_eq!(
+                level.direct_signal(host, [1, y, 1], Direction::East),
+                Some(0)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn shared_level_signal_reads_live_comparator_and_refuses_other_levels() {
         use horizon_client::chunk::Chunk;
         use horizon_core::geometry::Direction;
