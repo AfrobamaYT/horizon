@@ -6039,7 +6039,14 @@ impl Game<'_> {
                         host.hub.entity_event(id, event as i8);
                     }
                 }
-                MotionEvent::Fall(event) => self.landing_block_updates(&event),
+                MotionEvent::Fall(event) => {
+                    let player = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.hub.guest(conn))
+                        .map(|g| g.uuid);
+                    self.landing_block_updates(player, &event)
+                }
                 // PowderSnowBlock.entityInside: every player around sees the
                 // snowflake (`ServerLevel.sendParticles`).
                 MotionEvent::Snowflake { position, velocity } => {
