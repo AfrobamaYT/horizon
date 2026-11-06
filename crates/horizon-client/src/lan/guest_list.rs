@@ -88,6 +88,15 @@ impl GuestList {
         Some(&mut self.rows[index].saved)
     }
 
+    /// Borrow a player's canonical attachments without exposing identity fields.
+    pub fn attachments_mut(
+        &mut self,
+        conn: u32,
+    ) -> Option<&mut horizon_world::attachments::Attachments> {
+        let index = self.connection_index(conn)?;
+        Some(&mut self.rows[index].attachments)
+    }
+
     /// Borrow only the stored menu items at this collection index.
     pub fn ender_items_mut(
         &mut self,
@@ -174,26 +183,37 @@ impl GuestList {
         }
     }
     pub fn remove(&mut self, index: usize) -> Guest {
-        let guest = self.rows.remove(index);
+        let mut guest = self.rows.remove(index);
         self.reindex();
+        guest.attachments.unbind_index();
         guest
     }
-    pub fn retain(&mut self, keep: impl FnMut(&Guest) -> bool) {
+    pub fn retain(&mut self, mut keep: impl FnMut(&Guest) -> bool) {
         // Vec::retain may have removed earlier rows when the predicate unwinds.
         // Publish the surviving order on both the success and unwind paths.
         let repair = Reindex(self);
-        repair.0.rows.retain(keep);
+        repair.0.rows.retain_mut(|guest| {
+            let kept = keep(guest);
+            if !kept {
+                guest.attachments.unbind_index();
+            }
+            kept
+        });
     }
     pub fn insert(&mut self, index: usize, guest: Guest) {
         self.rows.insert(index, guest);
         self.reindex();
     }
     pub fn replace(&mut self, index: usize, guest: Guest) -> Guest {
-        let old = std::mem::replace(&mut self.rows[index], guest);
+        let mut old = std::mem::replace(&mut self.rows[index], guest);
         self.reindex();
+        old.attachments.unbind_index();
         old
     }
     pub fn clear(&mut self) {
+        for guest in &mut self.rows {
+            guest.attachments.unbind_index();
+        }
         self.rows.clear();
         self.simulation.clear();
         self.connections.clear();
@@ -216,6 +236,11 @@ impl GuestList {
                 .entry((guest.uuid, guest.entity_id as u32))
                 .or_insert(index);
         }
+    }
+}
+impl Drop for GuestList {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 impl Deref for GuestList {
