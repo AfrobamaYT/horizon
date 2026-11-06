@@ -209,6 +209,7 @@ mod tests {
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
         pub(super) struct NativeCommand;
+        pub(super) struct NativeKeyRegistration;
         pub(super) struct AdvancementProgress {
             pub done: bool,
         }

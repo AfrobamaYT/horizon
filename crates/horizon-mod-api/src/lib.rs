@@ -72,6 +72,8 @@ pub mod block_sprites;
 pub mod camera;
 mod command;
 pub use command::{CommandArgument, CommandArgumentValue, CommandInvocation};
+mod key_mapping;
+pub use key_mapping::NativeKeyRegistration;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod containers;

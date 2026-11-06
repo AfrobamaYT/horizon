@@ -1267,6 +1267,51 @@ fn graphics_api_tooltip(s: &Settings) -> Text {
 
 /// `selected_key` while a native mod's key waits (`selected_native_key`).
 const NATIVE_KEY: &str = "horizon.nativeModKey";
+/// `selected_key` while a key a native mod registered waits (`selected_mod_key`).
+const MOD_KEY: &str = "horizon.modKey";
+
+/// The id of mod `i`'s registered key `k` in `mods.installed`, with the mod's id.
+fn mod_mapping(s: &Settings, i: usize, k: usize) -> Option<(String, String)> {
+    let m = s.mods.installed.get(i)?;
+    let mapping = m.native.as_ref()?.mappings.get(k)?;
+    Some((m.id.clone(), mapping.id.clone()))
+}
+
+/// A native mod's title or key category on Controls: bold and underlined, centred on the row at `y`.
+fn section_title(text: Text, y: f32, w: f32) -> Widget {
+    Widget {
+        x: 0.0,
+        y: y + 7.0,
+        w,
+        h: 9.0,
+        kind: WKind::Text {
+            text: text.with_style(&Style {
+                bold: Some(true),
+                underlined: Some(true),
+                ..Style::default()
+            }),
+            color: u32::MAX,
+            centered: true,
+        },
+        list: false,
+        row: 0,
+    }
+}
+
+/// A registered key's binding as Controls shows it: its modifiers' key names, then its key's.
+fn binding_text(key: &str, modifiers: u32) -> Text {
+    let mut text = Text::empty();
+    for (bit, name) in [
+        (crate::mod_list::SHIFT, "key.keyboard.left.shift"),
+        (crate::mod_list::CONTROL, "key.keyboard.left.control"),
+        (crate::mod_list::ALT, "key.keyboard.left.alt"),
+    ] {
+        if modifiers & bit != 0 {
+            text = text.append(keybinds::display_name(name)).append(" + ");
+        }
+    }
+    text.append(keybinds::display_name(key))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -1344,6 +1389,9 @@ enum Act {
     ModSettings(usize),
     /// A native mod's key (mod, key) waits for a key; a button of its page.
     NativeKey(usize, usize),
+    /// A key a native mod registered (mod, mapping) waits for a key, or is reset.
+    ModKey(usize, usize),
+    ResetModKey(usize, usize),
     NativeButton(usize, usize),
     OpenModFolder,
     /// Browse mods: the page of listing `.0` of `mod_browser`.
@@ -1555,6 +1603,8 @@ pub struct OptionsUi {
     pub(crate) dragging: Option<Opt>,
     /// Shift is held during the click (it resets a shader pack option to its default).
     pub shift: bool,
+    /// The window's modifier keys (GLFW bits) when a key or button is bound: a mod's key keeps them.
+    pub modifiers: u32,
     /// The pressed slider's own position (`AbstractSliderButton.value`) and
     /// when it last moved: the handle follows the pointer while the option
     /// keeps its stepped value, then snaps to it (`resetValue`).
@@ -1566,6 +1616,8 @@ pub struct OptionsUi {
     pub selected_key: Option<&'static str>,
     /// The native mod's key waiting: (mod, key) in `mods.installed`.
     selected_native_key: Option<(usize, usize)>,
+    /// The registered key waiting: (mod, mapping) in `mods.installed`.
+    selected_mod_key: Option<(usize, usize)>,
     /// Bindings: the action waiting for a pad button.
     pub selected_pad_action: Option<&'static str>,
     /// The glyphs the binds list shows (the setting, else the pad's family).
@@ -1664,10 +1716,12 @@ impl Default for OptionsUi {
             scroll: 0.0,
             dragging: None,
             shift: false,
+            modifiers: 0,
             slider_value: None,
             scrollbar_drag_y: None,
             selected_key: None,
             selected_native_key: None,
+            selected_mod_key: None,
             selected_pad_action: None,
             pad_style: GlyphStyle::Xbox,
             pad_by_letter: false,
@@ -3291,6 +3345,74 @@ impl OptionsUi {
                     y += 20.0;
                     rows.end(&mut out, y);
                 }
+                // Each native mod's registered keys, under the mod's title and their categories.
+                for (i, m) in s.mods.installed.iter().enumerate() {
+                    let Some(page) = m.native.as_ref().filter(|p| !p.mappings.is_empty()) else {
+                        continue;
+                    };
+                    rows.begin(&out, y);
+                    out.push(section_title(Text::literal(m.title.clone()), y, w));
+                    y += 20.0;
+                    rows.end(&mut out, y);
+                    let mut last_category = "";
+                    for (k, mapping) in page.mappings.iter().enumerate() {
+                        if !query.is_empty() && !mapping.label.to_lowercase().contains(&query) {
+                            continue;
+                        }
+                        let category = mapping.category.as_str();
+                        if !category.is_empty() && category != last_category {
+                            last_category = category;
+                            rows.begin(&out, y);
+                            out.push(section_title(Text::literal(mapping.category.clone()), y, w));
+                            y += 20.0;
+                            rows.end(&mut out, y);
+                        }
+                        let (key, modifiers) = s.mods.binding(
+                            &m.id,
+                            &mapping.id,
+                            (mapping.key.as_str(), mapping.modifiers),
+                        );
+                        let at_default = key == mapping.key && modifiers == mapping.modifiers;
+                        let mut message = binding_text(&key, modifiers);
+                        if self.selected_mod_key == Some((i, k)) {
+                            message = Text::literal("> ")
+                                .append(message.with_style(&Style {
+                                    color: Some(text::WHITE),
+                                    underlined: Some(true),
+                                    ..Style::default()
+                                }))
+                                .append(" <")
+                                .with_color(text::YELLOW);
+                        }
+                        rows.begin(&out, y);
+                        out.push(Widget {
+                            x: row_left + 2.0,
+                            y: y + 6.0,
+                            w: 200.0,
+                            h: 9.0,
+                            kind: WKind::Text {
+                                text: Text::literal(mapping.label.clone()),
+                                color: u32::MAX,
+                                centered: false,
+                            },
+                            list: false,
+                            row: 0,
+                        });
+                        let reset_x = scrollbar_x - 50.0 - 10.0;
+                        let change_x = reset_x - 5.0 - 75.0;
+                        out.push(button(change_x, y, 75.0, message, Act::ModKey(i, k)));
+                        let reset = button(
+                            reset_x,
+                            y,
+                            50.0,
+                            tr("controls.reset"),
+                            Act::ResetModKey(i, k),
+                        );
+                        out.push(if at_default { inactive(reset) } else { reset });
+                        y += 20.0;
+                        rows.end(&mut out, y);
+                    }
+                }
                 content = y + self.scroll - top + 2.0;
                 out[list_start..].iter_mut().for_each(|w| w.list = true);
                 out.push(button(
@@ -4203,6 +4325,7 @@ impl OptionsUi {
                         }
                         Act::ResetKeys => {
                             s.keys.reset_all();
+                            s.mods.keys.clear();
                             events.push(Event::Changed);
                         }
                         Act::ToggleMod(i) => {
@@ -4217,6 +4340,16 @@ impl OptionsUi {
                         Act::NativeKey(i, k) => {
                             self.selected_key = Some(NATIVE_KEY);
                             self.selected_native_key = Some((i, k));
+                        }
+                        Act::ModKey(i, k) => {
+                            self.selected_key = Some(MOD_KEY);
+                            self.selected_mod_key = Some((i, k));
+                        }
+                        Act::ResetModKey(i, k) => {
+                            if let Some((id, mapping)) = mod_mapping(s, i, k) {
+                                s.mods.reset_binding(&id, &mapping);
+                                events.push(Event::Changed);
+                            }
                         }
                         Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
@@ -4717,6 +4850,26 @@ impl OptionsUi {
             keys.insert(key.clone(), value);
             return vec![Event::Changed];
         }
+        if name == MOD_KEY {
+            let (i, k) = self.selected_mod_key.take().unwrap_or_default();
+            let Some((id, mapping)) = mod_mapping(s, i, k) else {
+                return Vec::new();
+            };
+            // A modifier key bound on its own is the key, not a modifier held with itself.
+            let own = match value.as_str() {
+                "key.keyboard.left.shift" | "key.keyboard.right.shift" => crate::mod_list::SHIFT,
+                "key.keyboard.left.control" | "key.keyboard.right.control" => {
+                    crate::mod_list::CONTROL
+                }
+                "key.keyboard.left.alt" | "key.keyboard.right.alt" => crate::mod_list::ALT,
+                _ => 0,
+            };
+            let modifiers = self.modifiers
+                & (crate::mod_list::SHIFT | crate::mod_list::CONTROL | crate::mod_list::ALT)
+                & !own;
+            s.mods.set_binding(&id, &mapping, &value, modifiers);
+            return vec![Event::Changed];
+        }
         if !s.extras.set_key(name, value.clone()) && !s.horizon.set_key(name, value.clone()) {
             s.keys.set(name, &value);
         }
@@ -5107,6 +5260,7 @@ impl OptionsUi {
                         }
                         Act::ResetKeys => {
                             s.keys.reset_all();
+                            s.mods.keys.clear();
                             events.push(Event::Changed);
                         }
                         Act::ToggleMod(i) => {
@@ -5123,6 +5277,16 @@ impl OptionsUi {
                         Act::NativeKey(i, k) => {
                             self.selected_key = Some(NATIVE_KEY);
                             self.selected_native_key = Some((i, k));
+                        }
+                        Act::ModKey(i, k) => {
+                            self.selected_key = Some(MOD_KEY);
+                            self.selected_mod_key = Some((i, k));
+                        }
+                        Act::ResetModKey(i, k) => {
+                            if let Some((id, mapping)) = mod_mapping(s, i, k) {
+                                s.mods.reset_binding(&id, &mapping);
+                                events.push(Event::Changed);
+                            }
                         }
                         Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
@@ -5883,6 +6047,7 @@ mod tests {
             dev: false,
             native: Some(crate::mod_list::NativePage {
                 keys: vec![["zoom".into(), "Zoom key".into(), "key.keyboard.z".into()]],
+                mappings: Vec::new(),
                 buttons: Vec::new(),
             }),
         });
@@ -6067,6 +6232,7 @@ mod tests {
             dev: false,
             native: Some(crate::mod_list::NativePage {
                 keys: vec![["zoom".into(), "Zoom".into(), "key.keyboard.z".into()]],
+                mappings: Vec::new(),
                 buttons: Vec::new(),
             }),
         });

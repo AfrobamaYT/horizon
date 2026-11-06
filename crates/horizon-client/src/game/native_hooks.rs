@@ -992,7 +992,7 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
-    mod_list::{self, Installed, NativePage},
+    mod_list::{self, Installed, KeyMapping, NativePage},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
     text::Text,
@@ -1028,7 +1028,7 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
-use mod_api::{BlockKey, EffectKey};
+use mod_api::{BlockKey, EffectKey, NativeKeyRegistration};
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
     NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
@@ -3440,6 +3440,14 @@ impl Game<'_> {
     /// has no operator level: one with a nonzero level is left out.
     pub(super) fn native_register_client_commands(&mut self, commands: &mut Vec<NativeCommand>) {
         self.fire_register_client_commands(commands);
+    }
+    /// The keys native mods register on Options > Controls (`RegisterKeyMappingsEvent`): push
+    /// yours. Asked when the mod list is made (`list_native_mods`).
+    pub(super) fn native_register_key_mappings(
+        &mut self,
+        mappings: &mut Vec<NativeKeyRegistration>,
+    ) {
+        self.fire_register_key_mappings(mappings);
     }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API 362.
@@ -12108,6 +12116,8 @@ impl Game<'_> {
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
+        let mut registered = Vec::new();
+        self.native_register_key_mappings(&mut registered);
         let native = self.mods.native.clone();
         // Wasm proxies are installed in the same dispatch table as native mods. Their rows
         // need the same live switch and settings page, not a frozen content-only toggle.
@@ -12140,12 +12150,24 @@ impl Game<'_> {
         for mut row in rows {
             let mut buttons = Vec::new();
             self.native_settings(&row.id, &mut buttons);
+            let mappings: Vec<KeyMapping> = registered
+                .iter()
+                .filter(|k| k.mod_id == row.id)
+                .map(|k| KeyMapping {
+                    id: k.id.clone(),
+                    label: k.label.clone(),
+                    key: k.key.clone(),
+                    modifiers: k.modifiers.bits,
+                    category: k.category.clone(),
+                })
+                .collect();
             row.native = Some(NativePage {
                 keys: mods
                     .iter_mut()
                     .find(|page| page.id == row.id)
                     .map(|page| std::mem::take(&mut page.keys))
                     .unwrap_or_default(),
+                mappings,
                 buttons,
             });
             self.settings.mods.installed.push(row);

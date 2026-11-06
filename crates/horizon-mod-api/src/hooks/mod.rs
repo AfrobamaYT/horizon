@@ -256,6 +256,7 @@ mod projectile_refs;
 mod raid_refs;
 mod recipe_book_categories;
 mod recipe_property_sets;
+mod register_key_mappings;
 mod reload_resources;
 mod render_arm;
 mod render_frame_post;
