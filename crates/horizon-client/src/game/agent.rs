@@ -14,10 +14,7 @@ use horizon_client::{
     Result,
     block_entity_anim::Ticker,
     items::ItemStack,
-    mobs::{
-        Species,
-        render::{PROFESSIONS, VILLAGER_TYPES},
-    },
+    mobs::{Species, render::VILLAGER_TYPES},
     widgets,
 };
 use horizon_core::geometry::Vec3;
@@ -698,7 +695,7 @@ impl Game<'_> {
             if matches!(m.species(), Species::Villager | Species::ZombieVillager) {
                 v["villager"] = json!({
                     "type": VILLAGER_TYPES[m.extra.variant as usize % VILLAGER_TYPES.len()],
-                    "profession": PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()],
+                    "profession": horizon_client::mobs::villager::profession(m.extra.variant2).id,
                     "level": m.extra.villager_level,
                 });
             }

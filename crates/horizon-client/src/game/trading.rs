@@ -6,11 +6,7 @@ use super::{
     Game,
     stations::{INPUT, Kind, RESULT, Station},
 };
-use horizon_client::mobs::{
-    Species,
-    render::{PROFESSIONS, VILLAGER_TYPES},
-    villager,
-};
+use horizon_client::mobs::{Species, render::VILLAGER_TYPES, villager};
 use horizon_client::{
     hud::{HudBatch, rgba},
     items::ItemStack,
@@ -208,7 +204,7 @@ impl Game<'_> {
                 }
                 v
             } else {
-                let profession = PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()];
+                let profession = horizon_client::mobs::villager::profession(m.extra.variant2).id;
                 let level = m.extra.villager_level.max(1);
                 let set = merchant::Trades::set_for(profession, level);
                 if self.stations().trades.sets.contains_key(&set) {
@@ -265,7 +261,7 @@ impl Game<'_> {
         }
         let villager = species == Species::Villager;
         let profession = if villager {
-            PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()]
+            horizon_client::mobs::villager::profession(m.extra.variant2).id
         } else {
             "wandering_trader"
         };
