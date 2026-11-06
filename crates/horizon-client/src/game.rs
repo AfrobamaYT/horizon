@@ -21857,9 +21857,7 @@ impl Game<'_> {
             Some(kept) => {
                 match lan::reload_sync_data(&self.res.core.item_data, &self.pack_files(), &kept) {
                     Ok(sync) => {
-                        if let Some(host) = self.lan.as_mut() {
-                            host.hub.reload_resources(sync);
-                        }
+                        self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
                         self.run_native_advancement_grants();
                     }
                     Err(e) => {
