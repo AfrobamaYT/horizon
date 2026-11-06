@@ -156,3 +156,28 @@ fn lexical_call_identity_refuses_shadowing_in_all_binding_contexts() {
     assert!(Scope::scan(&sig, Some(&body)).check_target(&method).is_ok());
     assert!(opaque_argument(&syn::parse_quote!(unknown!(1))));
 }
+
+#[test]
+fn argument_records_refuse_hidden_receiver_aliases_and_macro_expansions() {
+    let receiver = syn::parse_quote!(self.child);
+    for written in [
+        "self.value",
+        "alias.value",
+        "*alias",
+        "read(alias)",
+        "opaque!(value)",
+    ] {
+        let arg = syn::parse_str(written).unwrap();
+        assert!(
+            arguments(&[&arg], Some(&receiver), true).is_err(),
+            "{written}"
+        );
+    }
+    for written in ["value", "(value)", "7", "-7", "!true", "Type::CONSTANT"] {
+        let arg = syn::parse_str(written).unwrap();
+        assert!(
+            arguments(&[&arg], Some(&receiver), true).is_ok(),
+            "{written}"
+        );
+    }
+}

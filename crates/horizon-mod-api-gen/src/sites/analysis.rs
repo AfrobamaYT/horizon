@@ -160,6 +160,51 @@ pub(crate) fn opaque_argument(expr: &Expr) -> bool {
     scan.opaque
 }
 
+/// Check expression lowering after the callee's record fields have been proven scalar/unit.
+/// A mutable receiver is borrowed before record construction, so argument expressions needing
+/// alias analysis are refused rather than losing Rust's two-phase borrowing semantics.
+pub(crate) fn arguments(
+    args: &[&Expr],
+    receiver: Option<&Expr>,
+    mutable: bool,
+) -> Result<(), super::Cause> {
+    fn simple_value(expr: &Expr) -> bool {
+        match expr {
+            Expr::Lit(_) | Expr::Path(_) => true,
+            Expr::Paren(e) => simple_value(&e.expr),
+            Expr::Group(e) => simple_value(&e.expr),
+            Expr::Unary(e) => {
+                matches!(e.op, syn::UnOp::Neg(_) | syn::UnOp::Not(_))
+                    && matches!(&*e.expr, Expr::Lit(_))
+            }
+            _ => false,
+        }
+    }
+    let root = receiver.and_then(root).map(ToString::to_string);
+    for arg in args {
+        if opaque_argument(arg) {
+            return Err(super::Cause::Record(
+                "macro-dependent argument cannot be hygienically lowered",
+            ));
+        }
+        let mut identifiers = BTreeSet::new();
+        tokens(arg.to_token_stream(), &mut identifiers);
+        if identifiers.contains("self")
+            || root.as_ref().is_some_and(|name| identifiers.contains(name))
+        {
+            return Err(super::Cause::Record(
+                "argument borrows or reads the receiver: two-phase borrowing is not record-safe",
+            ));
+        }
+        if mutable && !simple_value(arg) {
+            return Err(super::Cause::Record(
+                "mutable-receiver argument needs a literal or independent scalar binding: two-phase borrowing is not record-safe",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Matching calls in source order, excluding every AST context whose expressions are constant.
 pub(crate) fn calls<'a>(body: &'a syn::Block, selector: &str) -> Vec<&'a Expr> {
     struct Calls<'a, 's> {
