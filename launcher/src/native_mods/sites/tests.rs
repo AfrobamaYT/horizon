@@ -1,6 +1,9 @@
 use super::*;
 use std::{fs, path::Path, process::Command};
 
+#[path = "slot_lists.rs"]
+mod slot_lists;
+
 struct Case<'a> {
     kind: &'a str,
     body: &'a str,
