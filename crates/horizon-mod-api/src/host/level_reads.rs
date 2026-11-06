@@ -105,6 +105,28 @@ pub trait LevelReadsBackend {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: both.
+    /// Whether `pos` is inside the level's world bounds (`Level.isInWorldBounds`): within 30,000,000
+    /// blocks of the origin on x and z, and between the level's lowest and highest build height.
+    /// None for a stale handle, before client login, or for a dimension unavailable on this side.
+    /// Does not load chunks.
+    fn level_in_world_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
+        crate::phase::unprovided(
+            "Backend::level_in_world_bounds",
+            "level_in_world_bounds",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// Whether `pos` is inside the spawnable bounds (`Level.isInSpawnableBounds`): within
+    /// 30,000,000 blocks on x and z and 20,000,000 on y. None as for `in_world_bounds`.
+    fn level_in_spawnable_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
+        crate::phase::unprovided(
+            "Backend::level_in_spawnable_bounds",
+            "level_in_spawnable_bounds",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
     /// Side: server.
     /// The ticks the server has run (`Level.getGameTime`), shared by every
     /// level as in vanilla. API 381.
@@ -135,28 +157,6 @@ pub trait LevelReadsBackend {
         crate::phase::unprovided(
             "Backend::level_fluid_flow",
             "level_fluid_flow",
-            crate::phase::LoadAccess::WorldOnly,
-        )
-    }
-    /// Side: both.
-    /// Whether `pos` is inside the level's world bounds (`Level.isInWorldBounds`): within 30,000,000
-    /// blocks of the origin on x and z, and between the level's lowest and highest build height.
-    /// None for a stale handle, before client login, or for a dimension unavailable on this side.
-    /// Does not load chunks.
-    fn level_in_world_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
-        crate::phase::unprovided(
-            "Backend::level_in_world_bounds",
-            "level_in_world_bounds",
-            crate::phase::LoadAccess::WorldOnly,
-        )
-    }
-    /// Side: both.
-    /// Whether `pos` is inside the spawnable bounds (`Level.isInSpawnableBounds`): within
-    /// 30,000,000 blocks on x and z and 20,000,000 on y. None as for `in_world_bounds`.
-    fn level_in_spawnable_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
-        crate::phase::unprovided(
-            "Backend::level_in_spawnable_bounds",
-            "level_in_spawnable_bounds",
             crate::phase::LoadAccess::WorldOnly,
         )
     }

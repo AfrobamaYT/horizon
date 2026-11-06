@@ -694,7 +694,7 @@ mod tests {
 
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
-            let nether = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(level.in_world_bounds(game, [0, 64, 0]), Some(true));
             assert_eq!(level.in_world_bounds(game, [0, -65, 0]), Some(false));
             assert_eq!(level.in_world_bounds(game, [0, 320, 0]), Some(false));
