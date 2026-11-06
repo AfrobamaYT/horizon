@@ -436,7 +436,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_changed_held_stack_hits_by_its_own_modifiers() {
         use horizon_client::mobs::gear;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         use mod_api::EquipmentSlot;
         with_game(|game| {
             spawn(game);
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_mob_attribute_packet_is_the_live_maps_instances() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         use mod_api::EquipmentSlot;
         with_game(|game| {
             spawn(game);
@@ -552,7 +552,7 @@ mod tests {
         use AttributeOperation::*;
         use ModifierLifetime::*;
         use horizon_client::mobs::{Damage, DamageKind, armor};
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         use mod_api::EquipmentSlot;
         with_game(|game| {
             spawn(game);
@@ -741,7 +741,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_saved_base_and_modifier_are_read_and_saved_again() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             spawn(game);
             let saved = Tag::List(vec![Tag::compound([
@@ -772,7 +772,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_stacks_own_modifiers_replace_its_items() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             spawn(game);
             let damage = "minecraft:attack_damage";
@@ -803,7 +803,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn gear_knockback_is_read_again_only_when_the_gear_changes() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         with_game(|game| {
             spawn(game);
             let read_at = |game: &Game<'_>| {
@@ -848,9 +848,9 @@ mod tests {
     }
 
     /// The ids of the modifiers a saved `attributes` list holds.
-    fn saved_ids<'a>(list: impl IntoIterator<Item = &'a horizon_world::nbt::Tag>) -> Vec<String> {
+    fn saved_ids<'a>(list: impl IntoIterator<Item = &'a horizon_core::nbt::Tag>) -> Vec<String> {
         use horizon_client_core::nbt_value::text;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         list.into_iter()
             .flat_map(|entry| match entry.get("modifiers") {
                 Some(Tag::List(l)) => l.iter().filter_map(|m| text(m.get("id"))).collect(),

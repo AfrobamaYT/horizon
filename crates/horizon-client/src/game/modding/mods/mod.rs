@@ -1095,14 +1095,14 @@ mod tests {
         assert_eq!(ghoul.health, 40.0);
         let saved =
             |m: &Mob| horizon_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
-        let keys = |tag: &horizon_world::nbt::Tag| -> Vec<String> {
-            let horizon_world::nbt::Tag::Compound(map) = tag else {
+        let keys = |tag: &horizon_core::nbt::Tag| -> Vec<String> {
+            let horizon_core::nbt::Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
             };
             map.keys().map(|k| k.to_string_lossy()).collect()
         };
         let (zombie_tag, ghoul_tag) = (saved(&zombie), saved(&ghoul));
-        let Some(horizon_world::nbt::Tag::String(id)) = ghoul_tag.get("id") else {
+        let Some(horizon_core::nbt::Tag::String(id)) = ghoul_tag.get("id") else {
             panic!("a saved mob has its id");
         };
         assert_eq!(id.to_string_lossy(), "ruby:ghoul");
@@ -1136,7 +1136,7 @@ mod tests {
     #[test]
     fn a_mod_trader_type_is_a_wandering_trader_under_its_own_id() {
         use horizon_client::mobs::{Mob, Species};
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let types = living_mod_types();
         let merchant = &types["ruby:merchant"];
         assert_eq!(merchant.species, Species::WanderingTrader);

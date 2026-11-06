@@ -238,7 +238,7 @@ impl adv::World for View<'_, '_> {
     fn smokey(&self, p: [i32; 3]) -> bool {
         horizon_client::beehive::smokey(&self.0.mob_world_base(&[]), p)
     }
-    fn block_entity_nbt(&self, p: [i32; 3]) -> Option<horizon_world::nbt::Tag> {
+    fn block_entity_nbt(&self, p: [i32; 3]) -> Option<horizon_core::nbt::Tag> {
         self.0.block_entity_nbt(p)
     }
     fn in_tag(&self, registry: &str, tag: &str, id: &str) -> bool {
@@ -1518,7 +1518,7 @@ impl Game<'_> {
             .data()
             .and_then(|data| data.other("minecraft:max_damage"))
         {
-            Some(horizon_world::nbt::Tag::Int(value)) => i64::from(*value),
+            Some(horizon_core::nbt::Tag::Int(value)) => i64::from(*value),
             _ => i64::from(
                 self.res
                     .items()

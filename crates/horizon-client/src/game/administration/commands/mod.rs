@@ -2608,7 +2608,7 @@ impl Game<'_> {
                     // WeightedList.of(new SpawnData()).
                     if cart.spawner.is_some() {
                         use horizon_client::mobs::spawner::{Spawner, SpawnerExt};
-                        let empty = horizon_world::nbt::Tag::Compound(Default::default());
+                        let empty = horizon_core::nbt::Tag::Compound(Default::default());
                         cart.spawner = Some(Box::new(Spawner::load(&empty)));
                     }
                     let id = cart.id;
@@ -2819,9 +2819,9 @@ impl Game<'_> {
     /// The block entity part of `BlockInput.place`: load the block entity
     /// from the argument's tag; true when its saved data changed.
     pub(super) fn load_block_entity_nbt(&mut self, pos: [i32; 3], nbt: &str) -> bool {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         if self.pot_data(pos).is_some() {
-            let Ok((tag, _)) = horizon_world::nbt::parse_snbt(nbt) else {
+            let Ok((tag, _)) = horizon_core::nbt::parse_snbt(nbt) else {
                 return false;
             };
             return self.set_pot_data(pos, &tag).unwrap_or(false);
@@ -2832,7 +2832,7 @@ impl Game<'_> {
         };
         let name = self.data_block_name(pos);
         let before = horizon_client::save::encode_block_entity(key, e, &name);
-        let Ok((mut tag, _)) = horizon_world::nbt::parse_snbt(nbt) else {
+        let Ok((mut tag, _)) = horizon_core::nbt::parse_snbt(nbt) else {
             return false;
         };
         if let Tag::Compound(c) = &mut tag {
@@ -2885,7 +2885,7 @@ impl Game<'_> {
             .is_some_and(|entity| {
                 let mut tag = horizon_client::save::encode_block_entity(key, entity, name);
                 match &mut tag {
-                    horizon_world::nbt::Tag::Compound(map) => rolled.restore(map),
+                    horizon_core::nbt::Tag::Compound(map) => rolled.restore(map),
                     _ => false,
                 }
             });
@@ -2926,7 +2926,7 @@ impl Game<'_> {
     pub(super) fn take_loot_table(
         &mut self,
         key: (i32, i32, i32),
-        tag: &horizon_world::nbt::Tag,
+        tag: &horizon_core::nbt::Tag,
         entity: &mut horizon_client::containers::BlockEntity,
     ) -> bool {
         use horizon_client::{containers::BlockEntity, save, structure_blocks};
@@ -2976,9 +2976,9 @@ impl Game<'_> {
     pub(super) fn restore_loot_table(
         world: &horizon_client::world::World,
         key: (i32, i32, i32),
-        tag: &mut horizon_world::nbt::Tag,
+        tag: &mut horizon_core::nbt::Tag,
     ) {
-        let horizon_world::nbt::Tag::Compound(map) = tag else {
+        let horizon_core::nbt::Tag::Compound(map) = tag else {
             return;
         };
         let rolled = world
@@ -3660,7 +3660,7 @@ impl Game<'_> {
             .and_then(|t| t.strip_suffix(']'))
             .unwrap_or("");
         let components = match horizon_client::item_data::encode_components(stack) {
-            Some(horizon_world::nbt::Tag::Compound(c)) => c,
+            Some(horizon_core::nbt::Tag::Compound(c)) => c,
             _ => Default::default(),
         };
         let test = |term: &str| -> bool {
@@ -3679,7 +3679,7 @@ impl Game<'_> {
             let present = components.get(&id.as_str().into());
             let result = match term[split..].chars().next() {
                 Some('=') => {
-                    let value = horizon_world::nbt::parse_snbt(term[split + 1..].trim())
+                    let value = horizon_core::nbt::parse_snbt(term[split + 1..].trim())
                         .ok()
                         .map(|(t, _)| t);
                     match (present, value) {
@@ -3692,24 +3692,22 @@ impl Game<'_> {
                 }
                 Some('~') => {
                     // Sub-predicates: `count` and component predicates.
-                    let value = horizon_world::nbt::parse_snbt(term[split + 1..].trim())
+                    let value = horizon_core::nbt::parse_snbt(term[split + 1..].trim())
                         .ok()
                         .map(|(t, _)| t);
                     match (id.as_str(), value) {
                         ("minecraft:count", Some(v)) => {
                             let n = i64::from(stack.count);
                             match &v {
-                                horizon_world::nbt::Tag::Compound(_) => {
+                                horizon_core::nbt::Tag::Compound(_) => {
                                     let get = |k: &str| match v.get(k) {
-                                        Some(horizon_world::nbt::Tag::Int(i)) => {
-                                            Some(i64::from(*i))
-                                        }
+                                        Some(horizon_core::nbt::Tag::Int(i)) => Some(i64::from(*i)),
                                         _ => None,
                                     };
                                     get("min").is_none_or(|m| n >= m)
                                         && get("max").is_none_or(|m| n <= m)
                                 }
-                                horizon_world::nbt::Tag::Int(i) => n == i64::from(*i),
+                                horizon_core::nbt::Tag::Int(i) => n == i64::from(*i),
                                 _ => false,
                             }
                         }

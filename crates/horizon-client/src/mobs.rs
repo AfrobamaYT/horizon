@@ -468,7 +468,7 @@ impl MobType {
             .data()
             .and_then(|d| d.other("minecraft:max_stack_size"))
             .and_then(|t| match t {
-                horizon_world::nbt::Tag::Int(n) => u32::try_from(*n).ok(),
+                horizon_core::nbt::Tag::Int(n) => u32::try_from(*n).ok(),
                 _ => None,
             })
             .unwrap_or_else(|| {
@@ -1178,7 +1178,7 @@ pub struct Extra {
     pub stabbed: Option<Vec<(Who, i64)>>,
     /// `ItemStack.getUseAnimation` of the item in use (`None` when nothing is);
     /// a player model's arm pose and `isBlocking` follow it.
-    pub use_animation: horizon_world::consumable::UseAnimation,
+    pub use_animation: horizon_core::use_animation::UseAnimation,
     /// The `arm_pose` the items in the main and off hand declare, if any: the pose
     /// a player model's arm takes holding it, in place of vanilla's.
     pub held_arm_pose: [Option<horizon_core::arm_pose::ArmPose>; 2],
@@ -1643,22 +1643,22 @@ pub enum MannequinDescription {
     #[default]
     Default,
     Hidden,
-    Custom(horizon_world::nbt::Tag),
+    Custom(horizon_core::nbt::Tag),
 }
 impl MannequinDescription {
     /// `Mannequin.getDescription`: the component `DATA_DESCRIPTION` holds, none when hidden.
-    pub fn component(&self) -> Option<horizon_world::nbt::Tag> {
+    pub fn component(&self) -> Option<horizon_core::nbt::Tag> {
         match self {
-            Self::Default => Some(horizon_world::nbt::Tag::compound([(
+            Self::Default => Some(horizon_core::nbt::Tag::compound([(
                 "translate",
-                horizon_world::nbt::Tag::String("entity.minecraft.mannequin.label".into()),
+                horizon_core::nbt::Tag::String("entity.minecraft.mannequin.label".into()),
             )])),
             Self::Hidden => None,
             Self::Custom(tag) => Some(tag.clone()),
         }
     }
     /// `DATA_DESCRIPTION` as a client reads it.
-    pub fn from_component(tag: Option<&horizon_world::nbt::Tag>) -> Self {
+    pub fn from_component(tag: Option<&horizon_core::nbt::Tag>) -> Self {
         match tag {
             None => Self::Hidden,
             Some(tag) if Some(tag) == Self::Default.component().as_ref() => Self::Default,
@@ -5363,7 +5363,7 @@ mod held_stack_tests {
     fn replacing_even_the_same_item_clears_its_old_components() {
         let mut extra = Extra::default();
         let mut named = crate::items::ItemStack::new("minecraft:diamond_sword", 1);
-        named.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Old Sword".into()));
+        named.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("Old Sword".into()));
         extra.set_main_hand_stack(Some(named.clone()));
         assert_eq!(
             extra.main_hand_stack().unwrap().custom_name().as_deref(),
@@ -5772,7 +5772,7 @@ mod armor_hurt_tests {
         let mut horse = horse();
         let mut stack = crate::items::ItemStack::new("minecraft:red_carpet", 3);
         stack.damage = 7;
-        stack.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+        stack.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
         horse.extra.set_body_stack(Some(stack.clone()));
         assert_eq!(horse.take_body_equipment(), Some(stack));
         assert_eq!(horse.take_body_equipment(), None);
@@ -5863,7 +5863,7 @@ mod armor_hurt_tests {
     /// back, and the armour value is the body piece's.
     #[test]
     fn a_horse_holds_a_helmet_and_its_body_armour_at_once() {
-        use horizon_world::player_inventory::EquipmentSlot;
+        use horizon_core::equipment_slot::EquipmentSlot;
         let mut m = horse();
         m.extra.set_slot_id(
             horizon_items::equipment::HEAD,

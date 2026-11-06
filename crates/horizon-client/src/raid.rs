@@ -7,11 +7,11 @@
 //! wave); a raid reads them and the world through [`RaidLevel`] and asks the
 //! game for its side effects with [`Action`]s, so the game and the
 //! differential test (`tools/test_raid_parity.py`) run the same rules.
+use horizon_core::nbt::{JavaString, Tag};
 use horizon_core::{
     geometry::trig,
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::nbt::{JavaString, Tag};
 use std::collections::BTreeMap;
 
 pub const MAX_OMEN_LEVEL: i32 = 5;

@@ -17,10 +17,13 @@ use horizon_core::{
     ticks::ChunkTicks,
 };
 use horizon_world::attachments::{ATTACHMENTS_KEY, attachment_compound};
-use horizon_world::{level::MovingPiston, nbt::Tag, registry::BlockStateId};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{level::MovingPiston, registry::BlockStateId},
 };
 
 /// What Horizon remembers about loaded entities to save them faithfully.
@@ -233,13 +236,13 @@ impl Game<'_> {
             if let Some(g) = self.be_anims.gateway_servers.get(&pos)
                 && let Some(age) = tag.get_mut("Age")
             {
-                *age = horizon_world::nbt::Tag::Long(g.age);
+                *age = horizon_core::nbt::Tag::Long(g.age);
             }
         }
         if let Some(t) = self.world.inhabited.get(&(chunk.x, chunk.z)) {
             extras
                 .root
-                .insert("InhabitedTime".into(), horizon_world::nbt::Tag::Long(*t));
+                .insert("InhabitedTime".into(), horizon_core::nbt::Tag::Long(*t));
         }
         chunk.saved = Some(Arc::new(extras));
     }
@@ -1254,7 +1257,7 @@ impl Game<'_> {
     /// `@e[tag=]`, `/tag` and `/data get` see them, and the `Item` a
     /// fireball or a thrown item projectile was loaded with.
     pub(super) fn remember_tags(&mut self, id: u32, tag: &Tag) {
-        let mut map = horizon_world::nbt::Compound::new();
+        let mut map = horizon_core::nbt::Compound::new();
         if let Some(tags @ Tag::List(_)) = tag.get("Tags") {
             map.insert("Tags".into(), tags.clone());
         }

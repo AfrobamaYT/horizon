@@ -10,7 +10,7 @@ use horizon_client::{
     items::{ItemInfo, ItemStack},
     spear::Kinetic,
 };
-use horizon_world::consumable::UseAnimation;
+use horizon_core::use_animation::UseAnimation;
 
 #[derive(Clone, Copy)]
 pub(super) enum ItemUseState {
@@ -54,7 +54,7 @@ impl Game<'_> {
             let consumable = data.and_then(|d| d.other("minecraft:consumable"));
             if let Some(component) = consumable {
                 let name = component.get("animation");
-                use horizon_world::nbt::Tag;
+                use horizon_core::nbt::Tag;
                 if let Some(Tag::String(name)) = name {
                     horizon_items::use_animation::animation_name(name.0.iter().copied())
                 } else {
@@ -382,7 +382,7 @@ mod tests {
         start_of, tick_left, ticks_left, use_pose,
     };
     use horizon_client::first_person::ItemPose;
-    use horizon_world::consumable::UseAnimation;
+    use horizon_core::use_animation::UseAnimation;
 
     #[test]
     #[ignore = "needs prepared resources"]
@@ -412,9 +412,9 @@ mod tests {
             let mut bow = horizon_client::items::ItemStack::new("minecraft:bow", 1);
             bow.data_mut().set_other(
                 "minecraft:consumable",
-                Some(horizon_world::nbt::Tag::compound([(
+                Some(horizon_core::nbt::Tag::compound([(
                     "animation",
-                    horizon_world::nbt::Tag::String("drink".into()),
+                    horizon_core::nbt::Tag::String("drink".into()),
                 )])),
             );
             assert_eq!(game.item_use_animation(&bow), UseAnimation::Bow);
@@ -516,13 +516,13 @@ mod tests {
                 let mut patched = horizon_client::items::ItemStack::new("minecraft:bow", 1);
                 patched.data_mut().set_other(
                     "minecraft:consumable",
-                    Some(horizon_world::nbt::Tag::compound([(
+                    Some(horizon_core::nbt::Tag::compound([(
                         "animation",
-                        horizon_world::nbt::Tag::String("drink".into()),
+                        horizon_core::nbt::Tag::String("drink".into()),
                     )])),
                 );
                 assert_eq!(game.item_use_animation(&patched), UseAnimation::Drink);
-                use horizon_world::nbt::Tag;
+                use horizon_core::nbt::Tag;
                 let mut kinetic_stick = horizon_client::items::ItemStack::new("minecraft:stick", 1);
                 kinetic_stick.data_mut().set_other(
                     "minecraft:kinetic_weapon",

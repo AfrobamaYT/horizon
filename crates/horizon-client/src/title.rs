@@ -574,7 +574,7 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
             };
             let data = root.get("Data")?;
             let modified = match data.get("LastPlayed") {
-                Some(horizon_world::nbt::Tag::Long(millis)) if *millis >= 0 => std::time::UNIX_EPOCH + std::time::Duration::from_millis(*millis as u64),
+                Some(horizon_core::nbt::Tag::Long(millis)) if *millis >= 0 => std::time::UNIX_EPOCH + std::time::Duration::from_millis(*millis as u64),
                 _ => modified,
             };
             Some(WorldEntry {
@@ -583,9 +583,9 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
                 game_mode: level.game_mode,
                 hardcore: level.hardcore,
                 modified,
-                commands: matches!(data.get("allowCommands"), Some(horizon_world::nbt::Tag::Byte(v)) if *v != 0),
+                commands: matches!(data.get("allowCommands"), Some(horizon_core::nbt::Tag::Byte(v)) if *v != 0),
                 version: data.get("Version").and_then(|v| v.get("Name"))
-                    .and_then(|v| match v { horizon_world::nbt::Tag::String(s) => Some(s.to_string_lossy()), _ => None })
+                    .and_then(|v| match v { horizon_core::nbt::Tag::String(s) => Some(s.to_string_lossy()), _ => None })
                     .unwrap_or_else(|| lang::get_or("selectWorld.versionUnknown", "Unknown")),
                 locked: crate::save::SessionLock::is_locked(&path),
                 corrupted: false,

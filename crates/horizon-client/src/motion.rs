@@ -856,7 +856,7 @@ impl PlayerMotion {
     /// `AttributeMap.pack` in `AttributeInstance.Packed.LIST_CODEC`'s form: the
     /// player's `attributes` list (LivingEntity.addAdditionalSaveData), each
     /// instance's id, base and permanent modifiers.
-    pub fn saved_attributes(&self) -> horizon_world::nbt::Tag {
+    pub fn saved_attributes(&self) -> horizon_core::nbt::Tag {
         self.packed_attributes(true)
     }
     /// `ServerPlayer.restoreFrom`: the attributes a player's new body takes
@@ -865,19 +865,16 @@ impl PlayerMotion {
     /// level (`ServerPlayer.teleport`) is the same entity, with its permanent
     /// modifiers too (`restoreAll`, `assignPermanentModifiers`). A scale of
     /// 0.1 is still 0.1 after a respawn or a trip through a portal (#3684).
-    pub fn carried_attributes(&self, restore_all: bool) -> horizon_world::nbt::Tag {
+    pub fn carried_attributes(&self, restore_all: bool) -> horizon_core::nbt::Tag {
         self.packed_attributes(restore_all)
     }
-    fn packed_attributes(&self, modifiers: bool) -> horizon_world::nbt::Tag {
-        horizon_world::nbt::Tag::List(crate::living_attributes::pack(&self.attributes, modifiers))
+    fn packed_attributes(&self, modifiers: bool) -> horizon_core::nbt::Tag {
+        horizon_core::nbt::Tag::List(crate::living_attributes::pack(&self.attributes, modifiers))
     }
     /// `AttributeMap.apply` of a saved `attributes` list
     /// (LivingEntity.readAdditionalSaveData): each known attribute takes its
     /// saved base and permanent modifiers; unknown ones are skipped.
-    pub fn apply_saved_attributes(
-        &mut self,
-        saved: Option<&horizon_world::nbt::Tag>,
-    ) -> Result<()> {
+    pub fn apply_saved_attributes(&mut self, saved: Option<&horizon_core::nbt::Tag>) -> Result<()> {
         crate::living_attributes::apply_saved(&mut self.attributes, saved)
     }
     /// `Player.readAdditionalSaveData`: the movement speed's base is the abilities' walking speed.
@@ -3451,7 +3448,7 @@ mod tests {
             health: 40.0,
             food: 20,
             saturation: 5.0,
-            player_extra: Some(horizon_world::nbt::Tag::compound([(
+            player_extra: Some(horizon_core::nbt::Tag::compound([(
                 "attributes",
                 p.saved_attributes(),
             )])),
@@ -5752,9 +5749,9 @@ mod tests {
             w.player.velocity.y > 0.02,
             "look up must steer a submerged swimmer upward"
         );
-        let extra = horizon_world::nbt::Tag::compound([
-            ("Fire", horizon_world::nbt::Tag::Short(160)),
-            ("Air", horizon_world::nbt::Tag::Short(8)),
+        let extra = horizon_core::nbt::Tag::compound([
+            ("Fire", horizon_core::nbt::Tag::Short(160)),
+            ("Air", horizon_core::nbt::Tag::Short(8)),
         ]);
         let mut level = crate::save::Level {
             health: 13.0,

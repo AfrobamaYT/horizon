@@ -18,14 +18,14 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use horizon_world::{
-    level::portal_travel::{
+use std::collections::HashMap;
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::level::portal_travel::{
         BorderBounds, FoundRectangle, closest_portal, collision_free_position, exit_position,
         largest_rectangle_around, relative_position,
     },
-    nbt::Tag,
 };
-use std::collections::HashMap;
 
 /// `Player.getDimensionChangingDelay`.
 pub(super) const PLAYER_DELAY: i32 = 10;

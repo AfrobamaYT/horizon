@@ -118,18 +118,6 @@ use horizon_core::{
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_mods::selection::{Argument, LaunchArguments};
-use horizon_world::{
-    block_collision::BlockCollisionRegistry,
-    collision_context::{CollisionContext, CollisionEntity, CollisionItem},
-    entity_obstruction::{EntityIdentity, EntityObstructionWorld, ObstructionEntity},
-    fluid::FluidState,
-    level::{
-        Behaviours, BucketContent, Dimension as LevelDimension, EntityQuery, Landing, LevelAccess,
-        LevelEvent, PlaceContext, PlaceOutcome, PlacementContext, PlayerContext, PlayerEffect,
-        Ticks, flags as level_flags,
-    },
-    registry::BlockStateId,
-};
 pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
@@ -161,6 +149,21 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Window, WindowId},
+};
+use {
+    horizon_core::dimension::Dimension as LevelDimension,
+    horizon_world::{
+        block_collision::BlockCollisionRegistry,
+        collision_context::{CollisionContext, CollisionEntity, CollisionItem},
+        entity_obstruction::{EntityIdentity, EntityObstructionWorld, ObstructionEntity},
+        fluid::FluidState,
+        level::{
+            Behaviours, BucketContent, EntityQuery, Landing, LevelAccess, LevelEvent, PlaceContext,
+            PlaceOutcome, PlacementContext, PlayerContext, PlayerEffect, Ticks,
+            flags as level_flags,
+        },
+        registry::BlockStateId,
+    },
 };
 
 /// The time a frame spends uploading chunk meshes when the player set no
@@ -999,7 +1002,7 @@ impl LevelAccess for GameLevel<'_> {
         pos: BlockPos,
         state: BlockStateId,
         moved: bool,
-        updates: &mut Vec<horizon_world::level::NeighbourUpdate>,
+        updates: &mut Vec<horizon_core::neighbour_update::NeighbourUpdate>,
     ) {
         if self.native_authoritative {
             self.native_affect_neighbors_after_removal(self.dimension, pos, state, moved, updates);
@@ -1328,7 +1331,7 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn adjust_connects_to(
         &self,
-        kind: horizon_world::level::ConnectionKind,
+        kind: horizon_core::connection_kind::ConnectionKind,
         pos: BlockPos,
         state: BlockStateId,
         neighbour: BlockStateId,
@@ -1858,8 +1861,8 @@ impl LevelAccess for GameLevel<'_> {
     fn remove_block_entity(&mut self, pos: BlockPos, old: BlockStateId, side_effects: bool) -> u8 {
         self.remove_entity(pos, old, side_effects)
     }
-    fn load_block_entity(&mut self, pos: BlockPos, mut nbt: horizon_world::nbt::Compound) {
-        use horizon_world::nbt::Tag;
+    fn load_block_entity(&mut self, pos: BlockPos, mut nbt: horizon_core::nbt::Compound) {
+        use horizon_core::nbt::Tag;
         for (k, v) in [("x", pos.x), ("y", pos.y), ("z", pos.z)] {
             nbt.insert(k.into(), Tag::Int(v));
         }
@@ -1919,7 +1922,7 @@ struct FallingBlock {
     stuck: Vec3,
     damage: horizon_client::falling_block::Damage,
     /// The UUID and compound it was loaded with, kept while it moves.
-    saved: Option<Box<([i32; 4], horizon_world::nbt::Tag)>>,
+    saved: Option<Box<([i32; 4], horizon_core::nbt::Tag)>>,
 }
 impl FallingBlock {
     /// Where `FallingBlockRenderer` draws the block's model corner, `alpha`
@@ -2148,7 +2151,7 @@ pub(super) fn durability_damage(damage: f32) -> f32 {
 /// as vanilla casts it); an entry it removed keeps vanilla's `fallback`.
 pub(super) fn answered_wear(
     entries: &[mod_api::NativeArmorHurt],
-    slot: horizon_world::player_inventory::EquipmentSlot,
+    slot: horizon_core::equipment_slot::EquipmentSlot,
     fallback: u32,
 ) -> u32 {
     entries
@@ -2157,8 +2160,8 @@ pub(super) fn answered_wear(
         .map_or(fallback, |e| e.new_damage as u32)
 }
 
-pub(super) fn armor_slot(index: usize) -> horizon_world::player_inventory::EquipmentSlot {
-    use horizon_world::player_inventory::EquipmentSlot;
+pub(super) fn armor_slot(index: usize) -> horizon_core::equipment_slot::EquipmentSlot {
+    use horizon_core::equipment_slot::EquipmentSlot;
     match index {
         0 => EquipmentSlot::Head,
         1 => EquipmentSlot::Chest,
@@ -4328,7 +4331,7 @@ impl Game<'_> {
     /// The block entity at `pos` saved with its id and position
     /// (`saveWithFullMetadata`), or the saved one Horizon keeps as loaded:
     /// what a broken block's loot sees as `LootContextParams.BLOCK_ENTITY`.
-    fn loot_block_entity(&self, pos: [i32; 3], block: &str) -> Option<horizon_world::nbt::Tag> {
+    fn loot_block_entity(&self, pos: [i32; 3], block: &str) -> Option<horizon_core::nbt::Tag> {
         let key = (pos[0], pos[1], pos[2]);
         match self.world.block_entities.get(&key) {
             Some(entity) => Some(horizon_client::save::encode_block_entity(
@@ -4345,7 +4348,7 @@ impl Game<'_> {
     fn loot_place_at(
         &self,
         origin: [f64; 3],
-        block_entity: Option<horizon_world::nbt::Tag>,
+        block_entity: Option<horizon_core::nbt::Tag>,
     ) -> horizon_world::loot::NativeLootPlace {
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
@@ -4372,7 +4375,7 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
         held: Option<&ItemStack>,
-        block_entity: Option<horizon_world::nbt::Tag>,
+        block_entity: Option<horizon_core::nbt::Tag>,
     ) -> Vec<ItemStack> {
         let registry = self.pack.assets.registry;
         let dynamic = self.pending.dynamic(pos);
@@ -14107,7 +14110,7 @@ impl Game<'_> {
                 return None;
             }
             let max = match component("minecraft:max_damage") {
-                Some(horizon_world::nbt::Tag::Int(value)) => u32::try_from(*value).ok()?,
+                Some(horizon_core::nbt::Tag::Int(value)) => u32::try_from(*value).ok()?,
                 _ => info.max_damage,
             };
             if max == 0 {
@@ -14693,7 +14696,7 @@ impl Game<'_> {
         if let Some(broken) = broken {
             self.award_stat("broken", &broken.item, 1);
             self.player_equipment_broke(
-                horizon_world::player_inventory::EquipmentSlot::MainHand,
+                horizon_core::equipment_slot::EquipmentSlot::MainHand,
                 &broken,
             );
         }
@@ -15662,7 +15665,7 @@ impl Game<'_> {
             use horizon_client::first_person::ItemPose;
             use item_use::ItemUseState;
             let state = using.then(|| self.item_use_state(&stack));
-            use horizon_world::consumable::UseAnimation;
+            use horizon_core::use_animation::UseAnimation;
             let pose = match state {
                 Some(ItemUseState::Spear(timing)) => ItemPose::Spear {
                     timing,
@@ -16862,13 +16865,13 @@ impl Game<'_> {
             Some((tag, ..)) => {
                 let extra = level
                     .player_extra
-                    .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-                if let horizon_world::nbt::Tag::Compound(map) = extra {
+                    .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+                if let horizon_core::nbt::Tag::Compound(map) = extra {
                     map.insert("RootVehicle".into(), tag);
                 }
             }
             None if local && self.pending_vehicle.is_none() => {
-                if let Some(horizon_world::nbt::Tag::Compound(map)) = &mut level.player_extra {
+                if let Some(horizon_core::nbt::Tag::Compound(map)) = &mut level.player_extra {
                     map.remove(&"RootVehicle".into());
                 }
             }
@@ -16880,15 +16883,15 @@ impl Game<'_> {
             level.absorption = p.health.absorption();
             let extra = level
                 .player_extra
-                .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-            if let horizon_world::nbt::Tag::Compound(map) = extra {
+                .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+            if let horizon_core::nbt::Tag::Compound(map) = extra {
                 map.insert(
                     "Fire".into(),
-                    horizon_world::nbt::Tag::Short(
+                    horizon_core::nbt::Tag::Short(
                         p.fire_ticks.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16,
                     ),
                 );
-                map.insert("Air".into(), horizon_world::nbt::Tag::Short(p.air as i16));
+                map.insert("Air".into(), horizon_core::nbt::Tag::Short(p.air as i16));
                 // LivingEntity.addAdditionalSaveData: AttributeMap.pack.
                 map.insert("attributes".into(), p.saved_attributes());
             }
@@ -18685,7 +18688,7 @@ impl Game<'_> {
                     );
                     let sky_light = dimension.has_skylight;
                     let decode: terrain::DecodeChunk =
-                        Box::new(move |root: &horizon_world::nbt::NamedTag| {
+                        Box::new(move |root: &horizon_core::nbt::NamedTag| {
                             horizon_client::save::decode_lit(
                                 root, registry, &biomes, layout, sky_light,
                             )

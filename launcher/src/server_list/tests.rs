@@ -73,9 +73,11 @@ fn reads_the_shown_servers_with_their_pictures() {
         }]
     );
     // No file, or one that isn't NBT: an empty list, as in the game.
-    assert!(List::load(&home.as_path().join("none"))
-        .servers()
-        .is_empty());
+    assert!(
+        List::load(&home.as_path().join("none"))
+            .servers()
+            .is_empty()
+    );
     fs::write(home.as_path().join(FILE), b"not nbt").unwrap();
     assert!(List::load(home.as_path()).servers().is_empty());
 }

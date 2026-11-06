@@ -162,7 +162,7 @@ static EMPTY: std::sync::LazyLock<Cooldowns> = std::sync::LazyLock::new(Cooldown
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::items::ItemStack;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

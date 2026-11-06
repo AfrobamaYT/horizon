@@ -552,8 +552,8 @@ mod tests {
     fn archive_models_bind_prepared_states_and_load_world_texture_features_in_place() -> Result<()>
     {
         use crate::resource_source::{ResourceRoot, ResourceSource};
-        use horizon_world::{DATA_VERSION, nbt::Tag};
         use std::io::Write;
+        use {horizon_core::nbt::Tag, horizon_world::DATA_VERSION};
         let fixture = Fixture(
             std::env::temp_dir().join(format!("horizon-world-archive-{}", std::process::id())),
         );

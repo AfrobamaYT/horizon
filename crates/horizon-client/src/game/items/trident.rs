@@ -90,8 +90,8 @@ impl ThrownTrident {
     pub(super) fn to_nbt(
         &self,
         uuid: [i32; 4],
-        raw: Option<&horizon_world::nbt::Tag>,
-    ) -> horizon_world::nbt::Tag {
+        raw: Option<&horizon_core::nbt::Tag>,
+    ) -> horizon_core::nbt::Tag {
         horizon_client::entity_nbt::trident_to_nbt(
             &horizon_client::entity_nbt::TridentSave {
                 position: self.position,
@@ -249,7 +249,7 @@ impl Game<'_> {
         stack
             .data()
             .and_then(|data| match data.other("minecraft:max_damage") {
-                Some(horizon_world::nbt::Tag::Int(value)) => u32::try_from(*value).ok(),
+                Some(horizon_core::nbt::Tag::Int(value)) => u32::try_from(*value).ok(),
                 _ => None,
             })
             .unwrap_or_else(|| self.items().get(&stack.item).map_or(250, |i| i.max_damage))
@@ -1131,7 +1131,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn trident_release_rechecks_stack_durability_after_charge() {
         use crate::game::{Audio, Options, PlayerMotion, Progress, Settings, load_resources};
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(

@@ -223,7 +223,7 @@ pub struct ItemInfo {
     /// The ids of the item's default components (its prototype's keys).
     pub components: Vec<String>,
     /// Opaque native component defaults, keyed by their registered name.
-    pub custom_components: std::collections::BTreeMap<String, horizon_world::nbt::Tag>,
+    pub custom_components: std::collections::BTreeMap<String, horizon_core::nbt::Tag>,
 }
 /// `Item.Properties.craftRemainder` (not a data component, so not in the
 /// default-component report): what an item leaves in the grid when crafted with.
@@ -440,19 +440,19 @@ pub fn instrument_id(stack: &ItemStack) -> Option<String> {
         return None;
     }
     match stack.data().and_then(|d| d.other("minecraft:instrument")) {
-        Some(horizon_world::nbt::Tag::String(id)) => Some(id.to_string_lossy()),
-        Some(horizon_world::nbt::Tag::Compound(_)) => None,
+        Some(horizon_core::nbt::Tag::String(id)) => Some(id.to_string_lossy()),
+        Some(horizon_core::nbt::Tag::Compound(_)) => None,
         _ => Some("minecraft:ponder_goat_horn".to_owned()),
     }
 }
 /// A goat horn's inline `instrument` component (`Instrument.CODEC` also
 /// takes the instrument itself instead of a registry id).
-pub fn inline_instrument(stack: &ItemStack) -> Option<&horizon_world::nbt::Tag> {
+pub fn inline_instrument(stack: &ItemStack) -> Option<&horizon_core::nbt::Tag> {
     if &*stack.item != "minecraft:goat_horn" {
         return None;
     }
     match stack.data().and_then(|d| d.other("minecraft:instrument")) {
-        Some(tag @ horizon_world::nbt::Tag::Compound(_)) => Some(tag),
+        Some(tag @ horizon_core::nbt::Tag::Compound(_)) => Some(tag),
         _ => None,
     }
 }
@@ -706,11 +706,11 @@ impl Items {
                 .find(|(key, _)| key == "minecraft:damage_resistant")
         {
             return match v.get("types") {
-                Some(horizon_world::nbt::Tag::String(tag)) => {
+                Some(horizon_core::nbt::Tag::String(tag)) => {
                     tag.to_string().is_ok_and(|id|id=="#minecraft:is_fire" || id==source)
                 }
-                Some(horizon_world::nbt::Tag::List(tags)) => tags.iter().any(
-                    |t| matches!(t,horizon_world::nbt::Tag::String(id) if id.to_string().is_ok_and(|id|id==source)),
+                Some(horizon_core::nbt::Tag::List(tags)) => tags.iter().any(
+                    |t| matches!(t,horizon_core::nbt::Tag::String(id) if id.to_string().is_ok_and(|id|id==source)),
                 ),
                 _ => false,
             };
@@ -737,11 +737,11 @@ impl Items {
             return false;
         };
         match v.get("types") {
-            Some(horizon_world::nbt::Tag::String(id)) => id
+            Some(horizon_core::nbt::Tag::String(id)) => id
                 .to_string()
                 .is_ok_and(|id| id == "minecraft:cactus" || CACTUS_TAGS.contains(&id.as_str())),
-            Some(horizon_world::nbt::Tag::List(ids)) => ids.iter().any(|t| {
-                matches!(t, horizon_world::nbt::Tag::String(id)
+            Some(horizon_core::nbt::Tag::List(ids)) => ids.iter().any(|t| {
+                matches!(t, horizon_core::nbt::Tag::String(id)
                     if id.to_string().is_ok_and(|id| id == "minecraft:cactus"))
             }),
             _ => false,
@@ -1179,7 +1179,7 @@ impl Items {
             return tool
                 .get("can_destroy_blocks_in_creative")
                 .and_then(|v| match v {
-                    horizon_world::nbt::Tag::Byte(v) => Some(*v),
+                    horizon_core::nbt::Tag::Byte(v) => Some(*v),
                     _ => None,
                 })
                 .is_none_or(|v| v != 0);
@@ -2002,7 +2002,7 @@ impl LootContext<'_> {
                         continue;
                     }
                     let max = match component("minecraft:max_damage") {
-                        Some(horizon_world::nbt::Tag::Int(value)) => {
+                        Some(horizon_core::nbt::Tag::Int(value)) => {
                             u32::try_from(*value).unwrap_or(0)
                         }
                         _ => self
@@ -2066,7 +2066,7 @@ impl LootContext<'_> {
                 // CopyBlockState: the listed properties of the broken block
                 // become the item's `block_state` component.
                 "minecraft:copy_state" => {
-                    use horizon_world::nbt::Tag;
+                    use horizon_core::nbt::Tag;
                     let mut copied = match stack.data().and_then(|d| d.other(BLOCK_STATE)) {
                         Some(Tag::Compound(c)) => c.clone(),
                         _ => Default::default(),

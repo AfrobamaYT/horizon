@@ -1379,7 +1379,7 @@ pub(super) mod tests {
                 mob.extra.tame = true;
                 let mut held = ItemStack::new(item, 3);
                 held.damage = 7;
-                held.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+                held.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
                 game.inventory[game.selected] = Some(held.clone());
                 let index = game.mobs.len();
                 game.mobs.push(mob);
@@ -1412,7 +1412,7 @@ pub(super) mod tests {
                 .clone();
             let item = kind.tempt.first().expect("a swallowable item").to_string();
             let mut held = ItemStack::new(&item, 3);
-            held.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+            held.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
             game.inventory[game.selected] = Some(held.clone());
             game.mobs.push(Mob::new(12, kind.clone(), Vec3::ZERO, 0.0));
             assert!(game.interact_sulfur_cube(0, &item));
@@ -1452,7 +1452,7 @@ pub(super) mod tests {
                 mob.extra.tame = true;
                 let mut stack = ItemStack::new(item, 3);
                 stack.damage = 7;
-                stack.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+                stack.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
                 mob.extra.set_body_stack(Some(stack.clone()));
                 let index = game.mobs.len();
                 game.mobs.push(mob);
@@ -2294,8 +2294,8 @@ pub(super) mod tests {
                         horizon_client::items::ItemStack::new("minecraft:knowledge_book", 1);
                     book.data_mut().set_other(
                         "minecraft:recipes",
-                        Some(horizon_world::nbt::Tag::List(vec![
-                            horizon_world::nbt::Tag::String("minecraft:stick".into()),
+                        Some(horizon_core::nbt::Tag::List(vec![
+                            horizon_core::nbt::Tag::String("minecraft:stick".into()),
                         ])),
                     );
                     let slot = game.held_slot();

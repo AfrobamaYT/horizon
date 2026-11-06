@@ -4,10 +4,10 @@
 use crate::game::{
     Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
 };
+use horizon_core::nbt::Tag;
 use horizon_protocol::entity_data::Value;
 use horizon_protocol::item::{Component, Stack, component};
 use horizon_protocol::packets::play::{self, Clientbound as C};
-use horizon_world::nbt::Tag;
 use mod_api::EquipmentSlot;
 
 fn spawn(dimension: &str) -> play::SpawnInfo {
