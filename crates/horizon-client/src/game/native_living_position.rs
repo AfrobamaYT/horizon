@@ -210,6 +210,15 @@ mod tests {
             );
             assert_eq!(mob.no_action_time(game), Some(650));
 
+            // `noActionTime` is a Java `int`: the tick past `i32::MAX` wraps
+            // instead of panicking. Kept so it cannot despawn meanwhile.
+            assert!(mob.set_persistence_required(game));
+            assert!(mob.set_no_action_time(game, i32::MAX));
+            game.tick_mobs().unwrap();
+            let after = mob.no_action_time(game).unwrap();
+            assert!(after < 0, "wrapped past i32::MAX, got {after}");
+            assert!(mob.set_no_action_time(game, 650));
+
             assert_eq!(mob.pathfinding_malus(game, PathType::Water), Some(8.0));
             assert!(mob.set_pathfinding_malus(game, PathType::Water, -1.0));
             assert_eq!(mob.pathfinding_malus(game, PathType::Water), Some(-1.0));
