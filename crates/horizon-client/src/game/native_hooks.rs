@@ -13955,6 +13955,13 @@ mod screen_open_tests {
         struct Observe(Arc<Mutex<Vec<(String, Option<String>)>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Observe {
+            fn screen_opening(
+                &self,
+                _host: &dyn ClientHost,
+                _event: &mut ScreenOpeningEvent<'_>,
+            ) -> Option<ScreenOpening> {
+                None
+            }
             fn screen_init_post(&self, host: &dyn ClientHost, event: &mut ScreenInitPostEvent<'_>) {
                 self.0.lock().unwrap().push((
                     event.screen.id.to_owned(),
