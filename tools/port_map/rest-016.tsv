@@ -6,7 +6,7 @@ SpreadPlayersCommand.Position.clamp	inline	crates/horizon-client/src/game/admini
 SpreadPlayersCommand.Position.randomize	inline	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
 SpreadPlayersCommand.Position.getSpawnY	port	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::spread_spawn_y	the first solid block under two air blocks, searched down from max_y; max_y + 1 when there is none
 SpreadPlayersCommand.Position.isSafe	port	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::spread_safe	spawn y minus one under max_y, not a liquid and in the entities_can_teleport_to tag
-StopCommand.register	port	crates/horizon-client/src/game/interface/dedicated.rs::Game::console_command	gap: minor: /stop only from the dedicated console; no in-game /stop node
+StopCommand.register	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Game::console_command	gap: minor: /stop only from the dedicated console; no in-game /stop node
 StopSoundCommand.register	port	crates/horizon-command/src/tree_world.rs::sounds	/stopsound command tree
 StopSoundCommand.stopSound	inline	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::cmd_stopsound	the StopSound packet is built once and sent to each target's connection there; the local player's own sounds stop through Audio::stop_sounds
 StopwatchCommand.createStopwatch	port	crates/horizon-client/src/game/administration/commands/misc.rs::Game::cmd_stopwatch	stopwatch.create arm
@@ -15,8 +15,8 @@ StopwatchCommand.restartStopwatch	port	crates/horizon-client/src/game/administra
 StopwatchCommand.removeStopwatch	port	crates/horizon-client/src/game/administration/commands/misc.rs::Game::cmd_stopwatch	default arm: remove
 StopwatchCommand.register	port	crates/horizon-command/src/tree_misc.rs::stopwatch	create, query, restart and remove under the stopwatch literal
 SummonCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	root summon node
-SummonCommand.spawnEntity	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_summon	commands.summon.success
-SummonCommand.createEntity	inline	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_summon	plain and NBT summons share EntityType.isAllowedInPeaceful admission through mobs::finalize::allowed_in_peaceful
+SummonCommand.spawnEntity	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_summon	commands.summon.success
+SummonCommand.createEntity	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_summon	plain and NBT summons share EntityType.isAllowedInPeaceful admission through mobs::finalize::allowed_in_peaceful
 SwingCommand.register	port	crates/horizon-command/src/tree_world.rs::rotate_swing	/swing command tree
 SwingCommand.handSwing	port	crates/horizon-command/src/tree_world.rs::rotate_swing	gap: minor: hand literal is parsed but cmd_swing ignores it; only the main-hand swing plays
 SwingCommand.swing	port	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::cmd_swing	gap: minor: ignores hand, animation and duration; mobs get the swing flag, the player swings the main arm
@@ -40,28 +40,28 @@ TeamCommand.emptyTeam	port	crates/horizon-client/src/scoreboard_cmd.rs::team	tea
 TeamCommand.deleteTeam	port	crates/horizon-client/src/scoreboard_cmd.rs::team	team.remove arm
 TeamMsgCommand.sendMessage	port	crates/horizon-client/src/game/administration/commands/misc.rs::Game::cmd_teammsg	gap: minor: only the local player can receive; no per-receiver chat filtering
 TeleportCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	teleport and tp nodes
-TeleportCommand.teleportToPos	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_teleport	location arm
-TeleportCommand.getRelatives	inline	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_teleport	relative coords resolved from the source up front; same end position
-TeleportCommand.performTeleport	port	crates/horizon-client/src/game/administration/commands.rs::Game::teleport_to_in_level	gap: minor: zeroes all velocity and clears on_ground for a player; vanilla keeps horizontal motion, sets on_ground, stops mob navigation, skips Y reset while fall-flying
+TeleportCommand.teleportToPos	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_teleport	location arm
+TeleportCommand.getRelatives	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_teleport	relative coords resolved from the source up front; same end position
+TeleportCommand.performTeleport	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::teleport_to_in_level	gap: minor: zeroes all velocity and clears on_ground for a player; vanilla keeps horizontal motion, sets on_ground, stops mob navigation, skips Y reset while fall-flying
 TickCommand.nanosToMilisString	port	crates/horizon-client/src/game/administration/commands/misc.rs::millis	one-decimal millisecond string
 TickCommand.setTickingRate	port	crates/horizon-client/src/game/administration/commands/misc.rs::Game::cmd_tick	tick.rate arm
 TickCommand.step	port	crates/horizon-client/src/game/administration/commands/misc.rs::Game::cmd_tick	tick.step arm
 TickCommand.stopStepping	port	crates/horizon-client/src/game/administration/commands/misc.rs::Game::cmd_tick	tick.step.stop default arm
 TickCommand.stopSprinting	port	crates/horizon-client/src/game/administration/commands/misc.rs::Game::cmd_tick	tick.sprint.stop arm
 TimeCommand.suggestTimelines	port	crates/horizon-command/src/args.rs::ArgType::suggest	gap: minor: lists every timeline id, not only the ids of the parsed clock
-TimeCommand.queryGameTime	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	time.query.gametime arm
-TimeCommand.queryTime	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	time.query.time arm
-TimeCommand.queryTimelineTicks	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	time.query.timeline arm
-TimeCommand.queryTimelineRepetitions	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	time.query.repetition arm
-TimeCommand.setTotalTicks	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	time.set arm
-TimeCommand.addTime	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	time.add arm
-TimeCommand.setTimeToTimeMarker	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	time.set.marker arm
-TimeCommand.setRate	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	time.rate arm
-TimeCommand.getDefaultClock	inline	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_time	built-in dimension defaults: Overworld and End select their own clocks; Nether has none
+TimeCommand.queryGameTime	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	time.query.gametime arm
+TimeCommand.queryTime	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	time.query.time arm
+TimeCommand.queryTimelineTicks	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	time.query.timeline arm
+TimeCommand.queryTimelineRepetitions	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	time.query.repetition arm
+TimeCommand.setTotalTicks	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	time.set arm
+TimeCommand.addTime	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	time.add arm
+TimeCommand.setTimeToTimeMarker	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	time.set.marker arm
+TimeCommand.setRate	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	time.rate arm
+TimeCommand.getDefaultClock	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_time	built-in dimension defaults: Overworld and End select their own clocks; Nether has none
 TitleCommand.sendPacketToPlayers	port	crates/horizon-client/src/game/administration/commands/text_commands.rs::Game::titles_or_packet	per-player send
 TitleCommand.showTitle	port	crates/horizon-client/src/game/administration/commands/text_commands.rs::Game::cmd_title	title, subtitle and actionbar
 TitleCommand.setTimes	port	crates/horizon-client/src/game/administration/commands/text_commands.rs::Game::cmd_title	times arm
-TransferCommand.register	port	crates/horizon-client/src/game/administration/commands.rs::Game::execute_command	the node (the literal, the permission level, the `hostname` and optional `port` arguments, the `players` selector) comes from the data generator's commands.json through lan/commands.rs, which lists `transfer` as dedicated-only; this branch is its execute
+TransferCommand.register	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::execute_command	the node (the literal, the permission level, the `hostname` and optional `port` arguments, the `players` selector) comes from the data generator's commands.json through lan/commands.rs, which lists `transfer` as dedicated-only; this branch is its execute
 TransferCommand.transfer	port	crates/horizon-client/src/game/administration/commands/profiles.rs::Game::cmd_transfer	each target's `lan/hub.rs::Hub::transfer` sends the Transfer packet with the host and port; the reply is one name or a count, both with the host and port
 TriggerCommand.suggestObjectives	port	crates/horizon-command/src/lib.rs::Suggests::suggest	Suggests::Triggers arm
 TriggerCommand.addValue	port	crates/horizon-client/src/scoreboard_cmd.rs::trigger	trigger.add arm
@@ -74,16 +74,16 @@ WardenSpawnTrackerCommand.resetTracker	port	crates/horizon-client/src/game/block
 WaypointCommand.setWaypointStyle	port	crates/horizon-client/src/game/administration/commands/extra.rs::Game::cmd_waypoint	style arm of the modify branch
 WaypointCommand.setWaypointColor	port	crates/horizon-client/src/game/administration/commands/extra.rs::Game::cmd_waypoint	color arm of the modify branch
 WaypointCommand.resetWaypointColor	port	crates/horizon-client/src/game/administration/commands/extra.rs::Game::cmd_waypoint	color reset arm
-WeatherCommand.getDuration	inline	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_weather	default duration sample
-WeatherCommand.setClear	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_weather	clear branch
-WeatherCommand.setRain	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_weather	rain branch
-WeatherCommand.setThunder	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_weather	thunder branch
-WhitelistCommand.register	port	crates/horizon-client/src/game/interface/dedicated.rs::Game::console_command	gap: minor: console only; no in-game /whitelist node
-WhitelistCommand.reload	port	crates/horizon-client/src/game/interface/dedicated.rs::Game::console_whitelist	reload arm
-WhitelistCommand.addPlayers	port	crates/horizon-client/src/game/interface/dedicated.rs::Game::console_whitelist	gap: minor: one name per command, not a target list
-WhitelistCommand.removePlayers	port	crates/horizon-client/src/game/interface/dedicated.rs::Game::console_whitelist	gap: minor: one name per command, not a target list
-WhitelistCommand.enableWhitelist	port	crates/horizon-client/src/game/interface/dedicated.rs::Game::console_whitelist	on arm
-WhitelistCommand.disableWhitelist	port	crates/horizon-client/src/game/interface/dedicated.rs::Game::console_whitelist	off arm
+WeatherCommand.getDuration	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_weather	default duration sample
+WeatherCommand.setClear	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_weather	clear branch
+WeatherCommand.setRain	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_weather	rain branch
+WeatherCommand.setThunder	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_weather	thunder branch
+WhitelistCommand.register	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Game::console_command	gap: minor: console only; no in-game /whitelist node
+WhitelistCommand.reload	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Game::console_whitelist	reload arm
+WhitelistCommand.addPlayers	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Game::console_whitelist	gap: minor: one name per command, not a target list
+WhitelistCommand.removePlayers	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Game::console_whitelist	gap: minor: one name per command, not a target list
+WhitelistCommand.enableWhitelist	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Game::console_whitelist	on arm
+WhitelistCommand.disableWhitelist	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Game::console_whitelist	off arm
 WorldBorderCommand.setDamageBuffer	port	crates/horizon-client/src/game/administration/commands/terrain_cmds.rs::cmd_worldborder	damage buffer arm
 WorldBorderCommand.setDamageAmount	port	crates/horizon-client/src/game/administration/commands/terrain_cmds.rs::cmd_worldborder	damage amount arm
 WorldBorderCommand.setWarningTime	port	crates/horizon-client/src/game/administration/commands/terrain_cmds.rs::cmd_worldborder	warning time arm
@@ -125,4 +125,4 @@ DedicatedPlayerList.loadUserBanList	port	crates/horizon-server-files/src/user_li
 DedicatedPlayerList.saveOps	port	crates/horizon-server-files/src/user_lists.rs::UserList::save	
 DedicatedPlayerList.loadWhiteList	port	crates/horizon-server-files/src/user_lists.rs::UserList::load	startup and console reload
 DedicatedPlayerList.saveWhiteList	port	crates/horizon-server-files/src/user_lists.rs::UserList::save	
-DedicatedPlayerList.isWhiteListed	port	crates/horizon-client/src/game/interface/dedicated.rs::Lists::whitelisted	
+DedicatedPlayerList.isWhiteListed	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Lists::whitelisted	

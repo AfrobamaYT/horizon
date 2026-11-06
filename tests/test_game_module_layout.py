@@ -15,18 +15,24 @@ class GameModuleLayoutTests(unittest.TestCase):
                   'native_block_entity_draw': 'pub', 'native_client_services': 'pub'}
         roots = {}
         for marker in GAME.glob('*/.game-area'):
-            for path in marker.parent.glob('*.rs'):
-                self.assertNotIn(path.stem, roots)
-                roots[path.stem] = path
+            files = [(p.stem, p) for p in marker.parent.glob('*.rs')]
+            files += [(p.parent.name, p) for p in marker.parent.glob('*/mod.rs')]
+            for name, path in files:
+                self.assertNotIn(name, roots)
+                roots[name] = path
         for name, visibility in public.items():
             self.assertIn(f'// game-module-visibility: {visibility}', roots[name].read_text().splitlines())
         for name, path in roots.items():
             lines = path.read_text().splitlines()
             metadata = [line for line in lines if line.startswith('// game-module-')]
-            expected = [f'// game-module-visibility: {public[name]}'] if name in public else []
+            allowed = {'// game-module-visibility: pub', '// game-module-visibility: pub(crate)',
+                       '// game-module-cfg: always'}
+            for line in metadata:
+                self.assertIn(line, allowed, path)
+            keys = [line.split(':')[0] for line in metadata]
+            self.assertEqual(len(keys), len(set(keys)), path)
             if name == 'game_tests':
-                expected.append('// game-module-cfg: always')
-            self.assertEqual(metadata, expected, path)
+                self.assertIn('// game-module-cfg: always', metadata)
         declarations = re.findall(r'^(?:pub(?:\([^)]*\))? )?mod (\w+);',
                                   GAME.with_suffix('.rs').read_text(), re.M)
         self.assertEqual(declarations, ['native_hooks'])

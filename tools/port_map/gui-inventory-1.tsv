@@ -145,5 +145,5 @@ CreativeModeInventoryScreen.CustomCreativeSlot.mayPickup	inline	crates/horizon-c
 CreativeModeInventoryScreen.ItemPickerMenu.getRowIndexForScroll	port	crates/horizon-client/src/creative.rs::Creative::first_row	
 CreativeModeInventoryScreen.ItemPickerMenu.scrollTo	inline	crates/horizon-client/src/creative.rs::Creative::first_row	display slots are read from the first visible row when drawn and clicked
 CyclingSlotBackground	home	crates/horizon-client/src/game/blocks/stations.rs	CyclingSlot: an empty slot's icons advance every 30 ticks with a 4-tick fade
-DispenserScreen.init	inline	crates/horizon-client/src/game/blocks/machines.rs::Game::draw_machine_screen	title centred
-DispenserScreen.extractBackground	port	crates/horizon-client/src/game/blocks/machines.rs::Game::draw_machine_screen	
+DispenserScreen.init	inline	crates/horizon-client/src/game/blocks/machines/mod.rs::Game::draw_machine_screen	title centred
+DispenserScreen.extractBackground	port	crates/horizon-client/src/game/blocks/machines/mod.rs::Game::draw_machine_screen	

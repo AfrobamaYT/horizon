@@ -12,7 +12,7 @@ reads `pack.mcmeta` (format range, overlays, filters) and resolves one shared re
 prepared vanilla resources, later packs winning. Folders and open zip files use the same lookup and listing
 interface; archive entries stay in their archives. Files vanilla reads as a resource *stack* (language files,
 `sounds.json`, font definitions, atlas definitions) are merged layer by layer as vanilla merges them.
-Every loader reads that view; `game/world/packs.rs` (`reload_packs`) prepares a new generation on a worker and
+Every loader reads that view; `game/world/packs/mod.rs` (`reload_packs`) prepares a new generation on a worker and
 publishes it after loading succeeds, as `Minecraft.reloadResourcePacks` does. Readers of the previous
 archive generation retain its open files. Prepared registry tables and disposable decoding caches have
 separate filesystem locations. [The older overlay measurements](reuse-pack-overlays.md) describe the

@@ -61,7 +61,7 @@ containers, weather-driven blocks. The library code lives in
     and TNT. Creative players take no damage.
   - TNT explosions drop every block. Mob explosions use drop decay.
   - Drops merge in stacks of up to 16. Container contents spill.
-- **Hoppers** (`game/blocks/machines.rs`):
+- **Hoppers** (`game/blocks/machines/mod.rs`):
   - They push and pull through `HopperBlockEntity.tryMoveItems`.
   - The 8-tick cooldown applies, with the transfer cooldown hand-off between
     hoppers.

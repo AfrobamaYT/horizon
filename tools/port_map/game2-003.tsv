@@ -22,7 +22,7 @@ Vex.setVexFlag	inline	crates/horizon-client/src/mobs/vex.rs::Charge::start	start
 Vex.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	Vex arm: populate (sword) then enchant
 Vex.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	iron sword in hand with drop chance 0
 Witch.registerGoals	port	crates/horizon-client/src/mobs/witch.rs::register	gap: minor: raiders that hurt a witch are still targeted back (vanilla ignores them)
-Witch.handleEntityEvent	port	crates/horizon-client/src/game/network/remote_mob_particles.rs::Game::witch_magic_particles	event 15: `nextInt(35) + 10` purple puffs half a block over the head, the count drawn again every pass as the Java loop condition does; `game/network/remote.rs:3949` hands it every witch entity event (the rest of the handler is LivingEntity's)
+Witch.handleEntityEvent	port	crates/horizon-client/src/game/network/remote_mob_particles.rs::Game::witch_magic_particles	event 15: `nextInt(35) + 10` purple puffs half a block over the head, the count drawn again every pass as the Java loop condition does; `game/network/remote/mod.rs:3949` hands it every witch entity event (the rest of the handler is LivingEntity's)
 Witch.getDamageAfterMagicAbsorb	port	crates/horizon-client/src/mobs.rs::Mob::damage_with	85% less from #witch_resistant_to, nothing from its own hit
 Zoglin.initCoreActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: look-at-target and move-to-target sinks are not separate; the goal set stands in for them
 Zoglin.initIdleActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: idle is a stroll only; no look-target sometimes and no do-nothing pauses
@@ -45,7 +45,7 @@ Breeze.resetAnimations	inline	crates/horizon-client/src/mobs/breeze.rs::ai_step	
 Breeze.emitJumpTrailParticles	missing		`mobs/breeze.rs` has no particle call (only `dangerous_block`), so no block dust follows a long jump
 Breeze.emitGroundParticles	port	crates/horizon-client/src/mobs/breeze.rs::emit_ground_particles	the block it stands in (else the one it stands on) crumbled at the centre of its box and its feet; twenty crumbs while sliding, one while standing, shooting or inhaling; none as a passenger or over a block that draws nothing
 Breeze.playWhirlSound	port	crates/horizon-client/src/mobs/breeze.rs::tick	whirl sound on a random clock, as a local sound
-Breeze.deflection	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::tick_projectiles	breeze turns projectiles back, except wind charges
+Breeze.deflection	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::tick_projectiles	breeze turns projectiles back, except wind charges
 Breeze.getHurtBy	port	crates/horizon-client/src/mobs/monster_brain.rs::hurt_by_entity	the living source of the last hurt
 Breeze.registerDebugValues	skip:debug		debug subscription values
 BreezeAi.initCoreActivity	port	crates/horizon-client/src/mobs/monster_brain.rs::breeze_packages	core swim and look-at-target sink
@@ -81,8 +81,8 @@ CreakingAi.initFightActivity	port	crates/horizon-client/src/mobs/monster_brain.r
 AbstractCubeMob.registerGoals	port	crates/horizon-client/src/mobs/cube.rs::register	float, random direction, keep jumping, attack goal and player and golem targets
 AbstractCubeMob.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Size stored minus one, and wasOnGround
 AbstractCubeMob.refreshDimensions	skip:other		bounds are read from the size on each use, so there is no separate refresh; the position is never reset
-AbstractCubeMob.onSyncedDataUpdated	missing		no size sync from a spawn or a data update: `mobs/living.rs` takes a mob's dimensions from its own size, and `game/network/remote.rs` applies no cube size
-AbstractCubeMob.setUpSplitCube	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::mob_died	gap: minor: children get half size and the same fixed offsets, but no random yaw
+AbstractCubeMob.onSyncedDataUpdated	missing		no size sync from a spawn or a data update: `mobs/living.rs` takes a mob's dimensions from its own size, and `game/network/remote/mod.rs` applies no cube size
+AbstractCubeMob.setUpSplitCube	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::mob_died	gap: minor: children get half size and the same fixed offsets, but no random yaw
 AbstractCubeMob.push	inline	crates/horizon-client/src/mobs/cube.rs::hurt_touching_golems	an iron golem whose box overlaps a cube that can deal damage is hurt through dealDamage (MobEvent::CubeHurtMob, with the attack sound after a landed hit)
 AbstractCubeMob.dealDamage	inline	crates/horizon-client/src/mobs/cube.rs::ai_step	the player touch (CubeHurtPlayer) and a golem's overlap (CubeHurtMob, hurt_touching_golems): alive, teams allow damage, in melee range, line of sight, then mobAttack for getAttackDamage
 AbstractCubeMob.getPassengerAttachmentPoint	port	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	gap: minor: the rider sits at full height; vanilla lowers it by size/64 per block
@@ -128,11 +128,11 @@ Hoglin.hurtServer	inline	crates/horizon-client/src/mobs/piglin.rs::hoglin_repell
 Hoglin.ageBoundaryReached	port	crates/horizon-client/src/mobs/finalize.rs::age_boundary_reached	baby or adult attack damage; the xp of 3 or 5 is in drops.rs::xp_reward
 Hoglin.checkHoglinSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	not spawned on a nether wart block
 Hoglin.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	20 percent start as babies
-Hoglin.mobInteract	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::interact_mob	gap: minor: a fed hoglin does not become persistent
+Hoglin.mobInteract	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::interact_mob	gap: minor: a fed hoglin does not become persistent
 Hoglin.finishConversion	port	crates/horizon-client/src/mobs/piglin.rs::ai_step	zombification turns it into a zoglin with nausea
 Hoglin.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	gap: minor: CannotBeHunted is not written
 Hoglin.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: CannotBeHunted is not read
-Hoglin.getBreedOffspring	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::breed	gap: minor: the hoglin child is not made persistent
+Hoglin.getBreedOffspring	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::breed	gap: minor: the hoglin child is not made persistent
 HoglinAi.initCoreActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	gap: minor: look-at-target and move-to-target sinks are not separate; the goal set stands in for them
 HoglinAi.initIdleActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	gap: player: hoglins do not walk away from adult piglins within 8 blocks; the rest of the idle is there
 HoglinAi.initFightActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	MeleeAttack.create(40) for adults and create(15) for babies (`MeleeAttack::intervals(40, 15)`); the brain's own order has no tick parity here (the probe has no hoglin brain)

@@ -636,5 +636,5 @@ mod vanilla_entity_tests {
     }
 }
 #[cfg(test)]
-#[path = "entity_culling/entity_culling_tests.rs"]
+#[path = "entity_culling_tests.rs"]
 mod tests;

@@ -3,7 +3,7 @@
 //! like a player (walk, look, break, place, use, click buttons). Actions that
 //! take time run as a task advanced every frame and reply when they finish or
 //! time out, so `horizon-ctl break 10 64 3` returns what the block dropped.
-#[path = "agent/agent_navigation.rs"]
+#[path = "agent_navigation.rs"]
 mod navigation;
 
 use super::event_loop::EventLoopCtl;

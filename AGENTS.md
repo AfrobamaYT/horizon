@@ -221,11 +221,18 @@ state stays separate from the library tests. This compiles gameplay twice for ex
 
 ## How `Game` is organised
 
-- `struct Game` (game.rs, ~290 fields) holds everything. Its methods are spread over ~180 files: game.rs keeps
-  the core (tick, render, input, inventory, world open/close) and each `game/<feature>.rs` adds an
-  `impl Game<'_>` block for one feature, with its own state types. Fields stay private to the gameplay module and its descendants. Gameplay tests run in the gameplay library, separate from reusable-library tests.
+- `struct Game` (game.rs) holds everything. Its methods live in physical area folders under `game/`:
+  administration, blocks, entities, interface, items, mobs, modding, network, runtime and world.
+  An area has a `.game-area` marker. Add a leaf `<feature>.rs`, or `<feature>/mod.rs` for a feature with
+  children; the build derives the declarations without editing a list. These remain logical children
+  of `game`, not area namespaces, so `super` and visibility keep their meaning. Reference metadata is
+  local: `// game-module-visibility: pub` or `pub(crate)` when needed; `_tests` roots are test-only
+  unless marked `// game-module-cfg: always`. `native_hooks/` owns its separate generated list.
+  game.rs keeps the core loop and fields. Each feature adds an `impl Game<'_>` block and state types.
+  Fields stay private to the gameplay module and descendants. Gameplay tests stay separate from reusable-library tests.
 - Find a feature's code: `grep -rn "fn tick_<thing>\|fn <verb>_<thing>" crates/horizon-client/src/game*`;
-  the file is usually `game/<thing>s.rs`. Who calls it: grep the name in game.rs's `fn tick` / `fn tick_world`.
+  the file is usually `game/<area>/<thing>s.rs` or `game/<area>/<thing>s/mod.rs`. Who calls it:
+  grep the name in game.rs's `fn tick` / `fn tick_world`.
 - Fields that say which mode runs: `remote` (this window is a client of a server: multiplayer, LAN guest, or
   single player on its server thread), `lan` (`LanHost`: this world is open to the network), `integrated`
   (the window's own server thread), `serving` (this `Game` *is* that server thread), `options.dedicated`.

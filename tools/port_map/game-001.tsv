@@ -30,7 +30,7 @@ ChunkMap.getChunkQueueLevel	inline	crates/horizon-client-render/src/streaming.rs
 ChunkMap.getChunkDebugData	skip:debug		chunk debug renderer text
 ChunkMap.getChunkRangeFuture	inline	crates/horizon-client-render/src/streaming.rs::Streaming::update	neighbourhood waits: 3x3 protos to decorate, 3x3 decorated to finish, 3x3 lit to mesh
 ChunkMap.debugFuturesAndCreateReportedException	skip:debug		crash report detail
-ChunkMap.prepareEntityTickingChunk	inline	crates/horizon-client/src/game/mobs/creatures.rs::Game::entity_ticking_area	entity ticking comes from the ticket levels alone
+ChunkMap.prepareEntityTickingChunk	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::entity_ticking_area	entity ticking comes from the ticket levels alone
 ChunkMap.updateChunkScheduling	inline	crates/horizon-client-render/src/streaming.rs::Streaming::update	columns past every kept range are unloaded in the update scan
 ChunkMap.onLevelChange	port	crates/horizon-client-render/src/streaming.rs::Streaming::requeue	queued jobs are ranked again when the centre moves
 ChunkMap.close	port	crates/horizon-client-render/src/streaming.rs::Streaming::drop	waits for saves in flight
@@ -139,6 +139,6 @@ LoadingChunkTracker.getLevel	port	crates/horizon-client/src/ticket_levels.rs::Le
 LoadingChunkTracker.setLevel	inline	crates/horizon-client/src/ticket_levels.rs::ChunkTickets::update	levels are rebuilt when sources change
 PlayerSpawnFinder.scheduleNext	port	crates/horizon-client/src/world_spawn.rs::PlayerSpawnFinder::next_candidate	coprime stride order, then the suggestion
 PlayerSpawnFinder.scheduleCandidate	port	crates/horizon-client/src/game/world/initial_spawn.rs::Game::search_spawn	gap: minor: a server tick passes over candidates in unloaded chunks instead of waiting for the candidate's chunk, so a new player can stand on another spot of the radius
-SectionTracker.checkNeighborsAfterUpdate	inline	crates/horizon-client/src/game/mobs/raids.rs::sections_to_village	its only subclass is the POI village distance: Chebyshev distance in sections, 7 when farther than 6
-SectionTracker.getComputedLevel	inline	crates/horizon-client/src/game/mobs/raids.rs::sections_to_village	
-SectionTracker.computeLevelFromNeighbor	inline	crates/horizon-client/src/game/mobs/raids.rs::sections_to_village	
+SectionTracker.checkNeighborsAfterUpdate	inline	crates/horizon-client/src/game/mobs/raids/mod.rs::sections_to_village	its only subclass is the POI village distance: Chebyshev distance in sections, 7 when farther than 6
+SectionTracker.getComputedLevel	inline	crates/horizon-client/src/game/mobs/raids/mod.rs::sections_to_village	
+SectionTracker.computeLevelFromNeighbor	inline	crates/horizon-client/src/game/mobs/raids/mod.rs::sections_to_village	

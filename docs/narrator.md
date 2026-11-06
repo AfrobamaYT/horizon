@@ -54,7 +54,7 @@ the game runs and the narrator is "Not Available".
 | The driver: reads the last drawn frame, runs `updateNarrationState` and says what is due | `crates/horizon-client/src/screen_narrator.rs` |
 | Game glue: start and stop, the options, Ctrl+B, the toast, the input events the driver hears | `crates/horizon-client/src/game/interface/narrator.rs` |
 | Screens whose narration is their own (chat, level loading, books, confirm screens) | `crates/horizon-client/src/game/interface/screen_info.rs` |
-| Chat and system messages | `game.rs`, `game/network/remote.rs` and the other callers of `horizon_narrator::say_*`, where vanilla narrates |
+| Chat and system messages | `game.rs`, `game/network/remote/mod.rs` and the other callers of `horizon_narrator::say_*`, where vanilla narrates |
 
 ## How screens record their narration
 

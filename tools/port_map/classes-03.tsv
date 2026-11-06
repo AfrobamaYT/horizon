@@ -55,7 +55,7 @@ TheEndBiomeSource.getNoiseBiome	port	crates/horizon-world/src/worldgen/biome_sou
 AbstractFurnaceBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
 AbstractFurnaceBlock.createFurnaceTicker	port	crates/horizon-client/src/game/blocks/block_entity_ticks.rs::Game::tick_furnace	furnace ticker
 AbstractFurnaceBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
-AmethystBlock	home	crates/horizon-client/src/game/mobs/creatures.rs	onProjectileHit: `amethyst_projectile_hit` plays the chime for every projectile that hits the block (arrows included, through `projectile_hit`)
+AmethystBlock	home	crates/horizon-client/src/game/mobs/creatures/mod.rs	onProjectileHit: `amethyst_projectile_hit` plays the chime for every projectile that hits the block (arrows included, through `projectile_hit`)
 AmethystClusterBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
 AmethystClusterBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
 AmethystClusterBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
@@ -215,7 +215,7 @@ HeavyCoreBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs
 HeavyCoreBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
 HopperBlock.checkPoweredState	port	crates/horizon-world/src/level/redstone.rs::Sim::hopper_check_powered	
 HopperBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
-HopperBlock.entityInside	inline	crates/horizon-client/src/game/blocks/machines.rs::Game::suck_item_entities	gap: minor: the hopper pulls item entities every tick, not on contact
+HopperBlock.entityInside	inline	crates/horizon-client/src/game/blocks/machines/mod.rs::Game::suck_item_entities	gap: minor: the hopper pulls item entities every tick, not on contact
 HopperBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
 HopperBlock.makeShapes	skip:java		builds the VoxelShape arrays; shapes are data
 HopperBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	

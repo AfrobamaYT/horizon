@@ -3,7 +3,7 @@ ShearsItem.createToolProperties	skip:data		tool rules (cobweb speed, shears brea
 ShearsItem.mineBlock	port	crates/horizon-client/src/game.rs::Game::mine_block_with_held	shears wear one damage_per_block on any block but fire
 ShearsItem.useOn	port	crates/horizon-client/src/game/blocks/growth.rs::Game::shears_crop	shears crop a growing plant head to age 25 with block.growing_plant.crop, a block_change and one wear; pumpkin carving is PumpkinBlock's own path (game/blocks/pumpkin.rs)
 SnowballItem.asProjectile	port	crates/horizon-client/src/game/blocks/dispenser.rs::Game::shoot_projectile_item	a dispensed snowball or egg is shot with the dispenser's own config
-SnowballItem.use	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::throw_item	throw at 1.5 power, throw sound, use cooldown, one consumed
+SnowballItem.use	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::throw_item	throw at 1.5 power, throw sound, use cooldown, one consumed
 SplashPotionItem.createPotion	port	crates/horizon-client/src/game/items/potions.rs::Game::launch_thrown	the thrown splash potion entity is launched with the stack
 SplashPotionItem.use	port	crates/horizon-client/src/game/items/potions.rs::Game::use_potion_item	splash throw sound, throw at -20 degrees, one consumed
 ThrowablePotionItem.createDispenseConfig	port	crates/horizon-client/src/game/blocks/dispenser.rs::Game::dispense_projectile	splash, lingering and XP bottle: uncertainty 3.0 and power 1.375
@@ -17,7 +17,7 @@ ToolMaterial.applyToolProperties	skip:data		tool properties come from item data 
 ToolMaterial.createSwordAttributes	skip:data		sword attribute modifiers come from item data (items.rs)
 ToolMaterial.createToolAttributes	skip:data		tool attribute modifiers come from item data (items.rs)
 TippedArrowItem.getDefaultInstance	skip:data		creative entries come from the exported creative list (creative.rs), not a default stack built in code
-TippedArrowItem.getName	port	crates/horizon-client/src/game/administration/commands.rs::Game::stack_display_name	the hover name takes the potion's name key for a tipped arrow
+TippedArrowItem.getName	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::stack_display_name	the hover name takes the potion's name key for a tipped arrow
 BlockTransformers.axe	skip:data		axe rules are built in code; Horizon loads block transforms from data (block_transform.rs)
 BlockTransformers.axeStrippables	skip:data		stripping table is data; Horizon loads it from block_transform.rs
 BlockTransformers.bootstrap	skip:data		registry bootstrap; transforms are read from data

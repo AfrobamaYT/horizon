@@ -110,7 +110,7 @@ ChorusFlowerBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim
 ChorusFlowerBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Needs a chorus plant or support tag below, or a single plant neighbour in the air.
 ChorusFlowerBlock.generatePlant	port	crates/horizon-world/src/worldgen/chorus_plant.rs::ChorusPlantFeature::place	Connects the base plant and grows the tree.
 ChorusFlowerBlock.growTreeRecursive	port	crates/horizon-world/src/worldgen/chorus_plant.rs::ChorusPlantFeature::grow	Random height, stems and flowers at the tips.
-ChorusFlowerBlock.onProjectileHit	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_breaks_block	an impact projectile breaks and drops the flower under the mayBreak rules
+ChorusFlowerBlock.onProjectileHit	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_breaks_block	an impact projectile breaks and drops the flower under the mayBreak rules
 ChorusPlantBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::ChorusPlant arm updates the side connection and schedules the survival check.
 ChorusPlantBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Destroys the plant when it cannot survive.
 ChorusPlantBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Plant or support tag below, or a plant neighbour with support under it.
@@ -129,11 +129,11 @@ ComparatorBlock.triggerEvent	skip:other		No effect: vanilla BlockEntity.triggerE
 ComparatorBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
 ComposterBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	A full composter schedules its ready tick in 20 ticks.
 ComposterBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Full composter becomes ready (level 8) with the ready sound.
-ComposterBlock.getContainer	port	crates/horizon-client/src/game/blocks/machines.rs::Containers::view	Composter level picks the input, output or empty view.
-ComposterBlock.InputContainer.getSlotsForFace	port	crates/horizon-client/src/game/blocks/machines.rs::View::slots_for_face	Up face, slot 0 while the level is under 7.
+ComposterBlock.getContainer	port	crates/horizon-client/src/game/blocks/machines/mod.rs::Containers::view	Composter level picks the input, output or empty view.
+ComposterBlock.InputContainer.getSlotsForFace	port	crates/horizon-client/src/game/blocks/machines/mod.rs::View::slots_for_face	Up face, slot 0 while the level is under 7.
 ComposterBlock.InputContainer.canPlaceItemThroughFace	port	crates/horizon-client/src/game/blocks/composter.rs::Game::composter_container_insert	Only from above, below level 7, and compostable.
 ComposterBlock.InputContainer.setChanged	port	crates/horizon-client/src/game/blocks/composter.rs::Game::composter_container_insert	Composts the item at once through addLayer.
-ComposterBlock.OutputContainer.getSlotsForFace	port	crates/horizon-client/src/game/blocks/machines.rs::View::slots_for_face	Down face, slot 0 at level 8.
+ComposterBlock.OutputContainer.getSlotsForFace	port	crates/horizon-client/src/game/blocks/machines/mod.rs::View::slots_for_face	Down face, slot 0 at level 8.
 ComposterBlock.OutputContainer.setChanged	port	crates/horizon-world/src/level/interact.rs::Behaviours::composter_empty	Empties the composter to level 0.
 ChestBlock.getBlockType	port	crates/horizon-client/src/game/world/storage.rs::Game::chest_partner	Partner half and right-half flag give the single, first or second combine type.
 ChestBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::Chest arm joins or splits a double chest with the neighbour.

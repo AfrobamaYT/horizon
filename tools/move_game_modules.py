@@ -8,7 +8,7 @@ import re
 import subprocess
 
 GAME = Path('crates/horizon-client/src/game')
-DECL = re.compile(r'^(#\[cfg\(test\)\]\n)?(pub(?:\(crate\))? )?mod (\w+);\n', re.M)
+DECL = re.compile(r'^(#\[cfg\(test\)\]\n)?(pub(?:\(crate\))? )?mod (\w+);\n\n?', re.M)
 INCLUDE = 'include!(concat!(env!("OUT_DIR"), "/game_modules.rs"));\n'
 SUPPORT = {'agent_navigation': 'agent', 'mod_inventory_tests': 'mods'}
 
@@ -49,6 +49,9 @@ def plan(files, source):
         owner = name if name in roots else SUPPORT.get(name, name.removesuffix('_tests'))
         assert owner in roots, (path, owner)
         tail = rel if name in roots else Path(owner) / rel
+        has_children = any(p.startswith(f'{GAME}/{name}/') for p in files) or name in SUPPORT.values() or any(p == f'{GAME}/{name}_tests.rs' for p in files)
+        if len(rel.parts) == 1 and name in roots and has_children:
+            tail = Path(name) / 'mod.rs'
         moves[path] = str(GAME / area(owner) / tail)
     return moves
 
@@ -156,6 +159,9 @@ def main():
     else:
         for group in {area(Path(p).stem) for p in metadata} | {Path(p).parts[4] for p in moves.values()}:
             (GAME / group / '.game-area').write_text('Area roots are discovered; child folders belong to their module.\n')
+        for directory in sorted(GAME.rglob('*'), key=lambda p: len(p.parts), reverse=True):
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
         print('\n'.join(changed))
 
 

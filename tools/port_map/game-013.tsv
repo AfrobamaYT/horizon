@@ -84,7 +84,7 @@ Pig.getEquipSound	port	crates/horizon-client/src/game/blocks/dispenser.rs::equip
 Pig.thunderHit	port	crates/horizon-client/src/game/entities/lightning.rs::Game::thunder_hit	a pig outside peaceful becomes a zombified piglin
 Pig.tickRidden	inline	crates/horizon-client/src/mobs/equine.rs::ridden_step	turns to the rider's yaw, pitch halved, and ticks the boost
 Pig.getRiddenSpeed	inline	crates/horizon-client/src/mobs/equine.rs::ridden_step	movement speed times 0.225 times the boost factor
-Pig.getBreedOffspring	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::breed	gap: minor: the baby always takes the first parent's variant, not either parent's by a coin
+Pig.getBreedOffspring	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::breed	gap: minor: the baby always takes the first parent's variant, not either parent's by a coin
 Pig.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.6 of the eye height, the default width/2 forwards
 Pig.getSoundSet	inline	crates/horizon-client/src/mobs/ai.rs::voice_sounds	gap: player: only the baby or adult classic sounds are used, so mini and big sound variants (chosen and saved) never sound different
 Pig.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome tag and a random sound variant
@@ -106,7 +106,7 @@ Rabbit.createAttributes	skip:data		attributes come from the entity type table
 Rabbit.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	RabbitType; MoreCarrotTicks is kept at 0
 Rabbit.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: RabbitType (0 to 5 and 99) is read but MoreCarrotTicks is ignored
 Rabbit.playAttackSound	port	crates/horizon-client/src/mobs/rabbit.rs::attack_sound	only the killer bunny: `entity.rabbit.attack` at volume 1 and a pitch drawn from its own random (not the baby voice pitch)
-Rabbit.getBreedOffspring	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::breed	gap: minor: the baby always takes the first parent's coat; vanilla takes either parent's and one time in 20 rolls a biome coat
+Rabbit.getBreedOffspring	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::breed	gap: minor: the baby always takes the first parent's coat; vanilla takes either parent's and one time in 20 rolls a biome coat
 Rabbit.setVariant	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: player: variant 99 (killer bunny, from /summon or a save) only changes the texture: no armour 8, no plus 5 attack, no melee or target goals, no Killer Bunny name
 Rabbit.get	skip:other		reads the variant as a data component for predicates; Horizon has no entity component view
 Rabbit.applyImplicitComponent	missing		minor: a spawn egg's rabbit variant component is not applied (only bucketed mobs read item components)
@@ -124,13 +124,13 @@ Sheep.aiStep	inline	crates/horizon-client/src/mobs/ai.rs::species_ai_step	the ea
 Sheep.handleEntityEvent	port	crates/horizon-client/src/mobs/sync.rs::entity_event	ticked in #3512; `Sheep.handleEntityEvent` is cited at crates/horizon-client/src/mobs/sync.rs:132 (in a comment, so `where` names the enclosing fn)
 Sheep.getHeadEatPositionScale	inline	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Sheep arm: head drops by 9 times the scale (halved for a lamb)
 Sheep.getHeadEatAngleScale	inline	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Sheep arm: head tilt of pi/5 with the nibbling wobble
-Sheep.mobInteract	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::interact_mob	shears drop the shearing loot and set sheared; a dye recolours an unsheared sheep
+Sheep.mobInteract	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::interact_mob	shears drop the shearing loot and set sheared; a dye recolours an unsheared sheep
 Sheep.setColor	skip:other		stores the 4-bit wool colour in extra.color
 Sheep.get	skip:other		reads the colour as a data component for predicates; Horizon has no entity component view
 Sheep.applyImplicitComponent	inline	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the minecraft:sheep/color component, a dye id
 Sheep.isSheared	skip:other		reads extra.sheared
 Sheep.setSheared	skip:other		writes extra.sheared (shear, regrow and nbt set it directly)
-Sheep.getBreedOffspring	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::breed	gap: player: a lamb always takes the first parent's wool colour; vanilla mixes the two (red and blue give purple)
+Sheep.getBreedOffspring	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::breed	gap: player: a lamb always takes the first parent's wool colour; vanilla mixes the two (red and blue give purple)
 Sheep.ate	port	crates/horizon-client/src/mobs/ai.rs::ate	wool grows back and a lamb ages up by 60 seconds
 Sheep.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	wool colour from the biome's climate (farm::sheep_color)
 SheepColorSpawnRules.commonColors	inline	crates/horizon-client/src/mobs/farm.rs::sheep_color	the 82 weight tail: the common colour, pink one time in 500

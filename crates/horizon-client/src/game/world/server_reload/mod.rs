@@ -2,7 +2,7 @@
 use mod_api::__private::game::*;
 
 #[cfg(test)]
-#[path = "server_reload/server_reload_tests.rs"]
+#[path = "server_reload_tests.rs"]
 mod tests;
 use super::packs::reload_files;
 use super::{Game, functions::PackStack};

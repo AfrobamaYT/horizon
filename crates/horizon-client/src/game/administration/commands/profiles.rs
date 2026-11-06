@@ -3,7 +3,7 @@
 //! BanPlayerCommands, PardonCommand, BanIpCommands, PardonIpCommand,
 //! BanListCommands, SetPlayerIdleTimeoutCommand, TransferCommand,
 //! WhitelistCommand): commands of a dedicated server, run on its lists by an
-//! operator in game (the console has its own handlers in game/interface/dedicated.rs).
+//! operator in game (the console has its own handlers in game/interface/dedicated/mod.rs).
 //! Also `/stop`, `/save-all`, `/save-off` and `/save-on` (StopCommand,
 //! SaveAllCommand, SaveOffCommand, SaveOnCommand), on the switches the lists
 //! share.
@@ -26,7 +26,7 @@ impl Game<'_> {
         }
     }
 
-    /// StopCommand: the server loop (game/interface/dedicated.rs) ends after this tick.
+    /// StopCommand: the server loop (game/interface/dedicated/mod.rs) ends after this tick.
     pub(super) fn cmd_stop(&mut self) -> R<i32> {
         let lists = self.dedicated_lists()?;
         self.feedback(Text::translate("commands.stop.stopping", &[]));

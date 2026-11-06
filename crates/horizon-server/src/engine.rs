@@ -1,5 +1,5 @@
 //! The engine: the game itself, run headless (`horizon-client --dedicated`, crates/horizon-client
-//! game/interface/dedicated.rs). It reads the vanilla files the supervisor writes, takes console commands on stdin and
+//! game/interface/dedicated/mod.rs). It reads the vanilla files the supervisor writes, takes console commands on stdin and
 //! logs on stdout.
 
 use std::{

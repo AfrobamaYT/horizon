@@ -8,7 +8,7 @@ ServerScoreboard.onObjectiveRemoved	port	crates/horizon-client/src/lan/scoreboar
 ServerScoreboard.onTeamAdded	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	team method 0 (create) to everyone
 ServerScoreboard.onTeamChanged	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	team method 2 (update parameters); waypoints in Waypoints::tick_level
 ServerScoreboard.onTeamRemoved	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	team method 1 (remove)
-ServerScoreboard.storeToSaveDataIfDirty	port	crates/horizon-client/src/game/interface/scoreboard.rs::Game::save_scoreboard	gap: minor: saves the board on every save, no dirty flag; same file
+ServerScoreboard.storeToSaveDataIfDirty	port	crates/horizon-client/src/game/interface/scoreboard/mod.rs::Game::save_scoreboard	gap: minor: saves the board on every save, no dirty flag; same file
 ServerScoreboard.getStartTrackingPackets	inline	crates/horizon-client/src/lan/scoreboard.rs::View::changes	objective, display slot and score packets come from the diff
 ServerScoreboard.startTrackingObjective	inline	crates/horizon-client/src/lan/scoreboard.rs::View::changes	no per-objective call; a newly displayed objective appears in the next diff
 ServerScoreboard.getStopTrackingPackets	inline	crates/horizon-client/src/lan/scoreboard.rs::View::changes	objective method 1 and display resets come from the diff
@@ -46,11 +46,11 @@ ChaseServer.runSender	skip:debug		/chase remote-control server, a developer tool
 ChaseServer.runAcceptor	skip:debug		/chase remote-control server, a developer tool
 ChaseServer.getPlayerPosition	skip:debug		/chase remote-control server, a developer tool
 ChaseServer.PlayerPosition.format	skip:debug		/chase remote-control wire format, a developer tool
-AdvancementCommands.performCriterion	port	crates/horizon-client/src/game/interface/advancements.rs::Game::grant_advancement	grant path with a criterion; the revoke path is Game::revoke_advancement
-AdvancementCommands.getAdvancements	inline	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_advancement	parents, target, then children, walked inside cmd_advancement
-AdvancementCommands.addChildren	inline	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_advancement	subtree walk (nested add fn) inside cmd_advancement
-AdvancementCommands.Action.<init>	inline	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_advancement	per-action message keys built from grant/revoke inside cmd_advancement
-AdvancementCommands.Action.perform	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_advancement	loops the targets, counts changes, quiet when no single advancement
+AdvancementCommands.performCriterion	port	crates/horizon-client/src/game/interface/advancements/mod.rs::Game::grant_advancement	grant path with a criterion; the revoke path is Game::revoke_advancement
+AdvancementCommands.getAdvancements	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_advancement	parents, target, then children, walked inside cmd_advancement
+AdvancementCommands.addChildren	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_advancement	subtree walk (nested add fn) inside cmd_advancement
+AdvancementCommands.Action.<init>	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_advancement	per-action message keys built from grant/revoke inside cmd_advancement
+AdvancementCommands.Action.perform	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_advancement	loops the targets, counts changes, quiet when no single advancement
 ArgProvider.buildList	skip:java		list builder; tree_data.rs providers builds the entity, block and storage branches directly
 AttributeCommand.register	port	crates/horizon-command/src/tree_world.rs::attribute	attribute syntax tree
 AttributeCommand.getAttributeInstance	inline	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::cmd_attribute	instance lookup and no-attribute error inside cmd_attribute
@@ -63,10 +63,10 @@ AttributeCommand.setAttributeBase	port	crates/horizon-client/src/game/administra
 AttributeCommand.resetAttributeBase	port	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::cmd_attribute	base reset arm
 AttributeCommand.addModifier	port	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::cmd_attribute	modifier add arm, already-present error
 AttributeCommand.removeModifier	port	crates/horizon-client/src/game/administration/commands/world_cmds.rs::Game::cmd_attribute	modifier remove arm
-BanIpCommands.register	inline	crates/horizon-client/src/game/administration/commands.rs::Game::execute_command	"ban-ip" and "pardon-ip" are dispatched to cmd_ip_bans on a dedicated server (dedicated_lists is vanilla's DEDICATED selection); lan/command_order.rs lists them
+BanIpCommands.register	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::execute_command	"ban-ip" and "pardon-ip" are dispatched to cmd_ip_bans on a dedicated server (dedicated_lists is vanilla's DEDICATED selection); lan/command_order.rs lists them
 BanIpCommands.banIpOrName	port	crates/horizon-client/src/game/administration/commands/profiles.rs::Game::cmd_ip_bans	an address, or a name resolved through the guests' own addresses, goes in the ip ban list with its source and reason; a target that is neither gets commands.banip.invalid
-BanListCommands.register	inline	crates/horizon-client/src/game/administration/commands.rs::Game::execute_command	"banlist", "banlist.ips" and "banlist.players" are dispatched to cmd_banlist on a dedicated server
-BanPlayerCommands.register	inline	crates/horizon-client/src/game/administration/commands.rs::Game::execute_command	"ban" reaches the ban arm of cmd_profiles on a dedicated server: the profile joins the ban list, commands.ban.success is said, and it is kicked
+BanListCommands.register	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::execute_command	"banlist", "banlist.ips" and "banlist.players" are dispatched to cmd_banlist on a dedicated server
+BanPlayerCommands.register	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::execute_command	"ban" reaches the ban arm of cmd_profiles on a dedicated server: the profile joins the ban list, commands.ban.success is said, and it is kicked
 BossBarCommands.register	port	crates/horizon-command/src/tree_misc.rs::bossbar	bossbar syntax tree
 BossBarCommands.getValue	port	crates/horizon-client/src/game/interface/bossbars.rs::Game::bossbar_command	bossbar.get value arm
 BossBarCommands.getMax	port	crates/horizon-client/src/game/interface/bossbars.rs::Game::bossbar_command	bossbar.get max arm
@@ -86,7 +86,7 @@ ChaseCommand.follow	skip:debug		/chase follow, a developer tool
 ClearInventoryCommands.register	port	crates/horizon-command/src/vanilla.rs::registered	/clear syntax (vanilla.rs line 319)
 CloneCommands.register	port	crates/horizon-command/src/vanilla.rs::registered	/clone syntax root
 CloneCommands.beginEndDestinationAndModeSuffix	port	crates/horizon-command/src/vanilla.rs::clone_begin	begin, end, to dimension
-CloneCommands.getLoadedDimensionAndPosition	inline	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_clone	position resolve (block_pos_arg) inside cmd_clone
+CloneCommands.getLoadedDimensionAndPosition	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_clone	position resolve (block_pos_arg) inside cmd_clone
 CloneCommands.destinationAndStrictSuffix	port	crates/horizon-command/src/vanilla.rs::clone_destination	destination and strict
 CloneCommands.modeSuffix	port	crates/horizon-command/src/vanilla.rs::clone_mask	replace, masked, filtered
 CloneCommands.wrapWithCloneMode	port	crates/horizon-command/src/vanilla.rs::clone_mode	force, move, normal
@@ -105,7 +105,7 @@ DataPackCommand.createPack	port	crates/horizon-client/src/game/administration/fu
 DataPackCommand.enablePack	port	crates/horizon-client/src/game/administration/functions.rs::Game::cmd_datapack	datapack.enable arm; apply_pack_change reloads
 DataPackCommand.disablePack	port	crates/horizon-client/src/game/administration/functions.rs::Game::cmd_datapack	disable branch; apply_pack_change reloads
 DataPackCommand.getPack	port	crates/horizon-client/src/game/administration/functions.rs::Game::cmd_datapack	unknown, already enabled or disabled, and feature checks
-DeOpCommands.register	inline	crates/horizon-client/src/game/administration/commands.rs::Game::execute_command	"deop" reaches the deop arm of cmd_profiles on a dedicated server: the op entry goes, commands.deop.success is said, and a player left unlisted is kicked
+DeOpCommands.register	inline	crates/horizon-client/src/game/administration/commands/mod.rs::Game::execute_command	"deop" reaches the deop arm of cmd_profiles on a dedicated server: the op entry goes, commands.deop.success is said, and a player left unlisted is kicked
 DebugCommand.start	port	crates/horizon-client/src/game/administration/commands/extra.rs::Game::cmd_debug	profiler start, already-running error
 DebugCommand.stop	port	crates/horizon-client/src/game/administration/commands/extra.rs::Game::cmd_debug	profiler stop, ticks and tps
 DebugCommand.TraceCustomExecutor.runGuarded	port	crates/horizon-client/src/game/administration/commands/extra.rs::Game::cmd_debug_function	trace file under debug/ with one line per call
@@ -124,11 +124,11 @@ DebugConfigCommand.showDialog	skip:debug		/debugconfig, a developer tool
 DebugMobSpawningCommand.register	skip:debug		/debugmobspawning, a developer tool
 DebugPathCommand.register	skip:debug		/debugpath, a developer tool
 DebugPathCommand.fillBlocks	skip:debug		/debugpath, a developer tool
-DefaultGameModeCommands.setMode	port	crates/horizon-client/src/game/administration/commands.rs::Game::execute_command	gap: the defaultgamemode arm goes through set_default_game_mode (lan.rs:1645), which sets the world's default and, when the world forces a mode, puts the guests in it (as vanilla's setMode does), but also flips the host's own creative flag (level.creative = mode == 1)
+DefaultGameModeCommands.setMode	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::execute_command	gap: the defaultgamemode arm goes through set_default_game_mode (lan.rs:1645), which sets the world's default and, when the world forces a mode, puts the guests in it (as vanilla's setMode does), but also flips the host's own creative flag (level.creative = mode == 1)
 DialogCommand.showDialog	port	crates/horizon-client/src/game/administration/commands/extra.rs::Game::cmd_dialog	gap: player: open_dialog only sets the host's dialog state; other targets are counted but never sent the dialog
 DialogCommand.clearDialog	port	crates/horizon-client/src/game/administration/commands/extra.rs::Game::cmd_dialog	gap: player: close_dialog only closes the host's dialog; guests get no clear packet
 DifficultyCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	difficulty syntax (vanilla.rs line 284)
-DifficultyCommand.setDifficulty	port	crates/horizon-client/src/game/administration/commands.rs::Game::cmd_difficulty	already-same error, set, hostile mobs removed on peaceful
+DifficultyCommand.setDifficulty	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::cmd_difficulty	already-same error, set, hostile mobs removed on peaceful
 EffectCommands.register	port	crates/horizon-command/src/vanilla.rs::registered	effect syntax
 EffectCommands.computeDurationInTicks	port	crates/horizon-client/src/game/administration/commands/effects.rs::Game::cmd_effect_give	duration arm inside cmd_effect_give
 EffectCommands.clearEffect	port	crates/horizon-client/src/game/administration/commands/effects.rs::Game::cmd_effect_clear	clear one effect; tracker feedback

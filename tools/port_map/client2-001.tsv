@@ -38,12 +38,12 @@ EndFlashState.calculateIntensity	port	crates/horizon-client/src/game/world/end.r
 EndFlashState.flashStartedThisTick	inline	crates/horizon-client/src/game/world/end.rs::EndFlash::tick	sound_in is armed on the same rising edge (intensity above 0, previous at or below 0)
 FaceInfo.Extent.select	skip:data		corner selection; Horizon's unit-cube corner table PORTAL_FACES in block_entity_render.rs has the same order
 FaceInfo.VertexInfo.select	skip:data		corner selection; Horizon's unit-cube corner table PORTAL_FACES in block_entity_render.rs has the same order
-FirstPersonHandsAndItemsRenderer.calculateMapTilt	inline	crates/horizon-client/src/game/blocks/maps.rs::Game::two_handed_map_geometry	tilt computed inline with the calculateMapTilt comment
+FirstPersonHandsAndItemsRenderer.calculateMapTilt	inline	crates/horizon-client/src/game/blocks/maps/mod.rs::Game::two_handed_map_geometry	tilt computed inline with the calculateMapTilt comment
 FirstPersonHandsAndItemsRenderer.renderPlayerHand	port	crates/horizon-client/src/game.rs::Game::hand_geometry	empty main hand's arm model with the player skin
 FirstPersonHandsAndItemsRenderer.renderMapHand	port	crates/horizon-client/src/first_person.rs::map_arm_poses	both arms behind a two-handed map, at the jar's rotations and offsets
 FirstPersonHandsAndItemsRenderer.renderOneHandedMap	port	crates/horizon-client/src/first_person.rs::one_handed_map_pose	gap: player: the arm holding a map is not drawn; the map hand branch skips the arm
-FirstPersonHandsAndItemsRenderer.renderTwoHandedMap	port	crates/horizon-client/src/game/blocks/maps.rs::Game::two_handed_map_geometry	gap: player: the arms that hold a two-handed map are not drawn
-FirstPersonHandsAndItemsRenderer.renderMap	port	crates/horizon-client/src/game/blocks/maps.rs::Game::held_map	map background with its 7-pixel border, then the map contents
+FirstPersonHandsAndItemsRenderer.renderTwoHandedMap	port	crates/horizon-client/src/game/blocks/maps/mod.rs::Game::two_handed_map_geometry	gap: player: the arms that hold a two-handed map are not drawn
+FirstPersonHandsAndItemsRenderer.renderMap	port	crates/horizon-client/src/game/blocks/maps/mod.rs::Game::held_map	map background with its 7-pixel border, then the map contents
 FirstPersonHandsAndItemsRenderer.applyEatTransform	port	crates/horizon-client/src/first_person.rs::item_pose	ItemPose::Eat: bob and jiggle while eating or drinking
 FirstPersonHandsAndItemsRenderer.applyBrushTransform	port	crates/horizon-client/src/first_person.rs::brush_transform	the brush sweep while brushing, term for term
 FirstPersonHandsAndItemsRenderer.applyItemArmAttackTransform	port	crates/horizon-client/src/first_person.rs::item_pose	attack swing rotation in the Swing pose
@@ -108,8 +108,8 @@ LevelTargetBundle.get	skip:other		render-target bundle for post chains; Horizon 
 Lightmap.render	port	crates/horizon-client-render/src/gfx.rs::Renderer::update_lightmap	lightmap pass from sky, block, darkness, gamma, night vision, flicker and boss darkening
 LightmapRenderStateExtractor.calculateDarknessScale	port	crates/horizon-client/src/game/blocks/sculk.rs::Game::darkness_lighting	pulsing darkness scale from the darkness blend and the option
 LightmapRenderStateExtractor.extract	port	crates/horizon-client/src/game.rs::Game::render	lightmap inputs gathered into the frame; the end flash is added to sky_light_factor in end.rs::end_flash_sky
-MapRenderer.extractRenderState	port	crates/horizon-client/src/game/blocks/maps.rs::Game::map_vertices	map texture and decorations gathered for drawing
-MapRenderer.extractDecorationRenderState	port	crates/horizon-client/src/game/blocks/maps.rs::Game::map_vertices	decoration sprite, position and rotation drawn per map
+MapRenderer.extractRenderState	port	crates/horizon-client/src/game/blocks/maps/mod.rs::Game::map_vertices	map texture and decorations gathered for drawing
+MapRenderer.extractDecorationRenderState	port	crates/horizon-client/src/game/blocks/maps/mod.rs::Game::map_vertices	decoration sprite, position and rotation drawn per map
 MappableRingBuffer.currentBuffer	skip:other		GPU ring buffer bookkeeping
 MappableRingBuffer.rotate	skip:other		GPU ring buffer bookkeeping
 MappableRingBuffer.close	skip:other		GPU buffer release

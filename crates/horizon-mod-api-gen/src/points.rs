@@ -168,7 +168,10 @@ fn children(
         let (file, child_dir) = match explicit {
             Some(relative) => {
                 let file = here.join(relative);
-                let dir = file.with_extension("");
+                let dir = file
+                    .parent()
+                    .expect("a module file has a folder")
+                    .to_owned();
                 (file, dir)
             }
             None if dir.join(format!("{name}.rs")).is_file() => {
@@ -1265,8 +1268,10 @@ mod tests {
                 && game.contains("pub type __SlotReturnListener"),
             "{game}"
         );
-        let remote =
-            std::fs::read_to_string(root.join("crates/horizon-client/src/game/network/remote.rs")).unwrap();
+        let remote = std::fs::read_to_string(
+            root.join("crates/horizon-client/src/game/network/remote/mod.rs"),
+        )
+        .unwrap();
         assert!(
             remote.contains("point(name = \"game_remote_decode\", free)] fn decode")
                 && remote.contains("pub type __GameRemoteOtherSendListener"),

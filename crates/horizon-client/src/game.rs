@@ -3110,7 +3110,7 @@ struct Game<'a> {
     extras: extras::ExtrasState,
     /// The PvP & HUD options' state (`game/entities/pvp.rs`).
     pvp: pvp::PvpState,
-    /// Horizon mods (`game/modding/mods.rs`), none running unless turned on.
+    /// Horizon mods (`game/modding/mods/mod.rs`), none running unless turned on.
     mods: mods::ModsState,
     /// The in-game browser's worker, separate from the cloneable reload inputs.
     mod_jobs: mod_browser::Jobs,
@@ -3150,7 +3150,7 @@ struct Game<'a> {
     pack_shadow_casters: (bool, bool),
     /// A scripted flight from the control socket (`fly`).
     flight: Option<control::Flight>,
-    /// The running agent action from the control socket (game/runtime/agent.rs).
+    /// The running agent action from the control socket (game/runtime/agent/mod.rs).
     agent: agent::Agent,
     /// Widget commands waiting for the frame after a click (game/runtime/ui_control.rs).
     ui_wait: ui_control::UiWait,
@@ -3175,9 +3175,9 @@ struct Game<'a> {
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
-    /// Connected to a server: the world comes from the network (game/network/remote.rs).
+    /// Connected to a server: the world comes from the network (game/network/remote/mod.rs).
     remote: Option<remote::Remote>,
-    /// This world is open to the network (game/network/lan.rs).
+    /// This world is open to the network (game/network/lan/mod.rs).
     lan: Option<lan::LanHost>,
     /// Single player's server thread, which `remote` is connected to.
     integrated: Option<integrated::Integrated>,
@@ -3256,7 +3256,7 @@ struct Game<'a> {
     world_icon: Option<WorldIcon>,
     /// The block a guest is acting on (game/network/lan_actions.rs).
     forced_hit: Option<Hit>,
-    /// `Minecraft.hitResult` while the clicks of a tick act (game/network/remote.rs
+    /// `Minecraft.hitResult` while the clicks of a tick act (game/network/remote/mod.rs
     /// `remote_handle_input`): picked once, so a creative break does not
     /// move the use that follows it past the broken block.
     tick_hit: Option<Option<Hit>>,
@@ -17736,7 +17736,7 @@ impl Game<'_> {
             Vec::new()
         };
         // Map textures and font glyphs changed while building this frame's
-        // geometry (game/blocks/maps.rs, world text) upload with this batch; draining
+        // geometry (game/blocks/maps/mod.rs, world text) upload with this batch; draining
         // map_patches any earlier leaves them a frame behind.
         hud.patches.append(&mut self.map_patches);
         let entity_spans = std::mem::take(self.entity_spans.get_mut());
@@ -24411,7 +24411,6 @@ mod runtime_reset_tests {
         assert!(stats.values.is_empty());
     }
 }
-
 
 /// `LocalPlayer.moveTowardsClosestSpace` at the body's four corners (aiStep, unless a spectator or a
 /// passenger): a corner inside a suffocating block sets a 0.1 speed towards the nearest side that is

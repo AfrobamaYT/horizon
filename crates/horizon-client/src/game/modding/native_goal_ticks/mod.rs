@@ -433,5 +433,5 @@ pub(super) mod generated {
 }
 
 #[cfg(test)]
-#[path = "native_goal_ticks/native_goal_ticks_tests.rs"]
+#[path = "native_goal_ticks_tests.rs"]
 mod tests;

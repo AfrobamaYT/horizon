@@ -119,9 +119,9 @@ GrassColorReloadListener.prepare	port	crates/horizon-client-render/src/biome.rs:
 IndexedAssetSource.createIndexFs	skip:data		legacy objects/ asset index; Horizon reads assets/ folders directly
 LegacyStuffWrapper.getPixels	port	crates/horizon-client-render/src/hud.rs::decode	gap: minor: PNG decode to bytes; vanilla returns ARGB ints
 MapTextureManager.resetData	skip:other		frees GPU map textures on close; Horizon keeps its map atlas slots in Game::maps, no gameplay effect
-MapTextureManager.getOrCreateMapInstance	port	crates/horizon-client/src/game/blocks/maps.rs::Game::map_texture	gives the map its atlas slot, allocated on first use
-MapTextureManager.MapInstance.replaceMapData	port	crates/horizon-client/src/game/blocks/maps.rs::MapData::update_color	gap: minor: vanilla also flags an upload when the saved-data object is swapped; Horizon flags per changed colour
-MapTextureManager.MapInstance.updateTextureIfNeeded	port	crates/horizon-client/src/game/blocks/maps.rs::Game::map_texture	uploads the 128x128 colours when dirty
+MapTextureManager.getOrCreateMapInstance	port	crates/horizon-client/src/game/blocks/maps/mod.rs::Game::map_texture	gives the map its atlas slot, allocated on first use
+MapTextureManager.MapInstance.replaceMapData	port	crates/horizon-client/src/game/blocks/maps/mod.rs::MapData::update_color	gap: minor: vanilla also flags an upload when the saved-data object is swapped; Horizon flags per changed colour
+MapTextureManager.MapInstance.updateTextureIfNeeded	port	crates/horizon-client/src/game/blocks/maps/mod.rs::Game::map_texture	uploads the 128x128 colours when dirty
 SkinManager.get	port	crates/horizon-client-render/src/skins.rs::lookup	gap: minor: the packed textures come from ResolvedProfile::textures; the debug default-skin override is not ported
 SkinManager.registerTextures	port	crates/horizon-client-render/src/skins.rs::lookup	gap: minor: returns the skin location only; cape and elytra are downloaded here but not returned
 SkinManager.TextureCache.getOrLoad	port	crates/horizon-client-render/src/skins.rs::Downloader::state	one download per URL, then its state

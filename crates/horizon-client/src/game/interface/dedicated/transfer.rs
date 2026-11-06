@@ -270,7 +270,7 @@ impl Game<'_> {
         }
         let conn = host.hub.guests[i].conn;
         let window = host.hub.guests[i].menu.as_ref().map(|m| m.window);
-        // The menu closes in the player's own level, as when it leaves (`game/network/lan.rs`'s close of
+        // The menu closes in the player's own level, as when it leaves (`game/network/lan/mod.rs`'s close of
         // every guest): a chest's lid, a villager's trade and a dropped cursor stack belong there.
         let back = self.dim;
         let level = Dim::from_id(&host.hub.guests[i].dimension);

@@ -26,8 +26,21 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
             }
             continue;
         }
-        for name in Catalog::modules(&path).map_err(|e| e.to_string())? {
-            let file = path.join(format!("{name}.rs"));
+        let mut roots: Vec<_> = Catalog::modules(&path)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|name| (name.clone(), path.join(format!("{name}.rs"))))
+            .collect();
+        for child in fs::read_dir(&path).map_err(|e| e.to_string())? {
+            let child = child.map_err(|e| e.to_string())?;
+            let file = child.path().join("mod.rs");
+            if file.is_file() {
+                let name = child.file_name().to_string_lossy().into_owned();
+                syn::parse_str::<syn::Ident>(&name).map_err(|e| e.to_string())?;
+                roots.push((name, file));
+            }
+        }
+        for (name, file) in roots {
             let source = fs::read_to_string(&file).map_err(|e| e.to_string())?;
             let visibility = source
                 .lines()
@@ -87,8 +100,8 @@ mod tests {
         fs::create_dir_all(&area).unwrap();
         fs::write(area.join(".game-area"), "").unwrap();
         fs::write(root.join("game.rs"), INCLUDE).unwrap();
-        fs::write(area.join("remote.rs"), "mod child;").unwrap();
         fs::create_dir_all(area.join("remote")).unwrap();
+        fs::write(area.join("remote/mod.rs"), "mod child;").unwrap();
         fs::write(area.join("remote/child.rs"), "").unwrap();
         fs::write(area.join("probe_tests.rs"), "").unwrap();
         fs::write(area.join("game_tests.rs"), "// game-module-cfg: always\n").unwrap();

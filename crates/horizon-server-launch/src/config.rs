@@ -177,7 +177,7 @@ pub struct Config {
 }
 
 /// `[combat]`: `legacy = true` resolves the players' melee hits by 1.8.9's rules (no attack cooldown or sweep,
-/// 1.8.9 weapon damage). The game reads it from the same file (game/interface/dedicated.rs, `load_combat`).
+/// 1.8.9 weapon damage). The game reads it from the same file (game/interface/dedicated/mod.rs, `load_combat`).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Combat {

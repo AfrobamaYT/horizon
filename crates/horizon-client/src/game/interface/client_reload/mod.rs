@@ -5,7 +5,7 @@
 use mod_api::__private::game::*;
 
 #[cfg(test)]
-#[path = "client_reload/client_reload_tests.rs"]
+#[path = "client_reload_tests.rs"]
 mod tests;
 use super::Game;
 use super::packs::reload_files;

@@ -2261,5 +2261,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "occlusion_culling/occlusion_culling_tests.rs"]
+#[path = "occlusion_culling_tests.rs"]
 mod external_tests;

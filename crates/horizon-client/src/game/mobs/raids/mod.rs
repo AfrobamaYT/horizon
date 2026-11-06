@@ -1686,5 +1686,5 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-#[path = "raids/tests/bed_loss.rs"]
+#[path = "tests/bed_loss.rs"]
 mod bed_loss_tests;

@@ -324,7 +324,7 @@ offline mode (unsigned chat, as before). Both also click commands: `sendUnattend
 only reaches the chat box, for the player to send.
 
 Chat from other players is checked as vanilla's client does (`ClientPacketListener.handlePlayerChat`,
-`game/network/remote.rs`, `secure_chat::MessageValidator`): a wrong global chat index disconnects, and a sender
+`game/network/remote/mod.rs`, `secure_chat::MessageValidator`): a wrong global chat index disconnects, and a sender
 with no list entry or a message its validator refuses shows the red, italic `chat.validation_error`. A
 chat session the services' profile-key keys vouch for makes a keyed validator (the key not past its
 expiry plus 8 hours, the signature, the chain); anything else makes the fallback, which accepts unsigned

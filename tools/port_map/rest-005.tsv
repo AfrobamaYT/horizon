@@ -1,6 +1,6 @@
-RemotePlayer.shouldRenderAtSqrDistance	port	crates/horizon-client/src/game/interface/entity_culling.rs::entity_view_scale	every entity's draw distance is scaled by the view scale and the limit, remote players included
-RemotePlayer.aiStep	inline	crates/horizon-client/src/game/network/remote.rs::Game::tick_remote_entities	gap: minor: the head yaws over its lerp steps; the smoothed delta movement and the push step are not ported
-RemotePlayer.lerpMotion	missing		unsure: no lerp of received remote-player motion found in game/network/remote.rs
+RemotePlayer.shouldRenderAtSqrDistance	port	crates/horizon-client/src/game/interface/entity_culling/mod.rs::entity_view_scale	every entity's draw distance is scaled by the view scale and the limit, remote players included
+RemotePlayer.aiStep	inline	crates/horizon-client/src/game/network/remote/mod.rs::Game::tick_remote_entities	gap: minor: the head yaws over its lerp steps; the smoothed delta movement and the push step are not ported
+RemotePlayer.lerpMotion	missing		unsure: no lerp of received remote-player motion found in game/network/remote/mod.rs
 Hotbar.storeFrom	port	crates/horizon-client/src/game/items/creative_hotbar.rs::Game::hotbar_load_or_save	save copies the nine slots into the hotbar.nbt row
 Hotbar.isEmpty	inline	crates/horizon-client/src/game/items/creative_hotbar.rs::Game::refresh_saved_hotbars	the empty creative hotbar row carries the inventory.hotbarInfo hint
 ClientMetricsSamplersProvider.registerStaticSamplers	skip:debug		F3 metrics samplers
@@ -27,12 +27,12 @@ IntegratedPlayerList.canPlayerLogin	inline	crates/horizon-client/src/lan/mod.rs:
 IntegratedServer.processPacketsAndTick	skip:debug		gizmo collector for debug draws
 IntegratedServer.fillServerSystemReport	skip:debug		system report for crash reports
 IntegratedServer.getPersonalGameMode	port	crates/horizon-client/src/game/world/integrated.rs::Game::server_options	owner's game mode, read from the guest record
-IntegratedServer.updateGameModeBasedOnPermission	inline	crates/horizon-client/src/game/network/lan.rs::Game::lan_guest_joined	gap: player: a guest already in the world keeps their mode when force-gamemode or the default mode changes; only a join applies it
+IntegratedServer.updateGameModeBasedOnPermission	inline	crates/horizon-client/src/game/network/lan/mod.rs::Game::lan_guest_joined	gap: player: a guest already in the world keeps their mode when force-gamemode or the default mode changes; only a join applies it
 IntegratedServer.updatePermissions	port	crates/horizon-client/src/lan/hub.rs::Hub::resend_commands	permission level and commands sent to every guest
-IntegratedServer.setDefaultGameType	port	crates/horizon-client/src/game/network/lan.rs::Game::set_default_game_mode	
+IntegratedServer.setDefaultGameType	port	crates/horizon-client/src/game/network/lan/mod.rs::Game::set_default_game_mode	
 IntegratedServer.isSingleplayerOwner	port	crates/horizon-client/src/lan/hub.rs::Hub::player_info	the owner is kept by uuid on the hub, and player_info marks the guest it names
-IntegratedServer.getScaledTrackingDistance	inline	crates/horizon-client/src/game/network/lan.rs::Game::tick_lan	the Entity Distance option becomes the hub's entity range percent for an integrated or LAN host
-IntegratedServer.getForcedGameType	inline	crates/horizon-client/src/game/network/lan.rs::Game::lan_guest_joined	forced mode is sent when a guest joins
+IntegratedServer.getScaledTrackingDistance	inline	crates/horizon-client/src/game/network/lan/mod.rs::Game::tick_lan	the Entity Distance option becomes the hub's entity range percent for an integrated or LAN host
+IntegratedServer.getForcedGameType	inline	crates/horizon-client/src/game/network/lan/mod.rs::Game::lan_guest_joined	forced mode is sent when a guest joins
 IntegratedServer.selectLevelLoadFocusPos	missing		unsure: no load focus at the owner's saved position found in game/world/integrated.rs open_integrated
 IntegratedServer.reportChunkLoadFailure	port	crates/horizon-client/src/chunk_io.rs::load_failed	a failed load sets low_disk_space, which is warnOnLowDiskSpace plus reportChunkLoadFailure
 IntegratedServer.reportChunkSaveFailure	port	crates/horizon-client/src/chunk_io.rs::Pending::save_failed	the same low_disk_space flag is raised by the save side
@@ -123,8 +123,8 @@ CommandSourceStack.suggestRegistryElements	port	crates/horizon-command/src/args.
 CommandSourceStack.getLookup	skip:data		registry lookup; registries come from tables
 Commands.<init>	port	crates/horizon-command/src/vanilla.rs::build	registers the command tree
 Commands.mapSource	inline	crates/horizon-client/src/game/administration/commands/execute.rs::Game::with_source	source mapped onto the parse
-Commands.performPrefixedCommand	port	crates/horizon-client/src/game/administration/commands.rs::Game::run_command	the leading slash is trimmed by the callers
-Commands.finishParsing	port	crates/horizon-client/src/game/administration/commands.rs::Game::syntax_failure	parse error with the <--[HERE] context
+Commands.performPrefixedCommand	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::run_command	the leading slash is trimmed by the callers
+Commands.finishParsing	port	crates/horizon-client/src/game/administration/commands/mod.rs::Game::syntax_failure	parse error with the <--[HERE] context
 Commands.executeCommandInContext	port	crates/horizon-client/src/game/administration/commands/execute.rs::Game::run_chain	gap: minor: max_command_forks is not enforced
 Commands.validate	skip:debug		startup check of the command tree
 Commands.createCompilationContext	skip:data		datapack compile-time context

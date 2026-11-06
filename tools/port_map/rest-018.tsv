@@ -80,9 +80,9 @@ ServerTextFilter.makeRequest	skip:service		text filter / notification service: t
 ServerTextFilter.getURLConnection	skip:service		text filter / notification service: the LAN host wires no such service
 ServerTextFilter.PlayerContext.processMessageBundle	skip:service		text filter / notification service: the LAN host wires no such service
 ServerTextFilter.PlayerContext.processStreamMessage	skip:service		text filter / notification service: the LAN host wires no such service
-PrepareSpawnTask.start	port	crates/horizon-client/src/game/network/lan.rs::Game::lan_guest_joined	gap: minor: no wait for the spawn chunks; the saved state is applied and a new player is placed by server_player_spawn
+PrepareSpawnTask.start	port	crates/horizon-client/src/game/network/lan/mod.rs::Game::lan_guest_joined	gap: minor: no wait for the spawn chunks; the saved state is applied and a new player is placed by server_player_spawn
 PrepareSpawnTask.tick	missing		minor: no spawn-chunk wait before a joining player is placed (see Preparing.tick)
-PrepareSpawnTask.spawnPlayer	inline	crates/horizon-client/src/game/network/lan.rs::Game::lan_guest_joined	the load and the placement run here, through place_new_player
+PrepareSpawnTask.spawnPlayer	inline	crates/horizon-client/src/game/network/lan/mod.rs::Game::lan_guest_joined	the load and the placement run here, through place_new_player
 PrepareSpawnTask.keepAlive	skip:other		no preparing state to hold spawn chunks for
 PrepareSpawnTask.close	skip:other		no preparing state to cancel
 PrepareSpawnTask.Preparing.tick	missing		minor: no spawn-chunk load (radius 3) and no LOAD_PLAYER_CHUNKS progress before the join

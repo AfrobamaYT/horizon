@@ -107,7 +107,7 @@ def main():
     args = parser.parse_args()
     lock, jars, _ = base.verify_artifacts()
     source_paths = [lab.ROOT / path for path in (
-        'crates/horizon-client/src/game/entities/boats.rs',
+        'crates/horizon-client/src/game/entities/boats/mod.rs',
         'crates/horizon-client/src/game/network/remote_vehicles.rs',
         'crates/horizon-client/src/game/network/lan_vehicles.rs',
         'crates/horizon-client/src/game/entities/boat_authority_fixture.rs',

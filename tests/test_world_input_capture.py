@@ -42,7 +42,7 @@ def function(source, name):
 class WorldInputCaptureTests(unittest.TestCase):
     def test_loading_completion_wiring(self):
         game = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
-        remote = (next(ROOT.glob('crates/horizon-client/src/game/*/remote.rs'))).read_text(encoding="utf-8")
+        remote = (next(ROOT.glob('crates/horizon-client/src/game/*/remote/mod.rs'))).read_text(encoding="utf-8")
         spawn = method(game, "spawn_player")
         self.assertLess(spawn.index("self.player = Some(player)"),
                         spawn.index("self.capture_loaded_world()"))

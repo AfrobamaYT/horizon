@@ -45,9 +45,9 @@ Pillager.createAttributes	skip:data		attributes come from entity-types.json
 Pillager.finalizeSpawn	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::mob	crossbow in the main hand via populate; the enchant roll is in Ctx::enchant
 Pillager.getArmPose	port	crates/horizon-client/src/mobs/illager.rs::arm_pose	
 Pillager.getSlot	skip:other		Horizon's /item addresses named slots (weapon.mainhand, armor.head, ...); a mob has no numeric slot ids, so the pillager's 300+ inventory slots have no target
-Pillager.pickUpItem	inline	crates/horizon-client/src/game/mobs/raids.rs::Game::sync_raiders	an ominous banner beside a raider in a live raid with no leader becomes its head slot and the wave's leader (banner scan at 779-789, pickup at 894-906); gap: minor: a plain banner falls through to Mob.pickUpItem's gear swap, which Horizon does not do
+Pillager.pickUpItem	inline	crates/horizon-client/src/game/mobs/raids/mod.rs::Game::sync_raiders	an ominous banner beside a raider in a live raid with no leader becomes its head slot and the wave's leader (banner scan at 779-789, pickup at 894-906); gap: minor: a plain banner falls through to Mob.pickUpItem's gear swap, which Horizon does not do
 Pillager.registerGoals	port	crates/horizon-client/src/mobs/illager.rs::register_pillager	
-Pillager.wantsItem	skip:other		dead code: only a white banner passes, and Pillager.pickUpItem sends every BannerItem to Raider.pickUpItem before consulting it; the ominous banner pickup is in game/mobs/raids.rs
+Pillager.wantsItem	skip:other		dead code: only a white banner passes, and Pillager.pickUpItem sends every BannerItem to Raider.pickUpItem before consulting it; the ominous banner pickup is in game/mobs/raids/mod.rs
 PiglinBrute.createAttributes	skip:data		attributes come from entity-types.json
 PiglinBrute.customServerAiStep	inline	crates/horizon-client/src/mobs/piglin.rs::ai_step	after the goals that pick the target: update_activity, then maybe_play_brute_sound; the goals set in register_brute stand in for vanilla's brain tick
 PiglinBrute.finalizeSpawn	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::mob	golden axe in the main hand via populate; initMemories is missing
@@ -74,7 +74,7 @@ Stray.checkStraySpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::c
 Stray.getArrow	inline	crates/horizon-client/src/mobs/undead.rs::perform_ranged_attack	Stray arrows carry slowness for 600 ticks
 CaveSpider.getVehicleAttachmentPoint	port	crates/horizon-client/src/mobs/riders.rs::vehicle_attachment	0.21875 of the scale when the vehicle's box is no wider than the spider's; the wider case falls to the type default
 VillagerDataHolder.finalizeVillagerType	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::villager_type	
-Abilities.apply	port	crates/horizon-client/src/game/network/remote.rs::Game::apply_remote_abilities	gap: minor: invulnerable, flying, may fly and flying speed only; instabuild, may build and walk speed are not applied
+Abilities.apply	port	crates/horizon-client/src/game/network/remote/mod.rs::Game::apply_remote_abilities	gap: minor: invulnerable, flying, may fly and flying speed only; instabuild, may build and walk speed are not applied
 Abilities.pack	skip:java		record copy for the abilities packet; the flags are read in remote.rs
 PlayerSkin.with	missing		minor: skin patches (body, cape, elytra and model overrides) are not applied on top of a profile skin
 PlayerSkin.Patch.create	skip:java		record factory for the patch; the patch itself is missing (see PlayerSkin.with)
@@ -84,16 +84,16 @@ Fireball.getSlot	missing		minor: entity slot access (`/loot insert` on an entity
 Fireball.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::fireball_from_nbt	the `Item` it is drawn as goes through `setItem`, which refuses an empty stack and keeps a single one
 Fireball.setItem	port	crates/horizon-client/src/projectiles.rs::Projectile::set_item	an empty stack puts the default fire charge back, anything else is kept as one (`copyWithCount(1)`); a kind that is no `Fireball` has no item
 Fireball.shouldRenderAtSqrDistance	skip:ui		render distance rule for the first two ticks; Horizon draws the projectile as its own pass
-LargeFireball.onHit	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	LargeFireball arm: explosion power and fire flag (mob_griefing), MOB block interaction, then projectile removal. Bounded fire-presence fixture includes disabled-rule and TNT controls; exact motion/counts/geometry and UUID-view serialization are separate.
-LargeFireball.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	LargeFireball arm: 6 damage to the entity
-SmallFireball.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	SmallFireball arm: ignites for 5 seconds and deals 5 damage
+LargeFireball.onHit	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	LargeFireball arm: explosion power and fire flag (mob_griefing), MOB block interaction, then projectile removal. Bounded fire-presence fixture includes disabled-rule and TNT controls; exact motion/counts/geometry and UUID-view serialization are separate.
+LargeFireball.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	LargeFireball arm: 6 damage to the entity
+SmallFireball.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	SmallFireball arm: ignites for 5 seconds and deals 5 damage
 AbstractThrownPotion.affectEntitiesAround	port	crates/horizon-client/src/game/blocks/splash_water.rs::Game::affect_entities_around	water potion in the potion's (4, 2, 4) box: 1 indirect-magic damage to water-sensitive mobs, put out burning mobs, players and armor stands, then Axolotl.rehydrate
 AbstractThrownPotion.calculateHorizontalHurtKnockbackDirection	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	the splash hurt is `Damage::indirect_magic` from the potion position and the hurt pushes away from the source position
 AbstractThrownPotion.douseFire	port	crates/horizon-client/src/game/blocks/splash_water.rs::Game::douse_fire	fire blocks break without drops, lit candles and campfires go out (campfire with level event 1009 and the block-change game event); gap: minor: that game event carries no source entity
 AbstractThrownPotion.onHitBlock	port	crates/horizon-client/src/game/blocks/splash_water.rs::Game::potion_hit_block	a potion in #douses_fire puts out the cell in front of the face it hit, the block it hit and the four horizontal neighbours of the cell in front
-Snowball.getParticle	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::item_burst	snowball item burst on break
-Snowball.handleEntityEvent	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::thrown_break_event	break event 3 for thrown items
-Snowball.onHit	inline	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	Snowball arm: 3 damage to blazes, then the break burst
+Snowball.getParticle	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::item_burst	snowball item burst on break
+Snowball.handleEntityEvent	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::thrown_break_event	break event 3 for thrown items
+Snowball.onHit	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	Snowball arm: 3 damage to blazes, then the break burst
 ThrowableItemProjectile.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::throwable_from_nbt	the `Item` it flies as is read back with the rest (a potion keeps its effects); a tag without one keeps `getItem`'s default
 Activity.equals	skip:java		value equality of a named activity; no Horizon counterpart needed
 ModelAndTexture.codec	skip:data		codec for the variant model and texture asset; Horizon reads variant data from files
@@ -108,7 +108,7 @@ AbstractMinecartContainer.remove	inline	crates/horizon-client/src/game/entities/
 MinecartChest.interact	inline	crates/horizon-client/src/game/entities/minecarts.rs::Game::interact_cart	chest arm: opens the cart's items and plays the chest sound
 MinecartCommandBlock.activateMinecart	inline	crates/horizon-client/src/game/entities/minecarts.rs::Game::activate_cart	gap: minor: no command ever runs; the cart holds no command since its editor is missing
 MinecartCommandBlock.defineSynchedData	port	crates/horizon-client/src/game/entities/minecarts.rs::Minecart::new	the cart's `synced_command` and `synced_output` start empty on the cart itself, as `DATA_ID_COMMAND_NAME` and `DATA_ID_LAST_OUTPUT` do
-MinecartCommandBlock.interact	port	crates/horizon-client/src/game/network/remote.rs::Game::remote_use_entity	the client opens the command editor of the cart it right-clicked
+MinecartCommandBlock.interact	port	crates/horizon-client/src/game/network/remote/mod.rs::Game::remote_use_entity	the client opens the command editor of the cart it right-clicked
 MinecartCommandBlock.onSyncedDataUpdated	inline	crates/horizon-client/src/game/administration/command_minecarts.rs::Game::cart_command_updated	the command is the cart's own field rather than synched entity data, which `onUpdated` copies out
 MinecartCommandBlock.readAdditionalSaveData	inline	crates/horizon-client/src/game/entities/minecarts.rs::Minecart::from_nbt	loads the base command block and syncs its command/output; a changed command invokes setCommand and resets SuccessCount
 MinecartCommandBlock.MinecartCommandBase.createCommandSourceStack	port	crates/horizon-client/src/game/administration/command_minecarts.rs::Game::perform_cart_command	the due command runs with the cart as its source: its position, rotation and game master level
@@ -190,11 +190,11 @@ CreativeModeTabs.registerColoredItems	skip:data		creative contents come from the
 CreativeModeTabs.tryRebuildTabContents	port	crates/horizon-client/src/creative.rs::Creative::items	contents rebuilt on demand
 DebugStickItem	home	crates/horizon-client/src/game/blocks/debug_stick.rs	
 DoubleHighBlockItem.placeBlock	port	crates/horizon-world/src/level/place.rs::Sim::place	the block above is cleared to air (or water when it was water) before the placed half, as `BlockItem.place` does for a double-high item
-DyeItem.interactLivingEntity	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::interact_mob	a dye recolours an unsheared sheep's wool and a tamed wolf's or cat's collar, consumed with `item.dye.use`
+DyeItem.interactLivingEntity	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::interact_mob	a dye recolours an unsheared sheep's wool and a tamed wolf's or cat's collar, consumed with `item.dye.use`
 DyeItem.tryApplyToSign	inline	crates/horizon-client/src/game/interface/sign_edit.rs::Game::use_sign_applicator	dye colours the sign text
-EggItem.asProjectile	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::throw_item	egg kinds in throw_item
-EggItem.use	inline	crates/horizon-client/src/game/mobs/creatures.rs::Game::throw_item	egg throw
-EnderpearlItem.use	inline	crates/horizon-client/src/game/mobs/creatures.rs::Game::throw_item	ender pearl throw
+EggItem.asProjectile	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::throw_item	egg kinds in throw_item
+EggItem.use	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::throw_item	egg throw
+EnderpearlItem.use	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::throw_item	ender pearl throw
 ExperienceBottleItem.asProjectile	port	crates/horizon-client/src/game/items/potions.rs::Game::thrown_kind	thrown bottle entity type
 ExperienceBottleItem.createDispenseConfig	port	crates/horizon-client/src/game/blocks/dispenser.rs::Game::dispense_projectile	dispensed bottle flight
 ExperienceBottleItem.use	inline	crates/horizon-client/src/game/items/potions.rs::Game::use_potion_item	thrown bottle path
@@ -219,7 +219,7 @@ ItemProvider.FallbackItemProvider.findNext	inline	crates/horizon-client/src/game
 ItemProvider.FallbackItemProvider.next	inline	crates/horizon-client/src/game/items/recipe_book.rs::Game::draw_ghost	ghost slot item list
 ItemProvider.FallbackItemProvider.peek	inline	crates/horizon-client/src/game/items/recipe_book.rs::Game::draw_ghost	ghost slot item list
 JukeboxSongs	skip:data		registry of jukebox songs; song data is read from files
-KnowledgeBookItem.use	port	crates/horizon-client/src/game/interface/advancements.rs::Game::use_knowledge_book	the recipes the book names become known and the book is used up; an invalid recipe knows nothing
+KnowledgeBookItem.use	port	crates/horizon-client/src/game/interface/advancements/mod.rs::Game::use_knowledge_book	the recipes the book names become known and the book is used up; an invalid recipe knows nothing
 LingeringPotionItem.createPotion	port	crates/horizon-client/src/game/items/potions.rs::thrown_kind	lingering entity type
 LingeringPotionItem.use	inline	crates/horizon-client/src/game/items/potions.rs::Game::use_potion_item	lingering potion throw
 NameTagItem.interactLivingEntity	port	crates/horizon-client/src/game/interface/names.rs::Game::name_mob	a tag with a custom name names the mob under the crosshair, makes it persistent and is used up, in creative too

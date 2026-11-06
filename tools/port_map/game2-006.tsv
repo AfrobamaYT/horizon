@@ -19,8 +19,8 @@ FishingHook.getOpenWaterTypeForBlock	port	crates/horizon-client/src/game/items/f
 FishingHook.handleEntityEvent	inline	crates/horizon-client/src/game/items/fishing.rs::Game::retrieve_hook	event 31 pull: retrieve_hook pulls the hooked mob, item or player when the rod is reeled in
 FishingHook.getPlayerOwner	skip:other		owner is implicit: the host's hook is self.hook and a guest's is in that guest's play state
 FishingHook.getAddEntityPacket	port	crates/horizon-client/src/game/items/fishing.rs::Hook::track	add-entity payload: the owner entity id is the bobber's data field
-LlamaSpit.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	spit hit: 1.0 damage with the spit source to a player (mob_hits_player) or a mob
-Projectile.applyImplicitComponent	missing		an implicit component is applied only to a mob coming out of a bucket (`entity_nbt::bucket_components`, `game/mobs/creatures.rs:5058`), so a projectile spawned from an item with a `can_break` component keeps no break predicate
+LlamaSpit.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	spit hit: 1.0 damage with the spit source to a player (mob_hits_player) or a mob
+Projectile.applyImplicitComponent	missing		an implicit component is applied only to a mob coming out of a bucket (`entity_nbt::bucket_components`, `game/mobs/creatures/mod.rs:5058`), so a projectile spawned from an item with a `can_break` component keeps no break predicate
 Projectile.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::put_projectile	Owner and LeftOwner only when set, HasBeenShot once it has ticked (a save before the first tick keeps what it loaded)
 Projectile.ownedBy	inline	crates/horizon-client/src/projectiles.rs::Projectile::tick	the owner is skipped in the target loop until the projectile has left it
 Projectile.readAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::throwable_from_nbt	no shared reader: every kind's own reader takes Owner, LeftOwner and NoGravity (this one, `fireball_from_nbt`, `arrow_from_nbt`); HasBeenShot is read for arrows only, and no projectile keeps a `can_break` predicate
@@ -29,15 +29,15 @@ Projectile.isOutsideOwnerCollisionRange	inline	crates/horizon-client/src/project
 Projectile.getMovementToShoot	port	crates/horizon-client/src/projectiles.rs::Projectile::shoot	direction plus triangle spread 0.0172275 times uncertainty, scaled by power
 Projectile.onAboveBubbleColumn	port	crates/horizon-client/src/arrows.rs::Ticker::bubble_column	gap: minor: arrows only; thrown ender pearls get their push in creatures.rs tick_projectiles and other projectiles get none
 Projectile.onInsideBubbleColumn	port	crates/horizon-client/src/arrows.rs::Ticker::bubble_column	gap: minor: arrows only; thrown ender pearls get their push in creatures.rs tick_projectiles and other projectiles get none
-Projectile.canBreakBlockInAdventureMode	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_breaks_block	gap: minor: the shooter's gamemode and kind decide it; a stack's `can_break` predicate is not consulted
+Projectile.canBreakBlockInAdventureMode	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_breaks_block	gap: minor: the shooter's gamemode and kind decide it; a stack's `can_break` predicate is not consulted
 Projectile.spawnProjectileFromRotation	port	crates/horizon-client/src/projectiles.rs::Projectile::shoot_from_rotation	gap: minor: the aim and inherited velocity only; the add-to-world step is the caller's
-Projectile.spawnProjectile	inline	crates/horizon-client/src/game/mobs/creatures.rs::Game::throw_item	each shooter adds its own projectile (throw_item, shoot_crossbow, shoot_projectile_item, the bow in game.rs); throw_item is the player throw path
+Projectile.spawnProjectile	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::throw_item	each shooter adds its own projectile (throw_item, shoot_crossbow, shoot_projectile_item, the bow in game.rs); throw_item is the player throw path
 Projectile.applyOnProjectileSpawned	port	crates/horizon-client/src/game/items/enchant_effects.rs::Game::ignite_spawned_arrow	gap: minor: Flame ignite only; Piercing and Punch go through Projectile::set_bonus
-Projectile.hitTargetOrDeflectSelf	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::tick_projectiles	gap: minor: deflection is checked for breezes only; the onHit dispatch is creatures.rs projectile_hit
+Projectile.hitTargetOrDeflectSelf	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::tick_projectiles	gap: minor: deflection is checked for breezes only; the onHit dispatch is creatures.rs projectile_hit
 Projectile.onRedirectProjectile	port	crates/horizon-client/src/game/items/deflect.rs::Game::deflect	gap: minor: the player's attack turns the projectile; a projectile hitting another redirectable one is not modelled
 Projectile.recreateFromPacket	port	crates/horizon-client/src/game/network/remote_projectiles.rs::Game::spawn_remote_projectile	the owner id from the add-entity data is set on the remote projectile
-Projectile.mayBreak	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_breaks_block	impact projectiles break chorus flowers, decorated pots (cracked first) and speleothems, gated on mayInteract, mayBreak and the projectiles_can_break_blocks rule
-Projectile.calculateHorizontalHurtKnockbackDirection	inline	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	gap: minor: knockback goes from the shot's previous point, while vanilla uses the projectile's horizontal motion
+Projectile.mayBreak	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_breaks_block	impact projectiles break chorus flowers, decorated pots (cracked first) and speleothems, gated on mayInteract, mayBreak and the projectiles_can_break_blocks rule
+Projectile.calculateHorizontalHurtKnockbackDirection	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	gap: minor: knockback goes from the shot's previous point, while vanilla uses the projectile's horizontal motion
 ProjectileUtil.getHitResultOnMoveVector	port	crates/horizon-client/src/projectiles.rs::Projectile::tick	sweep along the movement: block clip, then entity boxes; gap: minor: entity margin is a fixed 0.3, vanilla ramps it up over the first ticks
 ProjectileUtil.getHitResultOnViewVector	port	crates/horizon-client/src/game/entities/pick_entity.rs::pick_entity_hit	gap: minor: the brush reach is the caller's; there is no separate view-vector trace
 ProjectileUtil.getHitResult	port	crates/horizon-client/src/projectiles.rs::Projectile::tick	block clip first, then the nearest entity box on the segment; same core as the move-vector sweep
@@ -45,12 +45,12 @@ ProjectileUtil.rotateTowardsMovement	port	crates/horizon-client/src/projectiles.
 ProjectileUtil.getMobArrow	port	crates/horizon-client/src/mobs/undead.rs::perform_ranged_attack	gap: minor: builds the skeleton-family arrow with base damage from power; illager crossbow arrows are built in mobs/illager.rs::shoot_crossbow
 ShulkerBullet.addAdditionalSaveData	missing		`entity_nbt.rs::saved_with_chunk` leaves `ShulkerBullet` out of the kinds a chunk writes, so a bullet in flight is dropped with the save; the final target and the move direction have no writer
 ShulkerBullet.readAdditionalSaveData	missing		the same gap on the load side: nothing reads a bullet's final target or move direction back
-ShulkerBullet.canHitEntity	missing		the bullet's target search (`Projectile::tick` on the client, `projectiles` in `game/mobs/creatures.rs`) tests the owner and the boxes only; a no-physics entity is not skipped
-ShulkerBullet.onHitBlock	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	shulker bullet block hit: hit sound and two explosion particles at the bullet
-ShulkerBullet.destroy	inline	crates/horizon-client/src/game/mobs/creatures.rs::Game::tick_projectiles	the bullet is dropped from the flight list on any hit; the game event is not sent
+ShulkerBullet.canHitEntity	missing		the bullet's target search (`Projectile::tick` on the client, `projectiles` in `game/mobs/creatures/mod.rs`) tests the owner and the boxes only; a no-physics entity is not skipped
+ShulkerBullet.onHitBlock	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	shulker bullet block hit: hit sound and two explosion particles at the bullet
+ShulkerBullet.destroy	inline	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::tick_projectiles	the bullet is dropped from the flight list on any hit; the game event is not sent
 ShulkerBullet.hurtServer	port	crates/horizon-client/src/game/items/deflect.rs::Game::hit_shulker_bullet	
 ThrowableProjectile.applyInertia	port	crates/horizon-client/src/projectiles.rs::Projectile::tick	default arm: gravity, then drag 0.8 in water and 0.99 in air; gap: minor: no bubble particles in water
-ThrowableProjectile.handleFirstTickBubbleColumn	missing		a thrown item spawned inside a bubble column is not pushed on its first tick: `game/mobs/creatures.rs` has bubble-column particles and the pearl's own column hooks, nothing for a throwable's first tick
+ThrowableProjectile.handleFirstTickBubbleColumn	missing		a thrown item spawned inside a bubble column is not pushed on its first tick: `game/mobs/creatures/mod.rs` has bubble-column particles and the pearl's own column hooks, nothing for a throwable's first tick
 AbstractArrow.<init>	port	crates/horizon-client/src/arrows.rs::ArrowState::new	arrow defaults: pickup, pickup item, shake, pierce; the owner and drawn ammo come from set_owner and set_item
 AbstractArrow.defineSynchedData	skip:java		flags, pierce level and in-ground sync fields; Horizon keeps them on ArrowState and Projectile
 AbstractArrow.lerpMotion	skip:other		client interpolation of a server motion packet; Horizon's remote arrows take the server position each update
@@ -59,7 +59,7 @@ AbstractArrow.hitTargetsOrDeflectSelf	port	crates/horizon-client/src/arrows.rs::
 AbstractArrow.addBubbleParticles	port	crates/horizon-client/src/projectiles.rs::Projectile::arrow_trail	four bubble particles along a submerged arrow
 AbstractArrow.move	inline	crates/horizon-client/src/arrows.rs::Ticker::tick	should_fall then start_falling run from the tick for an arrow in the ground
 AbstractArrow.resetPiercedEntities	inline	crates/horizon-client/src/arrows.rs::Ticker::on_hit_block	the pierced list is cleared when the arrow lands
-AbstractArrow.doKnockback	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	punch pushes along the flight, scaled by 0.6 and by knockback resistance
+AbstractArrow.doKnockback	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	punch pushes along the flight, scaled by 0.6 and by knockback resistance
 AbstractArrow.findHitEntity	port	crates/horizon-client/src/arrows.rs::Ticker::entity_hit	box clip, then the margin test against the segment
 AbstractArrow.findHitEntities	port	crates/horizon-client/src/arrows.rs::Ticker::step_move_and_hit	gap: minor: only the nearest hit per tick is returned; a piercing arrow takes the rest on later ticks
 AbstractArrow.canHitEntity	port	crates/horizon-client/src/arrows.rs::Ticker::step_move_and_hit	gap: minor: skips pierced entities here; the player canHarmPlayer rule is in creatures.rs tick_projectiles
@@ -90,20 +90,20 @@ AbstractWindCharge.canHitEntity	missing		the wind charge's target list is `creat
 AbstractWindCharge.onHitBlock	port	crates/horizon-client/src/game/interface/wind.rs::Game::wind_charge_hit	a burst a quarter block out along the hit face
 WindCharge.deflect	port	crates/horizon-client/src/game/interface/wind.rs::reverse	gap: minor: turns the charge at half speed; the noDeflectTicks delay is not modelled
 WindCharge.shouldRenderAtSqrDistance	skip:ui		distance culling for the wind charge model; Horizon culls with its own range check
-ThrownEgg.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	egg hit on a mob: zero damage, then the egg break and chick roll run on any landing
+ThrownEgg.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	egg hit on a mob: zero damage, then the egg break and chick roll run on any landing
 ThrownEnderpearl.deregisterFromCurrentOwner	skip:other		chunk-ticket bookkeeping for a player's pearls; Horizon has no chunk tickets for flying pearls
 ThrownEnderpearl.registerToCurrentOwner	skip:other		chunk-ticket bookkeeping for a player's pearls; Horizon has no chunk tickets for flying pearls
 ThrownEnderpearl.getOwner	skip:other		owner is kept as a Who value and resolved by the caller
 ThrownEnderpearl.findOwnerIncludingDeadPlayer	skip:other		owner lookup by UUID across dead players; Horizon keeps the owner id directly
-ThrownEnderpearl.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	a mob hit takes zero damage; the pearl still lands
-ThrownEnderpearl.onHit	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	gap: minor: no 32 portal particles and no dimension change; the owner is teleported to where the pearl was, with 5 damage and a 5 percent endermite
+ThrownEnderpearl.onHitEntity	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	a mob hit takes zero damage; the pearl still lands
+ThrownEnderpearl.onHit	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	gap: minor: no 32 portal particles and no dimension change; the owner is teleported to where the pearl was, with 5 damage and a 5 percent endermite
 ThrownEnderpearl.isAllowedToTeleportOwner	port	crates/horizon-client/src/projectiles.rs::owner_can_take_pearl	the owner's `isAlive() && !isSleeping()`, read by `Game::projectile_hit`: a dead or sleeping owner is not teleported and takes no damage; the other-dimension branch (`canUsePortal(true)`) is not reached, a pearl's owner is in its own level
-ThrownEnderpearl.playSound	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	teleport sound at the landing point
-ThrownEnderpearl.teleport	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::projectile_hit	moves the player to the pearl's previous position and clears velocity and fall distance
+ThrownEnderpearl.playSound	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	teleport sound at the landing point
+ThrownEnderpearl.teleport	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::projectile_hit	moves the player to the pearl's previous position and clears velocity and fall distance
 ThrownEnderpearl.canTeleport	missing		no seen-credits test: a pearl whose owner came from the End teleports them back to the Overworld regardless
 ThrownEnderpearl.onInsideBlock	port	crates/horizon-client/src/game/world/end.rs::Game::pearl_owner_in_gateway	a pearl that flies into an End gateway sends its owner through and fires enter_block
 Raid.<init>	port	crates/horizon-client/src/raid.rs::Raid::new	centre, difficulty-based group count, cooldown and active flag
-Raid.getAllRaiders	port	crates/horizon-client/src/game/mobs/raids.rs::Game::raid_members	the raiders of this raid, from the mobs carrying its id
+Raid.getAllRaiders	port	crates/horizon-client/src/game/mobs/raids/mod.rs::Game::raid_members	the raiders of this raid, from the mobs carrying its id
 Raid.getValidSpawnPos	port	crates/horizon-client/src/raid.rs::Raid::find_spawn_pos	eight tries around the centre, as findRandomSpawnPos(level, 8)
 Raid.getHealthOfLivingRaiders	port	crates/horizon-client/src/raid.rs::living_health	sum of the living raiders' health
 Raid.getBannerComponentPatch	port	crates/horizon-client/src/mobs/raider.rs::ominous_banner	the ominous banner stack: its patterns, hidden tooltip, name and rarity
@@ -111,14 +111,14 @@ Raid.getDefaultNumSpawns	port	crates/horizon-client/src/raid.rs::Raid::wave_coun
 Raid.getPotentialBonusSpawns	port	crates/horizon-client/src/raid.rs::Raid::wave_count	extra roll per type and difficulty: vindicators and pillagers, witches after wave 2, ravagers on the bonus wave
 Raider.hasRaid	port	crates/horizon-client/src/mobs/raider.rs::in_raid	gap: minor: checks only the raid id the raider holds; vanilla also looks for a raid at its position
 Raider.readAdditionalSaveData	port	crates/horizon-client/src/mobs/raider.rs::read_nbt	PatrolLeader, Patrolling, Wave, CanJoinRaid and RaidId, the same fields write_nbt saves
-Raider.pickUpItem	inline	crates/horizon-client/src/game/mobs/raids.rs::Game::sync_raiders	the banner pickup branch makes the raider the wave leader; gap: minor: the item already worn in the head slot is not dropped first
+Raider.pickUpItem	inline	crates/horizon-client/src/game/mobs/raids/mod.rs::Game::sync_raiders	the banner pickup branch makes the raider the wave leader; gap: minor: the item already worn in the head slot is not dropped first
 Raider.ObtainRaidLeaderBannerGoal.cannotPickUpBanner	port	crates/horizon-client/src/mobs/raider.rs::ObtainBanner::can_use	gap: minor: checks only a known, reachable banner; the raid-over, can-be-leader and head-slot rules are not repeated here
 Raider.RaiderMoveThroughVillageGoal.isValidRaid	inline	crates/horizon-client/src/mobs/raider.rs::MoveThroughVillage::can_use	active raid and not over, checked first
 Raider.RaiderMoveThroughVillageGoal.hasSuitablePoi	inline	crates/horizon-client/src/mobs/raider.rs::MoveThroughVillage::can_use	gap: minor: picks from the known homes within 48 blocks; no POI search or occupancy check
 Raider.RaiderMoveThroughVillageGoal.hasNotVisited	inline	crates/horizon-client/src/mobs/raider.rs::MoveThroughVillage::can_use	homes already visited are filtered out of the candidates
 Raider.RaiderMoveThroughVillageGoal.updateVisited	inline	crates/horizon-client/src/mobs/raider.rs::MoveThroughVillage::can_use	the visited list is trimmed first in can_use, as vanilla canUse does
 Raids.getId	skip:other		raids are looked up by their id, so no reverse lookup from a raid to its id is needed
-Raids.canJoinRaid	inline	crates/horizon-client/src/game/mobs/raids.rs::Game::sync_raiders	alive, the join flag and no action for 2400 ticks are checked in the raider sync
+Raids.canJoinRaid	inline	crates/horizon-client/src/game/mobs/raids/mod.rs::Game::sync_raiders	alive, the join flag and no action for 2400 ticks are checked in the raider sync
 Raids.getOrCreateRaid	port	crates/horizon-client/src/raid.rs::Raids::create_or_extend	the raid at the position is reused, otherwise a new one is made
 Raids.getRaidCentersInChunk	skip:debug		the raid centres per chunk feed the debug raid markers only
 PriorityProvider.Selector.codec	skip:java		record codec for a variant selector's condition and priority
@@ -136,5 +136,5 @@ ContainerEntity.getChestVehicleSlot	skip:other		slot access happens on the chest
 DismountHelper.canDismountTo	port	crates/horizon-client/src/game/blocks/respawn_anchor.rs::Game::safe_dismount_location	gap: minor: tests the floor and a 1.8 block box for the player, not the passenger's pose box
 DismountHelper.findCeilingFrom	inline	crates/horizon-client/src/game/blocks/respawn_anchor.rs::Game::safe_dismount_location	gap: minor: head room comes from the 1.8 box collision, not a ceiling scan
 VehicleEntity.ignoreExplosion	port	crates/horizon-client/src/game/entities/entity.rs::Entity::ignores_explosion	boats and minecarts sit out a mob's blast when mob griefing is off (the breeze's burst too), and are neither hurt nor pushed
-VehicleEntity.destroy	port	crates/horizon-client/src/game/entities/boats.rs::Game::hurt_boat	boats drop their item when entity drops are on; a minecart breaks through hurt_cart
+VehicleEntity.destroy	port	crates/horizon-client/src/game/entities/boats/mod.rs::Game::hurt_boat	boats drop their item when entity drops are on; a minecart breaks through hurt_cart
 VehicleEntity.defineSynchedData	skip:java		hurt time, hurt direction and damage fields; Horizon keeps them on the cart and boat structs

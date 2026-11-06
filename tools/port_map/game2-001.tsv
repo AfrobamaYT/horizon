@@ -16,7 +16,7 @@ Squid.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register
 Squid.getMovementEmission	port	crates/horizon-client/src/mobs/ai.rs::movement_sounds	EVENTS: the flop of a beached squid sends the step game event and no sound
 Squid.rotateVector	inline	crates/horizon-client/src/mobs/aquatic.rs::spawn_ink	xRot then yRot of the body angles, inside spawn_ink
 Squid.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	S::Squid arm: ageable group with 0.05 baby chance
-Turtle.defineSynchedData	port	crates/horizon-client/src/game/network/lan.rs::mob_meta	HAS_EGG and LAYING_EGG as entity metadata 18 and 19
+Turtle.defineSynchedData	port	crates/horizon-client/src/game/network/lan/mod.rs::mob_meta	HAS_EGG and LAYING_EGG as entity metadata 18 and 19
 Turtle.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	home_pos and has_egg written here
 Turtle.checkTurtleSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Turtle arm: below sea+4, sand, bright
 Turtle.createAttributes	skip:data		attribute values come from data tables (attr lookups in mobs.rs)
@@ -27,7 +27,7 @@ Turtle.TurtleLayEggGoal.isValidTarget	port	crates/horizon-client/src/mobs/turtle
 Wolf.registerGoals	port	crates/horizon-client/src/mobs/tame.rs::register	
 Wolf.getSoundSet	port	crates/horizon-client/src/mobs/finalize.rs::variant_sound	
 Wolf.createAttributes	skip:data		attribute values come from data tables
-Wolf.defineSynchedData	port	crates/horizon-client/src/game/network/lan.rs::mob_meta	flags, variant and anger metadata sent to clients
+Wolf.defineSynchedData	port	crates/horizon-client/src/game/network/lan/mod.rs::mob_meta	flags, variant and anger metadata sent to clients
 Wolf.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	CollarColor written
 Wolf.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	CollarColor, sound_variant and anger read; live command writes initialize the wolf remaining anger at the current level clock
 Wolf.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: minor: sound variant is stored but no sound uses it (see getSoundSet)
@@ -36,7 +36,7 @@ Wolf.die	port	crates/horizon-client/src/mobs/tame.rs::die	`drops::die` asks it f
 Wolf.getHeadRollAngle	port	crates/horizon-client/src/mobs/tame.rs::anim	
 Wolf.applyTamingSideEffects	port	crates/horizon-client/src/mobs/tame.rs::set_tame	
 Wolf.hurtArmor	port	crates/horizon-client/src/mobs.rs::Mob::hurt_wolf_armor	
-Wolf.tryToTame	port	crates/horizon-client/src/game/mobs/creatures.rs::Game::interact_mob	one in three tames; particles 7 or 6, sit, stop nav, clear target
+Wolf.tryToTame	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::interact_mob	one in three tames; particles 7 or 6, sit, stop nav, clear target
 Wolf.handleEntityEvent	inline	crates/horizon-client/src/mobs/tame.rs::ai_step	entity events 8 and 56 folded into the shake state in ai_step
 Wolf.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: player: wolf rope point uses full eye height, not 0.6 times it
 Wolf.checkWolfSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Wolf arm: wolves_spawnable_on and bright
@@ -75,7 +75,7 @@ EnderDragonPhaseManager.getPhase	skip:java		lazy cache of phase instances; Horiz
 WitherBoss.createNavigation	port	crates/horizon-client/src/mobs/wither.rs::register	gap: minor: door and float flags are not set here
 WitherBoss.canBeAffected	port	crates/horizon-client/src/mobs.rs::Mob::can_be_affected	the wither effect; the wither rose's own refusal is now that one
 WitherBoss.registerGoals	port	crates/horizon-client/src/mobs/wither.rs::register	
-WitherBoss.defineSynchedData	port	crates/horizon-client/src/game/network/lan.rs::mob_meta	gap: minor: only heads A and B are synced; the invulnerable counter is sent at index 19, the slot of target C
+WitherBoss.defineSynchedData	port	crates/horizon-client/src/game/network/lan/mod.rs::mob_meta	gap: minor: only heads A and B are synced; the invulnerable counter is sent at index 19, the slot of target C
 WitherBoss.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Invul read; boss bar name not checked here
 WitherBoss.canDestroy	inline	crates/horizon-client/src/mobs/wither.rs::custom_server_ai_step	air and wither-immune checks in the block loop
 WitherBoss.getHeadX	port	crates/horizon-client/src/mobs/wither.rs::head_pos	

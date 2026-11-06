@@ -145,7 +145,7 @@ drift. Gameplay is about 420 000 lines (`game/` 133 k, `mobs/` 62 k, `lan/` 15 k
 
 | Part | Where | Shared by |
 |---|---|---|
-| Parallel tick (section 4) | `game/world/levels.rs`, `game/world/integrated.rs`, `game/interface/dedicated.rs`, and the scheduler as a new module beside them | integrated server, LAN, dedicated |
+| Parallel tick (section 4) | `game/world/levels.rs`, `game/world/integrated.rs`, `game/interface/dedicated/mod.rs`, and the scheduler as a new module beside them | integrated server, LAN, dedicated |
 | Network front (5) | the hub, `lan/` (`conn.rs`, `hub.rs`, `chunks.rs`, `tracking.rs`); framing in `horizon-protocol` | LAN, Play with Friends, dedicated, the integrated server's memory connection where it applies |
 | Saving and light off the tick thread (5.5) | `game/world/saving.rs`, `save.rs`, `horizon-world` | everyone |
 | Fast path (8) | `horizon-protocol` (the `horizon:hello` payloads), `lan/conn.rs` (server), `net.rs` and `game/remote*.rs` (client) | every Horizon client against every Horizon server |
@@ -292,7 +292,7 @@ per server start and sent as prepared frames. The first chunks around the spawn 
 ### 5.4 Entity tracking as deltas
 
 - Today the tracker rebuilds each tracked entity's state per tick (`lan/entity.rs` `Entities::tick`,
-  `game/network/lan.rs` `mob_meta` ~3 % of the tick thread).
+  `game/network/lan/mod.rs` `mob_meta` ~3 % of the tick thread).
 - Instead, the engine writes a change log as it changes an entity (position, rotation, metadata index, equipment,
   passengers). The tracker turns each changed entity into packets once, and sends them to every player who
   sees it.
