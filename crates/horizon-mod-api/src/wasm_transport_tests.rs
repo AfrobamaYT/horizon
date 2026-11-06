@@ -89,11 +89,12 @@ fn resource_list_transport_reuses_host_buffers() {
                 "[method]node.echo",
                 |store, (node, values): (Resource<Node>, WasmList<u32>)| {
                     assert_eq!(node.rep(), 7);
-                    State::with_buffer::<Arc<Vec<u32>>, _>(store, |buffer, mut store| {
+                    State::with_buffer::<Arc<Vec<u32>>, _>(store, |buffer, store| {
                         let output = Arc::get_mut(buffer).unwrap();
                         output.clear();
-                        for value in values.iter(store.as_context_mut())? {
-                            output.push(value? + 1);
+                        output.extend_from_slice(values.as_le_slice(&store));
+                        for value in output {
+                            *value = u32::from_le(*value) + 1;
                         }
                         Ok((buffer.clone(),))
                     })

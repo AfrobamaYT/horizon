@@ -1025,30 +1025,27 @@ mod tests {
                 "fn set_mode(&mut self, mode: u8)",
             ),
         ];
-        let batch_method = entry(
-            "horizon_client::Mode::mode_field",
-            "method",
-            "fn mode_field(&self) -> u8",
-        );
         let all = [
             entry("horizon_client::Mode", "struct", "struct Mode { mode: u8 }"),
-            batch_method,
+            entry(
+                "horizon_client::Mode::mode_field",
+                "method",
+                "fn mode_field(&self) -> u8",
+            ),
         ];
         let (_, counts) = crate::internals_table::table(&all, &[all[1].path.clone()]);
         assert_eq!(counts.renamed_methods[&all[1].path], "call_mode_field");
-        let fields = [entry(
+        let rule = Rule::new(&[entry(
             "horizon_client::Mode",
             "struct",
             "struct Mode { mode: u8, mode_field: u8 }",
-        )];
-        let rule = Rule::new(&fields);
+        )]);
         assert_eq!(
-            descriptor_name("mode", Some("horizon_client::Mode"), &rule),
-            "call_mode_field"
-        );
-        assert_eq!(
-            method_name(&rule, "horizon_client::Mode", "mode_field"),
-            "call_call_mode_field"
+            [
+                descriptor_name("mode", Some("horizon_client::Mode"), &rule),
+                method_name(&rule, "horizon_client::Mode", "mode_field"),
+            ],
+            ["call_mode_field", "call_call_mode_field"]
         );
         for paths in [
             vec![entries[2].path.clone()],
