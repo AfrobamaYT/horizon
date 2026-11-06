@@ -444,6 +444,10 @@ impl GameRules {
             minecart_improvements: features.iter().any(|f| f == MINECART_IMPROVEMENTS),
         }
     }
+    /// The immutable definitions used by these values.
+    pub fn registry(&self) -> &Arc<RuleRegistry> {
+        &self.registry
+    }
     /// GameRules.copy(enabledFeatures): keep available values, add defaults for
     /// newly enabled rules and discard rules absent from the target feature set.
     pub fn copy_with_features(&self, features: &[String]) -> Self {
