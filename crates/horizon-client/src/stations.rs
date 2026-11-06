@@ -601,6 +601,7 @@ pub struct StationRecipes {
     /// What mods added to the smithing slots' property sets (template, base,
     /// addition).
     smithing_additions: [HashSet<String>; 3],
+    item_limits: std::collections::HashMap<Arc<str>, (u32, u32)>,
 }
 fn ingredient(v: &Value, items: &Items) -> Ingredient {
     Ingredient::parse(v, items).unwrap_or_else(|| Ingredient::of(Vec::new()))
@@ -665,6 +666,11 @@ impl StationRecipes {
             smithing,
             stonecutting,
             trim_materials,
+            item_limits: items
+                .items
+                .iter()
+                .map(|(id, info)| (id.clone(), (info.max_stack, info.max_damage)))
+                .collect(),
             smithing_additions: [
                 added("smithing_template"),
                 added("smithing_base"),
@@ -739,7 +745,32 @@ impl StationRecipes {
                             addition.is_some_and(|s| i.test_in(context, s))
                         })
                     {
-                        return Some((id.as_str(), result.over(base, 0)));
+                        let output = result.over(base, 0);
+                        let (mut max_stack, mut max_damage) = self
+                            .item_limits
+                            .get(&output.item)
+                            .copied()
+                            .unwrap_or((64, 0));
+                        if let Some(data) = output.data() {
+                            for (key, value) in &data.other {
+                                match (key.as_str(), value) {
+                                    (
+                                        "minecraft:max_stack_size",
+                                        horizon_world::nbt::Tag::Int(n),
+                                    ) => max_stack = *n as u32,
+                                    ("!minecraft:max_stack_size", _) => max_stack = 1,
+                                    ("minecraft:max_damage", horizon_world::nbt::Tag::Int(n)) => {
+                                        max_damage = *n as u32
+                                    }
+                                    ("!minecraft:max_damage", _) => max_damage = 0,
+                                    _ => {}
+                                }
+                            }
+                        }
+                        return (output.count > 0
+                            && output.count <= max_stack
+                            && !(max_damage > 0 && max_stack > 1))
+                            .then_some((id.as_str(), output));
                     }
                 }
                 Smithing::Trim {
@@ -1196,6 +1227,36 @@ mod tests {
         assert!(
             stations
                 .smithing_result(ctx, &ench, Some(&base), Some(&base), None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn smithing_rejects_invalid_assembled_stack() {
+        let items = Items::for_tests(Default::default());
+        let json = serde_json::json!({"type":"minecraft:smithing_transform","base":"minecraft:diamond_sword","result":{"id":"minecraft:netherite_sword","count":2}});
+        let ParsedStationRecipe::Smithing(recipe) =
+            ParsedStationRecipe::parse("test:smith".into(), &json, &items).unwrap()
+        else {
+            panic!("wrong rule")
+        };
+        let stations = StationRecipes {
+            smithing: vec![recipe],
+            item_limits: [(Arc::from("minecraft:netherite_sword"), (1, 2031))]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let base = ItemStack::new("minecraft:diamond_sword", 1);
+        assert!(
+            stations
+                .smithing_result(
+                    crate::test_resources::server_loop_context(),
+                    &Enchantments::default(),
+                    None,
+                    Some(&base),
+                    None
+                )
                 .is_none()
         );
     }

@@ -959,6 +959,9 @@ impl Special {
                 let (banner_stack, shield) = (banner_stack?, shield?);
                 let mut out = result.over(shield, 0);
                 let data = out.data_mut();
+                data.other.retain(|(key, _)| {
+                    key != "!minecraft:base_color" && key != "!minecraft:banner_patterns"
+                });
                 data.banner_patterns = banner::layers(banner_stack).to_vec();
                 data.base_color = banner::banner_color(&banner_stack.item).map(Arc::from);
                 out
@@ -3216,6 +3219,30 @@ mod tests {
         // Another colour is not in the recipe's ingredient.
         let other = ItemStack::new("minecraft:red_banner", 1);
         assert!(run(&recipe, &[source, other]).is_none());
+    }
+    #[test]
+    fn shield_decoration_replaces_component_removals() {
+        let recipe = Special::ShieldDecoration {
+            banner: ingredient(&["minecraft:red_banner"]),
+            target: ingredient(&["minecraft:shield"]),
+            result: Template::parse(&serde_json::json!({"id":"minecraft:shield","components":{"!minecraft:base_color":{},"!minecraft:banner_patterns":{}}})).unwrap(),
+        };
+        let out = run(
+            &recipe,
+            &[
+                patterned("minecraft:red_banner"),
+                ItemStack::new("minecraft:shield", 1),
+            ],
+        )
+        .unwrap();
+        let patch = crate::item_data::encode_components(&out).unwrap();
+        assert_eq!(
+            patch.get("minecraft:base_color"),
+            Some(&Tag::String("red".into()))
+        );
+        assert!(patch.get("minecraft:banner_patterns").is_some());
+        assert!(patch.get("!minecraft:base_color").is_none());
+        assert!(patch.get("!minecraft:banner_patterns").is_none());
     }
     #[test]
     fn shield_decoration_needs_a_bare_shield() {
